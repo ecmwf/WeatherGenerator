@@ -9,15 +9,17 @@ authors = [
 
 requires-python = ">=3.11,<3.13"
 dependencies = [ 'torch',
-                      'flash_attn',
-                      'numpy',
-                      'astropy_healpix',
-                      'zarr',
-                      'anemoi-datasets',
-                      'pandas',
-                      'pynvml',
-                      'tqdm',
-                      'matplotlib']
+                 'flash_attn',
+                 'numpy',
+                 'astropy_healpix',
+                 'zarr',
+                 'anemoi-datasets',
+                 'pandas',
+                 'pynvml',
+                 'tqdm',
+                 'matplotlib',
+                 'packaging',
+                 'wheel']
 
 [project.urls]
 Homepage = "https://www.weathergenerator.eu"
