@@ -1,3 +1,12 @@
+# (C) Copyright 2024 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+ 
 import time
 import sys
 import pdb
@@ -124,7 +133,7 @@ def train( run_id = None) -> None :
   # compile entire model
   cf.compile_model = False
 
-  cf.with_fsdp = False
+  cf.with_fsdp = True
 
   cf.loss_fcts = [['mse', 1.0]]
   cf.loss_fcts_val = [['mse', 1.0]]
