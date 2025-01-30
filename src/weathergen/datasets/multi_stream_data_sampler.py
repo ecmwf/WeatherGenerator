@@ -1,4 +1,4 @@
-# (C) Copyright 2024 WeatherGenerator contributors.
+# (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -77,6 +77,7 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
         ds = None
         if stream_info['type']=='obs' :
           
+          data_path = '/lus/h2resw01/fws4/lb/project/ai-ml/observations/v1/'
           ds = ObsDataset( data_path + '/' + fname, start_date, end_date_padded, len_hrs, step_hrs, False)
 
           # skip pre-pended columns before lat,lon
@@ -98,7 +99,11 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
 
         elif stream_info['type']=='anemoi' :
 
-          ds = AnemoiDataset( data_path + '/' + fname, start_date, end_date, len_hrs, step_hrs, False)
+          c_data_path = data_path
+          if 'CERRA' in stream_info['name'] :
+            c_data_path = '/home/mlx/ai-ml/datasets/experimental/'
+
+          ds = AnemoiDataset( c_data_path + '/' + fname, start_date, end_date, len_hrs, step_hrs, False)
           do = 0
           geoinfo_idx = [ 0, 1]
           stats_offset = 2

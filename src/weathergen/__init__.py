@@ -1,4 +1,4 @@
-# (C) Copyright 2024 WeatherGenerator contributors.
+# (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -64,7 +64,8 @@ def train( run_id = None) -> None :
 
   # directory where input streams are specified
   # cf.streams_directory = './streams_large/'
-  cf.streams_directory = './streams_anemoi/'
+  # cf.streams_directory = './streams_anemoi/'
+  cf.streams_directory = './streams_mixed/'
 
   # embed_orientation : 'channels' or 'columns'
   # channels: embedding is per channel for a token (#tokens=num_channels)
@@ -202,3 +203,6 @@ def train( run_id = None) -> None :
     extype, value, tb = sys.exc_info()
     traceback.print_exc()
     pdb.post_mortem(tb)
+
+if __name__ == '__main__':
+    train()
