@@ -12,8 +12,6 @@ import sys
 import pdb
 import traceback
 
-import pandas as pd
-
 from weathergen.utils.config import Config
 from weathergen.train.trainer import Trainer
 from weathergen.train.utils import get_run_id
@@ -55,7 +53,7 @@ def evaluate( run_id, epoch, masking_mode = None, forecacast_steps = None,
   cf.loader_num_workers = min( cf.loader_num_workers, samples)
 
   trainer = Trainer()
-  trainer.evaluate( cf, run_id, epoch)
+  trainer.evaluate( cf, run_id, epoch, True)
 
 ####################################################################################################
 def train( run_id = None) -> None :
@@ -188,7 +186,6 @@ def train( run_id = None) -> None :
   cf.data_loader_rng_seed = int(time.time())
   cf.log_validation = 0
 
-  cf.mlflow_offline = True #False
   cf.istep = 0
   cf.run_history = []
 
