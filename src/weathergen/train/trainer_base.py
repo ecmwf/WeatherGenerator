@@ -9,19 +9,14 @@
 
 import os
 import datetime
-import string
-import random
 import pathlib
 import itertools
 import logging
-import json
 import yaml
 import logging
 import code
 
-import numpy as np
 import torch
-# import mlflow
 
 import pynvml
 
@@ -37,44 +32,6 @@ class Trainer_Base() :
 
   def __init__( self) :
     pass
-
-  ###########################################
-  @staticmethod
-  def init_mlflow( cf, rank, run_id_contd = None, run_id_new = False,
-                   project='obs_learn_kas_cell_forecast') :
-
-    if 0 == rank :
-
-      run_id = cf.run_id
-
-      slurm_job_id_node = os.environ.get('SLURM_JOB_ID', '-1')
-      if slurm_job_id_node != '-1' :
-        cf.slurm_job_id = slurm_job_id_node
-
-      # check if offline mode is requested through environment variable or in config
-      mlflow_offline_env = os.environ.get('MLFLOW_OFFLINE', '-1')
-      if not hasattr( cf, 'mlflow_offline') :
-        cf.mlflow_offline = True if mlflow_offline_env != '-1' else False
-
-      rs_uri = './mlflow/' if cf.mlflow_offline else 'https://mlflow.ecmwf.int/'
-      mlflow.set_tracking_uri( rs_uri)
-      mlflow.set_experiment( project)
-
-      # # we separate the mlflow_id and the run_id/run_name, which is used for all local bookkeeping
-      # ml_id = None if run_id_contd is None or run_id_new else cf.mlflow_id
-      # mlflow_run = mlflow.start_run( run_id=ml_id, run_name=run_id,
-      #                                log_system_metrics=True)
-      # cf.mlflow_id = mlflow_run.info.run_id
-
-      # log config (cannot be overwritten so log only at the first start)
-      if run_id_contd is None or run_id_new :
-        mlflow.log_params( cf.__dict__)
-      
-      if run_id_contd is not None and run_id_new :
-        str = f'Continuing run {run_id_contd} at step={cf.istep} as run {run_id}.'
-        logging.getLogger('obslearn').info( str)
-      elif run_id_contd is not None :
-        logging.getLogger('obslearn').info( f'Continuing run {run_id_contd} at step={cf.istep}.')
 
   ###########################################
   @staticmethod
@@ -176,8 +133,6 @@ class Trainer_Base() :
     rts = list( itertools.chain.from_iterable( rts))
     if len(rts) != len( list(set( rts))) :
       logging.getLogger('obslearn').warning( 'Duplicate reportypes specified.')
-
-    cf.num_obs_types = 3
 
     return cf
 

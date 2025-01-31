@@ -92,8 +92,6 @@ class Trainer( Trainer_Base) :
     # read configuration of data streams
     cf = self.init_streams( cf, run_id_contd)
 
-    # self.init_mlflow( cf, self.cf.rank, run_id_contd, run_id_new)
-
     # create output directory
     path_run = './results/' + cf.run_id + '/'
     path_model = './models/' + cf.run_id + '/'
@@ -109,11 +107,6 @@ class Trainer( Trainer_Base) :
     self.init_perf_monitoring()
 
     self.train_logger = TrainLogger( cf, self.path_run)
-
-    # TODO: adapt to this info read from yaml files
-    # if self.cf.loss_chs is not None :
-    #   self.loss_chs = [[l_ch[0] for l_ch in lcs] for lcs in self.cf.loss_chs]
-    #   self.loss_chs_weights = [[l_ch[1] for l_ch in lcs] for lcs in self.cf.loss_chs]
 
   ########################################### 
   def evaluate( self, cf, run_id_trained, epoch, run_id_new=False) :
@@ -159,8 +152,6 @@ class Trainer( Trainer_Base) :
     # evaluate validation set
     self.validate( epoch=0)
     print( f'Finished evaluation run with id: {cf.run_id}')
-
-    # mlflow.end_run()
 
   ###########################################
   def evaluate_jac( self, cf, run_id, epoch, mode='row',
@@ -675,7 +666,6 @@ class Trainer( Trainer_Base) :
           for i_obs, rt in enumerate( cf.streams) :
             loss_dict['validation {}'.format(rt['name'].replace(',',''))] = float(losses_all[0,i_obs])
 
-          # mlflow.log_metrics( loss_dict, step=(cf.istep * cf.batch_size * cf.num_ranks))
           # add data to plain logger
           samples = cf.istep * cf.batch_size * cf.num_ranks
           self.train_logger.add_val( samples, losses_all, stddev_all)
@@ -749,12 +739,11 @@ class Trainer( Trainer_Base) :
 
       if 0 == self.cf.rank :
 
-        # mlflow logging
+        # logging
         loss_dict = { 'training mse': float(torch.nanmean(l_avg[0])),
                       'lr' : self.lr_scheduler.get_lr() }
         for i_obs, rt in enumerate( self.cf.streams) :
           loss_dict['training {}'.format(rt['name'].replace(',',''))] = float(l_avg[0,i_obs])
-        # mlflow.log_metrics( loss_dict, step=samples)
 
         # plain logger
         self.train_logger.add_train( samples, self.lr_scheduler.get_lr(), l_avg, stddev_avg, 
