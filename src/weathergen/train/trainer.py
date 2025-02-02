@@ -409,7 +409,7 @@ class Trainer( Trainer_Base) :
       self.save_model( epoch)
 
     # log final model
-    self.save_model( self.num_epochs)
+    self.save_model( cf.num_epochs)
 
   ###########################################
   def compute_loss( self, loss_fcts, sources, targets, targets_coords, targets_token_lens, preds,
