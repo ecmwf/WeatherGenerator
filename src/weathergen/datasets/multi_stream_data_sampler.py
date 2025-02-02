@@ -77,8 +77,8 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
         ds = None
         if stream_info['type']=='obs' :
           
-          data_path = '/lus/h2resw01/fws4/lb/project/ai-ml/observations/v1/'
-          ds = ObsDataset( data_path + '/' + fname, start_date, end_date_padded, len_hrs, step_hrs, False)
+          c_data_path = '/gpfs/scratch/ehpc01/dop/v1/'
+          ds = ObsDataset( c_data_path + '/' + fname, start_date, end_date_padded, len_hrs, step_hrs, False)
 
           # skip pre-pended columns before lat,lon
           do = 0
@@ -101,14 +101,13 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
 
           c_data_path = data_path
           if 'CERRA' in stream_info['name'] :
-            c_data_path = '/home/mlx/ai-ml/datasets/experimental/'
+            c_data_path = '/gpfs/scratch/ehpc03/weathergen/'
 
           ds = AnemoiDataset( c_data_path + '/' + fname, start_date, end_date, len_hrs, step_hrs, False)
           do = 0
-          geoinfo_idx = [ 0, 1]
+          geoinfo_idx = [0, 1]
           stats_offset = 2
-          # TODO: avoid hard coding
-          data_idxs = list(np.arange( 2, 82+2))
+          data_idxs = list(ds.fields_idx + 2)
 
         else :
           assert False, 'Unsupported stream type {}.'.format( stream_info['type'])

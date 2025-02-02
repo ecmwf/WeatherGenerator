@@ -45,20 +45,27 @@ class AnemoiDataset():
 
     if dt_start >= ds_dt_end or dt_end <= ds_dt_start :
       self.latitudes = np.array( []); self.longitudes = np.array( [])
-      self.colnames = []
+      self.colnames, self.selected_colnames = [], []
       self.properties = { 'obs_id' : 0, 'means' : [], 'vars' : [] }
+      self.fields_idx = np.array([], dtype=np.int32)
+      self.fields = []
       self.ds = None
       return
 
     # open dataset
 
-    self.ds = open_dataset( self.ds, frequency=str(step_hrs) + 'h',
-                                      start=dt_start, end=dt_end )
     # caches lats and lons
     self.latitudes = self.ds.latitudes.astype( np.float32)
     self.longitudes = self.ds.longitudes.astype( np.float32)
 
-    self.colnames = ['lat', 'lon'] + self.ds.variables
+    # find data fields
+    self.fields_idx = np.sort([self.ds.name_to_index[k]
+            for i,(k,v) in enumerate(self.ds.typed_variables.items()) if not v.is_computed_forcing])
+    self.fields = [ self.ds.variables[i] for i in self.fields_idx]
+    self.colnames = ['lat', 'lon'] + self.fields
+    self.selected_colnames = self.colnames
+
+    self.ds = open_dataset( self.ds, frequency=str(step_hrs) + 'h', start=dt_start, end=dt_end)
 
     self.properties = { 'obs_id' : 0,
                         'means' : self.ds.statistics['mean'], 
