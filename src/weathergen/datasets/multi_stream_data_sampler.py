@@ -113,7 +113,8 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
           assert False, 'Unsupported stream type {}.'.format( stream_info['type'])
 
         fsm = self.forecast_steps[0]
-        self.len = min( self.len, len(ds) - (self.len_hrs * (fsm+1)) // self.step_hrs )
+        if len(ds) > 0 :
+          self.len = min( self.len, len(ds) - (self.len_hrs * (fsm+1)) // self.step_hrs )
 
         normalizer = DataNormalizer( stream_info, self.geoinfo_offset, stats_offset, 
                                     ds, geoinfo_idx, data_idxs, do)
@@ -122,7 +123,8 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
         self.obs_datasets_idxs[-1] += [ (geoinfo_idx, data_idxs) ]
 
     # by construction, this is identical for all datasets
-    self.len_native = np.array([len(ds[0]) for dss in self.obs_datasets_norm for ds in dss]).min()
+    self.len_native = np.array([len(ds[0]) for dss in self.obs_datasets_norm 
+                                           for ds in dss if len(ds[0])>0]).min()
 
     self.len = min( self.len, self.len if not samples_per_epoch else samples_per_epoch)
     # adjust len to split loading across all workers
@@ -218,55 +220,6 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
     return [self.get_geoinfo_size(i,0) for i,_ in enumerate(self.obs_datasets_idxs)]
 
   ###################################################
-  def create_grid( self, grid, time_win2): 
-
-    # load specified grid 
-    source2 = np.float32(np.load( f'./assets/{grid}'))
-
-    # generate times 
-    start, end = time_win2
-    delta = np.timedelta64(1, 'h')
-    dates = np.arange(start.astype('datetime64[h]')+delta, end.astype( 'datetime64[h]')+delta,delta)
-
-    # convert to string
-    dates = [str(d.astype('datetime64[ns]')) for d in dates]
-    # TODO: avoid hard coding 40320
-    times2 = np.repeat( dates, 40320)
-
-    return (source2, times2)
-
-  ###################################################
-  def read_anemoi( self, grid_info, times2, source2):
-
-    from anemoi.datasets import open_dataset
-    from earthkit.meteo import thermo
-
-    with open( f'./assets/{grid_info}') as file:
-        grid_info = yaml.safe_load( file)
-
-    start = times2[0][:10] + ' ' + times2[0][11:19]
-    end = times2[-1][:10] + ' ' +  times2[-1][11:19]
-    
-    # open anemoi
-    # TODO: avoid hard coding path
-    path = '/gpfs/scratch/ehpc01/dop/era5/aifs-ea-an-oper-0001-mars-o96-1979-2022-1h-v4.zarr'
-    ds_anemoi = open_dataset( path, start = start, end = end, select = grid_info['colnames'], 
-                              reorder = grid_info['colnames'])
-
-    # reshape to fit grid
-    ds_anemoi = ( np.array(ds_anemoi).transpose(0, 3, 2, 1)).reshape( -1,len(grid_info['colnames']))
-
-    # perform transformation if specified 
-    if 'transformation' in grid_info.keys(): 
-      for transformation in grid_info['transformation'] :
-        exec(transformation)
-
-    # inject era data into grid 
-    source2[:,grid_info['indice_start']:] = ds_anemoi
-
-    return source2 
-
-  ###################################################
   def __iter__(self):
 
     iter_start, iter_end = self.worker_workset()
@@ -301,8 +254,9 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
         step_dt = self.len_hrs // self.step_hrs
         step_forecast_dt = step_dt + (self.forecast_delta_hrs * forecast_dt) // self.step_hrs
 
-        time_win1, time_win2 = ( self.obs_datasets_norm[0][0][0].time_window( idx),
-                                 self.obs_datasets_norm[0][0][0].time_window( idx + step_forecast_dt))
+        # TODO: this has to be independent of specific datasets
+        time_win1, time_win2 = ( self.obs_datasets_norm[-1][0][0].time_window( idx),
+                                 self.obs_datasets_norm[-1][0][0].time_window( idx + step_forecast_dt))
 
         c_tcs = [[] for _ in range(forecast_dt+1)]
         c_tcs_lens = [[] for _ in range(forecast_dt+1)] 
@@ -389,14 +343,6 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
             for i_source, ((ds, normalizer, do), s_idxs) in enumerate( zip(stream_dsn, stream_idxs)) :
 
               (source2,times2) = ds[idx + step_forecast_dt]
-
-              if grid is not None: 
-
-                (source2,times2) = self.create_grid( grid, time_win2)
-
-                # generate ERA5 data if specified
-                if grid_info is not None:
-                  source2 = self.read_anemoi( grid_info, times2, source2)
 
               if source2.shape[0] < token_size :
                 # skip if there are not enough data points
@@ -581,7 +527,7 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
 
   ###################################################
   def __len__(self):
-      return self.len
+    return self.len
 
   ###################################################
   def worker_workset( self) :
