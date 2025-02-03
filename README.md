@@ -3,7 +3,7 @@
 </p>
 
 <div align="center">
-  <h1>The WeatherGenerator Machine Learning Earth System Model</h1>
+  <h1>The WeatherGenerator <br> Machine Learning Earth System Model</h1>
 </div>
 
 The WeatherGenerator project develops a machine learning-based Earth system models. 
