@@ -43,15 +43,6 @@ class AnemoiDataset():
     dt_start = datetime.datetime.strptime( str(start), format_str)
     dt_end = datetime.datetime.strptime( str(end), format_str)
 
-    if dt_start >= ds_dt_end or dt_end <= ds_dt_start :
-      self.latitudes = np.array( []); self.longitudes = np.array( [])
-      self.colnames, self.selected_colnames = [], []
-      self.properties = { 'obs_id' : 0, 'means' : [], 'vars' : [] }
-      self.fields_idx = np.array([], dtype=np.int32)
-      self.fields = []
-      self.ds = None
-      return
-
     # open dataset
 
     # caches lats and lons
@@ -65,11 +56,16 @@ class AnemoiDataset():
     self.colnames = ['lat', 'lon'] + self.fields
     self.selected_colnames = self.colnames
 
-    self.ds = open_dataset( self.ds, frequency=str(step_hrs) + 'h', start=dt_start, end=dt_end)
-
     self.properties = { 'obs_id' : 0,
                         'means' : self.ds.statistics['mean'], 
                         'vars' : np.square(self.ds.statistics['stdev']), }
+
+    # set dataset to None when no overlap with time range
+    if dt_start >= ds_dt_end or dt_end <= ds_dt_start :
+      self.ds = None
+      return
+
+    self.ds = open_dataset( self.ds, frequency=str(step_hrs) + 'h', start=dt_start, end=dt_end)
 
   def __len__( self) :
     "Length of dataset"
