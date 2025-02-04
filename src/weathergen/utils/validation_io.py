@@ -104,8 +104,14 @@ def write_validation( cf, base_path, rank, epoch, cols,
     # TODO: how to avoid this
     if write_first :
       ds_source = ds.require_group( f'{rn}/{fs}')
-      cols_obsvalues = [col[:9]=='obsvalue_' for col in cols[k]]
-      ds_source.attrs['cols'] = np.array(cols[k])[cols_obsvalues].tolist()
+      # column names
+      if 'anemoi'==si['type'] :
+        cols_values = np.arange( 2, len(cols[k]))
+      elif 'obs'==si['type'] :
+        cols_values = [col[:9]=='obsvalue_' for col in cols[k]]
+      else :
+        assert False, 'Unsuppported stream type'
+      ds_source.attrs['cols'] = np.array(cols[k])[cols_values].tolist()
       ds_source.create_dataset( 'sources', data=source_k, chunks=(1024, *source_k.shape[1:]))
       ds_source.create_dataset( 'sources_lens', data=source_lens_k)
       ds_source.create_dataset( 'preds', data=preds_k, chunks=(1024, *preds_k.shape[1:]))
