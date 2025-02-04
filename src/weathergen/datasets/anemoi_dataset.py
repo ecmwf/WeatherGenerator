@@ -49,9 +49,11 @@ class AnemoiDataset():
     self.latitudes = self.ds.latitudes.astype( np.float32)
     self.longitudes = self.ds.longitudes.astype( np.float32)
 
-    # find data fields
+    # find physical fields (i.e. filter out auxiliary information to facilitate prediction)
     self.fields_idx = np.sort([self.ds.name_to_index[k]
-            for i,(k,v) in enumerate(self.ds.typed_variables.items()) if not v.is_computed_forcing])
+            for i,(k,v) in enumerate(self.ds.typed_variables.items())
+            if not v.is_computed_forcing and not v.is_constant_in_time])
+    # TODO: use complement of self.fields_idx as geoinfo
     self.fields = [ self.ds.variables[i] for i in self.fields_idx]
     self.colnames = ['lat', 'lon'] + self.fields
     self.selected_colnames = self.colnames

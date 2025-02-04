@@ -475,9 +475,8 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
   def prepare_window_source( self, obs_id, data_offset, normalizer, source, times, time_win, stream_idxs) :
 
     source = source[:,data_offset:]
-    # permutation to have all geoinfos at the beginning (only apply this if necessary)
+    # select geoinfo and field channels (also ensure geoinfos is at the beginning)
     idxs = np.array(stream_idxs[0] + stream_idxs[1])
-    # if not (idxs == np.arange( idxs.max()+1)).all() :
     source = source[:,idxs]
 
     # assemble tensor as fed to the network, combining geoinfo and data
@@ -502,9 +501,8 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
   def prepare_window_target( self, obs_id, data_offset, normalizer, source, times, time_win, stream_idxs) :
 
     source = source[:,data_offset:]
-    # permutation to have all geoinfos at the beginning (only apply this if necessary)
+    # select geoinfo and field channels (also ensure geoinfos is at the beginning)
     idxs = np.array(stream_idxs[0] + stream_idxs[1])
-    # if not (idxs == np.arange( idxs.max()+1)).all() :
     source = source[:,idxs]
 
     # assemble tensor as fed to the network, combining geoinfo and data
