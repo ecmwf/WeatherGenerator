@@ -1,4 +1,4 @@
-# (C) Copyright 2024 WeatherGenerator contributors.
+# (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -11,8 +11,6 @@ import time
 import sys
 import pdb
 import traceback
-
-import pandas as pd
 
 from weathergen.utils.config import Config
 from weathergen.train.trainer import Trainer
@@ -55,7 +53,7 @@ def evaluate( run_id, epoch, masking_mode = None, forecacast_steps = None,
   cf.loader_num_workers = min( cf.loader_num_workers, samples)
 
   trainer = Trainer()
-  trainer.evaluate( cf, run_id, epoch)
+  trainer.evaluate( cf, run_id, epoch, True)
 
 ####################################################################################################
 def train( run_id = None) -> None :
@@ -187,7 +185,6 @@ def train( run_id = None) -> None :
   cf.data_loader_rng_seed = int(time.time())
   cf.log_validation = 0
 
-  cf.mlflow_offline = True #False
   cf.istep = 0
   cf.run_history = []
 
@@ -202,3 +199,6 @@ def train( run_id = None) -> None :
     extype, value, tb = sys.exc_info()
     traceback.print_exc()
     pdb.post_mortem(tb)
+
+if __name__ == '__main__':
+    train()

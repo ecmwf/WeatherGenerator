@@ -1,4 +1,4 @@
-# (C) Copyright 2024 WeatherGenerator contributors.
+# (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -255,9 +255,8 @@ if __name__ == '__main__' :
     clean_out_folder()
 
   runs_ids = { 
-              'i18n6wmx' : [1, 'ERA5 test'],
+              'g0c86abp' : [34298989, 'ERA5 test'],
             }
-
 
   runs_data = [TrainLogger.read( run_id) for run_id in runs_ids.keys()]
 
@@ -316,13 +315,13 @@ if __name__ == '__main__' :
 
   # compare different runs
   plot_loss_per_stream( ['train', 'val'], runs_ids, runs_data, runs_times, runs_active,
-                        ['ERA5'], 
+                        ['ERA5', 'METEOSAT', 'NPP'], 
                         x_type=x_type, x_scale_log=x_scale_log)
   plot_loss_per_stream( ['val'], runs_ids, runs_data, runs_times, runs_active,
-                        ['ERA5'], 
+                        ['ERA5', 'METEOSAT', 'NPP'], 
                         x_type=x_type, x_scale_log=x_scale_log)
   plot_loss_per_stream( ['train'], runs_ids, runs_data, runs_times, runs_active,
-                        ['ERA5'], 
+                        ['ERA5', 'METEOSAT', 'NPP'], 
                         x_type=x_type, x_scale_log=x_scale_log)
   
   # plot all cols for all run_ids

@@ -203,6 +203,4 @@ logs/
 models/
 results/
 
-# uv
-uv.lock
 
