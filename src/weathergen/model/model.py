@@ -65,7 +65,7 @@ class ModelParams( torch.nn.Module) :
     self.pe_embed = torch.nn.Parameter( pe_embed, requires_grad=False)
 
     dim_embed = 1024
-    len_token_seq = 8192*4 #900000
+    len_token_seq = 8192*16 #900000
     # print( f'len_token_seq = {len_token_seq}')
     position = torch.arange( 0, len_token_seq).unsqueeze(1)
     div = torch.exp(torch.arange( 0, dim_embed, 2) * -(math.log(len_token_seq) / dim_embed))
