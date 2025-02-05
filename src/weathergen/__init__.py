@@ -64,7 +64,7 @@ def train( run_id = None) -> None :
 
   # directory where input streams are specified
   # cf.streams_directory = './streams_large/'
-  cf.streams_directory = './streams_anemoi/'
+  cf.streams_directory = '/work/ab0995/a270225/weathergen_data/'
 
   # embed_orientation : 'channels' or 'columns'
   # channels: embedding is per channel for a token (#tokens=num_channels)
@@ -133,7 +133,7 @@ def train( run_id = None) -> None :
   # compile entire model
   cf.compile_model = False
 
-  cf.with_fsdp = True
+  cf.with_fsdp = False
 
   cf.loss_fcts = [['mse', 1.0]]
   cf.loss_fcts_val = [['mse', 1.0]]
@@ -170,15 +170,15 @@ def train( run_id = None) -> None :
   cf.norm_type = 'LayerNorm'  #'LayerNorm' #'RMSNorm'
   cf.nn_module = 'te'
 
-  cf.data_path = '/home/mlx/ai-ml/datasets/stable/'
+  cf.data_path = '/work/ab0995/a270225/weathergen_data'
   # cf.data_path = '/lus/h2resw01/fws4/lb/project/ai-ml/observations/v1'
   # cf.data_path = '/leonardo_scratch/large/userexternal/clessig0/obs/v1'
-  cf.start_date = 201301010000
-  cf.end_date = 202012310000
-  cf.start_date_val = 202101010000
-  cf.end_date_val = 202201010000
+  cf.start_date = 195001010000
+  cf.end_date = 201012310000
+  cf.start_date_val = 201101010000
+  cf.end_date_val = 201901010000
   cf.len_hrs = 6
-  cf.step_hrs = 6
+  cf.step_hrs = 1
   cf.input_window_steps = 1
 
   cf.val_initial = False
