@@ -22,6 +22,8 @@ import pandas as pd
 
 from weathergen.datasets.obs_dataset import ObsDataset
 from weathergen.datasets.anemoi_dataset import AnemoiDataset
+from weathergen.datasets.regular_dataset import RegularDataset
+from weathergen.datasets.unstructured_dataset import UnstructuredDataset
 from weathergen.datasets.normalizer import DataNormalizer
 from weathergen.datasets.batchifyer import Batchifyer
 from weathergen.datasets.utils import merge_cells
@@ -105,6 +107,28 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
           # TODO: avoid hard coding
           data_idxs = list(np.arange( 2, 82+2))
 
+        elif stream_info['type']=='regular':
+
+          ds = RegularDataset( data_path + '/' + fname, start_date, end_date, len_hrs, step_hrs, False)
+          do = 0
+          geoinfo_idx = [ 0, 1]
+          stats_offset = 2
+          data_idxs = ds.selected_cols_idx[2:].tolist()
+
+          logger.info( '{} :: {} : {}'.format( stream_info['name'],
+                                              [ds.selected_colnames[do:][i] for i in geoinfo_idx],
+                                              [ds.selected_colnames[do:][i] for i in data_idxs]))
+        elif stream_info['type']=='unstr':
+
+          ds = UnstructuredDataset( data_path + '/' + fname, start_date, end_date, len_hrs, step_hrs, False)
+          do = 0
+          geoinfo_idx = [ 0, 1]
+          stats_offset = 2
+          data_idxs = ds.selected_cols_idx[2:].tolist()
+
+          logger.info( '{} :: {} : {}'.format( stream_info['name'],
+                                              [ds.selected_colnames[i] for i in geoinfo_idx],
+                                              [ds.selected_colnames[i] for i in data_idxs]))
         else :
           assert False, 'Unsupported stream type {}.'.format( stream_info['type'])
 
