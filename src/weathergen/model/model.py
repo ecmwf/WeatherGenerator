@@ -64,16 +64,6 @@ class ModelParams( torch.nn.Module) :
     pe_embed[:, 1::2] = torch.cos( position * div[ : pe_embed[:, 1::2].shape[1] ])
     self.pe_embed = torch.nn.Parameter( pe_embed, requires_grad=False)
 
-    dim_embed = 1024
-    len_token_seq = 8192*4 #900000
-    # print( f'len_token_seq = {len_token_seq}')
-    position = torch.arange( 0, len_token_seq).unsqueeze(1)
-    div = torch.exp(torch.arange( 0, dim_embed, 2) * -(math.log(len_token_seq) / dim_embed))
-    pe_tc_tokens = torch.zeros( len_token_seq, dim_embed, dtype=torch.float16)
-    pe_tc_tokens[:, 0::2] = torch.sin( position * div[ : pe_tc_tokens[:, 0::2].shape[1] ])
-    pe_tc_tokens[:, 1::2] = torch.cos( position * div[ : pe_tc_tokens[:, 1::2].shape[1] ])
-    self.pe_tc_tokens = torch.nn.Parameter( pe_tc_tokens, requires_grad=False)
-
     dim_embed = cf.ae_global_dim_embed
     pe = torch.zeros( self.num_healpix_cells, cf.ae_local_num_queries, dim_embed, dtype=torch.float16)
     xs = 2. * np.pi * torch.arange( 0, dim_embed, 2) / dim_embed
@@ -569,7 +559,6 @@ class Model( torch.nn.Module) :
     return tokens_global
 
   #########################################
-  # @torch.compile
   def assimilate_global( self, model_params, tokens) :
 
     # global assimilation engine and adapter
@@ -579,7 +568,6 @@ class Model( torch.nn.Module) :
     return tokens
 
   #########################################
-  # @torch.compile
   def forecast( self, model_params, tokens) :
 
     for it, block in enumerate(self.fe_blocks) :
@@ -612,13 +600,13 @@ class Model( torch.nn.Module) :
       # the varlen attention)
       if tro_type == 'obs_value' :  
         tc_tokens = torch.cat([checkpoint( tc_embed, tcs[fstep][i_b][ii], use_reentrant=False)
-                                                    if len(tcs[fstep][i_b][ii].shape)>1 else tcs[fstep][i_b][ii]
-                                                    for i_b in range(len(tcs[fstep]))])
+                                        if len(tcs[fstep][i_b][ii].shape)>1 else tcs[fstep][i_b][ii]
+                                        for i_b in range(len(tcs[fstep]))])
       elif tro_type == 'token' :
         tc_tokens = torch.cat( [checkpoint( tc_embed, tcs[fstep][i_b][ii].transpose(-2,-1).flatten(-2,-1),
                                                                               use_reentrant=False)
-                                                    if len(tcs[fstep][i_b][ii].shape)>1 else tcs[fstep][i_b][ii]
-                                                    for i_b in range(len(tcs[fstep]))])
+                                        if len(tcs[fstep][i_b][ii].shape)>1 else tcs[fstep][i_b][ii]
+                                        for i_b in range(len(tcs[fstep]))])
       else :
         assert False
 
@@ -635,10 +623,8 @@ class Model( torch.nn.Module) :
       #       stream basis
       assert type(tte_kv) == torch.nn.Identity
 
+      # lens for varlen attentino
       tcs_lens = target_coords_idxs[0][fstep][ii]
-      # add per-cell positional encoding
-      tc_tokens += model_params.pe_tc_tokens[ target_coords_idxs[1][fstep][ii] , : tc_tokens.shape[1] ]
-
       # coord information for learnable layer norm
       tcs_aux = torch.cat( [tcs[fstep][i_b][ii] for i_b in range(len(tcs[0]))])
 
