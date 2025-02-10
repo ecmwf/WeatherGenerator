@@ -1,0 +1,53 @@
+# Author: Javad Kasravi
+# Email: j.kasravi@fz-juelich.de
+# Description: Apptainer definition file for WeatherGenerator
+
+Bootstrap: localimage
+From: /p/scratch/atmlaml/apptainer/images/pytorch-24.12-py3-arm64.sif
+
+%post
+    # Set root permissions for /usr/lib
+    chown root:root /usr/lib
+
+    # Update and install dependencies
+    apt update -y && apt install -y \
+        build-essential \
+        curl \
+        kmod \
+        pdsh \
+        tmux
+
+    # Upgrade pip and install packages
+    pip install --upgrade pip wheel
+
+
+    pip install \
+        astropy_healpix==1.0.3 \
+        zarr==2.17.0 \
+        anemoi-datasets==0.5.15 \
+        six==1.16.0 \
+        matplotlib==3.10.0 \
+        packaging==24.2 \
+        wheel==0.45.1 
+
+    # Replace pynvml with nvidia-ml-py
+    pip uninstall -y pynvml
+    pip install nvidia-ml-py
+
+    # Create directory for custom packages
+    mkdir -p /packages
+
+    # Download and install custom wheels
+    cd /packages
+
+    pip install flash-attn==2.7.4.post1
+
+    # Cleanup
+    rm -rf /packages
+
+%environment
+    export PATH=/opt/conda/bin:$PATH
+    export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+
+%runscript
+    echo "Container is set up and ready!"
