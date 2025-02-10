@@ -63,7 +63,7 @@ def train( run_id = None) -> None :
   # directory where input streams are specified
   # cf.streams_directory = './streams_large/'
   # cf.streams_directory = './streams_anemoi/'
-  cf.streams_directory = './streams_mixed/'
+  cf.streams_directory = '/workspace/WeatherGenerator'
 
   # embed_orientation : 'channels' or 'columns'
   # channels: embedding is per channel for a token (#tokens=num_channels)
@@ -169,7 +169,7 @@ def train( run_id = None) -> None :
   cf.norm_type = 'LayerNorm'  #'LayerNorm' #'RMSNorm'
   cf.nn_module = 'te'
 
-  cf.data_path = '/home/mlx/ai-ml/datasets/stable/'
+  cf.data_path = '/data'
   # cf.data_path = '/lus/h2resw01/fws4/lb/project/ai-ml/observations/v1'
   # cf.data_path = '/leonardo_scratch/large/userexternal/clessig0/obs/v1'
   cf.start_date = 201301010000
