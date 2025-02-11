@@ -60,6 +60,9 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
     self.forecast_steps =np.array([forecast_steps] if type(forecast_steps)==int else forecast_steps)
     self.forecast_policy = forecast_policy
 
+    # Dictionary storing names of variables for each stream
+    self.stream_channels = {}
+
     # end date needs to be adjusted to account for window length
     format_str = '%Y%m%d%H%M%S'
     end_dt = datetime.datetime.strptime(str(end_date), format_str)
@@ -98,6 +101,7 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
                                               [ds.selected_colnames[do:][i] for i in geoinfo_idx],
                                               [ds.selected_colnames[do:][i] for i in data_idxs]))
           stats_offset = 0
+          self.stream_channels[stream_info['name']] = [ds.selected_colnames[do:][i] for i in data_idxs]
 
         elif stream_info['type']=='anemoi' :
 
@@ -110,6 +114,7 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
           geoinfo_idx = [0, 1]
           stats_offset = 2
           data_idxs = list(ds.fields_idx + 2)
+          self.stream_channels[stream_info['name']] = [ds.selected_colnames[do:][i] for i in data_idxs]
 
         elif stream_info['type']=='regular':
 
@@ -122,6 +127,8 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
           logger.info( '{} :: {} : {}'.format( stream_info['name'],
                                               [ds.selected_colnames[do:][i] for i in geoinfo_idx],
                                               [ds.selected_colnames[do:][i] for i in data_idxs]))
+          self.stream_channels[stream_info['name']] = [ds.selected_colnames[do:][i] for i in data_idxs]
+
         elif stream_info['type']=='unstr':
 
           ds = UnstructuredDataset( data_path + '/' + fname, start_date, end_date, len_hrs, step_hrs, False)
@@ -133,6 +140,8 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
           logger.info( '{} :: {} : {}'.format( stream_info['name'],
                                               [ds.selected_colnames[i] for i in geoinfo_idx],
                                               [ds.selected_colnames[i] for i in data_idxs]))
+          self.stream_channels[stream_info['name']] = [ds.selected_colnames[do:][i] for i in data_idxs]
+           
         else :
           assert False, 'Unsupported stream type {}.'.format( stream_info['type'])
 

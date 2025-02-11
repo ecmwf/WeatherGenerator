@@ -308,6 +308,9 @@ class Trainer( Trainer_Base) :
                                                                **loader_params, sampler = None) 
 
     num_channels = self.dataset.get_num_chs()
+    self.num_selected_chas = [
+      len(self.data_loader.dataset.stream_channels[k]) for k in self.data_loader.dataset.stream_channels
+    ]
     self.geoinfo_sizes = self.dataset.get_geoinfo_sizes()
     
     self.model = Model( cf, num_channels, self.geoinfo_sizes).create()
@@ -413,7 +416,7 @@ class Trainer( Trainer_Base) :
 
   ###########################################
   def compute_loss( self, loss_fcts, sources, targets, targets_coords, targets_token_lens, preds,
-                          losses_all, stddev_all,
+                          losses_all, stddev_all, losses_chn,
                           preds_all = None, targets_all = None,
                           targets_coords_all = None, targets_lens = None,
                           mode='training') :
@@ -432,7 +435,6 @@ class Trainer( Trainer_Base) :
 
     ctr = 0
     loss = torch.tensor( 0., device=self.devices[0], requires_grad=True)
-
     # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
     for fstep in range(len(targets_rt)) :
       for i_obs, (target, target_coords2, si) in enumerate( zip(targets_rt[fstep], 
@@ -476,7 +478,7 @@ class Trainer( Trainer_Base) :
           if pred[:,mask_nan].shape[1] == 0 :
             continue
           ens = pred.shape[0] > 1
-
+  
           # accumulate loss from different loss functions and channels
           for j, (loss_fct, w) in enumerate( loss_fcts) :
 
@@ -499,6 +501,8 @@ class Trainer( Trainer_Base) :
                                           pred[:,mask,i].mean(0),
                                           pred[:,mask,i].std(0) if ens else torch.zeros( 1) )
                     val_uw += temp.item()
+                    # Add  temp loss to buffer
+                    losses_chn[j, i, i_obs] = temp
                     val = val + channel_loss_weight[i] * temp # * tw[jj]
                     ctr += 1
 
@@ -509,6 +513,7 @@ class Trainer( Trainer_Base) :
                                         pred[:,mask_nan[:,i],i].mean(0),
                                         pred[:,mask_nan[:,i],i].std(0) if ens else torch.zeros( 1) )
                   val_uw += temp.item()
+                  losses_chn[j, i, i_obs] = temp
                   val = val + channel_loss_weight[i] * temp
                   ctr += 1
             val = val / ctr if (ctr > 0) else val
@@ -544,8 +549,7 @@ class Trainer( Trainer_Base) :
     dataset_iter = iter( self.data_loader)
 
     self.optimizer.zero_grad()
-    self.losses_hist, self.stddev_hist = [], []
-
+    self.losses_hist, self.stddev_hist, self.losses_hist_chn = [], [], []
     # training loop
     self.t_start = time.time()
     for bidx, data in enumerate(dataset_iter) :
@@ -554,7 +558,9 @@ class Trainer( Trainer_Base) :
       (_, source_tokens_cells, source_tokens_lens, source_centroids, source_cell_lens, source_idxs_embed,
        target_tokens, target_token_lens, targets_coords, targets_coords_lens, targets_coords_idxs, forecast_dt) = data
 
+      
       losses_all = torch.ones( (len(self.loss_fcts_val), len(cf.streams)) ) * torch.nan
+      losses_chn = torch.ones( (len(self.loss_fcts_val), max(self.num_selected_chas), len(cf.streams)) ) * torch.nan
       stddev_all = torch.zeros( len(cf.streams)) * torch.nan
 
       # evaluate model
@@ -565,7 +571,7 @@ class Trainer( Trainer_Base) :
                                 targets_coords, targets_coords_lens, targets_coords_idxs, forecast_dt)
 
         loss = self.compute_loss( self.loss_fcts, source_tokens_cells, target_tokens, targets_coords,
-                                  target_token_lens, preds, losses_all, stddev_all)
+                                  target_token_lens, preds, losses_all, stddev_all, losses_chn)
 
       # backward pass
       self.grad_scaler.scale(loss).backward()
@@ -584,6 +590,7 @@ class Trainer( Trainer_Base) :
 
       self.losses_hist += [ losses_all ]
       self.stddev_hist += [ stddev_all ]
+      self.losses_hist_chn += [ losses_chn ]
 
       perf_gpu, perf_mem = self.get_perf()
       self.perf_gpu = self.ddp_average( torch.tensor( [perf_gpu])).item()
@@ -606,7 +613,7 @@ class Trainer( Trainer_Base) :
     self.ddp_model.eval()
     
     dataset_val_iter = iter(self.data_loader_validation)
-    self.losses_hist, self.stddev_hist = [], []
+    self.losses_hist, self.stddev_hist, self.losses_hist_chn = [], [], []
     
     with torch.no_grad():
       # print progress bar but only in interactive mode, i.e. when without ddp
@@ -618,6 +625,7 @@ class Trainer( Trainer_Base) :
           target_tokens, target_token_lens, targets_coords, targets_coords_lens, targets_coords_idxs, forecast_dt) = data
 
           losses_all = torch.ones( (len(self.loss_fcts_val), len(cf.streams)) ) * torch.nan
+          losses_chn = torch.ones(  (len(self.loss_fcts_val),  max(self.num_selected_chas), len(cf.streams)) ) * torch.nan
           stddev_all = torch.zeros( len(cf.streams)) * torch.nan
 
           # evaluate model
@@ -635,7 +643,7 @@ class Trainer( Trainer_Base) :
 
             self.compute_loss( self.loss_fcts_val, source_tokens_cells,
                               target_tokens, targets_coords, target_token_lens, preds,
-                              losses_all, stddev_all, preds_all, targets_all, 
+                              losses_all, stddev_all, losses_chn, preds_all, targets_all, 
                               targets_coords_all, targets_lens, 
                               mode='validation')
 
@@ -646,18 +654,20 @@ class Trainer( Trainer_Base) :
           else :
 
             self.compute_loss( self.loss_fcts_val, source_tokens_cells, target_tokens,
-                              targets_coords, target_token_lens, preds, losses_all, stddev_all,
+                              targets_coords, target_token_lens, preds, losses_all, stddev_all, losses_chn,
                               mode='validation')
 
           self.losses_hist += [ losses_all ]
           self.stddev_hist += [ stddev_all ]
+          self.losses_hist_chn += [ losses_chn ]
 
           pbar.update( self.cf.batch_size_validation)
 
 
         losses_all = self.ddp_average( torch.stack( self.losses_hist).to(torch.float64).nanmean(0))
+        losses_chn = self.ddp_average( torch.stack( self.losses_hist_chn).to(torch.float64).nanmean(0))
         stddev_all = self.ddp_average( torch.stack( self.stddev_hist).to(torch.float64).nanmean(0))
-
+    
         if 0 == self.cf.rank and self.cf.istep >= 0:
           loss_dict = {}
           for j, (lname,_) in enumerate(cf.loss_fcts_val) :
@@ -665,10 +675,13 @@ class Trainer( Trainer_Base) :
           loss_dict['validation std_dev'] = torch.nanmean(stddev_all.mean()).item()
           for i_obs, rt in enumerate( cf.streams) :
             loss_dict['validation {}'.format(rt['name'].replace(',',''))] = float(losses_all[0,i_obs])
-
+          
+          for j, (lname,_) in enumerate(cf.loss_fcts_val) :
+            for i_obs, rt in enumerate( cf.streams) :
+              loss_dict['validation {} {}'.format(rt['name'].replace(',',''), lname)] = losses_chn[j, :, i_obs].tolist()
           # add data to plain logger
           samples = cf.istep * cf.batch_size * cf.num_ranks
-          self.train_logger.add_val( samples, losses_all, stddev_all)
+          self.train_logger.add_val( samples, losses_all, stddev_all, losses_chn, self.data_loader.dataset.stream_channels)
 
         if 0 == self.cf.rank :
           print( 'validation ({}) : {:03d} : loss = {:.4E}'.format( cf.run_id, epoch,
@@ -734,6 +747,7 @@ class Trainer( Trainer_Base) :
     if bidx % self.log_freq == 0 and bidx > 0 :
 
       l_avg = self.ddp_average( torch.nanmean( torch.stack( self.losses_hist), axis=0))
+      lchn_avg = self.ddp_average( torch.nanmean( torch.stack( self.losses_hist_chn), axis=0))
       stddev_avg = self.ddp_average( torch.nanmean( torch.stack( self.stddev_hist), axis=0))
       samples = self.cf.istep * self.cf.batch_size * self.cf.num_ranks
 
@@ -744,12 +758,16 @@ class Trainer( Trainer_Base) :
                       'lr' : self.lr_scheduler.get_lr() }
         for i_obs, rt in enumerate( self.cf.streams) :
           loss_dict['training {}'.format(rt['name'].replace(',',''))] = float(l_avg[0,i_obs])
+        
+        for i_obs, rt in enumerate( self.cf.streams) :
+          loss_dict['training {}'.format(rt['name'].replace(',',''))] = lchn_avg[0, :, i_obs].tolist()
 
         # plain logger
-        self.train_logger.add_train( samples, self.lr_scheduler.get_lr(), l_avg, stddev_avg, 
-                                     self.perf_gpu, self.perf_mem)
+        self.train_logger.add_train( samples, self.lr_scheduler.get_lr(), l_avg, stddev_avg, lchn_avg,
+                                     self.data_loader.dataset.stream_channels,
+                                     self.perf_gpu, self.perf_mem,)
 
-      self.losses_hist, self.stddev_hist = [], []
+      self.losses_hist, self.stddev_hist, self.losses_hist_chn = [], [], []
 
   ###########################################
   def log_terminal( self, bidx, epoch) :
