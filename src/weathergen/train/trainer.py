@@ -137,7 +137,10 @@ class Trainer( Trainer_Base) :
 
     num_channels = self.dataset_val.get_num_chs()
     self.geoinfo_sizes = self.dataset_val.get_geoinfo_sizes()
-
+    self.num_selected_chas = [
+      len(self.dataset_val.stream_channels[k]) for k in self.dataset_val.stream_channels
+    ]
+    
     self.model = Model( cf, num_channels, self.geoinfo_sizes).create().to( self.devices[0])
     self.model.load( run_id_trained, epoch)
     print( f'Loaded model {run_id_trained} at epoch {epoch}.')
@@ -309,7 +312,7 @@ class Trainer( Trainer_Base) :
 
     num_channels = self.dataset.get_num_chs()
     self.num_selected_chas = [
-      len(self.data_loader.dataset.stream_channels[k]) for k in self.data_loader.dataset.stream_channels
+      len(self.dataset.stream_channels[k]) for k in self.dataset.stream_channels
     ]
     self.geoinfo_sizes = self.dataset.get_geoinfo_sizes()
     
@@ -681,7 +684,7 @@ class Trainer( Trainer_Base) :
               loss_dict['validation {} {}'.format(rt['name'].replace(',',''), lname)] = losses_chn[j, :, i_obs].tolist()
           # add data to plain logger
           samples = cf.istep * cf.batch_size * cf.num_ranks
-          self.train_logger.add_val( samples, losses_all, stddev_all, losses_chn, self.data_loader.dataset.stream_channels)
+          self.train_logger.add_val( samples, losses_all, stddev_all, losses_chn, self.dataset_val.stream_channels)
 
         if 0 == self.cf.rank :
           print( 'validation ({}) : {:03d} : loss = {:.4E}'.format( cf.run_id, epoch,
@@ -764,7 +767,7 @@ class Trainer( Trainer_Base) :
 
         # plain logger
         self.train_logger.add_train( samples, self.lr_scheduler.get_lr(), l_avg, stddev_avg, lchn_avg,
-                                     self.data_loader.dataset.stream_channels,
+                                     self.dataset_val.stream_channels,
                                      self.perf_gpu, self.perf_mem,)
 
       self.losses_hist, self.stddev_hist, self.losses_hist_chn = [], [], []

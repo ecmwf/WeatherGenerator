@@ -87,7 +87,7 @@ class TrainLogger :
     multi_cols = pd.MultiIndex.from_tuples(columns)
 
     log_vals = [self.train_step]
-    log_vals += [ int(datetime.datetime.now().strftime(  '%Y%m%d%H%M%S')) ]
+    log_vals += [ datetime.datetime.now() ]
     log_vals += [samples]
     log_vals += [perf_gpu]
     log_vals += [perf_mem]
@@ -104,9 +104,7 @@ class TrainLogger :
         log_vals += [ None ]
 
     df = pd.DataFrame([log_vals], columns=multi_cols)
-
-    with open(self.train_file, 'a') as f:
-      df.to_csv(f, header=self.train_step == 1, index=False)
+    df.to_csv(self.train_file, mode='a', header=self.train_step == 1, index=False)
 
     self.train_step += 1
 
@@ -137,7 +135,7 @@ class TrainLogger :
     multi_cols = pd.MultiIndex.from_tuples(columns)
     
     log_vals = [self.val_step]
-    log_vals += [ int(datetime.datetime.now().strftime(  '%Y%m%d%H%M%S')) ]
+    log_vals += [ datetime.datetime.now() ]
     log_vals += [samples]
     log_vals += [loss_avg[0].mean().item()]
 
@@ -151,9 +149,7 @@ class TrainLogger :
         log_vals += [ None ]
 
     df = pd.DataFrame([log_vals], columns=multi_cols)
-
-    with open(self.val_file, 'a') as f:
-      df.to_csv(f, header=self.val_step == 1, index=False)
+    df.to_csv(self.val_file, mode='a', header=self.val_step == 1, index=False)
 
     self.val_step += 1
 
@@ -183,8 +179,8 @@ class TrainLogger :
     fname_log_train = f'./results/{run_id}/{run_id}_train_log.csv'
     fname_log_val = f'./results/{run_id}/{run_id}_val_log.csv'
     
-    df_train = pd.read_csv(fname_log_train, index_col=[0,1], skipinitialspace=True)
-    df_val = pd.read_csv(fname_log_val, index_col=[0,1], skipinitialspace=True)
+    df_train = pd.read_csv(fname_log_train, header=[0,1], skipinitialspace=True, parse_dates=[('global', 'time')])
+    df_val = pd.read_csv(fname_log_val, header=[0,1], skipinitialspace=True, parse_dates=[('global', 'time')])
 
     return df_train, df_val
     
