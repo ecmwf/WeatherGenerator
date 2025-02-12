@@ -105,7 +105,7 @@ def write_validation( cf, base_path, rank, epoch, cols,
     if write_first :
       ds_source = ds.require_group( f'{rn}/{fs}')
       # column names
-      if 'anemoi'==si['type'] :
+      if si['type'] in ['anemoi', 'regular', 'unstr'] :
         cols_values = np.arange( 2, len(cols[k]))
       elif 'obs'==si['type'] :
         cols_values = [col[:9]=='obsvalue_' for col in cols[k]]
