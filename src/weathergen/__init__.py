@@ -66,7 +66,7 @@ def evaluate() -> None :
 
   # Oct-Nov 2022
   start_date, end_date = pd.to_datetime(args.start_date), pd.to_datetime(args.end_date)
-  logger.info(f"Evaluation period: {start_date.strftime('%Y-%m-%d %h:%M')} - {end_date}.strftime('%Y-%m-%d %h:%M')") 
+  logger.info(f"Evaluation period: {start_date.strftime('%Y-%m-%d %H:%M')} -- {end_date.strftime('%Y-%m-%d %H:%M')}") 
 
   cf.start_date_val = start_date.strftime('%Y%m%d%H%M')     # ML: would be better to use datetime-objects
   cf.end_date_val = end_date.strftime('%Y%m%d%H%M')
@@ -77,7 +77,7 @@ def evaluate() -> None :
   # cf.start_date_val = 202201010400
   # cf.end_date_val = 202301010400
   
-  cf.step_hrs = 12
+  cf.step_hrs = cf.len_hrs      # ML: len_hrs == step_hrs is currently mandatory for AnemoiDatasets 
 
   cf.shuffle = args.shuffle
 
