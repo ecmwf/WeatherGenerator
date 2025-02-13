@@ -134,6 +134,9 @@ class Trainer( Trainer_Base) :
                       'num_workers': cf.loader_num_workers, 'pin_memory': True}
     self.data_loader_validation = torch.utils.data.DataLoader( self.dataset_val, 
                                                                **loader_params, sampler = None) 
+    
+    if 0 == self.cf.rank:
+      self.train_logger.initialize_file(self.dataset_val.stream_channels, val=True)
 
     num_channels = self.dataset_val.get_num_chs()
     self.geoinfo_sizes = self.dataset_val.get_geoinfo_sizes()
@@ -309,6 +312,9 @@ class Trainer( Trainer_Base) :
     self.data_loader = torch.utils.data.DataLoader( self.dataset, **loader_params, sampler = None) 
     self.data_loader_validation = torch.utils.data.DataLoader( self.dataset_val, 
                                                                **loader_params, sampler = None) 
+    
+    if 0 == self.cf.rank:
+      self.train_logger.initialize_file(self.dataset_val.stream_channels, train=True, val=True)
 
     num_channels = self.dataset.get_num_chs()
     self.num_selected_chas = [

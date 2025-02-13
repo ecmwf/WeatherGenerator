@@ -20,7 +20,6 @@ class TrainLogger :
 
   This logger writes metrics to CSV files with multi-level column headers, 
   organizing metrics by global training statistics and per-stream channel statistics.
-  Supports distributed training environments by only initializing files on rank 0.
 
   Attributes:
       cf (Config): Configuration object containing training parameters.
@@ -30,27 +29,84 @@ class TrainLogger :
       train_file (str): Full path to training log CSV file.
       val_file (str): Full path to validation log CSV file.
 
+  Methods:
+    initialize_file(stream_chans: dict, train: bool = False, val: bool = False) -> None:
+        Initializes log files and their headers for training and/or validation.
+    
+    add_train(samples: int, lr: float, loss_avg: torch.Tensor, stddev_avg: torch.Tensor, 
+              loss_chn_avg: torch.Tensor, stream_chans: dict, 
+              perf_gpu: float = 0., perf_mem: float = 0.) -> None:
+        Logs training metrics into the CSV file.
+    
+    add_val(samples: int, loss_avg: torch.Tensor, stddev_avg: torch.Tensor, 
+            loss_chn_avg: torch.Tensor, stream_chans: dict) -> None:
+        Logs validation metrics into the CSV file.
+
+    read(run_id: str, epoch: int = -1) -> tuple[pd.DataFrame, pd.DataFrame]:
+        Reads the training and validation log files and returns them as Pandas DataFrames.
+
   Args:
       cf (Config): Configuration object with training parameters.
       path_run (str): Base directory path where log files will be stored.
   """
   def __init__( self, cf: Config, path_run: str) -> None:
     """
-      Initializes the TrainLogger with configuration and file paths. Creates empty
-      log files if current process rank is 0 (for distributed training setups).
+      Initializes the TrainLogger with configuration and file paths.
     """
     self.cf = cf
     self.path_run = path_run
-    self.train_step = 1
-    self.val_step = 1
+    self.train_step = 0
+    self.val_step = 0
     self.train_file = self.path_run + self.cf.run_id + '_train_log.csv'
     self.val_file = self.path_run + self.cf.run_id + '_val_log.csv'
-    if 0 == self.cf.rank:
-      # Initialize log files
-      with open(self.train_file, "w") as my_empty_csv:
-        pass
-      with open(self.val_file, "w") as my_empty_csv:
-        pass
+
+
+  def initialize_file(self, stream_chans: dict, train: bool = False, val: bool = False) -> None:
+    """
+    Initializes CSV log files for training and validation.
+
+    This method creates log files with multi-index column structures based on 
+    global training statistics and per-stream channel statistics. It should be called 
+    before logging any training or validation data.
+
+    Args:
+        stream_chans (dict): A dictionary mapping stream names to their respective output channels.
+        train (bool, optional): If True, initializes the training log file. Defaults to False.
+        val (bool, optional): If True, initializes the validation log file. Defaults to False.
+    """
+    if train:
+      columns_config = {
+        'global': ["step", "time", "samples", "perf_gpu", "perf_mem", "learning_rate", "loss_mean"],
+      }
+      for stream in stream_chans:
+        columns_config[stream] = [nm[0] for j, nm in enumerate(self.cf.loss_fcts)] + stream_chans[stream] + ['std']
+      
+      columns = []
+      for top_level, sub_columns in columns_config.items():
+          columns.extend([(top_level, sub) for sub in sub_columns])
+
+      self.train_multi_cols = pd.MultiIndex.from_tuples(columns)
+      df = pd.DataFrame([], columns=self.train_multi_cols)
+      df.to_csv(self.train_file, mode='w', header=True, index=False)
+
+      self.train_step = 1
+    
+    if val: 
+      columns_config = {
+        'global': ["step", "time", "samples", "loss_mean"],
+      }
+      for stream in stream_chans:
+        columns_config[stream] = [nm[0] for j, nm in enumerate(self.cf.loss_fcts)] + stream_chans[stream] + ['std']
+      
+      columns = []
+      for top_level, sub_columns in columns_config.items():
+          columns.extend([(top_level, sub) for sub in sub_columns])
+
+      self.val_multi_cols = pd.MultiIndex.from_tuples(columns)
+      df = pd.DataFrame([], columns=self.val_multi_cols)
+      df.to_csv(self.val_file, mode='w', header=True, index=False)
+
+      self.val_step = 1
 
   #######################################
   def add_train(self, samples: int, lr: float, loss_avg: torch.Tensor,
@@ -73,18 +129,11 @@ class TrainLogger :
         stream_chans (dict): Dictionary mapping stream names to their output channels.
         perf_gpu (float, optional): GPU utilization percentage. Defaults to 0.
         perf_mem (float, optional): GPU memory utilization percentage. Defaults to 0.
-    """
-    columns_config = {
-      'global': ["step", "time", "samples", "perf_gpu", "perf_mem", "learning_rate", "loss_mean"],
-    }
-    for stream in stream_chans:
-      columns_config[stream] = [nm[0] for j, nm in enumerate( self.cf.loss_fcts)] + stream_chans[stream] + ['std']
     
-    columns = []
-    for top_level, sub_columns in columns_config.items():
-        columns.extend([(top_level, sub) for sub in sub_columns])
-
-    multi_cols = pd.MultiIndex.from_tuples(columns)
+    Raises:
+      AssertionError: If the logging files were not initialized before calling this method.
+    """
+    assert self.train_step > 0, "Logging files were not initialized. Call initialize_file before using add_train."
 
     log_vals = [self.train_step]
     log_vals += [ datetime.datetime.now() ]
@@ -103,8 +152,8 @@ class TrainLogger :
       else:
         log_vals += [ None ]
 
-    df = pd.DataFrame([log_vals], columns=multi_cols)
-    df.to_csv(self.train_file, mode='a', header=self.train_step == 1, index=False)
+    df = pd.DataFrame([log_vals], columns=self.train_multi_cols)
+    df.to_csv(self.train_file, mode='a', header=False, index=False)
 
     self.train_step += 1
 
@@ -121,19 +170,12 @@ class TrainLogger :
         stddev_avg (torch.Tensor): Array of standard deviation values per stream.
         loss_chn_avg (torch.Tensor): 3D array of channel-specific losses (loss_fns x channels x streams).
         stream_chans (dict): Dictionary mapping stream names to their output channels.
-    """
-    columns_config = {
-      'global': ["step", "time", "samples", "loss_mean"],
-    }
-    for stream in stream_chans:
-      columns_config[stream] = [nm[0] for j, nm in enumerate( self.cf.loss_fcts)] + stream_chans[stream] + ['std']
-    
-    columns = []
-    for top_level, sub_columns in columns_config.items():
-        columns.extend([(top_level, sub) for sub in sub_columns])
 
-    multi_cols = pd.MultiIndex.from_tuples(columns)
-    
+    Raises:
+      AssertionError: If the logging files were not initialized before calling this method.
+    """
+    assert self.val_step > 0, "Logging files were not initialized. Call initialize_file before using add_val."
+
     log_vals = [self.val_step]
     log_vals += [ datetime.datetime.now() ]
     log_vals += [samples]
@@ -148,8 +190,8 @@ class TrainLogger :
       else:
         log_vals += [ None ]
 
-    df = pd.DataFrame([log_vals], columns=multi_cols)
-    df.to_csv(self.val_file, mode='a', header=self.val_step == 1, index=False)
+    df = pd.DataFrame([log_vals], columns=self.val_multi_cols)
+    df.to_csv(self.val_file, mode='a', header=False, index=False)
 
     self.val_step += 1
 
