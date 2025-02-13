@@ -33,8 +33,8 @@ def evaluate( run_id, epoch, masking_mode = None, forecacast_steps = None,
     cf.masking_mode = masking_mode
 
   # Oct-Nov 2022
-  cf.start_date_val = 202210011600
-  cf.end_date_val = 202212010400
+  cf.start_date_val = 201901010000
+  cf.end_date_val = 201901300000
   # # 2022
   # cf.start_date_val = 202201010400
   # cf.end_date_val = 202301010400
@@ -47,7 +47,7 @@ def evaluate( run_id, epoch, masking_mode = None, forecacast_steps = None,
   # cf.forecast_policy = 'fixed'
 
   # cf.analysis_streams_output = ['Surface', 'Air', 'METEOSAT', 'ATMS', 'IASI', 'AMSR2']
-  cf.analysis_streams_output = ['ERA5']
+  cf.analysis_streams_output = ['FESOM']
  
   # make sure number of loaders does not exceed requested samples
   cf.loader_num_workers = min( cf.loader_num_workers, samples)
@@ -147,9 +147,9 @@ def train( run_id = None) -> None :
   cf.masking_rate_sampling = True #False
   cf.sampling_rate_target = 1.0
 
-  cf.num_epochs = 24
-  cf.samples_per_epoch = 4096
-  cf.samples_per_validation = 512
+  cf.num_epochs = 2
+  cf.samples_per_epoch = 1024
+  cf.samples_per_validation = 64
   cf.shuffle = True
 
   cf.lr_scaling_policy = 'sqrt'
@@ -202,3 +202,4 @@ def train( run_id = None) -> None :
 
 if __name__ == '__main__':
     train()
+    
