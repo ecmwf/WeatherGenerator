@@ -64,7 +64,6 @@ def evaluate() -> None :
   if args.masking_mode:
     cf.masking_mode = args.masking_mode
 
-  # Oct-Nov 2022
   start_date, end_date = pd.to_datetime(args.start_date), pd.to_datetime(args.end_date)
   logger.info(f"Evaluation period: {start_date.strftime('%Y-%m-%d %H:%M')} -- {end_date.strftime('%Y-%m-%d %H:%M')}") 
 
@@ -200,9 +199,9 @@ def train() -> None :
   cf.masking_rate_sampling = True #False
   cf.sampling_rate_target = 1.0
 
-  cf.num_epochs = 24
-  cf.samples_per_epoch = 4096
-  cf.samples_per_validation = 512
+  cf.num_epochs = 2
+  cf.samples_per_epoch = 1024
+  cf.samples_per_validation = 64
   cf.shuffle = True
 
   cf.lr_scaling_policy = 'sqrt'
