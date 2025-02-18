@@ -106,7 +106,7 @@ def train() -> None :
   """
   parser = argparse.ArgumentParser()
 
-  parser.add_argument('--run_id', type=str, required=True, help='Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.')
+  parser.add_argument('--run_id', type=str, default=None, help='Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.')
 
   args = parser.parse_args()
 
@@ -114,7 +114,9 @@ def train() -> None :
 
   # directory where input streams are specified
   # cf.streams_directory = './streams_large/'
-  cf.streams_directory = '/work/ab0995/a270225/weathergen_data/'
+  #cf.streams_directory = '/work/ab0995/a270225/weathergen_data/'
+  cf.streams_directory = '/p/home/jusers/langguth1/juwels/WeatherGenerator2/streams_mixed/'
+
 
   # embed_orientation : 'channels' or 'columns'
   # channels: embedding is per channel for a token (#tokens=num_channels)
@@ -199,9 +201,9 @@ def train() -> None :
   cf.masking_rate_sampling = True #False
   cf.sampling_rate_target = 1.0
 
-  cf.num_epochs = 2
-  cf.samples_per_epoch = 1024
-  cf.samples_per_validation = 64
+  cf.num_epochs = 128
+  cf.samples_per_epoch = 4096
+  cf.samples_per_validation = 512
   cf.shuffle = True
 
   cf.lr_scaling_policy = 'sqrt'
@@ -220,7 +222,8 @@ def train() -> None :
   cf.norm_type = 'LayerNorm'  #'LayerNorm' #'RMSNorm'
   cf.nn_module = 'te'
 
-  cf.data_path = '/work/ab0995/a270225/weathergen_data'
+  cf.data_path = '/p/scratch/hclimrep/shared/weather_generator_data'
+  #cf.data_path = '/work/ab0995/a270225/weathergen_data'
   # cf.data_path = '/lus/h2resw01/fws4/lb/project/ai-ml/observations/v1'
   # cf.data_path = '/leonardo_scratch/large/userexternal/clessig0/obs/v1'
   cf.start_date = 195001010000
@@ -228,7 +231,7 @@ def train() -> None :
   cf.start_date_val = 201101010000
   cf.end_date_val = 201901010000
   cf.len_hrs = 6
-  cf.step_hrs = 1
+  cf.step_hrs = 6
   cf.input_window_steps = 1
 
   cf.val_initial = False
