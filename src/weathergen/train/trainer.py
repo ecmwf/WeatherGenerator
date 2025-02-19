@@ -11,6 +11,7 @@ import os
 import code
 import time
 import string
+from pathlib import Path
 import random
 import functools
 
@@ -93,8 +94,12 @@ class Trainer( Trainer_Base) :
     cf = self.init_streams( cf, run_id_contd)
 
     # create output directory
-    path_run = './results/' + cf.run_id + '/'
-    path_model = './models/' + cf.run_id + '/'
+    path_out_base = Path("/p/home/jusers/langguth1/juwels/WeatherGenerator2/")
+    path_run = str(path_out_base.joinpath("results/"))
+    path_model = str(path_out_base.joinpath("models/"))
+
+    #path_run = './results/' + cf.run_id + '/'
+    #path_model = './models/' + cf.run_id + '/'
     if 0 == self.cf.rank :
       os.makedirs( path_run, exist_ok=True)
       os.makedirs( path_model, exist_ok=True)
