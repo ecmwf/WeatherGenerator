@@ -138,10 +138,6 @@ ENV/
 env.bak/
 venv.bak/
 virtual_envs/
-env_setup/
-
-# Batch scripts
-HPC_batch_scripts/
 
 # Spyder project settings
 .spyderproject
