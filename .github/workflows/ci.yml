@@ -4,11 +4,10 @@ on:
   push:
     branches: [ "main", "develop" ]
   pull_request:
-    branches: [ "main", "develop" ]
+    branches: [ "main", "develop", "feature/*" ]
     paths-ignore:
-      - "docs/**"
       - "CHANGELOG.md"
-      - "Readme.md"
+      - "README.md"
 
 jobs:
   linting:
@@ -24,11 +23,10 @@ jobs:
           # Install a specific version of uv.
           version: "0.6.2"
 
-      - name: Set up Python
-        run: uv python install
-
-      - name: Run black
-        run: uv run black --check src/wegen_utils     
+      - name: Run ruff (black)
+        # Do not attempt to install the default dependencies
+        run: uv run --no-default-groups --group lint ruff format --check -n src/wegen_utils
 
       - name: Run ruff (flake8)
-        run: uv run ruff src/wegen_utils
+        # Do not attempt to install the default dependencies
+        run: uv run --no-default-groups --group lint ruff check src/wegen_utils
