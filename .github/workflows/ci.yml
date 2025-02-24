@@ -29,4 +29,4 @@ jobs:
 
       - name: Run ruff (flake8)
         # Do not attempt to install the default dependencies, this is much faster.
-        run: uv run --no-project --with ruff ruff check src/wegen_utils
+        run: uv run --no-project --with ruff ruff check src/

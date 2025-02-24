@@ -46,8 +46,25 @@ dev = [
 # The linting configuration
 [tool.ruff]
 
-# Same as Black by default.
-line-length = 88
+# Wide rows
+line-length = 120
 
 [tool.ruff.lint]
-ignore = []
+# All disabled for the time being.
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    # "F",
+    # pyupgrade
+    # "UP",
+    # flake8-bugbear
+    # "B",
+    # flake8-simplify
+    # "SIM",
+    # isort
+    # "I",
+]
+ignore = [
+
+]
