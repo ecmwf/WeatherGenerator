@@ -9,4 +9,4 @@ _logger = logging.getLogger(__name__)
 
 def stub():
     _logger.info("This is a stub function.")
-    return None
+    return 1
