@@ -1,5 +1,14 @@
-name: Main workflow
+name: CI
 
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+    paths-ignore:
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "Readme.md"
 
 jobs:
   linting:
