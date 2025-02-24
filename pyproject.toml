@@ -41,16 +41,13 @@ build-backend = "hatchling.build"
 dev = [
   "pytest"
 ]
-# The linting dependencies
-lint = [
-  "ruff"
-]
 
+
+# The linting configuration
 [tool.ruff]
 
-# Same as Black.
+# Same as Black by default.
 line-length = 88
-indent-width = 4
 
 [tool.ruff.lint]
 ignore = []

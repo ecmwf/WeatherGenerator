@@ -24,9 +24,9 @@ jobs:
           version: "0.6.2"
 
       - name: Run ruff (black)
-        # Do not attempt to install the default dependencies
+        # Do not attempt to install the default dependencies, this is much faster.
         run: uv run --no-project --with ruff ruff format --check -n src/wegen_utils
 
       - name: Run ruff (flake8)
-        # Do not attempt to install the default dependencies
-        run: uv run --no-default-groups --group lint ruff check src/wegen_utils
+        # Do not attempt to install the default dependencies, this is much faster.
+        run: uv run --no-project --with ruff ruff check src/wegen_utils
