@@ -25,7 +25,7 @@ jobs:
 
       - name: Run ruff (black)
         # Do not attempt to install the default dependencies
-        run: uv run --no-default-groups --group lint ruff format --check -n src/wegen_utils
+        run: uv run --no-project --with ruff ruff format --check -n src/wegen_utils
 
       - name: Run ruff (flake8)
         # Do not attempt to install the default dependencies
