@@ -50,10 +50,10 @@ dev = [
 line-length = 120
 
 [tool.ruff.lint]
-# All disabled for the time being.
+# All disabled until the code is formatted.
 select = [
     # pycodestyle
-    "E",
+    # "E",
     # Pyflakes
     # "F",
     # pyupgrade
