@@ -7,10 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import code
 import torch
 
-from weathergen.model.norms import RMSNorm
+# from weathergen.model.norms import RMSNorm
 
 
 class EnsPredictionHead(torch.nn.Module):
@@ -23,7 +22,7 @@ class EnsPredictionHead(torch.nn.Module):
         super(EnsPredictionHead, self).__init__()
 
         dim_internal = dim_embed * hidden_factor
-        norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
+        # norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
         enl = ens_num_layers
 
         self.pred_heads = torch.nn.ModuleList()
@@ -32,7 +31,7 @@ class EnsPredictionHead(torch.nn.Module):
 
             # self.pred_heads[-1].append( norm( dim_embed))
             self.pred_heads[-1].append(
-                torch.nn.Linear(dim_embed, dim_out if 1 == enl else dim_internal)
+                torch.nn.Linear(dim_embed, dim_out if enl == 1 else dim_internal)
             )
 
             for i in range(ens_num_layers - 1):

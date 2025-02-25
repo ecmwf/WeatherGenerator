@@ -7,40 +7,28 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import os
-import numpy as np
 import math
-import time
-import code
 import warnings
 
-import torch
-import astropy_healpix.healpy
-
-from torch.nn.attention.flex_attention import flex_attention, create_mask, create_block_mask
 import astropy_healpix as hp
-
+import astropy_healpix.healpy
+import numpy as np
+import torch
+from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
-from weathergen.model.stream_embed_transformer import StreamEmbedTransformer
-from weathergen.model.stream_embed_linear import StreamEmbedLinear
-from weathergen.model.ens_prediction_head import EnsPredictionHead
 
 from weathergen.model.attention import (
-    MultiSelfAttentionHead,
-    MultiSelfAttentionHead_Local,
-    MultiCrossAttentionHead,
-    MultiSelfAttentionHead_Varlen,
     MultiCrossAttentionHead_Varlen,
     MultiCrossAttentionHead_Varlen_SlicedQ,
+    MultiSelfAttentionHead,
+    MultiSelfAttentionHead_Local,
+    MultiSelfAttentionHead_Varlen,
 )
+from weathergen.model.ens_prediction_head import EnsPredictionHead
 from weathergen.model.mlp import MLP
-
-from weathergen.model.utils import get_num_parameters, freeze_weights
-
-from weathergen.model.positional_encoding import positional_encoding_harmonic
-from weathergen.model.positional_encoding import positional_encoding_harmonic_idx
-from weathergen.model.positional_encoding import positional_encoding_harmonic_global
-
+from weathergen.model.stream_embed_linear import StreamEmbedLinear
+from weathergen.model.stream_embed_transformer import StreamEmbedTransformer
+from weathergen.model.utils import get_num_parameters
 from weathergen.utils.logger import logger
 
 
@@ -172,7 +160,7 @@ class Model(torch.nn.Module):
 
         # local assimilation engine
         self.ae_local_blocks = torch.nn.ModuleList()
-        for i in range(cf.ae_local_num_blocks):
+        for _ in range(cf.ae_local_num_blocks):
             self.ae_local_blocks.append(
                 MultiSelfAttentionHead_Varlen(
                     cf.ae_local_dim_embed,
@@ -529,7 +517,7 @@ class Model(torch.nn.Module):
         print("  Embedding networks:")
         [
             print("    {} : {:,}".format(si["name"], np))
-            for si, np in zip(cf.streams, num_params_embed)
+            for si, np in zip(cf.streams, num_params_embed, strict=False)
         ]
         print(f" Local assimilation engine: {num_params_ae_local:,}")
         print(f" Local-global adapter: {num_params_ae_adapater:,}")
@@ -542,7 +530,7 @@ class Model(torch.nn.Module):
             num_params_pred_adapter,
             num_params_embed_tcs,
             num_params_tte,
-            num_params_preds,
+            num_params_preds, strict=False,
         )
         [
             print("    {} : {:,} / {:,} / {:,} / {:,}".format(si["name"], np0, np1, np2, np3))
@@ -554,7 +542,7 @@ class Model(torch.nn.Module):
     def load(self, run_id, epoch=None):
         path_run = "./models/" + run_id + "/"
         fname = path_run + f"{run_id}"
-        fname += "_epoch{:05d}.chkpt".format(epoch) if epoch is not None else "_latest.chkpt"
+        fname += f"_epoch{epoch:05d}.chkpt" if epoch is not None else "_latest.chkpt"
 
         params = torch.load(fname, map_location=torch.device("cpu"), weights_only=True)
         params_renamed = {}
@@ -646,7 +634,7 @@ class Model(torch.nn.Module):
         source_centroids,
         source_idxs_embed,
     ):
-        cat = torch.cat
+        # cat = torch.cat
 
         offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
         tokens_all = torch.empty(
@@ -654,7 +642,7 @@ class Model(torch.nn.Module):
         )
 
         for ib, sb in enumerate(source_tokens_cells):
-            for itype, (s, embed) in enumerate(zip(sb, self.embeds)):
+            for itype, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
                 if s.shape[0] > 0:
                     idxs = source_idxs_embed[0][ib][itype]
                     idxs_pe = source_idxs_embed[1][ib][itype]
@@ -700,7 +688,7 @@ class Model(torch.nn.Module):
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_all = []
         zero_pad = torch.zeros(1, device="cuda", dtype=torch.int32)
-        for i in range(((cell_lens.shape[0]) // clen)):
+        for i in range((cell_lens.shape[0]) // clen):
             # make sure we properly catch all elements in last chunk
             i_end = (i + 1) * clen if i < (cell_lens.shape[0] // clen) - 1 else cell_lens.shape[0]
             l0, l1 = (
@@ -760,7 +748,7 @@ class Model(torch.nn.Module):
 
     #########################################
     def predict(self, model_params, fstep, tokens, tcs, target_coords_lens, target_coords_idxs):
-        fp32, i32 = torch.float32, torch.int32
+        # fp32, i32 = torch.float32, torch.int32
         batch_size = self.cf.batch_size if self.training else self.cf.batch_size_validation
 
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
@@ -769,7 +757,7 @@ class Model(torch.nn.Module):
 
         # pair with tokens from assimilation engine to obtain target tokens
         preds_tokens = []
-        for ii, (tte, tte_kv) in enumerate(zip(self.target_token_engines, self.pred_adapter_kv)):
+        for ii, (tte, tte_kv) in enumerate(zip(self.target_token_engines, self.pred_adapter_kv, strict=False)):
             si = self.cf.streams[ii]
             tro_type = si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
             tc_embed = self.embed_target_coords[ii]

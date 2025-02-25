@@ -7,10 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import code
 import argparse
-import dictdiffer
 
+import dictdiffer
 from obslearn.utils.config import Config
 
 if __name__ == "__main__":

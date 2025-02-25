@@ -7,11 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import code
 import datetime
 
 import numpy as np
-
 from anemoi.datasets import open_dataset
 
 

@@ -7,17 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import numpy as np
+import argparse
 import code
-
+import glob
 import os
 import subprocess
-import glob
-import argparse
-
-import pandas as pd
 
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 
 from weathergen.utils.config import Config
 from weathergen.utils.train_logger import TrainLogger
@@ -43,19 +41,19 @@ def get_stream_names(run_id):
 def plot_lr(runs_ids, runs_data, runs_active, x_axis="samples"):
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
-    fig = plt.figure(figsize=(10, 7), dpi=300)
+    _fig = plt.figure(figsize=(10, 7), dpi=300)
 
     # train
     idx = 0
     linestyle = "-"
 
     legend_str = []
-    for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data)):
+    for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
         if run_data[idx][1].shape[0] == 0:
             continue
 
         x_idx = [i for i, c in enumerate(run_data[idx][0]) if x_axis in c][0]
-        data_idxs = [i for i, c in enumerate(run_data[idx][0]) if "lr" == c][0]
+        data_idxs = [i for i, c in enumerate(run_data[idx][0]) if c == "lr"][0]
 
         plt.plot(
             run_data[idx][1][:, x_idx],
@@ -78,7 +76,7 @@ def plot_lr(runs_ids, runs_data, runs_active, x_axis="samples"):
     plt.xlabel(x_axis)
     plt.tight_layout()
     rstr = "".join([f"{r}_" for r in runs_ids])
-    plt.savefig("./plots/{}lr.png".format(rstr))
+    plt.savefig(f"./plots/{rstr}lr.png")
     plt.close()
 
 
@@ -86,7 +84,7 @@ def plot_lr(runs_ids, runs_data, runs_active, x_axis="samples"):
 def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
-    fig = plt.figure(figsize=(10, 7), dpi=300)
+    _fig = plt.figure(figsize=(10, 7), dpi=300)
 
     linestyles = ["-", "--", ".-"]
 
@@ -94,7 +92,7 @@ def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
     idx = 2
 
     legend_str = []
-    for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data)):
+    for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
         if run_data[idx][1].shape[0] == 0:
             continue
 
@@ -129,7 +127,7 @@ def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
     plt.xlabel(x_axis)
     plt.tight_layout()
     rstr = "".join([f"{r}_" for r in runs_ids])
-    plt.savefig("./plots/{}utilization.png".format(rstr))
+    plt.savefig(f"./plots/{rstr}utilization.png")
     plt.close()
 
 
@@ -156,7 +154,7 @@ def plot_loss_per_stream(
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "m", "y"]
 
     for stream_name in stream_names:
-        fig = plt.figure(figsize=(10, 7), dpi=300)
+        _fig = plt.figure(figsize=(10, 7), dpi=300)
 
         legend_strs = []
         min_val = np.finfo(np.float32).max
@@ -171,7 +169,7 @@ def plot_loss_per_stream(
                 if "train" in modes and "val" in modes:
                     alpha = 0.35 if "train" in mode else alpha
 
-                for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data)):
+                for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
                     x_idx = [i for i, c in enumerate(run_data[idx][0]) if x_axis in c][0]
                     data_idxs = [i for i, c in enumerate(run_data[idx][0]) if err in c]
 
@@ -258,7 +256,7 @@ def plot_loss_per_run(
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
 
-    fig = plt.figure(figsize=(10, 7), dpi=300)
+    _fig = plt.figure(figsize=(10, 7), dpi=300)
 
     legend_strs = []
     for mode in modes:
@@ -326,7 +324,7 @@ if __name__ == "__main__":
         "g0c86abp": [34298989, "ERA5 test"],
     }
 
-    runs_data = [TrainLogger.read(run_id) for run_id in runs_ids.keys()]
+    runs_data = [TrainLogger.read(run_id) for run_id in runs_ids]
 
     # extract times and convert back to datetime objects, store absolute time ta and relative one tr
     runs_times = []
@@ -373,7 +371,7 @@ if __name__ == "__main__":
                 if runs_data[j][i][1].shape[0] <= gauss_filter.shape[0]:
                     continue
                 for i_ch in range(runs_data[j][i][1].shape[-1]):
-                    if not ("mse" in runs_data[j][i][0][i_ch]):
+                    if "mse" not in runs_data[j][i][0][i_ch]:
                         continue
                     res = np.convolve(runs_data[j][i][1][:, i_ch], gauss_filter, "same")
                     code.interact(local=locals())
@@ -414,7 +412,7 @@ if __name__ == "__main__":
     )
 
     # plot all cols for all run_ids
-    for run_id, run_data in zip(runs_ids, runs_data):
+    for run_id, run_data in zip(runs_ids, runs_data, strict=False):
         plot_loss_per_run(
             ["train", "val"], run_id, runs_ids[run_id], run_data, get_stream_names(run_id)
         )

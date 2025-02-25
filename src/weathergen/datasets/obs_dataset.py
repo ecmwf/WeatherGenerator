@@ -7,11 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import code
 import datetime
 
 import numpy as np
 import zarr
-import code
 
 
 class ObsDataset:
@@ -37,12 +37,14 @@ class ObsDataset:
 
         # self.selected_colnames = self.colnames
         # self.selected_cols_idx = np.arange(len(self.colnames))
+        idx = 0
         for i, col in enumerate(reversed(self.colnames)):
+            idx = i
             # if col[:9] == 'obsvalue_' :
             if not (col[:4] == "sin_" or col[:4] == "cos_"):
                 break
-        self.selected_colnames = self.colnames[: len(self.colnames) - i]
-        self.selected_cols_idx = np.arange(len(self.colnames))[: len(self.colnames) - i]
+        self.selected_colnames = self.colnames[: len(self.colnames) - idx]
+        self.selected_cols_idx = np.arange(len(self.colnames))[: len(self.colnames) - idx]
 
         # Create index for samples
         self._setup_sample_index(start, end, self.len_hrs, self.step_hrs)
@@ -190,7 +192,7 @@ class ObsDataset:
 
 ####################################################################################################
 if __name__ == "__main__":
-    zarrpath = config.zarrpath
+    # zarrpath = config.zarrpath
     zarrpath = "/lus/h2resw01/fws4/lb/project/ai-ml/observations/zarr/v0.2"
 
     # # polar orbiting satellites

@@ -7,14 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import time
-import sys
 import pdb
+import sys
+import time
 import traceback
 
-from weathergen.utils.config import Config
 from weathergen.train.trainer import Trainer
-from weathergen.train.utils import get_run_id
+from weathergen.utils.config import Config
 
 
 ####################################################################################################

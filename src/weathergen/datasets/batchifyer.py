@@ -7,29 +7,20 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import torch
-import numpy as np
-import code
 import warnings
-import time
-
-import astropy_healpix as hp
-from astropy_healpix.healpy import ang2pix, pix2ang
-
 from functools import partial
 
+import astropy_healpix as hp
+import numpy as np
+import torch
+from astropy_healpix.healpy import ang2pix
+
 from weathergen.datasets.utils import (
-    vecs_to_rots,
-    s2tor3,
-    r3tos2,
-    locs_to_cell_coords,
-    coords_to_hpyidxs,
-    healpix_verts,
-    get_target_coords_local,
-    get_target_coords_local_fast,
     get_target_coords_local_ffast,
     healpix_verts_rots,
     locs_to_cell_coords_ctrs,
+    r3tos2,
+    s2tor3,
 )
 
 
@@ -64,7 +55,6 @@ def tokenize_window_space(
     )
     hpy_idxs_ord_split = np.split(hpy_idxs_ord, splits + 1)
 
-    lens = []
     for i, c in enumerate(cells_idxs):
         thetas_sorted = torch.argsort(thetas[hpy_idxs_ord_split[i]], stable=True)
         posr3_cell = posr3[hpy_idxs_ord_split[i]][thetas_sorted]
@@ -110,7 +100,7 @@ def tokenize_window_spacetime(
     mr,
 ):
     t_unique = np.unique(times)
-    for i, t in enumerate(t_unique):
+    for _, t in enumerate(t_unique):
         mask = t == times
         tokens_cells = tokenize_window_space(
             source[mask],

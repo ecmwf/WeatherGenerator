@@ -7,19 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import torch
-import time
-import code
 from functools import partial
 
-import numpy as np
+import torch
+from flash_attn import flash_attn_func, flash_attn_varlen_func
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
-from flash_attn import flash_attn_varlen_func, flash_attn_func
-
-from weathergen.model.norms import RMSNorm
-from weathergen.model.norms import AdaLayerNorm
-
-from torch.nn.attention.flex_attention import flex_attention, create_mask, create_block_mask
+from weathergen.model.norms import AdaLayerNorm, RMSNorm
 
 
 ####################################################################################################
@@ -44,7 +38,7 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
         self.with_flash = with_flash
         self.softcap = softcap
 
-        assert 0 == dim_embed % num_heads
+        assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
 
         if norm_type == "LayerNorm":
@@ -119,7 +113,7 @@ class MultiSelfAttentionHead_Varlen_Flex(torch.nn.Module):
         self.with_flash = with_flash
         self.softcap = softcap
 
-        assert 0 == dim_embed % num_heads
+        assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
 
         if norm_type == "LayerNorm":
@@ -190,7 +184,7 @@ class MultiSelfAttentionHead_Local(torch.nn.Module):
         self.with_flash = with_flash
         self.softcap = softcap
 
-        assert 0 == dim_embed % num_heads
+        assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
 
         if norm_type == "LayerNorm":
@@ -427,7 +421,7 @@ class MultiCrossAttentionHead_Varlen_SlicedQ(torch.nn.Module):
         s = [x_q.shape[0], self.num_heads, self.dim_head_proj]
         qs = [
             self.lnorm_q(head_proj(x_q_i).reshape(s)).to(torch.float16)
-            for head_proj, x_q_i in zip(self.proj_heads_q, x_q.transpose(1, 0))
+            for head_proj, x_q_i in zip(self.proj_heads_q, x_q.transpose(1, 0), strict=False)
         ]
         s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
         ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(torch.float16)
@@ -436,7 +430,7 @@ class MultiCrossAttentionHead_Varlen_SlicedQ(torch.nn.Module):
         cum_x_q_lens = torch.cumsum(x_q_lens, 0, dtype=torch.int32)
         cum_x_kv_lens = torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
         outs = []
-        for i, qs_i in enumerate(qs):
+        for _i, qs_i in enumerate(qs):
             outs += [
                 flash_attn_varlen_func(
                     qs_i,
@@ -479,7 +473,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.with_flash = with_flash
         self.dropout_rate = dropout_rate
 
-        assert 0 == dim_embed % num_heads
+        assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
 
         if norm_type == "LayerNorm":
@@ -563,7 +557,7 @@ class MultiCrossAttentionHead(torch.nn.Module):
         else:
             norm = RMSNorm
 
-        assert 0 == dim_embed_q % num_heads
+        assert dim_embed_q % num_heads == 0
         self.dim_head_proj = dim_embed_q // num_heads if dim_head_proj is None else dim_head_proj
 
         self.lnorm_in_q = norm(dim_embed_q)

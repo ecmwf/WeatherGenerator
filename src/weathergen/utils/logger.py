@@ -8,8 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-import pathlib
 import os
+import pathlib
 
 
 class RelPathFormatter(logging.Formatter):
