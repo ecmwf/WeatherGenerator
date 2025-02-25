@@ -530,7 +530,8 @@ class Model(torch.nn.Module):
             num_params_pred_adapter,
             num_params_embed_tcs,
             num_params_tte,
-            num_params_preds, strict=False,
+            num_params_preds,
+            strict=False,
         )
         [
             print("    {} : {:,} / {:,} / {:,} / {:,}".format(si["name"], np0, np1, np2, np3))
@@ -757,7 +758,9 @@ class Model(torch.nn.Module):
 
         # pair with tokens from assimilation engine to obtain target tokens
         preds_tokens = []
-        for ii, (tte, tte_kv) in enumerate(zip(self.target_token_engines, self.pred_adapter_kv, strict=False)):
+        for ii, (tte, tte_kv) in enumerate(
+            zip(self.target_token_engines, self.pred_adapter_kv, strict=False)
+        ):
             si = self.cf.streams[ii]
             tro_type = si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
             tc_embed = self.embed_target_coords[ii]

@@ -266,7 +266,7 @@ class Trainer(Trainer_Base):
                 targets_idxs_all[i_obs] += [target_idxs_obs]
 
         # cols = [ds[0][0].colnames for ds in dataset_val.obs_datasets_norm]
-        cols = [] # TODO
+        cols = []  # TODO
         write_validation(
             self.cf,
             self.path_run,

@@ -535,7 +535,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         torch.cat(
                             [
                                 torch.arange(o, o + l, dtype=torch.int32)
-                                for o, l in zip(offsets_pe, source_tokens_lens[ib][itype], strict=False)
+                                for o, l in zip(
+                                    offsets_pe, source_tokens_lens[ib][itype], strict=False
+                                )
                             ]
                         )
                     ]

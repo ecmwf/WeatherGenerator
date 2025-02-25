@@ -495,7 +495,11 @@ def get_target_coords_local_ffast(hlc, target_coords, geoinfo_offset, verts_Rs, 
     tcs_lens = tcs_lens[tcs_lens_mask]
 
     vls = torch.cat(
-        [vl.repeat([tt, 1, 1]) for tt, vl in zip(tcs_lens, verts_local[tcs_lens_mask], strict=False)], 0
+        [
+            vl.repeat([tt, 1, 1])
+            for tt, vl in zip(tcs_lens, verts_local[tcs_lens_mask], strict=False)
+        ],
+        0,
     )
     vls = vls.transpose(0, 1)
 
