@@ -26,7 +26,7 @@ jobs:
       - name: Run ruff (black)
         # Do not attempt to install the default dependencies, this is much faster.
         # Run temporarily on a sub directory before the main restyling.
-        run: uv run --no-project --with "ruff==0.9.7" ruff format --check -n src/wegen_utils
+        run: uv run --no-project --with "ruff==0.9.7" ruff format --check -n src/weathergenerator_utils
 
       - name: Run ruff (flake8)
         # Do not attempt to install the default dependencies, this is much faster.
