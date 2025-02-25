@@ -7,10 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import math
-import code
 
-import numpy as np
 import torch
 from torch.utils.checkpoint import checkpoint
 
@@ -18,9 +15,6 @@ from weathergen.model.attention import MultiSelfAttentionHead
 from weathergen.model.mlp import MLP
 from weathergen.model.norms import RMSNorm
 from weathergen.model.positional_encoding import positional_encoding_harmonic
-from weathergen.model.positional_encoding import positional_encoding_harmonic_coord
-
-from weathergen.model.utils import get_num_parameters
 
 
 class StreamEmbedTransformer(torch.nn.Module):
@@ -140,7 +134,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         elif self.unembed_mode == "block":
             out = [
                 checkpoint(ue, ln(x[:, i]), use_reentrant=False)
-                for i, (ue, ln) in enumerate(zip(self.unembed, self.ln_final))
+                for i, (ue, ln) in enumerate(zip(self.unembed, self.ln_final, strict=False))
             ]
             out = torch.stack(out, dim=1).flatten(-2, -1)
         else:

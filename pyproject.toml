@@ -54,18 +54,35 @@ line-length = 100
 # All disabled until the code is formatted.
 select = [
     # pycodestyle
-    # "E",
+    "E",
     # Pyflakes
-    # "F",
+    "F",
     # pyupgrade
-    # "UP",
+    "UP",
     # flake8-bugbear
-    # "B",
+    "B",
     # flake8-simplify
-    # "SIM",
+    "SIM",
     # isort
-    # "I",
+    "I",
 ]
-ignore = [
 
+# These rules are sensible and should be enabled at a later stage.
+ignore = [
+  "E501",
+  "E721",
+  "E722",
+  "B006",
+  "B011",
+  "UP008",
+  "SIM115",
+  "SIM117",
+  "SIM118",
+  "SIM102",
+  "SIM210",
+  "SIM212",
+  "SIM401",
+  "F811",
+  # To ignore, not relevant for us
+  "E741",
 ]

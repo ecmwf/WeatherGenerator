@@ -7,13 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import time
 import warnings
 
+import astropy_healpix as hp
 import numpy as np
 import torch
-import astropy_healpix as hp
-from astropy_healpix.healpy import ang2pix, pix2ang
+from astropy_healpix.healpy import ang2pix
 
 
 ####################################################################################################
@@ -89,7 +88,7 @@ def r3tos2(pos):
           (which is not problematic for lons but for lats care is required)
     """
     norm2 = torch.square(pos[..., 0]) + torch.square(pos[..., 1])
-    r = torch.sqrt(norm2 + torch.square(pos[..., 2]))
+    # r = torch.sqrt(norm2 + torch.square(pos[..., 2]))
     lats = torch.atan2(pos[..., 2], torch.sqrt(norm2))
     lons = torch.atan2(pos[..., 1], pos[..., 0])
     out = torch.stack([lats, lons])
@@ -120,7 +119,7 @@ def locs_to_cell_coords(hl: int, locs: list, dx=0.5, dy=0.5) -> list:
     # express each centroid in local coordinates w.r.t to healpix center by rotating center to origin
     local_locs = [
         torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1) if len(s) > 0 else torch.tensor([])
-        for i, (R, s) in enumerate(zip(healpix_centers_Rs, locs))
+        for i, (R, s) in enumerate(zip(healpix_centers_Rs, locs, strict=False))
     ]
 
     return local_locs
@@ -140,7 +139,7 @@ def locs_to_ctr_coords(ctrs_r3, locs: list) -> list:
         torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1)
         if len(s) > 0
         else torch.zeros([0, 3])
-        for i, (R, s) in enumerate(zip(ctrs_Rs, locs))
+        for i, (R, s) in enumerate(zip(ctrs_Rs, locs, strict=False))
     ]
 
     return local_locs
@@ -189,7 +188,7 @@ def locs_to_cell_coords_ctrs(healpix_centers_Rs, locs: list) -> list:
     # express each centroid in local coordinates w.r.t to healpix center by rotating center to origin
     local_locs = [
         torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1) if len(s) > 0 else torch.tensor([])
-        for i, (R, s) in enumerate(zip(healpix_centers_Rs, locs))
+        for i, (R, s) in enumerate(zip(healpix_centers_Rs, locs, strict=False))
     ]
 
     return local_locs
@@ -211,7 +210,7 @@ def add_local_vert_coords(hl, a, verts, tcs, zi, dx, dy, geoinfo_offset):
     aa = ref - torch.cat(
         [
             aaa.repeat([*tt.shape[:-1], 1]) if len(tt) > 0 else torch.tensor([])
-            for tt, aaa in zip(tcs, aa)
+            for tt, aaa in zip(tcs, aa, strict=False)
         ]
     )
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = aa
@@ -225,7 +224,7 @@ def add_local_vert_coords_ctrs2(ctrs, verts, tcs, a, zi, geoinfo_offset):
     aa = ref - torch.cat(
         [
             aaa.unsqueeze(0).repeat([*tt.shape[:-1], 1, 1]) if len(tt) > 0 else torch.tensor([])
-            for tt, aaa in zip(tcs, aa)
+            for tt, aaa in zip(tcs, aa, strict=False)
         ],
         0,
     )
@@ -237,11 +236,11 @@ def add_local_vert_coords_ctrs2(ctrs, verts, tcs, a, zi, geoinfo_offset):
 ####################################################################################################
 def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
     ref = torch.tensor([1.0, 0.0, 0.0])
-    aa = locs_to_cell_coords_ctrs(ctrs, verts.transpose(0, 1))
+    # aa = locs_to_cell_coords_ctrs(ctrs, verts.transpose(0, 1))
     aa = ref - torch.cat(
         [
             aaa.unsqueeze(0).repeat([*tcs_lens, 1, 1]) if len(tt) > 0 else torch.tensor([])
-            for tt, aaa in zip(tcs_lens, verts_local)
+            for tt, aaa in zip(tcs_lens, verts_local, strict=False)
         ],
         0,
     )
@@ -272,7 +271,7 @@ def get_target_coords_local(hlc, target_coords, geoinfo_offset):
     and for healpix cell vertices themselves
     """
 
-    target_coords_lens = [len(t) for t in target_coords]
+    # target_coords_lens = [len(t) for t in target_coords]
     tcs = [
         s2tor3(
             torch.deg2rad(90.0 - t[..., geoinfo_offset].to(torch.float64)),
@@ -496,7 +495,11 @@ def get_target_coords_local_ffast(hlc, target_coords, geoinfo_offset, verts_Rs, 
     tcs_lens = tcs_lens[tcs_lens_mask]
 
     vls = torch.cat(
-        [vl.repeat([tt, 1, 1]) for tt, vl in zip(tcs_lens, verts_local[tcs_lens_mask])], 0
+        [
+            vl.repeat([tt, 1, 1])
+            for tt, vl in zip(tcs_lens, verts_local[tcs_lens_mask], strict=False)
+        ],
+        0,
     )
     vls = vls.transpose(0, 1)
 
@@ -552,7 +555,7 @@ def get_target_coords_local_ffast(hlc, target_coords, geoinfo_offset, verts_Rs, 
 if __name__ == "__main__":
     vecs = torch.nn.functional.normalize(torch.rand((10, 3), dtype=torch.float64))
     Rs = vecs_to_rots(vecs)
-    res = torch.stack([torch.matmul(R, vec) for R, vec in zip(Rs, vecs)])
+    res = torch.stack([torch.matmul(R, vec) for R, vec in zip(Rs, vecs, strict=False)])
     ref = torch.tensor([1.0, 0.0, 0.0], dtype=torch.float64)
     passed = torch.allclose(res, ref)
     print(f"passed = {passed}")

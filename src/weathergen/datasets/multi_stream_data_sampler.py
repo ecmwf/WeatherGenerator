@@ -7,25 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import numpy as np
-import torch
-import math
 import datetime
-from copy import deepcopy
 import logging
-import time
-import code
-import os
-import yaml
 
+import numpy as np
 import pandas as pd
+import torch
 
-from weathergen.datasets.obs_dataset import ObsDataset
 from weathergen.datasets.anemoi_dataset import AnemoiDataset
-from weathergen.datasets.normalizer import DataNormalizer
 from weathergen.datasets.batchifyer import Batchifyer
+from weathergen.datasets.normalizer import DataNormalizer
+from weathergen.datasets.obs_dataset import ObsDataset
 from weathergen.datasets.utils import merge_cells
-
 from weathergen.utils.logger import logger
 
 
@@ -69,7 +62,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.len_hrs = len_hrs
         self.step_hrs = step_hrs
 
-        fc_policy_seq = "sequential" == forecast_policy or "sequential_random" == forecast_policy
+        fc_policy_seq = forecast_policy == "sequential" or forecast_policy == "sequential_random"
         assert forecast_steps >= 0 if not fc_policy_seq else True
         self.forecast_delta_hrs = forecast_delta_hrs if forecast_delta_hrs > 0 else self.len_hrs
         self.forecast_steps = np.array(
@@ -111,7 +104,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # the processing here is not natural but a workaround to various inconsistencies in the
                     # current datasets
                     data_idxs = [
-                        i for i, cn in enumerate(ds.selected_colnames[do:]) if "obsvalue_" == cn[:9]
+                        i for i, cn in enumerate(ds.selected_colnames[do:]) if cn[:9] == "obsvalue_"
                     ]
                     mask = np.ones(len(ds.selected_colnames[do:]), dtype=np.int32).astype(bool)
                     mask[data_idxs] = False
@@ -272,7 +265,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # idx_raw is used to index into the dataset; the decoupling is needed
         # since there are empty batches
         idx_raw = iter_start
-        for i, bidx in enumerate(range(iter_start, iter_end, self.batch_size)):
+        for i, _bidx in enumerate(range(iter_start, iter_end, self.batch_size)):
             # targets, targets_coords, targets_idxs = [], [], [],
             tcs, tcs_lens, target_tokens, source_tokens_cells, source_tokens_lens = (
                 [],
@@ -314,7 +307,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 c_source_raw = []
 
                 for obs_id, (stream_info, stream_dsn, stream_idxs) in enumerate(
-                    zip(self.streams, self.obs_datasets_norm, self.obs_datasets_idxs)
+                    zip(self.streams, self.obs_datasets_norm, self.obs_datasets_idxs, strict=False)
                 ):
                     s_tcs = []
                     s_tcs_lens = []
@@ -326,17 +319,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     s_source_raw = []
 
                     token_size = stream_info["token_size"]
-                    grid = (
-                        stream_info["gridded_output"] if "gridded_output" in stream_info else None
-                    )
-                    grid_info = (
-                        stream_info["gridded_output_info"]
-                        if "gridded_output_info" in stream_info
-                        else None
-                    )
+                    # grid = (
+                    #     stream_info["gridded_output"] if "gridded_output" in stream_info else None
+                    # )
+                    # grid_info = (
+                    #     stream_info["gridded_output_info"]
+                    #     if "gridded_output_info" in stream_info
+                    #     else None
+                    # )
 
                     for i_source, ((ds, normalizer, do), s_idxs) in enumerate(
-                        zip(stream_dsn, stream_idxs)
+                        zip(stream_dsn, stream_idxs, strict=False)
                     ):
                         # source window (of potentially multi-step length)
                         (source1, times1) = ds[idx]
@@ -417,7 +410,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     for fstep in range(forecast_dt + 1):
                         # collect all streams
                         for i_source, ((ds, normalizer, do), s_idxs) in enumerate(
-                            zip(stream_dsn, stream_idxs)
+                            zip(stream_dsn, stream_idxs, strict=False)
                         ):
                             (source2, times2) = ds[idx + step_forecast_dt]
 
@@ -534,7 +527,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     idxs = torch.cat(
                         [
                             torch.arange(o, o + l, dtype=torch.int64)
-                            for o, l in zip(offsets, source_tokens_lens[ib, itype])
+                            for o, l in zip(offsets, source_tokens_lens[ib, itype], strict=False)
                         ]
                     )
                     idxs_embed[-1] += [idxs.unsqueeze(1)]
@@ -542,7 +535,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         torch.cat(
                             [
                                 torch.arange(o, o + l, dtype=torch.int32)
-                                for o, l in zip(offsets_pe, source_tokens_lens[ib][itype])
+                                for o, l in zip(
+                                    offsets_pe, source_tokens_lens[ib][itype], strict=False
+                                )
                             ]
                         )
                     ]

@@ -7,17 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import numpy as np
-import torch
 import logging
 
-# import matplotlib.pyplot as plt
-import warnings
-import code
-
-from torch.optim.lr_scheduler import LinearLR
-from torch.optim.lr_scheduler import OneCycleLR
-from torch.optim.lr_scheduler import ExponentialLR
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from torch.optim.lr_scheduler import ExponentialLR, LinearLR, OneCycleLR
 
 
 class LearningRateScheduler:
@@ -256,7 +251,7 @@ class LearningRateScheduler:
         )
         lrs = []
 
-        for i in range(
+        for _ in range(
             num_epochs * num_samples_per_epoch + lr_steps_warmup + lr_steps_cooldown + 1023
         ):
             optimizer.step()
@@ -290,7 +285,7 @@ class LearningRateScheduler:
         )
         lrs = []
 
-        for i in range(
+        for _ in range(
             num_epochs * num_samples_per_epoch + lr_steps_warmup + lr_steps_cooldown + 1023
         ):
             optimizer.step()

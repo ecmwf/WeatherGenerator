@@ -7,11 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import time
 
 import numpy as np
 import torch
-
 import zarr
 
 
@@ -23,11 +21,11 @@ def sanitize_stream_str(istr):
 def read_validation(cf, epoch, base_path, instruments, forecast_steps, rank=0):
     streams, columns, data = [], [], []
 
-    fname = base_path + "validation_epoch{:05d}_rank{:04d}.zarr".format(epoch, rank)
+    fname = base_path + f"validation_epoch{epoch:05d}_rank{rank:04d}.zarr"
     store = zarr.DirectoryStore(fname)
     ds = zarr.group(store=store)
 
-    for ii, stream_info in enumerate(cf.streams):
+    for _ii, stream_info in enumerate(cf.streams):
         n = stream_info["name"]
         if len(instruments):
             if not np.array([r in n for r in instruments]).any():
@@ -70,10 +68,10 @@ def write_validation(
     targets_lens,
     jac=None,
 ):
-    if 0 == len(cf.analysis_streams_output):
+    if len(cf.analysis_streams_output) == 0:
         return
 
-    fname = base_path + "validation_epoch{:05d}_rank{:04d}".format(epoch, rank)
+    fname = base_path + f"validation_epoch{epoch:05d}_rank{rank:04d}"
     fname += "" if jac is None else "_jac"
     fname += ".zarr"
 
@@ -86,7 +84,7 @@ def write_validation(
             continue
 
         # skip empty entries (e.g. no channels from the sources are used as targets)
-        if 0 == len(targets_all[k]) or 0 == len(targets_all[k][0]):
+        if len(targets_all[k]) == 0 or len(targets_all[k][0]) == 0:
             continue
 
         # TODO: this only saves the first batch
@@ -112,9 +110,9 @@ def write_validation(
         if write_first:
             ds_source = ds.require_group(f"{rn}/{fs}")
             # column names
-            if "anemoi" == si["type"]:
+            if si["type"] == "anemoi":
                 cols_values = np.arange(2, len(cols[k]))
-            elif "obs" == si["type"]:
+            elif si["type"] == "obs":
                 cols_values = [col[:9] == "obsvalue_" for col in cols[k]]
             else:
                 assert False, "Unsuppported stream type"

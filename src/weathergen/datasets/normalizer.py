@@ -69,11 +69,11 @@ class DataNormalizer:
 
         go = self.geoinfo_offset
         for i, ch in enumerate(self.geoinfo_idx):
-            if 0 == i:  # lats
+            if i == 0:  # lats
                 if normalize_latlon:
                     data[..., go + i] = np.sin(np.deg2rad(data[..., go + i]))
                 pass
-            elif 1 == i:  # lons
+            elif i == 1:  # lons
                 if normalize_latlon:
                     data[..., go + i] = np.sin(0.5 * np.deg2rad(data[..., go + i]))
             else:

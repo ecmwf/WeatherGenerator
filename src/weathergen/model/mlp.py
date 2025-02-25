@@ -8,8 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import torch
-from weathergen.model.norms import RMSNorm
-from weathergen.model.norms import AdaLayerNorm
+
+from weathergen.model.norms import AdaLayerNorm, RMSNorm
 
 
 class MLP(torch.nn.Module):
@@ -47,7 +47,7 @@ class MLP(torch.nn.Module):
         self.layers.append(nonlin())
         self.layers.append(torch.nn.Dropout(p=dropout_rate))
 
-        for il in range(num_layers - 2):
+        for _ in range(num_layers - 2):
             self.layers.append(torch.nn.Linear(dim_hidden, dim_hidden))
             self.layers.append(nonlin())
             self.layers.append(torch.nn.Dropout(p=dropout_rate))

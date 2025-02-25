@@ -7,10 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import code
-import torch
-import numpy as np
 import datetime
+
+import numpy as np
 
 from weathergen.utils.config import Config
 
@@ -34,11 +33,11 @@ class TrainLogger:
         log_vals += [loss_avg[0].mean()]
         log_vals += [lr]
 
-        for i_obs, rt in enumerate(self.cf.streams):
+        for i_obs, _rt in enumerate(self.cf.streams):
             for j, _ in enumerate(self.cf.loss_fcts):
                 log_vals += [loss_avg[j, i_obs]]
         if len(stddev_avg) > 0:
-            for i_obs, rt in enumerate(self.cf.streams):
+            for i_obs, _rt in enumerate(self.cf.streams):
                 log_vals += [stddev_avg[i_obs]]
 
         with open(self.path_run + self.cf.run_id + "_train_log.txt", "ab") as f:
@@ -59,11 +58,11 @@ class TrainLogger:
         log_vals = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
         log_vals += [samples]
 
-        for i_obs, rt in enumerate(self.cf.streams):
+        for i_obs, _rt in enumerate(self.cf.streams):
             for j, _ in enumerate(self.cf.loss_fcts):
                 log_vals += [loss_avg[j, i_obs]]
         if len(stddev_avg) > 0:
-            for i_obs, rt in enumerate(self.cf.streams):
+            for i_obs, _rt in enumerate(self.cf.streams):
                 log_vals += [stddev_avg[i_obs]]
 
         with open(self.path_run + self.cf.run_id + "_val_log.txt", "ab") as f:
@@ -82,14 +81,14 @@ class TrainLogger:
         fname_log_train = f"./results/{run_id}/{run_id}_train_log.txt"
         fname_log_val = f"./results/{run_id}/{run_id}_val_log.txt"
         fname_perf_val = f"./results/{run_id}/{run_id}_perf_log.txt"
-        fname_config = f"./models/model_{run_id}.json"
+        # fname_config = f"./models/model_{run_id}.json"
 
         # training
 
         # define cols for training
         cols_train = ["dtime", "samples", "mse", "lr"]
         for si in cf.streams:
-            for j, lf in enumerate(cf.loss_fcts):
+            for _j, lf in enumerate(cf.loss_fcts):
                 cols_train += [
                     si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
                 ]
@@ -115,7 +114,7 @@ class TrainLogger:
         # define cols for validation
         cols_val = ["dtime", "samples"]
         for si in cf.streams:
-            for j, lf in enumerate(cf.loss_fcts_val):
+            for _j, lf in enumerate(cf.loss_fcts_val):
                 cols_val += [
                     si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
                 ]

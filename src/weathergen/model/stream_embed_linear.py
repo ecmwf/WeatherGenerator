@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import torch
-from torch.utils.checkpoint import checkpoint
 
 
 class StreamEmbedLinear(torch.nn.Module):
