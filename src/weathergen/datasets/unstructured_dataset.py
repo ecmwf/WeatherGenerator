@@ -75,7 +75,8 @@ class UnstructuredDataset():
     def __getitem__( self, idx: int) -> tuple :
         start_row = self.start_idx + idx * self.mesh_size
         end_row = start_row + self.len_hrs * self.mesh_size
-        data = self.data.oindex[start_row:end_row, self.selected_cols_idx]
+        data = self.data.oindex[start_row:end_row, :]
+        data[:, [0,1]] = data[:, [1,0]]
         datetimes = np.squeeze(self.time[start_row:end_row])
         
         return (data, datetimes)

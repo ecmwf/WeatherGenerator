@@ -77,7 +77,7 @@ class RegularDataset():
         start_row = self.start_idx + idx
         end_row = start_row + self.len_hrs
 
-        data = self.data.oindex[start_row:end_row, self.selected_cols_idx, 0, :, :]
+        data = self.data.oindex[start_row:end_row, :, 0, :, :]
         datetimes = np.tile(self.time[start_row:end_row], data.shape[-1] * data.shape[-2])
 
         data = np.reshape(data, (data.shape[1], data.shape[0], -1))

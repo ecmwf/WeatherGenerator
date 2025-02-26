@@ -56,7 +56,10 @@ class AnemoiDataset():
     # TODO: use complement of self.fields_idx as geoinfo
     self.fields = [ self.ds.variables[i] for i in self.fields_idx]
     self.colnames = ['lat', 'lon'] + self.fields
-    self.selected_colnames = self.colnames
+    if select:
+        self.select(select)
+    else:
+        self.select(self.colnames)
 
     self.properties = { 'obs_id' : 0,
                         'means' : self.ds.statistics['mean'], 
@@ -68,6 +71,17 @@ class AnemoiDataset():
       return
 
     self.ds = open_dataset( self.ds, frequency=str(step_hrs) + 'h', start=dt_start, end=dt_end)
+
+    def select(self, cols_list: list[str]) -> None:
+      """
+      Allow user to specify which columns they want to access.
+      Get functions only returned for these specified columns.
+      """
+
+      self.selected_colnames = cols_list
+      self.selected_cols_idx = np.array(
+          [self.colnames.index(item) for item in cols_list]
+      )
 
   def __len__( self) :
     "Length of dataset"

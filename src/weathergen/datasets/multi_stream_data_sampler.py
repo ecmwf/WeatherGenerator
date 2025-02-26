@@ -113,8 +113,12 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
           do = 0
           geoinfo_idx = [0, 1]
           stats_offset = 2
-          data_idxs = list(ds.fields_idx + 2)
-          self.stream_channels[stream_info['name']] = [ds.selected_colnames[do:][i] for i in data_idxs]
+          data_idxs = ds.selected_cols_idx[stats_offset:].tolist()
+
+          logger.info( '{} :: {} : {}'.format( stream_info['name'],
+                                              [ds.colnames[i] for i in geoinfo_idx],
+                                              [ds.colnames[i] for i in data_idxs]))
+          self.stream_channels[stream_info['name']] = [ds.colnames[do:][i] for i in data_idxs]
 
         elif stream_info['type']=='regular':
 
@@ -122,12 +126,12 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
           do = 0
           geoinfo_idx = [ 0, 1]
           stats_offset = 2
-          data_idxs = ds.selected_cols_idx[2:].tolist()
+          data_idxs = ds.selected_cols_idx[stats_offset:].tolist()
 
           logger.info( '{} :: {} : {}'.format( stream_info['name'],
-                                              [ds.selected_colnames[do:][i] for i in geoinfo_idx],
-                                              [ds.selected_colnames[do:][i] for i in data_idxs]))
-          self.stream_channels[stream_info['name']] = [ds.selected_colnames[do:][i] for i in data_idxs]
+                                              [ds.colnames[i] for i in geoinfo_idx],
+                                              [ds.colnames[i] for i in data_idxs]))
+          self.stream_channels[stream_info['name']] = [ds.colnames[do:][i] for i in data_idxs]
 
         elif stream_info['type']=='unstr':
 
@@ -135,12 +139,12 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
           do = 0
           geoinfo_idx = [ 0, 1]
           stats_offset = 2
-          data_idxs = ds.selected_cols_idx[2:].tolist()
+          data_idxs = ds.selected_cols_idx[stats_offset:].tolist()
 
           logger.info( '{} :: {} : {}'.format( stream_info['name'],
-                                              [ds.selected_colnames[i] for i in geoinfo_idx],
-                                              [ds.selected_colnames[i] for i in data_idxs]))
-          self.stream_channels[stream_info['name']] = [ds.selected_colnames[do:][i] for i in data_idxs]
+                                              [ds.colnames[i] for i in geoinfo_idx],
+                                              [ds.colnames[i] for i in data_idxs]))
+          self.stream_channels[stream_info['name']] = [ds.colnames[do:][i] for i in data_idxs]
            
         else :
           assert False, 'Unsupported stream type {}.'.format( stream_info['type'])
@@ -506,7 +510,6 @@ class MultiStreamDataSampler( torch.utils.data.IterableDataset):
 
   ###################################################
   def prepare_window_source( self, obs_id, data_offset, normalizer, source, times, time_win, stream_idxs) :
-
     source = source[:,data_offset:]
     # select geoinfo and field channels (also ensure geoinfos is at the beginning)
     idxs = np.array(stream_idxs[0] + stream_idxs[1])
