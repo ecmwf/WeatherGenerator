@@ -22,7 +22,6 @@ import yaml
 
 from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.config import Config
-from weathergen.utils.paths import private_path
 
 _logger = logging.getLogger(__path__)
 
