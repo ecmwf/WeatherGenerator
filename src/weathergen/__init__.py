@@ -45,7 +45,7 @@ def evaluate(
     # cf.start_date_val = 202201010400
     # cf.end_date_val = 202301010400
 
-    cf.step_hrs = 12
+    # cf.step_hrs = 12
 
     cf.shuffle = shuffle
 
@@ -68,8 +68,8 @@ def train(run_id=None) -> None:
 
     # directory where input streams are specified
     # cf.streams_directory = './streams_large/'
-    # cf.streams_directory = './streams_anemoi/'
-    cf.streams_directory = "./streams_mixed/"
+    cf.streams_directory = "./streams_anemoi/"
+    # cf.streams_directory = "./streams_mixed/"
 
     # embed_orientation : 'channels' or 'columns'
     # channels: embedding is per channel for a token (#tokens=num_channels)
