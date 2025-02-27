@@ -13,7 +13,7 @@ import time
 import traceback
 
 from weathergen.train.trainer import Trainer
-from weathergen.utils.config import Config
+from weathergen.utils.config import Config, private_config
 
 
 ####################################################################################################
@@ -64,11 +64,12 @@ def evaluate(
 
 ####################################################################################################
 def train(run_id=None) -> None:
+    private_cf = private_config()
     cf = Config()
 
     # directory where input streams are specified
     # cf.streams_directory = './streams_large/'
-    cf.streams_directory = "./streams_anemoi/"
+    cf.streams_directory = "./config/streams/"
     # cf.streams_directory = "./streams_mixed/"
 
     # embed_orientation : 'channels' or 'columns'
@@ -154,8 +155,10 @@ def train(run_id=None) -> None:
     cf.masking_rate_sampling = True  # False
     cf.sampling_rate_target = 1.0
 
-    cf.num_epochs = 24
-    cf.samples_per_epoch = 4096
+    # cf.num_epochs = 24 # TODO
+    cf.num_epochs = 1
+    # cf.samples_per_epoch = 4096 # TODO
+    cf.samples_per_epoch = 16
     cf.samples_per_validation = 512
     cf.shuffle = True
 
@@ -175,7 +178,7 @@ def train(run_id=None) -> None:
     cf.norm_type = "LayerNorm"  #'LayerNorm' #'RMSNorm'
     cf.nn_module = "te"
 
-    cf.data_path = "/home/mlx/ai-ml/datasets/stable/"
+    cf.data_path = private_cf["data_path"]  # "/home/mlx/ai-ml/datasets/stable/"
     # cf.data_path = '/lus/h2resw01/fws4/lb/project/ai-ml/observations/v1'
     # cf.data_path = '/leonardo_scratch/large/userexternal/clessig0/obs/v1'
     cf.start_date = 201301010000

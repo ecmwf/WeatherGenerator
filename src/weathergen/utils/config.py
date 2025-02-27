@@ -9,6 +9,9 @@
 
 import json
 import os
+import yaml
+from typing import Any
+from pathlib import Path
 
 
 ###########################################
@@ -24,7 +27,9 @@ class Config:
             else:
                 for rt in value:
                     for k, v in rt.items():
-                        print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
+                        print(
+                            "{}{} : {}".format("" if k == "reportypes" else "  ", k, v)
+                        )
 
     def save(self, epoch=None):
         # save in directory with model files
@@ -63,3 +68,13 @@ class Config:
         cf.__dict__ = json.loads(json_str[0])
 
         return cf
+
+
+# Function that checks if WEATHERGEN_PRIVATE_HOME is set and returns it:
+def private_conf() -> Any:
+    if "WEATHERGEN_PRIVATE_CONF" in os.environ:
+        private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
+        private_conf = yaml.safe_load(private_home.read_text())
+        return private_conf
+    else:
+        raise ValueError("WEATHERGEN_PRIVATE_CONF is not set.")
