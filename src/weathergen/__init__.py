@@ -13,7 +13,7 @@ import time
 import traceback
 
 from weathergen.train.trainer import Trainer
-from weathergen.utils.config import Config
+from weathergen.utils.config import Config, private_config
 
 
 ####################################################################################################
@@ -64,12 +64,13 @@ def evaluate(
 
 ####################################################################################################
 def train(run_id=None) -> None:
+    private_cf = private_config()
     cf = Config()
 
     # directory where input streams are specified
     # cf.streams_directory = './streams_large/'
-    # cf.streams_directory = './streams_anemoi/'
-    cf.streams_directory = "./streams_mixed/"
+    cf.streams_directory = "./config/streams/"
+    # cf.streams_directory = "./streams_mixed/"
 
     # embed_orientation : 'channels' or 'columns'
     # channels: embedding is per channel for a token (#tokens=num_channels)
@@ -177,7 +178,7 @@ def train(run_id=None) -> None:
     cf.norm_type = "LayerNorm"  #'LayerNorm' #'RMSNorm'
     cf.nn_module = "te"
 
-    cf.data_path = "/home/mlx/ai-ml/datasets/stable/"
+    cf.data_path = private_cf["data_path"]  # "/home/mlx/ai-ml/datasets/stable/"
     # cf.data_path = '/lus/h2resw01/fws4/lb/project/ai-ml/observations/v1'
     # cf.data_path = '/leonardo_scratch/large/userexternal/clessig0/obs/v1'
     cf.start_date = 201301010000
