@@ -154,8 +154,10 @@ def train(run_id=None) -> None:
     cf.masking_rate_sampling = True  # False
     cf.sampling_rate_target = 1.0
 
-    cf.num_epochs = 24
-    cf.samples_per_epoch = 4096
+    # cf.num_epochs = 24 # TODO
+    cf.num_epochs = 1
+    # cf.samples_per_epoch = 4096 # TODO
+    cf.samples_per_epoch = 16
     cf.samples_per_validation = 512
     cf.shuffle = True
 
