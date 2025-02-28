@@ -14,9 +14,7 @@ from weathergen.datasets.utils import arc_alpha
 
 class DataNormalizer:
     ###################################################
-    def __init__(
-        self, stream_info, geoinfo_offset, stats_offset, ds, geoinfo_idx, data_idx, do
-    ):
+    def __init__(self, stream_info, geoinfo_offset, stats_offset, ds, geoinfo_idx, data_idx, do):
         # obs_id, year, day_of_year, day
         self.geoinfo_offset = geoinfo_offset
         self.stats_offset = stats_offset
@@ -48,9 +46,9 @@ class DataNormalizer:
         go = self.geoinfo_size + self.geoinfo_offset if with_offset else 0
         so = self.stats_offset
         for i, ch in enumerate(self.data_idx):
-            data[..., go + i] = (
-                data[..., go + i] * (self.var[ch - so] ** 0.5)
-            ) + self.mean[ch - so]
+            data[..., go + i] = (data[..., go + i] * (self.var[ch - so] ** 0.5)) + self.mean[
+                ch - so
+            ]
 
         return data
 
@@ -114,9 +112,7 @@ class DataNormalizer:
         # obs_id, year, day of the year, minute of the day
         assert self.geoinfo_offset == 6
         data[..., 0] *= 256.0
-        data[..., 1] = (arc_alpha(data[..., 1], data[..., 2]) / (2.0 * np.pi)) * (
-            12.0 * 3600.0
-        )
+        data[..., 1] = (arc_alpha(data[..., 1], data[..., 2]) / (2.0 * np.pi)) * (12.0 * 3600.0)
         data[..., 2] = data[..., 1]
         data[..., 3] = data[..., 1]
         data[..., 4] = data[..., 1]

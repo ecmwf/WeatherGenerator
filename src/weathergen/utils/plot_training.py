@@ -34,10 +34,7 @@ def clean_out_folder():
 def get_stream_names(run_id):
     # return col names from training (should be identical to validation)
     cf = Config.load(run_id, -1)
-    return [
-        si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
-        for si in cf.streams
-    ]
+    return [si["name"].replace(",", "").replace("/", "_").replace(" ", "_") for si in cf.streams]
 
 
 ####################################################################################################
@@ -65,11 +62,7 @@ def plot_lr(runs_ids, runs_data, runs_active, x_axis="samples"):
             color=colors[j % len(colors)],
         )
         legend_str += [
-            ("R" if runs_active[j] else "X")
-            + " : "
-            + run_id
-            + " : "
-            + runs_ids[run_id][1]
+            ("R" if runs_active[j] else "X") + " : " + run_id + " : " + runs_ids[run_id][1]
         ]
 
     if len(legend_str) < 1:
@@ -170,20 +163,14 @@ def plot_loss_per_stream(
             legend_strs += [[]]
             for err in errs:
                 idx = 0 if mode == "train" else 1
-                linestyle = (
-                    "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
-                )
+                linestyle = "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
                 linestyle = ":" if "stddev" in err else linestyle
                 alpha = 1.0
                 if "train" in modes and "val" in modes:
                     alpha = 0.35 if "train" in mode else alpha
 
-                for j, (run_id, run_data) in enumerate(
-                    zip(runs_ids, runs_data, strict=False)
-                ):
-                    x_idx = [i for i, c in enumerate(run_data[idx][0]) if x_axis in c][
-                        0
-                    ]
+                for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
+                    x_idx = [i for i, c in enumerate(run_data[idx][0]) if x_axis in c][0]
                     data_idxs = [i for i, c in enumerate(run_data[idx][0]) if err in c]
 
                     for i, col in enumerate(np.array(run_data[idx][0])[data_idxs]):
@@ -227,17 +214,13 @@ def plot_loss_per_stream(
             plt.close()
             continue
 
-        legend = plt.legend(
-            legend_str, loc="upper right" if not x_scale_log else "lower left"
-        )
+        legend = plt.legend(legend_str, loc="upper right" if not x_scale_log else "lower left")
         for line in legend.get_lines():
             line.set(alpha=1.0)
         plt.grid(True, which="both", ls="-")
         plt.yscale("log")
         # cap at 1.0 in case of divergence of run (through normalziation, max should be around 1.0)
-        plt.ylim(
-            [0.95 * min_val, (None if max_val < 2.0 else min(1.1, 1.025 * max_val))]
-        )
+        plt.ylim([0.95 * min_val, (None if max_val < 2.0 else min(1.1, 1.025 * max_val))])
         if x_scale_log:
             plt.xscale("log")
         plt.title(stream_name)
@@ -246,8 +229,7 @@ def plot_loss_per_stream(
         plt.tight_layout()
         rstr = "".join([f"{r}_" for r in runs_ids])
         plt.savefig(
-            out_folder
-            + "{}{}{}.png".format(rstr, "".join([f"{m}_" for m in modes]), stream_name)
+            out_folder + "{}{}{}.png".format(rstr, "".join([f"{m}_" for m in modes]), stream_name)
         )
         plt.close()
 
@@ -323,15 +305,9 @@ def plot_loss_per_run(
     plt.xlabel("samples")
     plt.tight_layout()
     sstr = "".join(
-        [
-            f"{r}_".replace(",", "").replace("/", "_").replace(" ", "_")
-            for r in legend_str
-        ]
+        [f"{r}_".replace(",", "").replace("/", "_").replace(" ", "_") for r in legend_str]
     )
-    plt.savefig(
-        out_folder
-        + "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr)
-    )
+    plt.savefig(out_folder + "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr))
     plt.close()
 
 
@@ -372,9 +348,7 @@ if __name__ == "__main__":
     # determine which runs are still alive (as a process, though they might hang internally)
     ret = subprocess.run(["squeue"], capture_output=True)
     lines = str(ret.stdout).split("\\n")
-    runs_active = [
-        np.array([str(v[0]) in l for l in lines[1:]]).any() for v in runs_ids.values()
-    ]
+    runs_active = [np.array([str(v[0]) in l for l in lines[1:]]).any() for v in runs_ids.values()]
 
     x_scale_log = False
     x_type = ("rel_time",)  #'step'

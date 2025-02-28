@@ -22,9 +22,7 @@ class TrainLogger:
         # TODO: add header with col names (loadtxt has an option to skip k header lines)
 
     #######################################
-    def add_train(
-        self, samples, lr, loss_avg, stddev_avg, perf_gpu=0.0, perf_mem=0.0
-    ) -> None:
+    def add_train(self, samples, lr, loss_avg, stddev_avg, perf_gpu=0.0, perf_mem=0.0) -> None:
         """
         Log training data
         """
@@ -92,9 +90,7 @@ class TrainLogger:
         for si in cf.streams:
             for _j, lf in enumerate(cf.loss_fcts):
                 cols_train += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
-                    + ", "
-                    + lf[0]
+                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
                 ]
         with_stddev = [(True if "stats" in lf else False) for lf in cf.loss_fcts]
         if with_stddev:
@@ -108,9 +104,7 @@ class TrainLogger:
         try:
             with open(fname_log_train, "rb") as f:
                 log_train = np.loadtxt(f, delimiter=",")
-            log_train = log_train.reshape(
-                (log_train.shape[0] // len(cols_train), len(cols_train))
-            )
+            log_train = log_train.reshape((log_train.shape[0] // len(cols_train), len(cols_train)))
         except:
             print(f"Warning: no training data loaded for run_id={run_id}")
             log_train = np.array([])
@@ -122,9 +116,7 @@ class TrainLogger:
         for si in cf.streams:
             for _j, lf in enumerate(cf.loss_fcts_val):
                 cols_val += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
-                    + ", "
-                    + lf[0]
+                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
                 ]
         with_stddev = [(True if "stats" in lf else False) for lf in cf.loss_fcts_val]
         if with_stddev:
@@ -138,9 +130,7 @@ class TrainLogger:
         try:
             with open(fname_log_val, "rb") as f:
                 log_val = np.loadtxt(f, delimiter=",")
-            log_val = log_val.reshape(
-                (log_val.shape[0] // len(cols_val), len(cols_val))
-            )
+            log_val = log_val.reshape((log_val.shape[0] // len(cols_val), len(cols_val)))
         except:
             print(f"Warning: no validation data loaded for run_id={run_id}")
             log_val = np.array([])
@@ -153,9 +143,7 @@ class TrainLogger:
         try:
             with open(fname_perf_val, "rb") as f:
                 log_perf = np.loadtxt(f, delimiter=",")
-            log_perf = log_perf.reshape(
-                (log_perf.shape[0] // len(cols_perf), len(cols_perf))
-            )
+            log_perf = log_perf.reshape((log_perf.shape[0] // len(cols_perf), len(cols_perf)))
         except:
             print(f"Warning: no performance data loaded for run_id={run_id}")
             log_perf = np.array([])

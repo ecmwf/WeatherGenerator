@@ -29,9 +29,7 @@ def init_loggers():
 
     WARNING: this function resets all the logging handlers.
     """
-    formatter = RelPathFormatter(
-        "%(pathname)s:%(lineno)d : %(levelname)-8s : %(message)s"
-    )
+    formatter = RelPathFormatter("%(pathname)s:%(lineno)d : %(levelname)-8s : %(message)s")
     for package in ["obslearn", "weathergen"]:
         logger = logging.getLogger(package)
         logger.handlers.clear()

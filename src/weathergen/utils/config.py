@@ -27,9 +27,7 @@ class Config:
             else:
                 for rt in value:
                     for k, v in rt.items():
-                        print(
-                            "{}{} : {}".format("" if k == "reportypes" else "  ", k, v)
-                        )
+                        print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
 
     def save(self, epoch=None):
         # save in directory with model files

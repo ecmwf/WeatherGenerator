@@ -70,9 +70,7 @@ class AnemoiDataset:
             self.ds = None
             return
 
-        self.ds = open_dataset(
-            self.ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end
-        )
+        self.ds = open_dataset(self.ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end)
 
     def __len__(self):
         "Length of dataset"

@@ -64,13 +64,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.len_hrs = len_hrs
         self.step_hrs = step_hrs
 
-        fc_policy_seq = (
-            forecast_policy == "sequential" or forecast_policy == "sequential_random"
-        )
+        fc_policy_seq = forecast_policy == "sequential" or forecast_policy == "sequential_random"
         assert forecast_steps >= 0 if not fc_policy_seq else True
-        self.forecast_delta_hrs = (
-            forecast_delta_hrs if forecast_delta_hrs > 0 else self.len_hrs
-        )
+        self.forecast_delta_hrs = forecast_delta_hrs if forecast_delta_hrs > 0 else self.len_hrs
         self.forecast_steps = np.array(
             [forecast_steps] if type(forecast_steps) == int else forecast_steps
         )
@@ -110,17 +106,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # the processing here is not natural but a workaround to various inconsistencies in the
                     # current datasets
                     data_idxs = [
-                        i
-                        for i, cn in enumerate(ds.selected_colnames[do:])
-                        if cn[:9] == "obsvalue_"
+                        i for i, cn in enumerate(ds.selected_colnames[do:]) if cn[:9] == "obsvalue_"
                     ]
-                    mask = np.ones(
-                        len(ds.selected_colnames[do:]), dtype=np.int32
-                    ).astype(bool)
+                    mask = np.ones(len(ds.selected_colnames[do:]), dtype=np.int32).astype(bool)
                     mask[data_idxs] = False
-                    mask[-1] = (
-                        False if "healpix" in ds.selected_colnames[-1] else mask[-1]
-                    )
+                    mask[-1] = False if "healpix" in ds.selected_colnames[-1] else mask[-1]
                     geoinfo_idx = (
                         np.arange(len(ds.selected_colnames[do:]), dtype=np.int64)[mask]
                     ).tolist()
@@ -152,15 +142,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     data_idxs = list(ds.fields_idx + 2)
 
                 else:
-                    assert False, "Unsupported stream type {}.".format(
-                        stream_info["type"]
-                    )
+                    assert False, "Unsupported stream type {}.".format(stream_info["type"])
 
                 fsm = self.forecast_steps[0]
                 if len(ds) > 0:
-                    self.len = min(
-                        self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs
-                    )
+                    self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
 
                 normalizer = DataNormalizer(
                     stream_info,
@@ -177,17 +163,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # by construction, this is identical for all datasets
         self.len_native = np.array(
-            [
-                len(ds[0])
-                for dss in self.obs_datasets_norm
-                for ds in dss
-                if len(ds[0]) > 0
-            ]
+            [len(ds[0]) for dss in self.obs_datasets_norm for ds in dss if len(ds[0]) > 0]
         ).min()
 
-        self.len = min(
-            self.len, self.len if not samples_per_epoch else samples_per_epoch
-        )
+        self.len = min(self.len, self.len if not samples_per_epoch else samples_per_epoch)
         # adjust len to split loading across all workers
         len_chunk = ((self.len_native // num_ranks) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)
@@ -261,10 +240,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.perms_forecast_dt = np.zeros(len_dt_samples, dtype=np.int64)
         elif self.forecast_policy == "fixed" or self.forecast_policy == "sequential":
             self.perms_forecast_dt = fsm * np.ones(len_dt_samples, dtype=np.int64)
-        elif (
-            self.forecast_policy == "random"
-            or self.forecast_policy == "sequential_random"
-        ):
+        elif self.forecast_policy == "random" or self.forecast_policy == "sequential_random":
             # randint high=one-past
             self.perms_forecast_dt = np.random.randint(
                 low=self.forecast_steps.min(),
@@ -289,9 +265,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     ###################################################
     def get_geoinfo_sizes(self):
-        return [
-            self.get_geoinfo_size(i, 0) for i, _ in enumerate(self.obs_datasets_idxs)
-        ]
+        return [self.get_geoinfo_size(i, 0) for i, _ in enumerate(self.obs_datasets_idxs)]
 
     ###################################################
     def __iter__(self):
@@ -336,9 +310,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # TODO: this has to be independent of specific datasets
                 time_win1, time_win2 = (
                     self.obs_datasets_norm[-1][0][0].time_window(idx),
-                    self.obs_datasets_norm[-1][0][0].time_window(
-                        idx + step_forecast_dt
-                    ),
+                    self.obs_datasets_norm[-1][0][0].time_window(idx + step_forecast_dt),
                 )
 
                 c_tcs = [[] for _ in range(forecast_dt + 1)]
@@ -412,27 +384,23 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             # this should only be collected in validation mode
                             source1_raw = normalizer.denormalize_data(source1.clone())
 
-                            (ss_cells, ss_lens, ss_centroids) = (
-                                self.batchifyer.batchify_source(
-                                    stream_info,
-                                    self.geoinfo_offset,
-                                    self.get_geoinfo_size(obs_id, i_source),
-                                    self.masking_rate,
-                                    self.masking_rate_sampling,
-                                    self.rng,
-                                    source1,
-                                    times1,
-                                    normalizer.normalize_coords,
-                                )
+                            (ss_cells, ss_lens, ss_centroids) = self.batchifyer.batchify_source(
+                                stream_info,
+                                self.geoinfo_offset,
+                                self.get_geoinfo_size(obs_id, i_source),
+                                self.masking_rate,
+                                self.masking_rate_sampling,
+                                self.rng,
+                                source1,
+                                times1,
+                                normalizer.normalize_coords,
                             )
 
                         s_source_raw += [source1_raw]
                         s_source_tokens_lens += [ss_lens]
                         s_source_tokens_cells += [ss_cells]
                         s_source_centroids += (
-                            [ss_centroids]
-                            if len(ss_centroids) > 0
-                            else [torch.tensor([])]
+                            [ss_centroids] if len(ss_centroids) > 0 else [torch.tensor([])]
                         )
 
                     # collect all sources in current stream and add to batch sample list when non-empty
@@ -440,23 +408,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         c_source_raw += [torch.cat(s_source_raw)]
 
                         # collect by merging entries per cells, preserving cell structure
-                        c_source_tokens_cells += [
-                            merge_cells(s_source_tokens_cells, nhc_source)
-                        ]
-                        c_source_centroids += [
-                            merge_cells(s_source_centroids, nhc_source)
-                        ]
+                        c_source_tokens_cells += [merge_cells(s_source_tokens_cells, nhc_source)]
+                        c_source_centroids += [merge_cells(s_source_centroids, nhc_source)]
                         # lens can be stacked and summed
-                        c_source_tokens_lens += [
-                            torch.stack(s_source_tokens_lens).sum(0)
-                        ]
+                        c_source_tokens_lens += [torch.stack(s_source_tokens_lens).sum(0)]
                         # remove NaNs
-                        c_source_tokens_cells[-1][
-                            torch.isnan(c_source_tokens_cells[-1])
-                        ] = self.mask_value
-                        c_source_centroids[-1][
-                            torch.isnan(c_source_centroids[-1])
-                        ] = self.mask_value
+                        c_source_tokens_cells[-1][torch.isnan(c_source_tokens_cells[-1])] = (
+                            self.mask_value
+                        )
+                        c_source_centroids[-1][torch.isnan(c_source_centroids[-1])] = (
+                            self.mask_value
+                        )
                     else:
                         c_source_raw += [torch.tensor([])]
                         c_source_tokens_lens += [torch.zeros([nhc_source])]
@@ -501,17 +463,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                     s_idxs,
                                 )
 
-                                (tt_cells, tt_lens, tc, tc_lens) = (
-                                    self.batchifyer.batchify_target(
-                                        stream_info,
-                                        self.geoinfo_offset,
-                                        self.get_geoinfo_size(obs_id, i_source),
-                                        self.sampling_rate_target,
-                                        self.rng,
-                                        source2,
-                                        times2,
-                                        normalizer.normalize_targets,
-                                    )
+                                (tt_cells, tt_lens, tc, tc_lens) = self.batchifyer.batchify_target(
+                                    stream_info,
+                                    self.geoinfo_offset,
+                                    self.get_geoinfo_size(obs_id, i_source),
+                                    self.sampling_rate_target,
+                                    self.rng,
+                                    source2,
+                                    times2,
+                                    normalizer.normalize_targets,
                                 )
 
                             s_target_tokens_lens += (
@@ -526,18 +486,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         # collect all sources in current stream and add to batch sample list when non-empty
                         if torch.tensor([len(s) for s in s_target_tokens]).sum() > 0:
                             c_tcs[fstep] += [merge_cells(s_tcs, nhc_target)]
-                            c_target_tokens[fstep] += [
-                                merge_cells(s_target_tokens, nhc_target)
-                            ]
+                            c_target_tokens[fstep] += [merge_cells(s_target_tokens, nhc_target)]
                             # lens can be stacked and summed
                             c_target_tokens_lens[fstep] += [
                                 torch.stack(s_target_tokens_lens).sum(0)
                             ]
                             c_tcs_lens[fstep] += [torch.stack(s_tcs_lens).sum(0)]
                             # remove NaNs
-                            c_tcs[fstep][-1][
-                                torch.isnan(c_tcs[fstep][-1])
-                            ] = self.mask_value
+                            c_tcs[fstep][-1][torch.isnan(c_tcs[fstep][-1])] = self.mask_value
 
                         else:
                             c_tcs[fstep] += [torch.tensor([])]
@@ -576,13 +532,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 ]
             )
             source_cell_lens = torch.sum(source_cell_lens, 1).flatten().to(torch.int32)
-            source_cell_lens = torch.cat(
-                [torch.zeros(1, dtype=torch.int32), source_cell_lens]
-            )
+            source_cell_lens = torch.cat([torch.zeros(1, dtype=torch.int32), source_cell_lens])
 
-            source_tokens_lens = torch.from_numpy(np.array(source_tokens_lens)).to(
-                torch.int32
-            )
+            source_tokens_lens = torch.from_numpy(np.array(source_tokens_lens)).to(torch.int32)
 
             # precompute index sets for scatter operation after embed
             offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
@@ -602,9 +554,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     idxs = torch.cat(
                         [
                             torch.arange(o, o + l, dtype=torch.int64)
-                            for o, l in zip(
-                                offsets, source_tokens_lens[ib, itype], strict=False
-                            )
+                            for o, l in zip(offsets, source_tokens_lens[ib, itype], strict=False)
                         ]
                     )
                     idxs_embed[-1] += [idxs.unsqueeze(1)]
@@ -655,19 +605,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         torch.cat(
                             [
                                 pad,
-                                torch.tensor(
-                                    [len(tcs[i_b][ii]) for i_b in range(len(tcs))]
-                                ),
+                                torch.tensor([len(tcs[i_b][ii]) for i_b in range(len(tcs))]),
                             ]
                         ).to(torch.int32)
                     ]
 
                 # lengths for varlen attention
                 tcs_idxs += [
-                    [
-                        torch.cat([torch.arange(l) for l in tlm])
-                        for tlm in tcs_lens_merged[-1]
-                    ]
+                    [torch.cat([torch.arange(l) for l in tlm]) for tlm in tcs_lens_merged[-1]]
                 ]
 
             # reorder to have forecast step as first dimension, then batch items
@@ -741,9 +686,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         dt = pd.to_datetime(times)
         dt_win = pd.to_datetime(time_win)
         # for target only provide local time
-        dt_delta = torch.tensor(
-            (dt - dt_win[0]).seconds, dtype=torch.float32
-        ).unsqueeze(1)
+        dt_delta = torch.tensor((dt - dt_win[0]).seconds, dtype=torch.float32).unsqueeze(1)
         source = torch.cat(
             (
                 torch.full([dt.shape[0], 1], obs_id, dtype=torch.float32),

@@ -150,9 +150,7 @@ class LearningRateScheduler:
                 assert "Unsupported cooldown policy for learning rate scheduler"
 
         # set initial scheduler
-        self.cur_scheduler = (
-            self.scheduler_warmup if n_steps_warmup > 0 else self.scheduler_decay
-        )
+        self.cur_scheduler = self.scheduler_warmup if n_steps_warmup > 0 else self.scheduler_decay
 
         # explicitly track steps to be able to switch between optimizers
         self.i_step = 0
@@ -174,9 +172,7 @@ class LearningRateScheduler:
         """
 
         # keep final learning rate
-        if self.i_step >= (
-            self.n_steps_warmup + self.n_steps_decay + self.n_steps_cooldown
-        ):
+        if self.i_step >= (self.n_steps_warmup + self.n_steps_decay + self.n_steps_cooldown):
             return self.lr
 
         if (
@@ -260,10 +256,7 @@ class LearningRateScheduler:
         lrs = []
 
         for _ in range(
-            num_epochs * num_samples_per_epoch
-            + lr_steps_warmup
-            + lr_steps_cooldown
-            + 1023
+            num_epochs * num_samples_per_epoch + lr_steps_warmup + lr_steps_cooldown + 1023
         ):
             optimizer.step()
             lrs.append(optimizer.param_groups[0]["lr"])
@@ -297,10 +290,7 @@ class LearningRateScheduler:
         lrs = []
 
         for _ in range(
-            num_epochs * num_samples_per_epoch
-            + lr_steps_warmup
-            + lr_steps_cooldown
-            + 1023
+            num_epochs * num_samples_per_epoch + lr_steps_warmup + lr_steps_cooldown + 1023
         ):
             optimizer.step()
             lrs.append(optimizer.param_groups[0]["lr"])

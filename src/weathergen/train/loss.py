@@ -84,12 +84,8 @@ def kernel_crps(target, ens, mu, stddev, fair=True):
     if ens_size == 1:
         return mae
 
-    coef = (
-        -1.0 / (2.0 * ens_size * (ens_size - 1)) if fair else -1.0 / (2.0 * ens_size**2)
-    )
-    ens_var = (
-        coef * torch.tensor([(p1 - p2).abs().sum() for p1 in ens for p2 in ens]).sum()
-    )
+    coef = -1.0 / (2.0 * ens_size * (ens_size - 1)) if fair else -1.0 / (2.0 * ens_size**2)
+    ens_var = coef * torch.tensor([(p1 - p2).abs().sum() for p1 in ens for p2 in ens]).sum()
     ens_var /= ens.shape[1]
 
     return mae + ens_var
