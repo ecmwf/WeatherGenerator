@@ -9,9 +9,10 @@
 
 import json
 import os
-import yaml
-from typing import Any
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 
 ###########################################

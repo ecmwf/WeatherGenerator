@@ -20,7 +20,6 @@ from weathergen.datasets.normalizer import DataNormalizer
 from weathergen.datasets.obs_dataset import ObsDataset
 from weathergen.datasets.utils import merge_cells
 
-
 logger = logging.getLogger(__name__)
 
 
