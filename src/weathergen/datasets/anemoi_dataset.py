@@ -70,7 +70,9 @@ class AnemoiDataset:
             self.ds = None
             return
 
-        self.ds = open_dataset(self.ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end)
+        self.ds = open_dataset(
+            self.ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end
+        )
 
     def __len__(self):
         "Length of dataset"
@@ -103,6 +105,9 @@ class AnemoiDataset:
 
     def time_window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
         if not self.ds:
-            return (np.array([], dtype=np.datetime64), np.array([], dtype=np.datetime64))
+            return (
+                np.array([], dtype=np.datetime64),
+                np.array([], dtype=np.datetime64),
+            )
 
         return (self.ds.dates[idx], self.ds.dates[idx])

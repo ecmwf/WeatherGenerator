@@ -44,7 +44,9 @@ class ObsDataset:
             if not (col[:4] == "sin_" or col[:4] == "cos_"):
                 break
         self.selected_colnames = self.colnames[: len(self.colnames) - idx]
-        self.selected_cols_idx = np.arange(len(self.colnames))[: len(self.colnames) - idx]
+        self.selected_cols_idx = np.arange(len(self.colnames))[
+            : len(self.colnames) - idx
+        ]
 
         # Create index for samples
         self._setup_sample_index(start, end, self.len_hrs, self.step_hrs)
@@ -73,7 +75,9 @@ class ObsDataset:
         Get functions only returned for these specified columns.
         """
         self.selected_colnames = cols_list
-        self.selected_cols_idx = np.array([self.colnames.index(item) for item in cols_list])
+        self.selected_cols_idx = np.array(
+            [self.colnames.index(item) for item in cols_list]
+        )
 
     def time_window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
         """
@@ -83,9 +87,12 @@ class ObsDataset:
         if idx < 0:
             idx = len(self) + idx
 
-        time_start = self.start_dt + datetime.timedelta(hours=(int(idx * self.step_hrs)), seconds=1)
+        time_start = self.start_dt + datetime.timedelta(
+            hours=(int(idx * self.step_hrs)), seconds=1
+        )
         time_end = min(
-            self.start_dt + datetime.timedelta(hours=(int(idx * self.step_hrs + self.len_hrs))),
+            self.start_dt
+            + datetime.timedelta(hours=(int(idx * self.step_hrs + self.len_hrs))),
             self.end_dt,
         )
 
@@ -109,12 +116,17 @@ class ObsDataset:
             last_sample = None
         else:
             last_sample = int(
-                np.where(np.diff(np.append(self.indices_end, self.indices_end[-1])) > 0)[0][-1] + 1
+                np.where(
+                    np.diff(np.append(self.indices_end, self.indices_end[-1])) > 0
+                )[0][-1]
+                + 1
             )
 
         return last_sample
 
-    def _setup_sample_index(self, start: int, end: int, len_hrs: int, step_hrs: int) -> None:
+    def _setup_sample_index(
+        self, start: int, end: int, len_hrs: int, step_hrs: int
+    ) -> None:
         """
         Dataset is divided into samples;
            - each n_hours long
@@ -159,14 +171,16 @@ class ObsDataset:
                 self.indices_start = np.append(
                     self.indices_start,
                     np.ones(
-                        (diff_in_hours_end - self.hrly_index.shape[0] - 1) // step_hrs, dtype=int
+                        (diff_in_hours_end - self.hrly_index.shape[0] - 1) // step_hrs,
+                        dtype=int,
                     )
                     * self.indices_start[-1],
                 )
                 self.indices_end = np.append(
                     self.indices_end,
                     np.ones(
-                        (diff_in_hours_end - self.hrly_index.shape[0] - 1) // step_hrs, dtype=int
+                        (diff_in_hours_end - self.hrly_index.shape[0] - 1) // step_hrs,
+                        dtype=int,
                     )
                     * self.indices_end[-1],
                 )
@@ -211,8 +225,12 @@ if __name__ == "__main__":
     # conventional obs
     d1 = ObsDataset(zarrpath + "/16002.zarr", 201301010000, 202112310000, 24)
     d2 = ObsDataset(zarrpath + "/16045.zarr", 201301010000, 202112310000, 24)
-    d3 = ObsDataset(zarrpath + "/bufr_ship_synop_ofb_ea_0001.zarr", 201301010000, 202112310000, 24)
-    d4 = ObsDataset(zarrpath + "/bufr_land_synop_ofb_ea_0001.zarr", 201301010000, 202112310000, 24)
+    d3 = ObsDataset(
+        zarrpath + "/bufr_ship_synop_ofb_ea_0001.zarr", 201301010000, 202112310000, 24
+    )
+    d4 = ObsDataset(
+        zarrpath + "/bufr_land_synop_ofb_ea_0001.zarr", 201301010000, 202112310000, 24
+    )
 
     d = d1
     code.interact(local=locals())

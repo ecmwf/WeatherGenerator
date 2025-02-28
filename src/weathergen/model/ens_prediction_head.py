@@ -15,7 +15,13 @@ import torch
 class EnsPredictionHead(torch.nn.Module):
     #########################################
     def __init__(
-        self, dim_embed, dim_out, ens_num_layers, ens_size, norm_type="LayerNorm", hidden_factor=2
+        self,
+        dim_embed,
+        dim_out,
+        ens_num_layers,
+        ens_size,
+        norm_type="LayerNorm",
+        hidden_factor=2,
     ):
         """Constructor"""
 
@@ -37,7 +43,9 @@ class EnsPredictionHead(torch.nn.Module):
             for i in range(ens_num_layers - 1):
                 self.pred_heads[-1].append(torch.nn.GELU())
                 self.pred_heads[-1].append(
-                    torch.nn.Linear(dim_internal, dim_out if enl - 2 == i else dim_internal)
+                    torch.nn.Linear(
+                        dim_internal, dim_out if enl - 2 == i else dim_internal
+                    )
                 )
 
     #########################################

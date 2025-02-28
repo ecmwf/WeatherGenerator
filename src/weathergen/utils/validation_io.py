@@ -117,12 +117,20 @@ def write_validation(
             else:
                 assert False, "Unsuppported stream type"
             ds_source.attrs["cols"] = np.array(cols[k])[cols_values].tolist()
-            ds_source.create_dataset("sources", data=source_k, chunks=(1024, *source_k.shape[1:]))
-            ds_source.create_dataset("sources_lens", data=source_lens_k)
-            ds_source.create_dataset("preds", data=preds_k, chunks=(1024, *preds_k.shape[1:]))
-            ds_source.create_dataset("targets", data=targets_k, chunks=(1024, *targets_k.shape[1:]))
             ds_source.create_dataset(
-                "targets_coords", data=targets_coords_k, chunks=(1024, *targets_coords_k.shape[1:])
+                "sources", data=source_k, chunks=(1024, *source_k.shape[1:])
+            )
+            ds_source.create_dataset("sources_lens", data=source_lens_k)
+            ds_source.create_dataset(
+                "preds", data=preds_k, chunks=(1024, *preds_k.shape[1:])
+            )
+            ds_source.create_dataset(
+                "targets", data=targets_k, chunks=(1024, *targets_k.shape[1:])
+            )
+            ds_source.create_dataset(
+                "targets_coords",
+                data=targets_coords_k,
+                chunks=(1024, *targets_coords_k.shape[1:]),
             )
             ds_source.create_dataset("targets_lens", data=targets_lens_k)
         else:
