@@ -13,7 +13,8 @@ import time
 import traceback
 
 from weathergen.train.trainer import Trainer
-from weathergen.utils.config import Config, private_config
+from weathergen.utils.logger import init_loggers
+from weathergen.utils.config import Config, private_conf
 
 
 ####################################################################################################
@@ -27,6 +28,8 @@ def evaluate(
     save_samples=True,
     gridded_output_streams=[],
 ):
+    # TODO: move somewhere else
+    init_loggers()
     # load config if specified
     cf = Config.load(run_id, epoch if epoch is not None else -1)
 
@@ -64,7 +67,9 @@ def evaluate(
 
 ####################################################################################################
 def train(run_id=None) -> None:
-    private_cf = private_config()
+    # TODO: move somewhere else
+    init_loggers()
+    private_cf = private_conf()
     cf = Config()
 
     # directory where input streams are specified
@@ -167,8 +172,8 @@ def train(run_id=None) -> None:
     cf.lr_max = 0.00003
     cf.lr_final_decay = 0.000001
     cf.lr_final = 0.0
-    cf.lr_steps_warmup = 256
-    cf.lr_steps_cooldown = 4096
+    cf.lr_steps_warmup = 2  # 256 # TODO
+    cf.lr_steps_cooldown = 2  # 4096 TODO
     cf.lr_policy_warmup = "cosine"
     cf.lr_policy_decay = "linear"
     cf.lr_policy_cooldown = "linear"
@@ -204,7 +209,7 @@ def train(run_id=None) -> None:
     trainer = Trainer(log_freq=20, checkpoint_freq=250, print_freq=10)
 
     try:
-        trainer.run(cf)
+        trainer.run(cf, private_cf)
     except:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()

@@ -14,6 +14,8 @@ import numpy as np
 import torch
 from torch.optim.lr_scheduler import ExponentialLR, LinearLR, OneCycleLR
 
+_logger = logging.getLogger(__name__)
+
 
 class LearningRateScheduler:
     def __init__(
@@ -86,6 +88,7 @@ class LearningRateScheduler:
         elif policy_warmup == "cosine":
             n_steps = n_steps_warmup + n_steps_decay + 1
             pct_start = n_steps_warmup / n_steps
+            _logger.debug(f"n_steps = {n_steps}, pct_start = {pct_start}")
             self.scheduler_warmup = OneCycleLR(
                 optimizer,
                 max_lr=self.lr_max_scaled,
@@ -110,7 +113,8 @@ class LearningRateScheduler:
 
         elif policy_decay == "exponential":
             gamma = np.power(
-                np.float64(lr_final_decay / self.lr_max_scaled), 1.0 / np.float64(n_steps_decay)
+                np.float64(lr_final_decay / self.lr_max_scaled),
+                1.0 / np.float64(n_steps_decay),
             )
             self.scheduler_decay = ExponentialLR(optimizer, gamma=gamma)
 
@@ -146,7 +150,9 @@ class LearningRateScheduler:
                 assert "Unsupported cooldown policy for learning rate scheduler"
 
         # set initial scheduler
-        self.cur_scheduler = self.scheduler_warmup if n_steps_warmup > 0 else self.scheduler_decay
+        self.cur_scheduler = (
+            self.scheduler_warmup if n_steps_warmup > 0 else self.scheduler_decay
+        )
 
         # explicitly track steps to be able to switch between optimizers
         self.i_step = 0
@@ -168,7 +174,9 @@ class LearningRateScheduler:
         """
 
         # keep final learning rate
-        if self.i_step >= (self.n_steps_warmup + self.n_steps_decay + self.n_steps_cooldown):
+        if self.i_step >= (
+            self.n_steps_warmup + self.n_steps_decay + self.n_steps_cooldown
+        ):
             return self.lr
 
         if (
@@ -252,7 +260,10 @@ class LearningRateScheduler:
         lrs = []
 
         for _ in range(
-            num_epochs * num_samples_per_epoch + lr_steps_warmup + lr_steps_cooldown + 1023
+            num_epochs * num_samples_per_epoch
+            + lr_steps_warmup
+            + lr_steps_cooldown
+            + 1023
         ):
             optimizer.step()
             lrs.append(optimizer.param_groups[0]["lr"])
@@ -286,7 +297,10 @@ class LearningRateScheduler:
         lrs = []
 
         for _ in range(
-            num_epochs * num_samples_per_epoch + lr_steps_warmup + lr_steps_cooldown + 1023
+            num_epochs * num_samples_per_epoch
+            + lr_steps_warmup
+            + lr_steps_cooldown
+            + 1023
         ):
             optimizer.step()
             lrs.append(optimizer.param_groups[0]["lr"])

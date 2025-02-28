@@ -23,10 +23,23 @@ class RelPathFormatter(logging.Formatter):
         return super().format(record)
 
 
-logger = logging.getLogger("obslearn")
-logger.setLevel(logging.DEBUG)
-ch = logging.StreamHandler()
-formatter = RelPathFormatter("%(pathname)s:%(lineno)d : %(levelname)-8s : %(message)s")
-ch.setFormatter(formatter)
-logger.handlers.clear()
-logger.addHandler(ch)
+def init_loggers():
+    """
+    Initialize the logger for the package.
+
+    WARNING: this function resets all the logging handlers.
+    """
+    formatter = RelPathFormatter(
+        "%(pathname)s:%(lineno)d : %(levelname)-8s : %(message)s"
+    )
+    for package in ["obslearn", "weathergen"]:
+        logger = logging.getLogger(package)
+        logger.handlers.clear()
+        logger.setLevel(logging.DEBUG)
+        ch = logging.StreamHandler()
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
+
+
+# TODO: remove, it should be module-level loggers
+logger = logging.getLogger("weathergen")

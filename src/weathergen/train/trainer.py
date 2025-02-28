@@ -35,6 +35,8 @@ from weathergen.train.utils import get_run_id
 from weathergen.utils.train_logger import TrainLogger
 from weathergen.utils.validation_io import write_validation
 
+_logger = logging.getLogger(__name__)
+
 
 class Trainer(Trainer_Base):
     ###########################################
@@ -47,7 +49,15 @@ class Trainer(Trainer_Base):
         self.print_freq = print_freq
 
     ###########################################
-    def init(self, cf, run_id_contd=None, epoch_contd=None, run_id_new=False, run_mode="training"):
+    def init(
+        self,
+        cf,
+        private_cf,
+        run_id_contd=None,
+        epoch_contd=None,
+        run_id_new=False,
+        run_mode="training",
+    ):
         self.cf = cf
 
         if isinstance(run_id_new, str):
@@ -66,7 +76,7 @@ class Trainer(Trainer_Base):
         self.init_ddp(cf)
 
         # read configuration of data streams
-        cf = self.init_streams(cf, run_id_contd)
+        cf = self.init_streams(cf, private_cf, run_id_contd)
 
         # create output directory
         path_run = "./results/" + cf.run_id + "/"
@@ -129,12 +139,16 @@ class Trainer(Trainer_Base):
         num_channels = self.dataset_val.get_num_chs()
         self.geoinfo_sizes = self.dataset_val.get_geoinfo_sizes()
 
-        self.model = Model(cf, num_channels, self.geoinfo_sizes).create().to(self.devices[0])
+        self.model = (
+            Model(cf, num_channels, self.geoinfo_sizes).create().to(self.devices[0])
+        )
         self.model.load(run_id_trained, epoch)
         print(f"Loaded model {run_id_trained} at epoch {epoch}.")
         self.ddp_model = self.model
         self.model_params = ModelParams().create(cf).to(self.devices[0])
-        logging.getLogger("obslearn").info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
+        logging.getLogger("obslearn").info(
+            f"Loaded model id={run_id_trained} at epoch={epoch}."
+        )
 
         self.loss_fcts_val = []
         for name, w in cf.loss_fcts_val:
@@ -145,7 +159,9 @@ class Trainer(Trainer_Base):
         print(f"Finished evaluation run with id: {cf.run_id}")
 
     ###########################################
-    def evaluate_jac(self, cf, run_id, epoch, mode="row", date=None, obs_id=0, sample_id=0):
+    def evaluate_jac(
+        self, cf, run_id, epoch, mode="row", date=None, obs_id=0, sample_id=0
+    ):
         """Computes a row or column of the Jacobian as determined by mode ('row' or 'col'), i.e.
         determines sensitivities with respect to outputs or inputs
         """
@@ -183,7 +199,9 @@ class Trainer(Trainer_Base):
 
         dev = self.devices[0]
         sources = [source.to(dev, non_blocking=True) for source in sources]
-        targets = [[toks.to(dev, non_blocking=True) for toks in target] for target in targets]
+        targets = [
+            [toks.to(dev, non_blocking=True) for toks in target] for target in targets
+        ]
 
         # evaluate model
         with torch.autocast(
@@ -222,7 +240,9 @@ class Trainer(Trainer_Base):
         jac = [j_obs.cpu().detach().numpy() for j_obs in out[1]]
 
         sources_all, preds_all = [[] for _ in cf.streams], [[] for _ in cf.streams]
-        targets_all, targets_coords_all = [[] for _ in cf.streams], [[] for _ in cf.streams]
+        targets_all, targets_coords_all = [[] for _ in cf.streams], [
+            [] for _ in cf.streams
+        ]
         targets_idxs_all = [[] for _ in cf.streams]
         sources_lens = [toks.shape[0] for toks in sources]
         targets_lens = [[toks.shape[0] for toks in target] for target in targets]
@@ -233,9 +253,13 @@ class Trainer(Trainer_Base):
                     continue
 
                 gs = self.cf.geoinfo_size
-                target_i_obs = torch.cat([t[:, gs:].unsqueeze(0) for t in targets[i_obs][i_b]], 0)
+                target_i_obs = torch.cat(
+                    [t[:, gs:].unsqueeze(0) for t in targets[i_obs][i_b]], 0
+                )
                 preds_i_obs = preds[i_obs][target_idxs_obs]
-                preds_i_obs = preds_i_obs.reshape([*preds_i_obs.shape[:2], *target_i_obs.shape[1:]])
+                preds_i_obs = preds_i_obs.reshape(
+                    [*preds_i_obs.shape[:2], *target_i_obs.shape[1:]]
+                )
 
                 if self.cf.loss_chs is not None:
                     if len(self.cf.loss_chs[i_obs]) == 0:
@@ -246,14 +270,20 @@ class Trainer(Trainer_Base):
                 ds_val = self.dataset
                 n = self.cf.geoinfo_size
 
-                sources[i_obs][:, :, n:] = ds_val.denormalize_data(i_obs, sources[i_obs][:, :, n:])
+                sources[i_obs][:, :, n:] = ds_val.denormalize_data(
+                    i_obs, sources[i_obs][:, :, n:]
+                )
                 sources[i_obs][:, :, :n] = ds_val.denormalize_coords(
                     i_obs, sources[i_obs][:, :, :n]
                 )
                 sources_all[i_obs] += [sources[i_obs].detach().cpu()]
 
-                preds_all[i_obs] += [ds_val.denormalize_data(i_obs, preds_i_obs).detach().cpu()]
-                targets_all[i_obs] += [ds_val.denormalize_data(i_obs, target_i_obs).detach().cpu()]
+                preds_all[i_obs] += [
+                    ds_val.denormalize_data(i_obs, preds_i_obs).detach().cpu()
+                ]
+                targets_all[i_obs] += [
+                    ds_val.denormalize_data(i_obs, target_i_obs).detach().cpu()
+                ]
 
                 target_i_coords = (
                     torch.cat([t[:, :n].unsqueeze(0) for t in targets[i_obs][i_b]], 0)
@@ -284,9 +314,11 @@ class Trainer(Trainer_Base):
         )
 
     ###########################################
-    def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
+    def run(
+        self, cf, private_cf, run_id_contd=None, epoch_contd=None, run_id_new=False
+    ):
         # general initalization
-        self.init(cf, run_id_contd, epoch_contd, run_id_new)
+        self.init(cf, private_cf, run_id_contd, epoch_contd, run_id_new)
 
         self.dataset = MultiStreamDataSampler(
             cf.data_path,
@@ -349,7 +381,9 @@ class Trainer(Trainer_Base):
             "num_workers": cf.loader_num_workers,
             "pin_memory": True,
         }
-        self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
+        self.data_loader = torch.utils.data.DataLoader(
+            self.dataset, **loader_params, sampler=None
+        )
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset_val, **loader_params, sampler=None
         )
@@ -419,18 +453,23 @@ class Trainer(Trainer_Base):
         )
         self.grad_scaler = torch.amp.GradScaler("cuda")
 
+        assert len(self.dataset) > 0, f"No data found in {self.dataset}"
+
         # lr is updated after each batch so account for this
+        # TODO: conf should be read-only, do not modify the conf in flight
         cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size)
+
         steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
+        _logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
         # ensure that steps_decay has a reasonable value
         if steps_decay < int(0.2 * cf.lr_steps):
             cf.lr_steps_warmup = int(0.1 * cf.lr_steps)
             cf.lr_steps_cooldown = int(0.05 * cf.lr_steps)
             steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
-            str = f"cf.lr_steps_warmup and cf.lr_steps_cooldown were larger than cf.lr_steps={cf.lr_steps}"
-            str += ". The value have been adjusted to cf.lr_steps_warmup={cf.lr_steps_warmup} and "
-            str += " cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}."
-            logging.getLogger("obslearn").warning("")
+            s = f"cf.lr_steps_warmup and cf.lr_steps_cooldown were larger than cf.lr_steps={cf.lr_steps}"
+            s += f". The value have been adjusted to cf.lr_steps_warmup={cf.lr_steps_warmup} and "
+            s += f" cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}."
+            logging.getLogger("obslearn").warning(s)
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             cf.batch_size,
@@ -455,7 +494,9 @@ class Trainer(Trainer_Base):
 
         # get function handles for loss function terms
         self.loss_fcts = [[getattr(losses, name), w] for name, w in cf.loss_fcts]
-        self.loss_fcts_val = [[getattr(losses, name), w] for name, w in cf.loss_fcts_val]
+        self.loss_fcts_val = [
+            [getattr(losses, name), w] for name, w in cf.loss_fcts_val
+        ]
 
         # recover epoch when continuing run
         epoch_base = int(self.cf.istep / len(self.data_loader))
@@ -501,7 +542,10 @@ class Trainer(Trainer_Base):
 
         # merge across batch dimension (and keep streams and )
         targets_rt = [
-            [torch.cat([t[i] for t in targets[fstep]]) for i in range(len(targets[0][0]))]
+            [
+                torch.cat([t[i] for t in targets[fstep]])
+                for i in range(len(targets[0][0]))
+            ]
             for fstep in range(len(targets))
         ]
         targets_coords_rt = [
@@ -525,7 +569,12 @@ class Trainer(Trainer_Base):
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):
             for i_obs, (target, target_coords2, si) in enumerate(
-                zip(targets_rt[fstep], targets_coords_rt[fstep], self.cf.streams, strict=False)
+                zip(
+                    targets_rt[fstep],
+                    targets_coords_rt[fstep],
+                    self.cf.streams,
+                    strict=False,
+                )
             ):
                 pred = preds[fstep][i_obs]
 
@@ -535,15 +584,21 @@ class Trainer(Trainer_Base):
                 # set obs_loss_weight = 1. when not specified
                 obs_loss_weight = si["loss_weight"] if "loss_weight" in si else 1.0
                 channel_loss_weight = (
-                    si["channel_weight"] if "channel_weight" in si else np.ones(num_channels)
+                    si["channel_weight"]
+                    if "channel_weight" in si
+                    else np.ones(num_channels)
                 )
                 # in validation mode, always unweighted loss is computed
                 obs_loss_weight = 1.0 if mode == "validation" else obs_loss_weight
                 channel_loss_weight = (
-                    np.ones(num_channels) if mode == "validation" else channel_loss_weight
+                    np.ones(num_channels)
+                    if mode == "validation"
+                    else channel_loss_weight
                 )
 
-                tok_spacetime = si["tokenize_spacetime"] if "tokenize_spacetime" in si else False
+                tok_spacetime = (
+                    si["tokenize_spacetime"] if "tokenize_spacetime" in si else False
+                )
 
                 if target.shape[0] > 0 and pred.shape[0] > 0:
                     # extract content if tokens have been padded
@@ -558,9 +613,15 @@ class Trainer(Trainer_Base):
                         )
                         if tro_type == "token":
                             pred = pred.reshape(
-                                [*pred.shape[:2], target.shape[-2], target.shape[-1] - gs]
+                                [
+                                    *pred.shape[:2],
+                                    target.shape[-2],
+                                    target.shape[-1] - gs,
+                                ]
                             )
-                            pred = torch.cat([pred[:, i, :l] for i, l in enumerate(sl)], 1)
+                            pred = torch.cat(
+                                [pred[:, i, :l] for i, l in enumerate(sl)], 1
+                            )
                     else:
                         pred = pred.reshape([pred.shape[0], -1, target.shape[-1] - gs])
                     # extract data/coords and remove token dimension if it exists
@@ -581,7 +642,9 @@ class Trainer(Trainer_Base):
                         # compute per channel loss
                         # val_uw is unweighted loss for logging
                         val, val_uw, ctr = (
-                            torch.tensor(0.0, device=self.devices[0], requires_grad=True),
+                            torch.tensor(
+                                0.0, device=self.devices[0], requires_grad=True
+                            ),
                             0.0,
                             0.0,
                         )
@@ -600,10 +663,16 @@ class Trainer(Trainer_Base):
                                             target_data[mask, i],
                                             pred[:, mask, i],
                                             pred[:, mask, i].mean(0),
-                                            pred[:, mask, i].std(0) if ens else torch.zeros(1),
+                                            (
+                                                pred[:, mask, i].std(0)
+                                                if ens
+                                                else torch.zeros(1)
+                                            ),
                                         )
                                         val_uw += temp.item()
-                                        val = val + channel_loss_weight[i] * temp  # * tw[jj]
+                                        val = (
+                                            val + channel_loss_weight[i] * temp
+                                        )  # * tw[jj]
                                         ctr += 1
 
                             else:
@@ -613,9 +682,11 @@ class Trainer(Trainer_Base):
                                         target_data[mask_nan[:, i], i],
                                         pred[:, mask_nan[:, i], i],
                                         pred[:, mask_nan[:, i], i].mean(0),
-                                        pred[:, mask_nan[:, i], i].std(0)
-                                        if ens
-                                        else torch.zeros(1),
+                                        (
+                                            pred[:, mask_nan[:, i], i].std(0)
+                                            if ens
+                                            else torch.zeros(1)
+                                        ),
                                     )
                                     val_uw += temp.item()
                                     val = val + channel_loss_weight[i] * temp
@@ -624,7 +695,10 @@ class Trainer(Trainer_Base):
                         val_uw = val_uw / ctr if (ctr > 0) else val_uw
 
                         losses_all[j, i_obs] = val_uw
-                        if self.cf.loss_fcts[j][0] == "stats" or self.cf.loss_fcts[j][0] == "kcrps":
+                        if (
+                            self.cf.loss_fcts[j][0] == "stats"
+                            or self.cf.loss_fcts[j][0] == "kcrps"
+                        ):
                             stddev_all[i_obs] = pred[:, mask_nan].std(0).mean().item()
                         # ignore NaNs so that training can continue even if one pred-net diverges
                         loss = loss + (
@@ -643,7 +717,9 @@ class Trainer(Trainer_Base):
                         )
 
                         fp32 = torch.float32
-                        preds_all[i_obs] += [dn_data(i_obs, pred.to(fp32), False).detach().cpu()]
+                        preds_all[i_obs] += [
+                            dn_data(i_obs, pred.to(fp32), False).detach().cpu()
+                        ]
                         targets_all[i_obs] += [
                             dn_data(i_obs, target_data.to(fp32), False).detach().cpu()
                         ]
@@ -682,7 +758,9 @@ class Trainer(Trainer_Base):
                 forecast_dt,
             ) = data
 
-            losses_all = torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
+            losses_all = (
+                torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
+            )
             stddev_all = torch.zeros(len(cf.streams)) * torch.nan
 
             # evaluate model
@@ -718,7 +796,9 @@ class Trainer(Trainer_Base):
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), max_norm=cf.grad_clip)
+            torch.nn.utils.clip_grad_norm_(
+                self.ddp_model.parameters(), max_norm=cf.grad_clip
+            )
 
             # optimizer step
             self.grad_scaler.step(self.optimizer)
@@ -775,12 +855,17 @@ class Trainer(Trainer_Base):
                         forecast_dt,
                     ) = data
 
-                    losses_all = torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
+                    losses_all = (
+                        torch.ones((len(self.loss_fcts_val), len(cf.streams)))
+                        * torch.nan
+                    )
                     stddev_all = torch.zeros(len(cf.streams)) * torch.nan
 
                     # evaluate model
                     with torch.autocast(
-                        device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
+                        device_type="cuda",
+                        dtype=torch.float16,
+                        enabled=cf.with_mixed_precision,
                     ):
                         preds = self.ddp_model(
                             self.model_params,
@@ -820,7 +905,10 @@ class Trainer(Trainer_Base):
                             mode="validation",
                         )
 
-                        cols = [ds[0][0].colnames for ds in self.dataset_val.obs_datasets_norm]
+                        cols = [
+                            ds[0][0].colnames
+                            for ds in self.dataset_val.obs_datasets_norm
+                        ]
                         write_validation(
                             self.cf,
                             self.path_run,
@@ -862,12 +950,16 @@ class Trainer(Trainer_Base):
                 if self.cf.rank == 0 and self.cf.istep >= 0:
                     loss_dict = {}
                     for j, (lname, _) in enumerate(cf.loss_fcts_val):
-                        loss_dict[f"validation {lname}"] = torch.nanmean(losses_all[j]).item()
-                    loss_dict["validation std_dev"] = torch.nanmean(stddev_all.mean()).item()
+                        loss_dict[f"validation {lname}"] = torch.nanmean(
+                            losses_all[j]
+                        ).item()
+                    loss_dict["validation std_dev"] = torch.nanmean(
+                        stddev_all.mean()
+                    ).item()
                     for i_obs, rt in enumerate(cf.streams):
-                        loss_dict["validation {}".format(rt["name"].replace(",", ""))] = float(
-                            losses_all[0, i_obs]
-                        )
+                        loss_dict[
+                            "validation {}".format(rt["name"].replace(",", ""))
+                        ] = float(losses_all[0, i_obs])
 
                     # add data to plain logger
                     samples = cf.istep * cf.batch_size * cf.num_ranks
@@ -879,7 +971,9 @@ class Trainer(Trainer_Base):
                         flush=True,
                     )
                     for i_obs, rt in enumerate(cf.streams):
-                        print("{}".format(rt["name"]) + f" : {losses_all[0, i_obs]:0.4E}")
+                        print(
+                            "{}".format(rt["name"]) + f" : {losses_all[0, i_obs]:0.4E}"
+                        )
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
@@ -907,7 +1001,9 @@ class Trainer(Trainer_Base):
         source_tokens_cells = [
             [s.to(dev, non_blocking=True) for s in ss] for ss in source_tokens_cells
         ]
-        source_centroids = [[c.to(dev, non_blocking=True) for c in cb] for cb in source_centroids]
+        source_centroids = [
+            [c.to(dev, non_blocking=True) for c in cb] for cb in source_centroids
+        ]
         source_cell_lens = source_cell_lens.to(dev, non_blocking=True)
         source_tokens_lens = source_tokens_lens.to(dev, non_blocking=True)
         source_idxs_embed[0] = [
@@ -916,10 +1012,12 @@ class Trainer(Trainer_Base):
 
         # target data
         targets_coords = [
-            [[t.to(dev, non_blocking=True) for t in tt] for tt in ttt] for ttt in targets_coords
+            [[t.to(dev, non_blocking=True) for t in tt] for tt in ttt]
+            for ttt in targets_coords
         ]
         target_tokens = [
-            [[t.to(dev, non_blocking=True) for t in tt] for tt in ttt] for ttt in target_tokens
+            [[t.to(dev, non_blocking=True) for t in tt] for tt in ttt]
+            for ttt in target_tokens
         ]
         targets_coords_idxs[0] = [
             [s.to(dev, non_blocking=True) for s in ss] for ss in targets_coords_idxs[0]
@@ -972,8 +1070,12 @@ class Trainer(Trainer_Base):
     ###########################################
     def log(self, bidx, epoch):
         if bidx % self.log_freq == 0 and bidx > 0:
-            l_avg = self.ddp_average(torch.nanmean(torch.stack(self.losses_hist), axis=0))
-            stddev_avg = self.ddp_average(torch.nanmean(torch.stack(self.stddev_hist), axis=0))
+            l_avg = self.ddp_average(
+                torch.nanmean(torch.stack(self.losses_hist), axis=0)
+            )
+            stddev_avg = self.ddp_average(
+                torch.nanmean(torch.stack(self.stddev_hist), axis=0)
+            )
             samples = self.cf.istep * self.cf.batch_size * self.cf.num_ranks
 
             if self.cf.rank == 0:
@@ -983,8 +1085,8 @@ class Trainer(Trainer_Base):
                     "lr": self.lr_scheduler.get_lr(),
                 }
                 for i_obs, rt in enumerate(self.cf.streams):
-                    loss_dict["training {}".format(rt["name"].replace(",", ""))] = float(
-                        l_avg[0, i_obs]
+                    loss_dict["training {}".format(rt["name"].replace(",", ""))] = (
+                        float(l_avg[0, i_obs])
                     )
 
                 # plain logger
@@ -1028,7 +1130,10 @@ class Trainer(Trainer_Base):
                 )
                 print("\t", end="")
                 for i_obs, rt in enumerate(self.cf.streams):
-                    print("{}".format(rt["name"]) + f" : {l_avg[0, i_obs]:0.4E} \t", end="")
+                    print(
+                        "{}".format(rt["name"]) + f" : {l_avg[0, i_obs]:0.4E} \t",
+                        end="",
+                    )
                 print("\n", flush=True)
 
             self.t_start = time.time()

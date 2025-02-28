@@ -13,6 +13,7 @@ import logging
 import os
 import pathlib
 from pathlib import Path
+from typing import Any
 
 import pynvml
 import torch
@@ -23,7 +24,7 @@ import yaml
 from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.config import Config
 
-_logger = logging.getLogger(__path__)
+_logger = logging.getLogger(__name__)
 
 
 class Trainer_Base:
@@ -121,8 +122,9 @@ class Trainer_Base:
 
         # read all reportypes from directory, append to existing ones
         temp = {}
-        streams_dir = Path(cf.streams_directory)
+        streams_dir = Path(cf.streams_directory).absolute()
         _logger.info(f"Reading streams from {streams_dir}")
+        _logger.info("private_cf: %s", private_cf)
 
         for fh in sorted(streams_dir.rglob("*.yml")):
             stream_parsed = yaml.safe_load(fh.read_text())
@@ -130,7 +132,7 @@ class Trainer_Base:
                 temp.update(stream_parsed)
         for k, v in temp.items():
             v["name"] = k
-            v["filenames"] = private_cf.streams[k]["filenames"]
+            v["filenames"] = private_cf["streams"][k]["filenames"]
             cf.streams.append(v)
 
         # sanity checking (at some point, the dict should be parsed into a class)
