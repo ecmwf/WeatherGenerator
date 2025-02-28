@@ -44,6 +44,12 @@ dev = [
 ]
 
 
+[tool.black]
+
+# Wide rows
+line-length = 100
+
+
 # The linting configuration
 [tool.ruff]
 
