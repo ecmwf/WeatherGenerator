@@ -13,8 +13,8 @@ import time
 import traceback
 
 from weathergen.train.trainer import Trainer
-from weathergen.utils.logger import init_loggers
 from weathergen.utils.config import Config, private_conf
+from weathergen.utils.logger import init_loggers
 
 
 ####################################################################################################
