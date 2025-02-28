@@ -540,12 +540,7 @@ class Trainer(Trainer_Base):
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):
             for i_obs, (target, target_coords2, si) in enumerate(
-                zip(
-                    targets_rt[fstep],
-                    targets_coords_rt[fstep],
-                    self.cf.streams,
-                    strict=False,
-                )
+                zip(targets_rt[fstep], targets_coords_rt[fstep], self.cf.streams, strict=False)
             ):
                 pred = preds[fstep][i_obs]
 

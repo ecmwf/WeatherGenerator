@@ -160,9 +160,8 @@ def train(run_id=None) -> None:
     cf.masking_rate_sampling = True  # False
     cf.sampling_rate_target = 1.0
 
-    # cf.num_epochs = 24 # TODO
-    cf.num_epochs = 1
-    # cf.samples_per_epoch = 4096 # TODO
+    cf.num_epochs = 24
+    cf.samples_per_epoch = 4096
     cf.samples_per_epoch = 16
     cf.samples_per_validation = 512
     cf.shuffle = True
@@ -172,8 +171,8 @@ def train(run_id=None) -> None:
     cf.lr_max = 0.00003
     cf.lr_final_decay = 0.000001
     cf.lr_final = 0.0
-    cf.lr_steps_warmup = 2  # 256 # TODO
-    cf.lr_steps_cooldown = 2  # 4096 TODO
+    cf.lr_steps_warmup = 256
+    cf.lr_steps_cooldown = 4096
     cf.lr_policy_warmup = "cosine"
     cf.lr_policy_decay = "linear"
     cf.lr_policy_cooldown = "linear"
@@ -183,7 +182,8 @@ def train(run_id=None) -> None:
     cf.norm_type = "LayerNorm"  #'LayerNorm' #'RMSNorm'
     cf.nn_module = "te"
 
-    cf.data_path = private_cf["data_path"]  # "/home/mlx/ai-ml/datasets/stable/"
+    cf.data_path = private_cf["data_path"]
+    # "/home/mlx/ai-ml/datasets/stable/"
     # cf.data_path = '/lus/h2resw01/fws4/lb/project/ai-ml/observations/v1'
     # cf.data_path = '/leonardo_scratch/large/userexternal/clessig0/obs/v1'
     cf.start_date = 201301010000

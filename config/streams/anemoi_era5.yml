@@ -9,7 +9,7 @@
 
 ERA5 :
   type : anemoi
-  filenames : null # Path to be set
+  filenames : null # Path to be set by the private configuration
   loss_weight : 1.
   source_variables : [null]
   target_variables : [null]
