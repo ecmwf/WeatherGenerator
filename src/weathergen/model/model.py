@@ -573,26 +573,20 @@ class Model(torch.nn.Module):
     def forward(
         self,
         model_params,
-        source_tokens_cells,
-        source_tokens_lens,
-        source_centroids,
-        source_cell_lens,
-        source_idxs_embed,
-        target_coords,
-        target_coords_lens,
-        target_coords_idxs,
-        num_time_steps,
+        batch
     ):
         batch_size = self.cf.batch_size if self.training else self.cf.batch_size_validation
-        assert len(source_tokens_cells) == batch_size
+
+        # TODO
+        (streams_data, 
+        source_cell_lens, 
+        target_coords_idxs,
+        num_time_steps) = batch
 
         # embed
         tokens = self.embed_cells(
             model_params,
-            source_tokens_cells,
-            source_tokens_lens,
-            source_centroids,
-            source_idxs_embed,
+            streams_data
         )
 
         # local assimilation engine and adapter
@@ -618,8 +612,7 @@ class Model(torch.nn.Module):
                 model_params,
                 num_time_steps,
                 tokens,
-                target_coords,
-                target_coords_lens,
+                streams_data,
                 target_coords_idxs,
             )
         ]
@@ -630,26 +623,33 @@ class Model(torch.nn.Module):
     def embed_cells(
         self,
         model_params,
-        source_tokens_cells,
-        source_tokens_lens,
-        source_centroids,
-        source_idxs_embed,
-    ):
-        # cat = torch.cat
+        streams_data
+    ) :
 
+        import code
+        # code.interact( local=locals())
+        source_tokens_lens = torch.stack(
+            [
+                torch.stack([s.source_tokens_lens if len(s.source_tokens_lens) > 0 
+                                                        else torch.tensor([]) for s in stl_b])
+                for stl_b in streams_data
+            ]
+        )
         offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
         tokens_all = torch.empty(
             (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=torch.float16, device="cuda"
         )
 
-        for ib, sb in enumerate(source_tokens_cells):
+        for ib, sb in enumerate(streams_data):
             for itype, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                if s.shape[0] > 0:
-                    idxs = source_idxs_embed[0][ib][itype]
-                    idxs_pe = source_idxs_embed[1][ib][itype]
+                if not s.empty() :
+                    idxs = s.source_idxs_embed
+                    idxs_pe = s.source_idxs_embed_pe
                     # create full scatter index (there's no broadcasting which is likely highly inefficient)
                     idxs = idxs.repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed(s, source_centroids[ib][itype]).flatten(0, 1)
+                    # TODO: move torch.stack to data loader
+                    # code.interact( local=locals())
+                    x_embed = embed( s.source_tokens_cells, s.source_centroids).flatten(0, 1)
                     # x_embed = torch.cat( [embed( s_c, c_c).flatten(0,1)
                     #                 for s_c,c_c in zip( torch.split( s, 49152),
                     #                                     torch.split( source_centroids[ib][itype], 49152))])
@@ -748,7 +748,7 @@ class Model(torch.nn.Module):
         return tokens
 
     #########################################
-    def predict(self, model_params, fstep, tokens, tcs, target_coords_lens, target_coords_idxs):
+    def predict(self, model_params, fstep, tokens, streams_data, target_coords_idxs):
         # fp32, i32 = torch.float32, torch.int32
         batch_size = self.cf.batch_size if self.training else self.cf.batch_size_validation
 
@@ -772,13 +772,15 @@ class Model(torch.nn.Module):
             if tro_type == "obs_value":
                 tc_tokens = torch.cat(
                     [
-                        checkpoint(tc_embed, tcs[fstep][i_b][ii], use_reentrant=False)
-                        if len(tcs[fstep][i_b][ii].shape) > 1
-                        else tcs[fstep][i_b][ii]
-                        for i_b in range(len(tcs[fstep]))
+                        checkpoint( tc_embed, streams_data[i_b][ii].target_coords[fstep], 
+                                    use_reentrant=False)
+                        if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
+                        else streams_data[i_b][ii].target_coords[fstep]
+                        for i_b in range(len(streams_data))
                     ]
                 )
             elif tro_type == "token":
+                assert False
                 tc_tokens = torch.cat(
                     [
                         checkpoint(
@@ -812,7 +814,7 @@ class Model(torch.nn.Module):
             # lens for varlen attentino
             tcs_lens = target_coords_idxs[0][fstep][ii]
             # coord information for learnable layer norm
-            tcs_aux = torch.cat([tcs[fstep][i_b][ii] for i_b in range(len(tcs[0]))])
+            tcs_aux = torch.cat([streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))])
 
             # apply prediction engine
             for ib, block in enumerate(tte):

@@ -18,7 +18,11 @@ from weathergen.datasets.anemoi_dataset import AnemoiDataset
 from weathergen.datasets.batchifyer import Batchifyer
 from weathergen.datasets.normalizer import DataNormalizer
 from weathergen.datasets.obs_dataset import ObsDataset
-from weathergen.datasets.utils import merge_cells
+from weathergen.datasets.stream_data import StreamData
+from weathergen.datasets.utils import (
+        compute_offsets_embed,
+        compute_idxs_predict,
+        compute_source_cell_lens)
 from weathergen.utils.logger import logger
 
 
@@ -266,15 +270,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # since there are empty batches
         idx_raw = iter_start
         for i, _bidx in enumerate(range(iter_start, iter_end, self.batch_size)):
-            # targets, targets_coords, targets_idxs = [], [], [],
-            tcs, tcs_lens, target_tokens, source_tokens_cells, source_tokens_lens = (
-                [],
-                [],
-                [],
-                [],
-                [],
-            )
-            target_tokens_lens, sources, source_centroids = [], [], []
 
             # forecast_dt needs to be constant per batch (amortized through data parallel training)
             forecast_dt = self.perms_forecast_dt[i]
@@ -282,7 +277,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # use while loop due to the scattered nature of the data in time and to
             # ensure batches are not empty
             ib = 0
-            while len(source_tokens_cells) < self.batch_size:
+            batch = []
+            while len(batch) < self.batch_size:
                 idx = self.perms[idx_raw % self.perms.shape[0]]
                 idx_raw += 1
 
@@ -297,37 +293,18 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     self.obs_datasets_norm[-1][0][0].time_window(idx + step_forecast_dt),
                 )
 
-                c_tcs = [[] for _ in range(forecast_dt + 1)]
-                c_tcs_lens = [[] for _ in range(forecast_dt + 1)]
-                c_target_tokens = [[] for _ in range(forecast_dt + 1)]
-                c_target_tokens_lens = [[] for _ in range(forecast_dt + 1)]
-                c_source_tokens_cells = []
-                c_source_tokens_lens = []
-                c_source_centroids = []
-                c_source_raw = []
+                streams_data = []
 
+                # for all streams
                 for obs_id, (stream_info, stream_dsn, stream_idxs) in enumerate(
                     zip(self.streams, self.obs_datasets_norm, self.obs_datasets_idxs, strict=False)
                 ):
-                    s_tcs = []
-                    s_tcs_lens = []
-                    s_target_tokens = []
-                    s_target_tokens_lens = []
-                    s_source_tokens_cells = []
-                    s_source_tokens_lens = []
-                    s_source_centroids = []
-                    s_source_raw = []
+
+                    stream_data = StreamData( forecast_dt, nhc_source, nhc_target)
 
                     token_size = stream_info["token_size"]
-                    # grid = (
-                    #     stream_info["gridded_output"] if "gridded_output" in stream_info else None
-                    # )
-                    # grid_info = (
-                    #     stream_info["gridded_output_info"]
-                    #     if "gridded_output_info" in stream_info
-                    #     else None
-                    # )
 
+                    # for all sources for current stream
                     for i_source, ((ds, normalizer, do), s_idxs) in enumerate(
                         zip(stream_dsn, stream_idxs, strict=False)
                     ):
@@ -339,21 +316,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             times1 = np.concatenate([times0, times1], 0)
 
                         if source1.shape[0] < token_size:
-                            # skip if there are not enough data points
-                            tt_cells, tt_lens = (
-                                torch.tensor([]),
-                                torch.zeros([nhc_target], dtype=torch.int32),
-                            )
-                            ss_cells, ss_lens = (
-                                torch.tensor([]),
-                                torch.zeros([nhc_source], dtype=torch.int32),
-                            )
-                            ss_centroids = torch.tensor([])
-                            tc, tc_lens = (
-                                torch.tensor([]),
-                                torch.zeros([nhc_target], dtype=torch.int32),
-                            )
-                            source1_raw = torch.tensor([])
+                            stream_data.add_empty_source()
                         else:
                             oi = ds.properties["obs_id"]
                             source1 = self.prepare_window_source(
@@ -375,61 +338,21 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 normalizer.normalize_coords,
                             )
 
-                        s_source_raw += [source1_raw]
-                        s_source_tokens_lens += [ss_lens]
-                        s_source_tokens_cells += [ss_cells]
-                        s_source_centroids += (
-                            [ss_centroids] if len(ss_centroids) > 0 else [torch.tensor([])]
-                        )
-
-                    # collect all sources in current stream and add to batch sample list when non-empty
-                    if torch.tensor([len(s) for s in s_source_tokens_cells]).sum() > 0:
-                        c_source_raw += [torch.cat(s_source_raw)]
-
-                        # collect by merging entries per cells, preserving cell structure
-                        c_source_tokens_cells += [merge_cells(s_source_tokens_cells, nhc_source)]
-                        c_source_centroids += [merge_cells(s_source_centroids, nhc_source)]
-                        # lens can be stacked and summed
-                        c_source_tokens_lens += [torch.stack(s_source_tokens_lens).sum(0)]
-                        # remove NaNs
-                        c_source_tokens_cells[-1][torch.isnan(c_source_tokens_cells[-1])] = (
-                            self.mask_value
-                        )
-                        c_source_centroids[-1][torch.isnan(c_source_centroids[-1])] = (
-                            self.mask_value
-                        )
-                    else:
-                        c_source_raw += [torch.tensor([])]
-                        c_source_tokens_lens += [torch.zeros([nhc_source])]
-                        c_source_tokens_cells += [torch.tensor([])]
-                        c_source_centroids += [torch.tensor([])]
+                            stream_data.add_source( source1_raw, ss_lens, ss_cells, ss_centroids)
 
                     # target
 
                     # collect for all forecast steps
                     for fstep in range(forecast_dt + 1):
-                        # collect all streams
+
+                        # collect all sources
                         for i_source, ((ds, normalizer, do), s_idxs) in enumerate(
                             zip(stream_dsn, stream_idxs, strict=False)
                         ):
                             (source2, times2) = ds[idx + step_forecast_dt]
 
                             if source2.shape[0] < token_size:
-                                # skip if there are not enough data points
-                                tt_cells, tt_lens = (
-                                    torch.tensor([]),
-                                    torch.zeros([nhc_target], dtype=torch.int32),
-                                )
-                                ss_cells, ss_lens = (
-                                    torch.tensor([]),
-                                    torch.zeros([nhc_source], dtype=torch.int32),
-                                )
-                                ss_centroids = torch.tensor([])
-                                tc, tc_lens = (
-                                    torch.tensor([]),
-                                    torch.zeros([nhc_target], dtype=torch.int32),
-                                )
-                                source1_raw = torch.tensor([])
+                                stream_data.add_empty_target( fstep)
                             else:
                                 oi = ds.properties["obs_id"]
                                 source2 = self.prepare_window_target(
@@ -447,168 +370,33 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                     normalizer.normalize_targets,
                                 )
 
-                            s_target_tokens_lens += (
-                                [tt_lens] if len(tt_lens) > 0 else [torch.tensor([])]
-                            )
-                            s_target_tokens += (
-                                [tt_cells] if len(tt_cells) > 0 else [torch.tensor([])]
-                            )
-                            s_tcs += [tc]
-                            s_tcs_lens += [tc_lens]
+                                stream_data.add_target( fstep, tt_cells, tt_lens, tc, tc_lens)
 
-                        # collect all sources in current stream and add to batch sample list when non-empty
-                        if torch.tensor([len(s) for s in s_target_tokens]).sum() > 0:
-                            c_tcs[fstep] += [merge_cells(s_tcs, nhc_target)]
-                            c_target_tokens[fstep] += [merge_cells(s_target_tokens, nhc_target)]
-                            # lens can be stacked and summed
-                            c_target_tokens_lens[fstep] += [
-                                torch.stack(s_target_tokens_lens).sum(0)
-                            ]
-                            c_tcs_lens[fstep] += [torch.stack(s_tcs_lens).sum(0)]
-                            # remove NaNs
-                            c_tcs[fstep][-1][torch.isnan(c_tcs[fstep][-1])] = self.mask_value
+                    # merge inputs for sources and targets for current stream
+                    stream_data.merge_inputs()
+                    streams_data += [ stream_data ]
 
-                        else:
-                            c_tcs[fstep] += [torch.tensor([])]
-                            c_tcs_lens[fstep] += [torch.tensor([])]
-                            c_target_tokens[fstep] += [torch.tensor([])]
-                            c_target_tokens_lens[fstep] += [torch.tensor([])]
+                if np.array([s.empty() for s in streams_data]).all() :
+                    continue
 
-                # add batch, ensure sample is not empty
-                s1 = torch.tensor([stl.sum() for stl in c_source_tokens_lens]).sum()
-                s2 = torch.tensor([len(t) for f_tcs in c_tcs for t in f_tcs]).sum()
-                if s1 > 0 and s2 > 0:
-                    # source
-                    sources += [c_source_raw]
-                    source_tokens_cells += [c_source_tokens_cells]
-                    source_tokens_lens += [c_source_tokens_lens]
-                    source_centroids += [c_source_centroids]
-                    # target
-                    tcs += [c_tcs]
-                    tcs_lens += [c_tcs_lens]
-                    target_tokens += [c_target_tokens]
-                    target_tokens_lens += [c_target_tokens_lens]
-                    ib += 1
+                batch += [streams_data]
 
-            # skip if source is completely empty or nothing to predict (which causes errors in back prop)
-            target_tokens_lens_total = torch.cat(
-                [torch.cat(t) for tt in target_tokens_lens for t in tt]
-            )
-            if len(source_tokens_lens) == 0 or target_tokens_lens_total.sum() == 0:
-                continue
+            # aggregated lens of tokens per cell
+            (source_cell_lens, source_cell_lens_raw) = compute_source_cell_lens( batch)
 
-            # precompute for processing in the model (with varlen flash attention)
-            source_cell_lens = torch.stack(
-                [
-                    torch.stack(stl_b) if len(stl_b) > 0 else torch.tensor([])
-                    for stl_b in source_tokens_lens
-                ]
-            )
-            source_cell_lens = torch.sum(source_cell_lens, 1).flatten().to(torch.int32)
-            source_cell_lens = torch.cat([torch.zeros(1, dtype=torch.int32), source_cell_lens])
+            # compute offsets for scatter computation after embedding
+            batch = compute_offsets_embed( batch, source_cell_lens_raw)
 
-            source_tokens_lens = torch.from_numpy(np.array(source_tokens_lens)).to(torch.int32)
+            # compute offsets and auxiliary data needed for prediction computation
+            # (info is not per stream so separate data structure)
+            assert self.target_coords_local
+            target_coords_idx = compute_idxs_predict( forecast_dt, batch)
 
-            # precompute index sets for scatter operation after embed
-            offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
-            offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets_base[:-1]])
-            offsets_pe = torch.zeros_like(offsets)
-            idxs_embed = []
-            idxs_embed_pe = []
-            for ib, sb in enumerate(source_tokens_cells):
-                idxs_embed += [[]]
-                idxs_embed_pe += [[]]
-                for itype, s in enumerate(sb):
-                    if s.shape[0] == 0:
-                        idxs_embed[-1] += [torch.tensor([])]
-                        idxs_embed_pe[-1] += [torch.tensor([])]
-                        continue
-
-                    idxs = torch.cat(
-                        [
-                            torch.arange(o, o + l, dtype=torch.int64)
-                            for o, l in zip(offsets, source_tokens_lens[ib, itype], strict=False)
-                        ]
-                    )
-                    idxs_embed[-1] += [idxs.unsqueeze(1)]
-                    idxs_embed_pe[-1] += [
-                        torch.cat(
-                            [
-                                torch.arange(o, o + l, dtype=torch.int32)
-                                for o, l in zip(
-                                    offsets_pe, source_tokens_lens[ib][itype], strict=False
-                                )
-                            ]
-                        )
-                    ]
-                    # advance offsets
-                    offsets += source_tokens_lens[ib][itype]
-                    offsets_pe += source_tokens_lens[ib][itype]
-
-            target_coords_lens = tcs_lens
-
-            # target coords idxs
-            tcs_lens_merged = []
-            tcs_idxs = []
-            pad = torch.zeros(1, dtype=torch.int32)
-            for ii in range(len(self.streams)):
-                # generate len lists for varlen attention (per batch list for local, per-cell attention and
-                # global, per-batch-item lists otherwise)
-                if self.target_coords_local:
-                    tcs_lens_merged += [
-                        [
-                            torch.cat(
-                                [
-                                    pad,
-                                    torch.cat(
-                                        [
-                                            target_coords_lens[i_b][fstep][ii]
-                                            for i_b in range(len(tcs))
-                                        ]
-                                    ),
-                                ]
-                            ).to(torch.int32)
-                            for fstep in range(forecast_dt + 1)
-                        ]
-                    ]
-                else:
-                    tcs_lens_merged += [
-                        torch.cat(
-                            [pad, torch.tensor([len(tcs[i_b][ii]) for i_b in range(len(tcs))])]
-                        ).to(torch.int32)
-                    ]
-
-                # lengths for varlen attention
-                tcs_idxs += [
-                    [torch.cat([torch.arange(l) for l in tlm]) for tlm in tcs_lens_merged[-1]]
-                ]
-
-            # reorder to have forecast step as first dimension, then batch items
-            def list_transpose(clist):
-                return [[l[i] for l in clist] for i in range(len(clist[0]))]
-
-            target_tokens = list_transpose(target_tokens)
-            target_tokens_lens = list_transpose(target_tokens_lens)
-            tcs = list_transpose(tcs)
-            target_coords_lens = list_transpose(target_coords_lens)
-            tcs_lens_merged = list_transpose(tcs_lens_merged)
-            tcs_idxs = list_transpose(tcs_idxs)
-
-            assert len(source_tokens_cells) == self.batch_size
-            yield (
-                sources,
-                source_tokens_cells,
-                source_tokens_lens,
-                source_centroids,
-                source_cell_lens,
-                [idxs_embed, idxs_embed_pe],
-                target_tokens,
-                target_tokens_lens,
-                tcs,
-                target_coords_lens,
-                [tcs_lens_merged, tcs_idxs],
-                forecast_dt,
-            )
+            assert len(batch) == self.batch_size
+            yield ( batch,
+                    source_cell_lens,
+                    target_coords_idx,
+                    forecast_dt )
 
     ###################################################
     def prepare_window_source(

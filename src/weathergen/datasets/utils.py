@@ -551,11 +551,105 @@ def get_target_coords_local_ffast(hlc, target_coords, geoinfo_offset, verts_Rs, 
     return a
 
 
-####################################################################################################
-if __name__ == "__main__":
-    vecs = torch.nn.functional.normalize(torch.rand((10, 3), dtype=torch.float64))
-    Rs = vecs_to_rots(vecs)
-    res = torch.stack([torch.matmul(R, vec) for R, vec in zip(Rs, vecs, strict=False)])
-    ref = torch.tensor([1.0, 0.0, 0.0], dtype=torch.float64)
-    passed = torch.allclose(res, ref)
-    print(f"passed = {passed}")
+def compute_offsets_embed( batch, source_tokens_lens) :
+    """
+
+    """
+
+    # precompute index sets for scatter operation after embed
+    offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
+    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets_base[:-1]])
+    offsets_pe = torch.zeros_like(offsets)
+    idxs_embed = []
+    idxs_embed_pe = []
+    for ib, sb in enumerate(batch):
+        idxs_embed += [[]]
+        idxs_embed_pe += [[]]
+        for itype, s in enumerate(sb):
+
+            if not s.source_empty() :
+
+                idxs = torch.cat(
+                    [
+                        torch.arange(o, o + l, dtype=torch.int64)
+                        for o,l in zip(offsets, source_tokens_lens[ib, itype], strict=False)
+                    ]
+                )
+                idxs_embed[-1] += [idxs.unsqueeze(1)]
+                idxs_embed_pe[-1] += [
+                    torch.cat(
+                        [
+                            torch.arange(o, o + l, dtype=torch.int32)
+                            for o, l in zip(
+                                offsets_pe, source_tokens_lens[ib][itype], strict=False
+                            )
+                        ]
+                    )
+                ]
+
+                s.source_idxs_embed = idxs_embed[-1][0]
+                s.source_idxs_embed_pe = idxs_embed_pe[-1][0]
+
+            # advance offsets
+            offsets += source_tokens_lens[ib][itype]
+            offsets_pe += source_tokens_lens[ib][itype]
+
+    return batch
+
+
+def compute_idxs_predict( forecast_dt, batch ) :
+    """
+
+    """
+
+    target_coords_lens = [[s.target_coords_lens for s in sb] for sb in batch]
+
+    # target coords idxs
+    tcs_lens_merged = []
+    tcs_idxs = []
+    pad = torch.zeros(1, dtype=torch.int32)
+    for ii in range(len(batch[0])):
+        # generate len lists for varlen attention (per batch list for local, per-cell attention and
+        # global
+        tcs_lens_merged += [
+            [
+                torch.cat(
+                    [
+                        pad,
+                        torch.cat(
+                            [
+                                target_coords_lens[i_b][ii][fstep]
+                                for i_b in range(len(target_coords_lens))
+                            ]
+                        ),
+                    ]
+                ).to(torch.int32)
+                for fstep in range(forecast_dt + 1)
+            ]
+        ]
+
+        # lengths for varlen attention
+        tcs_idxs += [
+            [torch.cat([torch.arange(l) for l in tlm]) for tlm in tcs_lens_merged[-1]]
+        ]
+
+    return [tcs_lens_merged, tcs_idxs]
+
+def compute_source_cell_lens( batch) :
+    """
+
+    """
+
+    # precompute for processing in the model (with varlen flash attention)
+    source_cell_lens_raw = torch.stack(
+        [
+            torch.stack([s.source_tokens_lens if len(s.source_tokens_lens) > 0 
+                                                    else torch.tensor([]) for s in stl_b])
+            for stl_b in batch
+        ]
+    )
+    source_cell_lens = torch.sum(source_cell_lens_raw, 1).flatten().to(torch.int32)
+    source_cell_lens = torch.cat([torch.zeros(1, dtype=torch.int32), source_cell_lens])
+
+    return (source_cell_lens, source_cell_lens_raw)
+
