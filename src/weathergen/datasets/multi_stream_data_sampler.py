@@ -20,7 +20,7 @@ from weathergen.datasets.normalizer import DataNormalizer
 from weathergen.datasets.obs_dataset import ObsDataset
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.utils import (
-        compute_offsets_embed,
+        compute_offsets_scatter_embed,
         compute_idxs_predict,
         compute_source_cell_lens)
 from weathergen.utils.logger import logger
@@ -376,16 +376,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     stream_data.merge_inputs()
                     streams_data += [ stream_data ]
 
+                # skip completely empty batch item
                 if np.array([s.empty() for s in streams_data]).all() :
                     continue
 
                 batch += [streams_data]
 
             # aggregated lens of tokens per cell
-            (source_cell_lens, source_cell_lens_raw) = compute_source_cell_lens( batch)
+            source_cell_lens = compute_source_cell_lens( batch)
 
             # compute offsets for scatter computation after embedding
-            batch = compute_offsets_embed( batch, source_cell_lens_raw)
+            batch = compute_offsets_scatter_embed( batch)
 
             # compute offsets and auxiliary data needed for prediction computation
             # (info is not per stream so separate data structure)

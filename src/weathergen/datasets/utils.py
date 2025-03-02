@@ -14,6 +14,8 @@ import numpy as np
 import torch
 from astropy_healpix.healpy import ang2pix
 
+from weathergen.datasets.stream_data import StreamData
+
 
 ####################################################################################################
 def arc_alpha(sin_alpha, cos_alpha):
@@ -22,22 +24,6 @@ def arc_alpha(sin_alpha, cos_alpha):
     mask = sin_alpha < 0.0
     t[mask] = (2.0 * np.pi) - t[mask]
     return t
-
-
-####################################################################################################
-def merge_cells(s_list, num_healpix_cells):
-    if torch.tensor([len(s) for s in s_list]).sum() == 0:
-        return torch.tensor([])
-
-    ret = torch.cat(
-        [
-            torch.cat([s_list[i_s][i] for i_s in range(len(s_list)) if len(s_list[i_s]) > 0])
-            for i in range(num_healpix_cells)
-        ]
-    )
-
-    return ret
-
 
 ####################################################################################################
 def vecs_to_rots(vecs):
@@ -551,10 +537,30 @@ def get_target_coords_local_ffast(hlc, target_coords, geoinfo_offset, verts_Rs, 
     return a
 
 
-def compute_offsets_embed( batch, source_tokens_lens) :
+def compute_offsets_scatter_embed( batch : StreamData) -> StreamData:
     """
+        Compute auxiliary information for scatter operation that changes from stream-centric to 
+        cell-centric computations
 
-    """
+        Parameters
+        ----------
+        batch : str
+            batch of stream data information for which offsets have to be computed
+
+        Returns
+        -------
+        StreamData
+            stream data with offsets added as members
+        """
+
+    # collect source_tokens_lens for all stream datas
+    source_tokens_lens = torch.stack(
+        [
+            torch.stack([s.source_tokens_lens if len(s.source_tokens_lens) > 0 
+                                                    else torch.tensor([]) for s in stl_b])
+            for stl_b in batch
+        ]
+    )
 
     # precompute index sets for scatter operation after embed
     offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
@@ -589,9 +595,21 @@ def compute_offsets_embed( batch, source_tokens_lens) :
     return batch
 
 
-def compute_idxs_predict( forecast_dt, batch ) :
+def compute_idxs_predict( forecast_dt : int , batch : StreamData) -> list :
     """
+        Compute auxiliary information for prediction 
 
+        Parameters
+        ----------
+        forecast_dt : str
+            number of forecast steps
+        batch :
+            StreamData information for current batch
+
+        Returns
+        -------
+        tuple[list,list]
+            - lens for each item for varlen flash attention
     """
 
     target_coords_lens = [[s.target_coords_lens for s in sb] for sb in batch]
@@ -620,16 +638,21 @@ def compute_idxs_predict( forecast_dt, batch ) :
             ]
         ]
 
-        # lengths for varlen attention
-        tcs_idxs += [
-            [torch.cat([torch.arange(l) for l in tlm]) for tlm in tcs_lens_merged[-1]]
-        ]
+    return tcs_lens_merged
 
-    return [tcs_lens_merged, tcs_idxs]
-
-def compute_source_cell_lens( batch) :
+def compute_source_cell_lens( batch : StreamData) -> torch.tensor :
     """
+        Compute auxiliary information for varlen attention for local assimilation 
 
+        Parameters
+        ----------
+        batch :
+            StreamData information for current batch
+
+        Returns
+        -------
+        torch.tensor
+            Offsets for varlen attention
     """
 
     # precompute for processing in the model (with varlen flash attention)
@@ -643,5 +666,5 @@ def compute_source_cell_lens( batch) :
     source_cell_lens = torch.sum(source_cell_lens_raw, 1).flatten().to(torch.int32)
     source_cell_lens = torch.cat([torch.zeros(1, dtype=torch.int32), source_cell_lens])
 
-    return (source_cell_lens, source_cell_lens_raw)
+    return source_cell_lens
 

@@ -665,12 +665,8 @@ class Trainer(Trainer_Base):
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
 
-            # TODO
-            batch = ([[d.to_device() for d in db] for db in batch[0]],
-                       batch[1].to('cuda'),
-                       ([[b.to('cuda') for b in bf] for bf in batch[2][0]],
-                        [[b.to('cuda') for b in bf] for bf in batch[2][1]]),
-                       batch[3])
+            forecast_steps = batch[-1]
+            batch = self.batch_to_device( batch)
 
             losses_all = torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
             stddev_all = torch.zeros(len(cf.streams)) * torch.nan
@@ -679,11 +675,11 @@ class Trainer(Trainer_Base):
             with torch.autocast(
                 device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
             ):
-                preds = self.ddp_model( self.model_params, batch)
+                preds = self.ddp_model( self.model_params, batch, forecast_steps)
 
                 loss = self.compute_loss(
                     self.loss_fcts,
-                    batch[3],
+                    forecast_steps,
                     batch[0],
                     preds,
                     losses_all,
@@ -737,12 +733,8 @@ class Trainer(Trainer_Base):
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
 
-                    # TODO
-                    batch = ([[d.to_device() for d in db] for db in batch[0]],
-                       batch[1].to('cuda'),
-                       ([[b.to('cuda') for b in bf] for bf in batch[2][0]],
-                        [[b.to('cuda') for b in bf] for bf in batch[2][1]]),
-                       batch[3])
+                    forecast_steps = batch[-1]
+                    batch = self.batch_to_device( batch)
 
                     losses_all = torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
                     stddev_all = torch.zeros(len(cf.streams)) * torch.nan
@@ -751,7 +743,7 @@ class Trainer(Trainer_Base):
                     with torch.autocast(
                         device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
                     ):
-                        preds = self.ddp_model( self.model_params, batch)
+                        preds = self.ddp_model( self.model_params, batch, forecast_steps)
 
                     # compute loss and log output
                     if bidx < cf.log_validation:
@@ -764,7 +756,7 @@ class Trainer(Trainer_Base):
 
                         self.compute_loss(
                             self.loss_fcts_val,
-                            batch[3],
+                            forecast_steps,
                             batch[0],
                             preds,
                             losses_all,
@@ -793,7 +785,7 @@ class Trainer(Trainer_Base):
                     else:
                         self.compute_loss(
                             self.loss_fcts_val,
-                            batch[3],
+                            forecast_steps,
                             batch[0],
                             preds,
                             losses_all,
@@ -837,6 +829,13 @@ class Trainer(Trainer_Base):
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
+
+    ###########################################
+    def batch_to_device( self, batch) :
+        # forecast_steps is dropped here from the batch
+        return  ([[d.to_device() for d in db] for db in batch[0]],
+                  batch[1].to('cuda'),
+                  [[b.to('cuda') for b in bf] for bf in batch[2]])
 
     ###########################################
     def save_model(self, epoch=-1, name=None):

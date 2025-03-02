@@ -573,15 +573,14 @@ class Model(torch.nn.Module):
     def forward(
         self,
         model_params,
-        batch
+        batch,
+        forecast_steps
     ):
         batch_size = self.cf.batch_size if self.training else self.cf.batch_size_validation
 
-        # TODO
         (streams_data, 
         source_cell_lens, 
-        target_coords_idxs,
-        num_time_steps) = batch
+        target_coords_idxs) = batch
 
         # embed
         tokens = self.embed_cells(
@@ -596,7 +595,7 @@ class Model(torch.nn.Module):
 
         # roll-out in latent space
         preds_all = []
-        for it in range(num_time_steps):
+        for it in range(forecast_steps):
             # prediction
             preds_all += [
                 self.predict(
@@ -610,7 +609,7 @@ class Model(torch.nn.Module):
         preds_all += [
             self.predict(
                 model_params,
-                num_time_steps,
+                forecast_steps,
                 tokens,
                 streams_data,
                 target_coords_idxs,
@@ -815,10 +814,11 @@ class Model(torch.nn.Module):
             #       stream basis
             assert type(tte_kv) == torch.nn.Identity
 
-            # lens for varlen attentino
-            tcs_lens = target_coords_idxs[0][ii][fstep]
+            # lens for varlen attention
+            tcs_lens = target_coords_idxs[ii][fstep]
             # coord information for learnable layer norm
-            tcs_aux = torch.cat([streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))])
+            tcs_aux = torch.cat([streams_data[i_b][ii].target_coords[fstep] 
+                                    for i_b in range(len(streams_data))])
 
             # apply prediction engine
             for ib, block in enumerate(tte):

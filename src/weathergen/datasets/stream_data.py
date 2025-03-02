@@ -12,13 +12,11 @@ import logging
 
 import torch
 
-from weathergen.datasets.utils import merge_cells
-
 
 class StreamData() :
     """
-        StreamData object that encapsulates all data the model ingests for the stream 
-        for a batch item.
+        StreamData object that encapsulates all data the model ingests for one batch item
+        for one stream.
     """
 
     def __init__( self, forecast_steps : int, nhc_source : int, nhc_target : int) -> None :
@@ -29,11 +27,14 @@ class StreamData() :
             ----------
             forecast_steps : int
                 Number of forecast steps
+            nhc_source : int
+                Number of healpix cells for source 
+            nhc_target : int
+                Number of healpix cells for target
 
             Returns
             -------
-            StreamData
-                The created StreamData.
+            None
         """
 
         self.mask_value = 0.
@@ -52,15 +53,25 @@ class StreamData() :
         # length of source tokens per cell (without padding)
         self.source_tokens_lens = []
         self.source_centroids = []
-        # 
+        # unaltered source (for logging)
         self.source_raw = []
-        #
+        # auxiliary data for scatter operation that changes from stream-centric to cell-centric
+        # processing after embedding
         self.source_idxs_embed = torch.tensor([])
         self.source_idxs_embed_pe = torch.tensor([])
 
     def to_device( self, device = 'cuda') -> None :
         """
             Move data to GPU
+
+            Parameters
+            ----------
+            device : str
+                Device the data is moved/mapped to.
+
+            Returns
+            -------
+            None
         """
 
         self.source_tokens_cells = self.source_tokens_cells.to( device, non_blocking=True)
@@ -79,7 +90,15 @@ class StreamData() :
 
     def add_empty_source( self) -> None :
         """
-            
+            Add an empty source for an input.
+
+            Parameters
+            ----------
+            None
+
+            Returns
+            -------
+            None
         """
 
         self.source_raw += [ torch.tensor([]) ]
@@ -90,7 +109,15 @@ class StreamData() :
     def add_empty_target( self, 
                           fstep : int) -> None :
         """
-            
+            Add an empty target for an input.
+
+            Parameters
+            ----------
+            None
+
+            Returns
+            -------
+            None
         """
 
         self.target_tokens_lens[fstep] += [ torch.zeros([self.nhc_target], dtype=torch.int32) ]
@@ -105,7 +132,15 @@ class StreamData() :
                     ss_centroids : torch.tensor
                     ) -> None :
         """
+            Add data for source for one input.
 
+            Parameters
+            ----------
+            None
+
+            Returns
+            -------
+            None
         """
 
         self.source_raw += [source1_raw]
@@ -124,10 +159,18 @@ class StreamData() :
                     tc_lens : torch.tensor
                     ) -> None :
         """
+            Add data for target for one input.
 
+            Parameters
+            ----------
+            None
+
+            Returns
+            -------
+            None
         """
 
-            # TODO: are the if clauses still needed?
+        # TODO: are the if clauses still needed?
         self.target_tokens_lens[fstep] += (
             [tt_lens] if len(tt_lens) > 0 else [torch.tensor([])]
         )
@@ -139,7 +182,16 @@ class StreamData() :
 
     def target_empty( self) :
         """
+            Test if target for stream is empty
 
+            Parameters
+            ----------
+            None
+
+            Returns
+            -------
+            boolean 
+                True if target is empty for stream, else False
         """
 
         # cat over forecast steps
@@ -147,20 +199,80 @@ class StreamData() :
 
     def source_empty( self) :
         """
+            Test if source for stream is empty
 
+            Parameters
+            ----------
+            None
+
+            Returns
+            -------
+            boolean 
+                True if target is empty for stream, else False
         """
 
         return self.source_tokens_lens.sum() == 0
 
     def empty( self) :
         """
+            Test if stream (source and target) are empty
 
+            Parameters
+            ----------
+            None
+
+            Returns
+            -------
+            boolean 
+                True if stream is empty for stream, else False
         """
 
         return self.source_empty() and self.target_empty()
 
+    ####################################################################################################
+    def _merge_cells( self, s_list : list, num_healpix_cells : int) -> list :
+        """
+            Helper function to merge different inputs for the stream 
+            (preserving in particular the per cell information)
+
+            Parameters
+            ----------
+            s_list : list
+                List of lists to be merged along first (multi-source) dimension
+            num_healpix_cells : int
+                Number of healpix cells (equal to second dimension of list for all list items)
+
+            Returns
+            -------
+            list 
+                Merged inputs
+        """
+
+        if torch.tensor([len(s) for s in s_list]).sum() == 0:
+            return torch.tensor([])
+
+        ret = torch.cat(
+            [
+                torch.cat([s_list[i_s][i] for i_s in range(len(s_list)) if len(s_list[i_s]) > 0])
+                for i in range(num_healpix_cells)
+            ]
+        )
+
+        return ret
+
+
     def merge_inputs( self) -> None :
         """
+            Merge sources and targets from different inputs for the stream 
+            (preserving in particular the per cell information)
+
+            Parameters
+            ----------
+            None
+
+            Returns
+            -------
+            None
         """
 
         # collect all sources in current stream and add to batch sample list when non-empty
@@ -169,8 +281,8 @@ class StreamData() :
             self.source_raw = torch.cat(self.source_raw)
 
             # collect by merging entries per cells, preserving cell structure
-            self.source_tokens_cells = merge_cells( self.source_tokens_cells, self.nhc_source)
-            self.source_centroids = merge_cells( self.source_centroids, self.nhc_source)
+            self.source_tokens_cells = self._merge_cells( self.source_tokens_cells, self.nhc_source)
+            self.source_centroids = self._merge_cells( self.source_centroids, self.nhc_source)
             # lens can be stacked and summed
             self.source_tokens_lens = torch.stack( self.source_tokens_lens).sum(0)
             
@@ -190,8 +302,9 @@ class StreamData() :
         for fstep in range( len(self.target_coords)):
             # collect all targets in current stream and add to batch sample list when non-empty
             if torch.tensor([len(s) for s in self.target_tokens[fstep]]).sum() > 0:
-                self.target_coords[fstep] = merge_cells(self.target_coords[fstep], self.nhc_target)
-                self.target_tokens[fstep] = merge_cells(self.target_tokens[fstep], self.nhc_target)
+                nt = self.nhc_target
+                self.target_coords[fstep] = self._merge_cells(self.target_coords[fstep], nt)
+                self.target_tokens[fstep] = self._merge_cells(self.target_tokens[fstep], nt)
                 # lens can be stacked and summed
                 self.target_tokens_lens[fstep] = torch.stack(self.target_tokens_lens[fstep]).sum(0)
                 self.target_coords_lens[fstep] = torch.stack(self.target_coords_lens[fstep]).sum(0)
