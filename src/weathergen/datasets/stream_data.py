@@ -142,7 +142,8 @@ class StreamData() :
 
         """
 
-        return torch.stack([torch.stack(s) for s in self.target_tokens_lens]).sum() == 0
+        # cat over forecast steps
+        return torch.cat(self.target_tokens_lens).sum() == 0
 
     def source_empty( self) :
         """
@@ -180,10 +181,10 @@ class StreamData() :
             self.source_centroids[idx] = self.mask_value
 
         else:
-            c_source_raw += [torch.tensor([])]
-            c_source_tokens_lens += [torch.zeros([self.nhc_source])]
-            c_source_tokens_cells += [torch.tensor([])]
-            c_source_centroids += [torch.tensor([])]
+            self.source_raw = torch.tensor([])
+            self.source_tokens_lens = torch.zeros([self.nhc_source])
+            self.source_tokens_cells = torch.tensor([])
+            self.source_centroids = torch.tensor([])
 
         # targets
         for fstep in range( len(self.target_coords)):

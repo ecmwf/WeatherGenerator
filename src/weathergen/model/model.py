@@ -642,17 +642,21 @@ class Model(torch.nn.Module):
 
         for ib, sb in enumerate(streams_data):
             for itype, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                if not s.empty() :
+                if not s.source_empty() :
+
                     idxs = s.source_idxs_embed
                     idxs_pe = s.source_idxs_embed_pe
+
                     # create full scatter index (there's no broadcasting which is likely highly inefficient)
-                    idxs = idxs.repeat((1, self.cf.ae_local_dim_embed))
-                    # TODO: move torch.stack to data loader
-                    # code.interact( local=locals())
+                    idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
                     x_embed = embed( s.source_tokens_cells, s.source_centroids).flatten(0, 1)
+                    # there's undocumented limitation in flash_attn that will make embed fail if
+                    # #tokens is too large; code below is a work around
                     # x_embed = torch.cat( [embed( s_c, c_c).flatten(0,1)
                     #                 for s_c,c_c in zip( torch.split( s, 49152),
                     #                                     torch.split( source_centroids[ib][itype], 49152))])
+
+                    # scatter write to reorder from per stream to per cell ordering
                     tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
 
         return tokens_all
@@ -812,7 +816,7 @@ class Model(torch.nn.Module):
             assert type(tte_kv) == torch.nn.Identity
 
             # lens for varlen attentino
-            tcs_lens = target_coords_idxs[0][fstep][ii]
+            tcs_lens = target_coords_idxs[0][ii][fstep]
             # coord information for learnable layer norm
             tcs_aux = torch.cat([streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))])
 

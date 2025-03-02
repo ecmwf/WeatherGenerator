@@ -560,35 +560,27 @@ def compute_offsets_embed( batch, source_tokens_lens) :
     offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
     offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets_base[:-1]])
     offsets_pe = torch.zeros_like(offsets)
+
     idxs_embed = []
     idxs_embed_pe = []
     for ib, sb in enumerate(batch):
-        idxs_embed += [[]]
-        idxs_embed_pe += [[]]
         for itype, s in enumerate(sb):
 
             if not s.source_empty() :
 
-                idxs = torch.cat(
+                s.source_idxs_embed = torch.cat(
                     [
                         torch.arange(o, o + l, dtype=torch.int64)
                         for o,l in zip(offsets, source_tokens_lens[ib, itype], strict=False)
                     ]
                 )
-                idxs_embed[-1] += [idxs.unsqueeze(1)]
-                idxs_embed_pe[-1] += [
-                    torch.cat(
-                        [
-                            torch.arange(o, o + l, dtype=torch.int32)
-                            for o, l in zip(
-                                offsets_pe, source_tokens_lens[ib][itype], strict=False
-                            )
-                        ]
-                    )
-                ]
-
-                s.source_idxs_embed = idxs_embed[-1][0]
-                s.source_idxs_embed_pe = idxs_embed_pe[-1][0]
+                s.source_idxs_embed_pe = torch.cat( [
+                                                torch.arange(o, o + l, dtype=torch.int32)
+                                                for o, l in zip(
+                                                    offsets_pe, source_tokens_lens[ib][itype], strict=False
+                                                )
+                                            ]
+                                        )
 
             # advance offsets
             offsets += source_tokens_lens[ib][itype]
