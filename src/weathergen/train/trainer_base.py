@@ -103,7 +103,7 @@ class Trainer_Base:
 
     ###########################################
     @staticmethod
-    def init_streams(cf: Config, private_cf: Any, run_id_contd):
+    def init_streams(cf: Config, run_id_contd):
         if not hasattr(cf, "streams_directory"):
             return cf
 
@@ -123,7 +123,6 @@ class Trainer_Base:
         temp = {}
         streams_dir = Path(cf.streams_directory).absolute()
         _logger.info(f"Reading streams from {streams_dir}")
-        _logger.info("private_cf: %s", private_cf)
 
         for fh in sorted(streams_dir.rglob("*.yml")):
             stream_parsed = yaml.safe_load(fh.read_text())
@@ -131,7 +130,6 @@ class Trainer_Base:
                 temp.update(stream_parsed)
         for k, v in temp.items():
             v["name"] = k
-            v["filenames"] = private_cf["streams"][k]["filenames"]
             cf.streams.append(v)
 
         # sanity checking (at some point, the dict should be parsed into a class)

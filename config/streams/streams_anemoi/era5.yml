@@ -9,7 +9,7 @@
 
 ERA5 :
   type : anemoi
-  filenames : null # Path to be set by the private configuration
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr']
   loss_weight : 1.
   source_variables : [null]
   target_variables : [null]

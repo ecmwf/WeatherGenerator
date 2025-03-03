@@ -74,7 +74,7 @@ def train(run_id=None) -> None:
 
     # directory where input streams are specified
     # cf.streams_directory = './streams_large/'
-    cf.streams_directory = "./config/streams/"
+    cf.streams_directory = "./config/streams/streams_anemoi/"
     # cf.streams_directory = "./streams_mixed/"
 
     # embed_orientation : 'channels' or 'columns'
@@ -162,7 +162,6 @@ def train(run_id=None) -> None:
 
     cf.num_epochs = 24
     cf.samples_per_epoch = 4096
-    cf.samples_per_epoch = 16
     cf.samples_per_validation = 512
     cf.shuffle = True
 

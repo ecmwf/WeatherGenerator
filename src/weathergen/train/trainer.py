@@ -52,7 +52,6 @@ class Trainer(Trainer_Base):
     def init(
         self,
         cf,
-        private_cf,
         run_id_contd=None,
         epoch_contd=None,
         run_id_new=False,
@@ -76,7 +75,7 @@ class Trainer(Trainer_Base):
         self.init_ddp(cf)
 
         # read configuration of data streams
-        cf = self.init_streams(cf, private_cf, run_id_contd)
+        cf = self.init_streams(cf, run_id_contd)
 
         # create output directory
         path_run = "./results/" + cf.run_id + "/"
@@ -296,7 +295,7 @@ class Trainer(Trainer_Base):
     ###########################################
     def run(self, cf, private_cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
         # general initalization
-        self.init(cf, private_cf, run_id_contd, epoch_contd, run_id_new)
+        self.init(cf, run_id_contd, epoch_contd, run_id_new)
 
         self.dataset = MultiStreamDataSampler(
             cf.data_path,
