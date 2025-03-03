@@ -12,7 +12,6 @@ import itertools
 import logging
 import os
 from pathlib import Path
-from typing import Any
 
 import pynvml
 import torch
