@@ -80,16 +80,16 @@ class AnemoiDataset:
             self.ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end
         )
 
-        def select(self, cols_list: list[str]) -> None:
-            """
-            Allow user to specify which columns they want to access.
-            Get functions only returned for these specified columns.
-            """
+    def select(self, cols_list: list[str]) -> None:
+        """
+        Allow user to specify which columns they want to access.
+        Get functions only returned for these specified columns.
+        """
 
-            self.selected_colnames = cols_list
-            self.selected_cols_idx = np.array(
-                [self.colnames.index(item) for item in cols_list]
-            )
+        self.selected_colnames = cols_list
+        self.selected_cols_idx = np.array(
+            [self.colnames.index(item) for item in cols_list]
+        )
 
     def __len__(self):
         "Length of dataset"
