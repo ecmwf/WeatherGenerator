@@ -794,16 +794,16 @@ class Trainer(Trainer_Base):
 
                         cols = [ds[0][0].colnames for ds in self.dataset_val.obs_datasets_norm]
                         write_validation(
-                            self.cf,
-                            self.path_run,
-                            self.cf.rank,
-                            epoch,
-                            cols,
-                            sources,
-                            preds_all,
-                            targets_all,
-                            targets_coords_all,
-                            targets_lens,
+                            cf=self.cf,
+                            base_path=self.path_run,
+                            rank=self.cf.rank,
+                            epoch=epoch,
+                            cols=cols,
+                            sources=sources, # TODO
+                            preds_all=preds_all,
+                            targets_all=targets_all,
+                            targets_coords_all=targets_coords_all,
+                            targets_lens=targets_lens,
                         )
 
                     else:

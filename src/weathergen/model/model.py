@@ -587,11 +587,7 @@ class Model(torch.nn.Module):
         preds_all = []
         for it in range(forecast_steps):
             # prediction
-            preds_all += [
-                self.predict(
-                    model_params, it, tokens, target_coords, target_coords_lens, target_coords_idxs
-                )
-            ]
+            preds_all += [self.predict(model_params, it, tokens, target_coords_idxs)]
 
             tokens = self.forecast(model_params, tokens)
 
@@ -610,7 +606,6 @@ class Model(torch.nn.Module):
 
     #########################################
     def embed_cells(self, model_params, streams_data):
-
         # code.interact( local=locals())
         source_tokens_lens = torch.stack(
             [
@@ -775,18 +770,18 @@ class Model(torch.nn.Module):
                 )
             elif tro_type == "token":
                 assert False
-                tc_tokens = torch.cat(
-                    [
-                        checkpoint(
-                            tc_embed,
-                            tcs[fstep][i_b][ii].transpose(-2, -1).flatten(-2, -1),
-                            use_reentrant=False,
-                        )
-                        if len(tcs[fstep][i_b][ii].shape) > 1
-                        else tcs[fstep][i_b][ii]
-                        for i_b in range(len(tcs[fstep]))
-                    ]
-                )
+            #     tc_tokens = torch.cat(
+            #         [
+            #             checkpoint(
+            #                 tc_embed,
+            #                 tcs[fstep][i_b][ii].transpose(-2, -1).flatten(-2, -1),
+            #                 use_reentrant=False,
+            #             )
+            #             if len(tcs[fstep][i_b][ii].shape) > 1
+            #             else tcs[fstep][i_b][ii]
+            #             for i_b in range(len(tcs[fstep]))
+            #         ]
+            #     )
             else:
                 assert False
 
