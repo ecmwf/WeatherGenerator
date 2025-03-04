@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from obslearn.train.utils import get_run_id
+from weathergen.train.utils import get_run_id
 
 if __name__ == "__main__":
     print(get_run_id())
