@@ -570,23 +570,13 @@ class Model(torch.nn.Module):
         return tuple(preds_all[0])
 
     #########################################
-    def forward(
-        self,
-        model_params,
-        batch,
-        forecast_steps
-    ):
+    def forward(self, model_params, batch, forecast_steps):
         batch_size = self.cf.batch_size if self.training else self.cf.batch_size_validation
 
-        (streams_data, 
-        source_cell_lens, 
-        target_coords_idxs) = batch
+        (streams_data, source_cell_lens, target_coords_idxs) = batch
 
         # embed
-        tokens = self.embed_cells(
-            model_params,
-            streams_data
-        )
+        tokens = self.embed_cells(model_params, streams_data)
 
         # local assimilation engine and adapter
         tokens = self.assimilate_local(model_params, tokens, source_cell_lens)
@@ -619,18 +609,17 @@ class Model(torch.nn.Module):
         return preds_all
 
     #########################################
-    def embed_cells(
-        self,
-        model_params,
-        streams_data
-    ) :
+    def embed_cells(self, model_params, streams_data):
 
-        import code
         # code.interact( local=locals())
         source_tokens_lens = torch.stack(
             [
-                torch.stack([s.source_tokens_lens if len(s.source_tokens_lens) > 0 
-                                                        else torch.tensor([]) for s in stl_b])
+                torch.stack(
+                    [
+                        s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
+                        for s in stl_b
+                    ]
+                )
                 for stl_b in streams_data
             ]
         )
@@ -641,14 +630,13 @@ class Model(torch.nn.Module):
 
         for ib, sb in enumerate(streams_data):
             for itype, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                if not s.source_empty() :
-
+                if not s.source_empty():
                     idxs = s.source_idxs_embed
                     idxs_pe = s.source_idxs_embed_pe
 
                     # create full scatter index (there's no broadcasting which is likely highly inefficient)
                     idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed( s.source_tokens_cells, s.source_centroids).flatten(0, 1)
+                    x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
                     # there's undocumented limitation in flash_attn that will make embed fail if
                     # #tokens is too large; code below is a work around
                     # x_embed = torch.cat( [embed( s_c, c_c).flatten(0,1)
@@ -775,8 +763,11 @@ class Model(torch.nn.Module):
             if tro_type == "obs_value":
                 tc_tokens = torch.cat(
                     [
-                        checkpoint( tc_embed, streams_data[i_b][ii].target_coords[fstep], 
-                                    use_reentrant=False)
+                        checkpoint(
+                            tc_embed,
+                            streams_data[i_b][ii].target_coords[fstep],
+                            use_reentrant=False,
+                        )
                         if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
                         else streams_data[i_b][ii].target_coords[fstep]
                         for i_b in range(len(streams_data))
@@ -817,8 +808,9 @@ class Model(torch.nn.Module):
             # lens for varlen attention
             tcs_lens = target_coords_idxs[ii][fstep]
             # coord information for learnable layer norm
-            tcs_aux = torch.cat([streams_data[i_b][ii].target_coords[fstep] 
-                                    for i_b in range(len(streams_data))])
+            tcs_aux = torch.cat(
+                [streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))]
+            )
 
             # apply prediction engine
             for ib, block in enumerate(tte):

@@ -20,9 +20,10 @@ from weathergen.datasets.normalizer import DataNormalizer
 from weathergen.datasets.obs_dataset import ObsDataset
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.utils import (
-        compute_offsets_scatter_embed,
-        compute_idxs_predict,
-        compute_source_cell_lens)
+    compute_idxs_predict,
+    compute_offsets_scatter_embed,
+    compute_source_cell_lens,
+)
 from weathergen.utils.logger import logger
 
 
@@ -270,7 +271,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # since there are empty batches
         idx_raw = iter_start
         for i, _bidx in enumerate(range(iter_start, iter_end, self.batch_size)):
-
             # forecast_dt needs to be constant per batch (amortized through data parallel training)
             forecast_dt = self.perms_forecast_dt[i]
 
@@ -299,8 +299,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 for obs_id, (stream_info, stream_dsn, stream_idxs) in enumerate(
                     zip(self.streams, self.obs_datasets_norm, self.obs_datasets_idxs, strict=False)
                 ):
-
-                    stream_data = StreamData( forecast_dt, nhc_source, nhc_target)
+                    stream_data = StreamData(forecast_dt, nhc_source, nhc_target)
 
                     token_size = stream_info["token_size"]
 
@@ -338,13 +337,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 normalizer.normalize_coords,
                             )
 
-                            stream_data.add_source( source1_raw, ss_lens, ss_cells, ss_centroids)
+                            stream_data.add_source(source1_raw, ss_lens, ss_cells, ss_centroids)
 
                     # target
 
                     # collect for all forecast steps
                     for fstep in range(forecast_dt + 1):
-
                         # collect all sources
                         for i_source, ((ds, normalizer, do), s_idxs) in enumerate(
                             zip(stream_dsn, stream_idxs, strict=False)
@@ -352,7 +350,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             (source2, times2) = ds[idx + step_forecast_dt]
 
                             if source2.shape[0] < token_size:
-                                stream_data.add_empty_target( fstep)
+                                stream_data.add_empty_target(fstep)
                             else:
                                 oi = ds.properties["obs_id"]
                                 source2 = self.prepare_window_target(
@@ -370,34 +368,31 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                     normalizer.normalize_targets,
                                 )
 
-                                stream_data.add_target( fstep, tt_cells, tt_lens, tc, tc_lens)
+                                stream_data.add_target(fstep, tt_cells, tt_lens, tc, tc_lens)
 
                     # merge inputs for sources and targets for current stream
                     stream_data.merge_inputs()
-                    streams_data += [ stream_data ]
+                    streams_data += [stream_data]
 
                 # skip completely empty batch item
-                if np.array([s.empty() for s in streams_data]).all() :
+                if np.array([s.empty() for s in streams_data]).all():
                     continue
 
                 batch += [streams_data]
 
             # aggregated lens of tokens per cell
-            source_cell_lens = compute_source_cell_lens( batch)
+            source_cell_lens = compute_source_cell_lens(batch)
 
             # compute offsets for scatter computation after embedding
-            batch = compute_offsets_scatter_embed( batch)
+            batch = compute_offsets_scatter_embed(batch)
 
             # compute offsets and auxiliary data needed for prediction computation
             # (info is not per stream so separate data structure)
             assert self.target_coords_local
-            target_coords_idx = compute_idxs_predict( forecast_dt, batch)
+            target_coords_idx = compute_idxs_predict(forecast_dt, batch)
 
             assert len(batch) == self.batch_size
-            yield ( batch,
-                    source_cell_lens,
-                    target_coords_idx,
-                    forecast_dt )
+            yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
 
     ###################################################
     def prepare_window_source(
