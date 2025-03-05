@@ -57,13 +57,9 @@ def define_regional_mask(region, targets_coords):
 
 
 ####################################################################################################
-def plot_maps(
-    cf, reportypes, targets_coords, values, masks_nan, title, cmap="bwr", root_err=False
-):
-
+def plot_maps(cf, reportypes, targets_coords, values, masks_nan, title, cmap="bwr", root_err=False):
     for obs_idx in range(len(values)):
         for ch in range(values[obs_idx].shape[-1]):
-
             vs = values[obs_idx][..., ch][masks_nan[obs_idx][..., ch]].flatten()
             tcs = np.array(targets_coords[obs_idx])[masks_nan[obs_idx][..., ch]]
             ts = tcs.shape
@@ -115,9 +111,7 @@ def plot_maps(
                 vmax=vmax,
             )
             # im = ax.imshow( map, cmap=cmap, transform=cartopy.crs.PlateCarree(), norm=divnorm)
-            axins = inset_axes(
-                ax, width="80%", height="5%", loc="lower center", borderpad=-2
-            )
+            axins = inset_axes(ax, width="80%", height="5%", loc="lower center", borderpad=-2)
             clb = fig.colorbar(im, cax=axins, orientation="horizontal")
             clb.ax.yaxis.set_label_position("right")
             clb.ax.set_ylabel("[K]", rotation=90)
@@ -143,7 +137,6 @@ def plotExampleMap(
     cmap="bwr",
     cmap_symmetric=False,
 ):
-
     if map_data.shape[0] == 0:
         return
 
@@ -153,7 +146,9 @@ def plotExampleMap(
     lons = tc[..., idx_lons].flatten()
     err = "{:3.3f}".format(err)
     # title = f'{fig_name} : {reportype}::{chp} err={err} ({np.datetime_as_string( date, unit='m')})'
-    title = f"{fig_name} : {reportype}::{chp} err={err}"  # ({np.datetime_as_string( date, unit='m')})'
+    title = (
+        f"{fig_name} : {reportype}::{chp} err={err}"  # ({np.datetime_as_string( date, unit='m')})'
+    )
     fname = fig_path + "/example/{}/{}_{:05d}_{}_{}_{}_{:03d}_{:03d}.png".format(
         reportype, cf.run_id, epoch, reportype, chp, fig_name, fstep, step
     )
@@ -173,7 +168,6 @@ def plotScatterMPL(
     vmax=None,
     cmap_symmetric=False,
 ):
-
     fig = plt.figure(figsize=(10, 5), dpi=dpi)
     ax = plt.axes(projection=cartopy.crs.Robinson())
     ax.add_feature(cartopy.feature.COASTLINE)
@@ -218,7 +212,6 @@ def plotScatterDSH(
     vmax=None,
     cmap_symmetric=False,
 ):
-
     import datashader as dsh
     from datashader.mpl_ext import dsshow
 
@@ -287,7 +280,6 @@ def plotExampleMaps(
     bidx=0,
     with_ens=False,
 ):
-
     # extract info from bidx-th batch
     sources, sources_coords, targets, preds, targets_coords, targets_idxs = (
         [],
@@ -298,7 +290,6 @@ def plotExampleMaps(
         [],
     )
     for k, (rt_idx, rt_name) in enumerate(reportypes_active):
-
         name = rt_name.replace(" ", "_").replace("-", "_").replace(",", "")
         print(f"example name: {name}")
         sources = sources_all[k][bidx][..., -len(cols_all[k]) :]
@@ -308,11 +299,7 @@ def plotExampleMaps(
         targets_coords = targets_coords_all[k][: targets_lens_all[k][bidx]]
 
         # for GEOs filter out a single time step/slice (matching year, day-of-the-year, and minute)
-        if (
-            "METEOSAT" in cf.streams[rt_idx]["name"]
-            or "Surface" in cf.streams[rt_idx]["name"]
-        ):
-
+        if "METEOSAT" in cf.streams[rt_idx]["name"] or "Surface" in cf.streams[rt_idx]["name"]:
             # use only last step from source
             # idx = 0
             # mask = np.logical_and( np.logical_and( sources_coords[...,1] == sources_coords[...,1],
@@ -327,9 +314,7 @@ def plotExampleMaps(
             # dates_str = ['{:0.0f}-{:0.0f}-{:0.0f}-{:0.0f}'.format( *aa) for aa in dates]
             # dates = pd.to_datetime( dates_str, format='%Y-%j-%H-%M')
             # dates_unique, idxs_unique = np.unique( dates, return_index=True)
-            dates_unique, idxs_unique = np.unique(
-                targets_coords[:, 1], return_index=True
-            )
+            dates_unique, idxs_unique = np.unique(targets_coords[:, 1], return_index=True)
 
             # if len(idxs_unique) > cf.len_hrs :
             #   idxs = np.argsort( idxs_unique)
@@ -337,16 +322,11 @@ def plotExampleMaps(
             #   idxs_unique = idxs_unique[ idxs[:cf.len_hrs] ]
             #   dates_unique = idxs_unique[ idxs[:cf.len_hrs] ]
 
-            vmin = np.array(
-                [np.nanmin(targets[:, i]) for i in range(targets.shape[-1])]
-            )
-            vmax = np.array(
-                [np.nanmax(targets[:, i]) for i in range(targets.shape[-1])]
-            )
+            vmin = np.array([np.nanmin(targets[:, i]) for i in range(targets.shape[-1])])
+            vmax = np.array([np.nanmax(targets[:, i]) for i in range(targets.shape[-1])])
             errs = []
 
             for i, (date, idx) in enumerate(zip(dates_unique, idxs_unique)):
-
                 mask = np.logical_and(
                     np.logical_and(
                         targets_coords[idx, 1] == targets_coords[:, 1],
@@ -375,7 +355,6 @@ def plotExampleMaps(
                 sources = np.array([])
 
         else:
-
             # dates = targets_coords[:,[1,2,3,3]] * np.array([1.,1.,1./60.,1./60.])
             # dates[:,2] = np.floor( dates[:,2])
             # dates[:,3] = np.remainder( dates[:,3], 1) * 60.
@@ -450,7 +429,6 @@ def plotExampleMapsStream(
     vmins=None,
     vmaxs=None,
 ):
-
     # str_dt= '{:0.0f}-{:0.0f}-{:0.0f}'.format( *targets_coords[0][i][[1,2,4]]*np.array([1.,1.,1./60.]))
     # date_start = pd.to_datetime( str_dt, format='%Y-%j-%H')
     # date_end = date_start + pd.Timedelta( cf.len_hrs, "h")
@@ -462,7 +440,6 @@ def plotExampleMapsStream(
 
     errs = []
     for ch in range(len(cols_all)):
-
         # if '10u' != cols_all[ch] :
         #   continue
 
@@ -490,9 +467,7 @@ def plotExampleMapsStream(
             return
         vmin = np.min(targets[mask_nan, ch]) if vmins is None else vmins[ch]
         vmax = np.max(targets[mask_nan, ch]) if vmaxs is None else vmaxs[ch]
-        err = np.sqrt(
-            np.nanmean(np.square(targets[:, ch] - preds.mean(1)[:, ch]), axis=0)
-        )
+        err = np.sqrt(np.nanmean(np.square(targets[:, ch] - preds.mean(1)[:, ch]), axis=0))
 
         if sources.shape[0] > 0:
             plotExampleMap(
@@ -590,7 +565,6 @@ def plotExampleMapsStream(
 
 ####################################################################################################
 def compute_mean_space_time(preds, targets, targets_coords_all, mask_nan, ch=0):
-
     # example below:
     # compute lon \in [0,10] and all time steps for diurnal cycle example
 
@@ -636,17 +610,14 @@ def plot_scanlines(
     num_samples=512,
     cmap="bwr",
 ):
-
     streams = [streams] if type(streams) is not list else streams
 
     for stream in streams:
-
         idx = [i for i, c in enumerate(reportypes_active) if stream in c][0]
 
         vmin = targets_all[idx][:num_samples, 0].min()
         vmax = targets_all[idx][:num_samples, 0].max()
         for i in range(num_samples):
-
             fig = plt.figure(figsize=(10, 5), dpi=dpi)
             ax = plt.axes(projection=cartopy.crs.Robinson())
             ax.add_feature(cartopy.feature.COASTLINE)
@@ -678,7 +649,6 @@ def plot_scanlines(
 
 ####################################################################################################
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
     parser.add_argument("-id", "--run_id", required=True)
     parser.add_argument("-e", "--epoch", default="0", type=int)
@@ -733,7 +703,6 @@ if __name__ == "__main__":
     print(f"Processing run_id={run_id} at epoch={epoch}")
 
     for fstep in fsteps:
-
         print(f"Processing fstep={fstep}.")
 
         # read data
@@ -780,18 +749,16 @@ if __name__ == "__main__":
                 os.makedirs(fig_path + f"/example/{rt}")
 
         if with_channel_errors:
-
             # std-dev and mean of ensemble
             preds_mean_all, preds_std_all = [], []
             for i, preds in enumerate(preds_all):
                 preds_mean_all += [np.mean(preds, axis=1)]
                 preds_std_all += [np.std(preds, axis=1)]
-                print(f"Finished mean/std for {i+1} / {len(preds_all)}.", flush=True)
+                print(f"Finished mean/std for {i + 1} / {len(preds_all)}.", flush=True)
 
             # print basic error statistics
             print("reportype::channel : mse / mae / rmse / ens-spread / rel. mse:")
             for obs_idx, (ii, reportype) in enumerate(reportypes_active):
-
                 fname = base_path + "/analysis_{}_{}_rmse".format(run_id, epoch)
                 fname += "_{}.csv".format(
                     reportypes_active[obs_idx][1]
@@ -813,9 +780,7 @@ if __name__ == "__main__":
                 var = preds_std_all[obs_idx]
                 t = targets_all[obs_idx]
                 mask_nan = masks_nan[obs_idx]
-                mask_regional = define_regional_mask(
-                    region, targets_coords_all[obs_idx]
-                )
+                mask_regional = define_regional_mask(region, targets_coords_all[obs_idx])
 
                 chs_rmse = np.zeros(p.shape[-1])
                 for ch in range(p.shape[-1]):
@@ -884,9 +849,7 @@ if __name__ == "__main__":
                 errs_chs = []
                 for ch in range(p.shape[-1]):
                     errs_chs += [
-                        np.expand_dims(
-                            np.square(p[..., ch] - t[..., ch]), axis=len(p.shape) - 1
-                        )
+                        np.expand_dims(np.square(p[..., ch] - t[..., ch]), axis=len(p.shape) - 1)
                     ]
                 errs_all.append(np.concatenate(errs_chs, len(p.shape) - 1))
             plot_maps(
@@ -920,7 +883,6 @@ if __name__ == "__main__":
                     )
 
         for ex_idx in example_samples:
-
             try:
                 print("Plotting example maps")
                 # one batch example maps

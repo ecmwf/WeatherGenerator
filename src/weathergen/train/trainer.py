@@ -7,63 +7,48 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 import os
-import code
 import time
 import string
 from pathlib import Path
 import random
 import functools
 
-import math
 import numpy as np
 import torch
-import logging
-from functools import partial
-
-import tqdm
-
-import zarr
-
-import torch.distributed as dist
 import torch.utils.data.distributed
-
+import tqdm
+from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    CPUOffload,
     ShardingStrategy,
     MixedPrecision,
-    BackwardPrefetch,
+    ShardingStrategy,
 )
 from torch.distributed.fsdp.wrap import (
-    size_based_auto_wrap_policy,
     # default_auto_wrap_policy,
-    enable_wrap,
-    wrap,
+    size_based_auto_wrap_policy,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import (
     StateDictType,
     FullStateDictConfig,
-    FullOptimStateDictConfig,
 )
 
-from weathergen.train.trainer_base import Trainer_Base
-from weathergen.train.lr_scheduler import LearningRateScheduler
-
+import weathergen.train.loss as losses
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
-from weathergen.utils.config import Config
-from weathergen.utils.logger import logger
+from weathergen.train.lr_scheduler import LearningRateScheduler
+from weathergen.train.trainer_base import Trainer_Base
+from weathergen.train.utils import get_run_id
 from weathergen.utils.train_logger import TrainLogger
 from weathergen.utils.validation_io import write_validation
-from weathergen.train.utils import get_run_id
 
-import weathergen.train.loss as losses
+_logger = logging.getLogger(__name__)
 
 
 class Trainer(Trainer_Base):
-
     ###########################################
     def __init__(self, log_freq=20, checkpoint_freq=250, print_freq=10):
         Trainer_Base.__init__(self)
@@ -82,14 +67,13 @@ class Trainer(Trainer_Base):
         run_id_new=False,
         run_mode="training",
     ):
-
         self.cf = cf
 
         if isinstance(run_id_new, str):
             cf.run_id = run_id_new
         elif run_id_new or cf.run_id is None:
             cf.run_id = get_run_id()
-        elif run_id_contd is not None and run_id_new == False:
+        elif run_id_contd is not None and not run_id_new:
             cf.run_id = run_id_contd
         assert cf.run_id is not None
 
@@ -104,12 +88,12 @@ class Trainer(Trainer_Base):
         cf = self.init_streams(cf, run_id_contd)
 
         # create output directory
-        path_out_base = Path("/p/home/jusers/langguth1/juwels/WeatherGenerator2/")
-        path_run = str(path_out_base.joinpath("results/"))
-        path_model = str(path_out_base.joinpath("models/"))
+        # path_out_base = Path("/work/ab0995/a270225/WeatherGenerator2/")
+        # path_run = str(path_out_base.joinpath("results/"))
+        # path_model = str(path_out_base.joinpath("models/"))
 
-        # path_run = './results/' + cf.run_id + '/'
-        # path_model = './models/' + cf.run_id + '/'
+        path_run = "./results/" + cf.run_id + "/"
+        path_model = "./models/" + cf.run_id + "/"
         if 0 == self.cf.rank:
             os.makedirs(path_run, exist_ok=True)
             os.makedirs(path_model, exist_ok=True)
@@ -125,7 +109,6 @@ class Trainer(Trainer_Base):
 
     ###########################################
     def evaluate(self, cf, run_id_trained, epoch, run_id_new=False):
-
         # general initalization
         self.init(cf, run_id_trained, epoch, run_id_new, run_mode="evaluate")
 
@@ -167,27 +150,20 @@ class Trainer(Trainer_Base):
         )
 
         if 0 == self.cf.rank:
-            self.train_logger.initialize_file(
-                self.dataset_val.stream_channels, val=True
-            )
+            self.train_logger.initialize_file(self.dataset_val.stream_channels, val=True)
 
         num_channels = self.dataset_val.get_num_chs()
         self.geoinfo_sizes = self.dataset_val.get_geoinfo_sizes()
         self.num_selected_chas = [
-            len(self.dataset_val.stream_channels[k])
-            for k in self.dataset_val.stream_channels
+            len(self.dataset_val.stream_channels[k]) for k in self.dataset_val.stream_channels
         ]
 
-        self.model = (
-            Model(cf, num_channels, self.geoinfo_sizes).create().to(self.devices[0])
-        )
+        self.model = Model(cf, num_channels, self.geoinfo_sizes).create().to(self.devices[0])
         self.model.load(run_id_trained, epoch)
         print(f"Loaded model {run_id_trained} at epoch {epoch}.")
         self.ddp_model = self.model
         self.model_params = ModelParams().create(cf).to(self.devices[0])
-        logging.getLogger("obslearn").info(
-            f"Loaded model id={run_id_trained} at epoch={epoch}."
-        )
+        logging.getLogger("obslearn").info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
 
         self.loss_fcts_val = []
         for name, w in cf.loss_fcts_val:
@@ -198,12 +174,11 @@ class Trainer(Trainer_Base):
         print(f"Finished evaluation run with id: {cf.run_id}")
 
     ###########################################
-    def evaluate_jac(
-        self, cf, run_id, epoch, mode="row", date=None, obs_id=0, sample_id=0
-    ):
+    def evaluate_jac(self, cf, run_id, epoch, mode="row", date=None, obs_id=0, sample_id=0):
         """Computes a row or column of the Jacobian as determined by mode ('row' or 'col'), i.e.
         determines sensitivities with respect to outputs or inputs
         """
+        # TODO: this function is not complete
 
         # general initalization
         self.init(cf, run_id, epoch, run_id_new=True, run_mode="offline")
@@ -237,16 +212,13 @@ class Trainer(Trainer_Base):
 
         dev = self.devices[0]
         sources = [source.to(dev, non_blocking=True) for source in sources]
-        targets = [
-            [toks.to(dev, non_blocking=True) for toks in target] for target in targets
-        ]
+        targets = [[toks.to(dev, non_blocking=True) for toks in target] for target in targets]
 
         # evaluate model
         with torch.autocast(
             device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
         ):
-
-            if "row" == mode:
+            if mode == "row":
                 sources_in = [*sources, s_lens.to(torch.float32)]
                 y = self.model(sources, s_lens)
                 # vectors used to extract row from Jacobian
@@ -257,7 +229,7 @@ class Trainer(Trainer_Base):
                     self.model.forward_jac, tuple(sources_in), tuple(vs_sources)
                 )
 
-            elif "col" == mode:
+            elif mode == "col":
                 # vectors used to extract col from Jacobian
                 vs_sources = [torch.zeros_like(s_obs) for s_obs in sources]
                 vs_sources[obs_id][sample_id] = 1.0
@@ -279,27 +251,20 @@ class Trainer(Trainer_Base):
         jac = [j_obs.cpu().detach().numpy() for j_obs in out[1]]
 
         sources_all, preds_all = [[] for _ in cf.streams], [[] for _ in cf.streams]
-        targets_all, targets_coords_all = [[] for _ in cf.streams], [
-            [] for _ in cf.streams
-        ]
+        targets_all, targets_coords_all = [[] for _ in cf.streams], [[] for _ in cf.streams]
         targets_idxs_all = [[] for _ in cf.streams]
         sources_lens = [toks.shape[0] for toks in sources]
         targets_lens = [[toks.shape[0] for toks in target] for target in targets]
 
         for i_obs, b_targets_idxs in enumerate(targets_idxs):
             for i_b, target_idxs_obs in enumerate(b_targets_idxs):  # 1 batch
-
                 if len(targets[i_obs][i_b]) == 0:
                     continue
 
                 gs = self.cf.geoinfo_size
-                target_i_obs = torch.cat(
-                    [t[:, gs:].unsqueeze(0) for t in targets[i_obs][i_b]], 0
-                )
+                target_i_obs = torch.cat([t[:, gs:].unsqueeze(0) for t in targets[i_obs][i_b]], 0)
                 preds_i_obs = preds[i_obs][target_idxs_obs]
-                preds_i_obs = preds_i_obs.reshape(
-                    [*preds_i_obs.shape[:2], *target_i_obs.shape[1:]]
-                )
+                preds_i_obs = preds_i_obs.reshape([*preds_i_obs.shape[:2], *target_i_obs.shape[1:]])
 
                 if self.cf.loss_chs is not None:
                     if len(self.cf.loss_chs[i_obs]) == 0:
@@ -310,20 +275,14 @@ class Trainer(Trainer_Base):
                 ds_val = self.dataset
                 n = self.cf.geoinfo_size
 
-                sources[i_obs][:, :, n:] = ds_val.denormalize_data(
-                    i_obs, sources[i_obs][:, :, n:]
-                )
+                sources[i_obs][:, :, n:] = ds_val.denormalize_data(i_obs, sources[i_obs][:, :, n:])
                 sources[i_obs][:, :, :n] = ds_val.denormalize_coords(
                     i_obs, sources[i_obs][:, :, :n]
                 )
                 sources_all[i_obs] += [sources[i_obs].detach().cpu()]
 
-                preds_all[i_obs] += [
-                    ds_val.denormalize_data(i_obs, preds_i_obs).detach().cpu()
-                ]
-                targets_all[i_obs] += [
-                    ds_val.denormalize_data(i_obs, target_i_obs).detach().cpu()
-                ]
+                preds_all[i_obs] += [ds_val.denormalize_data(i_obs, preds_i_obs).detach().cpu()]
+                targets_all[i_obs] += [ds_val.denormalize_data(i_obs, target_i_obs).detach().cpu()]
 
                 target_i_coords = (
                     torch.cat([t[:, :n].unsqueeze(0) for t in targets[i_obs][i_b]], 0)
@@ -335,7 +294,8 @@ class Trainer(Trainer_Base):
                 ]
                 targets_idxs_all[i_obs] += [target_idxs_obs]
 
-        cols = [ds[0][0].colnames for ds in dataset_val.obs_datasets_norm]
+        # cols = [ds[0][0].colnames for ds in dataset_val.obs_datasets_norm]
+        cols = []  # TODO
         write_validation(
             self.cf,
             self.path_run,
@@ -353,8 +313,7 @@ class Trainer(Trainer_Base):
         )
 
     ###########################################
-    def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
-
+    def run(self, cf, private_cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
         # general initalization
         self.init(cf, run_id_contd, epoch_contd, run_id_new)
 
@@ -419,9 +378,7 @@ class Trainer(Trainer_Base):
             "num_workers": cf.loader_num_workers,
             "pin_memory": True,
         }
-        self.data_loader = torch.utils.data.DataLoader(
-            self.dataset, **loader_params, sampler=None
-        )
+        self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset_val, **loader_params, sampler=None
         )
@@ -480,7 +437,7 @@ class Trainer(Trainer_Base):
         self.model_params = ModelParams().create(cf).to("cuda")
 
         # if with_fsdp then parameter count is unreliable
-        if (0 == self.cf.rank and not cf.with_fsdp) or not cf.with_ddp:
+        if (self.cf.rank == 0 and not cf.with_fsdp) or not cf.with_ddp:
             self.model.print_num_parameters()
 
         # TODO: learning rate schedule
@@ -499,18 +456,23 @@ class Trainer(Trainer_Base):
         )
         self.grad_scaler = torch.amp.GradScaler("cuda")
 
+        assert len(self.dataset) > 0, f"No data found in {self.dataset}"
+
         # lr is updated after each batch so account for this
+        # TODO: conf should be read-only, do not modify the conf in flight
         cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size)
+
         steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
+        _logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
         # ensure that steps_decay has a reasonable value
         if steps_decay < int(0.2 * cf.lr_steps):
             cf.lr_steps_warmup = int(0.1 * cf.lr_steps)
             cf.lr_steps_cooldown = int(0.05 * cf.lr_steps)
             steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
-            str = f"cf.lr_steps_warmup and cf.lr_steps_cooldown were larger than cf.lr_steps={cf.lr_steps}"
-            str += ". The value have been adjusted to cf.lr_steps_warmup={cf.lr_steps_warmup} and "
-            str += " cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}."
-            logging.getLogger("obslearn").warning(f"")
+            s = f"cf.lr_steps_warmup and cf.lr_steps_cooldown were larger than cf.lr_steps={cf.lr_steps}"
+            s += f". The value have been adjusted to cf.lr_steps_warmup={cf.lr_steps_warmup} and "
+            s += f" cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}."
+            logging.getLogger("obslearn").warning(s)
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             cf.batch_size,
@@ -529,15 +491,13 @@ class Trainer(Trainer_Base):
             cf.lr_scaling_policy,
         )
 
-        if self.cf.istep > 0 and 0 == self.cf.rank:
+        if self.cf.istep > 0 and self.cf.rank == 0:
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
             logging.getLogger("obslearn").info(str)
 
         # get function handles for loss function terms
         self.loss_fcts = [[getattr(losses, name), w] for name, w in cf.loss_fcts]
-        self.loss_fcts_val = [
-            [getattr(losses, name), w] for name, w in cf.loss_fcts_val
-        ]
+        self.loss_fcts_val = [[getattr(losses, name), w] for name, w in cf.loss_fcts_val]
 
         # recover epoch when continuing run
         epoch_base = int(self.cf.istep / len(self.data_loader))
@@ -553,7 +513,6 @@ class Trainer(Trainer_Base):
             self.validate(-1)
 
         for epoch in range(epoch_base, cf.num_epochs):
-
             self.train(epoch)
 
             self.validate(epoch)
@@ -581,15 +540,11 @@ class Trainer(Trainer_Base):
         targets_lens=None,
         mode="training",
     ):
-
-        rng = np.random.default_rng()
+        _rng = np.random.default_rng()
 
         # merge across batch dimension (and keep streams and )
         targets_rt = [
-            [
-                torch.cat([t[i] for t in targets[fstep]])
-                for i in range(len(targets[0][0]))
-            ]
+            [torch.cat([t[i] for t in targets[fstep]]) for i in range(len(targets[0][0]))]
             for fstep in range(len(targets))
         ]
         targets_coords_rt = [
@@ -609,12 +564,12 @@ class Trainer(Trainer_Base):
 
         ctr = 0
         loss = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
+
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):
             for i_obs, (target, target_coords2, si) in enumerate(
-                zip(targets_rt[fstep], targets_coords_rt[fstep], self.cf.streams)
+                zip(targets_rt[fstep], targets_coords_rt[fstep], self.cf.streams, strict=False)
             ):
-
                 pred = preds[fstep][i_obs]
 
                 gs = self.geoinfo_sizes[i_obs]
@@ -623,24 +578,17 @@ class Trainer(Trainer_Base):
                 # set obs_loss_weight = 1. when not specified
                 obs_loss_weight = si["loss_weight"] if "loss_weight" in si else 1.0
                 channel_loss_weight = (
-                    si["channel_weight"]
-                    if "channel_weight" in si
-                    else np.ones(num_channels)
+                    si["channel_weight"] if "channel_weight" in si else np.ones(num_channels)
                 )
                 # in validation mode, always unweighted loss is computed
                 obs_loss_weight = 1.0 if mode == "validation" else obs_loss_weight
                 channel_loss_weight = (
-                    np.ones(num_channels)
-                    if mode == "validation"
-                    else channel_loss_weight
+                    np.ones(num_channels) if mode == "validation" else channel_loss_weight
                 )
 
-                tok_spacetime = (
-                    si["tokenize_spacetime"] if "tokenize_spacetime" in si else False
-                )
+                tok_spacetime = si["tokenize_spacetime"] if "tokenize_spacetime" in si else False
 
                 if target.shape[0] > 0 and pred.shape[0] > 0:
-
                     # extract content if tokens have been padded
                     if targets_token_lens[fstep][i_obs].shape[0] > 0:
                         sl = targets_token_lens[fstep][i_obs].to(
@@ -659,9 +607,7 @@ class Trainer(Trainer_Base):
                                     target.shape[-1] - gs,
                                 ]
                             )
-                            pred = torch.cat(
-                                [pred[:, i, :l] for i, l in enumerate(sl)], 1
-                            )
+                            pred = torch.cat([pred[:, i, :l] for i, l in enumerate(sl)], 1)
                     else:
                         pred = pred.reshape([pred.shape[0], -1, target.shape[-1] - gs])
                     # extract data/coords and remove token dimension if it exists
@@ -679,23 +625,19 @@ class Trainer(Trainer_Base):
 
                     # accumulate loss from different loss functions and channels
                     for j, (loss_fct, w) in enumerate(loss_fcts):
-
                         # compute per channel loss
                         # val_uw is unweighted loss for logging
                         val, val_uw, ctr = (
-                            torch.tensor(
-                                0.0, device=self.devices[0], requires_grad=True
-                            ),
+                            torch.tensor(0.0, device=self.devices[0], requires_grad=True),
                             0.0,
                             0.0,
                         )
                         for i in range(target_data.shape[-1]):
-
                             if tok_spacetime:
                                 # iterate over time steps and compute loss separately for each
                                 t_unique = torch.unique(target_coords[:, 1])
                                 # tw = np.linspace( 1.0, 2.0, len(t_unique))
-                                for jj, t in enumerate(t_unique):
+                                for _jj, t in enumerate(t_unique):
                                     # if jj < len(t_unique)//2 and rng.uniform() < 0.5 and mode!='validation':
                                     #   continue
                                     mask_t = t == target_coords[:, 1]
@@ -705,18 +647,10 @@ class Trainer(Trainer_Base):
                                             target_data[mask, i],
                                             pred[:, mask, i],
                                             pred[:, mask, i].mean(0),
-                                            (
-                                                pred[:, mask, i].std(0)
-                                                if ens
-                                                else torch.zeros(1)
-                                            ),
+                                            (pred[:, mask, i].std(0) if ens else torch.zeros(1)),
                                         )
                                         val_uw += temp.item()
-                                        # Add  temp loss to buffer
-                                        losses_chn[j, i, i_obs] = temp
-                                        val = (
-                                            val + channel_loss_weight[i] * temp
-                                        )  # * tw[jj]
+                                        val = val + channel_loss_weight[i] * temp  # * tw[jj]
                                         ctr += 1
 
                             else:
@@ -740,10 +674,7 @@ class Trainer(Trainer_Base):
                         val_uw = val_uw / ctr if (ctr > 0) else val_uw
 
                         losses_all[j, i_obs] = val_uw
-                        if (
-                            self.cf.loss_fcts[j][0] == "stats"
-                            or self.cf.loss_fcts[j][0] == "kcrps"
-                        ):
+                        if self.cf.loss_fcts[j][0] == "stats" or self.cf.loss_fcts[j][0] == "kcrps":
                             stddev_all[i_obs] = pred[:, mask_nan].std(0).mean().item()
                         # ignore NaNs so that training can continue even if one pred-net diverges
                         loss = loss + (
@@ -755,7 +686,6 @@ class Trainer(Trainer_Base):
 
                     # log data for analysis
                     if preds_all is not None:
-
                         targets_lens[i_obs] += [target_data.shape[0]]
                         dn_data, dn_coords = (
                             self.dataset_val.denormalize_data,
@@ -763,9 +693,7 @@ class Trainer(Trainer_Base):
                         )
 
                         fp32 = torch.float32
-                        preds_all[i_obs] += [
-                            dn_data(i_obs, pred.to(fp32), False).detach().cpu()
-                        ]
+                        preds_all[i_obs] += [dn_data(i_obs, pred.to(fp32), False).detach().cpu()]
                         targets_all[i_obs] += [
                             dn_data(i_obs, target_data.to(fp32), False).detach().cpu()
                         ]
@@ -777,7 +705,6 @@ class Trainer(Trainer_Base):
 
     ###########################################
     def train(self, epoch):
-
         cf = self.cf
         self.ddp_model.train()
 
@@ -788,7 +715,6 @@ class Trainer(Trainer_Base):
         # training loop
         self.t_start = time.time()
         for bidx, data in enumerate(dataset_iter):
-
             data = self.input_to_device(data)
             (
                 _,
@@ -805,9 +731,7 @@ class Trainer(Trainer_Base):
                 forecast_dt,
             ) = data
 
-            losses_all = (
-                torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
-            )
+            losses_all = torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
             losses_chn = (
                 torch.ones(
                     (
@@ -824,7 +748,6 @@ class Trainer(Trainer_Base):
             with torch.autocast(
                 device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
             ):
-
                 preds = self.ddp_model(
                     self.model_params,
                     source_tokens_cells,
@@ -855,9 +778,7 @@ class Trainer(Trainer_Base):
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(
-                self.ddp_model.parameters(), max_norm=cf.grad_clip
-            )
+            torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), max_norm=cf.grad_clip)
 
             # optimizer step
             self.grad_scaler.step(self.optimizer)
@@ -887,7 +808,6 @@ class Trainer(Trainer_Base):
 
     ###########################################
     def validate(self, epoch):
-
         cf = self.cf
         self.ddp_model.eval()
 
@@ -900,7 +820,6 @@ class Trainer(Trainer_Base):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, data in enumerate(dataset_val_iter):
-
                     data = self.input_to_device(data)
                     (
                         sources,
@@ -917,10 +836,7 @@ class Trainer(Trainer_Base):
                         forecast_dt,
                     ) = data
 
-                    losses_all = (
-                        torch.ones((len(self.loss_fcts_val), len(cf.streams)))
-                        * torch.nan
-                    )
+                    losses_all = torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
                     losses_chn = (
                         torch.ones(
                             (
@@ -935,9 +851,7 @@ class Trainer(Trainer_Base):
 
                     # evaluate model
                     with torch.autocast(
-                        device_type="cuda",
-                        dtype=torch.float16,
-                        enabled=cf.with_mixed_precision,
+                        device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
                     ):
                         preds = self.ddp_model(
                             self.model_params,
@@ -954,11 +868,11 @@ class Trainer(Trainer_Base):
 
                     # compute loss and log output
                     if bidx < cf.log_validation:
-
                         preds_all = [[] for _ in cf.streams]
-                        targets_all, targets_coords_all = [[] for _ in cf.streams], [
-                            [] for _ in cf.streams
-                        ]
+                        targets_all, targets_coords_all = (
+                            [[] for _ in cf.streams],
+                            [[] for _ in cf.streams],
+                        )
                         targets_lens = [[] for _ in cf.streams]
 
                         self.compute_loss(
@@ -978,10 +892,7 @@ class Trainer(Trainer_Base):
                             mode="validation",
                         )
 
-                        cols = [
-                            ds[0][0].colnames
-                            for ds in self.dataset_val.obs_datasets_norm
-                        ]
+                        cols = [ds[0][0].colnames for ds in self.dataset_val.obs_datasets_norm]
                         write_validation(
                             self.cf,
                             self.path_run,
@@ -996,7 +907,6 @@ class Trainer(Trainer_Base):
                         )
 
                     else:
-
                         self.compute_loss(
                             self.loss_fcts_val,
                             source_tokens_cells,
@@ -1026,26 +936,20 @@ class Trainer(Trainer_Base):
                     torch.stack(self.stddev_hist).to(torch.float64).nanmean(0)
                 )
 
-                if 0 == self.cf.rank and self.cf.istep >= 0:
+                if self.cf.rank == 0 and self.cf.istep >= 0:
                     loss_dict = {}
                     for j, (lname, _) in enumerate(cf.loss_fcts_val):
-                        loss_dict[f"validation {lname}"] = torch.nanmean(
-                            losses_all[j]
-                        ).item()
-                    loss_dict["validation std_dev"] = torch.nanmean(
-                        stddev_all.mean()
-                    ).item()
+                        loss_dict[f"validation {lname}"] = torch.nanmean(losses_all[j]).item()
+                    loss_dict["validation std_dev"] = torch.nanmean(stddev_all.mean()).item()
                     for i_obs, rt in enumerate(cf.streams):
-                        loss_dict[
-                            "validation {}".format(rt["name"].replace(",", ""))
-                        ] = float(losses_all[0, i_obs])
+                        loss_dict["validation {}".format(rt["name"].replace(",", ""))] = float(
+                            losses_all[0, i_obs]
+                        )
 
                     for j, (lname, _) in enumerate(cf.loss_fcts_val):
                         for i_obs, rt in enumerate(cf.streams):
                             loss_dict[
-                                "validation {} {}".format(
-                                    rt["name"].replace(",", ""), lname
-                                )
+                                "validation {} {}".format(rt["name"].replace(",", ""), lname)
                             ] = losses_chn[j, :, i_obs].tolist()
                     # add data to plain logger
                     samples = cf.istep * cf.batch_size * cf.num_ranks
@@ -1057,24 +961,21 @@ class Trainer(Trainer_Base):
                         self.dataset_val.stream_channels,
                     )
 
-                if 0 == self.cf.rank:
+                if self.cf.rank == 0:
                     print(
-                        "validation ({}) : {:03d} : loss = {:.4E}".format(
-                            cf.run_id, epoch, torch.nanmean(losses_all[0])
-                        ),
+                        f"validation ({cf.run_id}) : {epoch:03d} : loss = {torch.nanmean(losses_all[0]):.4E}",
                         flush=True,
                     )
                     for i_obs, rt in enumerate(cf.streams):
-                        print(
-                            "{}".format(rt["name"]) + f" : {losses_all[0,i_obs]:0.4E}"
-                        )
+                        print("{}".format(rt["name"]) + f" : {losses_all[0, i_obs]:0.4E}")
 
+        # avoid that there is a systematic bias in the validation subset
+        self.dataset_val.advance()
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
 
     ###########################################
     def input_to_device(self, data):
-
         (
             source,
             source_tokens_cells,
@@ -1096,9 +997,7 @@ class Trainer(Trainer_Base):
         source_tokens_cells = [
             [s.to(dev, non_blocking=True) for s in ss] for ss in source_tokens_cells
         ]
-        source_centroids = [
-            [c.to(dev, non_blocking=True) for c in cb] for cb in source_centroids
-        ]
+        source_centroids = [[c.to(dev, non_blocking=True) for c in cb] for cb in source_centroids]
         source_cell_lens = source_cell_lens.to(dev, non_blocking=True)
         source_tokens_lens = source_tokens_lens.to(dev, non_blocking=True)
         source_idxs_embed[0] = [
@@ -1107,12 +1006,10 @@ class Trainer(Trainer_Base):
 
         # target data
         targets_coords = [
-            [[t.to(dev, non_blocking=True) for t in tt] for tt in ttt]
-            for ttt in targets_coords
+            [[t.to(dev, non_blocking=True) for t in tt] for tt in ttt] for ttt in targets_coords
         ]
         target_tokens = [
-            [[t.to(dev, non_blocking=True) for t in tt] for tt in ttt]
-            for ttt in target_tokens
+            [[t.to(dev, non_blocking=True) for t in tt] for tt in ttt] for ttt in target_tokens
         ]
         targets_coords_idxs[0] = [
             [s.to(dev, non_blocking=True) for s in ss] for ss in targets_coords_idxs[0]
@@ -1138,14 +1035,13 @@ class Trainer(Trainer_Base):
 
     ###########################################
     def save_model(self, epoch=-1, name=None):
-
-        file_out = "./models/" + self.cf.run_id + "/{}_".format(self.cf.run_id)
-        file_out += "latest" if epoch == -1 else "epoch{:05d}".format(epoch)
+        file_out = "./models/" + self.cf.run_id + f"/{self.cf.run_id}_"
+        file_out += "latest" if epoch == -1 else f"epoch{epoch:05d}"
         file_out += ("_" + name) if name is not None else ""
         file_out += "{}.chkpt"
 
         if self.cf.with_ddp and self.cf.with_fsdp:
-            cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+            _cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
             with FSDP.state_dict_type(
                 self.ddp_model,
                 StateDictType.FULL_STATE_DICT,
@@ -1155,7 +1051,7 @@ class Trainer(Trainer_Base):
         else:
             state = self.ddp_model.state_dict()
 
-        if 0 == self.cf.rank:
+        if self.cf.rank == 0:
             # save temp file (slow)
             torch.save(state, file_out.format("_temp"))
             # move file (which is changing the link in the file system and very fast)
@@ -1165,36 +1061,27 @@ class Trainer(Trainer_Base):
 
     ###########################################
     def log(self, bidx, epoch):
-
         if bidx % self.log_freq == 0 and bidx > 0:
-
-            l_avg = self.ddp_average(
-                torch.nanmean(torch.stack(self.losses_hist), axis=0)
-            )
-            lchn_avg = self.ddp_average(
-                torch.nanmean(torch.stack(self.losses_hist_chn), axis=0)
-            )
-            stddev_avg = self.ddp_average(
-                torch.nanmean(torch.stack(self.stddev_hist), axis=0)
-            )
+            l_avg = self.ddp_average(torch.nanmean(torch.stack(self.losses_hist), axis=0))
+            lchn_avg = self.ddp_average(torch.nanmean(torch.stack(self.losses_hist_chn), axis=0))
+            stddev_avg = self.ddp_average(torch.nanmean(torch.stack(self.stddev_hist), axis=0))
             samples = self.cf.istep * self.cf.batch_size * self.cf.num_ranks
 
             if 0 == self.cf.rank:
-
                 # logging
                 loss_dict = {
                     "training mse": float(torch.nanmean(l_avg[0])),
                     "lr": self.lr_scheduler.get_lr(),
                 }
                 for i_obs, rt in enumerate(self.cf.streams):
-                    loss_dict["training {}".format(rt["name"].replace(",", ""))] = (
-                        float(l_avg[0, i_obs])
+                    loss_dict["training {}".format(rt["name"].replace(",", ""))] = float(
+                        l_avg[0, i_obs]
                     )
 
                 for i_obs, rt in enumerate(self.cf.streams):
-                    loss_dict["training {}".format(rt["name"].replace(",", ""))] = (
-                        lchn_avg[0, :, i_obs].tolist()
-                    )
+                    loss_dict["training {}".format(rt["name"].replace(",", ""))] = lchn_avg[
+                        0, :, i_obs
+                    ].tolist()
 
                 # plain logger
                 self.train_logger.add_train(
@@ -1212,17 +1099,14 @@ class Trainer(Trainer_Base):
 
     ###########################################
     def log_terminal(self, bidx, epoch):
-
         if bidx % self.print_freq == 0 and bidx > 0:
-
             # compute from last iteration
             nanmean = torch.nanmean
             l_avg = self.ddp_average(
                 nanmean(torch.stack(self.losses_hist[-self.print_freq :]), axis=0)
             )
 
-            if 0 == self.cf.rank:
-
+            if self.cf.rank == 0:
                 # samples per sec
                 dt = time.time() - self.t_start
                 pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
@@ -1243,7 +1127,8 @@ class Trainer(Trainer_Base):
                 print("\t", end="")
                 for i_obs, rt in enumerate(self.cf.streams):
                     print(
-                        "{}".format(rt["name"]) + f" : {l_avg[0,i_obs]:0.4E} \t", end=""
+                        "{}".format(rt["name"]) + f" : {l_avg[0, i_obs]:0.4E} \t",
+                        end="",
                     )
                 print("\n", flush=True)
 

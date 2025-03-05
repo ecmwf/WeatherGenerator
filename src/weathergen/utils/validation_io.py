@@ -7,11 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import time
 
 import numpy as np
 import torch
-
 import zarr
 
 
@@ -21,15 +19,13 @@ def sanitize_stream_str(istr):
 
 #################################
 def read_validation(cf, epoch, base_path, instruments, forecast_steps, rank=0):
-
     streams, columns, data = [], [], []
 
-    fname = base_path + "validation_epoch{:05d}_rank{:04d}.zarr".format(epoch, rank)
+    fname = base_path + f"validation_epoch{epoch:05d}_rank{rank:04d}.zarr"
     store = zarr.DirectoryStore(fname)
     ds = zarr.group(store=store)
 
-    for ii, stream_info in enumerate(cf.streams):
-
+    for _ii, stream_info in enumerate(cf.streams):
         n = stream_info["name"]
         if len(instruments):
             if not np.array([r in n for r in instruments]).any():
@@ -40,7 +36,6 @@ def read_validation(cf, epoch, base_path, instruments, forecast_steps, rank=0):
         data += [[]]
 
         for fstep in forecast_steps:
-
             data[-1] += [[]]
             istr = sanitize_stream_str(n)
 
@@ -73,11 +68,10 @@ def write_validation(
     targets_lens,
     jac=None,
 ):
-
-    if 0 == len(cf.analysis_streams_output):
+    if len(cf.analysis_streams_output) == 0:
         return
 
-    fname = base_path + "validation_epoch{:05d}_rank{:04d}".format(epoch, rank)
+    fname = base_path + f"validation_epoch{epoch:05d}_rank{rank:04d}"
     fname += "" if jac is None else "_jac"
     fname += ".zarr"
 
@@ -85,13 +79,12 @@ def write_validation(
     ds = zarr.group(store=store)
 
     for k, si in enumerate(cf.streams):
-
         # only store requested streams
         if not np.array([s in si["name"] for s in cf.analysis_streams_output]).any():
             continue
 
         # skip empty entries (e.g. no channels from the sources are used as targets)
-        if 0 == len(targets_all[k]) or 0 == len(targets_all[k][0]):
+        if len(targets_all[k]) == 0 or len(targets_all[k][0]) == 0:
             continue
 
         # TODO: this only saves the first batch
@@ -117,27 +110,19 @@ def write_validation(
         if write_first:
             ds_source = ds.require_group(f"{rn}/{fs}")
             # column names
-            if si["type"] in ["anemoi", "regular", "unstr"]:
+            if si["type"] == "anemoi":
                 cols_values = np.arange(2, len(cols[k]))
-            elif "obs" == si["type"]:
+            elif si["type"] == "obs":
                 cols_values = [col[:9] == "obsvalue_" for col in cols[k]]
             else:
                 assert False, "Unsuppported stream type"
             ds_source.attrs["cols"] = np.array(cols[k])[cols_values].tolist()
-            ds_source.create_dataset(
-                "sources", data=source_k, chunks=(1024, *source_k.shape[1:])
-            )
+            ds_source.create_dataset("sources", data=source_k, chunks=(1024, *source_k.shape[1:]))
             ds_source.create_dataset("sources_lens", data=source_lens_k)
+            ds_source.create_dataset("preds", data=preds_k, chunks=(1024, *preds_k.shape[1:]))
+            ds_source.create_dataset("targets", data=targets_k, chunks=(1024, *targets_k.shape[1:]))
             ds_source.create_dataset(
-                "preds", data=preds_k, chunks=(1024, *preds_k.shape[1:])
-            )
-            ds_source.create_dataset(
-                "targets", data=targets_k, chunks=(1024, *targets_k.shape[1:])
-            )
-            ds_source.create_dataset(
-                "targets_coords",
-                data=targets_coords_k,
-                chunks=(1024, *targets_coords_k.shape[1:]),
+                "targets_coords", data=targets_coords_k, chunks=(1024, *targets_coords_k.shape[1:])
             )
             ds_source.create_dataset("targets_lens", data=targets_lens_k)
         else:

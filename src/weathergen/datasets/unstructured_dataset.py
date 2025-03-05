@@ -35,16 +35,12 @@ class UnstructuredDataset:
         self.len = (end - start).astype("timedelta64[D]").astype(int) - self.len_hrs
         begin = self.time[0][0].astype("datetime64[D]")
 
-        self.start_idx = (start - begin).astype("timedelta64[D]").astype(
-            int
-        ) * self.mesh_size
-        self.end_idx = (
-            (end - begin).astype("timedelta64[D]").astype(int) + 1
-        ) * self.mesh_size - 1
+        self.start_idx = (start - begin).astype("timedelta64[D]").astype(int) * self.mesh_size
+        self.end_idx = ((end - begin).astype("timedelta64[D]").astype(int) + 1) * self.mesh_size - 1
 
-        assert (
-            self.end_idx > self.start_idx
-        ), f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
+        assert self.end_idx > self.start_idx, (
+            f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
+        )
 
         self.colnames = list(self.z.data.attrs["colnames"])
         # Ignore step_hrs, idk how it supposed to work
@@ -70,9 +66,7 @@ class UnstructuredDataset:
         """
 
         self.selected_colnames = cols_list
-        self.selected_cols_idx = np.array(
-            [self.colnames.index(item) for item in cols_list]
-        )
+        self.selected_cols_idx = np.array([self.colnames.index(item) for item in cols_list])
 
     def __len__(self):
         return self.len

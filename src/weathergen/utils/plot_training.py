@@ -7,20 +7,20 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import numpy as np
+import argparse
 import code
-
+import glob
 import os
 import subprocess
-import glob
-import argparse
-
-import pandas as pd
 
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 
 from weathergen.utils.config import Config
 from weathergen.utils.train_logger import TrainLogger
+
+out_folder = "./plots/"
 
 out_folder = "./plots/"
 
@@ -32,19 +32,21 @@ def clean_out_folder():
         os.remove(f)
 
 
+def clean_out_folder():
+    files = glob.glob(out_folder + "*.png")
+    for f in files:
+        os.remove(f)
+
+
 ####################################################################################################
 def get_stream_names(run_id):
     # return col names from training (should be identical to validation)
     cf = Config.load(run_id, -1)
-    return [
-        si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
-        for si in cf.streams
-    ]
+    return [si["name"].replace(",", "").replace("/", "_").replace(" ", "_") for si in cf.streams]
 
 
 ####################################################################################################
 def plot_lr(runs_ids, runs_data, runs_active, x_axis="samples"):
-
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
     fig = plt.figure(figsize=(10, 7), dpi=300)
@@ -69,13 +71,11 @@ def plot_lr(runs_ids, runs_data, runs_active, x_axis="samples"):
             color=colors[j % len(colors)],
         )
         legend_str += [
-            ("R" if runs_active[j] else "X")
-            + " : "
-            + run_id
-            + " : "
-            + runs_ids[run_id][1]
+            ("R" if runs_active[j] else "X") + " : " + run_id + " : " + runs_ids[run_id][1]
         ]
 
+    if len(legend_str) < 1:
+        return
     if len(legend_str) < 1:
         return
 
@@ -93,7 +93,6 @@ def plot_lr(runs_ids, runs_data, runs_active, x_axis="samples"):
 
 ####################################################################################################
 def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
-
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
     fig = plt.figure(figsize=(10, 7), dpi=300)
@@ -118,11 +117,7 @@ def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
             color=colors[j % len(colors)],
         )
         legend_str += [
-            ("R" if runs_active[j] else "X")
-            + " : "
-            + run_id
-            + ", GPU : "
-            + runs_ids[run_id][1]
+            ("R" if runs_active[j] else "X") + " : " + run_id + ", GPU : " + runs_ids[run_id][1]
         ]
 
         plt.plot(
@@ -132,13 +127,11 @@ def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
             color=colors[j % len(colors)],
         )
         legend_str += [
-            ("R" if runs_active[j] else "X")
-            + " : "
-            + run_id
-            + ", memory : "
-            + runs_ids[run_id][1]
+            ("R" if runs_active[j] else "X") + " : " + run_id + ", memory : " + runs_ids[run_id][1]
         ]
 
+    if len(legend_str) < 1:
+        return
     if len(legend_str) < 1:
         return
 
@@ -177,7 +170,6 @@ def plot_loss_per_stream(
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "m", "y"]
 
     for stream_name in stream_names:
-
         fig = plt.figure(figsize=(10, 7), dpi=300)
 
         legend_strs = []
@@ -187,10 +179,7 @@ def plot_loss_per_stream(
             idx = 0 if mode == "train" else 1
             legend_strs += [[]]
             for err in errs:
-
-                linestyle = (
-                    "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
-                )
+                linestyle = "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
                 linestyle = ":" if "stddev" in err else linestyle
                 alpha = 1.0
                 if "train" in modes and "val" in modes:
@@ -200,10 +189,7 @@ def plot_loss_per_stream(
                     if len(run_data[idx]) == 0:
                         # skip when no data is available
                         continue
-                    if (
-                        stream_name in run_data[idx]
-                        and err in run_data[idx][stream_name]
-                    ):
+                    if stream_name in run_data[idx] and err in run_data[idx][stream_name]:
                         x_vals = (
                             run_data[idx]["global"].step.values
                             if x_type == "step"
@@ -236,18 +222,19 @@ def plot_loss_per_stream(
         if len(legend_str) < 1:
             plt.close()
             continue
+        # TODO: ensure that legend is plotted with full opacity
+        legend_str = legend_strs[0]
+        if len(legend_str) < 1:
+            plt.close()
+            continue
 
-        legend = plt.legend(
-            legend_str, loc="upper right" if not x_scale_log else "lower left"
-        )
+        legend = plt.legend(legend_str, loc="upper right" if not x_scale_log else "lower left")
         for line in legend.get_lines():
             line.set(alpha=1.0)
         plt.grid(True, which="both", ls="-")
         plt.yscale("log")
         # cap at 1.0 in case of divergence of run (through normalziation, max should be around 1.0)
-        plt.ylim(
-            [0.95 * min_val, (None if max_val < 2.0 else min(1.1, 1.025 * max_val))]
-        )
+        plt.ylim([0.95 * min_val, (None if max_val < 2.0 else min(1.1, 1.025 * max_val))])
         if x_scale_log:
             plt.xscale("log")
         plt.title(stream_name)
@@ -256,8 +243,7 @@ def plot_loss_per_stream(
         plt.tight_layout()
         rstr = "".join([f"{r}_" for r in runs_ids])
         plt.savefig(
-            out_folder
-            + "{}{}{}.png".format(rstr, "".join([f"{m}_" for m in modes]), stream_name)
+            out_folder + "{}{}{}.png".format(rstr, "".join([f"{m}_" for m in modes]), stream_name)
         )
         plt.close()
 
@@ -275,10 +261,13 @@ def plot_loss_per_run(
 ):
     """
     Plot all stream_names (using matching to data columns) for given run_id
-
     x_axis : {samples,dtime} as used in the column names
     """
 
+    modes = [modes] if type(modes) is not list else modes
+    # repeat colors when train and val is plotted simultaneously
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
     modes = [modes] if type(modes) is not list else modes
     # repeat colors when train and val is plotted simultaneously
     prop_cycle = plt.rcParams["axes.prop_cycle"]
@@ -323,6 +312,10 @@ def plot_loss_per_run(
     if len(legend_str) < 1:
         plt.close()
         return
+    legend_str = legend_strs[0]
+    if len(legend_str) < 1:
+        plt.close()
+        return
 
     plt.title(run_id + " : " + run_desc[1])
     legend = plt.legend(legend_str, loc="lower left")
@@ -340,21 +333,14 @@ def plot_loss_per_run(
     plt.tight_layout()
 
     sstr = "".join(
-        [
-            f"{r}_".replace(",", "").replace("/", "_").replace(" ", "_")
-            for r in legend_str
-        ]
+        [f"{r}_".replace(",", "").replace("/", "_").replace(" ", "_") for r in legend_str]
     )
-    plt.savefig(
-        out_folder
-        + "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr)
-    )
+    plt.savefig(out_folder + "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr))
     plt.close()
 
 
 ####################################################################################################
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--delete")
     args = parser.parse_args()
@@ -388,14 +374,17 @@ if __name__ == "__main__":
     # determine which runs are still alive (as a process, though they might hang internally)
     ret = subprocess.run(["squeue"], capture_output=True)
     lines = str(ret.stdout).split("\\n")
-    runs_active = [
-        np.array([str(v[0]) in l for l in lines[1:]]).any() for v in runs_ids.values()
-    ]
+    runs_active = [np.array([str(v[0]) in l for l in lines[1:]]).any() for v in runs_ids.values()]
 
     x_scale_log = False
     x_type = ("rel_time",)  #'step'
     x_type = "step"
+    x_scale_log = False
+    x_type = ("rel_time",)  #'step'
+    x_type = "step"
 
+    # plot learning rate
+    plot_lr(runs_ids, runs_data, runs_active)
     # plot learning rate
     plot_lr(runs_ids, runs_data, runs_active)
 

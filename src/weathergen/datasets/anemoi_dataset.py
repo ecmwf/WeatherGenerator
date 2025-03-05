@@ -7,11 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import code
 import datetime
 
 import numpy as np
-
 from anemoi.datasets import open_dataset
 
 
@@ -28,7 +26,6 @@ class AnemoiDataset:
         normalize: bool = True,
         select: list[str] = None,
     ) -> None:
-
         assert len_hrs == step_hrs, "Currently only step_hrs=len_hrs is supported"
 
         # open  dataset to peak that it is compatible with requested parameters
@@ -43,6 +40,7 @@ class AnemoiDataset:
         dt_start = datetime.datetime.strptime(str(start), format_str)
         dt_end = datetime.datetime.strptime(str(end), format_str)
 
+        # open dataset
         # open dataset
 
         # caches lats and lons
@@ -76,9 +74,7 @@ class AnemoiDataset:
             self.ds = None
             return
 
-        self.ds = open_dataset(
-            self.ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end
-        )
+        self.ds = open_dataset(self.ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end)
 
     def select(self, cols_list: list[str]) -> None:
         """
@@ -87,9 +83,7 @@ class AnemoiDataset:
         """
 
         self.selected_colnames = cols_list
-        self.selected_cols_idx = np.array(
-            [self.colnames.index(item) for item in cols_list]
-        )
+        self.selected_cols_idx = np.array([self.colnames.index(item) for item in cols_list])
 
     def __len__(self):
         "Length of dataset"
@@ -121,11 +115,7 @@ class AnemoiDataset:
         return (data, datetimes)
 
     def time_window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
-
         if not self.ds:
-            return (
-                np.array([], dtype=np.datetime64),
-                np.array([], dtype=np.datetime64),
-            )
+            return (np.array([], dtype=np.datetime64), np.array([], dtype=np.datetime64))
 
         return (self.ds.dates[idx], self.ds.dates[idx])

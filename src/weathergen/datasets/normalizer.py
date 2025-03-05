@@ -13,12 +13,8 @@ from weathergen.datasets.utils import arc_alpha
 
 
 class DataNormalizer:
-
     ###################################################
-    def __init__(
-        self, stream_info, geoinfo_offset, stats_offset, ds, geoinfo_idx, data_idx, do
-    ):
-
+    def __init__(self, stream_info, geoinfo_offset, stats_offset, ds, geoinfo_idx, data_idx, do):
         # obs_id, year, day_of_year, day
         self.geoinfo_offset = geoinfo_offset
         self.stats_offset = stats_offset
@@ -36,7 +32,6 @@ class DataNormalizer:
 
     ###################################################
     def normalize_data(self, data, with_offset=True):
-
         go = self.geoinfo_size + self.geoinfo_offset
         so = self.stats_offset
         for i, ch in enumerate(self.data_idx):
@@ -48,19 +43,17 @@ class DataNormalizer:
 
     ###################################################
     def denormalize_data(self, data, with_offset=True):
-
         go = self.geoinfo_size + self.geoinfo_offset if with_offset else 0
         so = self.stats_offset
         for i, ch in enumerate(self.data_idx):
-            data[..., go + i] = (
-                data[..., go + i] * (self.var[ch - so] ** 0.5)
-            ) + self.mean[ch - so]
+            data[..., go + i] = (data[..., go + i] * (self.var[ch - so] ** 0.5)) + self.mean[
+                ch - so
+            ]
 
         return data
 
     ###################################################
     def normalize_coords(self, data, normalize_latlon=True):
-
         so = self.stats_offset
 
         # TODO: geoinfo_offset should be derived from the code below and the corresponding code in
@@ -76,11 +69,11 @@ class DataNormalizer:
 
         go = self.geoinfo_offset
         for i, ch in enumerate(self.geoinfo_idx):
-            if 0 == i:  # lats
+            if i == 0:  # lats
                 if normalize_latlon:
                     data[..., go + i] = np.sin(np.deg2rad(data[..., go + i]))
                 pass
-            elif 1 == i:  # lons
+            elif i == 1:  # lons
                 if normalize_latlon:
                     data[..., go + i] = np.sin(0.5 * np.deg2rad(data[..., go + i]))
             else:
@@ -92,7 +85,6 @@ class DataNormalizer:
 
     ###################################################
     def normalize_targets(self, data):
-
         so = self.stats_offset
 
         # TODO: geoinfo_offset should be derived from the code below and the corresponding code in
@@ -117,13 +109,10 @@ class DataNormalizer:
 
     ###################################################
     def denormalize_coords(self, data):
-
         # obs_id, year, day of the year, minute of the day
         assert self.geoinfo_offset == 6
         data[..., 0] *= 256.0
-        data[..., 1] = (arc_alpha(data[..., 1], data[..., 2]) / (2.0 * np.pi)) * (
-            12.0 * 3600.0
-        )
+        data[..., 1] = (arc_alpha(data[..., 1], data[..., 2]) / (2.0 * np.pi)) * (12.0 * 3600.0)
         data[..., 2] = data[..., 1]
         data[..., 3] = data[..., 1]
         data[..., 4] = data[..., 1]

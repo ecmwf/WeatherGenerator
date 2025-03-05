@@ -8,12 +8,11 @@
 # nor does it submit to any jurisdiction.
 
 import torch
-from weathergen.model.norms import RMSNorm
-from weathergen.model.norms import AdaLayerNorm
+
+from weathergen.model.norms import AdaLayerNorm, RMSNorm
 
 
 class MLP(torch.nn.Module):
-
     def __init__(
         self,
         dim_in,
@@ -42,15 +41,13 @@ class MLP(torch.nn.Module):
         norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
 
         if pre_layer_norm:
-            self.layers.append(
-                norm(dim_in) if dim_aux is None else AdaLayerNorm(dim_in, dim_aux)
-            )
+            self.layers.append(norm(dim_in) if dim_aux is None else AdaLayerNorm(dim_in, dim_aux))
 
         self.layers.append(torch.nn.Linear(dim_in, dim_hidden))
         self.layers.append(nonlin())
         self.layers.append(torch.nn.Dropout(p=dropout_rate))
 
-        for il in range(num_layers - 2):
+        for _ in range(num_layers - 2):
             self.layers.append(torch.nn.Linear(dim_hidden, dim_hidden))
             self.layers.append(nonlin())
             self.layers.append(torch.nn.Dropout(p=dropout_rate))
@@ -59,7 +56,6 @@ class MLP(torch.nn.Module):
         self.layers.append(nonlin())
 
     def forward(self, *args):
-
         x, x_in, aux = args[0], args[0], args[-1]
 
         for i, layer in enumerate(self.layers):
@@ -70,8 +66,6 @@ class MLP(torch.nn.Module):
                 x = x_in + x
             else:
                 assert x.shape[-1] % x_in.shape[-1] == 0
-                x = x + x_in.repeat(
-                    [*[1 for _ in x.shape[:-1]], x.shape[-1] // x_in.shape[-1]]
-                )
+                x = x + x_in.repeat([*[1 for _ in x.shape[:-1]], x.shape[-1] // x_in.shape[-1]])
 
         return x
