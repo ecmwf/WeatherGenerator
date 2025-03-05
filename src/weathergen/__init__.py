@@ -6,7 +6,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
- 
+
 import time
 import sys
 import pdb
@@ -19,241 +19,300 @@ from weathergen.train.trainer import Trainer
 from weathergen.train.utils import get_run_id
 from weathergen.utils.logger import logger
 
-####################################################################################################
-def evaluate() -> None :  
-  """
-  Main evaluation function for WeatherGenerator model.
-  Parses command line arguments and runs evaluation by calling Trainer.evaluate().
-
-  Args:
-    run_id (str): Run/model id of pretrained WeatherGenerator model.
-    start_date (str): Start date for evaluation. Format must be parsable with pd.to_datetime.
-    end_date (str): End date for evaluation. Format must be parsable with pd.to_datetime.
-    epoch (int, optional): Epoch of pretrained WeatherGenerator model used for evaluation (-1 corresponds to last epoch). Defaults to -1.
-    masking_mode (str, optional): Masking mode for evaluation. Defaults to None.
-    forecast_steps (int, optional): Number of forecast steps for evaluation. Defaults to None.
-    samples (int, optional): Number of samples for evaluation. Defaults to 10000000.
-    shuffle (bool, optional): Shuffle samples for evaluation. Defaults to False.
-    save_samples (bool, optional): Save samples for evaluation. Defaults to True.
-  """
-
-  parser = argparse.ArgumentParser()
-
-  parser.add_argument('--run_id', type=str, required=True, help='Run/model id of pretrained WeatherGenerator model.')
-  parser.add_argument('--start_date', '-start', type=str, required=True, help='Start date for evaluation. Format must be parsable with pd.to_datetime.')
-  parser.add_argument('--end_date', '-end', type=str, required=True, help='End date for evaluation. Format must be parsable with pd.to_datetime.')
-  parser.add_argument('--epoch', type=int, default=-1, help='Epoch of pretrained WeatherGenerator model used for evaluation (-1 corresponds to last epoch).')
-  parser.add_argument('--masking_mode', type=str, default=None, help='Masking mode for evaluation.')
-  parser.add_argument('--forecast_steps', type=int, default=None, help='Number of forecast steps for evaluation. Uses attribute from config when None is set.')
-  parser.add_argument('--samples', type=int, default=10000000, help='Number of samples for evaluation.')
-  parser.add_argument('--shuffle', type=bool, default=False, help='Shuffle samples for evaluation.')
-  parser.add_argument('--save_samples', type=bool, default=True, help='Save samples for evaluation.')
-  parser.add_argument('--analysis_streams_output', type=list, default=['ERA5'], help='Analysis output streams during evaluation.')   
-  # parser.add_argument('--gridded_output_streams', type=list, default=[], help='Gridded output streams for evaluation.')   # ML: currently unused
-
-  args = parser.parse_args()
-
-  # load config if specified
-  cf = Config.load( args.run_id, args.epoch)
-  
-  cf.run_history += [ (cf.run_id, cf.istep) ]
-
-  cf.samples_per_validation = args.samples
-  cf.log_validation = args.samples if args.save_samples else 0
-
-  if args.masking_mode:
-    cf.masking_mode = args.masking_mode
-
-  start_date, end_date = pd.to_datetime(args.start_date), pd.to_datetime(args.end_date)
-  logger.info(f"Evaluation period: {start_date.strftime('%Y-%m-%d %H:%M')} -- {end_date.strftime('%Y-%m-%d %H:%M')}") 
-
-  cf.start_date_val = start_date.strftime('%Y%m%d%H%M')     # ML: would be better to use datetime-objects
-  cf.end_date_val = end_date.strftime('%Y%m%d%H%M')
-  # Oct-Nov 2022
-  # cf.start_date_val = 202210011600
-  # cf.end_date_val = 202212010400
-  # # 2022
-  # cf.start_date_val = 202201010400
-  # cf.end_date_val = 202301010400
-  
-  cf.step_hrs = cf.len_hrs      # ML: len_hrs == step_hrs is currently mandatory for AnemoiDatasets 
-
-  cf.shuffle = args.shuffle
-
-  cf.forecast_steps = args.forecast_steps if args.forecast_steps else cf.forecast_steps
-  # cf.forecast_policy = 'fixed'
-
-  # cf.analysis_streams_output = ['Surface', 'Air', 'METEOSAT', 'ATMS', 'IASI', 'AMSR2']
-  cf.analysis_streams_output = args.analysis_streams_output
- 
-  # make sure number of loaders does not exceed requested samples
-  cf.loader_num_workers = min( cf.loader_num_workers, args.samples)
-
-  trainer = Trainer()
-  trainer.evaluate( cf, args.run_id, args.epoch, True)
 
 ####################################################################################################
-def train() -> None :
+def evaluate() -> None:
+    """
+    Main evaluation function for WeatherGenerator model.
+    Parses command line arguments and runs evaluation by calling Trainer.evaluate().
 
-  """
-  Main training function for WeatherGenerator model.
-  Parses command line arguments and runs evaluation by calling Trainer.evaluate().
+    Args:
+      run_id (str): Run/model id of pretrained WeatherGenerator model.
+      start_date (str): Start date for evaluation. Format must be parsable with pd.to_datetime.
+      end_date (str): End date for evaluation. Format must be parsable with pd.to_datetime.
+      epoch (int, optional): Epoch of pretrained WeatherGenerator model used for evaluation (-1 corresponds to last epoch). Defaults to -1.
+      masking_mode (str, optional): Masking mode for evaluation. Defaults to None.
+      forecast_steps (int, optional): Number of forecast steps for evaluation. Defaults to None.
+      samples (int, optional): Number of samples for evaluation. Defaults to 10000000.
+      shuffle (bool, optional): Shuffle samples for evaluation. Defaults to False.
+      save_samples (bool, optional): Save samples for evaluation. Defaults to True.
+    """
 
-  Args:
-    run_id (str, optional): Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.
+    parser = argparse.ArgumentParser()
 
-  ML: Note that passing a configuration file would be much more cleaner than setting all parameters here. 
-  """
-  parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--run_id",
+        type=str,
+        required=True,
+        help="Run/model id of pretrained WeatherGenerator model.",
+    )
+    parser.add_argument(
+        "--start_date",
+        "-start",
+        type=str,
+        required=True,
+        help="Start date for evaluation. Format must be parsable with pd.to_datetime.",
+    )
+    parser.add_argument(
+        "--end_date",
+        "-end",
+        type=str,
+        required=True,
+        help="End date for evaluation. Format must be parsable with pd.to_datetime.",
+    )
+    parser.add_argument(
+        "--epoch",
+        type=int,
+        default=-1,
+        help="Epoch of pretrained WeatherGenerator model used for evaluation (-1 corresponds to last epoch).",
+    )
+    parser.add_argument(
+        "--masking_mode", type=str, default=None, help="Masking mode for evaluation."
+    )
+    parser.add_argument(
+        "--forecast_steps",
+        type=int,
+        default=None,
+        help="Number of forecast steps for evaluation. Uses attribute from config when None is set.",
+    )
+    parser.add_argument(
+        "--samples",
+        type=int,
+        default=10000000,
+        help="Number of samples for evaluation.",
+    )
+    parser.add_argument(
+        "--shuffle", type=bool, default=False, help="Shuffle samples for evaluation."
+    )
+    parser.add_argument(
+        "--save_samples", type=bool, default=True, help="Save samples for evaluation."
+    )
+    parser.add_argument(
+        "--analysis_streams_output",
+        type=list,
+        default=["ERA5"],
+        help="Analysis output streams during evaluation.",
+    )
+    # parser.add_argument('--gridded_output_streams', type=list, default=[], help='Gridded output streams for evaluation.')   # ML: currently unused
 
-  parser.add_argument('--run_id', type=str, default=None, help='Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.')
+    args = parser.parse_args()
 
-  args = parser.parse_args()
+    # load config if specified
+    cf = Config.load(args.run_id, args.epoch)
 
-  cf = Config()
+    cf.run_history += [(cf.run_id, cf.istep)]
 
-  # directory where input streams are specified
-  # cf.streams_directory = './streams_large/'
-  #cf.streams_directory = '/work/ab0995/a270225/weathergen_data/'
-  cf.streams_directory = '/p/home/jusers/langguth1/juwels/WeatherGenerator2/streams_mixed/'
+    cf.samples_per_validation = args.samples
+    cf.log_validation = args.samples if args.save_samples else 0
+
+    if args.masking_mode:
+        cf.masking_mode = args.masking_mode
+
+    start_date, end_date = pd.to_datetime(args.start_date), pd.to_datetime(
+        args.end_date
+    )
+    logger.info(
+        f"Evaluation period: {start_date.strftime('%Y-%m-%d %H:%M')} -- {end_date.strftime('%Y-%m-%d %H:%M')}"
+    )
+
+    cf.start_date_val = start_date.strftime(
+        "%Y%m%d%H%M"
+    )  # ML: would be better to use datetime-objects
+    cf.end_date_val = end_date.strftime("%Y%m%d%H%M")
+    # Oct-Nov 2022
+    # cf.start_date_val = 202210011600
+    # cf.end_date_val = 202212010400
+    # # 2022
+    # cf.start_date_val = 202201010400
+    # cf.end_date_val = 202301010400
+
+    cf.step_hrs = (
+        cf.len_hrs
+    )  # ML: len_hrs == step_hrs is currently mandatory for AnemoiDatasets
+
+    cf.shuffle = args.shuffle
+
+    cf.forecast_steps = (
+        args.forecast_steps if args.forecast_steps else cf.forecast_steps
+    )
+    # cf.forecast_policy = 'fixed'
+
+    # cf.analysis_streams_output = ['Surface', 'Air', 'METEOSAT', 'ATMS', 'IASI', 'AMSR2']
+    cf.analysis_streams_output = args.analysis_streams_output
+
+    # make sure number of loaders does not exceed requested samples
+    cf.loader_num_workers = min(cf.loader_num_workers, args.samples)
+
+    trainer = Trainer()
+    trainer.evaluate(cf, args.run_id, args.epoch, True)
 
 
-  # embed_orientation : 'channels' or 'columns'
-  # channels: embedding is per channel for a token (#tokens=num_channels)
-  # columns:  embedding is per "column", all channels are embedded together (#tokens=token_size)
-  # the per-stream embedding paramters, in particular dim_embed, have to be chosen accordingly
-  cf.embed_orientation = 'channels'
-  cf.embed_local_coords = True
-  # False since per cell coords are meaningless for cells
-  cf.embed_centroids_local_coords = False   
-  cf.embed_size_centroids = 64
-  cf.embed_unembed_mode = 'block'
+####################################################################################################
+def train() -> None:
+    """
+    Main training function for WeatherGenerator model.
+    Parses command line arguments and runs evaluation by calling Trainer.evaluate().
 
-  cf.target_cell_local_prediction = True
-  cf.target_coords_local = True
+    Args:
+      run_id (str, optional): Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.
 
-  # parameters for local assimilation engine
-  cf.ae_local_dim_embed = 1024 #2048 #1024
-  cf.ae_local_num_blocks = 2
-  cf.ae_local_num_heads = 16
-  cf.ae_local_dropout_rate = 0.1
-  cf.ae_local_with_qk_lnorm = True
-  
-  # assimilation engine local -> global adapter
-  cf.ae_local_num_queries = 2
-  cf.ae_local_queries_per_cell = False
-  cf.ae_adapter_num_heads = 16
-  cf.ae_adapter_embed = 128
-  cf.ae_adapter_with_qk_lnorm = True
-  cf.ae_adapter_with_residual = True
-  cf.ae_adapter_dropout_rate = 0.1
+    ML: Note that passing a configuration file would be much more cleaner than setting all parameters here.
+    """
+    parser = argparse.ArgumentParser()
 
-  # parameters for global assimilation engine
-  cf.ae_global_dim_embed = 2048
-  cf.ae_global_num_blocks = 8
-  cf.ae_global_num_heads = 32
-  cf.ae_global_dropout_rate = 0.1
-  cf.ae_global_with_qk_lnorm = True
-  cf.ae_global_att_dense_rate = 0.2    # 0.25 : every 4-th block is dense attention
-  cf.ae_global_block_factor = 64
-  cf.ae_global_mlp_hidden_factor = 2
-  
-  cf.pred_adapter_kv = False
-  cf.pred_self_attention = True
-  cf.pred_dyadic_dims = False
-  cf.pred_mlp_adaln = True
+    parser.add_argument(
+        "--run_id",
+        type=str,
+        default=None,
+        help="Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.",
+    )
 
-  # forecasting engine
-  cf.forecast_delta_hrs = 0
-  cf.forecast_steps = 0      # [j for j in range(1,11) for i in range(1)]
-  cf.forecast_policy = None  #'fixed', 'sequential'
-  cf.forecast_freeze_model = False # False
-  cf.forecast_att_dense_rate = 0.25
+    args = parser.parse_args()
 
-  cf.fe_num_blocks = 0
-  cf.fe_num_heads = 16
-  cf.fe_dropout_rate = 0.1
-  cf.fe_with_qk_lnorm = True
+    cf = Config()
 
-  cf.healpix_level = 5
+    # directory where input streams are specified
+    # cf.streams_directory = './streams_large/'
+    cf.streams_directory = "/work/ab0995/a270225/weathergen_data/"
+    # cf.streams_directory = '/p/home/jusers/langguth1/juwels/WeatherGenerator2/streams_mixed/'
 
-  # working precision 
-  cf.with_mixed_precision = True
-  cf.with_flash_attention = True
-  if cf.with_flash_attention :
-    assert cf.with_mixed_precision
-  # compile entire model
-  cf.compile_model = False
+    # embed_orientation : 'channels' or 'columns'
+    # channels: embedding is per channel for a token (#tokens=num_channels)
+    # columns:  embedding is per "column", all channels are embedded together (#tokens=token_size)
+    # the per-stream embedding paramters, in particular dim_embed, have to be chosen accordingly
+    cf.embed_orientation = "channels"
+    cf.embed_local_coords = True
+    # False since per cell coords are meaningless for cells
+    cf.embed_centroids_local_coords = False
+    cf.embed_size_centroids = 64
+    cf.embed_unembed_mode = "block"
 
-  cf.with_fsdp = False
+    cf.target_cell_local_prediction = True
+    cf.target_coords_local = True
 
-  cf.loss_fcts = [['mse', 1.0]]
-  cf.loss_fcts_val = [['mse', 1.0]]
-  # cf.loss_fcts = [['mse', 0.5], ['stats', 0.5]]
-  # cf.loss_fcts_val = [['mse', 0.5], ['stats', 0.5]]
+    # parameters for local assimilation engine
+    cf.ae_local_dim_embed = 1024  # 2048 #1024
+    cf.ae_local_num_blocks = 2
+    cf.ae_local_num_heads = 16
+    cf.ae_local_dropout_rate = 0.1
+    cf.ae_local_with_qk_lnorm = True
 
-  cf.batch_size = 1
-  cf.batch_size_validation = 1
+    # assimilation engine local -> global adapter
+    cf.ae_local_num_queries = 2
+    cf.ae_local_queries_per_cell = False
+    cf.ae_adapter_num_heads = 16
+    cf.ae_adapter_embed = 128
+    cf.ae_adapter_with_qk_lnorm = True
+    cf.ae_adapter_with_residual = True
+    cf.ae_adapter_dropout_rate = 0.1
 
-  # forecast
-  cf.masking_mode = 'forecast'
-  cf.masking_rate = 0.0
-  cf.masking_rate_sampling = True #False
-  cf.sampling_rate_target = 1.0
+    # parameters for global assimilation engine
+    cf.ae_global_dim_embed = 2048
+    cf.ae_global_num_blocks = 8
+    cf.ae_global_num_heads = 32
+    cf.ae_global_dropout_rate = 0.1
+    cf.ae_global_with_qk_lnorm = True
+    cf.ae_global_att_dense_rate = 0.2  # 0.25 : every 4-th block is dense attention
+    cf.ae_global_block_factor = 64
+    cf.ae_global_mlp_hidden_factor = 2
 
-  cf.num_epochs = 128
-  cf.samples_per_epoch = 4096
-  cf.samples_per_validation = 512
-  cf.shuffle = True
+    cf.pred_adapter_kv = False
+    cf.pred_self_attention = True
+    cf.pred_dyadic_dims = False
+    cf.pred_mlp_adaln = True
 
-  cf.lr_scaling_policy = 'sqrt'
-  cf.lr_start = 0.000001
-  cf.lr_max = 0.00003
-  cf.lr_final_decay = 0.000001
-  cf.lr_final = 0.0
-  cf.lr_steps_warmup = 256
-  cf.lr_steps_cooldown = 4096
-  cf.lr_policy_warmup = 'cosine'
-  cf.lr_policy_decay = 'linear'
-  cf.lr_policy_cooldown = 'linear'
+    # forecasting engine
+    cf.forecast_delta_hrs = 0
+    cf.forecast_steps = 0  # [j for j in range(1,11) for i in range(1)]
+    cf.forecast_policy = None  #'fixed', 'sequential'
+    cf.forecast_freeze_model = False  # False
+    cf.forecast_att_dense_rate = 0.25
 
-  cf.grad_clip = 5.
-  cf.weight_decay = 0.1
-  cf.norm_type = 'LayerNorm'  #'LayerNorm' #'RMSNorm'
-  cf.nn_module = 'te'
+    cf.fe_num_blocks = 0
+    cf.fe_num_heads = 16
+    cf.fe_dropout_rate = 0.1
+    cf.fe_with_qk_lnorm = True
 
-  cf.data_path = '/p/scratch/hclimrep/shared/weather_generator_data'
-  #cf.data_path = '/work/ab0995/a270225/weathergen_data'
-  # cf.data_path = '/lus/h2resw01/fws4/lb/project/ai-ml/observations/v1'
-  # cf.data_path = '/leonardo_scratch/large/userexternal/clessig0/obs/v1'
-  cf.start_date = 195001010000
-  cf.end_date = 201012310000
-  cf.start_date_val = 201101010000
-  cf.end_date_val = 201901010000
-  cf.len_hrs = 6
-  cf.step_hrs = 6
-  cf.input_window_steps = 1
+    cf.healpix_level = 5
 
-  cf.val_initial = False
+    # working precision
+    cf.with_mixed_precision = True
+    cf.with_flash_attention = True
+    if cf.with_flash_attention:
+        assert cf.with_mixed_precision
+    # compile entire model
+    cf.compile_model = False
 
-  cf.loader_num_workers = 8
-  cf.data_loader_rng_seed = int(time.time())
-  cf.log_validation = 0
+    cf.with_fsdp = False
 
-  cf.istep = 0
-  cf.run_history = []
+    cf.loss_fcts = [["mse", 1.0]]
+    cf.loss_fcts_val = [["mse", 1.0]]
+    # cf.loss_fcts = [['mse', 0.5], ['stats', 0.5]]
+    # cf.loss_fcts_val = [['mse', 0.5], ['stats', 0.5]]
 
-  cf.run_id = args.run_id
-  cf.desc = ''
+    cf.batch_size = 1
+    cf.batch_size_validation = 1
 
-  trainer = Trainer( log_freq=20, checkpoint_freq=250, print_freq=10)
-  
-  try : 
-    trainer.run( cf)
-  except :    
-    extype, value, tb = sys.exc_info()
-    traceback.print_exc()
-    pdb.post_mortem(tb)
+    # forecast
+    cf.masking_mode = "forecast"
+    cf.masking_rate = 0.0
+    cf.masking_rate_sampling = True  # False
+    cf.sampling_rate_target = 1.0
 
-if __name__ == '__main__':
+    cf.num_epochs = 128
+    cf.samples_per_epoch = 4096
+    cf.samples_per_validation = 512
+    cf.shuffle = True
+
+    cf.lr_scaling_policy = "sqrt"
+    cf.lr_start = 0.000001
+    cf.lr_max = 0.00003
+    cf.lr_final_decay = 0.000001
+    cf.lr_final = 0.0
+    cf.lr_steps_warmup = 256
+    cf.lr_steps_cooldown = 4096
+    cf.lr_policy_warmup = "cosine"
+    cf.lr_policy_decay = "linear"
+    cf.lr_policy_cooldown = "linear"
+
+    cf.grad_clip = 5.0
+    cf.weight_decay = 0.1
+    cf.norm_type = "LayerNorm"  #'LayerNorm' #'RMSNorm'
+    cf.nn_module = "te"
+
+    # cf.data_path = '/p/scratch/hclimrep/shared/weather_generator_data'
+    cf.data_path = "/work/ab0995/a270225/weathergen_data"
+    # cf.data_path = '/lus/h2resw01/fws4/lb/project/ai-ml/observations/v1'
+    # cf.data_path = '/leonardo_scratch/large/userexternal/clessig0/obs/v1'
+    cf.start_date = 195001010000
+    cf.end_date = 201012310000
+    cf.start_date_val = 201101010000
+    cf.end_date_val = 201901010000
+    cf.len_hrs = 6
+    cf.step_hrs = 6
+    cf.input_window_steps = 1
+
+    cf.val_initial = False
+
+    cf.loader_num_workers = 8
+    cf.data_loader_rng_seed = int(time.time())
+    cf.log_validation = 0
+
+    cf.istep = 0
+    cf.run_history = []
+
+    cf.run_id = args.run_id
+    cf.desc = ""
+
+    trainer = Trainer(log_freq=20, checkpoint_freq=250, print_freq=10)
+
+    try:
+        trainer.run(cf)
+    except:
+        extype, value, tb = sys.exc_info()
+        traceback.print_exc()
+        pdb.post_mortem(tb)
+
+
+if __name__ == "__main__":
     train()

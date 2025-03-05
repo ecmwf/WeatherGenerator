@@ -14,7 +14,7 @@ import zarr
 import code
 
 
-class ObsDataset():
+class ObsDataset:
 
     def __init__(
         self,
@@ -29,7 +29,7 @@ class ObsDataset():
 
         self.normalize = normalize
         self.filename = filename
-        self.z = zarr.open( filename, mode="r")
+        self.z = zarr.open(filename, mode="r")
         self.data = self.z["data"]
         self.dt = self.z["dates"]  # datetime only
         self.hrly_index = self.z["idx_197001010000_1"]
@@ -39,13 +39,13 @@ class ObsDataset():
 
         # self.selected_colnames = self.colnames
         # self.selected_cols_idx = np.arange(len(self.colnames))
-        for i, col in enumerate( reversed( self.colnames)) :
+        for i, col in enumerate(reversed(self.colnames)):
             # if col[:9] == 'obsvalue_' :
-            if not (col[:4] == 'sin_' or col[:4] == 'cos_') :
+            if not (col[:4] == "sin_" or col[:4] == "cos_"):
                 break
-        self.selected_colnames = self.colnames[ : len(self.colnames)-i ]
-        self.selected_cols_idx = np.arange(len(self.colnames))[  : len(self.colnames)-i ]
-        
+        self.selected_colnames = self.colnames[: len(self.colnames) - i]
+        self.selected_cols_idx = np.arange(len(self.colnames))[: len(self.colnames) - i]
+
         # Create index for samples
         self._setup_sample_index(start, end, self.len_hrs, self.step_hrs)
         # assert len(self.indices_start) == len(self.indices_end)
@@ -55,19 +55,19 @@ class ObsDataset():
         if select:
             self.select(select)
 
-    def __getitem__( self, idx: int) -> tuple :
+    def __getitem__(self, idx: int) -> tuple:
 
         start_row = self.indices_start[idx]
         end_row = self.indices_end[idx]
 
         data = self.data.oindex[start_row:end_row, self.selected_cols_idx]
-        datetimes = self.dt[start_row:end_row][:,0]
+        datetimes = self.dt[start_row:end_row][:, 0]
 
         return (data, datetimes)
 
     def __len__(self) -> int:
 
-        return min( len(self.indices_start), len(self.indices_end))
+        return min(len(self.indices_start), len(self.indices_end))
 
     def select(self, cols_list: list[str]) -> None:
         """
@@ -88,11 +88,11 @@ class ObsDataset():
             idx = len(self) + idx
 
         time_start = self.start_dt + datetime.timedelta(
-            hours=( int(idx * self.step_hrs)), seconds=1
+            hours=(int(idx * self.step_hrs)), seconds=1
         )
         time_end = min(
             self.start_dt
-            + datetime.timedelta(hours=( int(idx * self.step_hrs + self.len_hrs))),
+            + datetime.timedelta(hours=(int(idx * self.step_hrs + self.len_hrs))),
             self.end_dt,
         )
 
@@ -172,7 +172,7 @@ class ObsDataset():
                     self.indices_start,
                     np.ones(
                         (diff_in_hours_end - self.hrly_index.shape[0] - 1) // step_hrs,
-                        dtype=int
+                        dtype=int,
                     )
                     * self.indices_start[-1],
                 )
@@ -180,11 +180,11 @@ class ObsDataset():
                     self.indices_end,
                     np.ones(
                         (diff_in_hours_end - self.hrly_index.shape[0] - 1) // step_hrs,
-                        dtype=int
+                        dtype=int,
                     )
                     * self.indices_end[-1],
                 )
-            
+
         # Prevent -1 in samples before the we have data
         self.indices_end = np.maximum(self.indices_end, 0)
 
@@ -204,11 +204,12 @@ class ObsDataset():
         # self.properties["data_idxs"] = self.data.attrs["data_idxs"]
         self.properties["obs_id"] = self.data.attrs["obs_id"]
 
+
 ####################################################################################################
 if __name__ == "__main__":
 
     zarrpath = config.zarrpath
-    zarrpath = '/lus/h2resw01/fws4/lb/project/ai-ml/observations/zarr/v0.2'
+    zarrpath = "/lus/h2resw01/fws4/lb/project/ai-ml/observations/zarr/v0.2"
 
     # # polar orbiting satellites
     # d1 = ObsDataset( zarrpath, '34001', 201301010000, 202112310000, 24)
@@ -224,13 +225,17 @@ if __name__ == "__main__":
     #                  )
 
     # conventional obs
-    d1 = ObsDataset( zarrpath + '/16002.zarr', 201301010000, 202112310000, 24)
-    d2 = ObsDataset( zarrpath + '/16045.zarr', 201301010000, 202112310000, 24)
-    d3 = ObsDataset( zarrpath + '/bufr_ship_synop_ofb_ea_0001.zarr', 201301010000, 202112310000, 24)
-    d4 = ObsDataset( zarrpath + '/bufr_land_synop_ofb_ea_0001.zarr', 201301010000, 202112310000, 24)
+    d1 = ObsDataset(zarrpath + "/16002.zarr", 201301010000, 202112310000, 24)
+    d2 = ObsDataset(zarrpath + "/16045.zarr", 201301010000, 202112310000, 24)
+    d3 = ObsDataset(
+        zarrpath + "/bufr_ship_synop_ofb_ea_0001.zarr", 201301010000, 202112310000, 24
+    )
+    d4 = ObsDataset(
+        zarrpath + "/bufr_land_synop_ofb_ea_0001.zarr", 201301010000, 202112310000, 24
+    )
 
     d = d1
-    code.interact( local=locals())
+    code.interact(local=locals())
 
     sample = d[0]
     print(sample.shape)

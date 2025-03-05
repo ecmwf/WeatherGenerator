@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main", "develop"]
+  pull_request:
+    branches: [ "main", "develop"]
+    paths-ignore:
+      - "CHANGELOG.md"
+      - "README.md"
+
+jobs:
+  linting:
+    name: python
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          # Install a specific version of uv.
+          version: "0.6.2"
+
+      - name: Run ruff (black)
+        # Do not attempt to install the default dependencies, this is much faster.
+        # Run temporarily on a sub directory before the main restyling.
+        run: uv run --no-project --with "ruff==0.9.7" ruff format --check -n src/
+
+      - name: Run ruff (flake8)
+        # Do not attempt to install the default dependencies, this is much faster.
+        run: uv run --no-project --with "ruff==0.9.7" ruff check src/

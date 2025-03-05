@@ -25,157 +25,175 @@ import torch.utils.data.distributed
 
 from weathergen.utils.config import Config
 import weathergen.utils.logger
-from weathergen.train.utils import get_run_id, str_to_tensor, tensor_to_str, json_to_dict
+from weathergen.train.utils import (
+    get_run_id,
+    str_to_tensor,
+    tensor_to_str,
+    json_to_dict,
+)
 
 
-class Trainer_Base() :
+class Trainer_Base:
 
-  def __init__( self) :
-    pass
+    def __init__(self):
+        pass
 
-  ###########################################
-  @staticmethod
-  def init_torch( use_cuda = True, num_accs_per_task = 1) :
+    ###########################################
+    @staticmethod
+    def init_torch(use_cuda=True, num_accs_per_task=1):
 
-    torch.set_printoptions( linewidth=120)
+        torch.set_printoptions(linewidth=120)
 
-    torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cuda.matmul.allow_tf32 = True
 
-    use_cuda = torch.cuda.is_available()
-    if not use_cuda :
-      return torch.device( 'cpu')
+        use_cuda = torch.cuda.is_available()
+        if not use_cuda:
+            return torch.device("cpu")
 
-    local_id_node = os.environ.get('SLURM_LOCALID', '-1')
-    if local_id_node == '-1' :
-      devices = ['cuda']
-    else :
-      devices = ['cuda:{}'.format(int(local_id_node) * num_accs_per_task + i) 
-                                                                for i in range(num_accs_per_task)]
-    torch.cuda.set_device( int(local_id_node) * num_accs_per_task )
+        local_id_node = os.environ.get("SLURM_LOCALID", "-1")
+        if local_id_node == "-1":
+            devices = ["cuda"]
+        else:
+            devices = [
+                "cuda:{}".format(int(local_id_node) * num_accs_per_task + i)
+                for i in range(num_accs_per_task)
+            ]
+        torch.cuda.set_device(int(local_id_node) * num_accs_per_task)
 
-    return devices 
+        return devices
 
-  ###########################################
-  @staticmethod
-  def init_ddp( cf) :
+    ###########################################
+    @staticmethod
+    def init_ddp(cf):
 
-    rank = 0
-    num_ranks = 1
+        rank = 0
+        num_ranks = 1
 
-    master_node = os.environ.get('MASTER_ADDR', '-1')
-    if '-1' == master_node :
-      cf.with_ddp=False; cf.rank=rank; cf.num_ranks=num_ranks
-      return
+        master_node = os.environ.get("MASTER_ADDR", "-1")
+        if "-1" == master_node:
+            cf.with_ddp = False
+            cf.rank = rank
+            cf.num_ranks = num_ranks
+            return
 
-    local_rank = int(os.environ.get("SLURM_LOCALID"))
-    ranks_per_node = int( os.environ.get('SLURM_TASKS_PER_NODE', '1')[0] )
-    rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
-    num_ranks = int(os.environ.get("SLURM_NTASKS"))
+        local_rank = int(os.environ.get("SLURM_LOCALID"))
+        ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
+        rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
+        num_ranks = int(os.environ.get("SLURM_NTASKS"))
 
-    dist.init_process_group( backend='nccl', init_method='tcp://' + master_node + ':1345',
-                             timeout=datetime.timedelta(seconds=10*8192),
-                             world_size = num_ranks, rank = rank)
+        dist.init_process_group(
+            backend="nccl",
+            init_method="tcp://" + master_node + ":1345",
+            timeout=datetime.timedelta(seconds=10 * 8192),
+            world_size=num_ranks,
+            rank=rank,
+        )
 
-    # communicate run id to all nodes
-    run_id_int = torch.zeros( 8, dtype=torch.int32).cuda()
-    if 0 == rank :
-      run_id_int = str_to_tensor( cf.run_id).cuda()
-    dist.all_reduce( run_id_int, op=torch.distributed.ReduceOp.SUM )
-    cf.run_id = tensor_to_str( run_id_int)
+        # communicate run id to all nodes
+        run_id_int = torch.zeros(8, dtype=torch.int32).cuda()
+        if 0 == rank:
+            run_id_int = str_to_tensor(cf.run_id).cuda()
+        dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
+        cf.run_id = tensor_to_str(run_id_int)
 
-    # communicate data_loader_rng_seed
-    if hasattr( cf, 'data_loader_rng_seed') :
-      if cf.data_loader_rng_seed is not None :
-        l_seed = torch.tensor([cf.data_loader_rng_seed if 0==rank else 0], dtype=torch.int32).cuda()
-        dist.all_reduce( l_seed, op=torch.distributed.ReduceOp.SUM )
-        cf.data_loader_rng_seed = l_seed.item()
+        # communicate data_loader_rng_seed
+        if hasattr(cf, "data_loader_rng_seed"):
+            if cf.data_loader_rng_seed is not None:
+                l_seed = torch.tensor(
+                    [cf.data_loader_rng_seed if 0 == rank else 0], dtype=torch.int32
+                ).cuda()
+                dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
+                cf.data_loader_rng_seed = l_seed.item()
 
-    cf.rank = rank
-    cf.num_ranks = num_ranks
-    cf.with_ddp = True
+        cf.rank = rank
+        cf.num_ranks = num_ranks
+        cf.with_ddp = True
 
-    return
+        return
 
-  ###########################################
-  @staticmethod
-  def init_streams( cf : Config, run_id_contd ) :
+    ###########################################
+    @staticmethod
+    def init_streams(cf: Config, run_id_contd):
 
-    if not hasattr( cf, 'streams_directory'):
-      return cf
+        if not hasattr(cf, "streams_directory"):
+            return cf
 
-    # use previously specified streams when continuing a run
-    if run_id_contd is not None :
-      return cf
+        # use previously specified streams when continuing a run
+        if run_id_contd is not None:
+            return cf
 
-    if not hasattr( cf, 'streams'):
-      cf.streams = [ ]
-    elif not isinstance( cf.streams, list) :
-      cf.streams = [ ]
+        if not hasattr(cf, "streams"):
+            cf.streams = []
+        elif not isinstance(cf.streams, list):
+            cf.streams = []
 
-    # warn if specified dir does not exist
-    if not os.path.isdir( cf.streams_directory) :
-      sd = cf.streams_directory
-      logging.getLogger('obslearn').warning( f'Streams directory {sd} does not exist.')
+        # warn if specified dir does not exist
+        if not os.path.isdir(cf.streams_directory):
+            sd = cf.streams_directory
+            logging.getLogger("obslearn").warning(
+                f"Streams directory {sd} does not exist."
+            )
 
-    # read all reportypes from directory, append to existing ones
-    temp = {}
-    for fh in sorted( pathlib.Path( cf.streams_directory).rglob( '*.yml')) :
-      stream_parsed = yaml.safe_load( fh.read_text())
-      if stream_parsed is not None :
-        temp.update( stream_parsed)
-    for k,v in temp.items() :
-      v['name'] = k
-      cf.streams.append( v)
+        # read all reportypes from directory, append to existing ones
+        temp = {}
+        for fh in sorted(pathlib.Path(cf.streams_directory).rglob("*.yml")):
+            stream_parsed = yaml.safe_load(fh.read_text())
+            if stream_parsed is not None:
+                temp.update(stream_parsed)
+        for k, v in temp.items():
+            v["name"] = k
+            cf.streams.append(v)
 
-    # sanity checking (at some point, the dict should be parsed into a class)
-    rts = [ rt['filenames'] for rt in cf.streams]
-    # flatten list
-    rts = list( itertools.chain.from_iterable( rts))
-    if len(rts) != len( list(set( rts))) :
-      logging.getLogger('obslearn').warning( 'Duplicate reportypes specified.')
+        # sanity checking (at some point, the dict should be parsed into a class)
+        rts = [rt["filenames"] for rt in cf.streams]
+        # flatten list
+        rts = list(itertools.chain.from_iterable(rts))
+        if len(rts) != len(list(set(rts))):
+            logging.getLogger("obslearn").warning("Duplicate reportypes specified.")
 
-    return cf
+        return cf
 
-  ###########################################
-  def init_perf_monitoring( self) :
+    ###########################################
+    def init_perf_monitoring(self):
 
-    self.device_handles, self.device_names = [], []
+        self.device_handles, self.device_names = [], []
 
-    pynvml.nvmlInit()
-    device_count = pynvml.nvmlDeviceGetCount()
+        pynvml.nvmlInit()
+        device_count = pynvml.nvmlDeviceGetCount()
 
-    for i in range(device_count):
-      handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-      self.device_names += [ pynvml.nvmlDeviceGetName(handle) ]
-      self.device_handles += [ handle ]
+        for i in range(device_count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+            self.device_names += [pynvml.nvmlDeviceGetName(handle)]
+            self.device_handles += [handle]
 
-  ###########################################
-  def get_perf( self) :
+    ###########################################
+    def get_perf(self):
 
-    perf_gpu, perf_mem = 0.0, 0.0
-    if len(self.device_handles) > 0 :
-      for handle in self.device_handles :
-        perf = pynvml.nvmlDeviceGetUtilizationRates( handle)
-        perf_gpu += perf.gpu
-        perf_mem += perf.memory
-      perf_gpu /= len(self.device_handles)
-      perf_mem /= len(self.device_handles)
+        perf_gpu, perf_mem = 0.0, 0.0
+        if len(self.device_handles) > 0:
+            for handle in self.device_handles:
+                perf = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                perf_gpu += perf.gpu
+                perf_mem += perf.memory
+            perf_gpu /= len(self.device_handles)
+            perf_mem /= len(self.device_handles)
 
-    return perf_gpu, perf_mem
+        return perf_gpu, perf_mem
 
-  ###########################################
-  def ddp_average( self, val) :
-    if self.cf.with_ddp :
-      dist.all_reduce( val.cuda(), op=torch.distributed.ReduceOp.AVG )
-    return val.cpu()
+    ###########################################
+    def ddp_average(self, val):
+        if self.cf.with_ddp:
+            dist.all_reduce(val.cuda(), op=torch.distributed.ReduceOp.AVG)
+        return val.cpu()
+
 
 ####################################################################################################
-if __name__ == '__main__' :
+if __name__ == "__main__":
 
-  from weathergen.utils.config import Config
-  from weathergen.train.trainer_base import Trainer_Base
+    from weathergen.utils.config import Config
+    from weathergen.train.trainer_base import Trainer_Base
 
-  cf = Config()
-  cf.sources_dir = './sources'
+    cf = Config()
+    cf.sources_dir = "./sources"
 
-  cf = Trainer_Base.init_reportypes( cf)
+    cf = Trainer_Base.init_reportypes(cf)
