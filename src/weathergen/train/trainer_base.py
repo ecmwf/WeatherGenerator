@@ -11,7 +11,7 @@ import datetime
 import itertools
 import logging
 import os
-import pathlib
+from pathlib import Path
 
 import pynvml
 import torch
@@ -21,6 +21,8 @@ import yaml
 
 from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.config import Config
+
+_logger = logging.getLogger(__name__)
 
 
 class Trainer_Base:
@@ -114,11 +116,14 @@ class Trainer_Base:
         # warn if specified dir does not exist
         if not os.path.isdir(cf.streams_directory):
             sd = cf.streams_directory
-            logging.getLogger("obslearn").warning(f"Streams directory {sd} does not exist.")
+            _logger.warning(f"Streams directory {sd} does not exist.")
 
         # read all reportypes from directory, append to existing ones
         temp = {}
-        for fh in sorted(pathlib.Path(cf.streams_directory).rglob("*.yml")):
+        streams_dir = Path(cf.streams_directory).absolute()
+        _logger.info(f"Reading streams from {streams_dir}")
+
+        for fh in sorted(streams_dir.rglob("*.yml")):
             stream_parsed = yaml.safe_load(fh.read_text())
             if stream_parsed is not None:
                 temp.update(stream_parsed)
@@ -131,7 +136,7 @@ class Trainer_Base:
         # flatten list
         rts = list(itertools.chain.from_iterable(rts))
         if len(rts) != len(list(set(rts))):
-            logging.getLogger("obslearn").warning("Duplicate reportypes specified.")
+            _logger.warning("Duplicate reportypes specified.")
 
         return cf
 

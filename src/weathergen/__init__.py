@@ -13,7 +13,8 @@ import time
 import traceback
 
 from weathergen.train.trainer import Trainer
-from weathergen.utils.config import Config
+from weathergen.utils.config import Config, private_conf
+from weathergen.utils.logger import init_loggers
 
 
 ####################################################################################################
@@ -27,6 +28,8 @@ def evaluate(
     save_samples=True,
     gridded_output_streams=[],
 ):
+    # TODO: move somewhere else
+    init_loggers()
     # load config if specified
     cf = Config.load(run_id, epoch if epoch is not None else -1)
 
@@ -45,7 +48,7 @@ def evaluate(
     # cf.start_date_val = 202201010400
     # cf.end_date_val = 202301010400
 
-    cf.step_hrs = 12
+    # cf.step_hrs = 12
 
     cf.shuffle = shuffle
 
@@ -64,12 +67,15 @@ def evaluate(
 
 ####################################################################################################
 def train(run_id=None) -> None:
+    # TODO: move somewhere else
+    init_loggers()
+    private_cf = private_conf()
     cf = Config()
 
     # directory where input streams are specified
     # cf.streams_directory = './streams_large/'
-    # cf.streams_directory = './streams_anemoi/'
-    cf.streams_directory = "./streams_mixed/"
+    cf.streams_directory = "./config/streams/streams_anemoi/"
+    # cf.streams_directory = "./streams_mixed/"
 
     # embed_orientation : 'channels' or 'columns'
     # channels: embedding is per channel for a token (#tokens=num_channels)
@@ -175,7 +181,8 @@ def train(run_id=None) -> None:
     cf.norm_type = "LayerNorm"  #'LayerNorm' #'RMSNorm'
     cf.nn_module = "te"
 
-    cf.data_path = "/home/mlx/ai-ml/datasets/stable/"
+    cf.data_path = private_cf["data_path"]
+    # "/home/mlx/ai-ml/datasets/stable/"
     # cf.data_path = '/lus/h2resw01/fws4/lb/project/ai-ml/observations/v1'
     # cf.data_path = '/leonardo_scratch/large/userexternal/clessig0/obs/v1'
     cf.start_date = 201301010000
@@ -201,7 +208,7 @@ def train(run_id=None) -> None:
     trainer = Trainer(log_freq=20, checkpoint_freq=250, print_freq=10)
 
     try:
-        trainer.run(cf)
+        trainer.run(cf, private_cf)
     except:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()

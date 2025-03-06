@@ -35,6 +35,8 @@ from weathergen.train.utils import get_run_id
 from weathergen.utils.train_logger import TrainLogger
 from weathergen.utils.validation_io import write_validation
 
+_logger = logging.getLogger(__name__)
+
 
 class Trainer(Trainer_Base):
     ###########################################
@@ -47,7 +49,14 @@ class Trainer(Trainer_Base):
         self.print_freq = print_freq
 
     ###########################################
-    def init(self, cf, run_id_contd=None, epoch_contd=None, run_id_new=False, run_mode="training"):
+    def init(
+        self,
+        cf,
+        run_id_contd=None,
+        epoch_contd=None,
+        run_id_new=False,
+        run_mode="training",
+    ):
         self.cf = cf
 
         if isinstance(run_id_new, str):
@@ -284,7 +293,7 @@ class Trainer(Trainer_Base):
         )
 
     ###########################################
-    def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
+    def run(self, cf, private_cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
         # general initalization
         self.init(cf, run_id_contd, epoch_contd, run_id_new)
 
@@ -419,18 +428,23 @@ class Trainer(Trainer_Base):
         )
         self.grad_scaler = torch.amp.GradScaler("cuda")
 
+        assert len(self.dataset) > 0, f"No data found in {self.dataset}"
+
         # lr is updated after each batch so account for this
+        # TODO: conf should be read-only, do not modify the conf in flight
         cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size)
+
         steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
+        _logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
         # ensure that steps_decay has a reasonable value
         if steps_decay < int(0.2 * cf.lr_steps):
             cf.lr_steps_warmup = int(0.1 * cf.lr_steps)
             cf.lr_steps_cooldown = int(0.05 * cf.lr_steps)
             steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
-            str = f"cf.lr_steps_warmup and cf.lr_steps_cooldown were larger than cf.lr_steps={cf.lr_steps}"
-            str += ". The value have been adjusted to cf.lr_steps_warmup={cf.lr_steps_warmup} and "
-            str += " cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}."
-            logging.getLogger("obslearn").warning("")
+            s = f"cf.lr_steps_warmup and cf.lr_steps_cooldown were larger than cf.lr_steps={cf.lr_steps}"
+            s += f". The value have been adjusted to cf.lr_steps_warmup={cf.lr_steps_warmup} and "
+            s += f" cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}."
+            logging.getLogger("obslearn").warning(s)
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             cf.batch_size,
@@ -580,7 +594,7 @@ class Trainer(Trainer_Base):
                                             target_data[mask, i],
                                             pred[:, mask, i],
                                             pred[:, mask, i].mean(0),
-                                            pred[:, mask, i].std(0) if ens else torch.zeros(1),
+                                            (pred[:, mask, i].std(0) if ens else torch.zeros(1)),
                                         )
                                         val_uw += temp.item()
                                         val = val + channel_loss_weight[i] * temp  # * tw[jj]
@@ -593,9 +607,11 @@ class Trainer(Trainer_Base):
                                         target_data[mask_nan[:, i], i],
                                         pred[:, mask_nan[:, i], i],
                                         pred[:, mask_nan[:, i], i].mean(0),
-                                        pred[:, mask_nan[:, i], i].std(0)
-                                        if ens
-                                        else torch.zeros(1),
+                                        (
+                                            pred[:, mask_nan[:, i], i].std(0)
+                                            if ens
+                                            else torch.zeros(1)
+                                        ),
                                     )
                                     val_uw += temp.item()
                                     val = val + channel_loss_weight[i] * temp
@@ -905,7 +921,10 @@ class Trainer(Trainer_Base):
                 )
                 print("\t", end="")
                 for i_obs, rt in enumerate(self.cf.streams):
-                    print("{}".format(rt["name"]) + f" : {l_avg[0, i_obs]:0.4E} \t", end="")
+                    print(
+                        "{}".format(rt["name"]) + f" : {l_avg[0, i_obs]:0.4E} \t",
+                        end="",
+                    )
                 print("\n", flush=True)
 
             self.t_start = time.time()
