@@ -599,7 +599,10 @@ class Model(torch.nn.Module):
             # prediction
             preds_all += [
                 self.predict(
-                    model_params, it, tokens, target_coords, target_coords_lens, target_coords_idxs
+                    forecast_steps,
+                    tokens,
+                    streams_data,
+                    target_coords_idxs,
                 )
             ]
 

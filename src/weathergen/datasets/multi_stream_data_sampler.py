@@ -257,6 +257,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     ###################################################
     def __iter__(self):
+        """
+        Return one batch of data
+
+        Return : list[list[StreamData]]
+            len : number of batch items
+            len[*] : number of streams
+        """
+
         iter_start, iter_end = self.worker_workset()
 
         # create new shuffeling
@@ -359,7 +367,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                     oi, do, normalizer, source2, times2, time_win2, s_idxs
                                 )
 
-                                (tt_cells, tt_lens, tc, tc_lens) = self.batchifyer.batchify_target(
+                                (tt_cells, tc) = self.batchifyer.batchify_target(
                                     stream_info,
                                     self.geoinfo_offset,
                                     self.get_geoinfo_size(obs_id, i_source),
@@ -370,7 +378,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                     normalizer.normalize_targets,
                                 )
 
-                                stream_data.add_target( fstep, tt_cells, tt_lens, tc, tc_lens)
+                                stream_data.add_target( fstep, tt_cells, tc)
 
                     # merge inputs for sources and targets for current stream
                     stream_data.merge_inputs()

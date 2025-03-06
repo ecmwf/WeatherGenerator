@@ -43,8 +43,11 @@ class StreamData() :
         self.nhc_source = nhc_source
         self.nhc_target = nhc_target
 
+        # TODO add shape of tensors
+
         # initialize empty members 
         self.target_coords = [[] for _ in range(forecast_steps + 1)]
+        # this is not directly used but to precompute index in compute_idxs_predict()
         self.target_coords_lens = [[] for _ in range(forecast_steps + 1)]
         self.target_tokens = [[] for _ in range(forecast_steps + 1)]
         self.target_tokens_lens = [[] for _ in range(forecast_steps + 1)]
@@ -79,7 +82,6 @@ class StreamData() :
         self.source_tokens_lens = self.source_tokens_lens.to( device, non_blocking=True)
 
         self.target_coords = [t.to( device, non_blocking=True) for t in self.target_coords]
-        self.target_coords_lens = [t.to( device, non_blocking=True) for t in self.target_coords_lens]
         self.target_tokens = [t.to( device, non_blocking=True) for t in self.target_tokens]
         self.target_tokens_lens = [t.to( device, non_blocking=True) for t in self.target_tokens_lens]
 
@@ -113,74 +115,73 @@ class StreamData() :
 
             Parameters
             ----------
-            None
+            fstep : int
+                forecast step
 
             Returns
             -------
             None
         """
 
-        self.target_tokens_lens[fstep] += [ torch.zeros([self.nhc_target], dtype=torch.int32) ]
         self.target_tokens[fstep] += [torch.tensor([]) ]
+        self.target_tokens_lens[fstep] += [ torch.zeros([self.nhc_target], dtype=torch.int32) ]
         self.target_coords[fstep] += [ torch.tensor([]) ]
         self.target_coords_lens[fstep] += [ torch.zeros([self.nhc_target], dtype=torch.int32) ]
 
     def add_source( self, 
-                    source1_raw : torch.tensor, 
+                    ss_raw : torch.tensor, 
                     ss_lens : torch.tensor,
-                    ss_cells : torch.tensor,
-                    ss_centroids : torch.tensor
+                    ss_cells : list,
+                    ss_centroids : list
                     ) -> None :
         """
             Add data for source for one input.
 
             Parameters
             ----------
-            None
+            ss_raw : torch.tensor( number of data points in time window , number of channels )
+            ss_lens : torch.tensor( number of healpix cells )
+            ss_cells : list( number of healpix cells )[ torch.tensor( tokens per cell, token size, number of channels) ]
+            ss_centroids : list(number of healpix cells )[ torch.tensor( for source , 5) ]
 
             Returns
             -------
             None
         """
 
-        self.source_raw += [source1_raw]
+        self.source_raw += [ss_raw]
         self.source_tokens_lens += [ss_lens]
         self.source_tokens_cells += [ss_cells]
-        # TODO: is the if clauses still needed?
-        self.source_centroids += (
-            [ss_centroids] if len(ss_centroids) > 0 else [torch.tensor([])]
-        )
+        self.source_centroids += [ss_centroids]
 
     def add_target( self, 
                     fstep : int, 
-                    tt_cells : torch.tensor,
-                    tt_lens : torch.tensor, 
-                    tc : torch.tensor,
-                    tc_lens : torch.tensor
-                    ) -> None :
+                    targets : list,
+                    target_coords : torch.tensor,
+                   ) -> None :
         """
             Add data for target for one input.
 
             Parameters
             ----------
-            None
+            fstep : int
+                forecast step
+            targets : torch.tensor( number of healpix cells )[ torch.tensor( num tokens, channels) ]
+                Target data for loss computation
+            targets_lens : torch.tensor( number of healpix cells)
+                length of targets per cell
+            target_coords : list( number of healpix cells)[ torch.tensor( points per cell, 105)] 
+                target coordinates
 
             Returns
             -------
             None
         """
 
-        # TODO: are the if clauses still needed?
-        self.target_tokens_lens[fstep] += (
-            [tt_lens] if len(tt_lens) > 0 else [torch.tensor([])]
-        )
-        self.target_tokens[fstep] += (
-            [tt_cells] if len(tt_cells) > 0 else [torch.tensor([])]
-        )
-        self.target_coords[fstep] += [tc]
-        self.target_coords_lens[fstep] += [tc_lens]
+        self.target_tokens[fstep] += [targets]
+        self.target_coords[fstep] += [target_coords]
 
-    def target_empty( self) :
+    def target_empty( self) -> bool :
         """
             Test if target for stream is empty
 
@@ -197,7 +198,7 @@ class StreamData() :
         # cat over forecast steps
         return torch.cat(self.target_tokens_lens).sum() == 0
 
-    def source_empty( self) :
+    def source_empty( self) -> bool :
         """
             Test if source for stream is empty
 
@@ -237,7 +238,7 @@ class StreamData() :
 
             Parameters
             ----------
-            s_list : list
+            s_list : list( number of healpix cells)[torch.tensor]
                 List of lists to be merged along first (multi-source) dimension
             num_healpix_cells : int
                 Number of healpix cells (equal to second dimension of list for all list items)
@@ -259,7 +260,6 @@ class StreamData() :
         )
 
         return ret
-
 
     def merge_inputs( self) -> None :
         """
@@ -303,17 +303,21 @@ class StreamData() :
             # collect all targets in current stream and add to batch sample list when non-empty
             if torch.tensor([len(s) for s in self.target_tokens[fstep]]).sum() > 0:
                 nt = self.nhc_target
+                import code
+                self.target_coords_lens[fstep] = torch.tensor([[len(f) for f in ff] 
+                                                    for ff in self.target_coords[fstep]]).sum(0)
+                self.target_tokens_lens[fstep] = torch.tensor([[len(f) for f in ff] 
+                                                    for ff in self.target_tokens[fstep]]).sum(0)
                 self.target_coords[fstep] = self._merge_cells(self.target_coords[fstep], nt)
                 self.target_tokens[fstep] = self._merge_cells(self.target_tokens[fstep], nt)
-                # lens can be stacked and summed
-                self.target_tokens_lens[fstep] = torch.stack(self.target_tokens_lens[fstep]).sum(0)
-                self.target_coords_lens[fstep] = torch.stack(self.target_coords_lens[fstep]).sum(0)
                 # remove NaNs
+                # TODO: it seems better to drop data points with NaN values in the coords than 
+                #       to mask them 
                 self.target_coords[fstep][torch.isnan(self.target_coords[fstep])] = self.mask_value
 
             else:
                 # TODO: is this branch still needed
                 self.target_coords[fstep] = torch.tensor([])
-                self.target_coords_lens[fstep] = torch.tensor([])
                 self.target_tokens[fstep] = torch.tensor([])
                 self.target_tokens_lens[fstep] = torch.tensor([])
+                self.target_coords_lens[fstep] = torch.tensor([])

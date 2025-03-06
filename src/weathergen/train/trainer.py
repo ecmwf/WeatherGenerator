@@ -508,11 +508,6 @@ class Trainer(Trainer_Base):
             for i in range(len(self.cf.streams))]
             for fstep in range(forecast_steps+1)
         ]
-        targets_token_lens = [
-            [torch.cat([t[i].target_tokens_lens[fstep] for t in streams_data])
-            for i in range(len(self.cf.streams))]
-            for fstep in range(forecast_steps+1)
-        ]
 
         ctr = 0
         loss = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
@@ -544,23 +539,6 @@ class Trainer(Trainer_Base):
                 tok_spacetime = si["tokenize_spacetime"] if "tokenize_spacetime" in si else False
 
                 if target.shape[0] > 0 and pred.shape[0] > 0:
-                    # extract content if tokens have been padded
-                    if targets_token_lens[fstep][i_obs].shape[0] > 0:
-                        sl = targets_token_lens[fstep][i_obs].to(
-                            torch.int64
-                        )  # TODO: why is it sometimes not torch.int
-                        tro_type = (
-                            si["target_readout"]["type"]
-                            if "type" in si["target_readout"]
-                            else "token"
-                        )
-                        if tro_type == "token":
-                            pred = pred.reshape(
-                                [*pred.shape[:2], target.shape[-2], target.shape[-1] - gs]
-                            )
-                            pred = torch.cat([pred[:, i, :l] for i, l in enumerate(sl)], 1)
-                    else:
-                        pred = pred.reshape([pred.shape[0], -1, target.shape[-1] - gs])
                     # extract data/coords and remove token dimension if it exists
                     target_coords = target[..., :gs].flatten(0, -2)
                     target_coords[:, 1:3] = target_coords2[..., 1:3]  # copy local time
