@@ -106,7 +106,7 @@ def write_validation(
         else:
             write_first = True
 
-        # TODO: how to avoid this
+        # TODO: how to avoid the case distinction for write_first
         if write_first:
             ds_source = ds.require_group(f"{rn}/{fs}")
             # column names
@@ -127,7 +127,8 @@ def write_validation(
             ds_source.create_dataset("targets_lens", data=targets_lens_k)
         else:
             rn = rn + f"/{fs}"
-            ds[f"{rn}/sources"].append(source_k)
+            if source_lens_k.sum() > 0 :
+                ds[f"{rn}/sources"].append(source_k)
             ds[f"{rn}/sources_lens"].append(source_lens_k)
             ds[f"{rn}/preds"].append(preds_k)
             ds[f"{rn}/targets"].append(targets_k)
