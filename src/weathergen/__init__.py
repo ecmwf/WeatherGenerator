@@ -23,7 +23,7 @@ from weathergen.utils.logger import init_loggers
 ####################################################################################################
 def evaluate():
     """
-    Main evaluation function for WeatherGenerator model.
+    Evaluation function for WeatherGenerator model.
     Parses command line arguments and runs evaluation by calling Trainer.evaluate().
     Note: The parsed arguments are used to overwrite the model configuration for evaluation.
 
@@ -45,12 +45,11 @@ def evaluate():
     parser.add_argument('--run_id', type=str, required=True, help='Run/model id of pretrained WeatherGenerator model.')
     parser.add_argument('--start_date', '-start', type=str, required=True, help='Start date for evaluation. Format must be parsable with pd.to_datetime.')
     parser.add_argument('--end_date', '-end', type=str, required=True, help='End date for evaluation. Format must be parsable with pd.to_datetime.')
-    parser.add_argument('--epoch', type=int, default=-1, help='Epoch of pretrained WeatherGenerator model used for evaluation (-1 corresponds to last epoch).')
-    parser.add_argument('--masking_mode', type=str, default=None, help='Masking mode for evaluation.')
+    parser.add_argument('--epoch', type=int, default=-1, help='Epoch of pretrained WeatherGenerator model used for evaluation (-1 corresponds to the last checkpoint).')
     parser.add_argument('--forecast_steps', type=int, default=None, help='Number of forecast steps for evaluation. Uses attribute from config when None is set.')
-    parser.add_argument('--samples', type=int, default=10000000, help='Number of samples for evaluation.')
-    parser.add_argument('--shuffle', type=bool, default=False, help='Shuffle samples for evaluation.')
-    parser.add_argument('--save_samples', type=bool, default=True, help='Save samples for evaluation.')
+    parser.add_argument('--samples', type=int, default=10000000, help='Number of evaluation samples.')
+    parser.add_argument('--shuffle', type=bool, default=False, help='Shuffle samples from evaluation.')
+    parser.add_argument('--save_samples', type=bool, default=True, help='Save samples from evaluation.')
     parser.add_argument('--analysis_streams_output', type=list, default=['ERA5'], help='Analysis output streams during evaluation.')   
 
     args = parser.parse_args()
@@ -59,15 +58,12 @@ def evaluate():
     init_loggers()
 
     # load config if specified
-    cf = Config.load(args.run_id, args.epoch if args.epoch is not None else -1)
+    cf = Config.load(args.run_id, args.epoch)
 
     cf.run_history += [(cf.run_id, cf.istep)]
 
     cf.samples_per_validation = args.samples
     cf.log_validation = args.samples if args.save_samples else 0
-
-    if args.masking_mode is not None:
-        cf.masking_mode = args.masking_mode
 
     start_date, end_date = pd.to_datetime(args.start_date), pd.to_datetime(args.end_date)
 
