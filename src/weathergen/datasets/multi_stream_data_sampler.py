@@ -31,7 +31,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ###################################################
     def __init__(
         self,
-        data_path,
+        cf,
         rank,
         num_ranks,
         streams,
@@ -91,9 +91,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             for fname in stream_info["filenames"]:
                 ds = None
                 if stream_info["type"] == "obs":
-                    c_data_path = "/gpfs/scratch/ehpc01/dop/v1/"
                     ds = ObsDataset(
-                        c_data_path + "/" + fname,
+                        cf.data_path_obs + "/" + fname,
                         start_date,
                         end_date_padded,
                         len_hrs,
@@ -127,12 +126,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     stats_offset = 0
 
                 elif stream_info["type"] == "anemoi":
-                    c_data_path = data_path
-                    if "CERRA" in stream_info["name"]:
-                        c_data_path = "/gpfs/scratch/ehpc03/weathergen/"
-
                     ds = AnemoiDataset(
-                        c_data_path + "/" + fname, start_date, end_date, len_hrs, step_hrs, False
+                        cf.data_path_anemoi + "/" + fname,
+                        start_date,
+                        end_date,
+                        len_hrs,
+                        step_hrs,
+                        False,
                     )
                     do = 0
                     geoinfo_idx = [0, 1]

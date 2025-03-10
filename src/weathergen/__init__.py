@@ -75,6 +75,7 @@ def train(run_id=None) -> None:
     # directory where input streams are specified
     # cf.streams_directory = './streams_large/'
     cf.streams_directory = "./config/streams/streams_anemoi/"
+    # cf.streams_directory = "./config/streams/streams_mixed/"
     # cf.streams_directory = "./streams_mixed/"
 
     # embed_orientation : 'channels' or 'columns'
@@ -181,10 +182,11 @@ def train(run_id=None) -> None:
     cf.norm_type = "LayerNorm"  #'LayerNorm' #'RMSNorm'
     cf.nn_module = "te"
 
-    cf.data_path = private_cf["data_path"]
-    # "/home/mlx/ai-ml/datasets/stable/"
-    # cf.data_path = '/lus/h2resw01/fws4/lb/project/ai-ml/observations/v1'
-    # cf.data_path = '/leonardo_scratch/large/userexternal/clessig0/obs/v1'
+    # merge private config
+    for k, v in private_cf.items():
+        setattr(cf, k, v)
+    cf.data_path = private_cf["data_path_anemoi"]  # for backward compatibility
+
     cf.start_date = 201301010000
     cf.end_date = 202012310000
     cf.start_date_val = 202101010000
