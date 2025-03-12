@@ -9,18 +9,21 @@ authors = [
 
 requires-python = ">=3.11,<3.13"
 # TODO: split the plotting dependencies into their own dep groups, they are not required.
-dependencies = [ 'torch',
-                 'numpy',
-                 'astropy_healpix',
-                 'zarr',
-                 'anemoi-datasets',
-                 'pandas',
-                 'pynvml',
-                 'tqdm',
-                 'matplotlib',
-                 'packaging',
-                 'wheel',
-                 'psutil']
+dependencies = [
+ 'torch',
+ 'numpy',
+ 'astropy_healpix',
+ 'zarr',
+ 'anemoi-datasets',
+ 'pandas',
+ 'pynvml',
+ 'tqdm',
+ 'matplotlib',
+ 'packaging',
+ 'wheel',
+ 'psutil',
+ "mlflow-skinny",
+]
 
 [project.urls]
 Homepage = "https://www.weathergenerator.eu"
