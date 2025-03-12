@@ -7,11 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import argparse
 import pdb
 import sys
 import time
 import traceback
-import argparse
 
 import pandas as pd
 
@@ -38,18 +38,56 @@ def evaluate():
         save_samples (bool, optional): Save samples for evaluation. Defaults to True.
         analysis_streams_output (list, optional): Analysis output streams during evaluation. Defaults to ['ERA5'].
         gridded_output_streams(list, optional): Currently unused and threrefore omitted here
-    """    
+    """
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--run_id', type=str, required=True, help='Run/model id of pretrained WeatherGenerator model.')
-    parser.add_argument('--start_date', '-start', type=str, required=True, help='Start date for evaluation. Format must be parsable with pd.to_datetime.')
-    parser.add_argument('--end_date', '-end', type=str, required=True, help='End date for evaluation. Format must be parsable with pd.to_datetime.')
-    parser.add_argument('--epoch', type=int, default=-1, help='Epoch of pretrained WeatherGenerator model used for evaluation (-1 corresponds to the last checkpoint).')
-    parser.add_argument('--forecast_steps', type=int, default=None, help='Number of forecast steps for evaluation. Uses attribute from config when None is set.')
-    parser.add_argument('--samples', type=int, default=10000000, help='Number of evaluation samples.')
-    parser.add_argument('--shuffle', type=bool, default=False, help='Shuffle samples from evaluation.')
-    parser.add_argument('--save_samples', type=bool, default=True, help='Save samples from evaluation.')
-    parser.add_argument('--analysis_streams_output', type=list, default=['ERA5'], help='Analysis output streams during evaluation.')   
+    parser.add_argument(
+        "--run_id",
+        type=str,
+        required=True,
+        help="Run/model id of pretrained WeatherGenerator model.",
+    )
+    parser.add_argument(
+        "--start_date",
+        "-start",
+        type=str,
+        required=True,
+        help="Start date for evaluation. Format must be parsable with pd.to_datetime.",
+    )
+    parser.add_argument(
+        "--end_date",
+        "-end",
+        type=str,
+        required=True,
+        help="End date for evaluation. Format must be parsable with pd.to_datetime.",
+    )
+    parser.add_argument(
+        "--epoch",
+        type=int,
+        default=-1,
+        help="Epoch of pretrained WeatherGenerator model used for evaluation (-1 corresponds to the last checkpoint).",
+    )
+    parser.add_argument(
+        "--forecast_steps",
+        type=int,
+        default=None,
+        help="Number of forecast steps for evaluation. Uses attribute from config when None is set.",
+    )
+    parser.add_argument(
+        "--samples", type=int, default=10000000, help="Number of evaluation samples."
+    )
+    parser.add_argument(
+        "--shuffle", type=bool, default=False, help="Shuffle samples from evaluation."
+    )
+    parser.add_argument(
+        "--save_samples", type=bool, default=True, help="Save samples from evaluation."
+    )
+    parser.add_argument(
+        "--analysis_streams_output",
+        type=list,
+        default=["ERA5"],
+        help="Analysis output streams during evaluation.",
+    )
 
     args = parser.parse_args()
 
@@ -66,8 +104,10 @@ def evaluate():
 
     start_date, end_date = pd.to_datetime(args.start_date), pd.to_datetime(args.end_date)
 
-    cf.start_date_val = start_date.strftime('%Y%m%d%H%M')     # ML: would be better to use datetime-objects
-    cf.end_date_val = end_date.strftime('%Y%m%d%H%M')
+    cf.start_date_val = start_date.strftime(
+        "%Y%m%d%H%M"
+    )  # ML: would be better to use datetime-objects
+    cf.end_date_val = end_date.strftime("%Y%m%d%H%M")
     # # Oct-Nov 2022
     # cf.start_date_val = 202210011600
     # cf.end_date_val = 202212010400
@@ -94,7 +134,7 @@ def evaluate():
 def train() -> None:
     """
     Training function for WeatherGenerator model.
-    Entry point for calling the training code from the command line. 
+    Entry point for calling the training code from the command line.
     Configurations are set in the function body.
 
     Args:
@@ -104,8 +144,12 @@ def train() -> None:
     """
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--run_id", type=str, default=None,
-                        help="Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.") 
+    parser.add_argument(
+        "--run_id",
+        type=str,
+        default=None,
+        help="Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.",
+    )
 
     args = parser.parse_args()
 
