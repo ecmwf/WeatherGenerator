@@ -24,8 +24,7 @@ from weathergen.utils.logger import init_loggers
 def evaluate():
     """
     Evaluation function for WeatherGenerator model.
-    Parses command line arguments and runs evaluation by calling Trainer.evaluate().
-    Note: The parsed arguments are used to overwrite the model configuration for evaluation.
+    Entry point for calling the evaluation code from the command line.
 
     Args:
         run_id (str): Run/model id of pretrained WeatherGenerator model.
@@ -94,8 +93,9 @@ def evaluate():
 ####################################################################################################
 def train() -> None:
     """
-    Main training function for WeatherGenerator model.
-    Parses command line arguments and runs training by calling Trainer.train().
+    Training function for WeatherGenerator model.
+    Entry point for calling the training code from the command line. 
+    Configurations are set in the function body.
 
     Args:
       run_id (str, optional): Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.
@@ -117,7 +117,6 @@ def train() -> None:
 
     # directory where input streams are specified
     # cf.streams_directory = './streams_large/'
-    # cf.streams_directory = './streams_anemoi/'
     cf.streams_directory = "./config/streams/streams_anemoi/"
     # cf.streams_directory = "./config/streams/streams_mixed/"
     # cf.streams_directory = "./streams_mixed/"
