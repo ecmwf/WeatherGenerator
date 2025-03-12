@@ -8,8 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
+import json
+import os.path
+import time
 
 import numpy as np
+from mlflow.tracking.metric_value_conversion_utils import convert_metric_value_to_float_if_possible
 
 from weathergen.utils.config import Config
 
@@ -21,24 +25,49 @@ class TrainLogger:
         self.path_run = path_run
         # TODO: add header with col names (loadtxt has an option to skip k header lines)
 
+    def log_metrics(self, metrics: dict[str, float]) -> None:
+        """
+        Log metrics to a file.
+        For now, just scalar values are expected. There is no check.
+        """
+        # Clean all the metrics to convert to float. Any other type (numpy etc.) will trigger a serialization error.
+        clean_metrics = {
+            "weathergen.timestamp": time.time_ns() // 1_000_000,
+            "weathergen.time": int(datetime.datetime.now().strftime("%Y%m%d%H%M%S")),
+        }
+        for key, value in metrics.items():
+            clean_metrics[key] = convert_metric_value_to_float_if_possible(value)
+
+        # TODO: performance: we repeatedly open the file for each call. Better for multiprocessing
+        # but we can probably do better and rely for example on the logging module.
+        with open(os.path.join(self.path_run, "metrics.json"), "ab") as f:
+            # Write the dictionary to json and append to file
+            f.write(json.dumps(metrics) + "\n")
+
     #######################################
     def add_train(self, samples, lr, loss_avg, stddev_avg, perf_gpu=0.0, perf_mem=0.0) -> None:
         """
         Log training data
         """
 
+        metrics = dict(num_samples=samples)
+
         log_vals = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
         log_vals += [samples]
 
+        metrics["loss_avg_0_mean"] = loss_avg[0].mean()
+        metrics["learning_rate"] = lr
         log_vals += [loss_avg[0].mean()]
         log_vals += [lr]
 
         for i_obs, _rt in enumerate(self.cf.streams):
             for j, _ in enumerate(self.cf.loss_fcts):
+                metrics[f"stream_{i_obs}.loss_{j}.loss_avg"] = loss_avg[j, i_obs]
                 log_vals += [loss_avg[j, i_obs]]
         if len(stddev_avg) > 0:
             for i_obs, _rt in enumerate(self.cf.streams):
                 log_vals += [stddev_avg[i_obs]]
+                metrics[f"stream_{i_obs}.stddev_avg"] = stddev_avg[i_obs]
 
         with open(self.path_run + self.cf.run_id + "_train_log.txt", "ab") as f:
             np.savetxt(f, log_vals)
@@ -46,6 +75,11 @@ class TrainLogger:
         log_vals = []
         log_vals += [perf_gpu]
         log_vals += [perf_mem]
+        if perf_gpu > 0.0:
+            metrics["perf.gpu"] = perf_gpu
+        if perf_mem > 0.0:
+            metrics["perf.memory"] = perf_mem
+        self.log_metrics(metrics)
         with open(self.path_run + self.cf.run_id + "_perf_log.txt", "ab") as f:
             np.savetxt(f, log_vals)
 
