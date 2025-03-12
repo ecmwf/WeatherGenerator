@@ -127,7 +127,7 @@ def write_validation(
             ds_source.create_dataset("targets_lens", data=targets_lens_k)
         else:
             rn = rn + f"/{fs}"
-            if source_lens_k.sum() > 0 :
+            if source_lens_k.sum() > 0:
                 ds[f"{rn}/sources"].append(source_k)
             ds[f"{rn}/sources_lens"].append(source_lens_k)
             ds[f"{rn}/preds"].append(preds_k)

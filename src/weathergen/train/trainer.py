@@ -99,7 +99,7 @@ class Trainer(Trainer_Base):
         self.init(cf, run_id_trained, epoch, run_id_new, run_mode="evaluate")
 
         self.dataset_val = MultiStreamDataSampler(
-            cf.data_path,
+            cf,
             cf.rank,
             cf.num_ranks,
             cf.streams,
@@ -164,7 +164,7 @@ class Trainer(Trainer_Base):
         self.init(cf, run_id, epoch, run_id_new=True, run_mode="offline")
 
         self.dataset = MultiStreamDataSampler(
-            cf.streams,
+            cf,
             cf.start_date_val,
             cf.end_date_val,
             cf.delta_time,
@@ -298,7 +298,7 @@ class Trainer(Trainer_Base):
         self.init(cf, run_id_contd, epoch_contd, run_id_new)
 
         self.dataset = MultiStreamDataSampler(
-            cf.data_path,
+            cf,
             cf.rank,
             cf.num_ranks,
             cf.streams,
@@ -324,7 +324,7 @@ class Trainer(Trainer_Base):
             sampling_rate_target=cf.sampling_rate_target,
         )
         self.dataset_val = MultiStreamDataSampler(
-            cf.data_path,
+            cf,
             cf.rank,
             cf.num_ranks,
             cf.streams,
