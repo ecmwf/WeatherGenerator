@@ -108,9 +108,6 @@ def evaluate():
         "%Y%m%d%H%M"
     )  # ML: would be better to use datetime-objects
     cf.end_date_val = end_date.strftime("%Y%m%d%H%M")
-    # # Oct-Nov 2022
-    # cf.start_date_val = 202210011600
-    # cf.end_date_val = 202212010400
     # # 2022
     # cf.start_date_val = 202201010400
     # cf.end_date_val = 202301010400
