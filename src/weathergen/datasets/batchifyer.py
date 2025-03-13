@@ -7,29 +7,20 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import torch
-import numpy as np
-import code
 import warnings
-import time
-
-import astropy_healpix as hp
-from astropy_healpix.healpy import ang2pix, pix2ang
-
 from functools import partial
 
+import astropy_healpix as hp
+import numpy as np
+import torch
+from astropy_healpix.healpy import ang2pix
+
 from weathergen.datasets.utils import (
-    vecs_to_rots,
-    s2tor3,
-    r3tos2,
-    locs_to_cell_coords,
-    coords_to_hpyidxs,
-    healpix_verts,
-    get_target_coords_local,
-    get_target_coords_local_fast,
     get_target_coords_local_ffast,
     healpix_verts_rots,
     locs_to_cell_coords_ctrs,
+    r3tos2,
+    s2tor3,
 )
 
 
@@ -64,34 +55,24 @@ def tokenize_window_space(
     )
     hpy_idxs_ord_split = np.split(hpy_idxs_ord, splits + 1)
 
-    lens = []
     for i, c in enumerate(cells_idxs):
-
         thetas_sorted = torch.argsort(thetas[hpy_idxs_ord_split[i]], stable=True)
         posr3_cell = posr3[hpy_idxs_ord_split[i]][thetas_sorted]
         source_cell = source[hpy_idxs_ord_split[i]][thetas_sorted]
 
         R = hpy_verts_Rs[c]
-        local_coords = r3tos2(
-            torch.matmul(R, posr3_cell.transpose(1, 0)).transpose(1, 0)
-        )
-        source_cell[:, geoinfo_offset : geoinfo_offset + 2] = local_coords.to(
-            torch.float32
-        )
+        local_coords = r3tos2(torch.matmul(R, posr3_cell.transpose(1, 0)).transpose(1, 0))
+        source_cell[:, geoinfo_offset : geoinfo_offset + 2] = local_coords.to(torch.float32)
         source_cell = normalize_coords(source_cell, False)
 
         # split into tokens and pad last one to have full size
         pad = (
-            token_size - (len(source_cell) % token_size)
-            if len(source_cell) % token_size > 0
-            else 0
+            token_size - (len(source_cell) % token_size) if len(source_cell) % token_size > 0 else 0
         )
         source_cell = torch.nn.functional.pad(
             source_cell, (0, 0, 0, pad), mode="constant", value=0.0
         )
-        source_cell = source_cell.reshape(
-            (len(source_cell) // token_size, token_size, -1)
-        )
+        source_cell = source_cell.reshape((len(source_cell) // token_size, token_size, -1))
 
         # apply masking (discarding) of tokens
         if mr > 0.0:
@@ -118,9 +99,8 @@ def tokenize_window_spacetime(
     rng,
     mr,
 ):
-
     t_unique = np.unique(times)
-    for i, t in enumerate(t_unique):
+    for _, t in enumerate(t_unique):
         mask = t == times
         tokens_cells = tokenize_window_space(
             source[mask],
@@ -140,9 +120,7 @@ def tokenize_window_spacetime(
 
 ####################################################################################################
 class Batchifyer:
-
     def __init__(self, hl):
-
         ref = torch.tensor([1.0, 0.0, 0.0])
 
         self.hl_source = hl
@@ -193,33 +171,23 @@ class Batchifyer:
 
         self.verts_local = []
         verts = torch.stack([verts10, verts11, verts01, vertsmm])
-        temp = ref - torch.stack(
-            locs_to_cell_coords_ctrs(verts00_Rs, verts.transpose(0, 1))
-        )
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts00_Rs, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts11, verts01, vertsmm])
-        temp = ref - torch.stack(
-            locs_to_cell_coords_ctrs(verts10_Rs, verts.transpose(0, 1))
-        )
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts10_Rs, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts10, verts01, vertsmm])
-        temp = ref - torch.stack(
-            locs_to_cell_coords_ctrs(verts11_Rs, verts.transpose(0, 1))
-        )
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts11_Rs, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts11, verts10, vertsmm])
-        temp = ref - torch.stack(
-            locs_to_cell_coords_ctrs(verts01_Rs, verts.transpose(0, 1))
-        )
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts01_Rs, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts10, verts11, verts01])
-        temp = ref - torch.stack(
-            locs_to_cell_coords_ctrs(vertsmm_Rs, verts.transpose(0, 1))
-        )
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(vertsmm_Rs, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         self.hpy_verts_local_target = torch.stack(self.verts_local).transpose(0, 1)
@@ -256,7 +224,6 @@ class Batchifyer:
         times,
         normalize_coords,
     ):
-
         si = stream_info
         token_size = si["token_size"]
         is_diagnostic = si["diagnostic"] if "diagnostic" in stream_info else False
@@ -297,25 +264,16 @@ class Batchifyer:
         if is_diagnostic or len(source) < 2 or masking_rate == 1.0:
             source_tokens_cells = torch.tensor([])
             source_centroids = torch.tensor([])
-            source_tokens_lens = torch.zeros(
-                [self.num_healpix_cells_source], dtype=torch.int32
-            )
+            source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
 
         else:
-
             source_tokens_cells = [[] for _ in range(self.num_healpix_cells_source)]
             source_tokens_cells = tokenize_window(
-                source,
-                times,
-                normalize_coords,
-                source_tokens_cells,
-                rng=self.rng,
-                mr=masking_rate,
+                source, times, normalize_coords, source_tokens_cells, rng=self.rng, mr=masking_rate
             )
 
             source_tokens_cells = [
-                torch.cat(c) if len(c) > 0 else torch.tensor([])
-                for c in source_tokens_cells
+                torch.cat(c) if len(c) > 0 else torch.tensor([]) for c in source_tokens_cells
             ]
             source_tokens_lens = torch.tensor(
                 [len(s) for s in source_tokens_cells], dtype=torch.int32
@@ -335,11 +293,7 @@ class Batchifyer:
                 source_means = torch.cat(source_means)
                 # TODO: precompute also source_means_r3 and then just cat
                 source_centroids = torch.cat(
-                    [
-                        source_means.to(torch.float32),
-                        r3tos2(source_means).to(torch.float32),
-                    ],
-                    -1,
+                    [source_means.to(torch.float32), r3tos2(source_means).to(torch.float32)], -1
                 )
                 source_centroids = torch.split(source_centroids, source_means_lens)
             else:
@@ -359,18 +313,12 @@ class Batchifyer:
         times2,
         normalize_targets,
     ):
-
         if len(source) < 2:
             target_tokens, target_coords = torch.tensor([]), torch.tensor([])
-            target_tokens_lens = torch.zeros(
-                [self.num_healpix_cells_target], dtype=torch.int32
-            )
-            target_coords_lens = torch.zeros(
-                [self.num_healpix_cells_target], dtype=torch.int32
-            )
+            target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
+            target_coords_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
 
         else:
-
             thetas = ((90.0 - source[:, geoinfo_offset]) / 180.0) * np.pi
             phis = ((source[:, geoinfo_offset + 1] + 180.0) / 360.0) * 2.0 * np.pi
             hpy_idxs = ang2pix(2**self.hl_target, thetas, phis, nest=True)
@@ -383,24 +331,16 @@ class Batchifyer:
             )
             hpy_idxs_ord_split = np.split(hpy_idxs_ord, splits + 1)
 
-            target_tokens = [
-                torch.tensor([]) for _ in range(self.num_healpix_cells_target)
-            ]
-            target_coords = [
-                torch.tensor([]) for _ in range(self.num_healpix_cells_target)
-            ]
+            target_tokens = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
+            target_coords = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
             for i, c in enumerate(cells_idxs):
                 t = source[hpy_idxs_ord_split[i]]
-                t = t[self.rng.permutation(len(t))][
-                    : int(len(t) * sampling_rate_target)
-                ]
+                t = t[self.rng.permutation(len(t))][: int(len(t) * sampling_rate_target)]
                 target_tokens[c] = t
                 # target_coords[c] = normalize_coords(t[:,:geoinfo_size].clone(), False)
                 target_coords[c] = normalize_targets(t[:, :geoinfo_size].clone())
 
-            target_tokens_lens = torch.tensor(
-                [len(s) for s in target_tokens], dtype=torch.int32
-            )
+            target_tokens_lens = torch.tensor([len(s) for s in target_tokens], dtype=torch.int32)
             target_coords_lens = target_tokens_lens.detach().clone()
 
             # if target_coords_local and target_tokens_lens.sum()>0 :

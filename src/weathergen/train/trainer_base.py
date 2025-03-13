@@ -7,41 +7,31 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import os
 import datetime
-import pathlib
 import itertools
 import logging
-import yaml
-import logging
-import code
-
-import torch
+import os
+from pathlib import Path
 
 import pynvml
-
+import torch
 import torch.distributed as dist
 import torch.utils.data.distributed
+import yaml
 
+from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.config import Config
-import weathergen.utils.logger
-from weathergen.train.utils import (
-    get_run_id,
-    str_to_tensor,
-    tensor_to_str,
-    json_to_dict,
-)
+
+_logger = logging.getLogger(__name__)
 
 
 class Trainer_Base:
-
     def __init__(self):
         pass
 
     ###########################################
     @staticmethod
     def init_torch(use_cuda=True, num_accs_per_task=1):
-
         torch.set_printoptions(linewidth=120)
 
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -55,7 +45,7 @@ class Trainer_Base:
             devices = ["cuda"]
         else:
             devices = [
-                "cuda:{}".format(int(local_id_node) * num_accs_per_task + i)
+                f"cuda:{int(local_id_node) * num_accs_per_task + i}"
                 for i in range(num_accs_per_task)
             ]
         torch.cuda.set_device(int(local_id_node) * num_accs_per_task)
@@ -65,12 +55,11 @@ class Trainer_Base:
     ###########################################
     @staticmethod
     def init_ddp(cf):
-
         rank = 0
         num_ranks = 1
 
         master_node = os.environ.get("MASTER_ADDR", "-1")
-        if "-1" == master_node:
+        if master_node == "-1":
             cf.with_ddp = False
             cf.rank = rank
             cf.num_ranks = num_ranks
@@ -91,7 +80,7 @@ class Trainer_Base:
 
         # communicate run id to all nodes
         run_id_int = torch.zeros(8, dtype=torch.int32).cuda()
-        if 0 == rank:
+        if rank == 0:
             run_id_int = str_to_tensor(cf.run_id).cuda()
         dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
         cf.run_id = tensor_to_str(run_id_int)
@@ -100,7 +89,7 @@ class Trainer_Base:
         if hasattr(cf, "data_loader_rng_seed"):
             if cf.data_loader_rng_seed is not None:
                 l_seed = torch.tensor(
-                    [cf.data_loader_rng_seed if 0 == rank else 0], dtype=torch.int32
+                    [cf.data_loader_rng_seed if rank == 0 else 0], dtype=torch.int32
                 ).cuda()
                 dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
                 cf.data_loader_rng_seed = l_seed.item()
@@ -114,7 +103,6 @@ class Trainer_Base:
     ###########################################
     @staticmethod
     def init_streams(cf: Config, run_id_contd):
-
         if not hasattr(cf, "streams_directory"):
             return cf
 
@@ -122,21 +110,20 @@ class Trainer_Base:
         if run_id_contd is not None:
             return cf
 
-        if not hasattr(cf, "streams"):
-            cf.streams = []
-        elif not isinstance(cf.streams, list):
+        if not hasattr(cf, "streams") or not isinstance(cf.streams, list):
             cf.streams = []
 
         # warn if specified dir does not exist
         if not os.path.isdir(cf.streams_directory):
             sd = cf.streams_directory
-            logging.getLogger("obslearn").warning(
-                f"Streams directory {sd} does not exist."
-            )
+            _logger.warning(f"Streams directory {sd} does not exist.")
 
         # read all reportypes from directory, append to existing ones
         temp = {}
-        for fh in sorted(pathlib.Path(cf.streams_directory).rglob("*.yml")):
+        streams_dir = Path(cf.streams_directory).absolute()
+        _logger.info(f"Reading streams from {streams_dir}")
+
+        for fh in sorted(streams_dir.rglob("*.yml")):
             stream_parsed = yaml.safe_load(fh.read_text())
             if stream_parsed is not None:
                 temp.update(stream_parsed)
@@ -149,13 +136,12 @@ class Trainer_Base:
         # flatten list
         rts = list(itertools.chain.from_iterable(rts))
         if len(rts) != len(list(set(rts))):
-            logging.getLogger("obslearn").warning("Duplicate reportypes specified.")
+            _logger.warning("Duplicate reportypes specified.")
 
         return cf
 
     ###########################################
     def init_perf_monitoring(self):
-
         self.device_handles, self.device_names = [], []
 
         pynvml.nvmlInit()
@@ -168,7 +154,6 @@ class Trainer_Base:
 
     ###########################################
     def get_perf(self):
-
         perf_gpu, perf_mem = 0.0, 0.0
         if len(self.device_handles) > 0:
             for handle in self.device_handles:
@@ -189,9 +174,8 @@ class Trainer_Base:
 
 ####################################################################################################
 if __name__ == "__main__":
-
-    from weathergen.utils.config import Config
     from weathergen.train.trainer_base import Trainer_Base
+    from weathergen.utils.config import Config
 
     cf = Config()
     cf.sources_dir = "./sources"

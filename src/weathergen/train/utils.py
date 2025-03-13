@@ -7,9 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import string
-import torch
+import json
 import random
+import string
+
+import torch
 
 
 def get_run_id():
@@ -27,5 +29,5 @@ def tensor_to_str(tensor):
 
 
 def json_to_dict(fname):
-    json_str = open(fname, "r").readlines()
+    json_str = open(fname).readlines()
     return json.loads("".join([s.replace("\n", "") for s in json_str]))

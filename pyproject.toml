@@ -8,6 +8,7 @@ authors = [
 ]
 
 requires-python = ">=3.11,<3.13"
+# TODO: split the plotting dependencies into their own dep groups, they are not required.
 dependencies = [ 'torch',
                  'numpy',
                  'astropy_healpix',
@@ -34,3 +35,60 @@ evaluate = "weathergen:evaluate"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+# The development dependencies
+dev = [
+  "pytest",
+  "ruff==0.9.7"
+]
+
+
+[tool.black]
+
+# Wide rows
+line-length = 100
+
+
+# The linting configuration
+[tool.ruff]
+
+# Wide rows
+line-length = 100
+
+[tool.ruff.lint]
+# All disabled until the code is formatted.
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+]
+
+# These rules are sensible and should be enabled at a later stage.
+ignore = [
+  "E501",
+  "E721",
+  "E722",
+  "B006",
+  "B011",
+  "UP008",
+  "SIM115",
+  "SIM117",
+  "SIM118",
+  "SIM102",
+  "SIM210",
+  "SIM212",
+  "SIM401",
+  "F811",
+  # To ignore, not relevant for us
+  "E741",
+]

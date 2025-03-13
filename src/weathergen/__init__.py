@@ -7,16 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import time
-import sys
+
 import pdb
+import sys
+import time
 import traceback
 import argparse
 import pandas as pd
 
-from weathergen.utils.config import Config
 from weathergen.train.trainer import Trainer
-from weathergen.train.utils import get_run_id
+from weathergen.utils.config import Config, private_conf
+from weathergen.utils.logger import init_loggers
+
 from weathergen.utils.logger import logger
 
 
@@ -108,9 +110,7 @@ def evaluate() -> None:
     if args.masking_mode:
         cf.masking_mode = args.masking_mode
 
-    start_date, end_date = pd.to_datetime(args.start_date), pd.to_datetime(
-        args.end_date
-    )
+    start_date, end_date = pd.to_datetime(args.start_date), pd.to_datetime(args.end_date)
     logger.info(
         f"Evaluation period: {start_date.strftime('%Y-%m-%d %H:%M')} -- {end_date.strftime('%Y-%m-%d %H:%M')}"
     )
@@ -119,22 +119,12 @@ def evaluate() -> None:
         "%Y%m%d%H%M"
     )  # ML: would be better to use datetime-objects
     cf.end_date_val = end_date.strftime("%Y%m%d%H%M")
-    # Oct-Nov 2022
-    # cf.start_date_val = 202210011600
-    # cf.end_date_val = 202212010400
-    # # 2022
-    # cf.start_date_val = 202201010400
-    # cf.end_date_val = 202301010400
 
-    cf.step_hrs = (
-        cf.len_hrs
-    )  # ML: len_hrs == step_hrs is currently mandatory for AnemoiDatasets
+    cf.step_hrs = cf.len_hrs  # ML: len_hrs == step_hrs is currently mandatory for AnemoiDatasets
 
     cf.shuffle = args.shuffle
 
-    cf.forecast_steps = (
-        args.forecast_steps if args.forecast_steps else cf.forecast_steps
-    )
+    cf.forecast_steps = args.forecast_steps if args.forecast_steps else cf.forecast_steps
     # cf.forecast_policy = 'fixed'
 
     # cf.analysis_streams_output = ['Surface', 'Air', 'METEOSAT', 'ATMS', 'IASI', 'AMSR2']
@@ -166,8 +156,9 @@ def train() -> None:
         default=None,
         help="Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.",
     )
-
+    init_loggers()
     args = parser.parse_args()
+    private_cf = private_conf()
 
     cf = Config()
 
@@ -243,7 +234,7 @@ def train() -> None:
     # compile entire model
     cf.compile_model = False
 
-    cf.with_fsdp = False
+    cf.with_fsdp = True
 
     cf.loss_fcts = [["mse", 1.0]]
     cf.loss_fcts_val = [["mse", 1.0]]
@@ -259,9 +250,9 @@ def train() -> None:
     cf.masking_rate_sampling = True  # False
     cf.sampling_rate_target = 1.0
 
-    cf.num_epochs = 128
-    cf.samples_per_epoch = 4096
-    cf.samples_per_validation = 512
+    cf.num_epochs = 1
+    cf.samples_per_epoch = 120
+    cf.samples_per_validation = 60
     cf.shuffle = True
 
     cf.lr_scaling_policy = "sqrt"
@@ -307,7 +298,7 @@ def train() -> None:
     trainer = Trainer(log_freq=20, checkpoint_freq=250, print_freq=10)
 
     try:
-        trainer.run(cf)
+        trainer.run(cf, private_cf)
     except:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()

@@ -7,14 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import code
 import argparse
-import dictdiffer
 
+import dictdiffer
 from obslearn.utils.config import Config
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
     parser.add_argument("-r1", "--run_id_1", required=True)
     parser.add_argument("-r2", "--run_id_2", required=True)
@@ -25,7 +23,6 @@ if __name__ == "__main__":
     # print(cf1.__dict__)
     result = dictdiffer.diff(cf1.__dict__, cf2.__dict__)
     for item in list(result):
-
         # TODO: if streams_directory differs than we need to manually compare streams using name
         # since index-based comparison by dictdiffer is meaningless
 

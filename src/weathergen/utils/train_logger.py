@@ -62,9 +62,7 @@ class TrainLogger:
         self.train_file = self.path_run + self.cf.run_id + "_train_log.csv"
         self.val_file = self.path_run + self.cf.run_id + "_val_log.csv"
 
-    def initialize_file(
-        self, stream_chans: dict, train: bool = False, val: bool = False
-    ) -> None:
+    def initialize_file(self, stream_chans: dict, train: bool = False, val: bool = False) -> None:
         """
         Initializes CSV log files for training and validation.
 
@@ -159,9 +157,9 @@ class TrainLogger:
         Raises:
           AssertionError: If the logging files were not initialized before calling this method.
         """
-        assert (
-            self.train_step > 0
-        ), "Logging files were not initialized. Call initialize_file before using add_train."
+        assert self.train_step > 0, (
+            "Logging files were not initialized. Call initialize_file before using add_train."
+        )
 
         log_vals = [self.train_step]
         log_vals += [datetime.datetime.now()]
@@ -209,9 +207,9 @@ class TrainLogger:
         Raises:
           AssertionError: If the logging files were not initialized before calling this method.
         """
-        assert (
-            self.val_step > 0
-        ), "Logging files were not initialized. Call initialize_file before using add_val."
+        assert self.val_step > 0, (
+            "Logging files were not initialized. Call initialize_file before using add_val."
+        )
 
         log_vals = [self.val_step]
         log_vals += [datetime.datetime.now()]

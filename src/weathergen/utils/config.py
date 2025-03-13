@@ -7,14 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from pathlib import Path
 import json
 import os
+from pathlib import Path
+from typing import Any
+
+import yaml
 
 
 ###########################################
 class Config:
-
     def __init__(self):
         pass
 
@@ -22,29 +24,26 @@ class Config:
         self_dict = self.__dict__
         for key, value in self_dict.items():
             if key != "streams":
-                print("{} : {}".format(key, value))
+                print(f"{key} : {value}")
             else:
                 for rt in value:
                     for k, v in rt.items():
-                        print(
-                            "{}{} : {}".format("" if k == "reportypes" else "  ", k, v)
-                        )
+                        print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
 
     def save(self, epoch=None):
-
         # save in directory with model files
-        dirname = "./models/{}".format(self.run_id)
+        dirname = f"./models/{self.run_id}"
         # if not os.path.exists(dirname):
         os.makedirs(dirname, exist_ok=True)
-        dirname = "./models/{}".format(self.run_id)
+        dirname = f"./models/{self.run_id}"
         # if not os.path.exists(dirname):
         os.makedirs(dirname, exist_ok=True)
 
-        fname = "./models/{}/model_{}".format(self.run_id, self.run_id)
+        fname = f"./models/{self.run_id}/model_{self.run_id}"
         epoch_str = ""
         if epoch is not None:
-            epoch_str = "_latest" if epoch == -1 else "_epoch{:05d}".format(epoch)
-        fname += "{}.json".format(epoch_str)
+            epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
+        fname += f"{epoch_str}.json"
 
         json_str = json.dumps(self.__dict__)
         with open(fname, "w") as f:
@@ -52,20 +51,29 @@ class Config:
 
     @staticmethod
     def load(run_id, epoch=None):
-
         if "/" in run_id:  # assumed to be full path instead of just id
             fname = run_id
         else:
-            fname = "./models/{}/model_{}".format(run_id, run_id)
+            fname = f"./models/{run_id}/model_{run_id}"
             epoch_str = ""
             if epoch is not None:
-                epoch_str = "_latest" if epoch == -1 else "_epoch{:05d}".format(epoch)
-            fname += "{}.json".format(epoch_str)
+                epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
+            fname += f"{epoch_str}.json"
 
-        with open(fname, "r") as f:
+        with open(fname) as f:
             json_str = f.readlines()
 
         cf = Config()
         cf.__dict__ = json.loads(json_str[0])
 
         return cf
+
+
+# Function that checks if WEATHERGEN_PRIVATE_HOME is set and returns it:
+def private_conf() -> Any:
+    if "WEATHERGEN_PRIVATE_CONF" in os.environ:
+        private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
+        private_conf = yaml.safe_load(private_home.read_text())
+        return private_conf
+    else:
+        print("WEATHERGEN_PRIVATE_CONF is not set.")
