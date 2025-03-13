@@ -77,3 +77,4 @@ def private_conf() -> Any:
         return private_conf
     else:
         print("WEATHERGEN_PRIVATE_CONF is not set.")
+        return {}

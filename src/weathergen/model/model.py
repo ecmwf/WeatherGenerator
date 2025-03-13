@@ -570,30 +570,11 @@ class Model(torch.nn.Module):
         return tuple(preds_all[0])
 
     #########################################
-    def forward(
-        self,
-        model_params,
-        source_tokens_cells,
-        source_tokens_lens,
-        source_centroids,
-        source_cell_lens,
-        source_idxs_embed,
-        target_coords,
-        target_coords_lens,
-        target_coords_idxs,
-        num_time_steps,
-    ):
-        batch_size = self.cf.batch_size if self.training else self.cf.batch_size_validation
-        assert len(source_tokens_cells) == batch_size
+    def forward(self, model_params, batch, forecast_steps):
+        (streams_data, source_cell_lens, target_coords_idxs) = batch
 
         # embed
-        tokens = self.embed_cells(
-            model_params,
-            source_tokens_cells,
-            source_tokens_lens,
-            source_centroids,
-            source_idxs_embed,
-        )
+        tokens = self.embed_cells(model_params, streams_data)
 
         # local assimilation engine and adapter
         tokens = self.assimilate_local(model_params, tokens, source_cell_lens)
@@ -602,11 +583,14 @@ class Model(torch.nn.Module):
 
         # roll-out in latent space
         preds_all = []
-        for it in range(num_time_steps):
+        for _ in range(forecast_steps):
             # prediction
             preds_all += [
                 self.predict(
-                    model_params, it, tokens, target_coords, target_coords_lens, target_coords_idxs
+                    forecast_steps,
+                    tokens,
+                    streams_data,
+                    target_coords_idxs,
                 )
             ]
 
@@ -616,10 +600,9 @@ class Model(torch.nn.Module):
         preds_all += [
             self.predict(
                 model_params,
-                num_time_steps,
+                forecast_steps,
                 tokens,
-                target_coords,
-                target_coords_lens,
+                streams_data,
                 target_coords_idxs,
             )
         ]
@@ -627,32 +610,40 @@ class Model(torch.nn.Module):
         return preds_all
 
     #########################################
-    def embed_cells(
-        self,
-        model_params,
-        source_tokens_cells,
-        source_tokens_lens,
-        source_centroids,
-        source_idxs_embed,
-    ):
-        # cat = torch.cat
-
+    def embed_cells(self, model_params, streams_data):
+        # code.interact( local=locals())
+        source_tokens_lens = torch.stack(
+            [
+                torch.stack(
+                    [
+                        s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
+                        for s in stl_b
+                    ]
+                )
+                for stl_b in streams_data
+            ]
+        )
         offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
         tokens_all = torch.empty(
             (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=torch.float16, device="cuda"
         )
 
-        for ib, sb in enumerate(source_tokens_cells):
-            for itype, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                if s.shape[0] > 0:
-                    idxs = source_idxs_embed[0][ib][itype]
-                    idxs_pe = source_idxs_embed[1][ib][itype]
+        for _, sb in enumerate(streams_data):
+            for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
+                if not s.source_empty():
+                    idxs = s.source_idxs_embed
+                    idxs_pe = s.source_idxs_embed_pe
+
                     # create full scatter index (there's no broadcasting which is likely highly inefficient)
-                    idxs = idxs.repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed(s, source_centroids[ib][itype]).flatten(0, 1)
+                    idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+                    x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
+                    # there's undocumented limitation in flash_attn that will make embed fail if
+                    # #tokens is too large; code below is a work around
                     # x_embed = torch.cat( [embed( s_c, c_c).flatten(0,1)
                     #                 for s_c,c_c in zip( torch.split( s, 49152),
                     #                                     torch.split( source_centroids[ib][itype], 49152))])
+
+                    # scatter write to reorder from per stream to per cell ordering
                     tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
 
         return tokens_all
@@ -748,7 +739,7 @@ class Model(torch.nn.Module):
         return tokens
 
     #########################################
-    def predict(self, model_params, fstep, tokens, tcs, target_coords_lens, target_coords_idxs):
+    def predict(self, model_params, fstep, tokens, streams_data, target_coords_idxs):
         # fp32, i32 = torch.float32, torch.int32
         batch_size = self.cf.batch_size if self.training else self.cf.batch_size_validation
 
@@ -773,26 +764,15 @@ class Model(torch.nn.Module):
                 tc_tokens = torch.cat(
                     [
                         (
-                            checkpoint(tc_embed, tcs[fstep][i_b][ii], use_reentrant=False)
-                            if len(tcs[fstep][i_b][ii].shape) > 1
-                            else tcs[fstep][i_b][ii]
-                        )
-                        for i_b in range(len(tcs[fstep]))
-                    ]
-                )
-            elif tro_type == "token":
-                tc_tokens = torch.cat(
-                    [
-                        (
                             checkpoint(
                                 tc_embed,
-                                tcs[fstep][i_b][ii].transpose(-2, -1).flatten(-2, -1),
+                                streams_data[i_b][ii].target_coords[fstep],
                                 use_reentrant=False,
                             )
-                            if len(tcs[fstep][i_b][ii].shape) > 1
-                            else tcs[fstep][i_b][ii]
+                            if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
+                            else streams_data[i_b][ii].target_coords[fstep]
                         )
-                        for i_b in range(len(tcs[fstep]))
+                        for i_b in range(len(streams_data))
                     ]
                 )
             else:
@@ -813,10 +793,12 @@ class Model(torch.nn.Module):
             #       stream basis
             assert type(tte_kv) == torch.nn.Identity
 
-            # lens for varlen attentino
-            tcs_lens = target_coords_idxs[0][fstep][ii]
+            # lens for varlen attention
+            tcs_lens = target_coords_idxs[ii][fstep]
             # coord information for learnable layer norm
-            tcs_aux = torch.cat([tcs[fstep][i_b][ii] for i_b in range(len(tcs[0]))])
+            tcs_aux = torch.cat(
+                [streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))]
+            )
 
             # apply prediction engine
             for ib, block in enumerate(tte):

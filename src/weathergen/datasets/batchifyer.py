@@ -316,7 +316,6 @@ class Batchifyer:
         if len(source) < 2:
             target_tokens, target_coords = torch.tensor([]), torch.tensor([])
             target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
-            target_coords_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
 
         else:
             thetas = ((90.0 - source[:, geoinfo_offset]) / 180.0) * np.pi
@@ -341,7 +340,6 @@ class Batchifyer:
                 target_coords[c] = normalize_targets(t[:, :geoinfo_size].clone())
 
             target_tokens_lens = torch.tensor([len(s) for s in target_tokens], dtype=torch.int32)
-            target_coords_lens = target_tokens_lens.detach().clone()
 
             # if target_coords_local and target_tokens_lens.sum()>0 :
             if target_tokens_lens.sum() > 0:
@@ -354,6 +352,6 @@ class Batchifyer:
                     self.hpy_nctrs_target,
                 )
                 target_coords.requires_grad = False
-                target_coords = list(target_coords.split(target_coords_lens.tolist()))
+                target_coords = list(target_coords.split(target_tokens_lens.tolist()))
 
-        return (target_tokens, target_tokens_lens, target_coords, target_coords_lens)
+        return (target_tokens, target_coords)
