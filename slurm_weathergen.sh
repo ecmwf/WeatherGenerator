@@ -67,7 +67,8 @@ date
 
 export SRUN_CPUS_PER_TASK=${SLURM_CPUS_PER_TASK}
 
-srun --label --cpu-bind=v --accel-bind=v ${SLURM_SUBMIT_DIR}/.venv/bin/python -u train.py > output/output_${SLURM_JOBID}.txt
+#srun --label --cpu-bind=v --accel-bind=v uv run evaluate --run_id=oeyu61ro --epoch=14 -start=2012-10-01 -end=2012-10-31 > output/output_${SLURM_JOBID}.txt
+srun --label --cpu-bind=v --accel-bind=v uv run train > output/output_${SLURM_JOBID}.txt
 
 echo "Finished job."
 sstat -j $SLURM_JOB_ID.batch   --format=JobID,MaxVMSize

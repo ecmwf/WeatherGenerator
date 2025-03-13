@@ -104,11 +104,7 @@ def plot_maps(cf, reportypes, targets_coords, values, masks_nan, title, cmap="bw
             ax.set_global()
             ax.set_title(fig_title)
             im = ax.imshow(
-                map,
-                cmap=cmap,
-                transform=cartopy.crs.PlateCarree(),
-                vmin=vmin,
-                vmax=vmax,
+                map, cmap=cmap, transform=cartopy.crs.PlateCarree(), vmin=vmin, vmax=vmax
             )
             # im = ax.imshow( map, cmap=cmap, transform=cartopy.crs.PlateCarree(), norm=divnorm)
             axins = inset_axes(ax, width="80%", height="5%", loc="lower center", borderpad=-2)
@@ -152,21 +148,13 @@ def plotExampleMap(
     fname = fig_path + "/example/{}/{}_{:05d}_{}_{}_{}_{:03d}_{:03d}.png".format(
         reportype, cf.run_id, epoch, reportype, chp, fig_name, fstep, step
     )
-    print(fname)
-    plotScatter(fname, title, lons, lats, data, cmap, vmin, vmax, cmap_symmetric)
+
+    plotScatter(fname, title, lats, lons, data, cmap, vmin, vmax, cmap_symmetric)
 
 
 ##########################################################################################
 def plotScatterMPL(
-    filename,
-    title,
-    lats,
-    lons,
-    values,
-    cmap="RdYlBu_r",
-    vmin=None,
-    vmax=None,
-    cmap_symmetric=False,
+    filename, title, lats, lons, values, cmap="RdYlBu_r", vmin=None, vmax=None, cmap_symmetric=False
 ):
     fig = plt.figure(figsize=(10, 5), dpi=dpi)
     ax = plt.axes(projection=cartopy.crs.Robinson())
@@ -184,7 +172,8 @@ def plotScatterMPL(
         y=lats,
         c=values,
         cmap=cmap,
-        s=0.25,
+        s=0.05,
+        marker=".",
         alpha=1.0,
         vmin=vmin,
         vmax=vmax,
@@ -202,15 +191,7 @@ def plotScatterMPL(
 
 ##########################################################################################
 def plotScatterDSH(
-    filename,
-    title,
-    lats,
-    lons,
-    values,
-    cmap="RdYlBu_r",
-    vmin=None,
-    vmax=None,
-    cmap_symmetric=False,
+    filename, title, lats, lons, values, cmap="RdYlBu_r", vmin=None, vmax=None, cmap_symmetric=False
 ):
     import datashader as dsh
     from datashader.mpl_ext import dsshow
@@ -270,6 +251,7 @@ def plotExampleMaps(
     cf,
     fstep,
     reportypes_active,
+    sel_channels,
     cols_all,
     sources_all,
     targets_all,
@@ -281,17 +263,10 @@ def plotExampleMaps(
     with_ens=False,
 ):
     # extract info from bidx-th batch
-    sources, sources_coords, targets, preds, targets_coords, targets_idxs = (
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-    )
+    sources, sources_coords, targets, preds, targets_coords, targets_idxs = [], [], [], [], [], []
     for k, (rt_idx, rt_name) in enumerate(reportypes_active):
         name = rt_name.replace(" ", "_").replace("-", "_").replace(",", "")
-        print(f"example name: {name}")
+
         sources = sources_all[k][bidx][..., -len(cols_all[k]) :]
         sources_coords = sources_all[k][bidx][..., : -len(cols_all[k])]
         targets = targets_all[k][: targets_lens_all[k][bidx]]
@@ -339,6 +314,7 @@ def plotExampleMaps(
                     name,
                     fstep,
                     i,
+                    sel_channels,
                     cols_all[k],
                     sources,
                     sources_coords,
@@ -365,6 +341,7 @@ def plotExampleMaps(
                 name,
                 fstep,
                 0,
+                sel_channels,
                 cols_all[k],
                 sources,
                 sources_coords,
@@ -419,6 +396,7 @@ def plotExampleMapsStream(
     name,
     fstep,
     step,
+    sel_channels,
     cols_all,
     sources,
     sources_coords,
@@ -434,31 +412,24 @@ def plotExampleMapsStream(
     # date_end = date_start + pd.Timedelta( cf.len_hrs, "h")
     # str_date = f'{date_start} - {date_end}'
 
-    print(f"plotExampleMapsStream {name}")
     if sources.shape[0] < 1 and targets.shape[0] < 1:
         return
 
     errs = []
     for ch in range(len(cols_all)):
-        # if '10u' != cols_all[ch] :
-        #   continue
-
         # translate channel label
         chp = cols_all[ch]
         cmap = "RdYlBu_r"
 
+        # only specified channels
+        if sel_channels is not None:
+            if not np.array([chp in s for s in sel_channels]).any():
+                continue
+
         n_chs = targets.shape[-1]
         print(
             "Processing {}, fstep={}, step={} :: ch={} ({}/{}) :: {} / {} / {}.".format(
-                name,
-                fstep,
-                step,
-                chp,
-                ch,
-                n_chs,
-                sources.shape,
-                targets.shape,
-                preds.shape,
+                name, fstep, step, chp, ch, n_chs, sources.shape, targets.shape, preds.shape
             )
         )
 
@@ -603,12 +574,7 @@ def compute_mean_space_time(preds, targets, targets_coords_all, mask_nan, ch=0):
 
 ####################################################################################################
 def plot_scanlines(
-    streams,
-    reportypes_active,
-    targets_all,
-    targets_coords_all,
-    num_samples=512,
-    cmap="bwr",
+    streams, reportypes_active, targets_all, targets_coords_all, num_samples=512, cmap="bwr"
 ):
     streams = [streams] if type(streams) is not list else streams
 
@@ -649,22 +615,21 @@ def plot_scanlines(
 
 ####################################################################################################
 if __name__ == "__main__":
+    # Example usage:
+    # python src/weathergen/utils/plot_results.py --run_id=cwr4ethn -c 10u -sa 0 -s ERA5
     parser = argparse.ArgumentParser()
     parser.add_argument("-id", "--run_id", required=True)
     parser.add_argument("-e", "--epoch", default="0", type=int)
     parser.add_argument("--channel_errors", default=False, type=bool)
     parser.add_argument("--avg_plots", default=False, type=bool)
-    parser.add_argument("-s", "--example_samples", nargs="+", default=[])
+    parser.add_argument("-sa", "--example_samples", nargs="+", default=[])
     parser.add_argument("--ens", default=False, type=bool)
-    parser.add_argument("-rt", "--reportypes", nargs="+", default=[])
+    parser.add_argument("-s", "--streams", nargs="+", default=[])
     parser.add_argument(
-        "-fs",
-        "--forecast_steps",
-        nargs="+",
-        default=[],
-        help="forecast steps as list or range",
+        "-fs", "--forecast_steps", nargs="+", default=[], help="forecast steps as list or range"
     )
-    parser.add_argument("--region", default="global")
+    parser.add_argument("-r", "--region", default="global")
+    parser.add_argument("-c", "--channels", default=None)
     args = parser.parse_args()
 
     # plotScatter = plotScatterDSH
@@ -681,22 +646,22 @@ if __name__ == "__main__":
     with_avg_plots = args.avg_plots
     with_ens = args.ens
     example_samples = [int(i) for i in args.example_samples]
-    reportypes = args.reportypes
+    reportypes = args.streams
     region = args.region
     if with_avg_plots:
         with_channel_errors = True
+    sel_channels = args.channels if isinstance(args.channels, list) else [args.channels]
 
     if len(args.forecast_steps) == 1 and "-" in args.forecast_steps[0]:
         fsteps = np.arange(
-            int(args.forecast_steps[0].split("-")[0]),
-            int(args.forecast_steps[0].split("-")[1]) + 1,
+            int(args.forecast_steps[0].split("-")[0]), int(args.forecast_steps[0].split("-")[1]) + 1
         )
     else:
         # fsteps = cf.forecacast_steps if len(args.forecast_steps)==0 else args.forecast_steps
         fsteps = [0] if len(args.forecast_steps) == 0 else args.forecast_steps
         fsteps = np.array(fsteps) if type(fsteps) == 0 else fsteps
 
-    fsteps = [0]  # list( np.arange(4*6))
+    # fsteps = list( np.arange(13))
 
     # run_id, epoch = 'abcd', 0
     # with_plots = True
@@ -717,7 +682,6 @@ if __name__ == "__main__":
         cols_all = []
         rank = 0
         fname = base_path + "validation_epoch{:05d}_rank{:04d}.zarr".format(epoch, rank)
-        print(fname)
         store = zarr.DirectoryStore(fname)
         ds = zarr.group(store=store)
         reportypes_active = []
@@ -831,12 +795,7 @@ if __name__ == "__main__":
 
             # std-dev maps
             plot_maps(
-                cf,
-                reportypes_active,
-                targets_coords_all,
-                preds_std_all,
-                masks_nan,
-                "ens-std",
+                cf, reportypes_active, targets_coords_all, preds_std_all, masks_nan, "ens-std"
             )
             print("Finished stddev maps.", flush=True)
 
@@ -853,14 +812,7 @@ if __name__ == "__main__":
                     ]
                 errs_all.append(np.concatenate(errs_chs, len(p.shape) - 1))
             plot_maps(
-                cf,
-                reportypes_active,
-                targets_coords_all,
-                errs_all,
-                masks_nan,
-                "rmse",
-                "bwr",
-                True,
+                cf, reportypes_active, targets_coords_all, errs_all, masks_nan, "rmse", "bwr", True
             )
             # plot_maps( reportypes, targets_coords_all, errs_all, 'rme', 'bwr', True)
             # plot_maps( reportypes, targets_coords_all, errs_all, 'me', 'bwr', True)
@@ -884,12 +836,12 @@ if __name__ == "__main__":
 
         for ex_idx in example_samples:
             try:
-                print("Plotting example maps")
                 # one batch example maps
                 plotExampleMaps(
                     cf,
                     fstep,
                     reportypes_active,
+                    sel_channels,
                     cols_all,
                     sources_all,
                     targets_all,
@@ -906,4 +858,4 @@ if __name__ == "__main__":
                 traceback.print_exc()
                 pdb.post_mortem(tb)
 
-    print(f"Finished plotting results for run_id {run_id}")
+    print(f"Finished results for run_id {run_id}")

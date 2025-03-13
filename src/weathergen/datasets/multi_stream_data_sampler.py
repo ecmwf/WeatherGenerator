@@ -20,7 +20,7 @@ import torch
 
 from weathergen.datasets.anemoi_dataset import AnemoiDataset
 from weathergen.datasets.regular_dataset import RegularDataset
-from weathergen.datasets.unstructured_dataset import UnstructuredDataset
+from weathergen.datasets.fesom_dataset import FesomDataset
 from weathergen.datasets.batchifyer import Batchifyer
 from weathergen.datasets.normalizer import DataNormalizer
 from weathergen.datasets.obs_dataset import ObsDataset
@@ -97,6 +97,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         for i, stream_info in enumerate(streams):
             self.obs_datasets_norm.append([])
             self.obs_datasets_idxs.append([])
+
+            target = stream_info["target"] if "target" in stream_info else None
+            source = stream_info["source"] if "source" in stream_info else None
 
             for fname in stream_info["filenames"]:
                 ds = None
@@ -192,30 +195,30 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         ds.colnames[do:][i] for i in data_idxs
                     ]
 
-                elif stream_info["type"] == "unstr":
-                    ds = UnstructuredDataset(
+                elif stream_info["type"] == "fesom":
+                    ds = FesomDataset(
                         cf.data_path_unstr + "/" + fname,
                         start_date,
                         end_date,
                         len_hrs,
                         step_hrs,
-                        False,
+                        target,
+                        source,
                     )
                     do = 0
                     geoinfo_idx = [0, 1]
                     stats_offset = 2
-                    data_idxs = ds.selected_cols_idx[stats_offset:].tolist()
+                    data_idxs = ds.idx_target.tolist()
 
                     logger.info(
-                        "{} :: {} : {}".format(
+                        "{} :: {} : {} : {}".format(
                             stream_info["name"],
                             [ds.colnames[i] for i in geoinfo_idx],
                             [ds.colnames[i] for i in data_idxs],
+                            [ds.colnames[i] for i in ds.idx_source.tolist()],
                         )
                     )
-                    self.stream_channels[stream_info["name"]] = [
-                        ds.colnames[do:][i] for i in data_idxs
-                    ]
+                    self.stream_channels[stream_info["name"]] = [ds.colnames[i] for i in data_idxs]
 
                 else:
                     assert False, "Unsupported stream type {}.".format(stream_info["type"])
@@ -428,9 +431,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         zip(stream_dsn, stream_idxs, strict=False)
                     ):
                         # source window (of potentially multi-step length)
-                        (source1, times1) = ds[idx]
+                        (source1, times1) = ds.get_source(idx)
                         for it in range(1, self.input_window_steps):
-                            (source0, times0) = ds[idx - it * step_dt]
+                            (source0, times0) = ds.get_source(idx - it * step_dt)
                             source1 = np.concatenate([source0, source1], 0)
                             times1 = np.concatenate([times0, times1], 0)
 
@@ -439,7 +442,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         else:
                             oi = ds.properties["obs_id"]
                             source1 = self.prepare_window_source(
-                                oi, do, normalizer, source1, times1, time_win1, s_idxs
+                                oi, do, normalizer, source1, times1, time_win1
                             )
 
                             # this should only be collected in validation mode
@@ -467,14 +470,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         for i_source, ((ds, normalizer, do), s_idxs) in enumerate(
                             zip(stream_dsn, stream_idxs, strict=False)
                         ):
-                            (source2, times2) = ds[idx + step_forecast_dt]
+                            (source2, times2) = ds.get_target(idx + step_forecast_dt)
 
                             if source2.shape[0] < token_size:
                                 stream_data.add_empty_target(fstep)
                             else:
                                 oi = ds.properties["obs_id"]
                                 source2 = self.prepare_window_target(
-                                    oi, do, normalizer, source2, times2, time_win2, s_idxs
+                                    oi, do, normalizer, source2, times2, time_win2
                                 )
 
                                 (tt_cells, tc) = self.batchifyer.batchify_target(
@@ -515,13 +518,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
 
     ###################################################
-    def prepare_window_source(
-        self, obs_id, data_offset, normalizer, source, times, time_win, stream_idxs
-    ):
+    def prepare_window_source(self, obs_id, data_offset, normalizer, source, times, time_win):
         source = source[:, data_offset:]
-        # select geoinfo and field channels (also ensure geoinfos is at the beginning)
-        idxs = np.array(stream_idxs[0] + stream_idxs[1])
-        source = source[:, idxs]
 
         # assemble tensor as fed to the network, combining geoinfo and data
         fp32 = torch.float32
@@ -546,13 +544,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         return source
 
     ###################################################
-    def prepare_window_target(
-        self, obs_id, data_offset, normalizer, source, times, time_win, stream_idxs
-    ):
+    def prepare_window_target(self, obs_id, data_offset, normalizer, source, times, time_win):
         source = source[:, data_offset:]
-        # select geoinfo and field channels (also ensure geoinfos is at the beginning)
-        idxs = np.array(stream_idxs[0] + stream_idxs[1])
-        source = source[:, idxs]
 
         # assemble tensor as fed to the network, combining geoinfo and data
         dt = pd.to_datetime(times)

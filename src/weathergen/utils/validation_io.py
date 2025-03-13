@@ -110,7 +110,7 @@ def write_validation(
         if write_first:
             ds_source = ds.require_group(f"{rn}/{fs}")
             # column names
-            if si["type"] == "anemoi":
+            if si["type"] == "anemoi" or si["type"] == "fesom":
                 cols_values = np.arange(2, len(cols[k]))
             elif si["type"] == "obs":
                 cols_values = [col[:9] == "obsvalue_" for col in cols[k]]
