@@ -9,11 +9,11 @@
 
 import datetime
 import json
+import math
 import os.path
 import time
 
 import numpy as np
-from mlflow.tracking.metric_value_conversion_utils import convert_metric_value_to_float_if_possible
 
 from weathergen.utils.config import Config
 
@@ -23,7 +23,6 @@ class TrainLogger:
     def __init__(self, cf, path_run) -> None:
         self.cf = cf
         self.path_run = path_run
-        # TODO: add header with col names (loadtxt has an option to skip k header lines)
 
     def log_metrics(self, metrics: dict[str, float]) -> None:
         """
@@ -36,13 +35,16 @@ class TrainLogger:
             "weathergen.time": int(datetime.datetime.now().strftime("%Y%m%d%H%M%S")),
         }
         for key, value in metrics.items():
-            clean_metrics[key] = convert_metric_value_to_float_if_possible(value)
+            v = float(value)
+            if math.isnan(v) or math.isinf(v):
+                v = str(v)
+            clean_metrics[key] = v
 
         # TODO: performance: we repeatedly open the file for each call. Better for multiprocessing
         # but we can probably do better and rely for example on the logging module.
         with open(os.path.join(self.path_run, "metrics.json"), "ab") as f:
-            # Write the dictionary to json and append to file
-            f.write(json.dumps(metrics) + "\n")
+            s = json.dumps(clean_metrics) + "\n"
+            f.write(s.encode("utf-8"))
 
     #######################################
     def add_train(self, samples, lr, loss_avg, stddev_avg, perf_gpu=0.0, perf_mem=0.0) -> None:
