@@ -18,14 +18,15 @@ class AnemoiDataset:
 
     def __init__(
         self,
-        filename: str,
         start: int,
         end: int,
         len_hrs: int,
-        step_hrs: int = None,
-        normalize: bool = True,
-        select: list[str] = None,
+        step_hrs: int,
+        filename: str,
+        stream_info: dict,
     ) -> None:
+        # TODO: add support for different normalization modes
+
         assert len_hrs == step_hrs, "Currently only step_hrs=len_hrs is supported"
 
         # open  dataset to peak that it is compatible with requested parameters
@@ -40,30 +41,48 @@ class AnemoiDataset:
         dt_start = datetime.datetime.strptime(str(start), format_str)
         dt_end = datetime.datetime.strptime(str(end), format_str)
 
+        # TODO, TODO, TODO: we need proper alignment for the case where self.ds.frequency
+        # is not a multile of len_hrs
+        self.num_steps_per_window = int( (len_hrs * 3600) / self.ds.frequency.seconds)
+
         # open dataset
 
         # caches lats and lons
         self.latitudes = self.ds.latitudes.astype(np.float32)
         self.longitudes = self.ds.longitudes.astype(np.float32)
 
-        # find physical fields (i.e. filter out auxiliary information to facilitate prediction)
-        self.fields_idx = np.sort(
+        # TODO: define in base class
+        self.geoinfo_idx = []
+
+        source_channels = stream_info["source"] if "source" in stream_info else None
+        self.source_idx = np.sort(
             [
                 self.ds.name_to_index[k]
                 for i, (k, v) in enumerate(self.ds.typed_variables.items())
-                if not v.is_computed_forcing and not v.is_constant_in_time
+                if (not v.is_computed_forcing 
+                    and not v.is_constant_in_time 
+                    and (np.array([f in k for f in source_channels]).any() if source_channels else True))
+            ]
+        )
+        target_channels = stream_info["target"] if "target" in stream_info else None
+        self.target_idx = np.sort(
+            [
+                self.ds.name_to_index[k]
+                for i, (k, v) in enumerate(self.ds.typed_variables.items())
+                if (not v.is_computed_forcing 
+                    and not v.is_constant_in_time 
+                    and (np.array([f in k for f in target_channels]).any() if target_channels else True))
             ]
         )
         # TODO: use complement of self.fields_idx as geoinfo
-        self.fields = [self.ds.variables[i] for i in self.fields_idx]
-        self.colnames = ["lat", "lon"] + self.fields
-        self.selected_colnames = self.colnames
+        self.source_channels = [self.ds.variables[i] for i in self.source_idx]
+        self.target_channels = [self.ds.variables[i] for i in self.target_idx]
 
         self.properties = {
-            "obs_id": 0,
-            "means": self.ds.statistics["mean"],
-            "vars": np.square(self.ds.statistics["stdev"]),
+            "stream_id": 0,
         }
+        self.mean = self.ds.statistics["mean"]
+        self.stdev = self.ds.statistics["stdev"]
 
         # set dataset to None when no overlap with time range
         if dt_start >= ds_dt_end or dt_end <= ds_dt_start:
@@ -100,6 +119,115 @@ class AnemoiDataset:
         datetimes = np.full(data.shape[0], self.ds.dates[idx])
 
         return (data, datetimes)
+
+    def _get(self, idx: int, channels_idx : np.array) -> tuple[np.array,np.array,np.array,np.array]:
+        """
+            TODO
+        """
+
+        if not self.ds:
+            return (np.array([], dtype=np.float32), np.array([], dtype=np.float32))
+
+        data = self.ds[idx : idx+self.num_steps_per_window][:,:,0]
+        data = data[:,channels_idx].transpose([0,2,1]).reshape( (data.shape[0]*data.shape[2], -1))
+
+        # prepend lat and lon to data; squeeze out ensemble dimension (for the moment)
+        latlon = np.concatenate(
+            [
+                np.expand_dims(self.latitudes, 0),
+                np.expand_dims(self.longitudes, 0),
+            ],
+            0,
+        ).transpose()
+        latlon = np.repeat( latlon, self.num_steps_per_window, axis=0).reshape( (-1,latlon.shape[1]) )
+
+        # empty geoinfos
+        geoinfos = np.zeros( (data.shape[0],0), dtype=data.dtype)
+
+        # date time matching #data points of data
+        datetimes = np.repeat( np.expand_dims(self.ds.dates[idx:idx+self.num_steps_per_window],0),
+                               data.shape[0], axis=0).flatten()
+
+        return (latlon, geoinfos, data, datetimes)
+
+    def get_source(self, idx: int) -> tuple[np.array,np.array,np.array,np.array]:
+        """
+            TODO
+        """
+        return self._get( idx, self.source_idx)
+
+    def get_target(self, idx: int) -> tuple[np.array,np.array,np.array,np.array]:
+        """
+            TODO
+        """
+        return self._get( idx, self.target_idx)
+
+    def get_source_size( self) :
+        """
+            TODO
+        """
+        return 2 + len(self.geoinfo_idx) + len(self.source_idx)
+
+    def get_source_num_channels( self) :
+        """
+            TODO
+        """
+        return len(self.source_idx)
+
+    def get_target_size( self) :
+        """
+            TODO
+        """
+        return 2 + len(self.geoinfo_idx) + len(self.target_idx)
+
+    def get_target_num_channels( self) :
+        """
+            TODO
+        """
+        return len(self.target_idx)
+
+    def get_geoinfo_size( self) :
+        """
+            TODO
+        """
+        return len(self.geoinfo_idx)
+
+    def normalize_coords( self, coords) :
+        """
+            TODO
+        """
+        coords[...,0] = np.sin(np.deg2rad( coords[...,0]))
+        coords[...,1] = np.sin(0.5 * np.deg2rad( coords[...,1]))
+
+        return coords
+
+    def normalize_geoinfos( self, geoinfos) :
+        """
+            TODO
+        """
+
+        assert geoinfos.shape[-1] == 0
+        return geoinfos
+
+    def normalize_source_channels( self, source) :
+        """
+            TODO
+        """
+        assert source.shape[1] == len(self.source_idx)
+        for i, ch in enumerate(self.source_idx):
+            source[...,i] = (source[...,i] - self.mean[ch]) / self.stdev[ch]
+
+        return source
+
+    def normalize_target_channels( self, target) :
+        """
+            TODO
+        """
+        assert target.shape[1] == len(self.target_idx)
+        for i, ch in enumerate(self.target_idx):
+            target[...,i] = (target[...,i] - self.mean[ch]) / self.stdev[ch]
+
+        return target
 
     def time_window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
         if not self.ds:
