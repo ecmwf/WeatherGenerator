@@ -31,29 +31,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     def __init__(
         self,
         cf,
-        rank,
-        num_ranks,
-        streams,
         start_date,
         end_date,
-        len_hrs,
-        step_hrs,
         batch_size,
-        masking_mode,
-        masking_rate,
-        masking_rate_sampling,
-        shuffle=True,
-        rng_seed=None,
-        healpix_level=2,
-        forecast_delta_hrs=0,
-        forecast_steps=1,
-        forecast_policy=None,
-        samples_per_epoch=None,
-        input_window_steps=1,
-        embed_local_coords=False,
-        embed_centroids_local_coords=False,
-        target_coords_local=False,
-        sampling_rate_target=1.0,
+        samples_per_epoch,
+        shuffle=True
     ):
         super(MultiStreamDataSampler, self).__init__()
 
@@ -61,27 +43,27 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.mask_value = 0.0
 
-        self.len_hrs = len_hrs
-        self.step_hrs = step_hrs
+        self.len_hrs = cf.len_hrs
+        self.step_hrs = cf.step_hrs
 
-        fc_policy_seq = forecast_policy == "sequential" or forecast_policy == "sequential_random"
-        assert forecast_steps >= 0 if not fc_policy_seq else True
-        self.forecast_delta_hrs = forecast_delta_hrs if forecast_delta_hrs > 0 else self.len_hrs
+        fc_policy_seq = cf.forecast_policy == "sequential" or cf.forecast_policy == "sequential_random"
+        assert cf.forecast_steps >= 0 if not fc_policy_seq else True
+        self.forecast_delta_hrs = cf.forecast_delta_hrs if cf.forecast_delta_hrs > 0 else self.len_hrs
         self.forecast_steps = np.array(
-            [forecast_steps] if type(forecast_steps) == int else forecast_steps
+            [cf.forecast_steps] if type(cf.forecast_steps) == int else cf.forecast_steps
         )
-        self.forecast_policy = forecast_policy
+        self.forecast_policy = cf.forecast_policy
 
         # end date needs to be adjusted to account for window length
         format_str = "%Y%m%d%H%M%S"
         end_dt = datetime.datetime.strptime(str(end_date), format_str)
-        end_dt = end_dt + datetime.timedelta(hours=len_hrs)
+        end_dt = end_dt + datetime.timedelta(hours=cf.len_hrs)
         end_date_padded = end_dt.strftime(format_str)
 
         self.len = 100000000
 
         self.streams_datasets = []
-        for i, stream_info in enumerate(streams):
+        for i, stream_info in enumerate(cf.streams):
             self.streams_datasets.append([])
 
             for fname in stream_info["filenames"]:
@@ -90,8 +72,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     ds = ObsDataset(
                         start_date,
                         end_date_padded,
-                        len_hrs,
-                        step_hrs,
+                        cf.len_hrs,
+                        cf.step_hrs,
                         cf.data_path_obs + "/" + fname,
                         stream_info
                     )
@@ -100,8 +82,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     ds = AnemoiDataset(
                         start_date,
                         end_date,
-                        len_hrs,
-                        step_hrs,
+                        cf.len_hrs,
+                        cf.step_hrs,
                         cf.data_path_anemoi + "/" + fname,
                         stream_info
                     )
@@ -110,8 +92,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     ds = FesomDataset(
                         start_date,
                         end_date,
-                        len_hrs,
-                        step_hrs,
+                        cf.len_hrs,
+                        cf.step_hrs,
                         cf.data_path_anemoi + "/" + fname,
                         stream_info
                     )
@@ -136,35 +118,36 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.len = min(self.len, self.len if not samples_per_epoch else samples_per_epoch)
         # adjust len to split loading across all workers
-        len_chunk = ((self.len_native // num_ranks) // batch_size) * batch_size
+        len_chunk = ((self.len_native // cf.num_ranks) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)
         # ensure it is multiple of batch_size
         self.len = (self.len // batch_size) * batch_size
 
-        self.rank = rank
-        self.num_ranks = num_ranks
+        self.rank = cf.rank
+        self.num_ranks = cf.num_ranks
 
-        self.streams = streams
+        self.streams = cf.streams
         self.shuffle = shuffle
-        self.input_window_steps = input_window_steps
-        self.embed_local_coords = embed_local_coords
-        self.embed_centroids_local_coords = embed_centroids_local_coords
-        self.target_coords_local = target_coords_local
-        self.sampling_rate_target = sampling_rate_target
+        # TODO: remove options that are no longer supported 
+        self.input_window_steps = cf.input_window_steps
+        self.embed_local_coords = cf.embed_local_coords
+        self.embed_centroids_local_coords = cf.embed_centroids_local_coords
+        self.target_coords_local = cf.target_coords_local
+        self.sampling_rate_target = cf.sampling_rate_target
 
-        self.masking_mode = masking_mode
-        self.masking_rate = masking_rate
-        self.masking_rate_sampling = masking_rate_sampling
+        self.masking_mode = cf.masking_mode
+        self.masking_rate = cf.masking_rate
+        self.masking_rate_sampling = cf.masking_rate_sampling
 
         self.batch_size = batch_size
-        self.rng = np.random.default_rng(rng_seed)
+        self.rng = np.random.default_rng(cf.data_loader_rng_seed)
 
-        self.healpix_level_source = healpix_level
-        self.healpix_level_target = healpix_level
+        self.healpix_level_source = cf.healpix_level
+        self.healpix_level_target = cf.healpix_level
         self.num_healpix_cells_source = 12 * 4**self.healpix_level_source
         self.num_healpix_cells_target = 12 * 4**self.healpix_level_target
 
-        self.batchifyer = Batchifyer(healpix_level)
+        self.batchifyer = Batchifyer(cf.healpix_level)
 
         self.epoch = 0
 
