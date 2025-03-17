@@ -32,14 +32,14 @@ class Config:
 
     def save(self, epoch=None):
         # save in directory with model files
-        dirname = f"./models/{self.run_id}"
+        dirname = self.cf.model_path + '/{}'.format( self.run_id)
         # if not os.path.exists(dirname):
         os.makedirs(dirname, exist_ok=True)
-        dirname = f"./models/{self.run_id}"
+        dirname = self.cf.model_path + '/{}'.format( self.run_id)
         # if not os.path.exists(dirname):
         os.makedirs(dirname, exist_ok=True)
 
-        fname = f"./models/{self.run_id}/model_{self.run_id}"
+        fname = self.cf.model_path + '/{}/model_{}'.format( self.run_id, self.run_id)
         epoch_str = ""
         if epoch is not None:
             epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
@@ -54,7 +54,7 @@ class Config:
         if "/" in run_id:  # assumed to be full path instead of just id
             fname = run_id
         else:
-            fname = f"./models/{run_id}/model_{run_id}"
+            fname = self.cf.model_path + '/{}/model_{}'.format( run_id, run_id)
             epoch_str = ""
             if epoch is not None:
                 epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"

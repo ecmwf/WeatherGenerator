@@ -127,7 +127,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         c_data_path = "/gpfs/scratch/ehpc03/weathergen/"
 
                     ds = AnemoiDataset(
-                        c_data_path + "/" + fname, start_date, end_date, len_hrs, step_hrs, False
+                        cf.data_path_anemoi + "/" + fname, start_date, end_date, len_hrs, step_hrs, False
                     )
                     do = 0
                     geoinfo_idx = [0, 1]
