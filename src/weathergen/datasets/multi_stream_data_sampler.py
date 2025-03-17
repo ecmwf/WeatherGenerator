@@ -17,6 +17,8 @@ import torch
 from weathergen.datasets.anemoi_dataset import AnemoiDataset
 from weathergen.datasets.batchifyer import Batchifyer
 from weathergen.datasets.obs_dataset import ObsDataset
+from weathergen.datasets.fesom_dataset import FesomDataset
+from weathergen.datasets.atmorep_dataset import AtmorepDataset
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.utils import (
     compute_idxs_predict,
@@ -90,6 +92,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 elif stream_info["type"] == "fesom":
                     ds = FesomDataset(
+                        start_date,
+                        end_date,
+                        cf.len_hrs,
+                        cf.step_hrs,
+                        cf.data_path_anemoi + "/" + fname,
+                        stream_info
+                    )
+
+                elif stream_info["type"] == "atmorep":
+                    ds = AtmorepDataset(
                         start_date,
                         end_date,
                         cf.len_hrs,
