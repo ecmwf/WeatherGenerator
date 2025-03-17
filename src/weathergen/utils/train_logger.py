@@ -78,9 +78,9 @@ class TrainLogger:
         cf = Config.load(run_id, epoch)
         run_id = cf.run_id
 
-        fname_log_train = cf.run_path + f'/{run_id}/{run_id}_train_log.txt'
-        fname_log_val = cf.run_path + f'/{run_id}/{run_id}_val_log.txt'
-        fname_perf_val = cf.run_path + f'/{run_id}/{run_id}_perf_log.txt'
+        fname_log_train = cf.run_path + f"/{run_id}/{run_id}_train_log.txt"
+        fname_log_val = cf.run_path + f"/{run_id}/{run_id}_val_log.txt"
+        fname_perf_val = cf.run_path + f"/{run_id}/{run_id}_perf_log.txt"
         # fname_config = cf.run_path + f'/model_{run_id}.json'
 
         # training

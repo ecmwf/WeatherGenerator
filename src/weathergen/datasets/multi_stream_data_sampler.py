@@ -58,7 +58,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ):
         super(MultiStreamDataSampler, self).__init__()
 
-        assert end_date > start_date 
+        assert end_date > start_date
 
         self.mask_value = 0.0
         # obs_id, year, day of year, minute of day
