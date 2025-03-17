@@ -79,9 +79,9 @@ def load_overwrite_conf(pth: str) -> dict:
         return overwrite_conf
 
 
-def load_private_conf(pth: str = None) -> dict:
+def load_private_conf(pth: str) -> dict:
     "Return the private configuration."
-    "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF. "
+    "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
 
     if not pth:
         if "WEATHERGEN_PRIVATE_CONF" in os.environ:

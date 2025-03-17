@@ -159,7 +159,7 @@ def train() -> None:
     )
 
     parser.add_argument(
-        "--overwrite_config",
+        "--config",
         type=str,
         default=None,
         help="Path to private configuration file for overwriting the defaults in the function body. Defaults to None.",
@@ -172,7 +172,7 @@ def train() -> None:
 
     # get the non-default configs: private and overwrite
     private_cf = load_private_conf(args.private_config)
-    overwrite_cf = load_overwrite_conf(args.overwrite_config)
+    overwrite_cf = load_overwrite_conf(args.config)
 
     cf = Config()
 
