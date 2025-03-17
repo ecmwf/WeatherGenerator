@@ -99,7 +99,7 @@ class Trainer(Trainer_Base):
         self.init(cf, run_id_trained, epoch, run_id_new, run_mode="evaluate")
 
         self.dataset_val = MultiStreamDataSampler(
-            cf.data_path,
+            cf,
             cf.rank,
             cf.num_ranks,
             cf.streams,
@@ -164,7 +164,7 @@ class Trainer(Trainer_Base):
         self.init(cf, run_id, epoch, run_id_new=True, run_mode="offline")
 
         self.dataset = MultiStreamDataSampler(
-            cf.streams,
+            cf,
             cf.start_date_val,
             cf.end_date_val,
             cf.delta_time,
@@ -298,7 +298,7 @@ class Trainer(Trainer_Base):
         self.init(cf, run_id_contd, epoch_contd, run_id_new)
 
         self.dataset = MultiStreamDataSampler(
-            cf.data_path,
+            cf,
             cf.rank,
             cf.num_ranks,
             cf.streams,
@@ -324,7 +324,7 @@ class Trainer(Trainer_Base):
             sampling_rate_target=cf.sampling_rate_target,
         )
         self.dataset_val = MultiStreamDataSampler(
-            cf.data_path,
+            cf,
             cf.rank,
             cf.num_ranks,
             cf.streams,
@@ -498,10 +498,8 @@ class Trainer(Trainer_Base):
     def compute_loss(
         self,
         loss_fcts,
-        sources,
-        targets,
-        targets_coords,
-        targets_token_lens,
+        forecast_steps,
+        streams_data,
         preds,
         losses_all,
         stddev_all,
@@ -515,26 +513,25 @@ class Trainer(Trainer_Base):
 
         # merge across batch dimension (and keep streams and )
         targets_rt = [
-            [torch.cat([t[i] for t in targets[fstep]]) for i in range(len(targets[0][0]))]
-            for fstep in range(len(targets))
+            [
+                torch.cat([t[i].target_tokens[fstep] for t in streams_data])
+                for i in range(len(self.cf.streams))
+            ]
+            for fstep in range(forecast_steps + 1)
         ]
         targets_coords_rt = [
             [
-                torch.cat([t[i] for t in targets_coords[fstep]])
-                for i in range(len(targets_coords[0][0]))
+                torch.cat([t[i].target_coords[fstep] for t in streams_data])
+                for i in range(len(self.cf.streams))
             ]
-            for fstep in range(len(targets_coords))
-        ]
-        targets_token_lens = [
-            [
-                torch.cat([t[i] for t in targets_token_lens[fstep]])
-                for i in range(len(targets_token_lens[0][0]))
-            ]
-            for fstep in range(len(targets_token_lens))
+            for fstep in range(forecast_steps + 1)
         ]
 
         ctr = 0
         loss = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
+
+        # import code
+        # code.interact( local=locals())
 
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):
@@ -560,27 +557,6 @@ class Trainer(Trainer_Base):
                 tok_spacetime = si["tokenize_spacetime"] if "tokenize_spacetime" in si else False
 
                 if target.shape[0] > 0 and pred.shape[0] > 0:
-                    # extract content if tokens have been padded
-                    if targets_token_lens[fstep][i_obs].shape[0] > 0:
-                        sl = targets_token_lens[fstep][i_obs].to(
-                            torch.int64
-                        )  # TODO: why is it sometimes not torch.int
-                        tro_type = (
-                            si["target_readout"]["type"]
-                            if "type" in si["target_readout"]
-                            else "token"
-                        )
-                        if tro_type == "token":
-                            pred = pred.reshape(
-                                [
-                                    *pred.shape[:2],
-                                    target.shape[-2],
-                                    target.shape[-1] - gs,
-                                ]
-                            )
-                            pred = torch.cat([pred[:, i, :l] for i, l in enumerate(sl)], 1)
-                    else:
-                        pred = pred.reshape([pred.shape[0], -1, target.shape[-1] - gs])
                     # extract data/coords and remove token dimension if it exists
                     target_coords = target[..., :gs].flatten(0, -2)
                     target_coords[:, 1:3] = target_coords2[..., 1:3]  # copy local time
@@ -685,22 +661,9 @@ class Trainer(Trainer_Base):
 
         # training loop
         self.t_start = time.time()
-        for bidx, data in enumerate(dataset_iter):
-            data = self.input_to_device(data)
-            (
-                _,
-                source_tokens_cells,
-                source_tokens_lens,
-                source_centroids,
-                source_cell_lens,
-                source_idxs_embed,
-                target_tokens,
-                target_token_lens,
-                targets_coords,
-                targets_coords_lens,
-                targets_coords_idxs,
-                forecast_dt,
-            ) = data
+        for bidx, batch in enumerate(dataset_iter):
+            forecast_steps = batch[-1]
+            batch = self.batch_to_device(batch)
 
             losses_all = torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
             stddev_all = torch.zeros(len(cf.streams)) * torch.nan
@@ -709,25 +672,12 @@ class Trainer(Trainer_Base):
             with torch.autocast(
                 device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
             ):
-                preds = self.ddp_model(
-                    self.model_params,
-                    source_tokens_cells,
-                    source_tokens_lens,
-                    source_centroids,
-                    source_cell_lens,
-                    source_idxs_embed,
-                    targets_coords,
-                    targets_coords_lens,
-                    targets_coords_idxs,
-                    forecast_dt,
-                )
+                preds = self.ddp_model(self.model_params, batch, forecast_steps)
 
                 loss = self.compute_loss(
                     self.loss_fcts,
-                    source_tokens_cells,
-                    target_tokens,
-                    targets_coords,
-                    target_token_lens,
+                    forecast_steps,
+                    batch[0],
                     preds,
                     losses_all,
                     stddev_all,
@@ -778,22 +728,9 @@ class Trainer(Trainer_Base):
             with tqdm.tqdm(
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
-                for bidx, data in enumerate(dataset_val_iter):
-                    data = self.input_to_device(data)
-                    (
-                        sources,
-                        source_tokens_cells,
-                        source_tokens_lens,
-                        source_centroids,
-                        source_cell_lens,
-                        source_idxs_embed,
-                        target_tokens,
-                        target_token_lens,
-                        targets_coords,
-                        targets_coords_lens,
-                        targets_coords_idxs,
-                        forecast_dt,
-                    ) = data
+                for bidx, batch in enumerate(dataset_val_iter):
+                    forecast_steps = batch[-1]
+                    batch = self.batch_to_device(batch)
 
                     losses_all = torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
                     stddev_all = torch.zeros(len(cf.streams)) * torch.nan
@@ -802,18 +739,7 @@ class Trainer(Trainer_Base):
                     with torch.autocast(
                         device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
                     ):
-                        preds = self.ddp_model(
-                            self.model_params,
-                            source_tokens_cells,
-                            source_tokens_lens,
-                            source_centroids,
-                            source_cell_lens,
-                            source_idxs_embed,
-                            targets_coords,
-                            targets_coords_lens,
-                            targets_coords_idxs,
-                            forecast_dt,
-                        )
+                        preds = self.ddp_model(self.model_params, batch, forecast_steps)
 
                     # compute loss and log output
                     if bidx < cf.log_validation:
@@ -826,10 +752,8 @@ class Trainer(Trainer_Base):
 
                         self.compute_loss(
                             self.loss_fcts_val,
-                            source_tokens_cells,
-                            target_tokens,
-                            targets_coords,
-                            target_token_lens,
+                            forecast_steps,
+                            batch[0],
                             preds,
                             losses_all,
                             stddev_all,
@@ -841,6 +765,7 @@ class Trainer(Trainer_Base):
                         )
 
                         cols = [ds[0][0].colnames for ds in self.dataset_val.obs_datasets_norm]
+                        sources = [[item.source_raw for item in b] for b in batch[0]]
                         write_validation(
                             self.cf,
                             self.path_run,
@@ -857,10 +782,8 @@ class Trainer(Trainer_Base):
                     else:
                         self.compute_loss(
                             self.loss_fcts_val,
-                            source_tokens_cells,
-                            target_tokens,
-                            targets_coords,
-                            target_token_lens,
+                            forecast_steps,
+                            batch[0],
                             preds,
                             losses_all,
                             stddev_all,
@@ -905,62 +828,12 @@ class Trainer(Trainer_Base):
         self.dataset_val.advance()
 
     ###########################################
-    def input_to_device(self, data):
-        (
-            source,
-            source_tokens_cells,
-            source_tokens_lens,
-            source_centroids,
-            source_cell_lens,
-            source_idxs_embed,
-            target_tokens,
-            target_token_lens,
-            targets_coords,
-            targets_coords_lens,
-            targets_coords_idxs,
-            forecast_dt,
-        ) = data
-
-        dev = self.devices[0]
-
-        # source data
-        source_tokens_cells = [
-            [s.to(dev, non_blocking=True) for s in ss] for ss in source_tokens_cells
-        ]
-        source_centroids = [[c.to(dev, non_blocking=True) for c in cb] for cb in source_centroids]
-        source_cell_lens = source_cell_lens.to(dev, non_blocking=True)
-        source_tokens_lens = source_tokens_lens.to(dev, non_blocking=True)
-        source_idxs_embed[0] = [
-            [s.to(dev, non_blocking=True) for s in ss] for ss in source_idxs_embed[0]
-        ]
-
-        # target data
-        targets_coords = [
-            [[t.to(dev, non_blocking=True) for t in tt] for tt in ttt] for ttt in targets_coords
-        ]
-        target_tokens = [
-            [[t.to(dev, non_blocking=True) for t in tt] for tt in ttt] for ttt in target_tokens
-        ]
-        targets_coords_idxs[0] = [
-            [s.to(dev, non_blocking=True) for s in ss] for ss in targets_coords_idxs[0]
-        ]
-        targets_coords_idxs[1] = [
-            [s.to(dev, non_blocking=True) for s in ss] for ss in targets_coords_idxs[1]
-        ]
-
+    def batch_to_device(self, batch):
+        # forecast_steps is dropped here from the batch
         return (
-            source,
-            source_tokens_cells,
-            source_tokens_lens,
-            source_centroids,
-            source_cell_lens,
-            source_idxs_embed,
-            target_tokens,
-            target_token_lens,
-            targets_coords,
-            targets_coords_lens,
-            targets_coords_idxs,
-            forecast_dt,
+            [[d.to_device() for d in db] for db in batch[0]],
+            batch[1].to("cuda"),
+            [[b.to("cuda") for b in bf] for bf in batch[2]],
         )
 
     ###########################################

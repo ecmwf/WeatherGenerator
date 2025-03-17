@@ -7,10 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import argparse
 import pdb
 import sys
 import time
 import traceback
+
+import pandas as pd
 
 from weathergen.train.trainer import Trainer
 from weathergen.utils.config import Config, private_conf
@@ -18,63 +21,148 @@ from weathergen.utils.logger import init_loggers
 
 
 ####################################################################################################
-def evaluate(
-    run_id,
-    epoch,
-    masking_mode=None,
-    forecacast_steps=None,
-    samples=10000000,
-    shuffle=False,
-    save_samples=True,
-    gridded_output_streams=[],
-):
+def evaluate():
+    """
+    Evaluation function for WeatherGenerator model.
+    Entry point for calling the evaluation code from the command line.
+
+    Args:
+        run_id (str): Run/model id of pretrained WeatherGenerator model.
+        start_date (str): Start date for evaluation. Format must be parsable with pd.to_datetime.
+        end_date (str): End date for evaluation. Format must be parsable with pd.to_datetime.
+        epoch (int, optional): Epoch of pretrained WeatherGenerator model used for evaluation (-1 corresponds to last epoch). Defaults to -1.
+        masking_mode (str, optional): Masking mode for evaluation. Defaults to None.
+        forecast_steps (int, optional): Number of forecast steps for evaluation. Defaults to None.
+        samples (int, optional): Number of samples for evaluation. Defaults to 10000000.
+        shuffle (bool, optional): Shuffle samples for evaluation. Defaults to False.
+        save_samples (bool, optional): Save samples for evaluation. Defaults to True.
+        analysis_streams_output (list, optional): Analysis output streams during evaluation. Defaults to ['ERA5'].
+        gridded_output_streams(list, optional): Currently unused and threrefore omitted here
+    """
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--run_id",
+        type=str,
+        required=True,
+        help="Run/model id of pretrained WeatherGenerator model.",
+    )
+    parser.add_argument(
+        "--start_date",
+        "-start",
+        type=str,
+        required=True,
+        help="Start date for evaluation. Format must be parsable with pd.to_datetime.",
+    )
+    parser.add_argument(
+        "--end_date",
+        "-end",
+        type=str,
+        required=True,
+        help="End date for evaluation. Format must be parsable with pd.to_datetime.",
+    )
+    parser.add_argument(
+        "--epoch",
+        type=int,
+        default=-1,
+        help="Epoch of pretrained WeatherGenerator model used for evaluation (-1 corresponds to the last checkpoint).",
+    )
+    parser.add_argument(
+        "--forecast_steps",
+        type=int,
+        default=None,
+        help="Number of forecast steps for evaluation. Uses attribute from config when None is set.",
+    )
+    parser.add_argument(
+        "--samples", type=int, default=10000000, help="Number of evaluation samples."
+    )
+    parser.add_argument(
+        "--shuffle", type=bool, default=False, help="Shuffle samples from evaluation."
+    )
+    parser.add_argument(
+        "--save_samples", type=bool, default=True, help="Save samples from evaluation."
+    )
+    parser.add_argument(
+        "--analysis_streams_output",
+        type=list,
+        default=["ERA5"],
+        help="Analysis output streams during evaluation.",
+    )
+
+    args = parser.parse_args()
+
     # TODO: move somewhere else
     init_loggers()
+
     # load config if specified
-    cf = Config.load(run_id, epoch if epoch is not None else -1)
+    cf = Config.load(args.run_id, args.epoch)
 
     cf.run_history += [(cf.run_id, cf.istep)]
 
-    cf.samples_per_validation = samples
-    cf.log_validation = samples if save_samples else 0
+    cf.samples_per_validation = args.samples
+    cf.log_validation = args.samples if args.save_samples else 0
 
-    if masking_mode is not None:
-        cf.masking_mode = masking_mode
+    start_date, end_date = pd.to_datetime(args.start_date), pd.to_datetime(args.end_date)
 
-    # Oct-Nov 2022
-    cf.start_date_val = 202210011600
-    cf.end_date_val = 202212010400
+    cf.start_date_val = start_date.strftime(
+        "%Y%m%d%H%M"
+    )  # ML: would be better to use datetime-objects
+    cf.end_date_val = end_date.strftime("%Y%m%d%H%M")
+    # # Oct-Nov 2022
+    # cf.start_date_val = 202210011600
+    # cf.end_date_val = 202212010400
     # # 2022
     # cf.start_date_val = 202201010400
     # cf.end_date_val = 202301010400
 
-    # cf.step_hrs = 12
+    cf.shuffle = args.shuffle
 
-    cf.shuffle = shuffle
-
-    cf.forecast_steps = forecacast_steps if forecacast_steps else cf.forecast_steps
+    cf.forecast_steps = args.forecast_steps if args.forecast_steps else cf.forecast_steps
     # cf.forecast_policy = 'fixed'
 
     # cf.analysis_streams_output = ['Surface', 'Air', 'METEOSAT', 'ATMS', 'IASI', 'AMSR2']
-    cf.analysis_streams_output = ["ERA5"]
+    cf.analysis_streams_output = args.analysis_streams_output
 
     # make sure number of loaders does not exceed requested samples
-    cf.loader_num_workers = min(cf.loader_num_workers, samples)
+    cf.loader_num_workers = min(cf.loader_num_workers, args.samples)
 
     trainer = Trainer()
-    trainer.evaluate(cf, run_id, epoch, True)
+    trainer.evaluate(cf, args.run_id, args.epoch, True)
 
 
 ####################################################################################################
-def train(run_id=None) -> None:
+def train() -> None:
+    """
+    Training function for WeatherGenerator model.
+    Entry point for calling the training code from the command line.
+    Configurations are set in the function body.
+
+    Args:
+      run_id (str, optional): Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.
+
+    Note: All model configurations are set in the function body.
+    """
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--run_id",
+        type=str,
+        default=None,
+        help="Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.",
+    )
+
+    args = parser.parse_args()
+
     # TODO: move somewhere else
     init_loggers()
     private_cf = private_conf()
+
     cf = Config()
 
     # directory where input streams are specified
     # cf.streams_directory = './streams_large/'
     cf.streams_directory = "./config/streams/streams_anemoi/"
+    # cf.streams_directory = "./config/streams/streams_mixed/"
     # cf.streams_directory = "./streams_mixed/"
 
     # embed_orientation : 'channels' or 'columns'
@@ -181,10 +269,11 @@ def train(run_id=None) -> None:
     cf.norm_type = "LayerNorm"  #'LayerNorm' #'RMSNorm'
     cf.nn_module = "te"
 
-    cf.data_path = private_cf["data_path"]
-    # "/home/mlx/ai-ml/datasets/stable/"
-    # cf.data_path = '/lus/h2resw01/fws4/lb/project/ai-ml/observations/v1'
-    # cf.data_path = '/leonardo_scratch/large/userexternal/clessig0/obs/v1'
+    # merge private config
+    for k, v in private_cf.items():
+        setattr(cf, k, v)
+    cf.data_path = private_cf["data_path_anemoi"]  # for backward compatibility
+
     cf.start_date = 201301010000
     cf.end_date = 202012310000
     cf.start_date_val = 202101010000
@@ -202,7 +291,7 @@ def train(run_id=None) -> None:
     cf.istep = 0
     cf.run_history = []
 
-    cf.run_id = run_id
+    cf.run_id = args.run_id
     cf.desc = ""
 
     trainer = Trainer(log_freq=20, checkpoint_freq=250, print_freq=10)
