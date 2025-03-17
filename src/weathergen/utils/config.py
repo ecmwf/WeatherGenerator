@@ -10,7 +10,6 @@
 import json
 import os
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -70,7 +69,7 @@ class Config:
 
 
 def load_overwrite_conf(pth: str) -> dict:
-    " Return the overwrite configuration."
+    "Return the overwrite configuration."
     "If path is None, return an empty dictionary."
     if not pth:
         return {}
@@ -78,20 +77,22 @@ def load_overwrite_conf(pth: str) -> dict:
         overwrite_path = Path(pth)
         overwrite_conf = yaml.safe_load(overwrite_path.read_text())
         return overwrite_conf
-    
+
+
 def load_private_conf(pth: str = None) -> dict:
-    " Return the private configuration."
+    "Return the private configuration."
     "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF. "
-    
+
     if not pth:
         if "WEATHERGEN_PRIVATE_CONF" in os.environ:
             private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
             private_conf = yaml.safe_load(private_home.read_text())
             return private_conf
         else:
-            raise ValueError("No private config path is provided in the command line and WEATHERGEN_PRIVATE_CONF is not set.")
+            raise ValueError(
+                "No private config path is provided in the command line and WEATHERGEN_PRIVATE_CONF is not set."
+            )
     else:
         private_home = Path(pth)
         private_conf = yaml.safe_load(private_home.read_text())
         return private_conf
-    
