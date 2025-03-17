@@ -54,6 +54,8 @@ class AnemoiDataset:
         # TODO: define in base class
         self.geoinfo_idx = []
 
+        # Determine source and target channels, filtering out forcings etc and using 
+        # specified source and target channels if specified
         source_channels = stream_info["source"] if "source" in stream_info else None
         self.source_idx = np.sort(
             [
@@ -74,7 +76,6 @@ class AnemoiDataset:
                     and (np.array([f in k for f in target_channels]).any() if target_channels else True))
             ]
         )
-        # TODO: use complement of self.fields_idx as geoinfo
         self.source_channels = [self.ds.variables[i] for i in self.source_idx]
         self.target_channels = [self.ds.variables[i] for i in self.target_idx]
 
@@ -99,57 +100,6 @@ class AnemoiDataset:
 
         return len(self.ds)
 
-    def __getitem__(self, idx: int) -> tuple:
-        "Get (data,datetime) for given index"
-
-        if not self.ds:
-            return (np.array([], dtype=np.float32), np.array([], dtype=np.float32))
-
-        # prepend lat and lon to data; squeeze out ensemble dimension (for the moment)
-        data = np.concatenate(
-            [
-                np.expand_dims(self.latitudes, 0),
-                np.expand_dims(self.longitudes, 0),
-                self.ds[idx].squeeze(),
-            ],
-            0,
-        ).transpose()
-
-        # date time matching #data points of data
-        datetimes = np.full(data.shape[0], self.ds.dates[idx])
-
-        return (data, datetimes)
-
-    def _get(self, idx: int, channels_idx : np.array) -> tuple[np.array,np.array,np.array,np.array]:
-        """
-            TODO
-        """
-
-        if not self.ds:
-            return (np.array([], dtype=np.float32), np.array([], dtype=np.float32))
-
-        data = self.ds[idx : idx+self.num_steps_per_window][:,:,0]
-        data = data[:,channels_idx].transpose([0,2,1]).reshape( (data.shape[0]*data.shape[2], -1))
-
-        # prepend lat and lon to data; squeeze out ensemble dimension (for the moment)
-        latlon = np.concatenate(
-            [
-                np.expand_dims(self.latitudes, 0),
-                np.expand_dims(self.longitudes, 0),
-            ],
-            0,
-        ).transpose()
-        latlon = np.repeat( latlon, self.num_steps_per_window, axis=0).reshape( (-1,latlon.shape[1]) )
-
-        # empty geoinfos
-        geoinfos = np.zeros( (data.shape[0],0), dtype=data.dtype)
-
-        # date time matching #data points of data
-        datetimes = np.repeat( np.expand_dims(self.ds.dates[idx:idx+self.num_steps_per_window],0),
-                               data.shape[0], axis=0).flatten()
-
-        return (latlon, geoinfos, data, datetimes)
-
     def get_source(self, idx: int) -> tuple[np.array,np.array,np.array,np.array]:
         """
             TODO
@@ -161,6 +111,41 @@ class AnemoiDataset:
             TODO
         """
         return self._get( idx, self.target_idx)
+
+    def _get(self, idx: int, channels_idx : np.array) -> tuple[np.array,np.array,np.array,np.array]:
+        """
+            TODO
+        """
+
+        if not self.ds:
+            return (np.array([], dtype=np.float32),
+                    np.array([], dtype=np.float32),
+                    np.array([], dtype=np.float32),
+                    np.array([], dtype=np.float32))
+
+        # extract number of time steps and collapse ensemble dimension
+        data = self.ds[idx : idx+self.num_steps_per_window][:,:,0]
+        # extract channels
+        data = data[:,channels_idx].transpose([0,2,1]).reshape( (data.shape[0]*data.shape[2], -1))
+
+        # construct lat/lon coords
+        latlon = np.concatenate(
+            [
+                np.expand_dims(self.latitudes, 0),
+                np.expand_dims(self.longitudes, 0),
+            ],
+            0,
+        ).transpose()
+        latlon = np.repeat( latlon, self.num_steps_per_window, axis=0).reshape( (-1,latlon.shape[1]) )
+
+        # empty geoinfos for anemoi
+        geoinfos = np.zeros( (data.shape[0],0), dtype=data.dtype)
+
+        # date time matching #data points of data
+        datetimes = np.repeat( np.expand_dims(self.ds.dates[idx:idx+self.num_steps_per_window],0),
+                               data.shape[0], axis=0).flatten()
+
+        return (latlon, geoinfos, data, datetimes)
 
     def get_source_size( self) :
         """
