@@ -16,7 +16,7 @@ import traceback
 import pandas as pd
 
 from weathergen.train.trainer import Trainer
-from weathergen.utils.config import Config, private_conf
+from weathergen.utils.config import Config, load_private_conf, load_overwrite_conf
 from weathergen.utils.logger import init_loggers
 
 
@@ -150,12 +150,29 @@ def train() -> None:
         default=None,
         help="Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.",
     )
+    
+    parser.add_argument(
+        "--private_config",
+        type=str,
+        default=None,
+        help="Path to private configuration file for paths.",
+    )
+    
+    parser.add_argument(
+        "--overwrite_config",
+        type=str,
+        default=None,
+        help="Path to private configuration file for overwriting the defaults in the function body. Defaults to None.",
+    )
 
     args = parser.parse_args()
 
     # TODO: move somewhere else
     init_loggers()
-    private_cf = private_conf()
+    
+    #get the non-default configs: private and overwrite
+    private_cf = load_private_conf(args.private_config)
+    overwrite_cf = load_overwrite_conf(args.overwrite_config)
 
     cf = Config()
 
@@ -269,10 +286,6 @@ def train() -> None:
     cf.norm_type = "LayerNorm"  #'LayerNorm' #'RMSNorm'
     cf.nn_module = "te"
 
-    # merge private config
-    for k, v in private_cf.items():
-        setattr(cf, k, v)
-    cf.data_path = private_cf["data_path_anemoi"]  # for backward compatibility
 
     cf.start_date = 201301010000
     cf.end_date = 202012310000
@@ -293,6 +306,15 @@ def train() -> None:
 
     cf.run_id = args.run_id
     cf.desc = ""
+    
+     # overwrite parameters from private config
+    for k, v in private_cf.items():
+        setattr(cf, k, v)
+    cf.data_path = private_cf["data_path_anemoi"]  # for backward compatibility
+
+    # overwrite parameters from overwrite config
+    for k, v in overwrite_cf.items():
+        setattr(cf, k, v)
 
     trainer = Trainer(log_freq=20, checkpoint_freq=250, print_freq=10)
 
