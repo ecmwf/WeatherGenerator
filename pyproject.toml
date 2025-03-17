@@ -104,6 +104,10 @@ ignore = [
 # exclude-newer = "2025-03-14T00:00:00Z"
 
 # Following the recommendations from https://docs.astral.sh/uv/guides/integration/pytorch
+# The current setup is:
+# linux == GPU + flashattention
+# windows == GPU
+# macos == CPU
 [[tool.uv.index]]
 name = "pytorch-cu124"
 url = "https://download.pytorch.org/whl/cu124"
