@@ -72,6 +72,7 @@ class Config:
         """
         if os.path.exists(run_id):  # load from the full path if a full path is provided
             fname = run_id
+            print("Loading config from provided full run_id path: " + fname)
         else:
             fname = model_path + f"/{run_id}/model_{run_id}"
 
@@ -81,11 +82,11 @@ class Config:
                 epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
             fname += f"{epoch_str}.json"
 
+            print("Loading config from specified run_id and epoch: " + fname)
+
         # open the file and read into a config object
         with open(fname) as f:
             json_str = f.readlines()
-
-        print("Loaded config file from " + fname)
 
         cf = Config()
         cf.__dict__ = json.loads(json_str[0])

@@ -105,11 +105,8 @@ def evaluate():
     # TODO: move somewhere else
     init_loggers()
 
-    # load config
-    if os.path.exists(args.run_id):  # assumed to be full path instead of just id
-        cf = Config.load(args.run_id)
-    else:
-        cf = Config.load(args.run_id, args.epoch, private_cf["model_path"])
+    # load config: if run_id is full path, it loads from there
+    cf = Config.load(args.run_id, args.epoch, private_cf["model_path"])
 
     cf.run_history += [(cf.run_id, cf.istep)]
 
