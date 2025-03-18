@@ -297,8 +297,6 @@ class Trainer(Trainer_Base):
         # general initalization
         self.init(cf, run_id_contd, epoch_contd, run_id_new)
 
-        cf.load(run_id="testtesttest", epoch=999999999)
-
         self.dataset = MultiStreamDataSampler(
             cf,
             cf.rank,

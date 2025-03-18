@@ -23,9 +23,8 @@ from weathergen.utils.logger import init_loggers
 
 ####################################################################################################
 def evaluate():
-    print("came to evaluate")
     """
-    Evaluation function for WeatherGenerator model.
+    Evaluation function for WesatherGenerator model.
     Entry point for calling the evaluation code from the command line.
 
     Args:
@@ -108,6 +107,10 @@ def evaluate():
     # load config: if run_id is full path, it loads from there
     cf = Config.load(args.run_id, args.epoch, private_cf["model_path"])
 
+    # add parameters from private (paths) config
+    for k, v in private_cf.items():
+        setattr(cf, k, v)
+
     cf.run_history += [(cf.run_id, cf.istep)]
 
     cf.samples_per_validation = args.samples
@@ -143,8 +146,6 @@ def evaluate():
 
 ####################################################################################################
 def train() -> None:
-    print("came to train")
-
     """
     Training function for WeatherGenerator model.
     Entry point for calling the training code from the command line.
@@ -339,4 +340,4 @@ def train() -> None:
 
 
 if __name__ == "__main__":
-    evaluate()
+    train()
