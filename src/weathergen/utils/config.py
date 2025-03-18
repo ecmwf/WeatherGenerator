@@ -45,25 +45,6 @@ class Config:
         with open(fname, "w") as f:
             f.write(json_str)
 
-    # @staticmethod
-    # def load(run_id, epoch=None):
-    #     if "/" in run_id:  # assumed to be full path instead of just id
-    #         fname = run_id
-    #     else:
-    #         fname = model_path + f"/{run_id}/model_{run_id}"
-    #         epoch_str = ""
-    #         if epoch is not None:
-    #             epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
-    #         fname += f"{epoch_str}.json"
-
-    #     with open(fname) as f:
-    #         json_str = f.readlines()
-
-    #     cf = Config()
-    #     cf.__dict__ = json.loads(json_str[0])
-
-    #     return cf
-
     @staticmethod
     def load(run_id: str, epoch: int = None, model_path: str = "./models") -> "Config":
         """
