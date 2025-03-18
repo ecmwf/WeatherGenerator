@@ -29,7 +29,7 @@ class Config:
                     for k, v in rt.items():
                         print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
 
-    def save(self, epoch=None):
+    def save(self, epoch: str = None) -> None:
         # save in directory with model files
         dirname = self.model_path + f"/{self.run_id}"
         # if not os.path.exists(dirname):
@@ -45,19 +45,47 @@ class Config:
         with open(fname, "w") as f:
             f.write(json_str)
 
+    # @staticmethod
+    # def load(run_id, epoch=None):
+    #     if "/" in run_id:  # assumed to be full path instead of just id
+    #         fname = run_id
+    #     else:
+    #         fname = model_path + f"/{run_id}/model_{run_id}"
+    #         epoch_str = ""
+    #         if epoch is not None:
+    #             epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
+    #         fname += f"{epoch_str}.json"
+
+    #     with open(fname) as f:
+    #         json_str = f.readlines()
+
+    #     cf = Config()
+    #     cf.__dict__ = json.loads(json_str[0])
+
+    #     return cf
+
     @staticmethod
-    def load(run_id, epoch=None):
-        if "/" in run_id:  # assumed to be full path instead of just id
+    def load(run_id: str, epoch: int = None, model_path: str = "./models") -> "Config":
+        """
+        Load a configuration file from a given run_id and epoch.
+        If run_id us a full path, loads it from the full path.
+        """
+        if os.path.exists(run_id):  # load from the full path if a full path is provided
             fname = run_id
         else:
-            fname = self.model_path + f"/{run_id}/model_{run_id}"
+            fname = model_path + f"/{run_id}/model_{run_id}"
+
+            # append also the epoch to the file name
             epoch_str = ""
             if epoch is not None:
                 epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
             fname += f"{epoch_str}.json"
 
+        # open the file and read into a config object
         with open(fname) as f:
             json_str = f.readlines()
+
+        print("Loaded config file from " + fname)
 
         cf = Config()
         cf.__dict__ = json.loads(json_str[0])

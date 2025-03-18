@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import argparse
+import os
 import pdb
 import sys
 import time
@@ -22,6 +23,7 @@ from weathergen.utils.logger import init_loggers
 
 ####################################################################################################
 def evaluate():
+    print("came to evaluate")
     """
     Evaluation function for WeatherGenerator model.
     Entry point for calling the evaluation code from the command line.
@@ -51,14 +53,14 @@ def evaluate():
         "--start_date",
         "-start",
         type=str,
-        required=True,
+        required=False,
         help="Start date for evaluation. Format must be parsable with pd.to_datetime.",
     )
     parser.add_argument(
         "--end_date",
         "-end",
         type=str,
-        required=True,
+        required=False,
         help="End date for evaluation. Format must be parsable with pd.to_datetime.",
     )
     parser.add_argument(
@@ -88,14 +90,26 @@ def evaluate():
         default=["ERA5"],
         help="Analysis output streams during evaluation.",
     )
+    parser.add_argument(
+        "--private_config",
+        type=str,
+        default=None,
+        help="Path to private configuration file for paths.",
+    )
 
     args = parser.parse_args()
+
+    # get the paths from the private config
+    private_cf = load_private_conf(args.private_config)
 
     # TODO: move somewhere else
     init_loggers()
 
-    # load config if specified
-    cf = Config.load(args.run_id, args.epoch)
+    # load config
+    if os.path.exists(args.run_id):  # assumed to be full path instead of just id
+        cf = Config.load(args.run_id)
+    else:
+        cf = Config.load(args.run_id, args.epoch, private_cf["model_path"])
 
     cf.run_history += [(cf.run_id, cf.istep)]
 
@@ -132,6 +146,8 @@ def evaluate():
 
 ####################################################################################################
 def train() -> None:
+    print("came to train")
+
     """
     Training function for WeatherGenerator model.
     Entry point for calling the training code from the command line.
@@ -326,4 +342,4 @@ def train() -> None:
 
 
 if __name__ == "__main__":
-    train()
+    evaluate()
