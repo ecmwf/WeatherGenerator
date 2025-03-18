@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import argparse
-import os
 import pdb
 import sys
 import time
