@@ -64,8 +64,8 @@ def evaluate():
     parser.add_argument(
         "--epoch",
         type=int,
-        default=-1,
-        help="Epoch of pretrained WeatherGenerator model used for evaluation (-1 corresponds to the last checkpoint).",
+        default=None,
+        help="Epoch of pretrained WeatherGenerator model used for evaluation (Default None corresponds to the last checkpoint).",
     )
     parser.add_argument(
         "--forecast_steps",
