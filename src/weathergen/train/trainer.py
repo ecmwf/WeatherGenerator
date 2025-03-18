@@ -78,8 +78,8 @@ class Trainer(Trainer_Base):
         cf = self.init_streams(cf, run_id_contd)
 
         # create output directory
-        path_run = "./results/" + cf.run_id + "/"
-        path_model = "./models/" + cf.run_id + "/"
+        path_run = cf.run_path + "/" + cf.run_id + "/"
+        path_model = cf.model_path + "/" + cf.run_id + "/"
         if self.cf.rank == 0:
             os.makedirs(path_run, exist_ok=True)
             os.makedirs(path_model, exist_ok=True)
@@ -840,7 +840,7 @@ class Trainer(Trainer_Base):
 
     ###########################################
     def save_model(self, epoch=-1, name=None):
-        file_out = "./models/" + self.cf.run_id + f"/{self.cf.run_id}_"
+        file_out = self.cf.model_path + "/" + self.cf.run_id + f"/{self.cf.run_id}_"
         file_out += "latest" if epoch == -1 else f"epoch{epoch:05d}"
         file_out += ("_" + name) if name is not None else ""
         file_out += "{}.chkpt"
