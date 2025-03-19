@@ -173,9 +173,8 @@ class TrainLogger:
             log_train = np.array([])
 
         log_train_df = read_metrics(cf, run_id, "train", cols1)
-        print("log_train_df", log_train_df)
+        
         # validation
-
         # define cols for validation
         cols_val = ["dtime", "samples"]
         cols2 = [_weathergen_timestamp, "num_samples"]
@@ -195,7 +194,6 @@ class TrainLogger:
                     + ", "
                     + "stddev"
                 ]
-        print("col_val", cols_val, cols2)
         # read validation log data
         try:
             with open(fname_log_val, "rb") as f:
@@ -205,12 +203,10 @@ class TrainLogger:
             print(f"Warning: no validation data loaded for run_id={run_id}")
             log_val = np.array([])
         metrics_val_df = read_metrics(cf, run_id, "val", cols2)
-        print("metrics_val_df", metrics_val_df)
+        
         # performance
-
         # define cols for performance monitoring
         cols_perf = ["GPU", "memory"]
-        print("col_perf", cols_perf)
         # read perf log data
         try:
             with open(fname_perf_val, "rb") as f:
@@ -222,14 +218,8 @@ class TrainLogger:
         metrics_system_df = read_metrics(
             cf, run_id, None, [_weathergen_timestamp, _performance_gpu, _performance_memory]
         )
-        print("metrics_system_df", metrics_system_df)
 
-        return (
-            (cols_train, log_train),
-            (cols_val, log_val),
-            (cols_perf, log_perf),
-            (log_train_df, metrics_val_df, metrics_system_df),
-        )
+        return (log_train_df, metrics_val_df, metrics_system_df)
 
 
 def read_metrics(
