@@ -8,22 +8,17 @@
 # nor does it submit to any jurisdiction.
 
 import argparse
-import code
 import glob
 import logging
 import os
+import pdb
 import subprocess
+import sys
+import traceback
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import polars as pl
-
-import argparse
-import pdb
-import sys
-import time
-import traceback
 
 from weathergen.utils.config import Config
 from weathergen.utils.train_logger import TrainLogger
@@ -169,7 +164,6 @@ def plot_loss_per_stream(
         for mode in modes:
             legend_strs += [[]]
             for err in errs:
-                idx = 0 if mode == "train" else 1
                 linestyle = "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
                 linestyle = ":" if "stddev" in err else linestyle
                 alpha = 1.0
@@ -177,20 +171,19 @@ def plot_loss_per_stream(
                     alpha = 0.35 if "train" in mode else alpha
 
                 for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
-                    
                     # find the col of the request x-axis (e.g. samples)
-                    x_idx = [c for _, c in enumerate(run_data[idx].columns) if x_axis in c][0]
+                    x_idx = [c for _, c in enumerate(run_data[mode].columns) if x_axis in c][0]
                     # find the cols of the requested metric (e.g. mse) for all streams
                     # TODO: fix captialization
-                    data_idxs = [c for _, c in enumerate(run_data[idx].columns) if err in c]
+                    data_idxs = [c for _, c in enumerate(run_data[mode].columns) if err in c]
 
-                    for i, col in enumerate(data_idxs):
+                    for _, col in enumerate(data_idxs):
                         if stream_name in col:
-                            if run_data[idx][col].shape[0] == 0:
+                            if run_data[mode][col].shape[0] == 0:
                                 continue
 
-                            x_vals = np.array( run_data[idx][x_idx])
-                            y_data = np.array( run_data[idx][col])
+                            x_vals = np.array(run_data[mode][x_idx])
+                            y_data = np.array(run_data[mode][col])
 
                             plt.plot(
                                 x_vals,
@@ -209,16 +202,8 @@ def plot_loss_per_stream(
                                 + col
                             ]
 
-                            min_val = np.min(
-                                [min_val, np.nanmin(y_data)]
-                            )
-                            max_val = np.max(
-                                [max_val, np.nanmax(y_data)]
-                            )
-
-        import code
-        code.interact( local=locals())
-
+                            min_val = np.min([min_val, np.nanmin(y_data)])
+                            max_val = np.max([max_val, np.nanmax(y_data)])
 
         # TODO: ensure that legend is plotted with full opacity
         legend_str = legend_strs[0]
@@ -334,7 +319,7 @@ if __name__ == "__main__":
         clean_out_folder()
 
     runs_ids = {
-        "thfmdl6w": [34298989, "ERA5 test"],
+        "szkuawor": [34298989, "ERA5 test"],
     }
 
     runs_data = [TrainLogger.read(run_id) for run_id in runs_ids]
@@ -343,21 +328,21 @@ if __name__ == "__main__":
     # extract times and convert back to datetime objects, store absolute time ta and relative one tr
     for rd in runs_data:
         # training
-        if len(rd[0]['weathergen.timestamp']) > 0 :
-            diff = rd[0]['weathergen.timestamp'] - rd[0]['weathergen.timestamp'][0]
-            rd[0].insert_column(1, pl.Series("weathergen.timestamp.diff", diff))
+        if len(rd["train"]["weathergen.timestamp"]) > 0:
+            diff = rd["train"]["weathergen.timestamp"] - rd["train"]["weathergen.timestamp"][0]
+            rd["train"].insert_column(1, pl.Series("weathergen.reltime", diff))
         # validation
-        if len(rd[1]['weathergen.timestamp']) > 0 :
-            diff = rd[1]['weathergen.timestamp'] - rd[1]['weathergen.timestamp'][0]
-            rd[1].insert_column(1, pl.Series("weathergen.timestamp.diff", diff))
-        
+        if len(rd["val"]["weathergen.timestamp"]) > 0:
+            diff = rd["val"]["weathergen.timestamp"] - rd["val"]["weathergen.timestamp"][0]
+            rd["val"].insert_column(1, pl.Series("weathergen.reltime", diff))
+
     # determine which runs are still alive (as a process, though they might hang internally)
     ret = subprocess.run(["squeue"], capture_output=True)
     lines = str(ret.stdout).split("\\n")
     runs_active = [np.array([str(v[0]) in l for l in lines[1:]]).any() for v in runs_ids.values()]
 
     x_scale_log = False
-    x_type = ("rel_time",)  #'step'
+    x_type = ("reltime",)  #'step'
     x_type = "step"
 
     # # plot learning rate
@@ -366,8 +351,7 @@ if __name__ == "__main__":
     # # plot performance
     # plot_utilization(runs_ids, runs_data, runs_active)
 
-    try : 
-
+    try:
         # compare different runs
         plot_loss_per_stream(
             ["train", "val"],
@@ -395,7 +379,7 @@ if __name__ == "__main__":
             ["ERA5", "METEOSAT", "NPP"],
             x_type=x_type,
             x_scale_log=x_scale_log,
-        )    
+        )
     except:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
@@ -406,4 +390,4 @@ if __name__ == "__main__":
     #     plot_loss_per_run(
     #         ["train", "val"], run_id, runs_ids[run_id], run_data, get_stream_names(run_id)
     #     )
-        # plot_loss_per_run( ['val'], run_id, runs_ids[run_id], run_data, get_stream_names( run_id))
+    # plot_loss_per_run( ['val'], run_id, runs_ids[run_id], run_data, get_stream_names( run_id))
