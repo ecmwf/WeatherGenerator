@@ -8,8 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-import os
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -78,11 +78,11 @@ class Trainer(Trainer_Base):
         cf = self.init_streams(cf, run_id_contd)
 
         # create output directory
-        path_run = cf.run_path + "/" + cf.run_id + "/"
-        path_model = cf.model_path + "/" + cf.run_id + "/"
+        path_run = Path(cf.run_path) / cf.run_id  # KCT:path
+        path_model = Path(cf.model_path) / cf.run_id
         if self.cf.rank == 0:
-            os.makedirs(path_run, exist_ok=True)
-            os.makedirs(path_model, exist_ok=True)
+            path_run.mkdir(parents=True, exist_ok=True)
+            path_model.mkdir(parents=True, exist_ok=True)
             # save config
             cf.save()
             if run_mode == "training":
@@ -838,10 +838,14 @@ class Trainer(Trainer_Base):
 
     ###########################################
     def save_model(self, epoch=-1, name=None):
-        file_out = self.cf.model_path + "/" + self.cf.run_id + f"/{self.cf.run_id}_"
-        file_out += "latest" if epoch == -1 else f"epoch{epoch:05d}"
-        file_out += ("_" + name) if name is not None else ""
-        file_out += "{}.chkpt"
+        base_path = Path(self.cf.model_path) / self.cf.run_id  # KCT:path
+        file_out = base_path / f"{self.cf.run_id}_"
+        file_out = file_out.with_name(
+            file_out.name + ("latest" if epoch == -1 else f"epoch{epoch:05d}")
+        )
+        if name is not None:
+            file_out = file_out.with_name(file_out.name + f"_{name}")
+        file_out = file_out.with_suffix(".chkpt")
 
         if self.cf.with_ddp and self.cf.with_fsdp:
             _cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
@@ -854,11 +858,12 @@ class Trainer(Trainer_Base):
         else:
             state = self.ddp_model.state_dict()
 
-        if self.cf.rank == 0:
+        if self.cf.rank == 0:  # KCT:path
             # save temp file (slow)
-            torch.save(state, file_out.format("_temp"))
+            temp_file = file_out.with_name(file_out.stem + "_temp" + file_out.suffix)
+            torch.save(state, temp_file)
             # move file (which is changing the link in the file system and very fast)
-            os.replace(file_out.format("_temp"), file_out.format(""))
+            temp_file.replace(file_out)
             # save config
             self.cf.save(epoch)
 
