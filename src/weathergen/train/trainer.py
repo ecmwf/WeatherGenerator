@@ -78,7 +78,7 @@ class Trainer(Trainer_Base):
         cf = self.init_streams(cf, run_id_contd)
 
         # create output directory
-        path_run = Path(cf.run_path) / cf.run_id  # KCT:path
+        path_run = Path(cf.run_path) / cf.run_id
         path_model = Path(cf.model_path) / cf.run_id
         if self.cf.rank == 0:
             path_run.mkdir(parents=True, exist_ok=True)

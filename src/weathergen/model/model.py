@@ -542,10 +542,6 @@ class Model(torch.nn.Module):
 
     #########################################
     def load(self, run_id, epoch=None):
-        # path_run = self.cf.model_path + "/" + run_id + "/" # KCT:path
-        # fname = path_run + f"{run_id}"
-        # fname += f"_epoch{epoch:05d}.chkpt" if epoch is not None else "_latest.chkpt"
-
         path_run = Path(self.cf.model_path) / run_id
         fname = path_run / (
             f"{run_id}_epoch{epoch:05d}.chkpt" if epoch is not None else f"{run_id}_latest.chkpt"

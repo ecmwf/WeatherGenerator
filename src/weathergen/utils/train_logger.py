@@ -115,7 +115,7 @@ class TrainLogger:
         cf = Config.load(run_id, epoch)
         run_id = cf.run_id
 
-        fname_log_train = Path(cf.run_path) / run_id / f"{run_id}_train_log.txt"  # KCT:path
+        fname_log_train = Path(cf.run_path) / run_id / f"{run_id}_train_log.txt"
         fname_log_val = Path(cf.run_path) / run_id / f"{run_id}_val_log.txt"
         fname_perf_val = Path(cf.run_path) / run_id / f"{run_id}_perf_log.txt"
         # fname_config = Path(cf.run_path) / f"model_{run_id}.json"
