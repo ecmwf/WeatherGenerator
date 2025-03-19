@@ -11,10 +11,7 @@ import argparse
 import glob
 import logging
 import os
-import pdb
 import subprocess
-import sys
-import traceback
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -46,21 +43,19 @@ def plot_lr(runs_ids, runs_data, runs_active, x_axis="samples"):
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
     _fig = plt.figure(figsize=(10, 7), dpi=300)
 
-    # train
-    idx = 0
     linestyle = "-"
 
     legend_str = []
     for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
-        if run_data[idx][1].shape[0] == 0:
+        if run_data["train"].shape[0] == 0:
             continue
 
-        x_idx = [i for i, c in enumerate(run_data[idx][0]) if x_axis in c][0]
-        data_idxs = [i for i, c in enumerate(run_data[idx][0]) if c == "lr"][0]
+        x_idx = [c for _, c in enumerate(run_data["train"].columns) if x_axis in c][0]
+        data_idxs = [c for _, c in enumerate(run_data["train"].columns) if c == "learning_rate"][0]
 
         plt.plot(
-            run_data[idx][1][:, x_idx],
-            run_data[idx][1][:, data_idxs],
+            run_data["train"][x_idx],
+            run_data["train"][data_idxs],
             linestyle,
             color=colors[j % len(colors)],
         )
@@ -91,21 +86,18 @@ def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
 
     linestyles = ["-", "--", ".-"]
 
-    # performance
-    idx = 2
-
     legend_str = []
     for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
-        if run_data[idx][1].shape[0] == 0:
+        if run_data["train"].shape[0] == 0:
             continue
 
-        x_idx = [i for i, c in enumerate(run_data[0][0]) if x_axis in c][0]
-        data_idxs = [i for i in range(len(run_data[2][0]))]
+        x_idx = [c for _, c in enumerate(run_data["train"].columns) if x_axis in c][0]
+        data_idxs = run_data["system"].columns[1:]
 
         for ii, di in enumerate(data_idxs):
             plt.plot(
-                run_data[0][1][:, x_idx],
-                run_data[idx][1][:, di],
+                run_data["train"][x_idx],
+                run_data["system"][di],
                 linestyles[ii],
                 color=colors[j % len(colors)],
             )
@@ -114,7 +106,7 @@ def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
                 + " : "
                 + run_id
                 + ", "
-                + run_data[idx][0][ii]
+                + di
                 + " : "
                 + runs_ids[run_id][1]
             ]
@@ -345,45 +337,40 @@ if __name__ == "__main__":
     x_type = ("reltime",)  #'step'
     x_type = "step"
 
-    # # plot learning rate
-    # plot_lr(runs_ids, runs_data, runs_active)
+    # plot learning rate
+    plot_lr(runs_ids, runs_data, runs_active)
 
-    # # plot performance
-    # plot_utilization(runs_ids, runs_data, runs_active)
+    # plot performance
+    plot_utilization(runs_ids, runs_data, runs_active)
 
-    try:
-        # compare different runs
-        plot_loss_per_stream(
-            ["train", "val"],
-            runs_ids,
-            runs_data,
-            runs_active,
-            ["era5", "METEOSAT", "NPP"],
-            x_type=x_type,
-            x_scale_log=x_scale_log,
-        )
-        plot_loss_per_stream(
-            ["val"],
-            runs_ids,
-            runs_data,
-            runs_active,
-            ["era5", "METEOSAT", "NPP"],
-            x_type=x_type,
-            x_scale_log=x_scale_log,
-        )
-        plot_loss_per_stream(
-            ["train"],
-            runs_ids,
-            runs_data,
-            runs_active,
-            ["ERA5", "METEOSAT", "NPP"],
-            x_type=x_type,
-            x_scale_log=x_scale_log,
-        )
-    except:
-        extype, value, tb = sys.exc_info()
-        traceback.print_exc()
-        pdb.post_mortem(tb)
+    # compare different runs
+    plot_loss_per_stream(
+        ["train", "val"],
+        runs_ids,
+        runs_data,
+        runs_active,
+        ["era5", "METEOSAT", "NPP"],
+        x_type=x_type,
+        x_scale_log=x_scale_log,
+    )
+    plot_loss_per_stream(
+        ["val"],
+        runs_ids,
+        runs_data,
+        runs_active,
+        ["era5", "METEOSAT", "NPP"],
+        x_type=x_type,
+        x_scale_log=x_scale_log,
+    )
+    plot_loss_per_stream(
+        ["train"],
+        runs_ids,
+        runs_data,
+        runs_active,
+        ["ERA5", "METEOSAT", "NPP"],
+        x_type=x_type,
+        x_scale_log=x_scale_log,
+    )
 
     # # plot all cols for all run_ids
     # for run_id, run_data in zip(runs_ids, runs_data, strict=False):
