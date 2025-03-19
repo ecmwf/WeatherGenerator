@@ -71,7 +71,7 @@ def write_validation(
     if len(cf.analysis_streams_output) == 0:
         return
 
-    fname = base_path + f"validation_epoch{epoch:05d}_rank{rank:04d}"
+    fname = str(base_path) + "/" + f"validation_epoch{epoch:05d}_rank{rank:04d}"
     fname += "" if jac is None else "_jac"
     fname += ".zarr"
 
