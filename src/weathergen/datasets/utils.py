@@ -450,7 +450,9 @@ def get_target_coords_local_fast(hlc, target_coords, geoinfo_offset):
 
 
 ####################################################################################################
-def get_target_coords_local_ffast(hlc, target_coords, target_geoinfos, target_times, verts_Rs, verts_local, nctrs):
+def get_target_coords_local_ffast(
+    hlc, target_coords, target_geoinfos, target_times, verts_Rs, verts_local, nctrs
+):
     """Generate local coordinates for target coords w.r.t healpix cell vertices and
     and for healpix cell vertices themselves
     """
@@ -458,8 +460,8 @@ def get_target_coords_local_ffast(hlc, target_coords, target_geoinfos, target_ti
     # target_coords_lens = [len(t) for t in target_coords]
     tcs = [
         s2tor3(
-            torch.deg2rad(90.0 - t[...,0]),
-            torch.deg2rad(180.0 + t[...,1]),
+            torch.deg2rad(90.0 - t[..., 0]),
+            torch.deg2rad(180.0 + t[..., 1]),
         )
         if len(t) > 0
         else torch.tensor([])
@@ -468,19 +470,22 @@ def get_target_coords_local_ffast(hlc, target_coords, target_geoinfos, target_ti
     target_coords = torch.cat(target_coords)
     if target_coords.shape[0] == 0:
         return torch.tensor([])
-    target_geoinfos = torch.cat( target_geoinfos)
+    target_geoinfos = torch.cat(target_geoinfos)
     target_times = torch.cat(target_times)
 
     verts00_Rs, verts10_Rs, verts11_Rs, verts01_Rs, vertsmm_Rs = verts_Rs
 
     a = torch.zeros(
-        [*target_coords.shape[:-1], 1 + target_geoinfos.shape[1]+target_times.shape[1] + 5 * (3 * 5) + 3 * 8]
+        [
+            *target_coords.shape[:-1],
+            1 + target_geoinfos.shape[1] + target_times.shape[1] + 5 * (3 * 5) + 3 * 8,
+        ]
     )
     # TODO: properly set stream_id, implicitly zero at the moment
     geoinfo_offset = 1
-    a[..., geoinfo_offset:geoinfo_offset+target_times.shape[1]] = target_times
+    a[..., geoinfo_offset : geoinfo_offset + target_times.shape[1]] = target_times
     geoinfo_offset += target_times.shape[1]
-    a[..., geoinfo_offset:geoinfo_offset+target_geoinfos.shape[1]] = target_geoinfos
+    a[..., geoinfo_offset : geoinfo_offset + target_geoinfos.shape[1]] = target_geoinfos
     geoinfo_offset += target_geoinfos.shape[1]
 
     ref = torch.tensor([1.0, 0.0, 0.0])

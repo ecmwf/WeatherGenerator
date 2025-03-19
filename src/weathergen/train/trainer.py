@@ -281,12 +281,7 @@ class Trainer(Trainer_Base):
         self.init(cf, run_id_contd, epoch_contd, run_id_new)
 
         self.dataset = MultiStreamDataSampler(
-            cf,
-            cf.start_date,
-            cf.end_date,
-            cf.batch_size,
-            cf.samples_per_epoch,
-            shuffle=True
+            cf, cf.start_date, cf.end_date, cf.batch_size, cf.samples_per_epoch, shuffle=True
         )
         self.dataset_val = MultiStreamDataSampler(
             cf,
@@ -490,7 +485,7 @@ class Trainer(Trainer_Base):
             ):
                 pred = preds[fstep][i_obs]
 
-                num_channels = len(si['target_channels'])
+                num_channels = len(si["target_channels"])
 
                 # set obs_loss_weight = 1. when not specified
                 obs_loss_weight = si["loss_weight"] if "loss_weight" in si else 1.0

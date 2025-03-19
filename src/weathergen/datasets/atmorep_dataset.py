@@ -1,4 +1,3 @@
-
 from datetime import datetime
 
 import numpy as np
@@ -88,4 +87,3 @@ class AtmorepDataset:
         start_row = self.start_idx + idx
         end_row = start_row + self.len_hrs
         return (self.time[start_row], self.time[end_row])
-
