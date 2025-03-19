@@ -12,9 +12,9 @@ from functools import partial
 
 import astropy_healpix as hp
 import numpy as np
+import pandas as pd
 import torch
 from astropy_healpix.healpy import ang2pix
-import pandas as pd
 
 from weathergen.datasets.utils import (
     get_target_coords_local_ffast,
@@ -24,8 +24,8 @@ from weathergen.datasets.utils import (
     s2tor3,
 )
 
-def encode_times_source( times, time_win) -> torch.tensor :
 
+def encode_times_source(times, time_win) -> torch.tensor:
     # assemble tensor as fed to the network, combining geoinfo and data
     fp32 = torch.float32
     dt = pd.to_datetime(times)
@@ -51,8 +51,8 @@ def encode_times_source( times, time_win) -> torch.tensor :
 
     return time_tensor
 
-def encode_times_target( times, time_win) -> torch.tensor :
 
+def encode_times_target(times, time_win) -> torch.tensor:
     dt = pd.to_datetime(times)
     dt_win = pd.to_datetime(time_win)
     # for target only provide local time
@@ -112,22 +112,26 @@ def tokenize_window_space(
     hpy_idxs_ord_split = np.split(hpy_idxs_ord, splits + 1)
 
     for i, c in enumerate(cells_idxs):
-
         # use sorting based on theta
         thetas_sorted = torch.argsort(thetas[hpy_idxs_ord_split[i]], stable=True)
         posr3_cell = posr3[hpy_idxs_ord_split[i]][thetas_sorted]
         R = hpy_verts_Rs[c]
-        coords_cell = r3tos2(torch.matmul(R, posr3_cell.transpose(1, 0)).transpose(1, 0)).to(torch.float32)
+        coords_cell = r3tos2(torch.matmul(R, posr3_cell.transpose(1, 0)).transpose(1, 0)).to(
+            torch.float32
+        )
 
-        source_cell = torch.cat( 
-            (   torch.full([coords_cell.shape[0], 1], stream_id, dtype=torch.float32),
+        source_cell = torch.cat(
+            (
+                torch.full([coords_cell.shape[0], 1], stream_id, dtype=torch.float32),
                 # use np.take to retain array and collapse it if index is 1-element
-                encode_times_source( np.take( np.take( times, hpy_idxs_ord_split[i]), thetas_sorted), time_win),
-                normalizer.normalize_coords( coords_cell),
-                normalizer.normalize_geoinfos( geoinfos[hpy_idxs_ord_split[i]][thetas_sorted]),
-                normalizer.normalize_source_channels( source[hpy_idxs_ord_split[i]][thetas_sorted]),
-            ), 
-            1 
+                encode_times_source(
+                    np.take(np.take(times, hpy_idxs_ord_split[i]), thetas_sorted), time_win
+                ),
+                normalizer.normalize_coords(coords_cell),
+                normalizer.normalize_geoinfos(geoinfos[hpy_idxs_ord_split[i]][thetas_sorted]),
+                normalizer.normalize_source_channels(source[hpy_idxs_ord_split[i]][thetas_sorted]),
+            ),
+            1,
         )
 
         # split into tokens for current cells and pad last one to have full size
@@ -135,7 +139,9 @@ def tokenize_window_space(
             token_size - (len(source_cell) % token_size) if len(source_cell) % token_size > 0 else 0
         )
 
-        source_cell = torch.nn.functional.pad( source_cell, (0, 0, 0, pad), mode="constant", value=0.0 )
+        source_cell = torch.nn.functional.pad(
+            source_cell, (0, 0, 0, pad), mode="constant", value=0.0
+        )
         source_cell = source_cell.reshape((len(source_cell) // token_size, token_size, -1))
 
         # apply masking (discarding) of tokens
@@ -322,7 +328,7 @@ class Batchifyer:
             normalizer=normalizer,
         )
 
-        if is_diagnostic or source.shape[1]==0 or len(source) < 2 or masking_rate == 1.0:
+        if is_diagnostic or source.shape[1] == 0 or len(source) < 2 or masking_rate == 1.0:
             source_tokens_cells = torch.tensor([])
             source_centroids = torch.tensor([])
             source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
@@ -331,7 +337,14 @@ class Batchifyer:
             source_tokens_cells = [[] for _ in range(self.num_healpix_cells_source)]
             # TODO: properly set stream_id; don't forget to normalize
             source_tokens_cells = tokenize_window(
-                0, coords, geoinfos, source, times, source_tokens_cells, rng=self.rng, mr=masking_rate,
+                0,
+                coords,
+                geoinfos,
+                source,
+                times,
+                source_tokens_cells,
+                rng=self.rng,
+                mr=masking_rate,
             )
 
             source_tokens_cells = [
@@ -379,8 +392,8 @@ class Batchifyer:
             target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
 
         else:
-            thetas = ((90.0 - coords[:,0]) / 180.0) * np.pi
-            phis = ((coords[:,1] + 180.0) / 360.0) * 2.0 * np.pi
+            thetas = ((90.0 - coords[:, 0]) / 180.0) * np.pi
+            phis = ((coords[:, 1] + 180.0) / 360.0) * 2.0 * np.pi
             hpy_idxs = ang2pix(2**self.hl_target, thetas, phis, nest=True)
             hpy_idxs_ord = np.argsort(hpy_idxs)
 
@@ -391,18 +404,18 @@ class Batchifyer:
             )
             hpy_idxs_ord_split = np.split(hpy_idxs_ord, splits + 1)
 
-            times = encode_times_target( times, time_win)
+            times = encode_times_target(times, time_win)
 
             target_tokens = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
             target_coords = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
             target_geoinfos = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
             target_times = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
             for i, c in enumerate(cells_idxs):
-                t = normalizer.normalize_target_channels( source[hpy_idxs_ord_split[i]])
+                t = normalizer.normalize_target_channels(source[hpy_idxs_ord_split[i]])
                 t = t[self.rng.permutation(len(t))][: int(len(t) * sampling_rate_target)]
                 target_tokens[c] = t
                 target_coords[c] = coords[hpy_idxs_ord_split[i]]
-                target_geoinfos[c] = normalizer.normalize_geoinfos( geoinfos[hpy_idxs_ord_split[i]])
+                target_geoinfos[c] = normalizer.normalize_geoinfos(geoinfos[hpy_idxs_ord_split[i]])
                 target_times[c] = times[hpy_idxs_ord_split[i]]
 
             target_tokens_lens = torch.tensor([len(s) for s in target_tokens], dtype=torch.int32)

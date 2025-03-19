@@ -11,14 +11,13 @@ import datetime
 import logging
 
 import numpy as np
-import pandas as pd
 import torch
 
 from weathergen.datasets.anemoi_dataset import AnemoiDataset
-from weathergen.datasets.batchifyer import Batchifyer
-from weathergen.datasets.obs_dataset import ObsDataset
-from weathergen.datasets.fesom_dataset import FesomDataset
 from weathergen.datasets.atmorep_dataset import AtmorepDataset
+from weathergen.datasets.batchifyer import Batchifyer
+from weathergen.datasets.fesom_dataset import FesomDataset
+from weathergen.datasets.obs_dataset import ObsDataset
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.utils import (
     compute_idxs_predict,
@@ -30,15 +29,7 @@ from weathergen.utils.logger import logger
 
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ###################################################
-    def __init__(
-        self,
-        cf,
-        start_date,
-        end_date,
-        batch_size,
-        samples_per_epoch,
-        shuffle=True
-    ):
+    def __init__(self, cf, start_date, end_date, batch_size, samples_per_epoch, shuffle=True):
         super(MultiStreamDataSampler, self).__init__()
 
         assert end_date > start_date
@@ -48,9 +39,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.len_hrs = cf.len_hrs
         self.step_hrs = cf.step_hrs
 
-        fc_policy_seq = cf.forecast_policy == "sequential" or cf.forecast_policy == "sequential_random"
+        fc_policy_seq = (
+            cf.forecast_policy == "sequential" or cf.forecast_policy == "sequential_random"
+        )
         assert cf.forecast_steps >= 0 if not fc_policy_seq else True
-        self.forecast_delta_hrs = cf.forecast_delta_hrs if cf.forecast_delta_hrs > 0 else self.len_hrs
+        self.forecast_delta_hrs = (
+            cf.forecast_delta_hrs if cf.forecast_delta_hrs > 0 else self.len_hrs
+        )
         self.forecast_steps = np.array(
             [cf.forecast_steps] if type(cf.forecast_steps) == int else cf.forecast_steps
         )
@@ -65,7 +60,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.len = 100000000
 
         self.streams_datasets = []
-        for i, stream_info in enumerate(cf.streams):
+        for _, stream_info in enumerate(cf.streams):
             self.streams_datasets.append([])
 
             for fname in stream_info["filenames"]:
@@ -77,7 +72,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         cf.len_hrs,
                         cf.step_hrs,
                         cf.data_path_obs + "/" + fname,
-                        stream_info
+                        stream_info,
                     )
 
                 elif stream_info["type"] == "anemoi":
@@ -87,7 +82,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         cf.len_hrs,
                         cf.step_hrs,
                         cf.data_path_anemoi + "/" + fname,
-                        stream_info
+                        stream_info,
                     )
 
                 elif stream_info["type"] == "fesom":
@@ -96,8 +91,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         end_date,
                         cf.len_hrs,
                         cf.step_hrs,
-                        cf.data_path_anemoi + "/" + fname,
-                        stream_info
+                        cf.data_path_fesom + "/" + fname,
+                        stream_info,
                     )
 
                 elif stream_info["type"] == "atmorep":
@@ -107,7 +102,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         cf.len_hrs,
                         cf.step_hrs,
                         cf.data_path_anemoi + "/" + fname,
-                        stream_info
+                        stream_info,
                     )
 
                 else:
@@ -120,9 +115,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 stream_info["source_channels"] = ds.source_channels
                 stream_info["target_channels"] = ds.target_channels
 
-                self.streams_datasets[-1] += [ ds ]
+                self.streams_datasets[-1] += [ds]
 
         # TODO: fix
+        # determine start and end-time for all datasets, determine then the
         # by construction, this is identical for all datasets
         self.len_native = np.array(
             [len(ds) for dss in self.streams_datasets for ds in dss if len(ds) > 0]
@@ -140,7 +136,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.streams = cf.streams
         self.shuffle = shuffle
-        # TODO: remove options that are no longer supported 
+        # TODO: remove options that are no longer supported
         self.input_window_steps = cf.input_window_steps
         self.embed_local_coords = cf.embed_local_coords
         self.embed_centroids_local_coords = cf.embed_centroids_local_coords
@@ -189,10 +185,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         return [ds[0].get_target_num_channels() for ds in self.streams_datasets]
 
     ###################################################
-    def get_targets_coords_size(self) :
+    def get_targets_coords_size(self):
         # TODO: avoid hard coding magic values
         # +6 at the end for stram_id and time encoding
-        return [(ds[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8)+6 for ds in self.streams_datasets]
+        return [
+            (ds[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6 for ds in self.streams_datasets
+        ]
 
     ###################################################
     def reset(self):
@@ -291,11 +289,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     stream_data = StreamData(forecast_dt, nhc_source, nhc_target)
 
                     # for all sources for current stream
-                    for _, ds in enumerate(stream_ds) :
+                    for _, ds in enumerate(stream_ds):
                         # source window (of potentially multi-step length)
                         (coords, geoinfos, source, times) = ds.get_source(idx)
                         for it in range(1, self.input_window_steps):
-                            (coords0, geoinfos0, source0, times0) = ds.get_source(idx - it*step_dt)
+                            (coords0, geoinfos0, source0, times0) = ds.get_source(
+                                idx - it * step_dt
+                            )
                             coords = np.concatenate([coords0, coords], 0)
                             geoinfos = np.concatenate([geoinfos0, geoinfos], 0)
                             source = np.concatenate([source0, source], 0)
@@ -304,19 +304,20 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         if source.shape[0] == 0:
                             stream_data.add_empty_source()
                         else:
-
                             # TODO: handling of conversion from numpy to torch here and below
                             # TODO: this should only be collected in validation mode
-                            source_raw = torch.from_numpy( np.concatenate( (coords, geoinfos, source), 1))
+                            source_raw = torch.from_numpy(
+                                np.concatenate((coords, geoinfos, source), 1)
+                            )
 
                             (ss_cells, ss_lens, ss_centroids) = self.batchifyer.batchify_source(
                                 stream_info,
                                 self.masking_rate,
                                 self.masking_rate_sampling,
                                 self.rng,
-                                torch.from_numpy( coords),
-                                torch.from_numpy( geoinfos),
-                                torch.from_numpy( source),
+                                torch.from_numpy(coords),
+                                torch.from_numpy(geoinfos),
+                                torch.from_numpy(source),
                                 times,
                                 time_win1,
                                 ds,
@@ -330,20 +331,20 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     for fstep in range(forecast_dt + 1):
                         # collect all sources
                         for _, ds in enumerate(stream_ds):
-
-                            (coords, geoinfos, target, times) = ds.get_target(idx+step_forecast_dt)
+                            (coords, geoinfos, target, times) = ds.get_target(
+                                idx + step_forecast_dt
+                            )
 
                             if target.shape[0] == 0:
                                 stream_data.add_empty_target(fstep)
                             else:
-
                                 (tt_cells, tc) = self.batchifyer.batchify_target(
                                     stream_info,
                                     self.sampling_rate_target,
                                     self.rng,
-                                    torch.from_numpy( coords),
-                                    torch.from_numpy( geoinfos),
-                                    torch.from_numpy( target),
+                                    torch.from_numpy(coords),
+                                    torch.from_numpy(geoinfos),
+                                    torch.from_numpy(target),
                                     times,
                                     time_win2,
                                     ds,

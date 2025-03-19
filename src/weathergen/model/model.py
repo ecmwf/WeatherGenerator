@@ -635,8 +635,8 @@ class Model(torch.nn.Module):
                     # there's undocumented limitation in flash_attn that will make embed fail if
                     # #tokens is too large; code below is a work around
                     # x_embed = torch.cat( [embed( s_c, c_c).flatten(0,1)
-                    #                 for s_c,c_c in zip( torch.split( s, 49152),
-                    #                                     torch.split( source_centroids[ib][itype], 49152))])
+                    #                 for s_c,c_c in zip( torch.split( s.source_tokens_cells, 49152),
+                    #                                     torch.split( s.source_centroids, 49152))])
 
                     # scatter write to reorder from per stream to per cell ordering
                     tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
