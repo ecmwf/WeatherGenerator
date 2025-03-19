@@ -10,6 +10,7 @@
 import argparse
 import code
 import glob
+import logging
 import os
 import subprocess
 
@@ -313,6 +314,7 @@ def plot_loss_per_run(
 
 ####################################################################################################
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--delete")
     args = parser.parse_args()
@@ -321,7 +323,7 @@ if __name__ == "__main__":
         clean_out_folder()
 
     runs_ids = {
-        "g0c86abp": [34298989, "ERA5 test"],
+        "thfmdl6w": [34298989, "ERA5 test"],
     }
 
     runs_data = [TrainLogger.read(run_id) for run_id in runs_ids]

@@ -23,6 +23,7 @@ dependencies = [
  'wheel',
  'psutil',
  "flash-attn; sys_platform == 'linux'",
+ "polars~=1.25.2",
 ]
 
 [project.urls]
