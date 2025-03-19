@@ -51,14 +51,14 @@ def evaluate():
         "--start_date",
         "-start",
         type=str,
-        required=True,
+        required=False,
         help="Start date for evaluation. Format must be parsable with pd.to_datetime.",
     )
     parser.add_argument(
         "--end_date",
         "-end",
         type=str,
-        required=True,
+        required=False,
         help="End date for evaluation. Format must be parsable with pd.to_datetime.",
     )
     parser.add_argument(
