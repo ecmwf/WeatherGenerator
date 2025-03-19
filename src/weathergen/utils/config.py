@@ -29,44 +29,43 @@ class Config:
                     for k, v in rt.items():
                         print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
 
-    def save(self, epoch: str = None) -> None:
+    def save(self, epoch: str = None) -> None:  # KCT:path
         # save in directory with model files
-        dirname = self.model_path + f"/{self.run_id}"
-        # if not os.path.exists(dirname):
-        os.makedirs(dirname, exist_ok=True)
+        dirname = Path(self.model_path) / self.run_id
+        dirname.mkdir(parents=True, exist_ok=True)
 
-        fname = self.model_path + f"/{self.run_id}/model_{self.run_id}"
+        fname = dirname / f"model_{self.run_id}"
         epoch_str = ""
         if epoch is not None:
             epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
-        fname += f"{epoch_str}.json"
+        fname = fname.with_name(fname.name + f"{epoch_str}.json")
 
         json_str = json.dumps(self.__dict__)
-        with open(fname, "w") as f:
+        with fname.open("w") as f:
             f.write(json_str)
 
     @staticmethod
-    def load(run_id: str, epoch: int = None, model_path: str = "./models") -> "Config":
+    def load(run_id: str, epoch: int = None, model_path: str = "./models") -> "Config":  # KCT:path
         """
         Load a configuration file from a given run_id and epoch.
-        If run_id us a full path, loads it from the full path.
+        If run_id is a full path, loads it from the full path.
         """
-        if os.path.exists(run_id):  # load from the full path if a full path is provided
-            fname = run_id
-            print("Loading config from provided full run_id path: " + fname)
+        if Path(run_id).exists():  # load from the full path if a full path is provided
+            fname = Path(run_id)
+            print(f"Loading config from provided full run_id path: {fname}")
         else:
-            fname = model_path + f"/{run_id}/model_{run_id}"
+            fname = Path(model_path) / run_id / f"model_{run_id}"
 
             # append also the epoch to the file name
             epoch_str = ""
             if epoch is not None:
                 epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
-            fname += f"{epoch_str}.json"
+            fname = fname.with_name(fname.name + f"{epoch_str}.json")
 
-            print("Loading config from specified run_id and epoch: " + fname)
+            print(f"Loading config from specified run_id and epoch: {fname}")
 
         # open the file and read into a config object
-        with open(fname) as f:
+        with fname.open() as f:
             json_str = f.readlines()
 
         cf = Config()
