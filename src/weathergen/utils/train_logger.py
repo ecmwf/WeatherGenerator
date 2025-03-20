@@ -164,14 +164,13 @@ class TrainLogger:
                     + ", "
                     + "stddev"
                 ]
-        print(cols_train, cols1)
         # read training log data
         try:
             with open(fname_log_train, "rb") as f:
                 log_train = np.loadtxt(f, delimiter=",")
             log_train = log_train.reshape((log_train.shape[0] // len(cols_train), len(cols_train)))
         except:
-            print(f"Warning: no training data loaded for run_id={run_id}")
+            _logger.warning(f"Warning: no training data loaded for run_id={run_id}")
             log_train = np.array([])
 
         log_train_df = read_metrics(cf, run_id, "train", cols1)
@@ -181,8 +180,7 @@ class TrainLogger:
         cols_val = ["dtime", "samples"]
         cols2 = [_weathergen_timestamp, "num_samples"]
         for si in cf.streams:
-            for _j, lf in enumerate(cf.loss_fcts_val):
-                print(si["name"])
+            for _, lf in enumerate(cf.loss_fcts_val):
                 cols_val += [
                     si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
                 ]

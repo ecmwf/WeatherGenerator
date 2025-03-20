@@ -327,7 +327,7 @@ if __name__ == "__main__":
 
     x_scale_log = False
     x_type = ("reltime",)  #'step'
-    x_type = "step"
+    # x_type = "step"
 
     # plot learning rate
     plot_lr(runs_ids, runs_data, runs_active)
