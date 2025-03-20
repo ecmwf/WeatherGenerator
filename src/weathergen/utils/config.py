@@ -45,7 +45,7 @@ class Config:
             f.write(json_str)
 
     @staticmethod
-    def load(run_id: str, epoch: int = None, model_path: str = "./models") -> "Config":  # KCT:path
+    def load(run_id: str, epoch: int = None, model_path: str = "./models") -> "Config":
         """
         Load a configuration file from a given run_id and epoch.
         If run_id is a full path, loads it from the full path.
