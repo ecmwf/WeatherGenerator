@@ -100,28 +100,11 @@ class Trainer(Trainer_Base):
 
         self.dataset_val = MultiStreamDataSampler(
             cf,
-            cf.rank,
-            cf.num_ranks,
-            cf.streams,
             cf.start_date_val,
             cf.end_date_val,
-            cf.len_hrs,
-            cf.step_hrs,
             cf.batch_size_validation,
-            cf.masking_mode,
-            cf.masking_rate,
-            cf.masking_rate_sampling,
-            cf.shuffle,
-            forecast_delta_hrs=cf.forecast_delta_hrs,
-            forecast_steps=cf.forecast_steps,
-            forecast_policy=cf.forecast_policy,
-            healpix_level=cf.healpix_level,
-            samples_per_epoch=cf.samples_per_validation,
-            input_window_steps=cf.input_window_steps,
-            embed_local_coords=cf.embed_local_coords,
-            embed_centroids_local_coords=cf.embed_centroids_local_coords,
-            target_coords_local=cf.target_coords_local,
-            sampling_rate_target=cf.sampling_rate_target,
+            cf.samples_per_validation,
+            shuffle=cf.shuffle,
         )
 
         loader_params = {
@@ -298,57 +281,15 @@ class Trainer(Trainer_Base):
         self.init(cf, run_id_contd, epoch_contd, run_id_new)
 
         self.dataset = MultiStreamDataSampler(
-            cf,
-            cf.rank,
-            cf.num_ranks,
-            cf.streams,
-            cf.start_date,
-            cf.end_date,
-            cf.len_hrs,
-            cf.step_hrs,
-            cf.batch_size,
-            cf.masking_mode,
-            cf.masking_rate,
-            cf.masking_rate_sampling,
-            shuffle=True,
-            rng_seed=cf.data_loader_rng_seed,
-            forecast_delta_hrs=cf.forecast_delta_hrs,
-            forecast_steps=cf.forecast_steps,
-            forecast_policy=cf.forecast_policy,
-            healpix_level=cf.healpix_level,
-            samples_per_epoch=cf.samples_per_epoch,
-            input_window_steps=cf.input_window_steps,
-            embed_local_coords=cf.embed_local_coords,
-            embed_centroids_local_coords=cf.embed_centroids_local_coords,
-            target_coords_local=cf.target_coords_local,
-            sampling_rate_target=cf.sampling_rate_target,
+            cf, cf.start_date, cf.end_date, cf.batch_size, cf.samples_per_epoch, shuffle=True
         )
         self.dataset_val = MultiStreamDataSampler(
             cf,
-            cf.rank,
-            cf.num_ranks,
-            cf.streams,
             cf.start_date_val,
             cf.end_date_val,
-            cf.len_hrs,
-            cf.step_hrs,
             cf.batch_size_validation,
-            cf.masking_mode,
-            # validation mode is always full forecasting
-            masking_rate=0.0,
-            masking_rate_sampling=False,
+            cf.samples_per_validation,
             shuffle=True,
-            rng_seed=cf.data_loader_rng_seed,
-            forecast_delta_hrs=cf.forecast_delta_hrs,
-            forecast_steps=cf.forecast_steps,
-            forecast_policy=cf.forecast_policy,
-            healpix_level=cf.healpix_level,
-            samples_per_epoch=max(32, cf.samples_per_validation // cf.num_ranks),
-            input_window_steps=cf.input_window_steps,
-            embed_local_coords=cf.embed_local_coords,
-            embed_centroids_local_coords=cf.embed_centroids_local_coords,
-            target_coords_local=cf.target_coords_local,
-            sampling_rate_target=cf.sampling_rate_target,
         )
 
         loader_params = {
@@ -363,10 +304,11 @@ class Trainer(Trainer_Base):
             self.dataset_val, **loader_params, sampler=None
         )
 
-        num_channels = self.dataset.get_num_chs()
-        self.geoinfo_sizes = self.dataset.get_geoinfo_sizes()
+        sources_size = self.dataset.get_sources_size()
+        targets_num_channels = self.dataset.get_targets_num_channels()
+        targets_coords_size = self.dataset.get_targets_coords_size()
 
-        self.model = Model(cf, num_channels, self.geoinfo_sizes).create()
+        self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         # load model if specified
         if run_id_contd is not None:
             self.model.load(run_id_contd, epoch_contd)
@@ -478,6 +420,9 @@ class Trainer(Trainer_Base):
         if cf.forecast_policy is not None:
             torch._dynamo.config.optimize_ddp = False
 
+        if self.cf.rank == 0:
+            self.cf.print()
+
         # training loop
 
         # validate once at the beginning as reference
@@ -535,13 +480,12 @@ class Trainer(Trainer_Base):
 
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):
-            for i_obs, (target, target_coords2, si) in enumerate(
+            for i_obs, (target, target_coords, si) in enumerate(
                 zip(targets_rt[fstep], targets_coords_rt[fstep], self.cf.streams, strict=False)
             ):
                 pred = preds[fstep][i_obs]
 
-                gs = self.geoinfo_sizes[i_obs]
-                num_channels = target[..., gs:].shape[-1]
+                num_channels = len(si["target_channels"])
 
                 # set obs_loss_weight = 1. when not specified
                 obs_loss_weight = si["loss_weight"] if "loss_weight" in si else 1.0
@@ -558,12 +502,9 @@ class Trainer(Trainer_Base):
 
                 if target.shape[0] > 0 and pred.shape[0] > 0:
                     # extract data/coords and remove token dimension if it exists
-                    target_coords = target[..., :gs].flatten(0, -2)
-                    target_coords[:, 1:3] = target_coords2[..., 1:3]  # copy local time
-                    target_data = target[..., gs:].flatten(0, -2)
-                    pred = pred.reshape([pred.shape[0], *target_data.shape])
+                    pred = pred.reshape([pred.shape[0], *target.shape])
 
-                    mask_nan = ~torch.isnan(target_data)
+                    mask_nan = ~torch.isnan(target)
 
                     assert pred.shape[1] > 0
                     if pred[:, mask_nan].shape[1] == 0:
@@ -579,19 +520,17 @@ class Trainer(Trainer_Base):
                             0.0,
                             0.0,
                         )
-                        for i in range(target_data.shape[-1]):
+                        for i in range(target.shape[-1]):
                             if tok_spacetime:
                                 # iterate over time steps and compute loss separately for each
                                 t_unique = torch.unique(target_coords[:, 1])
                                 # tw = np.linspace( 1.0, 2.0, len(t_unique))
                                 for _jj, t in enumerate(t_unique):
-                                    # if jj < len(t_unique)//2 and rng.uniform() < 0.5 and mode!='validation':
-                                    #   continue
                                     mask_t = t == target_coords[:, 1]
                                     mask = torch.logical_and(mask_t, mask_nan[:, i])
                                     if mask.sum().item() > 0:
                                         temp = loss_fct(
-                                            target_data[mask, i],
+                                            target[mask, i],
                                             pred[:, mask, i],
                                             pred[:, mask, i].mean(0),
                                             (pred[:, mask, i].std(0) if ens else torch.zeros(1)),
@@ -604,7 +543,7 @@ class Trainer(Trainer_Base):
                                 # only compute loss is there are non-NaN values
                                 if mask_nan[:, i].sum().item() > 0:
                                     temp = loss_fct(
-                                        target_data[mask_nan[:, i], i],
+                                        target[mask_nan[:, i], i],
                                         pred[:, mask_nan[:, i], i],
                                         pred[:, mask_nan[:, i], i].mean(0),
                                         (
@@ -632,7 +571,8 @@ class Trainer(Trainer_Base):
 
                     # log data for analysis
                     if preds_all is not None:
-                        targets_lens[i_obs] += [target_data.shape[0]]
+                        # TODO: test
+                        targets_lens[i_obs] += [target.shape[0]]
                         dn_data, dn_coords = (
                             self.dataset_val.denormalize_data,
                             self.dataset_val.denormalize_coords,
@@ -641,7 +581,7 @@ class Trainer(Trainer_Base):
                         fp32 = torch.float32
                         preds_all[i_obs] += [dn_data(i_obs, pred.to(fp32), False).detach().cpu()]
                         targets_all[i_obs] += [
-                            dn_data(i_obs, target_data.to(fp32), False).detach().cpu()
+                            dn_data(i_obs, target.to(fp32), False).detach().cpu()
                         ]
                         targets_coords_all[i_obs] += [
                             dn_coords(i_obs, target_coords.to(fp32)).detach().cpu()
