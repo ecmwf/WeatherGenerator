@@ -838,15 +838,6 @@ class Trainer(Trainer_Base):
 
     ###########################################
     def save_model(self, epoch=-1, name=None):
-        base_path = Path(self.cf.model_path) / self.cf.run_id  # KCT:path
-        file_out = base_path / f"{self.cf.run_id}_"
-        file_out = file_out.with_name(
-            file_out.name + ("latest" if epoch == -1 else f"epoch{epoch:05d}")
-        )
-        if name is not None:
-            file_out = file_out.with_name(file_out.name + f"_{name}")
-        file_out = file_out.with_suffix(".chkpt")
-
         if self.cf.with_ddp and self.cf.with_fsdp:
             _cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
             with FSDP.state_dict_type(
@@ -858,12 +849,22 @@ class Trainer(Trainer_Base):
         else:
             state = self.ddp_model.state_dict()
 
-        if self.cf.rank == 0:  # KCT:path
+        if self.cf.rank == 0:
+            filename = "".join(
+                [
+                    self.cf.run_id,
+                    "_",
+                    "latest" if epoch == -1 else f"epoch{epoch:05d}",
+                    ("_" + name) if name is not None else "",
+                ]
+            )
+            base_path = Path(self.cf.model_path) / self.cf.run_id
+            file_out: Path = base_path / (filename + ".chkpt")
+            file_tmp: Path = base_path / (filename + "_tmp.chkpt")
             # save temp file (slow)
-            temp_file = file_out.with_name(file_out.stem + "_temp" + file_out.suffix)
-            torch.save(state, temp_file)
+            torch.save(state, file_tmp)
             # move file (which is changing the link in the file system and very fast)
-            temp_file.replace(file_out)
+            file_tmp.replace(file_out)
             # save config
             self.cf.save(epoch)
 
