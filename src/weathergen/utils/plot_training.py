@@ -90,13 +90,13 @@ def plot_utilization(runs_ids, runs_data: list[Metrics], runs_active, x_axis="sa
         if run_data.train.is_empty():
             continue
 
-        x_col = [c for _, c in enumerate(run_data.train.columns) if x_axis in c][0]
-        data_cols = run_data["system"].columns[1:]
+        x_col = next(filter(lambda c: x_axis in c, run_data.train.columns))
+        data_cols = run_data.system.columns[1:]
 
         for ii, col in enumerate(data_cols):
             plt.plot(
-                run_data["train"][x_col],
-                run_data["system"][col],
+                run_data.train[x_col],
+                run_data.system[col],
                 linestyles[ii],
                 color=colors[j % len(colors)],
             )
@@ -315,7 +315,7 @@ if __name__ == "__main__":
         clean_out_folder()
 
     runs_ids = {
-        "thfmdl6w": [34298989, "ERA5 test"],
+        "fb89k61l": [34298989, "ERA5 test"],
     }
 
     runs_data = [TrainLogger.read(run_id) for run_id in runs_ids]
@@ -332,8 +332,8 @@ if __name__ == "__main__":
     # plot learning rate
     plot_lr(runs_ids, runs_data, runs_active)
 
-    # # plot performance
-    # plot_utilization(runs_ids, runs_data, runs_active)
+    # plot performance
+    plot_utilization(runs_ids, runs_data, runs_active)
 
     # compare different runs
     plot_loss_per_stream(
