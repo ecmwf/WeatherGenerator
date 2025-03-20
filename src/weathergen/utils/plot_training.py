@@ -50,12 +50,12 @@ def plot_lr(runs_ids, runs_data, runs_active, x_axis="samples"):
         if run_data["train"].shape[0] == 0:
             continue
 
-        x_idx = [c for _, c in enumerate(run_data["train"].columns) if x_axis in c][0]
-        data_idxs = [c for _, c in enumerate(run_data["train"].columns) if c == "learning_rate"][0]
+        x_col = [c for _, c in enumerate(run_data["train"].columns) if x_axis in c][0]
+        data_cols = [c for _, c in enumerate(run_data["train"].columns) if c == "learning_rate"][0]
 
         plt.plot(
-            run_data["train"][x_idx],
-            run_data["train"][data_idxs],
+            run_data["train"][x_col],
+            run_data["train"][data_cols],
             linestyle,
             color=colors[j % len(colors)],
         )
@@ -91,13 +91,13 @@ def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
         if run_data["train"].shape[0] == 0:
             continue
 
-        x_idx = [c for _, c in enumerate(run_data["train"].columns) if x_axis in c][0]
-        data_idxs = run_data["system"].columns[1:]
+        x_col = [c for _, c in enumerate(run_data["train"].columns) if x_axis in c][0]
+        data_cols = run_data["system"].columns[1:]
 
-        for ii, di in enumerate(data_idxs):
+        for ii, col in enumerate(data_cols):
             plt.plot(
-                run_data["train"][x_idx],
-                run_data["system"][di],
+                run_data["train"][x_col],
+                run_data["system"][col],
                 linestyles[ii],
                 color=colors[j % len(colors)],
             )
@@ -106,7 +106,7 @@ def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
                 + " : "
                 + run_id
                 + ", "
-                + di
+                + col
                 + " : "
                 + runs_ids[run_id][1]
             ]
@@ -164,17 +164,17 @@ def plot_loss_per_stream(
 
                 for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
                     # find the col of the request x-axis (e.g. samples)
-                    x_idx = [c for _, c in enumerate(run_data[mode].columns) if x_axis in c][0]
+                    x_col = [c for _, c in enumerate(run_data[mode].columns) if x_axis in c][0]
                     # find the cols of the requested metric (e.g. mse) for all streams
                     # TODO: fix captialization
-                    data_idxs = [c for _, c in enumerate(run_data[mode].columns) if err in c]
+                    data_cols = [c for _, c in enumerate(run_data[mode].columns) if err in c]
 
-                    for _, col in enumerate(data_idxs):
+                    for _, col in enumerate(data_cols):
                         if stream_name in col:
                             if run_data[mode][col].shape[0] == 0:
                                 continue
 
-                            x_vals = np.array(run_data[mode][x_idx])
+                            x_vals = np.array(run_data[mode][x_col])
                             y_data = np.array(run_data[mode][col])
 
                             plt.plot(
