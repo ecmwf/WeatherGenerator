@@ -251,26 +251,29 @@ def plot_loss_per_run(
     for mode in modes:
         legend_strs += [[]]
         for err in errs:
-            idx = 0 if mode == "train" else 1
             linestyle = "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
             linestyle = ":" if "stddev" in err else linestyle
             alpha = 1.0
             if "train" in modes and "val" in modes:
                 alpha = 0.35 if "train" in mode else alpha
 
-            x_idx = [i for i, c in enumerate(run_data[idx][0]) if x_axis in c][0]
-            data_idxs = [i for i, c in enumerate(run_data[idx][0]) if err in c]
+            x_col = [c for _, c in enumerate(run_data[mode].columns) if x_axis in c][0]
+            # find the cols of the requested metric (e.g. mse) for all streams
+            data_cols = [c for _, c in enumerate(run_data[mode].columns) if err in c]
 
-            for i, col in enumerate(np.array(run_data[idx][0])[data_idxs]):
+            for _, col in enumerate(data_cols) :
                 for j, stream_name in enumerate(stream_names):
                     if stream_name in col:
                         # skip when no data is available
-                        if run_data[idx][1].shape[0] == 0:
+                        if run_data[mode][col].shape[0] == 0:
                             continue
 
+                        x_vals = np.array(run_data[mode][x_col])
+                        y_data = np.array(run_data[mode][col])
+
                         plt.plot(
-                            run_data[idx][1][:, x_idx],
-                            run_data[idx][1][:, data_idxs[i]],
+                            x_vals,
+                            y_data,
                             linestyle,
                             color=colors[j % len(colors)],
                             alpha=alpha,
@@ -340,8 +343,8 @@ if __name__ == "__main__":
     # plot learning rate
     plot_lr(runs_ids, runs_data, runs_active)
 
-    # plot performance
-    plot_utilization(runs_ids, runs_data, runs_active)
+    # # plot performance
+    # plot_utilization(runs_ids, runs_data, runs_active)
 
     # compare different runs
     plot_loss_per_stream(
@@ -372,9 +375,9 @@ if __name__ == "__main__":
         x_scale_log=x_scale_log,
     )
 
-    # # plot all cols for all run_ids
-    # for run_id, run_data in zip(runs_ids, runs_data, strict=False):
-    #     plot_loss_per_run(
-    #         ["train", "val"], run_id, runs_ids[run_id], run_data, get_stream_names(run_id)
-    #     )
-    # plot_loss_per_run( ['val'], run_id, runs_ids[run_id], run_data, get_stream_names( run_id))
+    # plot all cols for all run_ids
+    for run_id, run_data in zip(runs_ids, runs_data, strict=False):
+        plot_loss_per_run(
+            ["train", "val"], run_id, runs_ids[run_id], run_data, get_stream_names(run_id)
+        )
+    plot_loss_per_run( ['val'], run_id, runs_ids[run_id], run_data, get_stream_names( run_id))
