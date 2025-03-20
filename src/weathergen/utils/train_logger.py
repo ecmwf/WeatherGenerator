@@ -10,8 +10,8 @@
 import datetime
 import json
 import math
-import os.path
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -20,7 +20,7 @@ from weathergen.utils.config import Config
 
 class TrainLogger:
     #######################################
-    def __init__(self, cf, path_run) -> None:
+    def __init__(self, cf, path_run: Path) -> None:
         self.cf = cf
         self.path_run = path_run
 
@@ -42,7 +42,7 @@ class TrainLogger:
 
         # TODO: performance: we repeatedly open the file for each call. Better for multiprocessing
         # but we can probably do better and rely for example on the logging module.
-        with open(os.path.join(self.path_run, "metrics.json"), "ab") as f:
+        with open(self.path_run / "metrics.json", "ab") as f:
             s = json.dumps(clean_metrics) + "\n"
             f.write(s.encode("utf-8"))
 
@@ -71,7 +71,7 @@ class TrainLogger:
                 log_vals += [stddev_avg[i_obs]]
                 metrics[f"stream_{i_obs}.stddev_avg"] = stddev_avg[i_obs]
 
-        with open(self.path_run + self.cf.run_id + "_train_log.txt", "ab") as f:
+        with open(self.path_run / f"{self.cf.run_id}_train_log.txt", "ab") as f:
             np.savetxt(f, log_vals)
 
         log_vals = []
@@ -82,7 +82,7 @@ class TrainLogger:
         if perf_mem > 0.0:
             metrics["perf.memory"] = perf_mem
         self.log_metrics(metrics)
-        with open(self.path_run + self.cf.run_id + "_perf_log.txt", "ab") as f:
+        with open(self.path_run / f"{self.cf.run_id}_perf_log.txt", "ab") as f:
             np.savetxt(f, log_vals)
 
     #######################################
@@ -101,7 +101,7 @@ class TrainLogger:
             for i_obs, _rt in enumerate(self.cf.streams):
                 log_vals += [stddev_avg[i_obs]]
 
-        with open(self.path_run + self.cf.run_id + "_val_log.txt", "ab") as f:
+        with open(self.path_run / f"{self.cf.run_id}_val_log.txt", "ab") as f:
             np.savetxt(f, log_vals)
 
     #######################################
@@ -114,10 +114,10 @@ class TrainLogger:
         cf = Config.load(run_id, epoch)
         run_id = cf.run_id
 
-        fname_log_train = f"./results/{run_id}/{run_id}_train_log.txt"
-        fname_log_val = f"./results/{run_id}/{run_id}_val_log.txt"
-        fname_perf_val = f"./results/{run_id}/{run_id}_perf_log.txt"
-        # fname_config = f"./models/model_{run_id}.json"
+        result_dir = Path(f"./results/{run_id}")
+        fname_log_train = result_dir / f"{run_id}_train_log.txt"
+        fname_log_val = result_dir / f"{run_id}_val_log.txt"
+        fname_perf_val = result_dir / f"{run_id}_perf_log.txt"
 
         # training
 

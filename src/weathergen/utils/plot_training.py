@@ -11,6 +11,7 @@ import argparse
 import code
 import glob
 import os
+import pathlib
 import subprocess
 
 import matplotlib.pyplot as plt
@@ -20,14 +21,13 @@ import pandas as pd
 from weathergen.utils.config import Config
 from weathergen.utils.train_logger import TrainLogger
 
-out_folder = "./plots/"
+out_folder = pathlib.Path("./plots/")
 
 
 ####################################################################################################
 def clean_out_folder():
-    files = glob.glob(out_folder + "*.png")
-    for f in files:
-        os.remove(f)
+    for image in out_folder.glob("*.png"):
+        image.unlink()
 
 
 ####################################################################################################
@@ -229,7 +229,7 @@ def plot_loss_per_stream(
         plt.tight_layout()
         rstr = "".join([f"{r}_" for r in runs_ids])
         plt.savefig(
-            out_folder + "{}{}{}.png".format(rstr, "".join([f"{m}_" for m in modes]), stream_name)
+            out_folder / "{}{}{}.png".format(rstr, "".join([f"{m}_" for m in modes]), stream_name)
         )
         plt.close()
 
@@ -307,7 +307,7 @@ def plot_loss_per_run(
     sstr = "".join(
         [f"{r}_".replace(",", "").replace("/", "_").replace(" ", "_") for r in legend_str]
     )
-    plt.savefig(out_folder + "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr))
+    plt.savefig(out_folder / "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr))
     plt.close()
 
 
