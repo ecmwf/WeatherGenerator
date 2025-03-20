@@ -29,7 +29,7 @@ class Config:
                     for k, v in rt.items():
                         print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
 
-    def save(self, epoch: str = None) -> None:  # KCT:path
+    def save(self, epoch: str = None) -> None:
         # save in directory with model files
         dirname = Path(self.model_path) / self.run_id
         dirname.mkdir(parents=True, exist_ok=True)
