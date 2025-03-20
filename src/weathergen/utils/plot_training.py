@@ -261,7 +261,7 @@ def plot_loss_per_run(
             # find the cols of the requested metric (e.g. mse) for all streams
             data_cols = [c for _, c in enumerate(run_data[mode].columns) if err in c]
 
-            for _, col in enumerate(data_cols) :
+            for _, col in enumerate(data_cols):
                 for j, stream_name in enumerate(stream_names):
                     if stream_name in col:
                         # skip when no data is available
@@ -380,4 +380,4 @@ if __name__ == "__main__":
         plot_loss_per_run(
             ["train", "val"], run_id, runs_ids[run_id], run_data, get_stream_names(run_id)
         )
-    plot_loss_per_run( ['val'], run_id, runs_ids[run_id], run_data, get_stream_names( run_id))
+    plot_loss_per_run(["val"], run_id, runs_ids[run_id], run_data, get_stream_names(run_id))
