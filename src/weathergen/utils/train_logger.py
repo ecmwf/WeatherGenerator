@@ -13,8 +13,8 @@ import logging
 import math
 import time
 from dataclasses import dataclass
-from typing import Literal
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import polars as pl
@@ -102,7 +102,7 @@ class TrainLogger:
         if perf_mem > 0.0:
             metrics[_performance_memory] = perf_mem
         self.log_metrics("train", metrics)
-        with open(self.path_run + self.cf.run_id + "_perf_log.txt", "ab") as f:
+        with open(self.path_run / (self.cf.run_id + "_perf_log.txt"), "ab") as f:
             np.savetxt(f, log_vals)
 
     #######################################
@@ -126,7 +126,7 @@ class TrainLogger:
                 log_vals += [stddev_avg[i_obs]]
 
         self.log_metrics("val", metrics)
-        with open(self.path_run + self.cf.run_id + "_val_log.txt", "ab") as f:
+        with open(self.path_run / (self.cf.run_id + "_val_log.txt"), "ab") as f:
             np.savetxt(f, log_vals)
 
     #######################################

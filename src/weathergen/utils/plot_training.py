@@ -8,9 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import argparse
-import glob
 import logging
-import os
 import pathlib
 import subprocess
 
