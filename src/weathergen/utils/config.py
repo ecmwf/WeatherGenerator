@@ -30,19 +30,15 @@ class Config:
                         print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
 
     def save(self, epoch=None):
+        path_models = Path("./models")
         # save in directory with model files
-        dirname = f"./models/{self.run_id}"
-        # if not os.path.exists(dirname):
-        os.makedirs(dirname, exist_ok=True)
-        dirname = f"./models/{self.run_id}"
-        # if not os.path.exists(dirname):
-        os.makedirs(dirname, exist_ok=True)
+        dirname = path_models / {self.run_id}
+        dirname.mkdir(exist_ok=True, paraents=True)
 
-        fname = f"./models/{self.run_id}/model_{self.run_id}"
         epoch_str = ""
         if epoch is not None:
             epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
-        fname += f"{epoch_str}.json"
+        fname = dirname / f"model_{self.run_id}{epoch_str}.json"
 
         json_str = json.dumps(self.__dict__)
         with open(fname, "w") as f:
@@ -51,13 +47,13 @@ class Config:
     @staticmethod
     def load(run_id, epoch=None):
         if "/" in run_id:  # assumed to be full path instead of just id
-            fname = run_id
+            fname = Path(run_id)
         else:
-            fname = f"./models/{run_id}/model_{run_id}"
+            path_models = Path("./models")
             epoch_str = ""
             if epoch is not None:
                 epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
-            fname += f"{epoch_str}.json"
+            fname = path_models / run_id / f"model_{run_id}{epoch_str}.json"
 
         with open(fname) as f:
             json_str = f.readlines()
