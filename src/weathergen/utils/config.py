@@ -13,6 +13,8 @@ from pathlib import Path
 
 import yaml
 
+from weathergen.utils.logger import logger
+
 
 ###########################################
 class Config:
@@ -52,7 +54,7 @@ class Config:
         """
         if Path(run_id).exists():  # load from the full path if a full path is provided
             fname = Path(run_id)
-            print(f"Loading config from provided full run_id path: {fname}")
+            logger.info(f"Loading config from provided full run_id path: {fname}")
         else:
             fname = Path(model_path) / run_id / f"model_{run_id}"
 
@@ -62,7 +64,7 @@ class Config:
                 epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
             fname = fname.with_name(fname.name + f"{epoch_str}.json")
 
-            print(f"Loading config from specified run_id and epoch: {fname}")
+            logger.info(f"Loading config from specified run_id and epoch: {fname}")
 
         # open the file and read into a config object
         with fname.open() as f:
