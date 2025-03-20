@@ -32,8 +32,8 @@ class Config:
     def save(self, epoch=None):
         path_models = Path("./models")
         # save in directory with model files
-        dirname = path_models / {self.run_id}
-        dirname.mkdir(exist_ok=True, paraents=True)
+        dirname = path_models / self.run_id
+        dirname.mkdir(exist_ok=True, parents=True)
 
         epoch_str = ""
         if epoch is not None:

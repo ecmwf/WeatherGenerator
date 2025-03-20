@@ -541,7 +541,9 @@ class Model(torch.nn.Module):
         epoch_id = f"epoch{epoch:05d}" if epoch is not None else "latest"
         filename = f"{run_id}_{epoch_id}.chkpt"
 
-        params = torch.load(path_run / filename , map_location=torch.device("cpu"), weights_only=True)
+        params = torch.load(
+            path_run / filename, map_location=torch.device("cpu"), weights_only=True
+        )
         params_renamed = {}
         for k in params.keys():
             params_renamed[k.replace("module.", "")] = params[k]

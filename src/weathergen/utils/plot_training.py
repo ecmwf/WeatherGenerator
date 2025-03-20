@@ -8,18 +8,15 @@
 # nor does it submit to any jurisdiction.
 
 import argparse
-import code
-import glob
-import os
+import logging
 import pathlib
 import subprocess
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 
 from weathergen.utils.config import Config
-from weathergen.utils.train_logger import TrainLogger
+from weathergen.utils.train_logger import Metrics, TrainLogger
 
 out_folder = pathlib.Path("./plots/")
 
@@ -38,26 +35,24 @@ def get_stream_names(run_id):
 
 
 ####################################################################################################
-def plot_lr(runs_ids, runs_data, runs_active, x_axis="samples"):
+def plot_lr(runs_ids, runs_data: list[Metrics], runs_active, x_axis="samples"):
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
     _fig = plt.figure(figsize=(10, 7), dpi=300)
 
-    # train
-    idx = 0
     linestyle = "-"
 
     legend_str = []
-    for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
-        if run_data[idx][1].shape[0] == 0:
+    for j, run_data in enumerate(runs_data):
+        if run_data.train.is_empty():
             continue
-
-        x_idx = [i for i, c in enumerate(run_data[idx][0]) if x_axis in c][0]
-        data_idxs = [i for i, c in enumerate(run_data[idx][0]) if c == "lr"][0]
+        run_id = run_data.run_id
+        x_col = next(filter(lambda c: x_axis in c, run_data.train.columns))
+        data_cols = list(filter(lambda c: "learning_rate" in c, run_data.train.columns))
 
         plt.plot(
-            run_data[idx][1][:, x_idx],
-            run_data[idx][1][:, data_idxs],
+            run_data.train[x_col],
+            run_data.train[data_cols],
             linestyle,
             color=colors[j % len(colors)],
         )
@@ -81,28 +76,25 @@ def plot_lr(runs_ids, runs_data, runs_active, x_axis="samples"):
 
 
 ####################################################################################################
-def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
+def plot_utilization(runs_ids, runs_data: list[Metrics], runs_active, x_axis="samples"):
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
     _fig = plt.figure(figsize=(10, 7), dpi=300)
 
     linestyles = ["-", "--", ".-"]
 
-    # performance
-    idx = 2
-
     legend_str = []
     for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
-        if run_data[idx][1].shape[0] == 0:
+        if run_data.train.is_empty():
             continue
 
-        x_idx = [i for i, c in enumerate(run_data[0][0]) if x_axis in c][0]
-        data_idxs = [i for i in range(len(run_data[2][0]))]
+        x_col = next(filter(lambda c: x_axis in c, run_data.train.columns))
+        data_cols = run_data.system.columns[1:]
 
-        for ii, di in enumerate(data_idxs):
+        for ii, col in enumerate(data_cols):
             plt.plot(
-                run_data[0][1][:, x_idx],
-                run_data[idx][1][:, di],
+                run_data.train[x_col],
+                run_data.system[col],
                 linestyles[ii],
                 color=colors[j % len(colors)],
             )
@@ -111,7 +103,7 @@ def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
                 + " : "
                 + run_id
                 + ", "
-                + run_data[idx][0][ii]
+                + col
                 + " : "
                 + runs_ids[run_id][1]
             ]
@@ -135,8 +127,7 @@ def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
 def plot_loss_per_stream(
     modes,
     runs_ids,
-    runs_data,
-    runs_times,
+    runs_data: list[Metrics],
     runs_active,
     stream_names,
     errs=["mse"],
@@ -162,51 +153,47 @@ def plot_loss_per_stream(
         for mode in modes:
             legend_strs += [[]]
             for err in errs:
-                idx = 0 if mode == "train" else 1
                 linestyle = "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
                 linestyle = ":" if "stddev" in err else linestyle
                 alpha = 1.0
                 if "train" in modes and "val" in modes:
                     alpha = 0.35 if "train" in mode else alpha
 
-                for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
-                    x_idx = [i for i, c in enumerate(run_data[idx][0]) if x_axis in c][0]
-                    data_idxs = [i for i, c in enumerate(run_data[idx][0]) if err in c]
+                for j, run_data in enumerate(runs_data):
+                    run_data_mode = run_data.by_mode(mode)
+                    if run_data_mode.is_empty():
+                        continue
+                    # find the col of the request x-axis (e.g. samples)
+                    x_col = next(filter(lambda c: x_axis in c, run_data_mode.columns))
+                    # find the cols of the requested metric (e.g. mse) for all streams
+                    # TODO: fix captialization
+                    data_cols = filter(
+                        lambda c: err in c and stream_name in c, run_data_mode.columns
+                    )
 
-                    for i, col in enumerate(np.array(run_data[idx][0])[data_idxs]):
-                        if stream_name in col:
-                            if run_data[idx][1].shape[0] == 0:
-                                continue
+                    for col in data_cols:
+                        x_vals = np.array(run_data_mode[x_col])
+                        y_data = np.array(run_data_mode[col])
 
-                            x_vals = (
-                                run_data[idx][1][:, x_idx]
-                                if x_type == "step"
-                                else runs_times[j][idx][1]
-                            )
+                        plt.plot(
+                            x_vals,
+                            y_data,
+                            linestyle,
+                            color=colors[j % len(colors)],
+                            alpha=alpha,
+                        )
+                        legend_strs[-1] += [
+                            ("R" if runs_active[j] else "X")
+                            + " : "
+                            + run_data.run_id
+                            + " : "
+                            + runs_ids[run_data.run_id][1]
+                            + ": "
+                            + col
+                        ]
 
-                            plt.plot(
-                                x_vals,
-                                run_data[idx][1][:, data_idxs[i]],
-                                linestyle,
-                                color=colors[j % len(colors)],
-                                alpha=alpha,
-                            )
-                            legend_strs[-1] += [
-                                ("R" if runs_active[j] else "X")
-                                + " : "
-                                + run_id
-                                + " : "
-                                + runs_ids[run_id][1]
-                                + ": "
-                                + col
-                            ]
-
-                            min_val = np.min(
-                                [min_val, np.nanmin(run_data[idx][1][:, data_idxs[i]])]
-                            )
-                            max_val = np.max(
-                                [max_val, np.nanmax(run_data[idx][1][:, data_idxs[i]])]
-                            )
+                        min_val = np.min([min_val, np.nanmin(y_data)])
+                        max_val = np.max([max_val, np.nanmax(y_data)])
 
         # TODO: ensure that legend is plotted with full opacity
         legend_str = legend_strs[0]
@@ -239,7 +226,7 @@ def plot_loss_per_run(
     modes,
     run_id,
     run_desc,
-    run_data,
+    run_data: Metrics,
     stream_names,
     errs=["mse"],
     x_axis="samples",
@@ -262,26 +249,30 @@ def plot_loss_per_run(
     for mode in modes:
         legend_strs += [[]]
         for err in errs:
-            idx = 0 if mode == "train" else 1
             linestyle = "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
             linestyle = ":" if "stddev" in err else linestyle
             alpha = 1.0
             if "train" in modes and "val" in modes:
                 alpha = 0.35 if "train" in mode else alpha
+            run_data_mode = run_data.by_mode(mode)
 
-            x_idx = [i for i, c in enumerate(run_data[idx][0]) if x_axis in c][0]
-            data_idxs = [i for i, c in enumerate(run_data[idx][0]) if err in c]
+            x_col = [c for _, c in enumerate(run_data_mode.columns) if x_axis in c][0]
+            # find the cols of the requested metric (e.g. mse) for all streams
+            data_cols = [c for _, c in enumerate(run_data_mode.columns) if err in c]
 
-            for i, col in enumerate(np.array(run_data[idx][0])[data_idxs]):
+            for _, col in enumerate(data_cols):
                 for j, stream_name in enumerate(stream_names):
                     if stream_name in col:
                         # skip when no data is available
-                        if run_data[idx][1].shape[0] == 0:
+                        if run_data_mode[col].shape[0] == 0:
                             continue
 
+                        x_vals = np.array(run_data_mode[x_col])
+                        y_data = np.array(run_data_mode[col])
+
                         plt.plot(
-                            run_data[idx][1][:, x_idx],
-                            run_data[idx][1][:, data_idxs[i]],
+                            x_vals,
+                            y_data,
                             linestyle,
                             color=colors[j % len(colors)],
                             alpha=alpha,
@@ -313,6 +304,7 @@ def plot_loss_per_run(
 
 ####################################################################################################
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--delete")
     args = parser.parse_args()
@@ -321,29 +313,10 @@ if __name__ == "__main__":
         clean_out_folder()
 
     runs_ids = {
-        "g0c86abp": [34298989, "ERA5 test"],
+        "fb89k61l": [34298989, "ERA5 test"],
     }
 
     runs_data = [TrainLogger.read(run_id) for run_id in runs_ids]
-
-    # extract times and convert back to datetime objects, store absolute time ta and relative one tr
-    runs_times = []
-    for rd in runs_data:
-        # training
-        if len(rd[1][1]) > 0:
-            ta_train = pd.to_datetime(rd[0][1][:, 0], format="%Y%m%d%H%M%S")
-            diff = ta_train - ta_train[0]
-            tr_train = diff.days * 24 + diff.seconds / 3600.0
-        else:
-            ta_train, tr_train = [], []
-        # validation
-        if len(rd[1][1]) > 0:
-            ta_val = pd.to_datetime(rd[1][1][:, 0], format="%Y%m%d%H%M%S")
-            diff = ta_val - ta_train[0]
-            tr_val = diff.days * 24 + diff.seconds / 3600.0
-        else:
-            ta_val, tr_val = [], []
-        runs_times.append([[ta_train, tr_train], [ta_val, tr_val]])
 
     # determine which runs are still alive (as a process, though they might hang internally)
     ret = subprocess.run(["squeue"], capture_output=True)
@@ -351,8 +324,8 @@ if __name__ == "__main__":
     runs_active = [np.array([str(v[0]) in l for l in lines[1:]]).any() for v in runs_ids.values()]
 
     x_scale_log = False
-    x_type = ("rel_time",)  #'step'
-    x_type = "step"
+    x_type = ("reltime",)  #'step'
+    # x_type = "step"
 
     # plot learning rate
     plot_lr(runs_ids, runs_data, runs_active)
@@ -360,33 +333,13 @@ if __name__ == "__main__":
     # plot performance
     plot_utilization(runs_ids, runs_data, runs_active)
 
-    # TODO: finish
-    smoothing_size = 0
-    if smoothing_size > 0:
-        # smooth
-        x = np.linspace(-np.pi, np.pi, smoothing_size)
-        gauss_filter = np.exp(-np.square(x))
-        for j in range(len(runs_data)):
-            for i in range(2):
-                if runs_data[j][i][1].shape[0] <= gauss_filter.shape[0]:
-                    continue
-                for i_ch in range(runs_data[j][i][1].shape[-1]):
-                    if "mse" not in runs_data[j][i][0][i_ch]:
-                        continue
-                    res = np.convolve(runs_data[j][i][1][:, i_ch], gauss_filter, "same")
-                    code.interact(local=locals())
-                    runs_data[j][i][1][: (res.shape[0] - smoothing_size), i_ch] = res[
-                        :-(smoothing_size)
-                    ]
-
     # compare different runs
     plot_loss_per_stream(
         ["train", "val"],
         runs_ids,
         runs_data,
-        runs_times,
         runs_active,
-        ["ERA5", "METEOSAT", "NPP"],
+        ["era5", "METEOSAT", "NPP"],
         x_type=x_type,
         x_scale_log=x_scale_log,
     )
@@ -394,9 +347,8 @@ if __name__ == "__main__":
         ["val"],
         runs_ids,
         runs_data,
-        runs_times,
         runs_active,
-        ["ERA5", "METEOSAT", "NPP"],
+        ["era5", "METEOSAT", "NPP"],
         x_type=x_type,
         x_scale_log=x_scale_log,
     )
@@ -404,7 +356,6 @@ if __name__ == "__main__":
         ["train"],
         runs_ids,
         runs_data,
-        runs_times,
         runs_active,
         ["ERA5", "METEOSAT", "NPP"],
         x_type=x_type,
@@ -416,4 +367,4 @@ if __name__ == "__main__":
         plot_loss_per_run(
             ["train", "val"], run_id, runs_ids[run_id], run_data, get_stream_names(run_id)
         )
-        # plot_loss_per_run( ['val'], run_id, runs_ids[run_id], run_data, get_stream_names( run_id))
+    plot_loss_per_run(["val"], run_id, runs_ids[run_id], run_data, get_stream_names(run_id))
