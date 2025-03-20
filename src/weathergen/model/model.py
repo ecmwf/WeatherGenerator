@@ -110,7 +110,7 @@ class ModelParams(torch.nn.Module):
 ####################################################################################################
 class Model(torch.nn.Module):
     #########################################
-    def __init__(self, cf, num_channels, geoinfo_sizes):
+    def __init__(self, cf, sources_size, targets_num_channels, targets_coords_size):
         """Constructor"""
 
         super(Model, self).__init__()
@@ -119,8 +119,9 @@ class Model(torch.nn.Module):
         self.num_healpix_cells = 12 * 4**self.healpix_level
 
         self.cf = cf
-        self.num_channels = num_channels
-        self.geoinfo_sizes = geoinfo_sizes
+        self.sources_size = sources_size
+        self.targets_num_channels = targets_num_channels
+        self.targets_coords_size = targets_coords_size
 
     #########################################
     def create(self):
@@ -139,7 +140,7 @@ class Model(torch.nn.Module):
                         mode=cf.embed_orientation,
                         num_tokens=si["embed"]["num_tokens"],
                         token_size=si["token_size"],
-                        num_channels=self.num_channels[i][0],
+                        num_channels=self.sources_size[i],
                         dim_embed=si["embed"]["dim_embed"],
                         dim_out=cf.ae_local_dim_embed,
                         num_blocks=si["embed"]["num_blocks"],
@@ -152,7 +153,7 @@ class Model(torch.nn.Module):
             elif si["embed"]["net"] == "linear":
                 self.embeds.append(
                     StreamEmbedLinear(
-                        self.num_channels[i][0] * si["token_size"], cf.ae_local_dim_embed
+                        self.sources_size[i] * si["token_size"], cf.ae_local_dim_embed
                     )
                 )
             else:
@@ -353,14 +354,13 @@ class Model(torch.nn.Module):
             dim_embed = si["embed_target_coords"]["dim_embed"]
             dim_out = max(
                 dim_embed,
-                si["token_size"] * (self.num_channels[i_obs][0] - self.geoinfo_sizes[i_obs]),
+                si["token_size"] * self.targets_num_channels[i_obs],
             )
             tr = si["target_readout"]
             num_layers = tr["num_layers"]
             tr_mlp_hidden_factor = tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
             tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
             softcap = tr["softcap"] if "softcap" in tr else 0.0
-            n_chs = self.num_channels[i_obs]
 
             if tro_type == "obs_value":
                 # fixed dimension for obs_value type
@@ -382,12 +382,7 @@ class Model(torch.nn.Module):
 
             logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
 
-            dim_coord_in = ((self.geoinfo_sizes[i_obs] - 2) + (5 * (3 * 5)) + 3 * 8) * (
-                1 if tro_type == "obs_value" else si["token_size"]
-            )
-            dim_pred = (n_chs[0] - self.geoinfo_sizes[i_obs]) * (
-                1 if tro_type == "obs_value" else si["token_size"]
-            )
+            dim_coord_in = self.targets_coords_size[i_obs]
 
             # embedding network for coordinates
             if etc["net"] == "linear":
@@ -469,7 +464,7 @@ class Model(torch.nn.Module):
             self.pred_heads.append(
                 EnsPredictionHead(
                     dims_embed[-1],
-                    dim_pred,
+                    self.targets_num_channels[i_obs],
                     si["pred_head"]["num_layers"],
                     si["pred_head"]["ens_size"],
                     norm_type=cf.norm_type,
@@ -640,8 +635,8 @@ class Model(torch.nn.Module):
                     # there's undocumented limitation in flash_attn that will make embed fail if
                     # #tokens is too large; code below is a work around
                     # x_embed = torch.cat( [embed( s_c, c_c).flatten(0,1)
-                    #                 for s_c,c_c in zip( torch.split( s, 49152),
-                    #                                     torch.split( source_centroids[ib][itype], 49152))])
+                    #                 for s_c,c_c in zip( torch.split( s.source_tokens_cells, 49152),
+                    #                                     torch.split( s.source_centroids, 49152))])
 
                     # scatter write to reorder from per stream to per cell ordering
                     tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
