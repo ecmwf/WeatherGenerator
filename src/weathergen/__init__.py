@@ -23,7 +23,7 @@ from weathergen.utils.logger import init_loggers
 ####################################################################################################
 def evaluate():
     """
-    Evaluation function for WesatherGenerator model.
+    Evaluation function for WeatherGenerator model.
     Entry point for calling the evaluation code from the command line.
 
     Args:
