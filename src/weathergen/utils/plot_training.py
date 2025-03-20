@@ -15,10 +15,9 @@ import subprocess
 
 import matplotlib.pyplot as plt
 import numpy as np
-import polars as pl
 
 from weathergen.utils.config import Config
-from weathergen.utils.train_logger import TrainLogger
+from weathergen.utils.train_logger import Metrics, TrainLogger
 
 out_folder = "./plots/"
 
@@ -38,7 +37,7 @@ def get_stream_names(run_id):
 
 
 ####################################################################################################
-def plot_lr(runs_ids, runs_data, runs_active, x_axis="samples"):
+def plot_lr(runs_ids, runs_data: list[Metrics], runs_active, x_axis="samples"):
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
     _fig = plt.figure(figsize=(10, 7), dpi=300)
@@ -46,16 +45,16 @@ def plot_lr(runs_ids, runs_data, runs_active, x_axis="samples"):
     linestyle = "-"
 
     legend_str = []
-    for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
-        if run_data["train"].shape[0] == 0:
+    for j, run_data in enumerate(runs_data):
+        if run_data.train.is_empty():
             continue
-
-        x_col = [c for _, c in enumerate(run_data["train"].columns) if x_axis in c][0]
-        data_cols = [c for _, c in enumerate(run_data["train"].columns) if c == "learning_rate"][0]
+        run_id = run_data.run_id
+        x_col = next(filter(lambda c: x_axis in c, run_data.train.columns))
+        data_cols = list(filter(lambda c: "learning_rate" in c, run_data.train.columns))
 
         plt.plot(
-            run_data["train"][x_col],
-            run_data["train"][data_cols],
+            run_data.train[x_col],
+            run_data.train[data_cols],
             linestyle,
             color=colors[j % len(colors)],
         )
@@ -79,7 +78,7 @@ def plot_lr(runs_ids, runs_data, runs_active, x_axis="samples"):
 
 
 ####################################################################################################
-def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
+def plot_utilization(runs_ids, runs_data: list[Metrics], runs_active, x_axis="samples"):
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
     _fig = plt.figure(figsize=(10, 7), dpi=300)
@@ -88,10 +87,10 @@ def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
 
     legend_str = []
     for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
-        if run_data["train"].shape[0] == 0:
+        if run_data.train.is_empty():
             continue
 
-        x_col = [c for _, c in enumerate(run_data["train"].columns) if x_axis in c][0]
+        x_col = [c for _, c in enumerate(run_data.train.columns) if x_axis in c][0]
         data_cols = run_data["system"].columns[1:]
 
         for ii, col in enumerate(data_cols):
@@ -130,7 +129,7 @@ def plot_utilization(runs_ids, runs_data, runs_active, x_axis="samples"):
 def plot_loss_per_stream(
     modes,
     runs_ids,
-    runs_data,
+    runs_data: list[Metrics],
     runs_active,
     stream_names,
     errs=["mse"],
@@ -162,40 +161,41 @@ def plot_loss_per_stream(
                 if "train" in modes and "val" in modes:
                     alpha = 0.35 if "train" in mode else alpha
 
-                for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
+                for j, run_data in enumerate(runs_data):
+                    run_data_mode = run_data.by_mode(mode)
+                    if run_data_mode.is_empty():
+                        continue
                     # find the col of the request x-axis (e.g. samples)
-                    x_col = [c for _, c in enumerate(run_data[mode].columns) if x_axis in c][0]
+                    x_col = next(filter(lambda c: x_axis in c, run_data_mode.columns))
                     # find the cols of the requested metric (e.g. mse) for all streams
                     # TODO: fix captialization
-                    data_cols = [c for _, c in enumerate(run_data[mode].columns) if err in c]
+                    data_cols = filter(
+                        lambda c: err in c and stream_name in c, run_data_mode.columns
+                    )
 
-                    for _, col in enumerate(data_cols):
-                        if stream_name in col:
-                            if run_data[mode][col].shape[0] == 0:
-                                continue
+                    for col in data_cols:
+                        x_vals = np.array(run_data_mode[x_col])
+                        y_data = np.array(run_data_mode[col])
 
-                            x_vals = np.array(run_data[mode][x_col])
-                            y_data = np.array(run_data[mode][col])
+                        plt.plot(
+                            x_vals,
+                            y_data,
+                            linestyle,
+                            color=colors[j % len(colors)],
+                            alpha=alpha,
+                        )
+                        legend_strs[-1] += [
+                            ("R" if runs_active[j] else "X")
+                            + " : "
+                            + run_data.run_id
+                            + " : "
+                            + runs_ids[run_data.run_id][1]
+                            + ": "
+                            + col
+                        ]
 
-                            plt.plot(
-                                x_vals,
-                                y_data,
-                                linestyle,
-                                color=colors[j % len(colors)],
-                                alpha=alpha,
-                            )
-                            legend_strs[-1] += [
-                                ("R" if runs_active[j] else "X")
-                                + " : "
-                                + run_id
-                                + " : "
-                                + runs_ids[run_id][1]
-                                + ": "
-                                + col
-                            ]
-
-                            min_val = np.min([min_val, np.nanmin(y_data)])
-                            max_val = np.max([max_val, np.nanmax(y_data)])
+                        min_val = np.min([min_val, np.nanmin(y_data)])
+                        max_val = np.max([max_val, np.nanmax(y_data)])
 
         # TODO: ensure that legend is plotted with full opacity
         legend_str = legend_strs[0]
@@ -228,7 +228,7 @@ def plot_loss_per_run(
     modes,
     run_id,
     run_desc,
-    run_data,
+    run_data: Metrics,
     stream_names,
     errs=["mse"],
     x_axis="samples",
@@ -256,20 +256,21 @@ def plot_loss_per_run(
             alpha = 1.0
             if "train" in modes and "val" in modes:
                 alpha = 0.35 if "train" in mode else alpha
+            run_data_mode = run_data.by_mode(mode)
 
-            x_col = [c for _, c in enumerate(run_data[mode].columns) if x_axis in c][0]
+            x_col = [c for _, c in enumerate(run_data_mode.columns) if x_axis in c][0]
             # find the cols of the requested metric (e.g. mse) for all streams
-            data_cols = [c for _, c in enumerate(run_data[mode].columns) if err in c]
+            data_cols = [c for _, c in enumerate(run_data_mode.columns) if err in c]
 
             for _, col in enumerate(data_cols):
                 for j, stream_name in enumerate(stream_names):
                     if stream_name in col:
                         # skip when no data is available
-                        if run_data[mode][col].shape[0] == 0:
+                        if run_data_mode[col].shape[0] == 0:
                             continue
 
-                        x_vals = np.array(run_data[mode][x_col])
-                        y_data = np.array(run_data[mode][col])
+                        x_vals = np.array(run_data_mode[x_col])
+                        y_data = np.array(run_data_mode[col])
 
                         plt.plot(
                             x_vals,
@@ -314,22 +315,10 @@ if __name__ == "__main__":
         clean_out_folder()
 
     runs_ids = {
-        "szkuawor": [34298989, "ERA5 test"],
+        "thfmdl6w": [34298989, "ERA5 test"],
     }
 
     runs_data = [TrainLogger.read(run_id) for run_id in runs_ids]
-
-    # should be moved to the train logger
-    # extract times and convert back to datetime objects, store absolute time ta and relative one tr
-    for rd in runs_data:
-        # training
-        if len(rd["train"]["weathergen.timestamp"]) > 0:
-            diff = rd["train"]["weathergen.timestamp"] - rd["train"]["weathergen.timestamp"][0]
-            rd["train"].insert_column(1, pl.Series("weathergen.reltime", diff))
-        # validation
-        if len(rd["val"]["weathergen.timestamp"]) > 0:
-            diff = rd["val"]["weathergen.timestamp"] - rd["val"]["weathergen.timestamp"][0]
-            rd["val"].insert_column(1, pl.Series("weathergen.reltime", diff))
 
     # determine which runs are still alive (as a process, though they might hang internally)
     ret = subprocess.run(["squeue"], capture_output=True)

@@ -13,6 +13,7 @@ import logging
 import math
 import os.path
 import time
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
@@ -21,6 +22,7 @@ import polars as pl
 from weathergen.utils.config import Config
 
 _weathergen_timestamp = "weathergen.timestamp"
+_weathergen_reltime = "weathergen.reltime"
 _weathergen_time = "weathergen.time"
 _performance_gpu = "perf.gpu"
 _performance_memory = "perf.memory"
@@ -219,7 +221,25 @@ class TrainLogger:
             cf, run_id, None, [_weathergen_timestamp, _performance_gpu, _performance_memory]
         )
 
-        return {"train": log_train_df, "val": metrics_val_df, "system": metrics_system_df}
+        return Metrics(run_id, "train", log_train_df, metrics_val_df, metrics_system_df)
+
+
+@dataclass
+class Metrics:
+    run_id: RunId
+    stage: Stage
+    train: pl.DataFrame
+    val: pl.DataFrame
+    system: pl.DataFrame
+
+    def by_mode(self, s: str) -> pl.DataFrame:
+        match s:
+            case "train":
+                return self.train
+            case "val":
+                return self.val
+            case "system":
+                return self.system
 
 
 def read_metrics(
@@ -258,6 +278,9 @@ def clean_df(df, columns: list[str] | None):
     # Convert timestamp column to date
     df = df.with_columns(
         pl.from_epoch(df[_weathergen_timestamp], time_unit="ms").alias(_weathergen_timestamp)
+    )
+    df = df.with_columns(
+        (df[_weathergen_timestamp] - df[_weathergen_timestamp].min()).alias(_weathergen_reltime)
     )
     _logger.info(f"schema {df.schema}")
 
