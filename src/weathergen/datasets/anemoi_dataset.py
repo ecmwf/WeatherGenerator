@@ -32,7 +32,7 @@ class AnemoiDataset:
         Parameters
         ----------
         start : int
-            Start time 
+            Start time
         end : int
             End time
         len_hrs : int
@@ -42,7 +42,7 @@ class AnemoiDataset:
         filename :
             filename (and path) of dataset
         stream_info :
-            information about stream 
+            information about stream
 
         Returns
         -------
