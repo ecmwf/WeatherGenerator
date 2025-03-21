@@ -113,14 +113,14 @@ class Trainer_Base:
         if not hasattr(cf, "streams") or not isinstance(cf.streams, list):
             cf.streams = []
 
+        streams_dir = Path(cf.streams_directory)
         # warn if specified dir does not exist
-        if not os.path.isdir(cf.streams_directory):
-            sd = cf.streams_directory
-            _logger.warning(f"Streams directory {sd} does not exist.")
+        if not streams_dir.is_dir():
+            _logger.warning(f"Streams directory {streams_dir} does not exist.")
 
         # read all reportypes from directory, append to existing ones
         temp = {}
-        streams_dir = Path(cf.streams_directory).absolute()
+        streams_dir = streams_dir.absolute()
         _logger.info(f"Reading streams from {streams_dir}")
 
         for fh in sorted(streams_dir.rglob("*.yml")):

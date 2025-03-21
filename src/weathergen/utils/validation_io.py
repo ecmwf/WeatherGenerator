@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -18,10 +19,10 @@ def sanitize_stream_str(istr):
 
 
 #################################
-def read_validation(cf, epoch, base_path, instruments, forecast_steps, rank=0):
+def read_validation(cf, epoch, base_path: Path, instruments, forecast_steps, rank=0):
     streams, columns, data = [], [], []
 
-    fname = base_path + f"validation_epoch{epoch:05d}_rank{rank:04d}.zarr"
+    fname = base_path / f"validation_epoch{epoch:05d}_rank{rank:04d}.zarr"
     store = zarr.DirectoryStore(fname)
     ds = zarr.group(store=store)
 
@@ -57,7 +58,7 @@ def read_validation(cf, epoch, base_path, instruments, forecast_steps, rank=0):
 #################################
 def write_validation(
     cf,
-    base_path,
+    base_path: Path,
     rank,
     epoch,
     cols,
@@ -71,11 +72,11 @@ def write_validation(
     if len(cf.analysis_streams_output) == 0:
         return
 
-    fname = base_path + f"validation_epoch{epoch:05d}_rank{rank:04d}"
+    fname = f"validation_epoch{epoch:05d}_rank{rank:04d}"
     fname += "" if jac is None else "_jac"
     fname += ".zarr"
 
-    store = zarr.DirectoryStore(fname)
+    store = zarr.DirectoryStore(base_path / fname)
     ds = zarr.group(store=store)
 
     for k, si in enumerate(cf.streams):
