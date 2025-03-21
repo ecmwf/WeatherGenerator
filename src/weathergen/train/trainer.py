@@ -429,12 +429,12 @@ class Trainer(Trainer_Base):
         if cf.val_initial:
             self.validate(-1)
 
-        for epoch in range(2):  # DEBUG
+        for epoch in range(epoch_base, cf.num_epochs):
             self.train(epoch)
 
-            # self.validate(epoch)
+            self.validate(epoch)
 
-            # self.save_model(epoch)
+            self.save_model(epoch)
 
         # log final model
         self.save_model(cf.num_epochs)
@@ -601,11 +601,7 @@ class Trainer(Trainer_Base):
 
         # training loop
         self.t_start = time.time()
-        n = 1
         for bidx, batch in enumerate(dataset_iter):
-            n += 1
-            if n >= 3:
-                break
             forecast_steps = batch[-1]
             batch = self.batch_to_device(batch)
 

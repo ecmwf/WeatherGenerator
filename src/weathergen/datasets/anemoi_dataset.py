@@ -9,7 +9,6 @@
 
 import datetime
 import logging
-import os
 
 import numpy as np
 from anemoi.datasets import open_dataset
@@ -37,7 +36,6 @@ class AnemoiDataset:
 
         # open  dataset to peak that it is compatible with requested parameters
         ds: Zarr = open_dataset(filename)
-        _logger.info(f"Opened dataset {filename}: {ds} {type(ds)}")
 
         # check that start and end time are within the dataset time range
 
@@ -111,7 +109,6 @@ class AnemoiDataset:
             self.ds: Subset = open_dataset(
                 ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end
             )
-            _logger.info(f"Repened dataset {filename}: {self.ds} {type(self.ds)}")
 
     def __len__(self):
         "Length of dataset"
@@ -151,20 +148,7 @@ class AnemoiDataset:
         # extract number of time steps and collapse ensemble dimension
 
         data = self.ds[idx : idx + self.num_steps_per_window][:, :, 0]
-        # Print the process id using python os module:
-        pid = os.getpid()
 
-        _logger.info(f"{pid} self.ds: {self.ds} {type(self.ds)}")
-        _logger.info(f"{pid} self.ds.dataset: {self.ds.dataset} {type(self.ds.dataset)}")
-        _logger.info(
-            f"{pid} self.ds.dataset.data: {self.ds.dataset.data} {type(self.ds.dataset.data)}"
-        )
-        # data: ZArray = self.ds.dataset.data
-
-        # data.__getitem__
-        # _logger.info(
-        #     f"data: {self.ds.__getitem__} {self.ds.data} {type(self.ds.data)} {type(data)}"
-        # )
         # # extract channels
         data = (
             data[:, channels_idx].transpose([0, 2, 1]).reshape((data.shape[0] * data.shape[2], -1))

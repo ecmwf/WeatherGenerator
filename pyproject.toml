@@ -23,8 +23,6 @@ dependencies = [
  'wheel',
  'psutil',
  "flash-attn; sys_platform == 'linux'",
-# "orjson>=3.10.15",
-# "viztracer>=1.0.3",
  "polars~=1.25.2",
 ]
 

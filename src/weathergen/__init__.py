@@ -16,8 +16,8 @@ import traceback
 import pandas as pd
 import torch.multiprocessing
 
-# TODO: change first our logging strategy
-# Spawning means the loggers are per process and will not just show up in the main process
+# This strategy is required by the nvidia profiles to properly trace events in worker processes.
+# This may cause issues with logging. Alternative: "fork"
 torch.multiprocessing.set_start_method("spawn", force=True)
 
 from weathergen.train.trainer import Trainer
