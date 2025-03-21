@@ -9,12 +9,12 @@
 
 import datetime
 import logging
+import os
 
 import numpy as np
 from anemoi.datasets import open_dataset
 from anemoi.datasets.data.stores import Zarr
 from anemoi.datasets.data.subset import Subset
-from zarr.core import Array as ZArray
 
 _logger = logging.getLogger(__name__)
 
@@ -151,12 +151,17 @@ class AnemoiDataset:
         # extract number of time steps and collapse ensemble dimension
 
         data = self.ds[idx : idx + self.num_steps_per_window][:, :, 0]
-        _logger.info(f"self.ds: {self.ds} {type(self.ds)}")
-        _logger.info(f"self.ds.dataset: {self.ds.dataset} {type(self.ds.dataset)}")
-        _logger.info(f"self.ds.dataset.data: {self.ds.dataset.data} {type(self.ds.dataset.data)}")
-        data: ZArray = self.ds.dataset.data
+        # Print the process id using python os module:
+        pid = os.getpid()
 
-        data.__getitem__
+        _logger.info(f"{pid} self.ds: {self.ds} {type(self.ds)}")
+        _logger.info(f"{pid} self.ds.dataset: {self.ds.dataset} {type(self.ds.dataset)}")
+        _logger.info(
+            f"{pid} self.ds.dataset.data: {self.ds.dataset.data} {type(self.ds.dataset.data)}"
+        )
+        # data: ZArray = self.ds.dataset.data
+
+        # data.__getitem__
         # _logger.info(
         #     f"data: {self.ds.__getitem__} {self.ds.data} {type(self.ds.data)} {type(data)}"
         # )

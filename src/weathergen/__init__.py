@@ -14,6 +14,9 @@ import time
 import traceback
 
 import pandas as pd
+import torch.multiprocessing
+
+torch.multiprocessing.set_start_method("spawn", force=True)
 
 from weathergen.train.trainer import Trainer
 from weathergen.utils.config import Config, load_overwrite_conf, load_private_conf
