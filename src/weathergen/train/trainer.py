@@ -456,7 +456,7 @@ class Trainer(Trainer_Base):
     ):
         _rng = np.random.default_rng()
 
-        # merge across batch dimension (and keep streams and )
+        # merge across batch dimension (and keep streams)
         targets_rt = [
             [
                 torch.cat([t[i].target_tokens[fstep] for t in streams_data])
@@ -474,9 +474,6 @@ class Trainer(Trainer_Base):
 
         ctr = 0
         loss = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
-
-        # import code
-        # code.interact( local=locals())
 
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):
@@ -571,6 +568,18 @@ class Trainer(Trainer_Base):
 
                     # log data for analysis
                     if preds_all is not None:
+
+                        targets_times_rt = [
+                            [
+                                np.concatenate([t[i].target_times[fstep] for t in streams_data])
+                                for i in range(len(self.cf.streams))
+                            ]
+                            for fstep in range(forecast_steps + 1)
+                        ]
+
+                        import code
+                        code.interact( local=locals())
+
                         # TODO: test
                         targets_lens[i_obs] += [target.shape[0]]
                         dn_data, dn_coords = (
@@ -583,6 +592,8 @@ class Trainer(Trainer_Base):
                         targets_all[i_obs] += [
                             dn_data(i_obs, target.to(fp32), False).detach().cpu()
                         ]
+                        import code
+                        code.interact( local=locals())
                         targets_coords_all[i_obs] += [
                             dn_coords(i_obs, target_coords.to(fp32)).detach().cpu()
                         ]

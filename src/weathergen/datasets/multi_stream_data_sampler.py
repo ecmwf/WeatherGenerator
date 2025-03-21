@@ -338,7 +338,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             if target.shape[0] == 0:
                                 stream_data.add_empty_target(fstep)
                             else:
-                                (tt_cells, tc) = self.batchifyer.batchify_target(
+                                (tt_cells, tc, tt_times) = self.batchifyer.batchify_target(
                                     stream_info,
                                     self.sampling_rate_target,
                                     self.rng,
@@ -350,7 +350,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                     ds,
                                 )
 
-                                stream_data.add_target(fstep, tt_cells, tc)
+                                stream_data.add_target(fstep, tt_cells, tc, tt_times)
 
                     # merge inputs for sources and targets for current stream
                     stream_data.merge_inputs()
