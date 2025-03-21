@@ -8,8 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 
-import torch
 import numpy as np
+import torch
+
 
 class StreamData:
     """
@@ -45,7 +46,8 @@ class StreamData:
 
         # initialize empty members
         self.target_coords = [[] for _ in range(forecast_steps + 1)]
-        self.target_times = [[] for _ in range(forecast_steps + 1)]
+        self.target_coords_raw = [[] for _ in range(forecast_steps + 1)]
+        self.target_times_raw = [[] for _ in range(forecast_steps + 1)]
         # this is not directly used but to precompute index in compute_idxs_predict()
         self.target_coords_lens = [[] for _ in range(forecast_steps + 1)]
         self.target_tokens = [[] for _ in range(forecast_steps + 1)]
@@ -125,6 +127,8 @@ class StreamData:
         self.target_tokens_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
         self.target_coords[fstep] += [torch.tensor([])]
         self.target_coords_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
+        self.target_coords_raw[fstep] += [torch.tensor([])]
+        self.target_times_raw_raw[fstep] += [torch.tensor([])]
 
     def add_source(
         self, ss_raw: torch.tensor, ss_lens: torch.tensor, ss_cells: list, ss_centroids: list
@@ -154,7 +158,8 @@ class StreamData:
         fstep: int,
         targets: list,
         target_coords: torch.tensor,
-        times: torch.tensor
+        target_coords_raw: torch.tensor,
+        times_raw: torch.tensor,
     ) -> None:
         """
         Add data for target for one input.
@@ -179,7 +184,8 @@ class StreamData:
 
         self.target_tokens[fstep] += [targets]
         self.target_coords[fstep] += [target_coords]
-        self.target_times[fstep] += [times]
+        self.target_coords_raw[fstep] += [target_coords_raw]
+        self.target_times_raw[fstep] += [times_raw]
 
     def target_empty(self) -> bool:
         """
@@ -311,7 +317,8 @@ class StreamData:
                     [[len(f) for f in ff] for ff in self.target_tokens[fstep]]
                 ).sum(0)
                 self.target_coords[fstep] = self._merge_cells(self.target_coords[fstep], nt)
-                self.target_times[fstep] = self._merge_cells(self.target_times[fstep], nt)
+                self.target_coords_raw[fstep] = self._merge_cells(self.target_coords_raw[fstep], nt)
+                self.target_times_raw[fstep] = self._merge_cells(self.target_times_raw[fstep], nt)
                 self.target_tokens[fstep] = self._merge_cells(self.target_tokens[fstep], nt)
                 # remove NaNs
                 # TODO: it seems better to drop data points with NaN values in the coords than
@@ -321,7 +328,8 @@ class StreamData:
             else:
                 # TODO: is this branch still needed
                 self.target_coords[fstep] = torch.tensor([])
-                self.target_times[fstep] = torch.tensor([])
+                self.target_coords_raw[fstep] = torch.tensor([])
+                self.target_times_raw[fstep] = torch.tensor([])
                 self.target_tokens[fstep] = torch.tensor([])
                 self.target_tokens_lens[fstep] = torch.tensor([])
                 self.target_coords_lens[fstep] = torch.tensor([])

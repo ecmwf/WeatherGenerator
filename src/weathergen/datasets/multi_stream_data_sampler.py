@@ -170,11 +170,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     ###################################################
     def get_sources_size(self):
-        return [ds[0].get_source_size() for ds in self.streams_datasets]
-
-    ###################################################
-    def get_targets_size(self):
-        return [ds[0].get_target_size() for ds in self.streams_datasets]
+        return [
+            ds[0].get_source_num_channels() + ds[0].get_geoinfo_size() + ds[0].get_coords_size()
+            for ds in self.streams_datasets
+        ]
 
     ###################################################
     def get_sources_num_channels(self):
@@ -224,17 +223,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ###################################################
     def denormalize_source_channels(self, obs_id, data):
         # TODO: with multiple ds per stream we need to distinguish these here
-        return self.datasets[obs_id][0].denormalize_source_channels(data)
+        return self.streams_datasets[obs_id][0].denormalize_source_channels(data)
 
     ###################################################
     def denormalize_target_channels(self, obs_id, data):
         # TODO: with multiple ds per stream we need to distinguish these here
-        return self.datasets[obs_id][0].denormalize_target_channels(data)
-
-    ###################################################
-    def denormalize_coords(self, obs_id, coords):
-        # TODO: is this correct?
-        return self.streams_datasets[obs_id][0].denormalize_coords(coords)
+        return self.streams_datasets[obs_id][0].denormalize_target_channels(data)
 
     ###################################################
     def __iter__(self):
@@ -338,7 +332,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             if target.shape[0] == 0:
                                 stream_data.add_empty_target(fstep)
                             else:
-                                (tt_cells, tc, tt_times) = self.batchifyer.batchify_target(
+                                (tt_cells, tc, tt_c, tt_t) = self.batchifyer.batchify_target(
                                     stream_info,
                                     self.sampling_rate_target,
                                     self.rng,
@@ -350,7 +344,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                     ds,
                                 )
 
-                                stream_data.add_target(fstep, tt_cells, tc, tt_times)
+                                stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t)
 
                     # merge inputs for sources and targets for current stream
                     stream_data.merge_inputs()
