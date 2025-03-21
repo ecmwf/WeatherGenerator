@@ -16,6 +16,8 @@ import traceback
 import pandas as pd
 import torch.multiprocessing
 
+# TODO: change first our logging strategy
+# Spawning means the loggers are per process and will not just show up in the main process
 torch.multiprocessing.set_start_method("spawn", force=True)
 
 from weathergen.train.trainer import Trainer
