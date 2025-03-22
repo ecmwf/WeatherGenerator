@@ -414,13 +414,13 @@ class Batchifyer:
             target_times = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
             for i, c in enumerate(cells_idxs):
                 t = normalizer.normalize_target_channels(source[hpy_idxs_ord_split[i]])
-                t = t[self.rng.permutation(len(t))][: int(len(t) * sampling_rate_target)]
-                target_tokens[c] = t
-                target_coords[c] = coords[hpy_idxs_ord_split[i]]
-                target_coords_raw[c] = coords[hpy_idxs_ord_split[i]]
-                target_geoinfos[c] = normalizer.normalize_geoinfos(geoinfos[hpy_idxs_ord_split[i]])
-                target_times_raw[c] = times[hpy_idxs_ord_split[i]]
-                target_times[c] = times_enc[hpy_idxs_ord_split[i]]
+                perm = self.rng.permutation(len(t))[ : int(len(t) * sampling_rate_target)]
+                target_tokens[c] = t[perm]
+                target_coords[c] = coords[hpy_idxs_ord_split[i]][perm]
+                target_coords_raw[c] = coords[hpy_idxs_ord_split[i]][perm]
+                target_geoinfos[c] = normalizer.normalize_geoinfos(geoinfos[hpy_idxs_ord_split[i]][perm])
+                target_times_raw[c] = times[hpy_idxs_ord_split[i]][perm]
+                target_times[c] = times_enc[hpy_idxs_ord_split[i]][perm]
 
             target_tokens_lens = torch.tensor([len(s) for s in target_tokens], dtype=torch.int32)
 
