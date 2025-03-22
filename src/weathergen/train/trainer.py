@@ -586,8 +586,9 @@ class Trainer(Trainer_Base):
 
                     # log data for analysis
                     if log_data:
+
                         # TODO: test
-                        targets_lens[i_obs] += [target.shape[0]]
+                        targets_lens[fstep][i_obs] += [target.shape[0]]
                         dn_data = self.dataset_val.denormalize_target_channels
 
                         f32 = torch.float32
@@ -632,7 +633,7 @@ class Trainer(Trainer_Base):
             ):
                 preds = self.ddp_model(self.model_params, batch, forecast_steps)
 
-                loss = self.compute_loss(
+                loss, _ = self.compute_loss(
                     self.loss_fcts,
                     forecast_steps,
                     batch[0],
