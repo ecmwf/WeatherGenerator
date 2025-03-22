@@ -586,7 +586,6 @@ class Trainer(Trainer_Base):
 
                     # log data for analysis
                     if log_data:
-
                         # TODO: test
                         targets_lens[fstep][i_obs] += [target.shape[0]]
                         dn_data = self.dataset_val.denormalize_target_channels

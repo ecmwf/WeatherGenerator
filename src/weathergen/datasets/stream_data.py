@@ -323,8 +323,8 @@ class StreamData:
                 # remove NaNs
                 # TODO: it seems better to drop data points with NaN values in the coords than
                 #       to mask them
-                assert torch.isnan(self.target_coords[fstep]).any() == False
-                #self.target_coords[fstep][torch.isnan(self.target_coords[fstep])] = self.mask_value
+                assert not torch.isnan(self.target_coords[fstep]).any()
+                # self.target_coords[fstep][torch.isnan(self.target_coords[fstep])] = self.mask_value
 
             else:
                 # TODO: is this branch still needed
