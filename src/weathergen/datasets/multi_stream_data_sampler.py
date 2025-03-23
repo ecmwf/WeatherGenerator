@@ -14,6 +14,7 @@ import numpy as np
 import torch
 
 from weathergen.datasets.anemoi_dataset import AnemoiDataset
+from weathergen.datasets.zfdb_dataset import ZFDBDataset
 from weathergen.datasets.atmorep_dataset import AtmorepDataset
 from weathergen.datasets.batchifyer import Batchifyer
 from weathergen.datasets.fesom_dataset import FesomDataset
@@ -82,6 +83,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         cf.len_hrs,
                         cf.step_hrs,
                         cf.data_path_anemoi + "/" + fname,
+                        stream_info,
+                    )
+
+                elif stream_info["type"] == "zfdb":
+                    ds = ZFDBDataset(
+                        start_date,
+                        end_date,
+                        cf.len_hrs,
+                        cf.step_hrs,
+                        fname,
                         stream_info,
                     )
 
