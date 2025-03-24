@@ -47,7 +47,6 @@ class Trainer_Base:
 
         torch.backends.cuda.matmul.allow_tf32 = True
 
-
         use_cuda = torch.cuda.is_available()
         if not use_cuda:
             return torch.device("cpu")

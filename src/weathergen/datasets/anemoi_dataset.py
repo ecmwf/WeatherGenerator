@@ -104,9 +104,7 @@ class AnemoiDataset:
         if dt_start >= ds_dt_end or dt_end <= ds_dt_start:
             self.ds = None
         else:
-            self.ds = open_dataset(
-                ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end
-            )
+            self.ds = open_dataset(ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end)
 
     def __len__(self):
         "Length of dataset"
