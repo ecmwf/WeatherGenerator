@@ -1629,8 +1629,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anemoi-datasets", specifier = "~=0.5" },
-    { name = "astropy-healpix", specifier = "~=1.0" },
+    { name = "anemoi-datasets", specifier = "~=0.5.16" },
+    { name = "astropy-healpix", specifier = "~=1.1.2" },
     { name = "flash-attn", marker = "sys_platform == 'linux'", url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl" },
     { name = "matplotlib" },
     { name = "numpy", specifier = "~=2.2" },

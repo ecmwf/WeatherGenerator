@@ -12,9 +12,9 @@ requires-python = ">=3.11,<3.13"
 dependencies = [
  'torch==2.6.0',
  'numpy~=2.2',
- 'astropy_healpix~=1.0',
+ 'astropy_healpix~=1.1.2',
  'zarr~=2.17',
- 'anemoi-datasets~=0.5',
+ 'anemoi-datasets~=0.5.16',
  'pandas~=2.2',
  'pynvml',
  'tqdm',
