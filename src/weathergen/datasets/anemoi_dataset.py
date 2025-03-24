@@ -12,8 +12,6 @@ import logging
 
 import numpy as np
 from anemoi.datasets import open_dataset
-from anemoi.datasets.data.stores import Zarr
-from anemoi.datasets.data.subset import Subset
 
 _logger = logging.getLogger(__name__)
 
@@ -35,7 +33,7 @@ class AnemoiDataset:
         assert len_hrs == step_hrs, "Currently only step_hrs=len_hrs is supported"
 
         # open  dataset to peak that it is compatible with requested parameters
-        ds: Zarr = open_dataset(filename)
+        ds = open_dataset(filename)
 
         # check that start and end time are within the dataset time range
 
@@ -106,7 +104,7 @@ class AnemoiDataset:
         if dt_start >= ds_dt_end or dt_end <= ds_dt_start:
             self.ds = None
         else:
-            self.ds: Subset = open_dataset(
+            self.ds = open_dataset(
                 ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end
             )
 
