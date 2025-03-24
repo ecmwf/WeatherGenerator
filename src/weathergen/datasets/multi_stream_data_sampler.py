@@ -24,7 +24,7 @@ from weathergen.datasets.utils import (
     compute_offsets_scatter_embed,
     compute_source_cell_lens,
 )
-from weathergen.utils.logger import logger
+from weathergen.utils.logger import init_loggers, logger
 
 
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
@@ -245,7 +245,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             len : number of batch items
             len[*] : number of streams
         """
-
+        init_loggers()
         iter_start, iter_end = self.worker_workset()
 
         # create new shuffeling

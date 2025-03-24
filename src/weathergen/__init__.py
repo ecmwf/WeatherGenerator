@@ -14,10 +14,15 @@ import time
 import traceback
 
 import pandas as pd
+import torch.multiprocessing
 
 from weathergen.train.trainer import Trainer
 from weathergen.utils.config import Config, load_overwrite_conf, load_private_conf
 from weathergen.utils.logger import init_loggers
+
+# This strategy is required by the nvidia profiles to properly trace events in worker processes.
+# This may cause issues with logging. Alternative: "fork"
+torch.multiprocessing.set_start_method("spawn", force=True)
 
 
 ####################################################################################################

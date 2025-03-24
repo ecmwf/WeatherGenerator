@@ -1,6 +1,34 @@
 [
     {
         "domain": "WeatherGen",
+        "module": "weathergen.datasets.multi_stream_data_sampler",
+        "functions": [
+            "MultiStreamDataSampler.__iter__"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
+        "module": "weathergen.datasets.batchifyer",
+        "functions": [
+            "encode_times_source",
+            "encode_times_target",
+            "tokenize_window_space",
+            "tokenize_window_spacetime",
+            "Batchifyer.batchify_source",
+            "Batchifyer.batchify_target"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
+        "module": "weathergen.datasets.stream_data",
+        "functions": [
+            "StreamData.to_device",
+            "StreamData.merge_inputs"
+            
+        ]
+    },
+    {
+        "domain": "WeatherGen",
         "module": "weathergen.train.trainer",
         "functions": [
             "Trainer.evaluate",
@@ -13,6 +41,17 @@
     },
     {
         "domain": "WeatherGen",
+        "module": "weathergen.datasets.utils",
+        "functions": [
+            "s2tor3",
+            "r3tos2",
+            "get_target_coords_local_ffast",
+            "healpix_verts_rots",
+            "locs_to_cell_coords_ctrs"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
         "module": "weathergen.train.trainer_base",
         "functions": [
             "Trainer_Base.ddp_average"
@@ -20,10 +59,97 @@
 
     },
     {
-        "domain": "WeatherGen",
-        "module": "weathergen.datasets.multi_stream_data_sampler",
+        "domain": "healpy",
+        "module": "astropy_healpix.healpy",
         "functions": [
-            "MultiStreamDataSampler.__iter__"
+            "ang2pix"
+        ]
+    },
+    {
+        "domain": "Anemoi",
+        "module": "anemoi.datasets.data.store",
+        "functions": [
+            "Zarr.__getitem__"
+        ]
+    },
+    {
+        "domain": "Anemoi",
+        "module": "anemoi.datasets.data.subset",
+        "functions": [
+            "Subset.__getitem__"
+        ]
+    },
+    {
+        "domain": "Zarr",
+        "module": "zarr.core",
+        "functions": [
+            "Array._get_selection",
+            "Array._chunk_getitems",
+            "Array._chunk_key",
+            "Array.__process_chunk",
+            "Array.__getitem__",
+            "Array.__setitem__",
+            "Array.__delitem__",
+            "Array.__contains__",
+            "Array.__len__",
+            "Array.__iter__",
+            "Array.__reversed__",
+            "Array.__copy__",
+            "Array.__deepcopy__",
+            "Array.__repr__",
+            "Array.__str__",
+            "Array.__eq__",
+            "Array.__ne__",
+            "Array.__lt__",
+            "Array.__le__",
+            "Array.__gt__",
+            "Array.__ge__",
+            "Array.__hash__",
+            "Array.__bool__",
+            "Array.__array__",
+            "Array.__array_ufunc__",
+            "Array.__array_function__",
+            "Array.__array_priority__",
+            "Array.__array_wrap__",
+            "Array.__array_prepare__",
+            "Array.__array_struct__",
+            "Array.__array_interface__",
+            "Array.__array_finalize__",
+            "Array.__array_ufunc__",
+            "Array.__array_function__",
+            "Array.__array_priority__",
+            "Array.__array_wrap__",
+            "Array.__array_prepare__",
+            "Array.__array_struct__",
+            "Array.__array_interface__",
+            "Array.__array_finalize__",
+            "Array.__array_ufunc__",
+            "Array.__array_function__",
+            "Array.__array_priority__",
+            "Array.__array_wrap__",
+            "Array.__array_prepare__",
+            "Array.__array_struct__",
+            "Array.__array_interface__",
+            "Array.__array_finalize__",
+            "Array.__array_ufunc__",
+            "Array.__array_function__",
+            "Array.__array_priority__",
+            "Array.__array_wrap__",
+            "Array.__array_prepare__",
+            "Array.__array_struct__",
+            "Array.__array_interface__",
+            "Array.__array_finalize__",
+            "Array.__array_ufunc__",
+            "Array.__array_function__",
+            "Array.__array_priority__",
+            "Array.__array_wrap__",
+            "Array.__array_prepare__",
+            "Array.__array_struct__",
+            "Array.__array_interface__",
+            "Array.__array_finalize__",
+            "Array.__array_ufunc__",
+            "Array.__array_function__",
+            "Array.__array_priority__"
         ]
     },
     {
@@ -48,15 +174,29 @@
         "domain": "PyTorch",
         "module": "torch",
         "functions": [
-            "Tensor.to"
+            "Tensor.to",
+            "argsort",
+            "cat",
+            "matmul",
+            "full",
+            "split",
+            "tensor"
         ]
     },
-
     {
         "domain": "PyTorch",
         "color": "0xbbd6cf",
         "module": "torch.utils.data.dataloader",
         "functions": ["_BaseDataLoaderIter.__next__"]
+    },
+    {
+        "domain": "PyTorch",
+        "color": "0xbbd6cf",
+        "module": "torch.utils.data.dataset",
+        "functions": [
+            "Dataset.__getitem__",
+            "IterableDataset.__iter__"
+        ]
     },
 
     {
@@ -379,5 +519,136 @@
             "UpsamplingBilinear2d.forward",
             "UpsamplingNearest2d.forward"
         ]
-    }
-]
+    },
+
+    {
+        "domain":"Numpy",
+        "module": "numpy",
+        "functions": [
+            "array",
+            "argsort",
+            "argmax",
+            "argmin",
+            "amax",
+            "amin",
+            "all",
+            "any",
+            "average",
+            "bincount",
+            "ceil",
+            "clip",
+            "conj",
+            "corrcoef",
+            "cov",  
+            "split",
+            "flatnonzero",
+            "flatten",
+            "flip",
+            "fliplr",
+            "flipud",
+            "floor",
+            "full",
+            "full_like",
+            "identity",
+            "imag",
+            "inner",
+            "insert",
+            "interp",
+            "intersect1d",
+            "isclose",
+            "iscomplex",    
+            "concatenate",
+            "split",
+            "asarray",
+            "asanyarray",
+            "ascontiguousarray",
+            "asfortranarray",
+            "empty",
+            "empty_like",
+            "zeros",
+            "zeros_like",
+            "ones",
+            "ones_like",
+            "full",
+            "full_like",
+            "full",
+            "full_like",
+            "eye",
+            "identity",
+            "arange",
+            "linspace",
+            "logspace",
+            "geomspace",
+            "meshgrid",
+            "mgrid",
+            "ogrid",
+            "diag",
+            "diagflat",
+            "tri",
+            "tril",
+            "triu",
+            "vander",
+            "histogram",
+            "histogram2d",
+            "histogramdd",
+            "bincount",
+            "digitize",
+            "cov",
+            "corrcoef",
+            "correlate",
+            "convolve",
+            "vdot",
+            "dot",
+            "inner",
+            "outer",
+            "tensordot",
+            "einsum",
+            "matmul",
+            "linalg.norm",
+            "linalg.cond",
+            "linalg.det",
+            "linalg.matrix_rank",
+            "linalg.slogdet",
+            "linalg.solve",
+            "linalg.tensorsolve",
+            "linalg.lstsq",
+            "linalg.inv",
+            "linalg.pinv",
+            "linalg.tensorinv",
+            "linalg.qr",
+            "linalg.svd",
+            "linalg.eig",
+            "linalg.eigh",
+            "linalg.eigvals",
+            "linalg.eigvalsh",
+            "linalg.norm",
+            "linalg.cond",
+            "linalg.det",
+            "linalg.matrix_rank",
+            "linalg.slogdet",
+            "linalg.solve",
+            "linalg.tensorsolve",
+            "linalg.lstsq",
+            "linalg.inv",
+            "linalg.pinv",
+            "linalg.tensorinv",
+            "linalg.qr",
+            "linalg.svd",
+            "linalg.eig",
+            "linalg.eigh",
+            "linalg.eigvals",
+            "linalg.eigvalsh",
+            "linalg.norm",
+            "linalg.cond",
+            "linalg.det",
+            "linalg.matrix_rank",
+            "linalg.slogdet"
+        ]
+        },
+        {
+            "domain":"Pandas",
+            "module": "pandas",
+            "functions": ["to_datetime"]
+        }
+    
+    ]

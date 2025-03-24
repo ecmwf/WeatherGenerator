@@ -8,9 +8,14 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
+import logging
 
 import numpy as np
 from anemoi.datasets import open_dataset
+from anemoi.datasets.data.stores import Zarr
+from anemoi.datasets.data.subset import Subset
+
+_logger = logging.getLogger(__name__)
 
 
 class AnemoiDataset:
@@ -30,12 +35,12 @@ class AnemoiDataset:
         assert len_hrs == step_hrs, "Currently only step_hrs=len_hrs is supported"
 
         # open  dataset to peak that it is compatible with requested parameters
-        self.ds = open_dataset(filename)
+        ds: Zarr = open_dataset(filename)
 
         # check that start and end time are within the dataset time range
 
-        ds_dt_start = self.ds.dates[0]
-        ds_dt_end = self.ds.dates[-1]
+        ds_dt_start = ds.dates[0]
+        ds_dt_end = ds.dates[-1]
 
         format_str = "%Y%m%d%H%M%S"
         dt_start = datetime.datetime.strptime(str(start), format_str)
@@ -43,13 +48,13 @@ class AnemoiDataset:
 
         # TODO, TODO, TODO: we need proper alignment for the case where self.ds.frequency
         # is not a multile of len_hrs
-        self.num_steps_per_window = int((len_hrs * 3600) / self.ds.frequency.seconds)
+        self.num_steps_per_window = int((len_hrs * 3600) / ds.frequency.seconds)
 
         # open dataset
 
         # caches lats and lons
-        self.latitudes = self.ds.latitudes.astype(np.float32)
-        self.longitudes = self.ds.longitudes.astype(np.float32)
+        self.latitudes = ds.latitudes.astype(np.float32)
+        self.longitudes = ds.longitudes.astype(np.float32)
 
         # TODO: define in base class
         self.geoinfo_idx = []
@@ -59,8 +64,8 @@ class AnemoiDataset:
         source_channels = stream_info["source"] if "source" in stream_info else None
         self.source_idx = np.sort(
             [
-                self.ds.name_to_index[k]
-                for i, (k, v) in enumerate(self.ds.typed_variables.items())
+                ds.name_to_index[k]
+                for i, (k, v) in enumerate(ds.typed_variables.items())
                 if (
                     not v.is_computed_forcing
                     and not v.is_constant_in_time
@@ -75,8 +80,8 @@ class AnemoiDataset:
         target_channels = stream_info["target"] if "target" in stream_info else None
         self.target_idx = np.sort(
             [
-                self.ds.name_to_index[k]
-                for i, (k, v) in enumerate(self.ds.typed_variables.items())
+                ds.name_to_index[k]
+                for (k, v) in ds.typed_variables.items()
                 if (
                     not v.is_computed_forcing
                     and not v.is_constant_in_time
@@ -88,21 +93,22 @@ class AnemoiDataset:
                 )
             ]
         )
-        self.source_channels = [self.ds.variables[i] for i in self.source_idx]
-        self.target_channels = [self.ds.variables[i] for i in self.target_idx]
+        self.source_channels = [ds.variables[i] for i in self.source_idx]
+        self.target_channels = [ds.variables[i] for i in self.target_idx]
 
         self.properties = {
             "stream_id": 0,
         }
-        self.mean = self.ds.statistics["mean"]
-        self.stdev = self.ds.statistics["stdev"]
+        self.mean = ds.statistics["mean"]
+        self.stdev = ds.statistics["stdev"]
 
         # set dataset to None when no overlap with time range
         if dt_start >= ds_dt_end or dt_end <= ds_dt_start:
             self.ds = None
-            return
-
-        self.ds = open_dataset(self.ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end)
+        else:
+            self.ds: Subset = open_dataset(
+                ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end
+            )
 
     def __len__(self):
         "Length of dataset"
@@ -140,8 +146,10 @@ class AnemoiDataset:
             )
 
         # extract number of time steps and collapse ensemble dimension
+
         data = self.ds[idx : idx + self.num_steps_per_window][:, :, 0]
-        # extract channels
+
+        # # extract channels
         data = (
             data[:, channels_idx].transpose([0, 2, 1]).reshape((data.shape[0] * data.shape[2], -1))
         )

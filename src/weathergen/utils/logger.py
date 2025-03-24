@@ -10,6 +10,7 @@
 import logging
 import os
 import pathlib
+from functools import cache
 
 
 class RelPathFormatter(logging.Formatter):
@@ -23,11 +24,14 @@ class RelPathFormatter(logging.Formatter):
         return super().format(record)
 
 
+@cache
 def init_loggers():
     """
     Initialize the logger for the package.
 
     WARNING: this function resets all the logging handlers.
+
+    This function can be called only once, so that it can be called repeatedly in multiprocessing pipelines.
     """
     formatter = RelPathFormatter("%(pathname)s:%(lineno)d : %(levelname)-8s : %(message)s")
     for package in ["obslearn", "weathergen"]:
