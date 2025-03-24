@@ -31,7 +31,7 @@ wheels = [
 
 [[package]]
 name = "anemoi-transform"
-version = "0.1.3"
+version = "0.1.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anemoi-utils" },
@@ -40,14 +40,14 @@ dependencies = [
     { name = "earthkit-meteo" },
     { name = "earthkit-regrid" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/55/19/900380b1f8c985c98eec35f4d4452c5668bb6bc0fb2ecd4fa7652318282a/anemoi_transform-0.1.3.tar.gz", hash = "sha256:c3652a1829cd77c00cefba90f98a0f585a2b748775549fd004e2b74f7cd7cf5e", size = 71289 }
+sdist = { url = "https://files.pythonhosted.org/packages/79/40/5853af0e6b921277327e142ebecf4b39f396a9f028a6c784c34ec298b671/anemoi_transform-0.1.4.tar.gz", hash = "sha256:3e620e12e910830029163d3921dee51be115edb6053c66d7a0c4d1dadbdfaa91", size = 101493 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8d/71/89b5e9b55c56350b7548088596d01960460825e1903311e5231f360b1797/anemoi_transform-0.1.3-py3-none-any.whl", hash = "sha256:bdcc8b16af7a6adf770ee62f061ac60556b98bf1a1904f6f3aa6f370eaffcfdf", size = 59155 },
+    { url = "https://files.pythonhosted.org/packages/5b/41/fd667940a1922ef8a34169549dcb3a64ecf91ab7931107584e5670c134d2/anemoi_transform-0.1.4-py3-none-any.whl", hash = "sha256:cff3233ba587459319e670087c45afaa3d360a39a4fd528b78263c18ee141f9c", size = 62650 },
 ]
 
 [[package]]
 name = "anemoi-utils"
-version = "0.4.13"
+version = "0.4.16"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aniso8601" },
@@ -57,9 +57,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a7/fe/a76165be861b9e363d41708d71358e2637fb5ae9a6f08b4490d4dc8448e5/anemoi_utils-0.4.13.tar.gz", hash = "sha256:bc4ec82172423d1871dd446dcb67e21575edc0f4159f28af0241dcf07d2bf93b", size = 92814 }
+sdist = { url = "https://files.pythonhosted.org/packages/2a/63/d1804851b31f47cd6a89ea4c67991e983aec07e4d00cc401dae22b8dffc6/anemoi_utils-0.4.16.tar.gz", hash = "sha256:6a992face531f796e9bed027abe11bc5e6731d9b5fa7e1c2ece295faf207ed19", size = 94860 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/de/3b/c219df3a94418153739ab7a2ffe2d61169a81e61dc11b5d6dfdb2adf826b/anemoi_utils-0.4.13-py3-none-any.whl", hash = "sha256:534bb9392bfc02bec6edac1aab84808e83051ade7c93abdbada9b1eabc8ccdde", size = 70911 },
+    { url = "https://files.pythonhosted.org/packages/94/e6/a6c4f1c328d8a2d3d3568b627962d1f0ee9e4a772bde7f787020b3b9bad9/anemoi_utils-0.4.16-py3-none-any.whl", hash = "sha256:c9e7ee4a03de387b75fbd24995860d1ed28f5ba0bc9223b855fc2530d07987bb", size = 73424 },
 ]
 
 [package.optional-dependencies]
@@ -142,11 +142,11 @@ wheels = [
 
 [[package]]
 name = "astropy-iers-data"
-version = "0.2025.3.17.0.34.53"
+version = "0.2025.3.24.0.35.32"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/5d/ed/1b7608de11c298cb6b65276c0afc6b4fef4ddbe205420cb599022d727a96/astropy_iers_data-0.2025.3.17.0.34.53.tar.gz", hash = "sha256:646f050d4af4772ac5a0181fd133a452118ca5b4485af69ebe371ff51129ea28", size = 1895946 }
+sdist = { url = "https://files.pythonhosted.org/packages/68/29/f76a6e3704d927a41a88b9c7d428b99ea5106b4c9db0bf529f629913e359/astropy_iers_data-0.2025.3.24.0.35.32.tar.gz", hash = "sha256:4c01603b92800b5a89a2a7418b3f84d66fef3334e8e5af2ec726510db6e1b384", size = 1896659 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/25/bd/745cbee503d3b12df37f8201cf76f1d231c469a11a125511fa75c76e31df/astropy_iers_data-0.2025.3.17.0.34.53-py3-none-any.whl", hash = "sha256:8006784932c625121c091f7b069b3fb4d0f471f63fe5b1e740d6d8f9f75171f7", size = 1948846 },
+    { url = "https://files.pythonhosted.org/packages/73/34/f6d78f23d55bf61cc0d45a91dea496bf312c7d83cb8926dc0dc8b0f4c2f9/astropy_iers_data-0.2025.3.24.0.35.32-py3-none-any.whl", hash = "sha256:a9eb0c46a19d055dac53fdb99d91d0117ec5ccfd0033ff0ffcfcac4d4a44a677", size = 1949603 },
 ]
 
 [[package]]
@@ -357,7 +357,7 @@ wheels = [
 
 [[package]]
 name = "dask"
-version = "2025.2.0"
+version = "2025.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -369,9 +369,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "toolz" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/55/30/ba2d373923cad0e069b50bf27115745fba4fb0a4f53cee7002582cb5cec7/dask-2025.2.0.tar.gz", hash = "sha256:89c87125d04d28141eaccc4794164ce9098163fd22d8ad943db48f8d4c815460", size = 10781637 }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/f1/b4d8ccb5010ecba58a1799cb3c6b7ef5ed0d7d2add53adc1fc0d0ace56fe/dask-2025.3.0.tar.gz", hash = "sha256:322834f44ebc24abeb564c56ccb817c97d6e7af6be71ad0ad96b78b51f2e0e85", size = 10928728 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/4a/738ec3dac7e767c1ba6fbb6ecb908ceda66a1b2f4ee967bc03800fb07630/dask-2025.2.0-py3-none-any.whl", hash = "sha256:f0fdeef6ceb0a06569d456c9e704f220f7f54e80f3a6ea42ab98cea6bc642b6e", size = 1393839 },
+    { url = "https://files.pythonhosted.org/packages/bd/8a/3609033a4bfd7c9b3e8a4e8a5d6e318dfc06ab2e2d3b5cb0e01a60458858/dask-2025.3.0-py3-none-any.whl", hash = "sha256:b5d72bb33788904a218fd7da1850238517592358ecc79c30bb5c188a71df506d", size = 1437133 },
 ]
 
 [[package]]
@@ -400,7 +400,7 @@ wheels = [
 
 [[package]]
 name = "earthkit-data"
-version = "0.13.4"
+version = "0.13.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "array-api-compat" },
@@ -423,9 +423,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "xarray" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f8/7b/9ba0128a7d39e717b5835bc45d4b9df305c49503421850d02d2074251423/earthkit_data-0.13.4.tar.gz", hash = "sha256:adac40f82bcfc899c3b55bd64f8bbd2dd2e510487a9d24b9932531999f7c2fe5", size = 4810580 }
+sdist = { url = "https://files.pythonhosted.org/packages/72/90/c32bc5354024b2bf9ece05d340e13f5a6066392aeb2cfc8c5f46155ef12d/earthkit_data-0.13.5.tar.gz", hash = "sha256:436b0cb34361e8056c03ffe3c4e3e6458ab4b01945ce6a7d766e454b6f4ef82b", size = 4812283 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/66/b9/47b701661b54878ea7ab61e85c45721d8b6ef232906aff7283fe0eb7ba16/earthkit_data-0.13.4-py3-none-any.whl", hash = "sha256:0bf8db177ec1b11d9dd4b9521f538eae357cbcf6c8af82da63dad009927dc676", size = 363337 },
+    { url = "https://files.pythonhosted.org/packages/67/24/b0efecc84f8102dcec1ba7e38ab94896c7764f936b1b90df6c3c8833283a/earthkit_data-0.13.5-py3-none-any.whl", hash = "sha256:32487dad76df86290f5f44476548388e82fb326d84292ccc0d3661e358f41661", size = 363940 },
 ]
 
 [[package]]
@@ -1229,11 +1229,11 @@ wheels = [
 
 [[package]]
 name = "pyparsing"
-version = "3.2.1"
+version = "3.2.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/8b/1a/3544f4f299a47911c2ab3710f534e52fea62a633c96806995da5d25be4b2/pyparsing-3.2.1.tar.gz", hash = "sha256:61980854fd66de3a90028d679a954d5f2623e83144b5afe5ee86f43d762e5f0a", size = 1067694 }
+sdist = { url = "https://files.pythonhosted.org/packages/55/f0/3a81fb395058f5fc84bccb0dc9ca09eddf69b3cc86ccab6729c680121912/pyparsing-3.2.2.tar.gz", hash = "sha256:2a857aee851f113c2de9d4bfd9061baea478cb0f1c7ca6cbf594942d6d111575", size = 1088193 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1c/a7/c8a2d361bf89c0d9577c934ebb7421b25dc84bf3a8e3ac0a40aed9acc547/pyparsing-3.2.1-py3-none-any.whl", hash = "sha256:506ff4f4386c4cec0590ec19e6302d3aedb992fdc02c761e90416f158dacf8e1", size = 107716 },
+    { url = "https://files.pythonhosted.org/packages/f9/83/80c17698f41131f7157a26ae985e2c1f5526db79f277c4416af145f3e12b/pyparsing-3.2.2-py3-none-any.whl", hash = "sha256:6ab05e1cb111cc72acc8ed811a3ca4c2be2af8d7b6df324347f04fd057d8d793", size = 111060 },
 ]
 
 [[package]]
@@ -1426,11 +1426,11 @@ wheels = [
 
 [[package]]
 name = "setuptools"
-version = "77.0.3"
+version = "78.0.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/81/ed/7101d53811fd359333583330ff976e5177c5e871ca8b909d1d6c30553aa3/setuptools-77.0.3.tar.gz", hash = "sha256:583b361c8da8de57403743e756609670de6fb2345920e36dc5c2d914c319c945", size = 1367236 }
+sdist = { url = "https://files.pythonhosted.org/packages/47/42/55a8f24bd1287676b23e56a6d94e416be390ca6e0ee30fa46a782d038f80/setuptools-78.0.1.tar.gz", hash = "sha256:4321d2dc2157b976dee03e1037c9f2bc5fea503c0c47d3c9458e0e8e49e659ce", size = 1367415 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a9/07/99f2cefae815c66eb23148f15d79ec055429c38fa8986edcc712ab5f3223/setuptools-77.0.3-py3-none-any.whl", hash = "sha256:67122e78221da5cf550ddd04cf8742c8fe12094483749a792d56cd669d6cf58c", size = 1255678 },
+    { url = "https://files.pythonhosted.org/packages/42/c8/3faed884acdb2c1f2eb353cbacdd1ee4943de89a199d1f622ebefb6170e5/setuptools-78.0.1-py3-none-any.whl", hash = "sha256:1cc9b32ee94f93224d6c80193cbb768004667aa2f2732a473d6949b0236c1d4e", size = 1255630 },
 ]
 
 [[package]]
@@ -1582,11 +1582,11 @@ wheels = [
 
 [[package]]
 name = "tzdata"
-version = "2025.1"
+version = "2025.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/43/0f/fa4723f22942480be4ca9527bbde8d43f6c3f2fe8412f00e7f5f6746bc8b/tzdata-2025.1.tar.gz", hash = "sha256:24894909e88cdb28bd1636c6887801df64cb485bd593f2fd83ef29075a81d694", size = 194950 }
+sdist = { url = "https://files.pythonhosted.org/packages/95/32/1a225d6164441be760d75c2c42e2780dc0873fe382da3e98a2e1e48361e5/tzdata-2025.2.tar.gz", hash = "sha256:b60a638fcc0daffadf82fe0f57e53d06bdec2f36c4df66280ae79bce6bd6f2b9", size = 196380 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0f/dd/84f10e23edd882c6f968c21c2434fe67bd4a528967067515feca9e611e5e/tzdata-2025.1-py2.py3-none-any.whl", hash = "sha256:7e127113816800496f027041c570f50bcd464a020098a3b6b199517772303639", size = 346762 },
+    { url = "https://files.pythonhosted.org/packages/5c/23/c7abc0ca0a1526a0774eca151daeb8de62ec457e77262b66b359c3c7679e/tzdata-2025.2-py2.py3-none-any.whl", hash = "sha256:1a403fada01ff9221ca8044d701868fa132215d84beb92242d9acd2147f667a8", size = 347839 },
 ]
 
 [[package]]
@@ -1629,8 +1629,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anemoi-datasets", specifier = "~=0.5" },
-    { name = "astropy-healpix", specifier = "~=1.0" },
+    { name = "anemoi-datasets", specifier = "~=0.5.16" },
+    { name = "astropy-healpix", specifier = "~=1.1.2" },
     { name = "flash-attn", marker = "sys_platform == 'linux'", url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl" },
     { name = "matplotlib" },
     { name = "numpy", specifier = "~=2.2" },

@@ -16,6 +16,7 @@ from pathlib import Path
 import pynvml
 import torch
 import torch.distributed as dist
+import torch.multiprocessing
 import torch.utils.data.distributed
 import yaml
 
@@ -31,8 +32,18 @@ class Trainer_Base:
 
     ###########################################
     @staticmethod
-    def init_torch(use_cuda=True, num_accs_per_task=1):
+    def init_torch(use_cuda=True, num_accs_per_task=1, multiprocessing_method="fork"):
+        """
+        Initialize torch, set device and multiprocessing method.
+
+        NOTE: If using the Nvidia profiler, the multiprocessing method must be set to "spawn".
+        The default for linux systems is "fork", which prevents traces from being generated with DDP.
+        """
         torch.set_printoptions(linewidth=120)
+
+        # This strategy is required by the nvidia profiles to properly trace events in worker processes.
+        # This may cause issues with logging. Alternative: "fork"
+        torch.multiprocessing.set_start_method(multiprocessing_method, force=True)
 
         torch.backends.cuda.matmul.allow_tf32 = True
 

@@ -23,6 +23,7 @@ from weathergen.datasets.utils import (
     r3tos2,
     s2tor3,
 )
+from weathergen.utils.logger import init_loggers
 
 
 def encode_times_source(times, time_win) -> torch.tensor:
@@ -300,6 +301,7 @@ class Batchifyer:
         time_win,
         normalizer,
     ):
+        init_loggers()
         si = stream_info
         token_size = si["token_size"]
         is_diagnostic = si["diagnostic"] if "diagnostic" in stream_info else False
