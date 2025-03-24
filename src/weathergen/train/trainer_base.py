@@ -16,8 +16,8 @@ from pathlib import Path
 import pynvml
 import torch
 import torch.distributed as dist
-import torch.utils.data.distributed
 import torch.multiprocessing
+import torch.utils.data.distributed
 import yaml
 
 from weathergen.train.utils import str_to_tensor, tensor_to_str
