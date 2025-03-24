@@ -8,8 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-import os
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -78,11 +78,11 @@ class Trainer(Trainer_Base):
         cf = self.init_streams(cf, run_id_contd)
 
         # create output directory
-        path_run = "./results/" + cf.run_id + "/"
-        path_model = "./models/" + cf.run_id + "/"
+        path_run = Path("./results") / cf.run_id
+        path_model = Path("./models") / cf.run_id
         if self.cf.rank == 0:
-            os.makedirs(path_run, exist_ok=True)
-            os.makedirs(path_model, exist_ok=True)
+            path_run.mkdir(exist_ok=True)
+            path_model.mkdir(exist_ok=True)
             # save config
             cf.save()
             if run_mode == "training":
@@ -782,10 +782,11 @@ class Trainer(Trainer_Base):
 
     ###########################################
     def save_model(self, epoch=-1, name=None):
-        file_out = "./models/" + self.cf.run_id + f"/{self.cf.run_id}_"
-        file_out += "latest" if epoch == -1 else f"epoch{epoch:05d}"
-        file_out += ("_" + name) if name is not None else ""
-        file_out += "{}.chkpt"
+        path_model = Path("./models/") / self.cf.run_id
+        epoch_str = "latest" if epoch == -1 else f"epoch{epoch:05d}"
+        name_str = f"_{name}" if name is not None else ""
+        file_out = path_model / f"{self.cf.run_id}_{epoch_str}_{name_str}.chkpt"
+        temp_file_out = path_model / f"{self.cf.run_id}_{epoch_str}_{name_str}_temp.chkpt"
 
         if self.cf.with_ddp and self.cf.with_fsdp:
             _cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
@@ -800,9 +801,9 @@ class Trainer(Trainer_Base):
 
         if self.cf.rank == 0:
             # save temp file (slow)
-            torch.save(state, file_out.format("_temp"))
+            torch.save(state, temp_file_out)
             # move file (which is changing the link in the file system and very fast)
-            os.replace(file_out.format("_temp"), file_out.format(""))
+            temp_file_out.replace(file_out)
             # save config
             self.cf.save(epoch)
 
