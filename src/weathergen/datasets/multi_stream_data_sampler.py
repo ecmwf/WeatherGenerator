@@ -14,7 +14,6 @@ import numpy as np
 import torch
 
 from weathergen.datasets.anemoi_dataset import AnemoiDataset
-from weathergen.datasets.zfdb_dataset import ZFDBDataset
 from weathergen.datasets.atmorep_dataset import AtmorepDataset
 from weathergen.datasets.batchifyer import Batchifyer
 from weathergen.datasets.fesom_dataset import FesomDataset
@@ -25,6 +24,7 @@ from weathergen.datasets.utils import (
     compute_offsets_scatter_embed,
     compute_source_cell_lens,
 )
+from weathergen.datasets.zfdb_dataset import ZFDBDataset
 from weathergen.utils.logger import logger
 
 

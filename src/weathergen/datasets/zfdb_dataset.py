@@ -10,9 +10,10 @@
 import datetime
 
 import numpy as np
+import pyfdb
 import torch
-
 import zarr
+
 from zfdb import (
     ChunkAxisType,
     FdbSource,
@@ -21,9 +22,7 @@ from zfdb import (
     FdbZarrMapping,
     Request,
 )
-from zfdb.datasources import make_lat_long_sources
-from zfdb.datasources import make_dates_source
-import pyfdb
+from zfdb.datasources import make_dates_source, make_lat_long_sources
 
 
 class ZFDBDataset:
@@ -69,40 +68,38 @@ class ZFDBDataset:
 
         # get all channels that are needed
         # TODO: handle when source/target is not specified, ie query available channels in dataset
-        channels = list(set( stream_info["source"]).union( set( stream_info["target"])))
+        channels = list(set(stream_info["source"]).union(set(stream_info["target"])))
 
         fdb = pyfdb.FDB()
         request = Request(
-                request={
-                    "date": np.arange(
-                        np.datetime64("2020-01-01"),  # TODO: dt_start
-                        np.datetime64("2020-01-03"),  # TODO: dt_end
-                    ),
-                    "time": ["00", "06", "12", "18"],
-                    "class": "ea",
-                    "domain": "g",
-                    "expver": "0001",
-                    "stream": "oper",
-                    "type": "an",
-                    "step": "0",
-                    "levtype": "sfc",
-                    "param": channels,
-                },
-                chunk_axis=ChunkAxisType.DateTime,
-            )
+            request={
+                "date": np.arange(
+                    np.datetime64("2020-01-01"),  # TODO: dt_start
+                    np.datetime64("2021-01-01"),  # TODO: dt_end
+                ),
+                "time": ["00", "06", "12", "18"],
+                "class": "ea",
+                "domain": "g",
+                "expver": "0001",
+                "stream": "oper",
+                "type": "an",
+                "step": "0",
+                "levtype": "sfc",
+                "param": channels,
+            },
+            chunk_axis=ChunkAxisType.DateTime,
+        )
         lat, lon = make_lat_long_sources(fdb, request[0])
-        datetimes = make_dates_source( np.datetime64("2020-01-01"),
-                                       np.datetime64("2020-01-03"),
-                                       np.timedelta64( 6, "h") )
+        datetimes = make_dates_source(
+            np.datetime64("2020-01-01"), np.datetime64("2021-01-03"), np.timedelta64(6, "h")
+        )
 
         mapping = FdbZarrMapping(
             FdbZarrGroup(
                 children=[
                     FdbZarrArray(
                         name="data",
-                        datasource=FdbSource(
-                            request=[ request ]
-                        ),
+                        datasource=FdbSource(request=[request]),
                     ),
                     FdbZarrArray(name="latitudes", datasource=lat),
                     FdbZarrArray(name="longitudes", datasource=lon),
@@ -112,10 +109,10 @@ class ZFDBDataset:
         )
         self.ds = zarr.open_group(mapping, mode="r")
 
-        self.data = self.ds['data']
-        self.lats = np.array( self.ds['latitudes'])
-        self.lons = np.array( self.ds['longitudes'])
-        self.datatimes = self.ds['datetimes']
+        self.data = self.ds["data"]
+        self.latitudes = np.array(self.ds["latitudes"])
+        self.longitudes = np.array(self.ds["longitudes"])
+        self.datetimes = self.ds["datetimes"]
 
         self.properties = {
             "stream_id": 0,
@@ -126,12 +123,15 @@ class ZFDBDataset:
         self.target_channels = stream_info["target"]
         self.target_idx = [0, 1]
         self.source_idx = [0, 1]
+
         self.geoinfo_idx = []
 
         # TODO
         self.num_steps_per_window = 1
 
-        # TODO: get mean and var 
+        # TODO: get mean and var
+        self.mean = np.zeros(len(self.source_idx))
+        self.stdev = np.ones(len(self.source_idx))
 
     def __len__(self):
         """
@@ -207,20 +207,24 @@ class ZFDBDataset:
             )
 
         # extract number of time steps
-        data = self.ds[idx : idx + self.num_steps_per_window]
+        data = self.data[idx : idx + self.num_steps_per_window][:, :, 0]
         # extract channels
         data = (
-            data[:, channels_idx]
+            data[:, channels_idx].transpose([0, 2, 1]).reshape((data.shape[0] * data.shape[2], -1))
         )
 
         # construct lat/lon coords
-        latlon = np.concatenate(
-            [
-                np.expand_dims(self.latitudes, 0),
-                np.expand_dims(self.longitudes, 0),
-            ],
-            0,
-        ).transpose()
+        latlon = (
+            np.concatenate(
+                [
+                    np.expand_dims(self.latitudes, 0),
+                    np.expand_dims(self.longitudes, 0),
+                ],
+                0,
+            )
+            .transpose()
+            .astype(np.float32)
+        )
         latlon = np.repeat(latlon, self.num_steps_per_window, axis=0).reshape((-1, latlon.shape[1]))
 
         # empty geoinfos
@@ -418,4 +422,4 @@ class ZFDBDataset:
         if not self.ds:
             return (np.array([], dtype=np.datetime64), np.array([], dtype=np.datetime64))
 
-        return (self.ds.dates[idx], self.ds.dates[idx])
+        return (self.datetimes[idx], self.datetimes[idx])
