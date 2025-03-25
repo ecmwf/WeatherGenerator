@@ -538,11 +538,12 @@ class Model(torch.nn.Module):
     #########################################
     def load(self, run_id, epoch=None):
         path_run = Path(self.cf.model_path) / run_id
-        fname = path_run / (
-            f"{run_id}_epoch{epoch:05d}.chkpt" if epoch is not None else f"{run_id}_latest.chkpt"
-        )
+        epoch_id = f"epoch{epoch:05d}" if epoch is not None else "latest"
+        filename = f"{run_id}_{epoch_id}.chkpt"
 
-        params = torch.load(fname, map_location=torch.device("cpu"), weights_only=True)
+        params = torch.load(
+            path_run / filename, map_location=torch.device("cpu"), weights_only=True
+        )
         params_renamed = {}
         for k in params.keys():
             params_renamed[k.replace("module.", "")] = params[k]

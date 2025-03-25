@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import numpy as np
 import torch
 
 
@@ -45,6 +46,8 @@ class StreamData:
 
         # initialize empty members
         self.target_coords = [[] for _ in range(forecast_steps + 1)]
+        self.target_coords_raw = [[] for _ in range(forecast_steps + 1)]
+        self.target_times_raw = [[] for _ in range(forecast_steps + 1)]
         # this is not directly used but to precompute index in compute_idxs_predict()
         self.target_coords_lens = [[] for _ in range(forecast_steps + 1)]
         self.target_tokens = [[] for _ in range(forecast_steps + 1)]
@@ -124,6 +127,8 @@ class StreamData:
         self.target_tokens_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
         self.target_coords[fstep] += [torch.tensor([])]
         self.target_coords_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
+        self.target_coords_raw[fstep] += [torch.tensor([])]
+        self.target_times_raw_raw[fstep] += [torch.tensor([])]
 
     def add_source(
         self, ss_raw: torch.tensor, ss_lens: torch.tensor, ss_cells: list, ss_centroids: list
@@ -153,6 +158,8 @@ class StreamData:
         fstep: int,
         targets: list,
         target_coords: torch.tensor,
+        target_coords_raw: torch.tensor,
+        times_raw: torch.tensor,
     ) -> None:
         """
         Add data for target for one input.
@@ -167,6 +174,8 @@ class StreamData:
             length of targets per cell
         target_coords : list( number of healpix cells)[ torch.tensor( points per cell, 105)]
             target coordinates
+        target_times : list( number of healpix cells)[ torch.tensor( points per cell)]
+            absolute target times
 
         Returns
         -------
@@ -175,6 +184,8 @@ class StreamData:
 
         self.target_tokens[fstep] += [targets]
         self.target_coords[fstep] += [target_coords]
+        self.target_coords_raw[fstep] += [target_coords_raw]
+        self.target_times_raw[fstep] += [times_raw]
 
     def target_empty(self) -> bool:
         """
@@ -245,11 +256,12 @@ class StreamData:
         """
 
         if torch.tensor([len(s) for s in s_list]).sum() == 0:
-            return torch.tensor([])
+            return torch.tensor([]) if type(s_list[0][0]) is torch.Tensor else np.array([])
 
-        ret = torch.cat(
+        cat = torch.cat if type(s_list[0][0]) is torch.Tensor else np.concatenate
+        ret = cat(
             [
-                torch.cat([s_list[i_s][i] for i_s in range(len(s_list)) if len(s_list[i_s]) > 0])
+                cat([s_list[i_s][i] for i_s in range(len(s_list)) if len(s_list[i_s]) > 0])
                 for i in range(num_healpix_cells)
             ]
         )
@@ -305,15 +317,20 @@ class StreamData:
                     [[len(f) for f in ff] for ff in self.target_tokens[fstep]]
                 ).sum(0)
                 self.target_coords[fstep] = self._merge_cells(self.target_coords[fstep], nt)
+                self.target_coords_raw[fstep] = self._merge_cells(self.target_coords_raw[fstep], nt)
+                self.target_times_raw[fstep] = self._merge_cells(self.target_times_raw[fstep], nt)
                 self.target_tokens[fstep] = self._merge_cells(self.target_tokens[fstep], nt)
                 # remove NaNs
                 # TODO: it seems better to drop data points with NaN values in the coords than
                 #       to mask them
-                self.target_coords[fstep][torch.isnan(self.target_coords[fstep])] = self.mask_value
+                assert not torch.isnan(self.target_coords[fstep]).any()
+                # self.target_coords[fstep][torch.isnan(self.target_coords[fstep])] = self.mask_value
 
             else:
                 # TODO: is this branch still needed
                 self.target_coords[fstep] = torch.tensor([])
+                self.target_coords_raw[fstep] = torch.tensor([])
+                self.target_times_raw[fstep] = torch.tensor([])
                 self.target_tokens[fstep] = torch.tensor([])
                 self.target_tokens_lens[fstep] = torch.tensor([])
                 self.target_coords_lens[fstep] = torch.tensor([])

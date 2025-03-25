@@ -31,16 +31,16 @@ class Config:
                     for k, v in rt.items():
                         print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
 
-    def save(self, epoch: str = None) -> None:
+    def save(self, epoch=None):
+        path_models = Path(self.model_path)
         # save in directory with model files
-        dirname = Path(self.model_path) / self.run_id
-        dirname.mkdir(parents=True, exist_ok=True)
+        dirname = path_models / self.run_id
+        dirname.mkdir(exist_ok=True, parents=True)
 
-        fname = dirname / f"model_{self.run_id}"
         epoch_str = ""
         if epoch is not None:
             epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
-        fname = fname.with_name(fname.name + f"{epoch_str}.json")
+        fname = dirname / f"model_{self.run_id}{epoch_str}.json"
 
         json_str = json.dumps(self.__dict__)
         with fname.open("w") as f:
@@ -56,13 +56,11 @@ class Config:
             fname = Path(run_id)
             logger.info(f"Loading config from provided full run_id path: {fname}")
         else:
-            fname = Path(model_path) / run_id / f"model_{run_id}"
-
-            # append also the epoch to the file name
+            path_models = Path("./models")
             epoch_str = ""
             if epoch is not None:
                 epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
-            fname = fname.with_name(fname.name + f"{epoch_str}.json")
+            fname = path_models / run_id / f"model_{run_id}{epoch_str}.json"
 
             logger.info(f"Loading config from specified run_id and epoch: {fname}")
 

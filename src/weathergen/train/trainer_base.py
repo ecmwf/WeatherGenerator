@@ -16,6 +16,7 @@ from pathlib import Path
 import pynvml
 import torch
 import torch.distributed as dist
+import torch.multiprocessing
 import torch.utils.data.distributed
 import yaml
 
@@ -31,8 +32,18 @@ class Trainer_Base:
 
     ###########################################
     @staticmethod
-    def init_torch(use_cuda=True, num_accs_per_task=1):
+    def init_torch(use_cuda=True, num_accs_per_task=1, multiprocessing_method="fork"):
+        """
+        Initialize torch, set device and multiprocessing method.
+
+        NOTE: If using the Nvidia profiler, the multiprocessing method must be set to "spawn".
+        The default for linux systems is "fork", which prevents traces from being generated with DDP.
+        """
         torch.set_printoptions(linewidth=120)
+
+        # This strategy is required by the nvidia profiles to properly trace events in worker processes.
+        # This may cause issues with logging. Alternative: "fork"
+        torch.multiprocessing.set_start_method(multiprocessing_method, force=True)
 
         torch.backends.cuda.matmul.allow_tf32 = True
 
@@ -113,14 +124,14 @@ class Trainer_Base:
         if not hasattr(cf, "streams") or not isinstance(cf.streams, list):
             cf.streams = []
 
+        streams_dir = Path(cf.streams_directory)
         # warn if specified dir does not exist
-        if not os.path.isdir(cf.streams_directory):
-            sd = cf.streams_directory
-            _logger.warning(f"Streams directory {sd} does not exist.")
+        if not streams_dir.is_dir():
+            _logger.warning(f"Streams directory {streams_dir} does not exist.")
 
         # read all reportypes from directory, append to existing ones
         temp = {}
-        streams_dir = Path(cf.streams_directory).absolute()
+        streams_dir = streams_dir.absolute()
         _logger.info(f"Reading streams from {streams_dir}")
 
         for fh in sorted(streams_dir.rglob("*.yml")):
