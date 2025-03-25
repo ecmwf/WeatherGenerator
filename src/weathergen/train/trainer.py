@@ -451,8 +451,6 @@ class Trainer(Trainer_Base):
         mode="training",
         log_data=False,
     ):
-        _rng = np.random.default_rng()
-
         # merge across batch dimension (and keep streams)
         targets_rt = [
             [
