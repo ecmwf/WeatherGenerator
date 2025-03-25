@@ -118,10 +118,12 @@ class Trainer(Trainer_Base):
             self.dataset_val, **loader_params, sampler=None
         )
 
-        num_channels = self.dataset_val.get_num_chs()
-        self.geoinfo_sizes = self.dataset_val.get_geoinfo_sizes()
+        sources_size = self.dataset_val.get_sources_size()
+        targets_num_channels = self.dataset_val.get_targets_num_channels()
+        targets_coords_size = self.dataset_val.get_targets_coords_size()
 
-        self.model = Model(cf, num_channels, self.geoinfo_sizes).create().to(self.devices[0])
+        self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+        self.model = self.model.to(self.devices[0])
         self.model.load(run_id_trained, epoch)
         print(f"Loaded model {run_id_trained} at epoch {epoch}.")
         self.ddp_model = self.model
@@ -793,7 +795,7 @@ class Trainer(Trainer_Base):
         path_model = Path("./models/") / self.cf.run_id
         epoch_str = "latest" if epoch == -1 else f"epoch{epoch:05d}"
         name_str = f"_{name}" if name is not None else ""
-        file_out = path_model / f"{self.cf.run_id}_{epoch_str}_{name_str}.chkpt"
+        file_out = path_model / f"{self.cf.run_id}_{epoch_str}{name_str}.chkpt"
         temp_file_out = path_model / f"{self.cf.run_id}_{epoch_str}_{name_str}_temp.chkpt"
 
         if self.cf.with_ddp and self.cf.with_fsdp:
