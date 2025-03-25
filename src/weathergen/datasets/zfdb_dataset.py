@@ -148,7 +148,7 @@ class ZFDBDataset:
         if not self.ds:
             return 0
 
-        return len(self.ds)
+        return len(self.data)
 
     def get_source(self, idx: int) -> tuple[np.array, np.array, np.array, np.array]:
         """
