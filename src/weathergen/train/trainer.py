@@ -78,6 +78,8 @@ class Trainer(Trainer_Base):
         cf = self.init_streams(cf, run_id_contd)
 
         # create output directory
+        cf.run_path = cf.run_path if hasattr(cf, "run_path") else "./results"
+        cf.model_path = cf.model_path if hasattr(cf, "model_path") else "./models"
         path_run = Path(cf.run_path) / cf.run_id
         path_model = Path(cf.model_path) / cf.run_id
         if self.cf.rank == 0:
