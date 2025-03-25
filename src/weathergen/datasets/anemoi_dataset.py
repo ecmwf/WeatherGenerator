@@ -128,7 +128,7 @@ class AnemoiDataset:
 
         self.ds = open_dataset(self.ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end)
 
-    def __len__(self):
+    def __len__(self) -> int:
         """
         Length of dataset
 
@@ -230,7 +230,7 @@ class AnemoiDataset:
 
         return (latlon, geoinfos, data, datetimes)
 
-    def get_source_num_channels(self):
+    def get_source_num_channels(self) -> int:
         """
         Get number of source channels
 
@@ -244,7 +244,7 @@ class AnemoiDataset:
         """
         return len(self.source_idx)
 
-    def get_target_num_channels(self):
+    def get_target_num_channels(self) -> int:
         """
         Get number of target channels
 
@@ -258,7 +258,7 @@ class AnemoiDataset:
         """
         return len(self.target_idx)
 
-    def get_coords_size(self):
+    def get_coords_size(self) -> int:
         """
         Get size of coords
 
@@ -272,7 +272,7 @@ class AnemoiDataset:
         """
         return 2
 
-    def get_geoinfo_size(self):
+    def get_geoinfo_size(self) -> int:
         """
         Get size of geoinfos
 
@@ -286,13 +286,13 @@ class AnemoiDataset:
         """
         return len(self.geoinfo_idx)
 
-    def normalize_coords(self, coords):
+    def normalize_coords(self, coords: torch.tensor) -> torch.tensor:
         """
         Normalize coordinates
 
         Parameters
         ----------
-        coords : torch.tensor
+        coords :
             coordinates to be normalized
 
         Returns
@@ -304,13 +304,13 @@ class AnemoiDataset:
 
         return coords
 
-    def normalize_geoinfos(self, geoinfos):
+    def normalize_geoinfos(self, geoinfos: torch.tensor) -> torch.tensor:
         """
         Normalize geoinfos
 
         Parameters
         ----------
-        geoinfos : torch.tensor
+        geoinfos :
             geoinfos to be normalized
 
         Returns
@@ -318,80 +318,80 @@ class AnemoiDataset:
         Normalized geoinfo
         """
 
-        assert geoinfos.shape[-1] == 0
+        assert geoinfos.shape[-1] == 0, "incorrect number of geoinfo channels"
         return geoinfos
 
-    def normalize_source_channels(self, source):
+    def normalize_source_channels(self, source: torch.tensor) -> torch.tensor:
         """
         Normalize source channels
 
         Parameters
         ----------
-        data : torch.tensor
+        data :
             data to be normalized
 
         Returns
         -------
         Normalized data
         """
-        assert source.shape[-1] == len(self.source_idx)
+        assert source.shape[-1] == len(self.source_idx), "incorrect number of channels"
         for i, ch in enumerate(self.source_idx):
             source[..., i] = (source[..., i] - self.mean[ch]) / self.stdev[ch]
 
         return source
 
-    def normalize_target_channels(self, target):
+    def normalize_target_channels(self, target: torch.tensor) -> torch.tensor:
         """
         Normalize target channels
 
         Parameters
         ----------
-        data : torch.tensor
+        data :
             data to be normalized
 
         Returns
         -------
         Normalized data
         """
-        assert target.shape[-1] == len(self.target_idx)
+        assert target.shape[-1] == len(self.target_idx), "incorrect number of channels"
         for i, ch in enumerate(self.target_idx):
             target[..., i] = (target[..., i] - self.mean[ch]) / self.stdev[ch]
 
         return target
 
-    def denormalize_source_channels(self, source):
+    def denormalize_source_channels(self, source: torch.tensor) -> torch.tensor:
         """
         Denormalize source channels
 
         Parameters
         ----------
-        data : torch.tensor
+        data :
             data to be denormalized
 
         Returns
         -------
         Denormalized data
         """
-        assert source.shape[-1] == len(self.source_idx)
+        assert source.shape[-1] == len(self.source_idx), "incorrect number of channels"
         for i, ch in enumerate(self.source_idx):
             source[..., i] = (source[..., i] * self.stdev[ch]) + self.mean[ch]
 
         return source
 
-    def denormalize_target_channels(self, data: torch.tensor):
+    def denormalize_target_channels(self, data: torch.tensor) -> torch.tensor:
         """
         Denormalize target channels
 
         Parameters
         ----------
-        data : torch.tensor
+        data :
             data to be denormalized (target or pred)
 
         Returns
         -------
         Denormalized data
         """
-        assert data.shape[-1] == len(self.target_idx)
+        assert data.shape[-1] == len(self.target_idx), "incorrect number of channels"
         for i, ch in enumerate(self.target_idx):
             data[..., i] = (data[..., i] * self.stdev[ch]) + self.mean[ch]
 
@@ -403,7 +403,7 @@ class AnemoiDataset:
 
         Parameters
         ----------
-        idx : int
+        idx :
             index of temporal window
 
         Returns
