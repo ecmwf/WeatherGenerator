@@ -19,6 +19,7 @@ import torch.distributed as dist
 import torch.multiprocessing
 import torch.utils.data.distributed
 import yaml
+from omegaconf import OmegaConf
 
 from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.config import Config
@@ -111,47 +112,36 @@ class Trainer_Base:
 
         return
 
-    ###########################################
     @staticmethod
-    def init_streams(cf: Config, run_id_contd):
-        if not hasattr(cf, "streams_directory"):
-            return cf
-
-        # use previously specified streams when continuing a run
-        if run_id_contd is not None:
-            return cf
-
-        if not hasattr(cf, "streams") or not isinstance(cf.streams, list):
-            cf.streams = []
-
-        streams_dir = Path(cf.streams_directory)
-        # warn if specified dir does not exist
-        if not streams_dir.is_dir():
-            _logger.warning(f"Streams directory {streams_dir} does not exist.")
+    def get_streams(streams_directory: Path):
+        if not streams_directory.is_dir():
+            _logger.warning(f"Streams directory {streams_directory} does not exist.")
 
         # read all reportypes from directory, append to existing ones
-        temp = {}
-        streams_dir = streams_dir.absolute()
-        _logger.info(f"Reading streams from {streams_dir}")
+        streams_directory = streams_directory.absolute()
+        _logger.info(f"Reading streams from {streams_directory}")
 
-        for fh in sorted(streams_dir.rglob("*.yml")):
-            stream_parsed = yaml.safe_load(fh.read_text())
-            if stream_parsed is not None:
-                temp.update(stream_parsed)
-        for k, v in temp.items():
-            v["name"] = k
-            cf.streams.append(v)
+        # append streams to existing (only relevant for evaluation)
+        streams = []
+        for config_file in sorted(streams_directory.rglob("*.yml")):
+            try:
+                stream_name, stream_config = [*OmegaConf.load(config_file).items()][0]
+            except yaml.scanner.ScannerError:
+                _logger.warning(f"Invalid yaml file: {config_file}")
+                continue
+
+            stream_config.name = stream_name
+            streams.append(stream_config)
 
         # sanity checking (at some point, the dict should be parsed into a class)
+        # check if all filenames accross all streams are unique
         rts = [rt["filenames"] for rt in cf.streams]
-        # flatten list
         rts = list(itertools.chain.from_iterable(rts))
-        if len(rts) != len(list(set(rts))):
+        if len(rts) != len(set(rts)):
             _logger.warning("Duplicate reportypes specified.")
 
-        return cf
+        return OmegaConf.create({"streams": streams})
 
-    ###########################################
     def init_perf_monitoring(self):
         self.device_handles, self.device_names = [], []
 
