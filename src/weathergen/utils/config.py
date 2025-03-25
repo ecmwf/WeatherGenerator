@@ -56,7 +56,7 @@ class Config:
             fname = Path(run_id)
             logger.info(f"Loading config from provided full run_id path: {fname}")
         else:
-            path_models = Path("./models")
+            path_models = Path(model_path)
             epoch_str = ""
             if epoch is not None:
                 epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
