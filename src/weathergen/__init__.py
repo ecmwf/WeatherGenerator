@@ -12,6 +12,7 @@ import pdb
 import sys
 import time
 import traceback
+from pathlib import Path
 
 import pandas as pd
 
@@ -20,7 +21,6 @@ from weathergen.utils.config import Config, load_overwrite_conf, load_private_co
 from weathergen.utils.logger import init_loggers
 
 
-####################################################################################################
 def evaluate():
     """
     Evaluation function for WeatherGenerator model.
@@ -252,7 +252,7 @@ def train() -> None:
     init_loggers()
 
     # get the non-default configs: private and overwrite
-    private_cf = load_private_conf(args.private_config)
+    private_cf = load_private_conf(Path(args.private_config))
     overwrite_cf = load_overwrite_conf(args.config)
 
     cf = Config()

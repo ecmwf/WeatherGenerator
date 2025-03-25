@@ -89,6 +89,22 @@ def load_overwrite_conf(pth: str) -> dict:
         overwrite_conf = yaml.safe_load(overwrite_path.read_text())
         return overwrite_conf
 
+
+def load_private_conf(private_home: Path | None = None) -> dict:
+    "Return the private configuration."
+    "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
+
+    if private_home is None or not private_home.is_file():
+        if "WEATHERGEN_PRIVATE_CONF" in os.environ:
+            private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
+        else:
+            raise ValueError(
+                "No private config path is provided in the command line and WEATHERGEN_PRIVATE_CONF is not set."
+            )
+
+    return OmegaConf.load(private_home)
+
+
 def get_streams(streams_directory: Path):
     if not streams_directory.is_dir():
         _logger.warning(f"Streams directory {streams_directory} does not exist.")
@@ -117,22 +133,3 @@ def get_streams(streams_directory: Path):
         _logger.warning("Duplicate reportypes specified.")
 
     return OmegaConf.create({"streams": streams})
-
-
-def load_private_conf(pth: str) -> dict:
-    "Return the private configuration."
-    "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
-
-    if not pth:
-        if "WEATHERGEN_PRIVATE_CONF" in os.environ:
-            private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
-            private_conf = yaml.safe_load(private_home.read_text())
-            return private_conf
-        else:
-            raise ValueError(
-                "No private config path is provided in the command line and WEATHERGEN_PRIVATE_CONF is not set."
-            )
-    else:
-        private_home = Path(pth)
-        private_conf = yaml.safe_load(private_home.read_text())
-        return private_conf
