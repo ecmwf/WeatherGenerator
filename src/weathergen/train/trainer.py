@@ -27,6 +27,7 @@ from torch.distributed.fsdp.wrap import (
 )
 
 import weathergen.train.loss as losses
+import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.train.lr_scheduler import LearningRateScheduler
@@ -76,7 +77,7 @@ class Trainer(Trainer_Base):
 
         # read configuration of data streams
         #FIXME should concat streams together really
-        cf.streams = self.get_streams(Path(cf.streams_directory)) 
+        cf.streams = config.get_streams(Path(cf.streams_directory))
 
         # create output directory
         cf.run_path = cf.run_path if hasattr(cf, "run_path") else "./results"

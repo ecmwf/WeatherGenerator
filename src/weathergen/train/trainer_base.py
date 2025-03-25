@@ -8,18 +8,14 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
-import itertools
 import logging
 import os
-from pathlib import Path
 
 import pynvml
 import torch
 import torch.distributed as dist
 import torch.multiprocessing
 import torch.utils.data.distributed
-import yaml
-from omegaconf import OmegaConf
 
 from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.config import Config
@@ -111,36 +107,6 @@ class Trainer_Base:
         cf.with_ddp = True
 
         return
-
-    @staticmethod
-    def get_streams(streams_directory: Path):
-        if not streams_directory.is_dir():
-            _logger.warning(f"Streams directory {streams_directory} does not exist.")
-
-        # read all reportypes from directory, append to existing ones
-        streams_directory = streams_directory.absolute()
-        _logger.info(f"Reading streams from {streams_directory}")
-
-        # append streams to existing (only relevant for evaluation)
-        streams = []
-        for config_file in sorted(streams_directory.rglob("*.yml")):
-            try:
-                stream_name, stream_config = [*OmegaConf.load(config_file).items()][0]
-            except yaml.scanner.ScannerError:
-                _logger.warning(f"Invalid yaml file: {config_file}")
-                continue
-
-            stream_config.name = stream_name
-            streams.append(stream_config)
-
-        # sanity checking (at some point, the dict should be parsed into a class)
-        # check if all filenames accross all streams are unique
-        rts = [rt["filenames"] for rt in cf.streams]
-        rts = list(itertools.chain.from_iterable(rts))
-        if len(rts) != len(set(rts)):
-            _logger.warning("Duplicate reportypes specified.")
-
-        return OmegaConf.create({"streams": streams})
 
     def init_perf_monitoring(self):
         self.device_handles, self.device_names = [], []

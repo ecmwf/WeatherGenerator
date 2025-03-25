@@ -7,11 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import itertools
 import json
+import logging
 import os
 from pathlib import Path
 
+from omegaconf import OmegaConf
 import yaml
+_logger = logging.getLogger(__name__)
+
 
 from weathergen.utils.logger import logger
 
@@ -83,6 +88,35 @@ def load_overwrite_conf(pth: str) -> dict:
         overwrite_path = Path(pth)
         overwrite_conf = yaml.safe_load(overwrite_path.read_text())
         return overwrite_conf
+
+def get_streams(streams_directory: Path):
+    if not streams_directory.is_dir():
+        _logger.warning(f"Streams directory {streams_directory} does not exist.")
+
+    # read all reportypes from directory, append to existing ones
+    streams_directory = streams_directory.absolute()
+    _logger.info(f"Reading streams from {streams_directory}")
+
+    # append streams to existing (only relevant for evaluation)
+    streams = []
+    for config_file in sorted(streams_directory.rglob("*.yml")):
+        try:
+            stream_name, stream_config = [*OmegaConf.load(config_file).items()][0]
+        except yaml.scanner.ScannerError:
+            _logger.warning(f"Invalid yaml file: {config_file}")
+            continue
+
+        stream_config.name = stream_name
+        streams.append(stream_config)
+
+    # sanity checking (at some point, the dict should be parsed into a class)
+    # check if all filenames accross all streams are unique
+    rts = [rt["filenames"] for rt in cf.streams]
+    rts = list(itertools.chain.from_iterable(rts))
+    if len(rts) != len(set(rts)):
+        _logger.warning("Duplicate reportypes specified.")
+
+    return OmegaConf.create({"streams": streams})
 
 
 def load_private_conf(pth: str) -> dict:
