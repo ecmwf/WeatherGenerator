@@ -111,7 +111,7 @@ def get_streams(streams_directory: Path):
 
     # sanity checking (at some point, the dict should be parsed into a class)
     # check if all filenames accross all streams are unique
-    rts = [rt["filenames"] for rt in cf.streams]
+    rts = [rt["filenames"] for rt in streams]
     rts = list(itertools.chain.from_iterable(rts))
     if len(rts) != len(set(rts)):
         _logger.warning("Duplicate reportypes specified.")
