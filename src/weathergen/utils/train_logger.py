@@ -58,6 +58,7 @@ class TrainLogger:
 
         # TODO: performance: we repeatedly open the file for each call. Better for multiprocessing
         # but we can probably do better and rely for example on the logging module.
+
         with open(self.path_run / "metrics.json", "ab") as f:
             s = json.dumps(clean_metrics) + "\n"
             f.write(s.encode("utf-8"))
@@ -139,7 +140,7 @@ class TrainLogger:
         cf = Config.load(run_id, epoch)
         run_id = cf.run_id
 
-        result_dir = Path(f"./results/{run_id}")
+        result_dir = Path(cf.run_path) / run_id
         fname_log_train = result_dir / f"{run_id}_train_log.txt"
         fname_log_val = result_dir / f"{run_id}_val_log.txt"
         fname_perf_val = result_dir / f"{run_id}_perf_log.txt"

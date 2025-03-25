@@ -13,6 +13,8 @@ from pathlib import Path
 
 import yaml
 
+from weathergen.utils.logger import logger
+
 
 ###########################################
 class Config:
@@ -30,7 +32,7 @@ class Config:
                         print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
 
     def save(self, epoch=None):
-        path_models = Path("./models")
+        path_models = Path(self.model_path)
         # save in directory with model files
         dirname = path_models / self.run_id
         dirname.mkdir(exist_ok=True, parents=True)
@@ -41,21 +43,29 @@ class Config:
         fname = dirname / f"model_{self.run_id}{epoch_str}.json"
 
         json_str = json.dumps(self.__dict__)
-        with open(fname, "w") as f:
+        with fname.open("w") as f:
             f.write(json_str)
 
     @staticmethod
-    def load(run_id, epoch=None):
-        if "/" in run_id:  # assumed to be full path instead of just id
+    def load(run_id: str, epoch: int = None, model_path: str = "./models") -> "Config":
+        """
+        Load a configuration file from a given run_id and epoch.
+        If run_id is a full path, loads it from the full path.
+        """
+        if Path(run_id).exists():  # load from the full path if a full path is provided
             fname = Path(run_id)
+            logger.info(f"Loading config from provided full run_id path: {fname}")
         else:
-            path_models = Path("./models")
+            path_models = Path(model_path)
             epoch_str = ""
             if epoch is not None:
                 epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
             fname = path_models / run_id / f"model_{run_id}{epoch_str}.json"
 
-        with open(fname) as f:
+            logger.info(f"Loading config from specified run_id and epoch: {fname}")
+
+        # open the file and read into a config object
+        with fname.open() as f:
             json_str = f.readlines()
 
         cf = Config()

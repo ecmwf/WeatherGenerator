@@ -88,14 +88,27 @@ def evaluate():
         default=["ERA5"],
         help="Analysis output streams during evaluation.",
     )
+    parser.add_argument(
+        "--private_config",
+        type=str,
+        default=None,
+        help="Path to private configuration file for paths.",
+    )
 
     args = parser.parse_args()
+
+    # get the paths from the private config
+    private_cf = load_private_conf(args.private_config)
 
     # TODO: move somewhere else
     init_loggers()
 
-    # load config if specified
-    cf = Config.load(args.run_id, args.epoch)
+    # load config: if run_id is full path, it loads from there
+    cf = Config.load(args.run_id, args.epoch, private_cf["model_path"])
+
+    # add parameters from private (paths) config
+    for k, v in private_cf.items():
+        setattr(cf, k, v)
 
     cf.run_history += [(cf.run_id, cf.istep)]
 
