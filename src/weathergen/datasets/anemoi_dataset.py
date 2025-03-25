@@ -11,6 +11,7 @@ import datetime
 import logging
 
 import numpy as np
+import torch
 from anemoi.datasets import open_dataset
 
 _logger = logging.getLogger(__name__)
@@ -28,6 +29,29 @@ class AnemoiDataset:
         filename: str,
         stream_info: dict,
     ) -> None:
+        """
+        Construct dataset based on anemoi dataset
+
+        Parameters
+        ----------
+        start : int
+            Start time
+        end : int
+            End time
+        len_hrs : int
+            length of data window
+        step_hrs :
+            delta hours between start times of windows
+        filename :
+            filename (and path) of dataset
+        stream_info :
+            information about stream
+
+        Returns
+        -------
+        None
+        """
+
         # TODO: add support for different normalization modes
 
         assert len_hrs == step_hrs, "Currently only step_hrs=len_hrs is supported"
@@ -106,9 +130,18 @@ class AnemoiDataset:
         else:
             self.ds = open_dataset(ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end)
 
-    def __len__(self):
-        "Length of dataset"
+    def __len__(self) -> int:
+        """
+        Length of dataset
 
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        length of dataset
+        """
         if not self.ds:
             return 0
 
@@ -116,13 +149,31 @@ class AnemoiDataset:
 
     def get_source(self, idx: int) -> tuple[np.array, np.array, np.array, np.array]:
         """
-        TODO
+        Get source data for idx
+
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+
+        Returns
+        -------
+        source data (coords, geoinfos, data, datetimes)
         """
         return self._get(idx, self.source_idx)
 
     def get_target(self, idx: int) -> tuple[np.array, np.array, np.array, np.array]:
         """
-        TODO
+        Get target data for idx
+
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+
+        Returns
+        -------
+        target data (coords, geoinfos, data, datetimes)
         """
         return self._get(idx, self.target_idx)
 
@@ -130,7 +181,18 @@ class AnemoiDataset:
         self, idx: int, channels_idx: np.array
     ) -> tuple[np.array, np.array, np.array, np.array]:
         """
-        TODO
+        Get data for window
+
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+        channels_idx : np.array
+            Selection of channels
+
+        Returns
+        -------
+        data (coords, geoinfos, data, datetimes)
         """
 
         if not self.ds:
@@ -172,74 +234,186 @@ class AnemoiDataset:
 
         return (latlon, geoinfos, data, datetimes)
 
-    def get_source_size(self):
+    def get_source_num_channels(self) -> int:
         """
-        TODO
-        """
-        return 2 + len(self.geoinfo_idx) + len(self.source_idx)
+        Get number of source channels
 
-    def get_source_num_channels(self):
-        """
-        TODO
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        number of source channels
         """
         return len(self.source_idx)
 
-    def get_target_size(self):
+    def get_target_num_channels(self) -> int:
         """
-        TODO
-        """
-        return 2 + len(self.geoinfo_idx) + len(self.target_idx)
+        Get number of target channels
 
-    def get_target_num_channels(self):
-        """
-        TODO
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        number of target channels
         """
         return len(self.target_idx)
 
-    def get_geoinfo_size(self):
+    def get_coords_size(self) -> int:
         """
-        TODO
+        Get size of coords
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        size of coords
+        """
+        return 2
+
+    def get_geoinfo_size(self) -> int:
+        """
+        Get size of geoinfos
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        size of geoinfos
         """
         return len(self.geoinfo_idx)
 
-    def normalize_coords(self, coords):
+    def normalize_coords(self, coords: torch.tensor) -> torch.tensor:
         """
-        TODO
+        Normalize coordinates
+
+        Parameters
+        ----------
+        coords :
+            coordinates to be normalized
+
+        Returns
+        -------
+        Normalized coordinates
         """
         coords[..., 0] = np.sin(np.deg2rad(coords[..., 0]))
         coords[..., 1] = np.sin(0.5 * np.deg2rad(coords[..., 1]))
 
         return coords
 
-    def normalize_geoinfos(self, geoinfos):
+    def normalize_geoinfos(self, geoinfos: torch.tensor) -> torch.tensor:
         """
-        TODO
+        Normalize geoinfos
+
+        Parameters
+        ----------
+        geoinfos :
+            geoinfos to be normalized
+
+        Returns
+        -------
+        Normalized geoinfo
         """
 
-        assert geoinfos.shape[-1] == 0
+        assert geoinfos.shape[-1] == 0, "incorrect number of geoinfo channels"
         return geoinfos
 
-    def normalize_source_channels(self, source):
+    def normalize_source_channels(self, source: torch.tensor) -> torch.tensor:
         """
-        TODO
+        Normalize source channels
+
+        Parameters
+        ----------
+        data :
+            data to be normalized
+
+        Returns
+        -------
+        Normalized data
         """
-        assert source.shape[1] == len(self.source_idx)
+        assert source.shape[-1] == len(self.source_idx), "incorrect number of channels"
         for i, ch in enumerate(self.source_idx):
             source[..., i] = (source[..., i] - self.mean[ch]) / self.stdev[ch]
 
         return source
 
-    def normalize_target_channels(self, target):
+    def normalize_target_channels(self, target: torch.tensor) -> torch.tensor:
         """
-        TODO
+        Normalize target channels
+
+        Parameters
+        ----------
+        data :
+            data to be normalized
+
+        Returns
+        -------
+        Normalized data
         """
-        assert target.shape[1] == len(self.target_idx)
+        assert target.shape[-1] == len(self.target_idx), "incorrect number of channels"
         for i, ch in enumerate(self.target_idx):
             target[..., i] = (target[..., i] - self.mean[ch]) / self.stdev[ch]
 
         return target
 
+    def denormalize_source_channels(self, source: torch.tensor) -> torch.tensor:
+        """
+        Denormalize source channels
+
+        Parameters
+        ----------
+        data :
+            data to be denormalized
+
+        Returns
+        -------
+        Denormalized data
+        """
+        assert source.shape[-1] == len(self.source_idx), "incorrect number of channels"
+        for i, ch in enumerate(self.source_idx):
+            source[..., i] = (source[..., i] * self.stdev[ch]) + self.mean[ch]
+
+        return source
+
+    def denormalize_target_channels(self, data: torch.tensor) -> torch.tensor:
+        """
+        Denormalize target channels
+
+        Parameters
+        ----------
+        data :
+            data to be denormalized (target or pred)
+
+        Returns
+        -------
+        Denormalized data
+        """
+        assert data.shape[-1] == len(self.target_idx), "incorrect number of channels"
+        for i, ch in enumerate(self.target_idx):
+            data[..., i] = (data[..., i] * self.stdev[ch]) + self.mean[ch]
+
+        return data
+
     def time_window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
+        """
+        Temporal window corresponding to index
+
+        Parameters
+        ----------
+        idx :
+            index of temporal window
+
+        Returns
+        -------
+            start and end of temporal window
+        """
         if not self.ds:
             return (np.array([], dtype=np.datetime64), np.array([], dtype=np.datetime64))
 

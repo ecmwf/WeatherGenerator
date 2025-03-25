@@ -406,19 +406,25 @@ class Batchifyer:
             )
             hpy_idxs_ord_split = np.split(hpy_idxs_ord, splits + 1)
 
-            times = encode_times_target(times, time_win)
+            times_enc = encode_times_target(times, time_win)
 
             target_tokens = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
+            target_coords_raw = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
             target_coords = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
             target_geoinfos = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
+            target_times_raw = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
             target_times = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
             for i, c in enumerate(cells_idxs):
                 t = normalizer.normalize_target_channels(source[hpy_idxs_ord_split[i]])
-                t = t[self.rng.permutation(len(t))][: int(len(t) * sampling_rate_target)]
-                target_tokens[c] = t
-                target_coords[c] = coords[hpy_idxs_ord_split[i]]
-                target_geoinfos[c] = normalizer.normalize_geoinfos(geoinfos[hpy_idxs_ord_split[i]])
-                target_times[c] = times[hpy_idxs_ord_split[i]]
+                perm = self.rng.permutation(len(t))[: int(len(t) * sampling_rate_target)]
+                target_tokens[c] = t[perm]
+                target_coords[c] = coords[hpy_idxs_ord_split[i]][perm]
+                target_coords_raw[c] = coords[hpy_idxs_ord_split[i]][perm]
+                target_geoinfos[c] = normalizer.normalize_geoinfos(
+                    geoinfos[hpy_idxs_ord_split[i]][perm]
+                )
+                target_times_raw[c] = times[hpy_idxs_ord_split[i]][perm]
+                target_times[c] = times_enc[hpy_idxs_ord_split[i]][perm]
 
             target_tokens_lens = torch.tensor([len(s) for s in target_tokens], dtype=torch.int32)
 
@@ -436,4 +442,4 @@ class Batchifyer:
                 target_coords.requires_grad = False
                 target_coords = list(target_coords.split(target_tokens_lens.tolist()))
 
-        return (target_tokens, target_coords)
+        return (target_tokens, target_coords, target_coords_raw, target_times_raw)

@@ -448,15 +448,10 @@ class Trainer(Trainer_Base):
         preds,
         losses_all,
         stddev_all,
-        preds_all=None,
-        targets_all=None,
-        targets_coords_all=None,
-        targets_lens=None,
         mode="training",
+        log_data=False,
     ):
-        _rng = np.random.default_rng()
-
-        # merge across batch dimension (and keep streams and )
+        # merge across batch dimension (and keep streams)
         targets_rt = [
             [
                 torch.cat([t[i].target_tokens[fstep] for t in streams_data])
@@ -472,11 +467,29 @@ class Trainer(Trainer_Base):
             for fstep in range(forecast_steps + 1)
         ]
 
+        if log_data:
+            fsteps = len(targets_rt)
+            preds_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+            targets_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+            targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+
+            targets_coords_raw_rt = [
+                [
+                    torch.cat([t[i].target_coords_raw[fstep] for t in streams_data])
+                    for i in range(len(self.cf.streams))
+                ]
+                for fstep in range(forecast_steps + 1)
+            ]
+            targets_times_raw_rt = [
+                [
+                    np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
+                    for i in range(len(self.cf.streams))
+                ]
+                for fstep in range(forecast_steps + 1)
+            ]
+
         ctr = 0
         loss = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
-
-        # import code
-        # code.interact( local=locals())
 
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):
@@ -570,24 +583,27 @@ class Trainer(Trainer_Base):
                     ctr += 1
 
                     # log data for analysis
-                    if preds_all is not None:
+                    if log_data:
                         # TODO: test
-                        targets_lens[i_obs] += [target.shape[0]]
-                        dn_data, dn_coords = (
-                            self.dataset_val.denormalize_data,
-                            self.dataset_val.denormalize_coords,
-                        )
+                        targets_lens[fstep][i_obs] += [target.shape[0]]
+                        dn_data = self.dataset_val.denormalize_target_channels
 
-                        fp32 = torch.float32
-                        preds_all[i_obs] += [dn_data(i_obs, pred.to(fp32), False).detach().cpu()]
-                        targets_all[i_obs] += [
-                            dn_data(i_obs, target.to(fp32), False).detach().cpu()
-                        ]
-                        targets_coords_all[i_obs] += [
-                            dn_coords(i_obs, target_coords.to(fp32)).detach().cpu()
-                        ]
+                        f32 = torch.float32
+                        preds_all[fstep][i_obs] += [dn_data(i_obs, pred.to(f32)).detach().cpu()]
+                        targets_all[fstep][i_obs] += [dn_data(i_obs, target.to(f32)).detach().cpu()]
 
-        return loss / ctr
+        return (
+            loss / ctr,
+            None
+            if not log_data
+            else [
+                preds_all,
+                targets_all,
+                targets_coords_raw_rt,
+                targets_times_raw_rt,
+                targets_lens,
+            ],
+        )
 
     ###########################################
     def train(self, epoch):
@@ -614,7 +630,7 @@ class Trainer(Trainer_Base):
             ):
                 preds = self.ddp_model(self.model_params, batch, forecast_steps)
 
-                loss = self.compute_loss(
+                loss, _ = self.compute_loss(
                     self.loss_fcts,
                     forecast_steps,
                     batch[0],
@@ -683,39 +699,35 @@ class Trainer(Trainer_Base):
 
                     # compute loss and log output
                     if bidx < cf.log_validation:
-                        preds_all = [[] for _ in cf.streams]
-                        targets_all, targets_coords_all = (
-                            [[] for _ in cf.streams],
-                            [[] for _ in cf.streams],
-                        )
-                        targets_lens = [[] for _ in cf.streams]
-
-                        self.compute_loss(
+                        _, ret = self.compute_loss(
                             self.loss_fcts_val,
                             forecast_steps,
                             batch[0],
                             preds,
                             losses_all,
                             stddev_all,
+                            mode="validation",
+                            log_data=True,
+                        )
+
+                        (
                             preds_all,
                             targets_all,
                             targets_coords_all,
+                            targets_times_all,
                             targets_lens,
-                            mode="validation",
-                        )
-
-                        cols = [ds[0][0].colnames for ds in self.dataset_val.obs_datasets_norm]
+                        ) = ret
                         sources = [[item.source_raw for item in b] for b in batch[0]]
                         write_validation(
                             self.cf,
                             self.path_run,
                             self.cf.rank,
                             epoch,
-                            cols,
                             sources,
                             preds_all,
                             targets_all,
                             targets_coords_all,
+                            targets_times_all,
                             targets_lens,
                         )
 
