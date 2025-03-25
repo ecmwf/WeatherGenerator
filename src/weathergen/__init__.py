@@ -178,7 +178,8 @@ def train() -> None:
 
     # directory where input streams are specified
     # cf.streams_directory = './streams_large/'
-    cf.streams_directory = "./config/streams/streams_anemoi/"
+    # cf.streams_directory = "./config/streams/streams_anemoi/"
+    cf.streams_directory = "./config/streams/streams_zfdb/"
     # cf.streams_directory = "./config/streams/streams_mixed/"
     # cf.streams_directory = "./streams_mixed/"
 
@@ -283,7 +284,7 @@ def train() -> None:
 
     cf.grad_clip = 5.0
     cf.weight_decay = 0.1
-    cf.norm_type = "LayerNorm"  #'LayerNorm' #'RMSNorm'
+    cf.norm_type = "LayerNorm"
     cf.nn_module = "te"
 
     cf.start_date = 201301010000
@@ -294,11 +295,12 @@ def train() -> None:
     cf.step_hrs = 6
     cf.input_window_steps = 1
 
-    cf.val_initial = False
+    cf.val_initial = False  # True
 
     cf.loader_num_workers = 8
     cf.data_loader_rng_seed = int(time.time())
     cf.log_validation = 0
+    cf.analysis_streams_output = ["ERA5"]
 
     cf.istep = 0
     cf.run_history = []
