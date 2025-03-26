@@ -15,13 +15,14 @@ from pathlib import Path
 
 from omegaconf import OmegaConf
 import yaml
+
+
+_REPO_ROOT = Path(__file__).parent.parent.parent.parent  # TODO use importlib for resources
+DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
+
 _logger = logging.getLogger(__name__)
 
 
-from weathergen.utils.logger import logger
-
-
-###########################################
 class Config:
     def __init__(self):
         pass
@@ -102,6 +103,11 @@ def load_private_conf(private_home: Path | None = None) -> dict:
             )
 
     return OmegaConf.load(private_home)
+
+
+def load_default_conf():
+    """Deserialize default configuration."""
+    return OmegaConf.load(DEFAULT_CONFIG_PTH)
 
 
 def get_streams(streams_directory: Path):
