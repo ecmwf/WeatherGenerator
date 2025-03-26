@@ -79,15 +79,14 @@ class Config:
         return cf
 
 
-def load_overwrite_conf(pth: str) -> dict:
+def load_overwrite_conf(overwrite_path: Path | None = None) -> OmegaConf:
     "Return the overwrite configuration."
+
     "If path is None, return an empty dictionary."
-    if not pth:
+    if overwrite_path is None or not overwrite_path.is_file():
         return {}
     else:
-        overwrite_path = Path(pth)
-        overwrite_conf = yaml.safe_load(overwrite_path.read_text())
-        return overwrite_conf
+        return OmegaConf.load(overwrite_path)
 
 
 def load_private_conf(private_home: Path | None = None) -> dict:

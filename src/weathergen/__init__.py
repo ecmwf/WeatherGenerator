@@ -253,7 +253,7 @@ def train() -> None:
 
     # get the non-default configs: private and overwrite
     private_cf = load_private_conf(Path(args.private_config))
-    overwrite_cf = load_overwrite_conf(args.config)
+    overwrite_cf = load_overwrite_conf(Path(args.config))
 
     cf = Config()
 
