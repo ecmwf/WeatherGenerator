@@ -110,7 +110,7 @@ def load_default_conf():
     return OmegaConf.load(DEFAULT_CONFIG_PTH)
 
 
-def get_streams(streams_directory: Path):
+def load_streams(streams_directory: Path):
     if not streams_directory.is_dir():
         _logger.warning(f"Streams directory {streams_directory} does not exist.")
 
