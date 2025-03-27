@@ -176,6 +176,20 @@ class FesomDataset:
         """
         return 2 + len(self.geoinfo_idx) + len(self.target_idx) if self.ds else 0
 
+    def get_coords_size(self) -> int:
+        """
+        Get size of coords
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        size of coords
+        """
+        return 2
+
     def get_target_num_channels(self):
         """
         TODO
