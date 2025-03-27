@@ -585,6 +585,7 @@ class Model(torch.nn.Module):
             # prediction
             preds_all += [
                 self.predict(
+                    model_params,
                     forecast_steps,
                     tokens,
                     streams_data,

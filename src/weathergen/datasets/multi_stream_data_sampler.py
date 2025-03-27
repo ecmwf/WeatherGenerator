@@ -46,6 +46,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.forecast_delta_hrs = (
             cf.forecast_delta_hrs if cf.forecast_delta_hrs > 0 else self.len_hrs
         )
+        assert self.forecast_delta_hrs == self.len_hrs, "Only supported option at the moment"
         self.forecast_steps = np.array(
             [cf.forecast_steps] if type(cf.forecast_steps) == int else cf.forecast_steps
         )
@@ -263,15 +264,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 idx = self.perms[idx_raw % self.perms.shape[0]]
                 idx_raw += 1
 
-                step_dt = self.len_hrs // self.step_hrs
-                step_forecast_dt = (
-                    step_dt + (self.forecast_delta_hrs * forecast_dt) // self.step_hrs
-                )
-
                 # TODO: this has to be independent of specific datasets
-                time_win1, time_win2 = (
+                time_win1, _ = (
                     self.streams_datasets[-1][0].time_window(idx),
-                    self.streams_datasets[-1][0].time_window(idx + step_forecast_dt),
+                    self.streams_datasets[-1][0].time_window(idx + self.len_hrs // self.step_hrs),
                 )
 
                 streams_data = []
@@ -288,7 +284,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         (coords, geoinfos, source, times) = ds.get_source(idx)
                         for it in range(1, self.input_window_steps):
                             (coords0, geoinfos0, source0, times0) = ds.get_source(
-                                idx - it * step_dt
+                                idx - it * self.len_hrs
                             )
                             coords = np.concatenate([coords0, coords], 0)
                             geoinfos = np.concatenate([geoinfos0, geoinfos], 0)
@@ -325,9 +321,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     for fstep in range(forecast_dt + 1):
                         # collect all sources
                         for _, ds in enumerate(stream_ds):
-                            (coords, geoinfos, target, times) = ds.get_target(
-                                idx + step_forecast_dt
+                            step_forecast_dt = (
+                                idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
                             )
+                            _, time_win2 = (
+                                self.streams_datasets[-1][0].time_window(idx),
+                                self.streams_datasets[-1][0].time_window(step_forecast_dt),
+                            )
+
+                            (coords, geoinfos, target, times) = ds.get_target(step_forecast_dt)
 
                             if target.shape[0] == 0:
                                 stream_data.add_empty_target(fstep)
