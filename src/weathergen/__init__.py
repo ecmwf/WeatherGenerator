@@ -25,19 +25,6 @@ def evaluate():
     """
     Evaluation function for WeatherGenerator model.
     Entry point for calling the evaluation code from the command line.
-
-    Args:
-        run_id (str): Run/model id of pretrained WeatherGenerator model.
-        start_date (str): Start date for evaluation. Format must be parsable with pd.to_datetime.
-        end_date (str): End date for evaluation. Format must be parsable with pd.to_datetime.
-        epoch (int, optional): Epoch of pretrained WeatherGenerator model used for evaluation (-1 corresponds to last epoch). Defaults to -1.
-        masking_mode (str, optional): Masking mode for evaluation. Defaults to None.
-        forecast_steps (int, optional): Number of forecast steps for evaluation. Defaults to None.
-        samples (int, optional): Number of samples for evaluation. Defaults to 10000000.
-        shuffle (bool, optional): Shuffle samples for evaluation. Defaults to False.
-        save_samples (bool, optional): Save samples for evaluation. Defaults to True.
-        analysis_streams_output (list, optional): Analysis output streams during evaluation. Defaults to ['ERA5'].
-        gridded_output_streams(list, optional): Currently unused and threrefore omitted here
     """
     parser = argparse.ArgumentParser()
 
@@ -52,6 +39,7 @@ def evaluate():
         "-start",
         type=str,
         required=False,
+        default="2022-10-01",
         help="Start date for evaluation. Format must be parsable with pd.to_datetime.",
     )
     parser.add_argument(
@@ -59,6 +47,7 @@ def evaluate():
         "-end",
         type=str,
         required=False,
+        default="2022-12-01",
         help="End date for evaluation. Format must be parsable with pd.to_datetime.",
     )
     parser.add_argument(
@@ -104,7 +93,8 @@ def evaluate():
     init_loggers()
 
     # load config: if run_id is full path, it loads from there
-    cf = Config.load(args.run_id, args.epoch, private_cf["model_path"])
+    model_path = private_cf["model_path"] if hasattr(private_cf, "model_path") else "./models"
+    cf = Config.load(args.run_id, args.epoch, model_path)
 
     # add parameters from private (paths) config
     for k, v in private_cf.items():
@@ -117,16 +107,8 @@ def evaluate():
 
     start_date, end_date = pd.to_datetime(args.start_date), pd.to_datetime(args.end_date)
 
-    cf.start_date_val = start_date.strftime(
-        "%Y%m%d%H%M"
-    )  # ML: would be better to use datetime-objects
+    cf.start_date_val = start_date.strftime("%Y%m%d%H%M")
     cf.end_date_val = end_date.strftime("%Y%m%d%H%M")
-    # # Oct-Nov 2022
-    # cf.start_date_val = 202210011600
-    # cf.end_date_val = 202212010400
-    # # 2022
-    # cf.start_date_val = 202201010400
-    # cf.end_date_val = 202301010400
 
     cf.shuffle = args.shuffle
 
