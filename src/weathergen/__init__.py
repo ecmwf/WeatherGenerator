@@ -93,7 +93,7 @@ def evaluate():
     init_loggers()
 
     # load config: if run_id is full path, it loads from there
-    model_path = private_cf["model_path"] if hasattr(private_cf, "model_path") else "./models"
+    model_path = private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
     cf = Config.load(args.run_id, args.epoch, model_path)
 
     # add parameters from private (paths) config
