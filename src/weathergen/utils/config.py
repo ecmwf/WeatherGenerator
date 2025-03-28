@@ -23,13 +23,12 @@ DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
 _logger = logging.getLogger(__name__)
 
 
-class Config:
-    pass
+Config = OmegaConf
+
 
 
 def print_cf(config: Config):
-    self_dict = config.__dict__
-    for key, value in self_dict.items():
+    for key, value in config.items():
         if key != "streams":
             print(f"{key} : {value}")
         else:
@@ -38,7 +37,7 @@ def print_cf(config: Config):
                     print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
 
 
-def save(config, epoch=None):
+def save(config: Config, epoch: int | None = None):
     path_models = Path(config.model_path)
     # save in directory with model files
     dirname = path_models / config.run_id
@@ -49,7 +48,7 @@ def save(config, epoch=None):
         epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
     fname = dirname / f"model_{config.run_id}{epoch_str}.json"
 
-    json_str = json.dumps(config.__dict__)
+    json_str = json.dumps(config.to_container())
     with fname.open("w") as f:
         f.write(json_str)
 
@@ -77,13 +76,10 @@ def load_model_config(
         json_str = f.read()
         print(json_str)
 
-    cf = Config()
-    cf.__dict__ = json.loads(json_str)
-
-    return cf
+    return OmegaConf.create(json.loads(json_str))
 
 
-def load_overwrite_conf(overwrite_path: Path | None = None) -> OmegaConf:
+def load_overwrite_conf(overwrite_path: Path | None = None) -> Config:
     "Return the overwrite configuration."
 
     "If path is None, return an empty dictionary."
@@ -94,7 +90,8 @@ def load_overwrite_conf(overwrite_path: Path | None = None) -> OmegaConf:
 
 
 def create_empty() -> Config:
-    return Config()
+    return OmegaConf.create({})
+
 
 
 def load_private_conf(private_home: Path | None = None) -> dict:
@@ -112,7 +109,7 @@ def load_private_conf(private_home: Path | None = None) -> dict:
     return OmegaConf.load(private_home)
 
 
-def load_default_conf():
+def load_default_conf() -> Config:
     """Deserialize default configuration."""
     return OmegaConf.load(DEFAULT_CONFIG_PTH)
 
