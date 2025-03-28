@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pandas as pd
 
+import weathergen.utils.config as config
 from weathergen.train.trainer import Trainer
-from weathergen.utils.config import Config, load_overwrite_conf, load_private_conf
 from weathergen.utils.logger import init_loggers
 
 
@@ -87,14 +87,14 @@ def evaluate():
     args = parser.parse_args()
 
     # get the paths from the private config
-    private_cf = load_private_conf(args.private_config)
+    private_cf = config.load_private_conf(args.private_config)
 
     # TODO: move somewhere else
     init_loggers()
 
     # load config: if run_id is full path, it loads from there
     model_path = private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
-    cf = Config.load(args.run_id, args.epoch, model_path)
+    cf = config.load(args.run_id, args.epoch, model_path)
 
     # add parameters from private (paths) config
     for k, v in private_cf.items():
@@ -166,11 +166,11 @@ def train_continue() -> None:
 
     args = parser.parse_args()
     # get the paths from the private config
-    private_cf = load_private_conf(args.private_config)
+    private_cf = config.load_private_conf(args.private_config)
 
     # load config if specified
     model_path = private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
-    cf = Config.load(args.run_id, args.epoch, model_path)
+    cf = config.load(args.run_id, args.epoch, model_path)
 
     # track history of run to ensure traceability of results
     if "run_history" not in cf.__dict__:
@@ -252,10 +252,10 @@ def train() -> None:
     init_loggers()
 
     # get the non-default configs: private and overwrite
-    private_cf = load_private_conf(Path(args.private_config))
-    overwrite_cf = load_overwrite_conf(Path(args.config))
+    private_cf = config.load_private_conf(Path(args.private_config))
+    overwrite_cf = config.load_overwrite_conf(Path(args.config))
 
-    cf = Config()
+    cf = config.create_empty()
 
     # directory where input streams are specified
     # cf.streams_directory = './streams_large/'

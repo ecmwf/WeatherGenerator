@@ -24,60 +24,63 @@ _logger = logging.getLogger(__name__)
 
 
 class Config:
-    def __init__(self):
-        pass
+    pass
 
-    def print(self):
-        self_dict = self.__dict__
-        for key, value in self_dict.items():
-            if key != "streams":
-                print(f"{key} : {value}")
-            else:
-                for rt in value:
-                    for k, v in rt.items():
-                        print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
 
-    def save(self, epoch=None):
-        path_models = Path(self.model_path)
-        # save in directory with model files
-        dirname = path_models / self.run_id
-        dirname.mkdir(exist_ok=True, parents=True)
+def print_cf(config: Config):
+    self_dict = config.__dict__
+    for key, value in self_dict.items():
+        if key != "streams":
+            print(f"{key} : {value}")
+        else:
+            for rt in value:
+                for k, v in rt.items():
+                    print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
 
+
+def save(config, epoch=None):
+    path_models = Path(config.model_path)
+    # save in directory with model files
+    dirname = path_models / config.run_id
+    dirname.mkdir(exist_ok=True, parents=True)
+
+    epoch_str = ""
+    if epoch is not None:
+        epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
+    fname = dirname / f"model_{config.run_id}{epoch_str}.json"
+
+    json_str = json.dumps(config.__dict__)
+    with fname.open("w") as f:
+        f.write(json_str)
+
+
+def load_model_config(
+    run_id: str, epoch: int | None = None, model_path: str = "./models"
+) -> Config:
+    """
+    Load a configuration file from a given run_id and epoch.
+    If run_id is a full path, loads it from the full path.
+    """
+    if Path(run_id).exists():  # load from the full path if a full path is provided
+        fname = Path(run_id)
+        _logger.info(f"Loading config from provided full run_id path: {fname}")
+    else:
+        path_models = Path(model_path)
         epoch_str = ""
         if epoch is not None:
             epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
-        fname = dirname / f"model_{self.run_id}{epoch_str}.json"
+        fname = path_models / run_id / f"model_{run_id}{epoch_str}.json"
 
-        json_str = json.dumps(self.__dict__)
-        with fname.open("w") as f:
-            f.write(json_str)
+    _logger.info(f"Loading config from specified run_id and epoch: {fname}")
 
-    @staticmethod
-    def load(run_id: str, epoch: int = None, model_path: str = "./models") -> "Config":
-        """
-        Load a configuration file from a given run_id and epoch.
-        If run_id is a full path, loads it from the full path.
-        """
-        if Path(run_id).exists():  # load from the full path if a full path is provided
-            fname = Path(run_id)
-            logger.info(f"Loading config from provided full run_id path: {fname}")
-        else:
-            path_models = Path(model_path)
-            epoch_str = ""
-            if epoch is not None:
-                epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
-            fname = path_models / run_id / f"model_{run_id}{epoch_str}.json"
+    with fname.open() as f:
+        json_str = f.read()
+        print(json_str)
 
-            logger.info(f"Loading config from specified run_id and epoch: {fname}")
+    cf = Config()
+    cf.__dict__ = json.loads(json_str)
 
-        # open the file and read into a config object
-        with fname.open() as f:
-            json_str = f.readlines()
-
-        cf = Config()
-        cf.__dict__ = json.loads(json_str[0])
-
-        return cf
+    return cf
 
 
 def load_overwrite_conf(overwrite_path: Path | None = None) -> OmegaConf:
@@ -88,6 +91,10 @@ def load_overwrite_conf(overwrite_path: Path | None = None) -> OmegaConf:
         return {}
     else:
         return OmegaConf.load(overwrite_path)
+
+
+def create_empty() -> Config:
+    return Config()
 
 
 def load_private_conf(private_home: Path | None = None) -> dict:

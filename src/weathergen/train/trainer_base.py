@@ -18,7 +18,6 @@ import torch.multiprocessing
 import torch.utils.data.distributed
 
 from weathergen.train.utils import str_to_tensor, tensor_to_str
-from weathergen.utils.config import Config
 
 _logger = logging.getLogger(__name__)
 
@@ -141,10 +140,10 @@ class Trainer_Base:
 
 ####################################################################################################
 if __name__ == "__main__":
+    import weathergen.utils.config as config
     from weathergen.train.trainer_base import Trainer_Base
-    from weathergen.utils.config import Config
 
-    cf = Config()
+    cf = config.create_empty()
     cf.sources_dir = "./sources"
 
     cf = Trainer_Base.init_reportypes(cf)
