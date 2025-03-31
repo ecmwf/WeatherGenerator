@@ -13,9 +13,10 @@ import logging
 import os
 from pathlib import Path
 
-from omegaconf import OmegaConf
 import yaml
+from omegaconf import OmegaConf
 
+from weathergen.train.utils import get_run_id
 
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent  # TODO use importlib for resources
 DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
@@ -77,6 +78,22 @@ def load_model_config(
         print(json_str)
 
     return OmegaConf.create(json.loads(json_str))
+
+
+def load_config(
+    run_id: str | None = None, private_home: Path | None = None, overwrite_path: Path | None = None
+) -> Config:
+    if run_id is None:
+        base_config = load_default_conf()
+        base_config.run_id = get_run_id()
+    else:
+        base_config = load_model_config(run_id)
+
+    private_config = load_private_conf(private_home)
+    overwrite_config = load_overwrite_conf(overwrite_path)
+
+    # use OmegaConf.unsafe_merge if too slow
+    return OmegaConf.merge(base_config, private_config, overwrite_config)
 
 
 def load_overwrite_conf(overwrite_path: Path | None = None) -> Config:
