@@ -17,14 +17,8 @@ import torch.utils.data.distributed
 import tqdm
 from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    MixedPrecision,
-    ShardingStrategy,
-)
-from torch.distributed.fsdp.wrap import (
-    # default_auto_wrap_policy,
-    size_based_auto_wrap_policy,
-)
+from torch.distributed.fsdp.fully_sharded_data_parallel import MixedPrecision, ShardingStrategy
+from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy  # default_auto_wrap_policy,
 
 import weathergen.train.loss as losses
 import weathergen.utils.config as config
