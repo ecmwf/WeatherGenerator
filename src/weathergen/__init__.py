@@ -304,9 +304,7 @@ def train() -> None:
     # overwrite parameters from private config
     for k, v in private_cf.items():
         setattr(cf, k, v)
-
-    if "data_path_anemoi" in private_cf:
-        cf.data_path = private_cf["data_path_anemoi"]  # for backward compatibility
+    cf.data_path = private_cf["data_path_anemoi"]  # for backward compatibility
 
     # overwrite parameters from overwrite config
     for k, v in overwrite_cf.items():

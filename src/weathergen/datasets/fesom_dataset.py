@@ -10,56 +10,10 @@
 from datetime import datetime
 
 import numpy as np
-import torch
 import zarr
 
 
 class FesomDataset:
-    """
-    A dataset class for handling temporal windows of FESOM model output data stored in Zarr format.
-
-    Parameters
-    ----------
-    start : datetime | int
-        Start time of the data period as datetime object or integer in "%Y%m%d%H%M" format
-    end : datetime | int
-        End time of the data period (inclusive) with same format as start
-    len_hrs : int
-        Length of temporal windows in days
-    step_hrs : int
-        (Currently unused) Intended step size between windows in hours
-    filename : str
-        Path to Zarr dataset containing FESOM output
-    stream_info : dict
-        Dictionary with "source" and "target" keys specifying channel subsets to use
-        (e.g., {"source": ["temp"], "target": ["salinity"]})
-
-    Attributes
-    ----------
-    len_hrs : int
-        Temporal window length in days
-    mesh_size : int
-        Number of nodes in the FESOM mesh
-    source_channels : list[str]
-        Names of selected source channels
-    target_channels : list[str]
-        Names of selected target channels
-    mean : np.ndarray
-        Per-channel means for normalization (includes coordinates)
-    stdev : np.ndarray
-        Per-channel standard deviations for normalization (includes coordinates)
-    properties : dict
-        Dataset metadata including 'stream_id' from Zarr attributes
-
-    Notes
-    -----
-    - Automatically handles datetime conversion and alignment with dataset time axis
-    - Returns empty data containers if requested period doesn't overlap with dataset
-    - Implements coordinate normalization using sinusoidal projections
-    - Provides channel-wise normalization/denormalization for source/target variables
-    - Uses Zarr's orthogonal indexing for efficient data access
-    """
-
     def __init__(
         self,
         start: datetime | int,
@@ -71,12 +25,12 @@ class FesomDataset:
     ):
         self.len_hrs = len_hrs
 
-        format_str = "%Y%m%d%H%M"
-        if type(start) is not datetime:
+        format_str = "%Y%m%d%H%M%S"
+        if type(start) is int:
             start = datetime.strptime(str(start), format_str)
         start = np.datetime64(start).astype("datetime64[D]")
 
-        if type(end) is not datetime:
+        if type(end) is int:
             end = datetime.strptime(str(end), format_str)
         end = np.datetime64(end).astype("datetime64[D]")
 
@@ -107,9 +61,9 @@ class FesomDataset:
 
         self.len = (self.end_idx - self.start_idx) // self.mesh_size
 
-        assert (
-            self.end_idx > self.start_idx
-        ), f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
+        assert self.end_idx > self.start_idx, (
+            f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
+        )
 
         self.colnames = list(self.ds.data.attrs["colnames"])
         self.cols_idx = list(np.arange(len(self.colnames)))
@@ -133,7 +87,7 @@ class FesomDataset:
 
         self.mean = np.concatenate((np.array([0, 0]), np.array(self.ds.data.attrs["means"])))
         self.stdev = np.sqrt(
-            np.concatenate((np.array([1, 1]), np.array(self.ds.data.attrs["vars"])))
+            np.concatenate((np.array([0, 0]), np.array(self.ds.data.attrs["vars"])))
         )
 
         source_channels = stream_info["source"] if "source" in stream_info else None
@@ -166,35 +120,11 @@ class FesomDataset:
 
         return selected_colnames, selected_cols_idx
 
-    def __len__(self) -> int:
-        """
-        Length of dataset
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        length of dataset
-        """
+    def __len__(self):
         return self.len
 
     def _get(self, idx: int, idx_channels: np.array) -> tuple:
-        """
-        Get data for window
-
-        Parameters
-        ----------
-        idx : int
-            Index of temporal window
-        channels_idx : np.array
-            Selection of channels
-
-        Returns
-        -------
-        data (coords, geoinfos, data, datetimes)
-        """
+        """ """
         if self.ds is None:
             fp32 = np.float32
             return (
@@ -218,108 +148,66 @@ class FesomDataset:
 
         return (latlon, geoinfos, data, datetimes)
 
-    def get_source(self, idx: int) -> tuple[np.array, np.array, np.array, np.array]:
-        """
-        Get source data for idx
+    def get_source(self, idx: int) -> tuple:
+        """ """
 
-        Parameters
-        ----------
-        idx : int
-            Index of temporal window
-
-        Returns
-        -------
-        source data (coords, geoinfos, data, datetimes)
-        """
         return self._get(idx, self.source_idx)
 
-    def get_target(self, idx: int) -> tuple[np.array, np.array, np.array, np.array]:
-        """
-        Get target data for idx
+    def get_target(self, idx: int) -> tuple:
+        """ """
 
-        Parameters
-        ----------
-        idx : int
-            Index of temporal window
-
-        Returns
-        -------
-        target data (coords, geoinfos, data, datetimes)
-        """
         return self._get(idx, self.target_idx)
 
-    def get_source_size(self) -> int:
+    def get_source_size(self):
         """
-        Get size of all columns, including coordinates and geoinfo, with source
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        size of coords
+        TODO
         """
         return 2 + len(self.geoinfo_idx) + len(self.source_idx) if self.ds else 0
 
-    def get_target_size(self) -> int:
+    def get_source_num_channels(self):
         """
-        Get size of all columns, including coordinates and geoinfo, with source
+        TODO
+        """
+        return len(self.source_idx)
 
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        size of coords
+    def get_target_size(self):
+        """
+        TODO
         """
         return 2 + len(self.geoinfo_idx) + len(self.target_idx) if self.ds else 0
 
-    def get_coords_size(self) -> int:
+    def get_target_num_channels(self):
         """
-        Get size of coords
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        size of coords
+        TODO
         """
-        return 2
+        return len(self.target_idx)
 
-    def normalize_coords(self, coords: torch.tensor) -> torch.tensor:
+    def get_geoinfo_size(self):
         """
-        Normalize coordinates
+        TODO
+        """
+        return len(self.geoinfo_idx)
 
-        Parameters
-        ----------
-        coords :
-            coordinates to be normalized
-
-        Returns
-        -------
-        Normalized coordinates
+    def normalize_coords(self, coords):
+        """
+        TODO
         """
         coords[..., 0] = np.sin(np.deg2rad(coords[..., 0]))
         coords[..., 1] = np.sin(0.5 * np.deg2rad(coords[..., 1]))
 
         return coords
 
-    def normalize_source_channels(self, source: torch.tensor) -> torch.tensor:
+    def normalize_geoinfos(self, geoinfos):
         """
-        Normalize source channels
+        TODO
+        """
 
-        Parameters
-        ----------
-        source :
-            data to be normalized
+        assert geoinfos.shape[-1] == 0
+        return geoinfos
 
-        Returns
-        -------
-        Normalized data
+    def normalize_source_channels(self, source):
+        """
+        TODO
         """
         assert source.shape[1] == len(self.source_idx)
         for i, ch in enumerate(self.source_idx):
@@ -327,117 +215,18 @@ class FesomDataset:
 
         return source
 
-    def normalize_target_channels(self, target: torch.tensor) -> torch.tensor:
+    def normalize_target_channels(self, target):
         """
-        Normalize target channels
-
-        Parameters
-        ----------
-        target :
-            data to be normalized
-
-        Returns
-        -------
-        Normalized data
+        TODO
         """
         assert target.shape[1] == len(self.target_idx)
         for i, ch in enumerate(self.target_idx):
-            target[..., i] = (target[..., i] - self.mean[ch + 2]) / self.stdev[ch + 2]
+            target[..., i] = (target[..., i] - self.mean[ch]) / self.stdev[ch]
 
         return target
 
     def time_window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
-        """
-        Temporal window corresponding to index
-
-        Parameters
-        ----------
-        idx :
-            index of temporal window
-
-        Returns
-        -------
-            start and end of temporal window
-        """
         start_row = self.start_idx + idx * self.mesh_size
         end_row = start_row + self.len_hrs * self.mesh_size
 
         return (self.time[start_row, 0], self.time[end_row, 0])
-
-    def denormalize_target_channels(self, data: torch.tensor) -> torch.tensor:
-        """
-        Denormalize target channels
-
-        Parameters
-        ----------
-        data :
-            data to be denormalized (target or pred)
-
-        Returns
-        -------
-        Denormalized data
-        """
-        assert data.shape[-1] == len(self.target_idx), "incorrect number of channels"
-        for i, ch in enumerate(self.target_idx):
-            data[..., i] = (data[..., i] * self.stdev[ch + 2]) + self.mean[ch + 2]
-
-        return data
-
-    def get_source_num_channels(self) -> int:
-        """
-        Get number of source channels
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        number of source channels
-        """
-        return len(self.source_idx)
-
-    def get_target_num_channels(self) -> int:
-        """
-        Get number of target channels
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        number of target channels
-        """
-        return len(self.target_idx)
-
-    def get_geoinfo_size(self) -> int:
-        """
-        Get size of geoinfos
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        size of geoinfos
-        """
-        return len(self.geoinfo_idx)
-
-    def normalize_geoinfos(self, geoinfos: torch.tensor) -> torch.tensor:
-        """
-        Normalize geoinfos
-
-        Parameters
-        ----------
-        geoinfos :
-            geoinfos to be normalized
-
-        Returns
-        -------
-        Normalized geoinfo
-        """
-
-        assert geoinfos.shape[-1] == 0, "incorrect number of geoinfo channels"
-        return geoinfos

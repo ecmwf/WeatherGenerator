@@ -128,7 +128,7 @@ class StreamData:
         self.target_coords[fstep] += [torch.tensor([])]
         self.target_coords_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
         self.target_coords_raw[fstep] += [torch.tensor([])]
-        self.target_times_raw_raw[fstep] += [np.array([], dtype="datetime64[ns]")]
+        self.target_times_raw_raw[fstep] += [torch.tensor([])]
 
     def add_source(
         self, ss_raw: torch.tensor, ss_lens: torch.tensor, ss_cells: list, ss_centroids: list
@@ -318,7 +318,6 @@ class StreamData:
                 ).sum(0)
                 self.target_coords[fstep] = self._merge_cells(self.target_coords[fstep], nt)
                 self.target_coords_raw[fstep] = self._merge_cells(self.target_coords_raw[fstep], nt)
-
                 self.target_times_raw[fstep] = self._merge_cells(self.target_times_raw[fstep], nt)
                 self.target_tokens[fstep] = self._merge_cells(self.target_tokens[fstep], nt)
                 # remove NaNs
@@ -331,7 +330,7 @@ class StreamData:
                 # TODO: is this branch still needed
                 self.target_coords[fstep] = torch.tensor([])
                 self.target_coords_raw[fstep] = torch.tensor([])
-                self.target_times_raw[fstep] = np.array([], dtype="datetime64[ns]")
+                self.target_times_raw[fstep] = torch.tensor([])
                 self.target_tokens[fstep] = torch.tensor([])
                 self.target_tokens_lens[fstep] = torch.tensor([])
                 self.target_coords_lens[fstep] = torch.tensor([])
