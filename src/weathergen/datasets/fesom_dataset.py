@@ -87,7 +87,7 @@ class FesomDataset:
 
         self.mean = np.concatenate((np.array([0, 0]), np.array(self.ds.data.attrs["means"])))
         self.stdev = np.sqrt(
-            np.concatenate((np.array([0, 0]), np.array(self.ds.data.attrs["vars"])))
+            np.concatenate((np.array([1, 1]), np.array(self.ds.data.attrs["vars"])))
         )
 
         source_channels = stream_info["source"] if "source" in stream_info else None
@@ -235,7 +235,7 @@ class FesomDataset:
         """
         assert target.shape[1] == len(self.target_idx)
         for i, ch in enumerate(self.target_idx):
-            target[..., i] = (target[..., i] - self.mean[ch]) / self.stdev[ch]
+            target[..., i] = (target[..., i] - self.mean[ch + 2]) / self.stdev[ch + 2]
 
         return target
 
@@ -244,3 +244,81 @@ class FesomDataset:
         end_row = start_row + self.len_hrs * self.mesh_size
 
         return (self.time[start_row, 0], self.time[end_row, 0])
+
+    def denormalize_target_channels(self, data: torch.tensor) -> torch.tensor:
+        """
+        Denormalize target channels
+
+        Parameters
+        ----------
+        data :
+            data to be denormalized (target or pred)
+
+        Returns
+        -------
+        Denormalized data
+        """
+        assert data.shape[-1] == len(self.target_idx), "incorrect number of channels"
+        for i, ch in enumerate(self.target_idx):
+            data[..., i] = (data[..., i] * self.stdev[ch + 2]) + self.mean[ch + 2]
+
+        return data
+
+    def get_source_num_channels(self) -> int:
+        """
+        Get number of source channels
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        number of source channels
+        """
+        return len(self.source_idx)
+
+    def get_target_num_channels(self) -> int:
+        """
+        Get number of target channels
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        number of target channels
+        """
+        return len(self.target_idx)
+
+    def get_geoinfo_size(self) -> int:
+        """
+        Get size of geoinfos
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        size of geoinfos
+        """
+        return len(self.geoinfo_idx)
+
+    def normalize_geoinfos(self, geoinfos: torch.tensor) -> torch.tensor:
+        """
+        Normalize geoinfos
+
+        Parameters
+        ----------
+        geoinfos :
+            geoinfos to be normalized
+
+        Returns
+        -------
+        Normalized geoinfo
+        """
+
+        assert geoinfos.shape[-1] == 0, "incorrect number of geoinfo channels"
+        return geoinfos
