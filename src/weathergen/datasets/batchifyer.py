@@ -358,9 +358,11 @@ class Batchifyer:
 
             if source_tokens_lens.sum() > 0:
                 source_means = [
-                    self.hpy_verts[-1][i].unsqueeze(0).repeat(len(s), 1)
-                    if len(s) > 0
-                    else torch.tensor([])
+                    (
+                        self.hpy_verts[-1][i].unsqueeze(0).repeat(len(s), 1)
+                        if len(s) > 0
+                        else torch.tensor([])
+                    )
                     for i, s in enumerate(source_tokens_cells)
                 ]
                 source_means_lens = [len(s) for s in source_means]
@@ -412,7 +414,9 @@ class Batchifyer:
             target_coords_raw = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
             target_coords = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
             target_geoinfos = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
-            target_times_raw = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
+            target_times_raw = [
+                np.array([], dtype="datetime64[ns]") for _ in range(self.num_healpix_cells_target)
+            ]
             target_times = [torch.tensor([]) for _ in range(self.num_healpix_cells_target)]
             for i, c in enumerate(cells_idxs):
                 t = normalizer.normalize_target_channels(source[hpy_idxs_ord_split[i]])
