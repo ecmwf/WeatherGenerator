@@ -10,10 +10,56 @@
 from datetime import datetime
 
 import numpy as np
+import torch
 import zarr
 
 
 class FesomDataset:
+    """
+    A dataset class for handling temporal windows of FESOM model output data stored in Zarr format.
+
+    Parameters
+    ----------
+    start : datetime | int
+        Start time of the data period as datetime object or integer in "%Y%m%d%H%M" format
+    end : datetime | int
+        End time of the data period (inclusive) with same format as start
+    len_hrs : int
+        Length of temporal windows in days
+    step_hrs : int
+        (Currently unused) Intended step size between windows in hours
+    filename : str
+        Path to Zarr dataset containing FESOM output
+    stream_info : dict
+        Dictionary with "source" and "target" keys specifying channel subsets to use
+        (e.g., {"source": ["temp"], "target": ["salinity"]})
+
+    Attributes
+    ----------
+    len_hrs : int
+        Temporal window length in days
+    mesh_size : int
+        Number of nodes in the FESOM mesh
+    source_channels : list[str]
+        Names of selected source channels
+    target_channels : list[str]
+        Names of selected target channels
+    mean : np.ndarray
+        Per-channel means for normalization (includes coordinates)
+    stdev : np.ndarray
+        Per-channel standard deviations for normalization (includes coordinates)
+    properties : dict
+        Dataset metadata including 'stream_id' from Zarr attributes
+
+    Notes
+    -----
+    - Automatically handles datetime conversion and alignment with dataset time axis
+    - Returns empty data containers if requested period doesn't overlap with dataset
+    - Implements coordinate normalization using sinusoidal projections
+    - Provides channel-wise normalization/denormalization for source/target variables
+    - Uses Zarr's orthogonal indexing for efficient data access
+    """
+
     def __init__(
         self,
         start: datetime | int,
@@ -120,11 +166,35 @@ class FesomDataset:
 
         return selected_colnames, selected_cols_idx
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """
+        Length of dataset
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        length of dataset
+        """
         return self.len
 
     def _get(self, idx: int, idx_channels: np.array) -> tuple:
-        """ """
+        """
+        Get data for window
+
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+        channels_idx : np.array
+            Selection of channels
+
+        Returns
+        -------
+        data (coords, geoinfos, data, datetimes)
+        """
         if self.ds is None:
             fp32 = np.float32
             return (
@@ -148,31 +218,61 @@ class FesomDataset:
 
         return (latlon, geoinfos, data, datetimes)
 
-    def get_source(self, idx: int) -> tuple:
-        """ """
+    def get_source(self, idx: int) -> tuple[np.array, np.array, np.array, np.array]:
+        """
+        Get source data for idx
 
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+
+        Returns
+        -------
+        source data (coords, geoinfos, data, datetimes)
+        """
         return self._get(idx, self.source_idx)
 
-    def get_target(self, idx: int) -> tuple:
-        """ """
+    def get_target(self, idx: int) -> tuple[np.array, np.array, np.array, np.array]:
+        """
+        Get target data for idx
 
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+
+        Returns
+        -------
+        target data (coords, geoinfos, data, datetimes)
+        """
         return self._get(idx, self.target_idx)
 
-    def get_source_size(self):
+    def get_source_size(self) -> int:
         """
-        TODO
+        Get size of all columns, including coordinates and geoinfo, with source
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        size of coords
         """
         return 2 + len(self.geoinfo_idx) + len(self.source_idx) if self.ds else 0
 
-    def get_source_num_channels(self):
+    def get_target_size(self) -> int:
         """
-        TODO
-        """
-        return len(self.source_idx)
+        Get size of all columns, including coordinates and geoinfo, with source
 
-    def get_target_size(self):
-        """
-        TODO
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        size of coords
         """
         return 2 + len(self.geoinfo_idx) + len(self.target_idx) if self.ds else 0
 
@@ -190,38 +290,36 @@ class FesomDataset:
         """
         return 2
 
-    def get_target_num_channels(self):
+    def normalize_coords(self, coords: torch.tensor) -> torch.tensor:
         """
-        TODO
-        """
-        return len(self.target_idx)
+        Normalize coordinates
 
-    def get_geoinfo_size(self):
-        """
-        TODO
-        """
-        return len(self.geoinfo_idx)
+        Parameters
+        ----------
+        coords :
+            coordinates to be normalized
 
-    def normalize_coords(self, coords):
-        """
-        TODO
+        Returns
+        -------
+        Normalized coordinates
         """
         coords[..., 0] = np.sin(np.deg2rad(coords[..., 0]))
         coords[..., 1] = np.sin(0.5 * np.deg2rad(coords[..., 1]))
 
         return coords
 
-    def normalize_geoinfos(self, geoinfos):
+    def normalize_source_channels(self, source: torch.tensor) -> torch.tensor:
         """
-        TODO
-        """
+        Normalize source channels
 
-        assert geoinfos.shape[-1] == 0
-        return geoinfos
+        Parameters
+        ----------
+        source :
+            data to be normalized
 
-    def normalize_source_channels(self, source):
-        """
-        TODO
+        Returns
+        -------
+        Normalized data
         """
         assert source.shape[1] == len(self.source_idx)
         for i, ch in enumerate(self.source_idx):
@@ -229,9 +327,18 @@ class FesomDataset:
 
         return source
 
-    def normalize_target_channels(self, target):
+    def normalize_target_channels(self, target: torch.tensor) -> torch.tensor:
         """
-        TODO
+        Normalize target channels
+
+        Parameters
+        ----------
+        target :
+            data to be normalized
+
+        Returns
+        -------
+        Normalized data
         """
         assert target.shape[1] == len(self.target_idx)
         for i, ch in enumerate(self.target_idx):
@@ -240,6 +347,18 @@ class FesomDataset:
         return target
 
     def time_window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
+        """
+        Temporal window corresponding to index
+
+        Parameters
+        ----------
+        idx :
+            index of temporal window
+
+        Returns
+        -------
+            start and end of temporal window
+        """
         start_row = self.start_idx + idx * self.mesh_size
         end_row = start_row + self.len_hrs * self.mesh_size
 
