@@ -105,7 +105,7 @@ class StreamData:
         """
 
         self.source_raw += [torch.tensor([])]
-        self.source_tokens_lens += [torch.zeros([self.nhc_source], dtype=int)]
+        self.source_tokens_lens += [torch.zeros([self.nhc_source], dtype=torch.int32)]
         self.source_tokens_cells += [torch.tensor([])]
         self.source_centroids += [torch.tensor([])]
 

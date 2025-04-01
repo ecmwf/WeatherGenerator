@@ -25,12 +25,12 @@ class FesomDataset:
     ):
         self.len_hrs = len_hrs
 
-        format_str = "%Y%m%d%H%M%S"
-        if type(start) is int:
+        format_str = "%Y%m%d%H%M"
+        if type(start) is not datetime:
             start = datetime.strptime(str(start), format_str)
         start = np.datetime64(start).astype("datetime64[D]")
 
-        if type(end) is int:
+        if type(end) is not datetime:
             end = datetime.strptime(str(end), format_str)
         end = np.datetime64(end).astype("datetime64[D]")
 
@@ -61,9 +61,9 @@ class FesomDataset:
 
         self.len = (self.end_idx - self.start_idx) // self.mesh_size
 
-        assert self.end_idx > self.start_idx, (
-            f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
-        )
+        assert (
+            self.end_idx > self.start_idx
+        ), f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
 
         self.colnames = list(self.ds.data.attrs["colnames"])
         self.cols_idx = list(np.arange(len(self.colnames)))
