@@ -107,9 +107,9 @@ class FesomDataset:
 
         self.len = (self.end_idx - self.start_idx) // self.mesh_size
 
-        assert (
-            self.end_idx > self.start_idx
-        ), f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
+        assert self.end_idx > self.start_idx, (
+            f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
+        )
 
         self.colnames = list(self.ds.data.attrs["colnames"])
         self.cols_idx = list(np.arange(len(self.colnames)))
