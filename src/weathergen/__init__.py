@@ -126,6 +126,88 @@ def evaluate():
 
 
 ####################################################################################################
+def train_continue() -> None:
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "-id",
+        "--run_id",
+        type=str,
+        required=True,
+        help="run id of to be continued",
+    )
+    parser.add_argument(
+        "-e",
+        "--epoch",
+        type=int,
+        required=False,
+        default=-1,
+        help="epoch where to continue run",
+    )
+    parser.add_argument(
+        "-n",
+        "--run_id_new",
+        type=bool,
+        required=False,
+        default=False,
+        help="create new run id for cont'd run",
+    )
+    parser.add_argument(
+        "--private_config",
+        type=str,
+        default=None,
+        help="Path to private configuration file for paths.",
+    )
+
+    args = parser.parse_args()
+    # get the paths from the private config
+    private_cf = load_private_conf(args.private_config)
+
+    # load config if specified
+    model_path = private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
+    cf = Config.load(args.run_id, args.epoch, model_path)
+
+    # track history of run to ensure traceability of results
+    if "run_history" not in cf.__dict__:
+        cf.run_history = []
+    cf.run_history += [(cf.run_id, cf.istep)]
+
+    #########################
+    cf.forecast_delta_hrs = 0  # 12
+    cf.forecast_steps = 1  # [j for j in range(1,9) for i in range(4)]
+    cf.forecast_policy = "fixed"  # 'sequential_random' # 'fixed' #'sequential' #_random'
+    cf.forecast_freeze_model = True
+    cf.forecast_att_dense_rate = 1.0  # 0.25
+
+    if cf.forecast_freeze_model:
+        cf.with_fsdp = False
+        import torch
+
+        torch._dynamo.config.optimize_ddp = False
+
+    cf.fe_num_blocks = 8
+    cf.fe_num_heads = 16
+    cf.fe_dropout_rate = 0.1
+    cf.fe_with_qk_lnorm = True
+
+    cf.lr_start = 0.000001
+    cf.lr_max = 0.00003
+    cf.lr_final_decay = 0.00003
+    cf.lr_final = 0.0
+    cf.lr_steps_warmup = 1024
+    cf.lr_steps_cooldown = 4096
+    cf.lr_policy_warmup = "cosine"
+    cf.lr_policy_decay = "linear"
+    cf.lr_policy_cooldown = "linear"
+
+    cf.num_epochs = 12  # len(cf.forecast_steps) + 4
+    cf.istep = 0
+
+    trainer = Trainer()
+    trainer.run(cf, private_cf, args.run_id, args.epoch, args.run_id_new)
+
+
+####################################################################################################
 def train() -> None:
     """
     Training function for WeatherGenerator model.
@@ -143,21 +225,13 @@ def train() -> None:
         "--run_id",
         type=str,
         default=None,
-        help="Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.",
+        help="Run id",
     )
-
     parser.add_argument(
         "--private_config",
         type=str,
         default=None,
-        help="Path to private configuration file for paths.",
-    )
-
-    parser.add_argument(
-        "--config",
-        type=str,
-        default=None,
-        help="Path to private configuration file for overwriting the defaults in the function body. Defaults to None.",
+        help="Path to private configuration file for paths",
     )
 
     args = parser.parse_args()
@@ -304,9 +378,7 @@ def train() -> None:
     # overwrite parameters from private config
     for k, v in private_cf.items():
         setattr(cf, k, v)
-
-    if "data_path_anemoi" in private_cf:
-        cf.data_path = private_cf["data_path_anemoi"]  # for backward compatibility
+    cf.data_path = private_cf["data_path_anemoi"]  # for backward compatibility
 
     # overwrite parameters from overwrite config
     for k, v in overwrite_cf.items():
@@ -324,3 +396,4 @@ def train() -> None:
 
 if __name__ == "__main__":
     train()
+    # train_continue()
