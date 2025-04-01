@@ -492,7 +492,7 @@ class Trainer(Trainer_Base):
                 for fstep in range(forecast_steps + 1)
             ]
 
-        ctr = 0
+        ctr_target = 0
         loss = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
 
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
@@ -584,7 +584,7 @@ class Trainer(Trainer_Base):
                             if not torch.isnan(val)
                             else torch.tensor(0.0, requires_grad=True)
                         )
-                    ctr += 1
+                    ctr_target += 1
 
                     # log data for analysis
                     if log_data:
@@ -597,7 +597,7 @@ class Trainer(Trainer_Base):
                         targets_all[fstep][i_obs] += [dn_data(i_obs, target.to(f32)).detach().cpu()]
 
         return (
-            loss / ctr,
+            loss / ctr_target,
             None
             if not log_data
             else [
