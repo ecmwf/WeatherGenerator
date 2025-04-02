@@ -20,15 +20,14 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.model.attention import (
     MultiCrossAttentionHead_Varlen,
-    MultiCrossAttentionHead_Varlen_SlicedQ,
-    MultiSelfAttentionHead,
-    MultiSelfAttentionHead_Local,
     MultiSelfAttentionHead_Varlen,
 )
-from weathergen.model.ens_prediction_head import EnsPredictionHead
-from weathergen.model.mlp import MLP
-from weathergen.model.stream_embed_linear import StreamEmbedLinear
-from weathergen.model.stream_embed_transformer import StreamEmbedTransformer
+
+from weathergen.model.layers import (
+    EnsPredictionHead,
+    MLP,
+    )
+
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.logger import logger
 
