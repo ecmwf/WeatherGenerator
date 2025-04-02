@@ -83,9 +83,16 @@ def evaluate():
         default=None,
         help="Path to private configuration file for paths.",
     )
+    parser.add_argument(
+        "-n",
+        "--same_run_id",
+        required=False,
+        dest='run_id_new', 
+        action='store_false',
+        help="store evaluation results in the same folder as run_id"
+    )
 
     args = parser.parse_args()
-
     # get the paths from the private config
     private_cf = load_private_conf(args.private_config)
 
@@ -104,7 +111,6 @@ def evaluate():
 
     cf.samples_per_validation = args.samples
     cf.log_validation = args.samples if args.save_samples else 0
-
     start_date, end_date = pd.to_datetime(args.start_date), pd.to_datetime(args.end_date)
 
     cf.start_date_val = start_date.strftime("%Y%m%d%H%M")
@@ -122,7 +128,7 @@ def evaluate():
     cf.loader_num_workers = min(cf.loader_num_workers, args.samples)
 
     trainer = Trainer()
-    trainer.evaluate(cf, args.run_id, args.epoch, True)
+    trainer.evaluate(cf, args.run_id, args.epoch, args.run_id_new)
 
 
 ####################################################################################################
@@ -232,6 +238,13 @@ def train() -> None:
         type=str,
         default=None,
         help="Path to private configuration file for paths",
+    )
+
+    parser.add_argument(
+        "--config", 
+        type=str,
+        default=None,
+        help="Path to configuration with parameters to overwrite",
     )
 
     args = parser.parse_args()
