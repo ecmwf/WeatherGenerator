@@ -16,9 +16,11 @@ from weathergen.model.attention import (
     MultiSelfAttentionHead_Varlen,
 )
 from weathergen.model.ens_prediction_head import EnsPredictionHead
-from weathergen.model.mlp import MLP
-from weathergen.model.stream_embed_linear import StreamEmbedLinear
-from weathergen.model.stream_embed_transformer import StreamEmbedTransformer
+from weathergen.model.layers import (
+    MLP,
+    StreamEmbedLinear,
+    StreamEmbedTransformer,
+    )
 
 from weathergen.utils.config import Config
 
