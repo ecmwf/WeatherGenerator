@@ -9,14 +9,12 @@
 
 
 import torch
-
-from weathergen.model.norms import AdaLayerNorm, RMSNorm
-
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.model.attention import MultiSelfAttentionHead
+
 # from weathergen.model.mlp import MLP
-from weathergen.model.norms import RMSNorm
+from weathergen.model.norms import AdaLayerNorm, RMSNorm
 from weathergen.model.positional_encoding import positional_encoding_harmonic
 
 
@@ -273,8 +271,6 @@ class StreamEmbedTransformer(torch.nn.Module):
         out = self.dropout_final(self.ln_final(out))
 
         return out
-
-
 
 
 class StreamEmbedLinear(torch.nn.Module):
