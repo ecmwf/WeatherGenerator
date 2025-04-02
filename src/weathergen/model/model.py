@@ -32,6 +32,13 @@ from weathergen.model.stream_embed_transformer import StreamEmbedTransformer
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.logger import logger
 
+from weathergen.model.engines import (
+    EmbeddingEngine,
+    LocalAssimilationEngine,
+    Local2GlobalAssimilationEngine,
+    GlobalAssimilationEngine,
+    ForecastingEngine,
+)
 
 class ModelParams(torch.nn.Module):
     def __init__(self):
@@ -128,101 +135,18 @@ class Model(torch.nn.Module):
     def create(self):
         cf = self.cf
 
+        # KCT:iss130
         # separate embedding networks for differnt observation types
-        self.embeds = torch.nn.ModuleList()
-        for i, si in enumerate(cf.streams):
-            if "diagnostic" in si:
-                if si["diagnostic"]:
-                    self.embeds.append(torch.nn.Identity())
-                    continue
-            if si["embed"]["net"] == "transformer":
-                self.embeds.append(
-                    StreamEmbedTransformer(
-                        mode=cf.embed_orientation,
-                        num_tokens=si["embed"]["num_tokens"],
-                        token_size=si["token_size"],
-                        num_channels=self.sources_size[i],
-                        dim_embed=si["embed"]["dim_embed"],
-                        dim_out=cf.ae_local_dim_embed,
-                        num_blocks=si["embed"]["num_blocks"],
-                        num_heads=si["embed"]["num_heads"],
-                        norm_type=cf.norm_type,
-                        embed_size_centroids=cf.embed_size_centroids,
-                        unembed_mode=cf.embed_unembed_mode,
-                    )
-                )
-            elif si["embed"]["net"] == "linear":
-                self.embeds.append(
-                    StreamEmbedLinear(
-                        self.sources_size[i] * si["token_size"], cf.ae_local_dim_embed
-                    )
-                )
-            else:
-                assert False, "Unsupported embedding network type"
+        self.embeds = EmbeddingEngine(cf, self.sources_size).create()
 
+        # KCT:iss130
         # local assimilation engine
-        self.ae_local_blocks = torch.nn.ModuleList()
-        for _ in range(cf.ae_local_num_blocks):
-            self.ae_local_blocks.append(
-                MultiSelfAttentionHead_Varlen(
-                    cf.ae_local_dim_embed,
-                    num_heads=cf.ae_local_num_heads,
-                    dropout_rate=cf.ae_local_dropout_rate,
-                    with_qk_lnorm=cf.ae_local_with_qk_lnorm,
-                    with_flash=cf.with_flash_attention,
-                    norm_type=cf.norm_type,
-                )
-            )
-            self.ae_local_blocks.append(
-                MLP(
-                    cf.ae_local_dim_embed,
-                    cf.ae_local_dim_embed,
-                    with_residual=True,
-                    dropout_rate=cf.ae_local_dropout_rate,
-                    norm_type=cf.norm_type,
-                )
-            )
-
+        self.ae_local_blocks = LocalAssimilationEngine(cf).create()
+        
         ##############
+        # KCT:iss130
         # local -> global assimilation engine adapter
-        self.ae_adapter = torch.nn.ModuleList()
-        self.ae_adapter.append(
-            MultiCrossAttentionHead_Varlen_SlicedQ(
-                cf.ae_global_dim_embed,
-                cf.ae_local_dim_embed,
-                num_slices_q=cf.ae_local_num_queries,
-                dim_head_proj=cf.ae_adapter_embed,
-                num_heads=cf.ae_adapter_num_heads,
-                with_residual=cf.ae_adapter_with_residual,
-                with_qk_lnorm=cf.ae_adapter_with_qk_lnorm,
-                dropout_rate=cf.ae_adapter_dropout_rate,
-                with_flash=cf.with_flash_attention,
-                norm_type=cf.norm_type,
-            )
-        )
-        self.ae_adapter.append(
-            MLP(
-                cf.ae_global_dim_embed,
-                cf.ae_global_dim_embed,
-                with_residual=True,
-                dropout_rate=cf.ae_adapter_dropout_rate,
-                norm_type=cf.norm_type,
-            )
-        )
-        self.ae_adapter.append(
-            MultiCrossAttentionHead_Varlen_SlicedQ(
-                cf.ae_global_dim_embed,
-                cf.ae_local_dim_embed,
-                num_slices_q=cf.ae_local_num_queries,
-                dim_head_proj=cf.ae_adapter_embed,
-                num_heads=cf.ae_adapter_num_heads,
-                with_residual=cf.ae_adapter_with_residual,
-                with_qk_lnorm=cf.ae_adapter_with_qk_lnorm,
-                dropout_rate=cf.ae_adapter_dropout_rate,
-                with_flash=cf.with_flash_attention,
-                norm_type=cf.norm_type,
-            )
-        )
+        self.ae_adapter = Local2GlobalAssimilationEngine(cf).create()
 
         # learnable queries
         if cf.ae_local_queries_per_cell:
@@ -252,92 +176,14 @@ class Model(torch.nn.Module):
         self.q_cells = torch.nn.Parameter(q_cells, requires_grad=True)
 
         ##############
+        # KCT:iss130
         # global assimilation engine
-        global_rate = int(1 / cf.ae_global_att_dense_rate)
-        self.ae_global_blocks = torch.nn.ModuleList()
-        for i in range(cf.ae_global_num_blocks):
-            # alternate between local and global attention as controlled by cf.ae_global_att_dense_rate
-            # last block is always global attention
-            # if (i % global_rate == 0 and i>0) or i+1 == cf.ae_global_num_blocks :
-            if i % global_rate == 0 or i + 1 == cf.ae_global_num_blocks:
-                self.ae_global_blocks.append(
-                    MultiSelfAttentionHead(
-                        cf.ae_global_dim_embed,
-                        num_heads=cf.ae_global_num_heads,
-                        dropout_rate=cf.ae_global_dropout_rate,
-                        with_qk_lnorm=cf.ae_global_with_qk_lnorm,
-                        with_flash=cf.with_flash_attention,
-                        norm_type=cf.norm_type,
-                    )
-                )
-            else:
-                self.ae_global_blocks.append(
-                    MultiSelfAttentionHead_Local(
-                        cf.ae_global_dim_embed,
-                        num_heads=cf.ae_global_num_heads,
-                        qkv_len=self.num_healpix_cells * cf.ae_local_num_queries,
-                        block_factor=cf.ae_global_block_factor,
-                        dropout_rate=cf.ae_global_dropout_rate,
-                        with_qk_lnorm=cf.ae_global_with_qk_lnorm,
-                        with_flash=cf.with_flash_attention,
-                        norm_type=cf.norm_type,
-                    )
-                )
-            # MLP block
-            self.ae_global_blocks.append(
-                MLP(
-                    cf.ae_global_dim_embed,
-                    cf.ae_global_dim_embed,
-                    with_residual=True,
-                    dropout_rate=cf.ae_global_dropout_rate,
-                    hidden_factor=cf.ae_global_mlp_hidden_factor,
-                    norm_type=cf.norm_type,
-                )
-            )
+        self.ae_global_blocks = GlobalAssimilationEngine(cf, self.num_healpix_cells).create()
 
         ###############
+        # KCT:iss130
         # forecasting engine
-
-        global_rate = int(1 / cf.forecast_att_dense_rate)
-        self.fe_blocks = torch.nn.ModuleList()
-        if cf.forecast_policy is not None:
-            for i in range(cf.fe_num_blocks):
-                if (i % global_rate == 0 and i > 0) or i + 1 == cf.ae_global_num_blocks:
-                    self.fe_blocks.append(
-                        MultiSelfAttentionHead(
-                            cf.ae_global_dim_embed,
-                            num_heads=cf.fe_num_heads,
-                            dropout_rate=cf.fe_dropout_rate,
-                            with_qk_lnorm=cf.fe_with_qk_lnorm,
-                            with_flash=cf.with_flash_attention,
-                            norm_type=cf.norm_type,
-                            dim_aux=1,
-                        )
-                    )
-                else:
-                    self.fe_blocks.append(
-                        MultiSelfAttentionHead_Local(
-                            cf.ae_global_dim_embed,
-                            num_heads=cf.fe_num_heads,
-                            qkv_len=self.num_healpix_cells * cf.ae_local_num_queries,
-                            block_factor=cf.ae_global_block_factor,
-                            dropout_rate=cf.fe_dropout_rate,
-                            with_qk_lnorm=cf.fe_with_qk_lnorm,
-                            with_flash=cf.with_flash_attention,
-                            norm_type=cf.norm_type,
-                            dim_aux=1,
-                        )
-                    )
-                self.fe_blocks.append(
-                    MLP(
-                        cf.ae_global_dim_embed,
-                        cf.ae_global_dim_embed,
-                        with_residual=True,
-                        dropout_rate=cf.fe_dropout_rate,
-                        norm_type=cf.norm_type,
-                        dim_aux=1,
-                    )
-                )
+        self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells).create()
 
         ###############
 
