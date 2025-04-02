@@ -22,22 +22,20 @@ from weathergen.model.attention import (
     MultiCrossAttentionHead_Varlen,
     MultiSelfAttentionHead_Varlen,
 )
-
+from weathergen.model.engines import (
+    EmbeddingEngine,
+    ForecastingEngine,
+    GlobalAssimilationEngine,
+    Local2GlobalAssimilationEngine,
+    LocalAssimilationEngine,
+)
 from weathergen.model.layers import (
-    EnsPredictionHead,
     MLP,
-    )
-
+    EnsPredictionHead,
+)
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.logger import logger
 
-from weathergen.model.engines import (
-    EmbeddingEngine,
-    LocalAssimilationEngine,
-    Local2GlobalAssimilationEngine,
-    GlobalAssimilationEngine,
-    ForecastingEngine,
-)
 
 class ModelParams(torch.nn.Module):
     def __init__(self):
@@ -141,7 +139,7 @@ class Model(torch.nn.Module):
         # KCT:iss130
         # local assimilation engine
         self.ae_local_blocks = LocalAssimilationEngine(cf).create()
-        
+
         ##############
         # KCT:iss130
         # local -> global assimilation engine adapter

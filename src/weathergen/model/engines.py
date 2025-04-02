@@ -8,24 +8,19 @@
 # nor does it submit to any jurisdiction.
 
 import torch
+
 from weathergen.model.attention import (
-    MultiCrossAttentionHead_Varlen,
     MultiCrossAttentionHead_Varlen_SlicedQ,
     MultiSelfAttentionHead,
     MultiSelfAttentionHead_Local,
     MultiSelfAttentionHead_Varlen,
 )
-
-
 from weathergen.model.layers import (
-    EnsPredictionHead,
     MLP,
     StreamEmbedLinear,
     StreamEmbedTransformer,
-    )
-
+)
 from weathergen.utils.config import Config
-
 
 
 class EmbeddingEngine:
@@ -37,7 +32,7 @@ class EmbeddingEngine:
         :param sources_size: List of source sizes for each stream.
         """
         self.cf = cf
-        self.sources_size = sources_size # KCT:iss130, what is this?
+        self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleList()
 
     def create(self) -> torch.nn.ModuleList:
@@ -77,6 +72,7 @@ class EmbeddingEngine:
                 raise ValueError("Unsupported embedding network type")
         return self.embeds
 
+
 class LocalAssimilationEngine:
     def __init__(self, cf: Config) -> None:
         """
@@ -114,10 +110,8 @@ class LocalAssimilationEngine:
                 )
             )
         return self.ae_local_blocks
-    
-    
-    
-    
+
+
 class Local2GlobalAssimilationEngine:
     def __init__(self, cf: Config) -> None:
         """
@@ -172,8 +166,8 @@ class Local2GlobalAssimilationEngine:
             )
         )
         return self.ae_adapter
-    
-    
+
+
 class GlobalAssimilationEngine:
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
         """
@@ -184,7 +178,7 @@ class GlobalAssimilationEngine:
         """
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
-        
+
         self.ae_global_blocks = torch.nn.ModuleList()
 
     def create(self) -> torch.nn.ModuleList:
@@ -233,9 +227,8 @@ class GlobalAssimilationEngine:
                 )
             )
         return self.ae_global_blocks
-    
-    
-    
+
+
 class ForecastingEngine:
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
         """
