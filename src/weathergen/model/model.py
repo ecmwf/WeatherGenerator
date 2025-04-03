@@ -593,7 +593,7 @@ class Model(torch.nn.Module):
                 )
             ]
 
-            tokens = self.forecast(model_params, tokens)
+            tokens = tokens + self.forecast(model_params, tokens)
 
         # prediction for final step
         preds_all += [
