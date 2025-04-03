@@ -160,7 +160,7 @@ def train_continue() -> None:
     )
     parser.add_argument(
          "--finetune_forecast",
-        action='store_true'
+        action='store_true', 
         help="Fine tune for forecasting. It overwrites some of the Config settings.",
     )
 
