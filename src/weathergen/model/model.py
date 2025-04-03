@@ -18,17 +18,14 @@ import torch
 from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
 
-from weathergen.model.attention import (
-    MultiCrossAttentionHead_Varlen,
-    MultiSelfAttentionHead_Varlen,
-)
 from weathergen.model.engines import (
     EmbeddingEngine,
+    EnsPredictionHead,
     ForecastingEngine,
     GlobalAssimilationEngine,
     Local2GlobalAssimilationEngine,
     LocalAssimilationEngine,
-    EnsPredictionHead,
+    TargetPredictionEngine,
 )
 from weathergen.model.layers import MLP
 from weathergen.model.utils import get_num_parameters
@@ -257,49 +254,18 @@ class Model(torch.nn.Module):
             else:
                 self.pred_adapter_kv.append(torch.nn.Identity())
 
+            #KCT:iss130
             # target prediction engines
-            tte = torch.nn.ModuleList()
-            for i in range(num_layers):
-                tte.append(
-                    MultiCrossAttentionHead_Varlen(
-                        dims_embed[i],
-                        cf.ae_global_dim_embed,
-                        si["target_readout"]["num_heads"],
-                        dim_head_proj=tr_dim_head_proj,
-                        with_residual=True,
-                        with_qk_lnorm=True,
-                        dropout_rate=dropout_rate,
-                        with_flash=cf.with_flash_attention,
-                        norm_type=cf.norm_type,
-                        softcap=softcap,
-                        dim_aux=dim_coord_in,
-                    )
-                )
-                if cf.pred_self_attention:
-                    tte.append(
-                        MultiSelfAttentionHead_Varlen(
-                            dims_embed[i],
-                            num_heads=si["target_readout"]["num_heads"],
-                            dropout_rate=dropout_rate,
-                            with_qk_lnorm=True,
-                            with_flash=cf.with_flash_attention,
-                            norm_type=cf.norm_type,
-                            dim_aux=dim_coord_in,
-                        )
-                    )
-                tte.append(
-                    MLP(
-                        dims_embed[i],
-                        dims_embed[i + 1],
-                        with_residual=(
-                            True if cf.pred_dyadic_dims or tro_type == "obs_value" else False
-                        ),
-                        hidden_factor=tr_mlp_hidden_factor,
-                        dropout_rate=dropout_rate,
-                        norm_type=cf.norm_type,
-                        dim_aux=(dim_coord_in if cf.pred_mlp_adaln else None),
-                    )
-                )
+            tte = TargetPredictionEngine(
+                    cf,
+                    dims_embed,
+                    dim_coord_in,
+                    tr_dim_head_proj,
+                    tr_mlp_hidden_factor,
+                    softcap,
+                    tro_type
+                ).create()
+            
             self.target_token_engines.append(tte)
 
             # ensemble prediction heads to provide probabilistic prediction

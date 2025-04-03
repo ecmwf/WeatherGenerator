@@ -18,6 +18,7 @@ from weathergen.model.layers import MLP
 from weathergen.model.norms import RMSNorm
 from weathergen.model.positional_encoding import positional_encoding_harmonic
 
+
 class StreamEmbedTransformer(torch.nn.Module):
     def __init__(
         self,
