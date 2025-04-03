@@ -32,18 +32,18 @@ def test_missing_metrics_file(run_id):
     assert metrics is not None, f"Failed to load metrics for run_id: {run_id}"
 
 def test_train_loss_below_threshold(run_id):
-    """Test that the 'stream.era5.loss_mse.loss_avg' metric is below 0.2."""
+    """Test that the 'stream.era5.loss_mse.loss_avg' metric is below a threshold."""
     metrics = load_metrics(run_id)
     loss_metric = next((metric.get("stream.era5.loss_mse.loss_avg", None) for metric in reversed(metrics) if metric.get('stage') == 'train'), None)
     assert loss_metric is not None, "'stream.era5.loss_mse.loss_avg' metric is missing in metrics file"
-    assert loss_metric < 0.25, f"'stream.era5.loss_mse.loss_avg' is {loss_metric}, expected to be below 0.15"
+    assert loss_metric < 0.25, f"'stream.era5.loss_mse.loss_avg' is {loss_metric}, expected to be below 0.25"
 
 def test_val_loss_below_threshold(run_id):
-    """Test that the 'stream.era5.loss_mse.loss_avg' metric is below 0.2."""
+    """Test that the 'stream.era5.loss_mse.loss_avg' metric is below a threshold."""
     metrics = load_metrics(run_id)
     loss_metric = next((metric.get("stream.era5.loss_mse.loss_avg", None) for metric in reversed(metrics) if metric.get('stage') == 'val'), None)
     assert loss_metric is not None, "'stream.era5.loss_mse.loss_avg' metric is missing in metrics file"
-    assert loss_metric < 0.25, f"'stream.era5.loss_mse.loss_avg' is {loss_metric}, expected to be below 0.15"
+    assert loss_metric < 0.25, f"'stream.era5.loss_mse.loss_avg' is {loss_metric}, expected to be below 0.25"
 
 
 def test_gpu_performance_above_threshold(run_id):
