@@ -254,18 +254,18 @@ class Model(torch.nn.Module):
             else:
                 self.pred_adapter_kv.append(torch.nn.Identity())
 
-            #KCT:iss130
+            # KCT:iss130
             # target prediction engines
             tte = TargetPredictionEngine(
-                    cf,
-                    dims_embed,
-                    dim_coord_in,
-                    tr_dim_head_proj,
-                    tr_mlp_hidden_factor,
-                    softcap,
-                    tro_type
-                ).create()
-            
+                cf,
+                dims_embed,
+                dim_coord_in,
+                tr_dim_head_proj,
+                tr_mlp_hidden_factor,
+                softcap,
+                tro_type,
+            ).create()
+
             self.target_token_engines.append(tte)
 
             # ensemble prediction heads to provide probabilistic prediction
