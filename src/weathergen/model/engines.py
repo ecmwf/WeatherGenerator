@@ -10,6 +10,7 @@
 import torch
 
 from weathergen.model.attention import (
+    MultiCrossAttentionHead_Varlen,
     MultiCrossAttentionHead_Varlen_SlicedQ,
     MultiSelfAttentionHead,
     MultiSelfAttentionHead_Local,
@@ -20,7 +21,6 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
-
 from weathergen.utils.config import Config
 
 
@@ -334,3 +334,81 @@ class EnsPredictionHead(torch.nn.Module):
         preds = torch.stack(preds, 0)
 
         return preds
+    
+    
+    
+class TargetPredictionEngine:
+    def __init__(self, cf, dims_embed, dim_coord_in, tr_dim_head_proj, tr_mlp_hidden_factor, softcap, tro_type):
+        """
+        Initialize the TargetPredictionEngine with the configuration.
+
+        :param cf: Configuration object containing parameters for the engine.
+        :param dims_embed: List of embedding dimensions for each layer.
+        :param dim_coord_in: Input dimension for coordinates.
+        :param tr_dim_head_proj: Dimension for head projection.
+        :param tr_mlp_hidden_factor: Hidden factor for the MLP layers.
+        :param softcap: Softcap value for the attention layers.
+        :param tro_type: Type of target readout (e.g., "obs_value").
+        """
+        self.cf = cf
+        self.dims_embed = dims_embed
+        self.dim_coord_in = dim_coord_in
+        self.tr_dim_head_proj = tr_dim_head_proj
+        self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
+        self.softcap = softcap
+        self.tro_type = tro_type
+        self.tte = torch.nn.ModuleList()
+
+    def create(self):
+        """
+        Creates and returns the module list (tte).
+
+        :return: torch.nn.ModuleList containing the target prediction blocks.
+        """
+        for i in range(len(self.dims_embed) - 1):
+            # Multi-Cross Attention Head
+            self.tte.append(
+                MultiCrossAttentionHead_Varlen(
+                    self.dims_embed[i],
+                    self.cf.ae_global_dim_embed,
+                    self.cf.streams[0]["target_readout"]["num_heads"],
+                    dim_head_proj=self.tr_dim_head_proj,
+                    with_residual=True,
+                    with_qk_lnorm=True,
+                    dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                    with_flash=self.cf.with_flash_attention,
+                    norm_type=self.cf.norm_type,
+                    softcap=self.softcap,
+                    dim_aux=self.dim_coord_in,
+                )
+            )
+
+            # Optional Self-Attention Head
+            if self.cf.pred_self_attention:
+                self.tte.append(
+                    MultiSelfAttentionHead_Varlen(
+                        self.dims_embed[i],
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                        with_qk_lnorm=True,
+                        with_flash=self.cf.with_flash_attention,
+                        norm_type=self.cf.norm_type,
+                        dim_aux=self.dim_coord_in,
+                    )
+                )
+
+            # MLP Block
+            self.tte.append(
+                MLP(
+                    self.dims_embed[i],
+                    self.dims_embed[i + 1],
+                    with_residual=(
+                        True if self.cf.pred_dyadic_dims or self.tro_type == "obs_value" else False
+                    ),
+                    hidden_factor=self.tr_mlp_hidden_factor,
+                    dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                    norm_type=self.cf.norm_type,
+                    dim_aux=(self.dim_coord_in if self.cf.pred_mlp_adaln else None),
+                )
+            )
+        return self.tte
