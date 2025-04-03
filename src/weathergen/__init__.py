@@ -394,7 +394,7 @@ def train() -> None:
 
     try:
         trainer.run(cf, private_cf)
-    except:
+    except Exception as e:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
         pdb.post_mortem(tb)
