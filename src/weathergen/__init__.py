@@ -87,9 +87,9 @@ def evaluate():
         "-n",
         "--same_run_id",
         required=False,
-        dest='run_id_new', 
-        action='store_false',
-        help="store evaluation results in the same folder as run_id"
+        dest="run_id_new",
+        action="store_false",
+        help="store evaluation results in the same folder as run_id",
     )
 
     args = parser.parse_args()
@@ -241,7 +241,7 @@ def train() -> None:
     )
 
     parser.add_argument(
-        "--config", 
+        "--config",
         type=str,
         default=None,
         help="Path to configuration with parameters to overwrite",
@@ -401,7 +401,7 @@ def train() -> None:
 
     try:
         trainer.run(cf, private_cf)
-    except Exception as e:
+    except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
         pdb.post_mortem(tb)
