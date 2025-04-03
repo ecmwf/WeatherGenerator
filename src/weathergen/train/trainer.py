@@ -492,7 +492,7 @@ class Trainer(Trainer_Base):
                 for fstep in range(forecast_steps + 1)
             ]
 
-        ctr = 0
+        ctr_ftarget = 0
         loss = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
 
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
@@ -520,10 +520,9 @@ class Trainer(Trainer_Base):
                 if target.shape[0] > 0 and pred.shape[0] > 0:
                     # extract data/coords and remove token dimension if it exists
                     pred = pred.reshape([pred.shape[0], *target.shape])
+                    assert pred.shape[1] > 0
 
                     mask_nan = ~torch.isnan(target)
-
-                    assert pred.shape[1] > 0
                     if pred[:, mask_nan].shape[1] == 0:
                         continue
                     ens = pred.shape[0] > 1
@@ -532,16 +531,16 @@ class Trainer(Trainer_Base):
                     for j, (loss_fct, w) in enumerate(loss_fcts):
                         # compute per channel loss
                         # val_uw is unweighted loss for logging
-                        val, val_uw, ctr = (
-                            torch.tensor(0.0, device=self.devices[0], requires_grad=True),
-                            0.0,
-                            0.0,
-                        )
+                        val = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
+                        val_uw = 0.0
+                        ctr_chs = 0.0
+
+                        # loop over all channels
                         for i in range(target.shape[-1]):
+                            # if stream is internal time step, compute loss separately per step
                             if tok_spacetime:
                                 # iterate over time steps and compute loss separately for each
                                 t_unique = torch.unique(target_coords[:, 1])
-                                # tw = np.linspace( 1.0, 2.0, len(t_unique))
                                 for _jj, t in enumerate(t_unique):
                                     mask_t = t == target_coords[:, 1]
                                     mask = torch.logical_and(mask_t, mask_nan[:, i])
@@ -553,8 +552,8 @@ class Trainer(Trainer_Base):
                                             (pred[:, mask, i].std(0) if ens else torch.zeros(1)),
                                         )
                                         val_uw += temp.item()
-                                        val = val + channel_loss_weight[i] * temp  # * tw[jj]
-                                        ctr += 1
+                                        val = val + channel_loss_weight[i] * temp
+                                        ctr_chs += 1
 
                             else:
                                 # only compute loss is there are non-NaN values
@@ -571,9 +570,9 @@ class Trainer(Trainer_Base):
                                     )
                                     val_uw += temp.item()
                                     val = val + channel_loss_weight[i] * temp
-                                    ctr += 1
-                        val = val / ctr if (ctr > 0) else val
-                        val_uw = val_uw / ctr if (ctr > 0) else val_uw
+                                    ctr_chs += 1
+                        val = val / ctr_chs if (ctr_chs > 0) else val
+                        val_uw = val_uw / ctr_chs if (ctr_chs > 0) else val_uw
 
                         losses_all[j, i_obs] = val_uw
                         if self.cf.loss_fcts[j][0] == "stats" or self.cf.loss_fcts[j][0] == "kcrps":
@@ -584,11 +583,10 @@ class Trainer(Trainer_Base):
                             if not torch.isnan(val)
                             else torch.tensor(0.0, requires_grad=True)
                         )
-                    ctr += 1
+                    ctr_ftarget += 1
 
                     # log data for analysis
                     if log_data:
-                        # TODO: test
                         targets_lens[fstep][i_obs] += [target.shape[0]]
                         dn_data = self.dataset_val.denormalize_target_channels
 
@@ -596,8 +594,12 @@ class Trainer(Trainer_Base):
                         preds_all[fstep][i_obs] += [dn_data(i_obs, pred.to(f32)).detach().cpu()]
                         targets_all[fstep][i_obs] += [dn_data(i_obs, target.to(f32)).detach().cpu()]
 
+        # normalize by all targets and forecast steps that were non-empty
+        # (with each having an expected loss of 1 for an uninitalized neural net)
+        loss /= ctr_ftarget
+
         return (
-            loss / ctr,
+            loss,
             None
             if not log_data
             else [
