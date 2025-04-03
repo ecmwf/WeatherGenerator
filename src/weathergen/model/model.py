@@ -28,11 +28,9 @@ from weathergen.model.engines import (
     GlobalAssimilationEngine,
     Local2GlobalAssimilationEngine,
     LocalAssimilationEngine,
-)
-from weathergen.model.layers import (
-    MLP,
     EnsPredictionHead,
 )
+from weathergen.model.layers import MLP
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.logger import logger
 
