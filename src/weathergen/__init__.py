@@ -159,8 +159,8 @@ def train_continue() -> None:
         help="Path to private configuration file for paths.",
     )
     parser.add_argument(
-         "--finetune_forecast",
-        action='store_true', 
+        "--finetune_forecast",
+        action="store_true",
         help="Fine tune for forecasting. It overwrites some of the Config settings.",
     )
 
@@ -394,7 +394,7 @@ def train() -> None:
 
     try:
         trainer.run(cf, private_cf)
-    except Exception as e:
+    except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
         pdb.post_mortem(tb)
