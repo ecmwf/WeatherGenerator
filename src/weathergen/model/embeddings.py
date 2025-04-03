@@ -171,7 +171,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         out = self.dropout_final(self.ln_final(out))
 
         return out
-    
+
 
 class StreamEmbedLinear(torch.nn.Module):
     def __init__(self, dim_in, dim_out):

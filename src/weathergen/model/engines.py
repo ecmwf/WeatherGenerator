@@ -292,8 +292,6 @@ class ForecastingEngine:
         return self.fe_blocks
 
 
-
-
 class EnsPredictionHead(torch.nn.Module):
     #########################################
     def __init__(
@@ -334,11 +332,19 @@ class EnsPredictionHead(torch.nn.Module):
         preds = torch.stack(preds, 0)
 
         return preds
-    
-    
-    
+
+
 class TargetPredictionEngine:
-    def __init__(self, cf, dims_embed, dim_coord_in, tr_dim_head_proj, tr_mlp_hidden_factor, softcap, tro_type):
+    def __init__(
+        self,
+        cf,
+        dims_embed,
+        dim_coord_in,
+        tr_dim_head_proj,
+        tr_mlp_hidden_factor,
+        softcap,
+        tro_type,
+    ):
         """
         Initialize the TargetPredictionEngine with the configuration.
 
