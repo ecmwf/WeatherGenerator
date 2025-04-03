@@ -158,6 +158,11 @@ def train_continue() -> None:
         default=None,
         help="Path to private configuration file for paths.",
     )
+    parser.add_argument(
+         "--finetune_forecast",
+        action='store_true'
+        help="Fine tune for forecasting. It overwrites some of the Config settings.",
+    )
 
     args = parser.parse_args()
     # get the paths from the private config
@@ -173,35 +178,36 @@ def train_continue() -> None:
     cf.run_history += [(cf.run_id, cf.istep)]
 
     #########################
-    cf.forecast_delta_hrs = 0  # 12
-    cf.forecast_steps = 1  # [j for j in range(1,9) for i in range(4)]
-    cf.forecast_policy = "fixed"  # 'sequential_random' # 'fixed' #'sequential' #_random'
-    cf.forecast_freeze_model = True
-    cf.forecast_att_dense_rate = 1.0  # 0.25
+    if args.finetune_forecast:
+        cf.forecast_delta_hrs = 0  # 12
+        cf.forecast_steps = 1  # [j for j in range(1,9) for i in range(4)]
+        cf.forecast_policy = "fixed"  # 'sequential_random' # 'fixed' #'sequential' #_random'
+        cf.forecast_freeze_model = True
+        cf.forecast_att_dense_rate = 1.0  # 0.25
 
-    if cf.forecast_freeze_model:
-        cf.with_fsdp = False
-        import torch
+        if cf.forecast_freeze_model:
+            cf.with_fsdp = False
+            import torch
 
-        torch._dynamo.config.optimize_ddp = False
+            torch._dynamo.config.optimize_ddp = False
 
-    cf.fe_num_blocks = 8
-    cf.fe_num_heads = 16
-    cf.fe_dropout_rate = 0.1
-    cf.fe_with_qk_lnorm = True
+        cf.fe_num_blocks = 8
+        cf.fe_num_heads = 16
+        cf.fe_dropout_rate = 0.1
+        cf.fe_with_qk_lnorm = True
 
-    cf.lr_start = 0.000001
-    cf.lr_max = 0.00003
-    cf.lr_final_decay = 0.00003
-    cf.lr_final = 0.0
-    cf.lr_steps_warmup = 1024
-    cf.lr_steps_cooldown = 4096
-    cf.lr_policy_warmup = "cosine"
-    cf.lr_policy_decay = "linear"
-    cf.lr_policy_cooldown = "linear"
+        cf.lr_start = 0.000001
+        cf.lr_max = 0.00003
+        cf.lr_final_decay = 0.00003
+        cf.lr_final = 0.0
+        cf.lr_steps_warmup = 1024
+        cf.lr_steps_cooldown = 4096
+        cf.lr_policy_warmup = "cosine"
+        cf.lr_policy_decay = "linear"
+        cf.lr_policy_cooldown = "linear"
 
-    cf.num_epochs = 12  # len(cf.forecast_steps) + 4
-    cf.istep = 0
+        cf.num_epochs = 12  # len(cf.forecast_steps) + 4
+        cf.istep = 0
 
     trainer = Trainer()
     trainer.run(cf, private_cf, args.run_id, args.epoch, args.run_id_new)
