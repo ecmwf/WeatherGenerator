@@ -342,7 +342,7 @@ class Trainer(Trainer_Base):
                 if not cf.with_mixed_precision
                 else MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=True)
             )
-            mp = None
+            # mp = None
             self.ddp_model = FSDP(
                 self.model,
                 auto_wrap_policy=size_based_auto_wrap_policy,
