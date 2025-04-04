@@ -86,17 +86,10 @@ def evaluate():
 
     args = parser.parse_args()
 
-    # get the paths from the private config
-    private_cf = config.load_private_conf(args.private_config)
-
     # TODO: move somewhere else
     init_loggers()
 
-    cf = config.load_model_config(args.run_id, args.epoch, private_cf["model_path"])
-
-    # add parameters from private (paths) config
-    for k, v in private_cf.items():
-        setattr(cf, k, v)
+    cf = config.load_config(args.private_config, args.run_id, args.epoch)
 
     cf.run_history += [(cf.run_id, cf.istep)]
 
@@ -166,10 +159,7 @@ def train_continue() -> None:
 
     if args.epoch == -2:
         args.epoch = None
-    private_cf = config.load_private_conf(args.private_config)
-    
-
-    cf = config.load_model_config(args.run_id, args.epoch, private_cf["model_path"])
+    cf = config.load_config(args.private_config, args.run_id, args.epoch)
     
 
     # track history of run to ensure traceability of results
