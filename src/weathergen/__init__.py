@@ -160,7 +160,7 @@ def train_continue() -> None:
     )
     parser.add_argument(
          "--finetune_forecast",
-        action='store_true'
+        action='store_true',
         help="Fine tune for forecasting. It overwrites some of the Config settings.",
     )
 
@@ -238,6 +238,13 @@ def train() -> None:
         type=str,
         default=None,
         help="Path to private configuration file for paths",
+    )
+
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to configuration with parameters to overwrite",
     )
 
     args = parser.parse_args()
@@ -371,7 +378,7 @@ def train() -> None:
 
     cf.val_initial = False
 
-    cf.loader_num_workers = 8
+    cf.loader_num_workers = 0 #8
     cf.data_loader_rng_seed = int(time.time())
     cf.log_validation = 0
 

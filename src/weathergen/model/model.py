@@ -570,7 +570,7 @@ class Model(torch.nn.Module):
     #########################################
     def forward(self, model_params, batch, forecast_steps):
         (streams_data, source_cell_lens, target_coords_idxs) = batch
-
+        
         # embed
         tokens = self.embed_cells(model_params, streams_data)
 
@@ -578,7 +578,7 @@ class Model(torch.nn.Module):
         tokens = self.assimilate_local(model_params, tokens, source_cell_lens)
 
         tokens = self.assimilate_global(model_params, tokens)
-
+        breakpoint()
         # roll-out in latent space
         preds_all = []
         for _ in range(forecast_steps):
@@ -610,7 +610,7 @@ class Model(torch.nn.Module):
 
     #########################################
     def embed_cells(self, model_params, streams_data):
-        # code.interact( local=locals())
+        
         source_tokens_lens = torch.stack(
             [
                 torch.stack(
@@ -626,13 +626,13 @@ class Model(torch.nn.Module):
         tokens_all = torch.empty(
             (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=torch.float16, device="cuda"
         )
-
+        breakpoint()
         for _, sb in enumerate(streams_data):
             for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
                 if not s.source_empty():
                     idxs = s.source_idxs_embed
                     idxs_pe = s.source_idxs_embed_pe
-
+                    breakpoint()
                     # create full scatter index (there's no broadcasting which is likely highly inefficient)
                     idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
                     x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
@@ -745,7 +745,7 @@ class Model(torch.nn.Module):
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
         tokens_stream = (tokens.reshape(s) + model_params.pe_global).flatten(0, 1)
         tokens_stream = tokens_stream[model_params.hp_nbours.flatten()].flatten(0, 1)
-
+       
         # pair with tokens from assimilation engine to obtain target tokens
         preds_tokens = []
         for ii, (tte, tte_kv) in enumerate(
@@ -774,7 +774,7 @@ class Model(torch.nn.Module):
                 )
             else:
                 assert False
-
+           
             if torch.isnan(tc_tokens).any():
                 nn = si["name"]
                 logger.warning(
@@ -785,7 +785,7 @@ class Model(torch.nn.Module):
             if tc_tokens.shape[0] == 0:
                 preds_tokens += [torch.tensor([], device=tc_tokens.device)]
                 continue
-
+          
             # TODO: how to support tte_kv efficiently, generate 1-ring neighborhoods here or on a per
             #       stream basis
             assert type(tte_kv) == torch.nn.Identity
@@ -814,5 +814,5 @@ class Model(torch.nn.Module):
 
             # final prediction head to map back to physical space
             preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
-
+          
         return preds_tokens

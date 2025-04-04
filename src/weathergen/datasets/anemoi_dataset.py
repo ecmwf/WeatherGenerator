@@ -13,7 +13,7 @@ import logging
 import numpy as np
 import torch
 from anemoi.datasets import open_dataset
-
+import pandas as pd
 _logger = logging.getLogger(__name__)
 
 
@@ -121,6 +121,30 @@ class AnemoiDataset:
         self.properties = {
             "stream_id": 0,
         }
+
+        # sigma_t = pd.read_csv("./grouped_variances.csv")
+        # wg_sigma_t = np.array(
+        #     [
+        #         sigma_t.loc[sigma_t.group == var].SF_temporal.values[0]
+        #         if var in sigma_t.group.values
+        #         else 1.0
+        #         for i, var in enumerate(ds.variables)
+        #     ]
+        # )
+
+        tendency_anemoi_mean = ds.statistics_tendencies()["mean"]
+        tendency_anemoi_stdev = ds.statistics_tendencies()["stdev"]
+
+        # breakpoint()
+        self.sigma_t = ds.statistics_tendencies()["stdev"]
+        self.sigma_t[ self.sigma_t  == 0.0] = 1
+
+        # self.sigma_t = np.ones(101)
+        for i, var in enumerate(ds.variables):
+            # print(f"{var}: WG {wg_sigma_t[i]}, ANEMOI mean: {tendency_anemoi_mean[i]}, ANEMOI std: {self.sigma_t[i]}")
+            print(f"{var}: ANEMOI mean: {tendency_anemoi_mean[i]}, ANEMOI std: {self.sigma_t[i]}")
+
+
         self.mean = ds.statistics["mean"]
         self.stdev = ds.statistics["stdev"]
 
@@ -339,8 +363,14 @@ class AnemoiDataset:
         Normalized data
         """
         assert source.shape[-1] == len(self.source_idx), "incorrect number of channels"
+        hasnan = False
         for i, ch in enumerate(self.source_idx):
-            source[..., i] = (source[..., i] - self.mean[ch]) / self.stdev[ch]
+            source[..., i] = (source[..., i] - self.mean[ch]) / (self.stdev[ch]*self.sigma_t[ch])
+            hasnan = source[..., i].isnan().any()
+            if hasnan:
+                print(f"source channel {i} has nan values")
+                print(source[..., i])
+                breakpoint()
 
         return source
 
@@ -359,7 +389,14 @@ class AnemoiDataset:
         """
         assert target.shape[-1] == len(self.target_idx), "incorrect number of channels"
         for i, ch in enumerate(self.target_idx):
-            target[..., i] = (target[..., i] - self.mean[ch]) / self.stdev[ch]
+            target[..., i] = (target[..., i] - self.mean[ch]) / (self.stdev[ch]*self.sigma_t[ch])
+
+        hasnan = target[..., i].isnan().any()
+        if hasnan:
+            print(f"target channel {i} has nan values")
+            print(target[..., i])
+            breakpoint()
+
 
         return target
 
@@ -378,7 +415,7 @@ class AnemoiDataset:
         """
         assert source.shape[-1] == len(self.source_idx), "incorrect number of channels"
         for i, ch in enumerate(self.source_idx):
-            source[..., i] = (source[..., i] * self.stdev[ch]) + self.mean[ch]
+            source[..., i] = (source[..., i] * self.stdev[ch]*self.sigma_t[ch]) + self.mean[ch]
 
         return source
 
@@ -397,7 +434,7 @@ class AnemoiDataset:
         """
         assert data.shape[-1] == len(self.target_idx), "incorrect number of channels"
         for i, ch in enumerate(self.target_idx):
-            data[..., i] = (data[..., i] * self.stdev[ch]) + self.mean[ch]
+            data[..., i] = (data[..., i] * self.stdev[ch]*self.sigma_t[ch]) + self.mean[ch]
 
         return data
 

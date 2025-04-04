@@ -495,6 +495,9 @@ class Trainer(Trainer_Base):
         ctr_ftarget = 0
         loss = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
 
+        import code
+        code.interact( local=locals())
+
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):
             for i_obs, (target, target_coords, si) in enumerate(
@@ -573,6 +576,9 @@ class Trainer(Trainer_Base):
                                     ctr_chs += 1
                         val = val / ctr_chs if (ctr_chs > 0) else val
                         val_uw = val_uw / ctr_chs if (ctr_chs > 0) else val_uw
+
+                        # import code
+                        # code.interact( local=locals())
 
                         losses_all[j, i_obs] = val_uw
                         if self.cf.loss_fcts[j][0] == "stats" or self.cf.loss_fcts[j][0] == "kcrps":
