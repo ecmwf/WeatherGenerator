@@ -81,16 +81,17 @@ def load_model_config(
 
 
 def load_config(
-    run_id: str | None = None, private_home: Path | None = None, overwrite_path: Path | None = None
+    private_home: Path | None = None, run_id: str | None = None, epoch: int | None = None, overwrite_path: Path | None = None
 ) -> Config:
+    private_config = load_private_conf(private_home)
+    overwrite_config = load_overwrite_conf(overwrite_path)
+
     if run_id is None:
         base_config = load_default_conf()
         base_config.run_id = get_run_id()
     else:
-        base_config = load_model_config(run_id)
+        base_config = load_model_config(run_id, epoch, private_config["model_path"])
 
-    private_config = load_private_conf(private_home)
-    overwrite_config = load_overwrite_conf(overwrite_path)
 
     # use OmegaConf.unsafe_merge if too slow
     return OmegaConf.merge(base_config, private_config, overwrite_config)

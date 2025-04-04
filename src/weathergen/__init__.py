@@ -249,7 +249,7 @@ def train() -> None:
     # TODO: move somewhere else
     init_loggers()
 
-    cf = config.load_config(None, args.private_config, None)
+    cf = config.load_config(args.private_config)
     
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
