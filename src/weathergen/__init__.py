@@ -179,12 +179,6 @@ def train_continue() -> None:
     cf.forecast_freeze_model = True
     cf.forecast_att_dense_rate = 1.0  # 0.25
 
-    if cf.forecast_freeze_model:
-        cf.with_fsdp = False
-        import torch
-
-        torch._dynamo.config.optimize_ddp = False
-
     cf.fe_num_blocks = 8
     cf.fe_num_heads = 16
     cf.fe_dropout_rate = 0.1
