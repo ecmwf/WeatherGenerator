@@ -110,7 +110,6 @@ def create_empty() -> Config:
     return OmegaConf.create({})
 
 
-
 def load_private_conf(private_home: Path | None = None) -> dict:
     "Return the private configuration."
     "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
@@ -131,7 +130,7 @@ def load_default_conf() -> Config:
     return OmegaConf.load(DEFAULT_CONFIG_PTH)
 
 
-def load_streams(streams_directory: Path):
+def load_streams(streams_directory: Path) -> list[Config]:
     if not streams_directory.is_dir():
         _logger.warning(f"Streams directory {streams_directory} does not exist.")
 
@@ -150,6 +149,7 @@ def load_streams(streams_directory: Path):
 
         stream_config.name = stream_name
         streams.append(stream_config)
+        _logger.info(f"loaded stream config: {stream_name}")
 
     # sanity checking (at some point, the dict should be parsed into a class)
     # check if all filenames accross all streams are unique
@@ -158,4 +158,5 @@ def load_streams(streams_directory: Path):
     if len(rts) != len(set(rts)):
         _logger.warning("Duplicate reportypes specified.")
 
-    return OmegaConf.create({"streams": streams})
+    # return OmegaConf.create({"streams": streams})
+    return streams
