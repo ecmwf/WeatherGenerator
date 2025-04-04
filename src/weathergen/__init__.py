@@ -173,8 +173,6 @@ def train_continue() -> None:
     
 
     # track history of run to ensure traceability of results
-    if "run_history" not in cf.__dict__:
-        cf.run_history = []
     cf.run_history += [(cf.run_id, cf.istep)]
 
     #########################
