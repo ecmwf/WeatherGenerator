@@ -79,8 +79,8 @@ class Trainer(Trainer_Base):
         path_run = Path(cf.run_path) / cf.run_id
         path_model = Path(cf.model_path) / cf.run_id
         if self.cf.rank == 0:
-            path_run.mkdir(exist_ok=True)
-            path_model.mkdir(exist_ok=True)
+            path_run.mkdir(exist_ok=True, parents=True)
+            path_model.mkdir(exist_ok=True, parents=True)
         self.path_run = path_run
 
         self.init_perf_monitoring()
