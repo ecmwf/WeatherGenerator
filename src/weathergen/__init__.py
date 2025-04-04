@@ -92,9 +92,7 @@ def evaluate():
     # TODO: move somewhere else
     init_loggers()
 
-    # load config: if run_id is full path, it loads from there
-    model_path = private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
-    cf = config.load(args.run_id, args.epoch, model_path)
+    cf = config.load_model_config(args.run_id, args.epoch, private_cf["model_path"])
 
     # add parameters from private (paths) config
     for k, v in private_cf.items():
@@ -167,10 +165,10 @@ def train_continue() -> None:
     args = parser.parse_args()
     # get the paths from the private config
     private_cf = config.load_private_conf(args.private_config)
+    
 
-    # load config if specified
-    model_path = private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
-    cf = config.load(args.run_id, args.epoch, model_path)
+    cf = config.load_model_config(args.run_id, args.epoch, private_cf["model_path"])
+    
 
     # track history of run to ensure traceability of results
     if "run_history" not in cf.__dict__:
@@ -210,7 +208,7 @@ def train_continue() -> None:
         cf.istep = 0
 
     trainer = Trainer()
-    trainer.run(cf, private_cf, args.run_id, args.epoch, args.run_id_new)
+    trainer.run(cf, args.run_id, args.epoch, args.run_id_new)
 
 
 ####################################################################################################

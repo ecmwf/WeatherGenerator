@@ -122,7 +122,9 @@ def load_private_conf(private_home: Path | None = None) -> dict:
                 "No private config path is provided in the command line and WEATHERGEN_PRIVATE_CONF is not set."
             )
 
-    return OmegaConf.load(private_home)
+    private_cf = OmegaConf.load(private_home)
+    private_cf["model_path"] = private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
+    return private_cf
 
 
 def load_default_conf() -> Config:
