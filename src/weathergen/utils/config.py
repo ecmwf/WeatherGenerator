@@ -49,7 +49,7 @@ def save(config: Config, epoch: int | None = None):
         epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
     fname = dirname / f"model_{config.run_id}{epoch_str}.json"
 
-    json_str = json.dumps(config.to_container())
+    json_str = json.dumps(OmegaConf.to_container(config))
     with fname.open("w") as f:
         f.write(json_str)
 
