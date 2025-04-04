@@ -399,7 +399,7 @@ def train() -> None:
     trainer = Trainer(log_freq=20, checkpoint_freq=250, print_freq=10)
 
     try:
-        trainer.run(cf, private_cf)
+        trainer.run(cf)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()

@@ -136,7 +136,7 @@ class Trainer(Trainer_Base):
         print(f"Finished evaluation run with id: {cf.run_id}")
 
     ###########################################
-    def run(self, cf, private_cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
+    def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
         # general initalization
         self.init(cf, run_id_contd, epoch_contd, run_id_new)
 
