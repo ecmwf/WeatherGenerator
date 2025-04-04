@@ -79,7 +79,7 @@ def evaluate():
     )
     parser.add_argument(
         "--private_config",
-        type=str,
+        type=Path,
         default=None,
         help="Path to private configuration file for paths.",
     )
@@ -154,7 +154,7 @@ def train_continue() -> None:
     )
     parser.add_argument(
         "--private_config",
-        type=str,
+        type=Path,
         default=None,
         help="Path to private configuration file for paths.",
     )
@@ -235,7 +235,7 @@ def train() -> None:
     )
     parser.add_argument(
         "--private_config",
-        type=str,
+        type=Path,
         default=None,
         help="Path to private configuration file for paths",
     )
@@ -252,8 +252,8 @@ def train() -> None:
     init_loggers()
 
     # get the non-default configs: private and overwrite
-    private_cf = config.load_private_conf(Path(args.private_config))
-    overwrite_cf = config.load_overwrite_conf(Path(args.config))
+    private_cf = config.load_private_conf(args.private_config)
+    overwrite_cf = config.load_overwrite_conf(None) # TODO removed => what is the plan
 
     cf = config.create_empty()
 
