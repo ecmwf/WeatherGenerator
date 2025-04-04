@@ -160,7 +160,6 @@ def train_continue() -> None:
     if args.epoch == -2:
         args.epoch = None
     cf = config.load_config(args.private_config, args.run_id, args.epoch)
-    
 
     # track history of run to ensure traceability of results
     cf.run_history += [(cf.run_id, cf.istep)]
@@ -240,7 +239,7 @@ def train() -> None:
     init_loggers()
 
     cf = config.load_config(args.private_config)
-    
+
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
     cf.data_loader_rng_seed = int(time.time())

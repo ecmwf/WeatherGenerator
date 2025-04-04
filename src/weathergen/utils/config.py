@@ -27,7 +27,6 @@ _logger = logging.getLogger(__name__)
 Config = OmegaConf
 
 
-
 def print_cf(config: Config):
     for key, value in config.items():
         if key != "streams":
@@ -81,7 +80,10 @@ def load_model_config(
 
 
 def load_config(
-    private_home: Path | None = None, run_id: str | None = None, epoch: int | None = None, overwrite_path: Path | None = None
+    private_home: Path | None = None,
+    run_id: str | None = None,
+    epoch: int | None = None,
+    overwrite_path: Path | None = None,
 ) -> Config:
     private_config = load_private_conf(private_home)
     overwrite_config = load_overwrite_conf(overwrite_path)
@@ -91,7 +93,6 @@ def load_config(
         base_config.run_id = get_run_id()
     else:
         base_config = load_model_config(run_id, epoch, private_config["model_path"])
-
 
     # use OmegaConf.unsafe_merge if too slow
     return OmegaConf.merge(base_config, private_config, overwrite_config)
@@ -124,7 +125,9 @@ def load_private_conf(private_home: Path | None = None) -> dict:
             )
 
     private_cf = OmegaConf.load(private_home)
-    private_cf["model_path"] = private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
+    private_cf["model_path"] = (
+        private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
+    )
     return private_cf
 
 
