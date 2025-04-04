@@ -163,7 +163,9 @@ def train_continue() -> None:
     )
 
     args = parser.parse_args()
-    # get the paths from the private config
+
+    if args.epoch == -2:
+        args.epoch = None
     private_cf = config.load_private_conf(args.private_config)
     
 
