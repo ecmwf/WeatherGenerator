@@ -495,8 +495,8 @@ class Trainer(Trainer_Base):
         ctr_ftarget = 0
         loss = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
 
-        import code
-        code.interact( local=locals())
+        # import code
+        # code.interact( local=locals())
 
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):

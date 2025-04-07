@@ -132,17 +132,17 @@ class AnemoiDataset:
         #     ]
         # )
 
-        tendency_anemoi_mean = ds.statistics_tendencies()["mean"]
-        tendency_anemoi_stdev = ds.statistics_tendencies()["stdev"]
+        self.tendency_mean = ds.statistics_tendencies()["mean"]
+        self.tendency_stdev = ds.statistics_tendencies()["stdev"]
 
         # breakpoint()
-        self.sigma_t = ds.statistics_tendencies()["stdev"]
-        self.sigma_t[ self.sigma_t  == 0.0] = 1
+        # self.sigma_t = ds.statistics_tendencies()["stdev"]
+        # self.sigma_t[ self.sigma_t  == 0.0] = 1
 
         # self.sigma_t = np.ones(101)
         for i, var in enumerate(ds.variables):
             # print(f"{var}: WG {wg_sigma_t[i]}, ANEMOI mean: {tendency_anemoi_mean[i]}, ANEMOI std: {self.sigma_t[i]}")
-            print(f"{var}: ANEMOI mean: {tendency_anemoi_mean[i]}, ANEMOI std: {self.sigma_t[i]}")
+            print(f"{var}: ANEMOI mean: {self.tendency_mean[i]}, ANEMOI std: {self.tendency_stdev[i]}")
 
 
         self.mean = ds.statistics["mean"]
@@ -365,12 +365,12 @@ class AnemoiDataset:
         assert source.shape[-1] == len(self.source_idx), "incorrect number of channels"
         hasnan = False
         for i, ch in enumerate(self.source_idx):
-            source[..., i] = (source[..., i] - self.mean[ch]) / (self.stdev[ch]*self.sigma_t[ch])
+            source[..., i] = (source[..., i] - self.mean[ch] - self.tendency_mean[ch]) / (self.stdev[ch]*self.tendency_stdev[ch])
             hasnan = source[..., i].isnan().any()
             if hasnan:
                 print(f"source channel {i} has nan values")
                 print(source[..., i])
-                breakpoint()
+                # breakpoint()
 
         return source
 
@@ -389,13 +389,13 @@ class AnemoiDataset:
         """
         assert target.shape[-1] == len(self.target_idx), "incorrect number of channels"
         for i, ch in enumerate(self.target_idx):
-            target[..., i] = (target[..., i] - self.mean[ch]) / (self.stdev[ch]*self.sigma_t[ch])
+            target[..., i] = (target[..., i] - self.mean[ch]- self.tendency_mean[ch]) / (self.stdev[ch]*self.tendency_stdev[ch])
 
         hasnan = target[..., i].isnan().any()
         if hasnan:
             print(f"target channel {i} has nan values")
             print(target[..., i])
-            breakpoint()
+            # breakpoint()
 
 
         return target
@@ -415,7 +415,7 @@ class AnemoiDataset:
         """
         assert source.shape[-1] == len(self.source_idx), "incorrect number of channels"
         for i, ch in enumerate(self.source_idx):
-            source[..., i] = (source[..., i] * self.stdev[ch]*self.sigma_t[ch]) + self.mean[ch]
+            source[..., i] = (source[..., i] * self.stdev[ch]*self.tendency_stdev[ch]) + self.mean[ch] + elf.tendency_mean[ch]
 
         return source
 
@@ -434,7 +434,7 @@ class AnemoiDataset:
         """
         assert data.shape[-1] == len(self.target_idx), "incorrect number of channels"
         for i, ch in enumerate(self.target_idx):
-            data[..., i] = (data[..., i] * self.stdev[ch]*self.sigma_t[ch]) + self.mean[ch]
+            data[..., i] = (data[..., i] * self.stdev[ch]*self.tendency_stdev[ch]) + self.mean[ch] + self.tendency_mean[ch]
 
         return data
 

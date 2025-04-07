@@ -578,7 +578,7 @@ class Model(torch.nn.Module):
         tokens = self.assimilate_local(model_params, tokens, source_cell_lens)
 
         tokens = self.assimilate_global(model_params, tokens)
-        breakpoint()
+        # breakpoint()
         # roll-out in latent space
         preds_all = []
         for _ in range(forecast_steps):
@@ -626,13 +626,13 @@ class Model(torch.nn.Module):
         tokens_all = torch.empty(
             (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=torch.float16, device="cuda"
         )
-        breakpoint()
+        # breakpoint()
         for _, sb in enumerate(streams_data):
             for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
                 if not s.source_empty():
                     idxs = s.source_idxs_embed
                     idxs_pe = s.source_idxs_embed_pe
-                    breakpoint()
+                    # breakpoint()
                     # create full scatter index (there's no broadcasting which is likely highly inefficient)
                     idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
                     x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
