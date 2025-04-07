@@ -20,6 +20,7 @@
 -   [ ] I have performed a self-review of my code
 
 ### Code Performance and Testing
+
 -   [ ] I ran the `uv run train` and (if necessary) `uv run evaluate` on a least one GPU node and it works 
 -   [ ] If the new feature introduces modifications at the config level, I have made sure to have notified the other software developers through Mattermost and updated the paths in the `$WEATHER_GENERATOR_PRIVATE` directory
 
