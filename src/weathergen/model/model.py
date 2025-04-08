@@ -34,9 +34,46 @@ from weathergen.utils.logger import logger
 
 class ModelParams(torch.nn.Module):
     def __init__(self):
+        """initializes PyTorch Module and prepares for the creation of model parameters.
+        Args:
+            self : ModelParams object
+        Returns:
+            None
+        Raises:
+            noexcept
+        """
         super(ModelParams, self).__init__()
 
     def create(self, cf):
+        """creates positional encoding, HEALPix neighbourhood structure, batch-related parameters and saves them in self
+
+        sinusoidal positional encoding: Sinusoidal positional encoding is used for the model to learn information about the relative
+                                        or absolute position of the tokens in the sequence.
+
+                                        For sinusoidal positional encoding we use sine and cosine in different frequencies. In the
+                                        end we transform the embedding into a learnable parameter for the model and save it in the
+                                        ModelParams object.
+
+        HEALPix neighbourhood structure:    HEALPix is a special kind of Earth System grid, which we use as positional embedding.
+
+                                            Saves all 8 neighbours for every HEALPix cell in local variable nbours and when it is an
+                                            edge case with only 7 neighbours we add the cell itself as the 8th neighbour. After that
+                                            the cell itself is added additionally to the neighbourhood structure of every cell. In
+                                            the end nbours is transformed to a learnable parameter for the model and saved in the
+                                            ModelParams object.
+
+        batch related parameters creation:  We calculate the token_len for every query and store it in a tensor, which is then used as
+                                            a learnable parameter for the model. Then we create a tensor for the attention for every
+                                            cell and turn it into a learnable parameter as well.
+
+        Args:
+            self : ModelParams object
+            cf : configuration
+        Returns:
+            ModelParams (self)
+        Raises:
+            AssertionError : If batch sizes for training and validation are not equal.
+        """
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**cf.healpix_level
 
