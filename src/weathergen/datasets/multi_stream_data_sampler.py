@@ -46,9 +46,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.forecast_steps = np.array(
             [cf.forecast_steps] if type(cf.forecast_steps) == int else cf.forecast_steps
         )
-        if cf.forecast_policy is not None :
-            if self.forecast_steps.max() == 0 :
-                logger.warning( "forecast policy is not None but number of forecast steps is 0.")
+        if cf.forecast_policy is not None:
+            if self.forecast_steps.max() == 0:
+                logger.warning("forecast policy is not None but number of forecast steps is 0.")
         self.forecast_policy = cf.forecast_policy
 
         # end date needs to be adjusted to account for window length
@@ -193,7 +193,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     ###################################################
     def reset(self):
-        fsm = self.forecast_steps[min(self.epoch, len(self.forecast_steps) - 1)] if self.forecast_policy!='random' else self.forecast_steps.max()
+        fsm = (
+            self.forecast_steps[min(self.epoch, len(self.forecast_steps) - 1)]
+            if self.forecast_policy != "random"
+            else self.forecast_steps.max()
+        )
         if fsm > 0:
             logger.info(f"forecast_steps at epoch={self.epoch} : {fsm}")
 
