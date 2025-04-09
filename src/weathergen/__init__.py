@@ -228,7 +228,7 @@ def train() -> None:
     )
     parser.add_argument(
         "--config",
-        type=str,
+        type=Path,
         default=None,
         help="Path to private configuration file for overwriting the defaults in the function body. Defaults to None.",
     )
@@ -238,7 +238,7 @@ def train() -> None:
     # TODO: move somewhere else
     init_loggers()
 
-    cf = config.load_config(args.private_config)
+    cf = config.load_config(args.private_config, overwrite_path=args.config)
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
