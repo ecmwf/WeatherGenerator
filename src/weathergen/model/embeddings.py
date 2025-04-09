@@ -150,7 +150,6 @@ class StreamEmbedTransformer(torch.nn.Module):
 
         return out
 
-    # @torch.compile( dynamic=True)
     def forward_columns(self, x_in, centroids):
         # embed provided input data
         x = positional_encoding_harmonic(checkpoint(self.embed, x_in, use_reentrant=False))
@@ -182,7 +181,6 @@ class StreamEmbedLinear(torch.nn.Module):
         self.layer = torch.nn.Linear(dim_in, dim_out)
 
     def forward(self, x):
-        # x = checkpoint( self.layer, x.flatten( -2, -1), use_reentrant=True)
         x = self.layer(x.flatten(-2, -1))
 
         return x

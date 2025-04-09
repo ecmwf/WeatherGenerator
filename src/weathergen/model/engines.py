@@ -25,15 +25,15 @@ from weathergen.utils.config import Config
 
 
 class EmbeddingEngine:
-    def __init__(self, cf: Config, sources_size) -> None:
+    def __init__(self, cf: Config, sources_num_channels) -> None:
         """
         Initialize the EmbeddingEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
-        :param sources_size: List of source sizes for each stream.
+        :param sources_num_channels: Number of channels for each source (including lat,lon and geoinfo)
         """
         self.cf = cf
-        self.sources_size = sources_size  # KCT:iss130, what is this?
+        self.sources_num_channels = sources_num_channels
         self.embeds = torch.nn.ModuleList()
 
     def create(self) -> torch.nn.ModuleList:
@@ -53,7 +53,7 @@ class EmbeddingEngine:
                         mode=self.cf.embed_orientation,
                         num_tokens=si["embed"]["num_tokens"],
                         token_size=si["token_size"],
-                        num_channels=self.sources_size[i],
+                        num_channels=self.sources_num_channels[i],
                         dim_embed=si["embed"]["dim_embed"],
                         dim_out=self.cf.ae_local_dim_embed,
                         num_blocks=si["embed"]["num_blocks"],
@@ -66,7 +66,7 @@ class EmbeddingEngine:
             elif si["embed"]["net"] == "linear":
                 self.embeds.append(
                     StreamEmbedLinear(
-                        self.sources_size[i] * si["token_size"], self.cf.ae_local_dim_embed
+                        self.sources_num_channels[i] * si["token_size"], self.cf.ae_local_dim_embed
                     )
                 )
             else:
@@ -274,7 +274,6 @@ class ForecastingEngine:
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
-                            norm_type=self.cf.norm_type,
                             dim_aux=1,
                         )
                     )
@@ -293,16 +292,27 @@ class ForecastingEngine:
 
 
 class EnsPredictionHead(torch.nn.Module):
-    #########################################
     def __init__(
-        self, dim_embed, dim_out, ens_num_layers, ens_size, norm_type="LayerNorm", hidden_factor=2
+        self,
+        dim_embed: int,
+        dim_out: int,
+        ens_num_layers: int,
+        ens_size: int,
+        hidden_factor: int = 2,
     ):
-        """Constructor"""
+        """
+        Create ensemble prediction head
+
+        :param dim_embed: embedding dimension of input state
+        :param dim_out: dimension of output (number of channels)
+        :ens_num_layers: number of layers in ensemble heads
+        :ens_size: size of the ensemble
+        :hidden_factor: hidden dimension factor for MLPs
+        """
 
         super(EnsPredictionHead, self).__init__()
 
         dim_internal = dim_embed * hidden_factor
-        # norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
         enl = ens_num_layers
 
         self.pred_heads = torch.nn.ModuleList()
@@ -320,7 +330,6 @@ class EnsPredictionHead(torch.nn.Module):
                     torch.nn.Linear(dim_internal, dim_out if enl - 2 == i else dim_internal)
                 )
 
-    #########################################
     @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
     def forward(self, toks):
         preds = []

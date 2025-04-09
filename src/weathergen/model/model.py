@@ -127,11 +127,9 @@ class Model(torch.nn.Module):
     def create(self):
         cf = self.cf
 
-        # KCT:iss130
         # separate embedding networks for differnt observation types
         self.embeds = EmbeddingEngine(cf, self.sources_size).create()
 
-        # KCT:iss130
         # local assimilation engine
         self.ae_local_blocks = LocalAssimilationEngine(cf).create()
 
@@ -168,12 +166,10 @@ class Model(torch.nn.Module):
         self.q_cells = torch.nn.Parameter(q_cells, requires_grad=True)
 
         ##############
-        # KCT:iss130
         # global assimilation engine
         self.ae_global_blocks = GlobalAssimilationEngine(cf, self.num_healpix_cells).create()
 
         ###############
-        # KCT:iss130
         # forecasting engine
         self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells).create()
 
@@ -275,7 +271,6 @@ class Model(torch.nn.Module):
                     self.targets_num_channels[i_obs],
                     si["pred_head"]["num_layers"],
                     si["pred_head"]["ens_size"],
-                    norm_type=cf.norm_type,
                 )
             )
 
