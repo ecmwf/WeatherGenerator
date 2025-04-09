@@ -581,12 +581,12 @@ class Model(torch.nn.Module):
 
         # roll-out in latent space
         preds_all = []
-        for _ in range(forecast_steps):
+        for fstep in range(forecast_steps):
             # prediction
             preds_all += [
                 self.predict(
                     model_params,
-                    forecast_steps,
+                    fstep,
                     tokens,
                     streams_data,
                     target_coords_idxs,
@@ -610,7 +610,6 @@ class Model(torch.nn.Module):
 
     #########################################
     def embed_cells(self, model_params, streams_data):
-        # code.interact( local=locals())
         source_tokens_lens = torch.stack(
             [
                 torch.stack(
