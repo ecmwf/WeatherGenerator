@@ -85,10 +85,6 @@ class Trainer(Trainer_Base):
         if self.cf.rank == 0:
             path_run.mkdir(exist_ok=True)
             path_model.mkdir(exist_ok=True)
-            # save config
-            cf.save()
-            if run_mode == "training":
-                cf.print()
         self.path_run = path_run
 
         self.init_perf_monitoring()
@@ -135,6 +131,9 @@ class Trainer(Trainer_Base):
         self.loss_fcts_val = []
         for name, w in cf.loss_fcts_val:
             self.loss_fcts_val += [[getattr(losses, name), w]]
+
+        if self.cf.rank == 0:
+            self.cf.save()
 
         # evaluate validation set
         self.validate(epoch=0)
@@ -425,6 +424,7 @@ class Trainer(Trainer_Base):
             torch._dynamo.config.optimize_ddp = False
 
         if self.cf.rank == 0:
+            self.cf.save()
             self.cf.print()
 
         # training loop
