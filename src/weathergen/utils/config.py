@@ -155,18 +155,12 @@ def load_streams(streams_directory: Path) -> list[Config]:
             # itself is a dict containing the actual options. stream_name needs to be
             # added to this dict since only stream_config will be further processed.
             stream_name, stream_config = [*OmegaConf.load(config_file).items()][0]
-        except yaml.scanner.ScannerError:
-            _logger.warning(f"Invalid yaml file: {config_file}")
-            continue
+        except yaml.scanner.ScannerError as e:
+            msg = f"Invalid yaml file while parsing stream configs: {config_file}"
+            raise RuntimeError(msg) from e
 
         stream_config.name = stream_name
         streams.append(stream_config)
         _logger.info(f"loaded stream config: {stream_name}")
-
-    # sanity checking (at some point, the dict should be parsed into a class)
-    # check if all filenames accross all streams are unique
-    rts = [filename for rt in streams for filename in rt["filenames"]]
-    if len(rts) != len(set(rts)):
-        _logger.warning("Duplicate reportypes specified.")
 
     return streams
