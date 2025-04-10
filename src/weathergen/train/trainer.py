@@ -280,7 +280,7 @@ class Trainer(Trainer_Base):
             torch._dynamo.config.optimize_ddp = False
 
         if self.cf.rank == 0:
-            config.save(self.cf)
+            config.save(self.cf, None)
             config.print_cf(self.cf)
 
         # training loop

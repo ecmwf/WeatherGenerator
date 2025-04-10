@@ -19,6 +19,7 @@ from weathergen.train.utils import get_run_id
 
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent  # TODO use importlib for resources
 DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
+_DEFAULT_MODEL_PATH = "./models"
 
 _logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def print_cf(config: Config):
                     print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
 
 
-def save(config: Config, epoch: int | None = None):
+def save(config: Config, epoch: int | None):
     """Save current config into the current runs model directory."""
     path_models = Path(config.model_path)
     # save in directory with model files
@@ -58,17 +59,18 @@ def save(config: Config, epoch: int | None = None):
 
 
 def load_model_config(
-    run_id: str, epoch: int | None = None, model_path: str = "./models"
+    run_id: str, epoch: int | None, model_path: str | None
 ) -> Config:
     """
     Load a configuration file from a given run_id and epoch.
     If run_id is a full path, loads it from the full path.
     """
+    
     if Path(run_id).exists():  # load from the full path if a full path is provided
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
     else:
-        path_models = Path(model_path)
+        path_models = Path(model_path or _DEFAULT_MODEL_PATH)
         epoch_str = ""
         if epoch is not None:
             epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
@@ -84,10 +86,10 @@ def load_model_config(
 
 
 def load_config(
-    private_home: Path | None = None,
-    run_id: str | None = None,
-    epoch: int | None = None,
-    overwrite_path: Path | None = None,
+    private_home: Path | None,
+    run_id: str | None,
+    epoch: int | None,
+    overwrite_path: Path | None,
 ) -> Config:
     private_config = load_private_conf(private_home)
     overwrite_config = load_overwrite_conf(overwrite_path)
@@ -102,7 +104,7 @@ def load_config(
     return OmegaConf.merge(base_config, private_config, overwrite_config)
 
 
-def load_overwrite_conf(overwrite_path: Path | None = None) -> Config:
+def load_overwrite_conf(overwrite_path: Path | None) -> Config:
     "Return the overwrite configuration."
 
     "If path is None, return an empty dictionary."
@@ -118,7 +120,7 @@ def create_empty() -> Config:
     return OmegaConf.create({})
 
 
-def load_private_conf(private_home: Path | None = None) -> dict:
+def load_private_conf(private_home: Path | None) -> dict:
     "Return the private configuration."
     "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
 

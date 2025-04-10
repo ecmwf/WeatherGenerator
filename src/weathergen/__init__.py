@@ -89,7 +89,7 @@ def evaluate():
     # TODO: move somewhere else
     init_loggers()
 
-    cf = config.load_config(args.private_config, args.run_id, args.epoch)
+    cf = config.load_config(args.private_config, args.run_id, args.epoch, None)
 
     cf.run_history += [(cf.run_id, cf.istep)]
 
@@ -157,7 +157,7 @@ def train_continue() -> None:
 
     args = parser.parse_args()
 
-    cf = config.load_config(args.private_config, args.run_id, args.epoch)
+    cf = config.load_config(args.private_config, args.run_id, args.epoch, None)
 
     # track history of run to ensure traceability of results
     cf.run_history += [(cf.run_id, cf.istep)]
@@ -236,7 +236,7 @@ def train() -> None:
     # TODO: move somewhere else
     init_loggers()
 
-    cf = config.load_config(args.private_config, overwrite_path=args.config)
+    cf = config.load_config(args.private_config, None, None, args.config)
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision

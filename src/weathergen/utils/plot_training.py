@@ -30,7 +30,7 @@ def clean_out_folder():
 ####################################################################################################
 def get_stream_names(run_id):
     # return col names from training (should be identical to validation)
-    cf = config.load_model_config(run_id, -1)
+    cf = config.load_model_config(run_id, -1, None)
     return [si["name"].replace(",", "").replace("/", "_").replace(" ", "_") for si in cf.streams]
 
 

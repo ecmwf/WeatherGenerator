@@ -137,7 +137,7 @@ class TrainLogger:
         Read data for run_id
         """
 
-        cf = config.load_model_config(run_id, epoch)
+        cf = config.load_model_config(run_id, epoch, None)
         run_id = cf.run_id
 
         result_dir = Path(cf.run_path) / run_id
