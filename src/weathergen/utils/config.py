@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import itertools
 import json
 import logging
 import os
@@ -28,6 +27,7 @@ Config = OmegaConf
 
 
 def print_cf(config: Config):
+    """Print formatted the contents of the configuration."""
     for key, value in config.items():
         if key != "streams":
             print(f"{key} : {value}")
@@ -38,14 +38,18 @@ def print_cf(config: Config):
 
 
 def save(config: Config, epoch: int | None = None):
+    """Save current config into the current runs model directory."""
     path_models = Path(config.model_path)
     # save in directory with model files
     dirname = path_models / config.run_id
     dirname.mkdir(exist_ok=True, parents=True)
 
-    epoch_str = ""
-    if epoch is not None:
-        epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
+    if epoch is None:
+        epoch_str = ""
+    elif epoch == -1:
+        epoch_str = "_latest"
+    else:
+        epoch_str = f"_epoch{epoch:05d}"
     fname = dirname / f"model_{config.run_id}{epoch_str}.json"
 
     json_str = json.dumps(OmegaConf.to_container(config))
@@ -103,8 +107,10 @@ def load_overwrite_conf(overwrite_path: Path | None = None) -> Config:
 
     "If path is None, return an empty dictionary."
     if overwrite_path is None or not overwrite_path.is_file():
+        _logger.info(f"Loading no overwrite config: {overwrite_path} is no valid path.")
         return {}
     else:
+        _logger.info(f"Loading overwrite config from {overwrite_path}.")
         return OmegaConf.load(overwrite_path)
 
 
@@ -138,7 +144,8 @@ def load_default_conf() -> Config:
 
 def load_streams(streams_directory: Path) -> list[Config]:
     if not streams_directory.is_dir():
-        _logger.warning(f"Streams directory {streams_directory} does not exist.")
+        msg = f"Streams directory {streams_directory} does not exist."
+        raise FileNotFoundError(msg)
 
     # read all reportypes from directory, append to existing ones
     streams_directory = streams_directory.absolute()
@@ -148,6 +155,9 @@ def load_streams(streams_directory: Path) -> list[Config]:
     streams = []
     for config_file in sorted(streams_directory.rglob("*.yml")):
         try:
+            # Stream config schema is {stream_name: stream_config} where stream_config
+            # itself is a dict containing the actual options. stream_name needs to be
+            # added to this dict since only stream_config will be further processed.
             stream_name, stream_config = [*OmegaConf.load(config_file).items()][0]
         except yaml.scanner.ScannerError:
             _logger.warning(f"Invalid yaml file: {config_file}")
@@ -159,10 +169,8 @@ def load_streams(streams_directory: Path) -> list[Config]:
 
     # sanity checking (at some point, the dict should be parsed into a class)
     # check if all filenames accross all streams are unique
-    rts = [rt["filenames"] for rt in streams]
-    rts = list(itertools.chain.from_iterable(rts))
+    rts = [filename for rt in streams for filename in rt["filenames"]]
     if len(rts) != len(set(rts)):
         _logger.warning("Duplicate reportypes specified.")
 
-    # return OmegaConf.create({"streams": streams})
     return streams

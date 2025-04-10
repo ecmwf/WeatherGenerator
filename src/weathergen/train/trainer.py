@@ -70,7 +70,6 @@ class Trainer(Trainer_Base):
         self.init_ddp(cf)
 
         # read configuration of data streams
-        # FIXME should concat streams together really
         cf.streams = config.load_streams(Path(cf.streams_directory))
 
         # create output directory

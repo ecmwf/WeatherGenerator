@@ -157,8 +157,6 @@ def train_continue() -> None:
 
     args = parser.parse_args()
 
-    if args.epoch == -2:
-        args.epoch = None
     cf = config.load_config(args.private_config, args.run_id, args.epoch)
 
     # track history of run to ensure traceability of results
@@ -243,7 +241,6 @@ def train() -> None:
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
     cf.data_loader_rng_seed = int(time.time())
-    cf.data_path = cf["data_path_anemoi"]  # for backward compatibility
 
     trainer = Trainer(log_freq=20, checkpoint_freq=250, print_freq=10)
 
