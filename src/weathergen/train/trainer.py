@@ -128,7 +128,7 @@ class Trainer(Trainer_Base):
             self.loss_fcts_val += [[getattr(losses, name), w]]
 
         if self.cf.rank == 0:
-            self.cf.save()
+            config.save(self.cf, epoch=None)
 
         # evaluate validation set
         self.validate(epoch=0)
