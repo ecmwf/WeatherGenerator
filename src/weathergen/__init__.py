@@ -22,6 +22,10 @@ from weathergen.utils.logger import init_loggers
 
 ####################################################################################################
 def evaluate():
+    evaluate_from_args(sys.argv[1:])
+
+
+def evaluate_from_args(argl: list[str]):
     """
     Evaluation function for WeatherGenerator model.
     Entry point for calling the evaluation code from the command line.
@@ -92,7 +96,7 @@ def evaluate():
         help="store evaluation results in the same folder as run_id",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argl)
     # get the paths from the private config
     private_cf = load_private_conf(args.private_config)
 
@@ -225,6 +229,12 @@ def train() -> None:
 
     Note: All model configurations are set in the function body.
     """
+    train_with_args(sys.argv[1:])
+
+
+def train_with_args(argl: list[str]):
+    """
+    Training function for WeatherGenerator model."""
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -248,6 +258,12 @@ def train() -> None:
     )
 
     args = parser.parse_args()
+    train_with_args(
+        args.run_id,
+        args.private_config,
+        args.config,
+        streams_directory="./config/streams/streams_anemoi/",
+    )
 
     # TODO: move somewhere else
     init_loggers()
@@ -260,7 +276,7 @@ def train() -> None:
 
     # directory where input streams are specified
     # cf.streams_directory = './streams_large/'
-    cf.streams_directory = "./config/streams/streams_anemoi/"
+    # cf.streams_directory = "./config/streams/streams_anemoi/"
     # cf.streams_directory = "./config/streams/streams_mixed/"
     # cf.streams_directory = "./streams_mixed/"
 
