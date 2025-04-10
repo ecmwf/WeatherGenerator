@@ -136,14 +136,3 @@ class Trainer_Base:
         if self.cf.with_ddp:
             dist.all_reduce(val.cuda(), op=torch.distributed.ReduceOp.AVG)
         return val.cpu()
-
-
-####################################################################################################
-if __name__ == "__main__":
-    import weathergen.utils.config as config
-    from weathergen.train.trainer_base import Trainer_Base
-
-    cf = config.create_empty()
-    cf.sources_dir = "./sources"
-
-    cf = Trainer_Base.init_reportypes(cf)

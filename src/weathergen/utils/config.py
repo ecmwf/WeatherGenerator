@@ -114,9 +114,6 @@ def _load_overwrite_conf(overwrite_path: Path | None) -> OmegaConf:
         return OmegaConf.load(overwrite_path)
 
 
-def create_empty() -> Config:
-    return OmegaConf.create({})
-
 def _load_private_conf(private_home: Path | None) -> OmegaConf:
     "Return the private configuration."
     "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
