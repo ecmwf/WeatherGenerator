@@ -30,7 +30,7 @@ def evaluate_from_args(argl: list[str]):
     Evaluation function for WeatherGenerator model.
     Entry point for calling the evaluation code from the command line.
     """
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(argl)
 
     parser.add_argument(
         "--run_id",
@@ -229,10 +229,10 @@ def train() -> None:
 
     Note: All model configurations are set in the function body.
     """
-    train_with_args(sys.argv[1:])
+    train_with_args(sys.argv[1:], None)
 
 
-def train_with_args(argl: list[str]):
+def train_with_args(argl: list[str], stream_dir: str | None):
     """
     Training function for WeatherGenerator model."""
     parser = argparse.ArgumentParser()
@@ -257,13 +257,7 @@ def train_with_args(argl: list[str]):
         help="Path to configuration with parameters to overwrite",
     )
 
-    args = parser.parse_args()
-    train_with_args(
-        args.run_id,
-        args.private_config,
-        args.config,
-        streams_directory="./config/streams/streams_anemoi/",
-    )
+    args = parser.parse_args(argl)
 
     # TODO: move somewhere else
     init_loggers()
@@ -276,7 +270,10 @@ def train_with_args(argl: list[str]):
 
     # directory where input streams are specified
     # cf.streams_directory = './streams_large/'
-    # cf.streams_directory = "./config/streams/streams_anemoi/"
+    if stream_dir is None:
+        cf.streams_directory = "./config/streams/streams_anemoi/"
+    else:
+        cf.streams_directory = stream_dir
     # cf.streams_directory = "./config/streams/streams_mixed/"
     # cf.streams_directory = "./streams_mixed/"
 

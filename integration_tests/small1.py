@@ -1,3 +1,11 @@
+"""
+Small test for the Weather Generator.
+This test must run on a GPU machine. It performs a training and evaluation of the Weather Generator model.
+
+Command:
+uv run pytest  ./integration_tests/small1.py
+"""
+
 import json
 import logging
 import os
@@ -10,46 +18,44 @@ from weathergen import evaluate_from_args, train_with_args
 
 logger = logging.getLogger(__name__)
 
-run_id = "testsmall1"
-
 
 @pytest.fixture()
-def setup():
-    logger.info("setup fixture")
-    print("start fixture")
-    p = Path("./results") / run_id
-    shutil.rmtree(p, ignore_errors=True)
+def setup(test_run_id):
+    logger.info(f"setup fixture with {test_run_id}")
+    shutil.rmtree(Path("./results") / test_run_id, ignore_errors=True)
+    shutil.rmtree(Path("./models") / test_run_id, ignore_errors=True)
     yield
     print("end fixture")
 
 
-def test_train(setup):
-    logger.info("test_train")
+@pytest.mark.parametrize("test_run_id", ["testsmall1"])
+def test_train(setup, test_run_id):
+    logger.info(f"test_train with run_id {test_run_id}")
 
-    if False:
-        train_with_args(
-            "--run_id=testsmall1 ".split()
-            + [
-                "--private_config",
-                "../WeatherGenerator-private/hpc/hpc2020/config/paths.yml",
-                "--config",
-                "integration_tests/small1.yaml",
-                "--streams_directory",
-                "./config/streams/streams_test/",
-            ]
-        )
-        evaluate_from_args(
-            "-start 2022-10-10 -end 2022-10-11 --samples 10 --same_run_id --epoch 1".split()
-            + [
-                "--run_id",
-                run_id,
-                "--private_config",
-                "../WeatherGenerator-private/hpc/hpc2020/config/paths.yml",
-            ]
-        )
-    assert_missing_metrics_file(run_id)
-    assert_train_loss_below_threshold(run_id)
-    assert_val_loss_below_threshold(run_id)
+    train_with_args(
+        "--run_id=testsmall1 ".split()
+        + [
+            "--run_id",
+            test_run_id,
+            "--private_config",
+            "../WeatherGenerator-private/hpc/hpc2020/config/paths.yml",
+            "--config",
+            "integration_tests/small1.yaml",
+        ],
+        "./config/streams/streams_test/",
+    )
+    evaluate_from_args(
+        "-start 2022-10-10 -end 2022-10-11 --samples 10 --same_run_id --epoch 1".split()
+        + [
+            "--run_id",
+            test_run_id,
+            "--private_config",
+            "../WeatherGenerator-private/hpc/hpc2020/config/paths.yml",
+        ]
+    )
+    assert_missing_metrics_file(test_run_id)
+    assert_train_loss_below_threshold(test_run_id)
+    assert_val_loss_below_threshold(test_run_id)
     logger.info("end test_train")
 
 
