@@ -18,7 +18,7 @@ from omegaconf import OmegaConf
 from weathergen.train.utils import get_run_id
 
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent  # TODO use importlib for resources
-DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
+_DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
 _DEFAULT_MODEL_PATH = "./models"
 
 _logger = logging.getLogger(__name__)
@@ -58,14 +58,12 @@ def save(config: Config, epoch: int | None):
         f.write(json_str)
 
 
-def load_model_config(
-    run_id: str, epoch: int | None, model_path: str | None
-) -> Config:
+def load_model_config(run_id: str, epoch: int | None, model_path: str | None) -> OmegaConf:
     """
     Load a configuration file from a given run_id and epoch.
     If run_id is a full path, loads it from the full path.
     """
-    
+
     if Path(run_id).exists():  # load from the full path if a full path is provided
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
@@ -91,11 +89,11 @@ def load_config(
     epoch: int | None,
     overwrite_path: Path | None,
 ) -> Config:
-    private_config = load_private_conf(private_home)
-    overwrite_config = load_overwrite_conf(overwrite_path)
+    private_config = _load_private_conf(private_home)
+    overwrite_config = _load_overwrite_conf(overwrite_path)
 
     if run_id is None:
-        base_config = load_default_conf()
+        base_config = _load_default_conf()
         base_config.run_id = get_run_id()
     else:
         base_config = load_model_config(run_id, epoch, private_config["model_path"])
@@ -104,7 +102,7 @@ def load_config(
     return OmegaConf.merge(base_config, private_config, overwrite_config)
 
 
-def load_overwrite_conf(overwrite_path: Path | None) -> Config:
+def _load_overwrite_conf(overwrite_path: Path | None) -> OmegaConf:
     "Return the overwrite configuration."
 
     "If path is None, return an empty dictionary."
@@ -119,8 +117,7 @@ def load_overwrite_conf(overwrite_path: Path | None) -> Config:
 def create_empty() -> Config:
     return OmegaConf.create({})
 
-
-def load_private_conf(private_home: Path | None) -> dict:
+def _load_private_conf(private_home: Path | None) -> OmegaConf:
     "Return the private configuration."
     "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
 
@@ -139,9 +136,9 @@ def load_private_conf(private_home: Path | None) -> dict:
     return private_cf
 
 
-def load_default_conf() -> Config:
+def _load_default_conf() -> OmegaConf:
     """Deserialize default configuration."""
-    return OmegaConf.load(DEFAULT_CONFIG_PTH)
+    return OmegaConf.load(_DEFAULT_CONFIG_PTH)
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
