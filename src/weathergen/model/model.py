@@ -134,7 +134,6 @@ class Model(torch.nn.Module):
         self.ae_local_blocks = LocalAssimilationEngine(cf).create()
 
         ##############
-        # KCT:iss130
         # local -> global assimilation engine adapter
         self.ae_adapter = Local2GlobalAssimilationEngine(cf).create()
 
@@ -250,7 +249,6 @@ class Model(torch.nn.Module):
             else:
                 self.pred_adapter_kv.append(torch.nn.Identity())
 
-            # KCT:iss130
             # target prediction engines
             tte = TargetPredictionEngine(
                 cf,
