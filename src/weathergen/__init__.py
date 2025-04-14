@@ -335,6 +335,7 @@ def train() -> None:
 
     cf.loss_fcts = [["mse", 1.0]]
     cf.loss_fcts_val = [["mse", 1.0]]
+    cf.tendencies = True
     # cf.loss_fcts = [['mse', 0.5], ['stats', 0.5]]
     # cf.loss_fcts_val = [['mse', 0.5], ['stats', 0.5]]
 
