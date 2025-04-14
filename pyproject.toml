@@ -24,7 +24,7 @@ dependencies = [
  'psutil',
  "flash-attn; sys_platform == 'linux'",
  "polars~=1.25.2",
- "pytest"
+ "omegaconf~=2.3.0",
 ]
 
 [project.urls]
@@ -45,7 +45,7 @@ build-backend = "hatchling.build"
 [dependency-groups]
 # The development dependencies
 dev = [
-  "pytest",
+ "pytest~=8.3.5",
   "ruff==0.9.7"
 ]
 

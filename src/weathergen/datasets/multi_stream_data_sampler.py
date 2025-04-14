@@ -39,10 +39,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.len_hrs = cf.len_hrs
         self.step_hrs = cf.step_hrs
 
-        fc_policy_seq = (
-            cf.forecast_policy == "sequential" or cf.forecast_policy == "sequential_random"
-        )
-        assert cf.forecast_steps >= 0 if not fc_policy_seq else True
         self.forecast_delta_hrs = (
             cf.forecast_delta_hrs if cf.forecast_delta_hrs > 0 else self.len_hrs
         )
@@ -50,6 +46,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.forecast_steps = np.array(
             [cf.forecast_steps] if type(cf.forecast_steps) == int else cf.forecast_steps
         )
+        if cf.forecast_policy is not None:
+            if self.forecast_steps.max() == 0:
+                logger.warning("forecast policy is not None but number of forecast steps is 0.")
         self.forecast_policy = cf.forecast_policy
 
         # end date needs to be adjusted to account for window length
@@ -194,7 +193,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     ###################################################
     def reset(self):
-        fsm = self.forecast_steps[min(self.epoch, len(self.forecast_steps) - 1)]
+        fsm = (
+            self.forecast_steps[min(self.epoch, len(self.forecast_steps) - 1)]
+            if self.forecast_policy != "random"
+            else self.forecast_steps.max()
+        )
         if fsm > 0:
             logger.info(f"forecast_steps at epoch={self.epoch} : {fsm}")
 
@@ -319,7 +322,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                     # collect for all forecast steps
                     for fstep in range(forecast_dt + 1):
-                        # collect all sources
+                        # collect all targets
                         for _, ds in enumerate(stream_ds):
                             step_forecast_dt = (
                                 idx + (self.forecast_delta_hrs * fstep) // self.step_hrs

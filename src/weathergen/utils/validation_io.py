@@ -67,13 +67,11 @@ def write_validation(
     targets_coords_all,
     targets_times_all,
     targets_lens,
-    jac=None,
 ):
     if len(cf.analysis_streams_output) == 0:
         return
 
     fname = f"validation_epoch{epoch:05d}_rank{rank:04d}"
-    fname += "" if jac is None else "_jac"
     fname += ".zarr"
 
     store = zarr.DirectoryStore(base_path / fname)

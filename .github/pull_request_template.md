@@ -21,8 +21,8 @@
 
 ### Code Performance and Testing
 
--   [ ] I ran the test: `sh $WG_HOME/tests/test.sh --test_id <test_name>` on at least a single GPU, and all tests passed
--   [ ] If the new feature introduces modifications at the config level, I have made sure to have notified the other software developers throuth Mattermost and updated the paths in the `$WEATHER_GENERATOR_PRIVATE` directory
+-   [ ] I ran the `uv run train` and (if necessary) `uv run evaluate` on a least one GPU node and it works 
+-   [ ] If the new feature introduces modifications at the config level, I have made sure to have notified the other software developers through Mattermost and updated the paths in the `$WEATHER_GENERATOR_PRIVATE` directory
 
 <!-- In case this affects the model sharding or other specific components please describe these here. -->
 
