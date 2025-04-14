@@ -17,16 +17,11 @@ import torch.utils.data.distributed
 import tqdm
 from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    MixedPrecision,
-    ShardingStrategy,
-)
-from torch.distributed.fsdp.wrap import (
-    # default_auto_wrap_policy,
-    size_based_auto_wrap_policy,
-)
+from torch.distributed.fsdp.fully_sharded_data_parallel import MixedPrecision, ShardingStrategy
+from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy  # default_auto_wrap_policy,
 
 import weathergen.train.loss as losses
+import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.train.lr_scheduler import LearningRateScheduler
@@ -75,7 +70,7 @@ class Trainer(Trainer_Base):
         self.init_ddp(cf)
 
         # read configuration of data streams
-        cf = self.init_streams(cf, run_id_contd)
+        cf.streams = config.load_streams(Path(cf.streams_directory))
 
         # create output directory
         cf.run_path = cf.run_path if hasattr(cf, "run_path") else "./results"
@@ -83,8 +78,8 @@ class Trainer(Trainer_Base):
         path_run = Path(cf.run_path) / cf.run_id
         path_model = Path(cf.model_path) / cf.run_id
         if self.cf.rank == 0:
-            path_run.mkdir(exist_ok=True)
-            path_model.mkdir(exist_ok=True)
+            path_run.mkdir(exist_ok=True, parents=True)
+            path_model.mkdir(exist_ok=True, parents=True)
         self.path_run = path_run
 
         self.init_perf_monitoring()
@@ -133,14 +128,14 @@ class Trainer(Trainer_Base):
             self.loss_fcts_val += [[getattr(losses, name), w]]
 
         if self.cf.rank == 0:
-            self.cf.save()
+            config.save(self.cf, epoch=None)
 
         # evaluate validation set
         self.validate(epoch=0)
         print(f"Finished evaluation run with id: {cf.run_id}")
 
     ###########################################
-    def run(self, cf, private_cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
+    def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
         # general initalization
         self.init(cf, run_id_contd, epoch_contd, run_id_new)
 
@@ -285,8 +280,8 @@ class Trainer(Trainer_Base):
             torch._dynamo.config.optimize_ddp = False
 
         if self.cf.rank == 0:
-            self.cf.save()
-            self.cf.print()
+            config.save(self.cf, None)
+            config.print_cf(self.cf)
 
         # training loop
 
@@ -686,7 +681,7 @@ class Trainer(Trainer_Base):
             file_tmp.replace(file_out)
 
             # save config
-            self.cf.save(epoch)
+            config.save(self.cf, epoch)
 
     ###########################################
     def log(self, bidx, epoch):

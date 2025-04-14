@@ -19,7 +19,7 @@ from typing import Literal
 import numpy as np
 import polars as pl
 
-from weathergen.utils.config import Config
+import weathergen.utils.config as config
 
 _weathergen_timestamp = "weathergen.timestamp"
 _weathergen_reltime = "weathergen.reltime"
@@ -137,7 +137,7 @@ class TrainLogger:
         Read data for run_id
         """
 
-        cf = Config.load(run_id, epoch)
+        cf = config.load_model_config(run_id, epoch, None)
         run_id = cf.run_id
 
         result_dir = Path(cf.run_path) / run_id
@@ -242,7 +242,7 @@ class Metrics:
 
 
 def read_metrics(
-    cf: Config, run_id: RunId | None, stage: Stage | None, cols: list[str] | None
+    cf: config.Config, run_id: RunId | None, stage: Stage | None, cols: list[str] | None
 ) -> pl.DataFrame:
     """
     Read metrics for run_id
