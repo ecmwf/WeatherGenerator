@@ -51,8 +51,6 @@ def test_train(setup, test_run_id):
         + [
             "--run_id",
             test_run_id,
-            # "--private_config",
-            # "../WeatherGenerator-private/hpc/hpc2020/config/paths.yml",
             "--config",
             "integration_tests/small1.yaml",
         ],
@@ -63,8 +61,6 @@ def test_train(setup, test_run_id):
         + [
             "--run_id",
             test_run_id,
-            # "--private_config",
-            # "../WeatherGenerator-private/hpc/hpc2020/config/paths.yml",
         ]
     )
     assert_missing_metrics_file(test_run_id)
