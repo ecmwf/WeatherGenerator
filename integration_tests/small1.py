@@ -47,15 +47,14 @@ def test_train(setup, test_run_id):
     logger.info(f"test_train with run_id {test_run_id}")
 
     train_with_args(
-        "--run_id=testsmall1 ".split()
+        "--config=integration_tests/small1.yaml".split() #"--run_id=testsmall1 ".split()
         + [
             "--run_id",
             test_run_id,
-            "--config",
-            "integration_tests/small1.yaml",
         ],
         "./config/streams/streams_test/",
     )
+
     evaluate_from_args(
         "-start 2022-10-10 -end 2022-10-11 --samples 10 --same_run_id --epoch 1".split()
         + [

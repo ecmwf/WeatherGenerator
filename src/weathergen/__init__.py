@@ -254,6 +254,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     init_loggers()
 
     cf = config.load_config(args.private_config, None, None, args.config)
+    cf.run_id = args.run_id
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
