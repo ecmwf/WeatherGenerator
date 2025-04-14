@@ -78,6 +78,9 @@ class AnemoiDataset:
         self.latitudes = ds.latitudes.astype(np.float32)
         self.longitudes = ds.longitudes.astype(np.float32)
 
+        # Ensures that coordinates remain into the interval [-90,90] for latitudes
+        # and [-180, 180] for longitudes. Ensures that periodicity has been taken
+        # into consideration for the specific intervals.
         il, ir = (-90.0, 90.0)
 
         self.latitudes = np.where(
