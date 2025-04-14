@@ -78,6 +78,22 @@ class AnemoiDataset:
         self.latitudes = ds.latitudes.astype(np.float32)
         self.longitudes = ds.longitudes.astype(np.float32)
 
+        il, ir = (-90.0, 90.0)
+
+        self.latitudes = np.where(
+            self.latitudes >= ir,
+            180.0 - self.latitudes,
+            np.where(self.latitudes <= il, -180.0 - self.latitudes, self.latitudes),
+        )
+
+        il, ir = (-180.0, 180.0)
+
+        self.longitudes = np.where(
+            self.longitudes >= ir,
+            self.longitudes - 360.0,
+            np.where(self.longitudes <= il, self.longitudes + 360.0, self.longitudes),
+        )
+
         # TODO: define in base class
         self.geoinfo_idx = []
 
