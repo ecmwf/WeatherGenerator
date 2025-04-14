@@ -262,82 +262,6 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
     cf = config.load_config(args.private_config, None, None, args.config)
 
-<<<<<<< HEAD
-    cf = Config()
-
-    # directory where input streams are specified
-    # cf.streams_directory = './streams_large/'
-    if stream_dir is None:
-        cf.streams_directory = "./config/streams/streams_anemoi/"
-    else:
-        cf.streams_directory = stream_dir
-    # cf.streams_directory = "./config/streams/streams_mixed/"
-    # cf.streams_directory = "./streams_mixed/"
-
-    # embed_orientation : 'channels' or 'columns'
-    # channels: embedding is per channel for a token (#tokens=num_channels)
-    # columns:  embedding is per "column", all channels are embedded together (#tokens=token_size)
-    # the per-stream embedding paramters, in particular dim_embed, have to be chosen accordingly
-    cf.embed_orientation = "channels"
-    cf.embed_local_coords = True
-    # False since per cell coords are meaningless for cells
-    cf.embed_centroids_local_coords = False
-    cf.embed_size_centroids = 64
-    cf.embed_unembed_mode = "block"
-
-    cf.target_cell_local_prediction = True
-    cf.target_coords_local = True
-
-    # parameters for local assimilation engine
-    cf.ae_local_dim_embed = 1024  # 2048 #1024
-    cf.ae_local_num_blocks = 2
-    cf.ae_local_num_heads = 16
-    cf.ae_local_dropout_rate = 0.1
-    cf.ae_local_with_qk_lnorm = True
-
-    # assimilation engine local -> global adapter
-    cf.ae_local_num_queries = 2
-    cf.ae_local_queries_per_cell = False
-    cf.ae_adapter_num_heads = 16
-    cf.ae_adapter_embed = 128
-    cf.ae_adapter_with_qk_lnorm = True
-    cf.ae_adapter_with_residual = True
-    cf.ae_adapter_dropout_rate = 0.1
-
-    # parameters for global assimilation engine
-    cf.ae_global_dim_embed = 2048
-    cf.ae_global_num_blocks = 8
-    cf.ae_global_num_heads = 32
-    cf.ae_global_dropout_rate = 0.1
-    cf.ae_global_with_qk_lnorm = True
-    cf.ae_global_att_dense_rate = 0.2  # 0.25 : every 4-th block is dense attention
-    cf.ae_global_block_factor = 64
-    cf.ae_global_mlp_hidden_factor = 2
-
-    cf.pred_adapter_kv = False
-    cf.pred_self_attention = True
-    cf.pred_dyadic_dims = False
-    cf.pred_mlp_adaln = True
-
-    # forecasting engine
-    cf.forecast_delta_hrs = 0
-    cf.forecast_steps = 0  # [j for j in range(1,11) for i in range(1)]
-    cf.forecast_policy = None  #'fixed', 'sequential'
-    cf.forecast_freeze_model = False  # False
-    cf.forecast_att_dense_rate = 0.25
-
-    cf.fe_num_blocks = 0
-    cf.fe_num_heads = 16
-    cf.fe_dropout_rate = 0.1
-    cf.fe_with_qk_lnorm = True
-
-    cf.healpix_level = 5
-
-    # working precision
-    cf.with_mixed_precision = True
-    cf.with_flash_attention = True
-=======
->>>>>>> origin/develop
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
     cf.data_loader_rng_seed = int(time.time())
@@ -345,11 +269,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     trainer = Trainer(log_freq=20, checkpoint_freq=250, print_freq=10)
 
     try:
-<<<<<<< HEAD
-        trainer.run(cf, private_cf)
-=======
         trainer.run(cf)
->>>>>>> origin/develop
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()

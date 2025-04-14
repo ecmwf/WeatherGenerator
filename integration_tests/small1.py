@@ -16,7 +16,21 @@ import pytest
 
 from weathergen import evaluate_from_args, train_with_args
 
+
 logger = logging.getLogger(__name__)
+
+# Read from git the current commit hash and take the first 5 characters:
+try:
+    from git import Repo
+
+    repo = Repo(search_parent_directories=False)
+    commit_hash = repo.head.object.hexsha[:5]
+    logger.info(f"Current commit hash: {commit_hash}")
+except Exception as e:
+    commit_hash = "unknown"
+    logger.warning(f"Could not get commit hash: {e}")
+
+
 
 
 @pytest.fixture()
@@ -28,7 +42,7 @@ def setup(test_run_id):
     print("end fixture")
 
 
-@pytest.mark.parametrize("test_run_id", ["testsmall1"])
+@pytest.mark.parametrize("test_run_id", ["test_small1_" + commit_hash])
 def test_train(setup, test_run_id):
     logger.info(f"test_train with run_id {test_run_id}")
 
@@ -37,8 +51,8 @@ def test_train(setup, test_run_id):
         + [
             "--run_id",
             test_run_id,
-            "--private_config",
-            "../WeatherGenerator-private/hpc/hpc2020/config/paths.yml",
+            # "--private_config",
+            # "../WeatherGenerator-private/hpc/hpc2020/config/paths.yml",
             "--config",
             "integration_tests/small1.yaml",
         ],
@@ -49,8 +63,8 @@ def test_train(setup, test_run_id):
         + [
             "--run_id",
             test_run_id,
-            "--private_config",
-            "../WeatherGenerator-private/hpc/hpc2020/config/paths.yml",
+            # "--private_config",
+            # "../WeatherGenerator-private/hpc/hpc2020/config/paths.yml",
         ]
     )
     assert_missing_metrics_file(test_run_id)
