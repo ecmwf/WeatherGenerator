@@ -228,7 +228,7 @@ def train() -> None:
         "--config",
         type=Path,
         default=None,
-        help="Path to private configuration file for overwriting the defaults in the function body. Defaults to None.",
+        help="Optional experiment specfic configuration file",
     )
 
     args = parser.parse_args()

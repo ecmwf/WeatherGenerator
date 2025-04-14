@@ -161,6 +161,6 @@ def load_streams(streams_directory: Path) -> list[Config]:
 
         stream_config.name = stream_name
         streams.append(stream_config)
-        _logger.info(f"loaded stream config: {stream_name}")
+        _logger.info(f"Loaded stream config: {stream_name}")
 
     return streams
