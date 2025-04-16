@@ -51,7 +51,6 @@ class Trainer(Trainer_Base):
         run_id_new=False,
         run_mode="training",  # unused
     ):
-        print(cf)
         self.cf = cf
 
         if isinstance(run_id_new, str):
@@ -118,7 +117,7 @@ class Trainer(Trainer_Base):
         self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         self.model = self.model.to(self.devices[0])
         self.model.load(run_id_trained, epoch)
-        print(f"Loaded model {run_id_trained} at epoch {epoch}.")
+        _logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
         self.ddp_model = self.model
         self.model_params = ModelParams().create(cf).to(self.devices[0])
         logging.getLogger("obslearn").info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
@@ -132,7 +131,7 @@ class Trainer(Trainer_Base):
 
         # evaluate validation set
         self.validate(epoch=0)
-        print(f"Finished evaluation run with id: {cf.run_id}")
+        _logger.info(f"Finished evaluation run with id: {cf.run_id}")
 
     ###########################################
     def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
@@ -171,7 +170,7 @@ class Trainer(Trainer_Base):
         # load model if specified
         if run_id_contd is not None:
             self.model.load(run_id_contd, epoch_contd)
-            print(f"Loaded model id={run_id_contd}.")
+            _logger.info(f"Loaded model id={run_id_contd}.")
 
         if cf.forecast_freeze_model:
             self.model = self.model.freeze_weights_forecast()
@@ -689,9 +688,7 @@ class Trainer(Trainer_Base):
     ###########################################
     def log(self, bidx):
         log_interval = self.cf.train_log.log_interval
-        print("bidx", bidx, "log_interval", log_interval)
         if bidx % log_interval == 0:
-            print("log_interval", log_interval)
             l_avg = self.ddp_average(torch.nanmean(torch.stack(self.losses_hist), axis=0))
             stddev_avg = self.ddp_average(torch.nanmean(torch.stack(self.stddev_hist), axis=0))
             samples = self.cf.istep * self.cf.batch_size * self.cf.num_ranks
