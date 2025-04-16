@@ -10,8 +10,8 @@
 import json
 import logging
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import yaml
 from omegaconf import OmegaConf
@@ -129,13 +129,15 @@ def _load_private_conf(private_home: Path | None) -> OmegaConf:
         _logger.info(f"Loading private config fromWEATHERGEN_PRIVATE_CONF:{private_home}.")
 
     elif test_script_path.is_file():
-        result = subprocess.run([str(test_script_path), "hpc-config"],  capture_output=True, text=True)
+        result = subprocess.run(
+            [str(test_script_path), "hpc-config"], capture_output=True, text=True
+        )
         private_home = Path(result.stdout.strip())
         _logger.info(f"Loading private config from platform-env.py output: {private_home}.")
     else:
         _logger.info(f"Could not find platform script at {test_script_path}")
         raise FileNotFoundError(
-            f"Could not find private config. Please set the environment variable WEATHERGEN_PRIVATE_CONF or provide a path."
+            "Could not find private config. Please set the environment variable WEATHERGEN_PRIVATE_CONF or provide a path."
         )
     private_cf = OmegaConf.load(private_home)
     private_cf["model_path"] = (
