@@ -98,13 +98,19 @@ def evaluate_from_args(argl: list[str]):
         action="store_false",
         help="store evaluation results in the same folder as run_id",
     )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Optional experiment specfic configuration file",
+    )
 
     args = parser.parse_args(argl)
 
     # TODO: move somewhere else
     init_loggers()
 
-    cf = config.load_config(args.private_config, args.run_id, args.epoch, None)
+    cf = config.load_config(args.private_config, args.run_id, args.epoch, args.config)
 
     cf.run_history += [(cf.run_id, cf.istep)]
 
@@ -263,7 +269,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
         assert cf.with_mixed_precision
     cf.data_loader_rng_seed = int(time.time())
 
-    trainer = Trainer(log_freq=20, checkpoint_freq=250, print_freq=10)
+    trainer = Trainer(checkpoint_freq=250, print_freq=10)
 
     try:
         trainer.run(cf)

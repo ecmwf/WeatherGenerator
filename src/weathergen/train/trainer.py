@@ -29,29 +29,29 @@ from weathergen.train.trainer_base import Trainer_Base
 from weathergen.train.utils import get_run_id
 from weathergen.utils.train_logger import TrainLogger
 from weathergen.utils.validation_io import write_validation
+from weathergen.utils.config import Config
 
 _logger = logging.getLogger(__name__)
 
 
 class Trainer(Trainer_Base):
     ###########################################
-    def __init__(self, log_freq=20, checkpoint_freq=250, print_freq=10):
+    def __init__(self, checkpoint_freq=250, print_freq=10):
         Trainer_Base.__init__(self)
 
-        assert print_freq < log_freq
-        self.log_freq = log_freq
         self.checkpoint_freq = checkpoint_freq
         self.print_freq = print_freq
 
     ###########################################
     def init(
         self,
-        cf,
+        cf: Config,
         run_id_contd=None,
-        epoch_contd=None,
+        epoch_contd=None, # unused
         run_id_new=False,
-        run_mode="training",
+        run_mode="training", # unused
     ):
+        print(cf)
         self.cf = cf
 
         if isinstance(run_id_new, str):
@@ -527,10 +527,7 @@ class Trainer(Trainer_Base):
             self.perf_mem = self.ddp_average(torch.tensor([perf_mem])).item()
 
             self.log_terminal(bidx, epoch)
-            self.log(bidx, epoch)
-            # model checkpoint
-            if bidx % self.checkpoint_freq == 0:
-                self.save_model()
+            self.log(bidx)
 
             self.cf.istep += cf.batch_size
 
@@ -654,9 +651,11 @@ class Trainer(Trainer_Base):
         )
 
     ###########################################
-    def save_model(self, epoch=-1, name=None):
+    def save_model(self, epoch:int, name=None):
+        # Saving at epoch == max_epoch means that we are saving the latest checkpoint.
+        max_epoch = self.cf.num_epochs
+        assert epoch <= max_epoch, (epoch, max_epoch)
         if self.cf.with_ddp and self.cf.with_fsdp:
-            _cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
             with FSDP.state_dict_type(
                 self.ddp_model,
                 StateDictType.FULL_STATE_DICT,
@@ -671,7 +670,7 @@ class Trainer(Trainer_Base):
                 [
                     self.cf.run_id,
                     "_",
-                    "latest" if epoch == -1 else f"epoch{epoch:05d}",
+                    "latest" if epoch == max_epoch else f"epoch{epoch:05d}",
                     ("_" + name) if name is not None else "",
                 ]
             )
@@ -682,13 +681,17 @@ class Trainer(Trainer_Base):
             torch.save(state, file_tmp)
             # move file (which is changing the link in the file system and very fast)
             file_tmp.replace(file_out)
+            _logger.info(f"Saved model to {file_out}")
 
             # save config
             config.save(self.cf, epoch)
 
     ###########################################
-    def log(self, bidx, epoch):
-        if bidx % self.log_freq == 0 and bidx > 0:
+    def log(self, bidx):
+        log_interval = self.cf.train_log.log_interval
+        print("bidx", bidx, "log_interval", log_interval)
+        if bidx % log_interval == 0 :
+            print("log_interval", log_interval)
             l_avg = self.ddp_average(torch.nanmean(torch.stack(self.losses_hist), axis=0))
             stddev_avg = self.ddp_average(torch.nanmean(torch.stack(self.stddev_hist), axis=0))
             samples = self.cf.istep * self.cf.batch_size * self.cf.num_ranks

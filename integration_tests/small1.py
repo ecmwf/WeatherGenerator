@@ -56,10 +56,12 @@ def test_train(setup, test_run_id):
     )
 
     evaluate_from_args(
-        "-start 2022-10-10 -end 2022-10-11 --samples 10 --same_run_id --epoch 1".split()
+        "-start 2022-10-10 -end 2022-10-11 --samples 10 --same_run_id --epoch 0".split()
         + [
             "--run_id",
             test_run_id,
+            "--config",
+            "integration_tests/small1.yaml",
         ]
     )
     assert_missing_metrics_file(test_run_id)
@@ -82,6 +84,7 @@ def assert_missing_metrics_file(run_id):
     file_path = f"./results/{run_id}/metrics.json"
     assert os.path.exists(file_path), f"Metrics file does not exist for run_id: {run_id}"
     metrics = load_metrics(run_id)
+    logger.info(f"Loaded metrics for run_id: {run_id}: {metrics}")
     assert metrics is not None, f"Failed to load metrics for run_id: {run_id}"
 
 
