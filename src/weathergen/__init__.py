@@ -22,6 +22,7 @@ from weathergen.utils.logger import init_loggers
 
 
 def evaluate():
+    # By default, arguments from the command line are read.
     evaluate_from_args(sys.argv[1:])
 
 
@@ -29,8 +30,10 @@ def evaluate_from_args(argl: list[str]):
     """
     Evaluation function for WeatherGenerator model.
     Entry point for calling the evaluation code from the command line.
+
+    When running integration tests, the arguments are directly provided.
     """
-    parser = argparse.ArgumentParser(argl)
+    parser = argparse.ArgumentParser()
 
     parser.add_argument(
         "--run_id",
