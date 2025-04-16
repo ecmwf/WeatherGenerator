@@ -118,7 +118,7 @@ def _load_private_conf(private_home: Path | None) -> OmegaConf:
     "Return the private configuration."
     "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
 
-    test_script_path = _REPO_ROOT.parent / "WeatherGenerator-private" / "hpc" / "platform-env.py"
+    env_script_path = _REPO_ROOT.parent / "WeatherGenerator-private" / "hpc" / "platform-env.py"
 
     if private_home is not None and private_home.is_file():
         _logger.info(f"Loading private config from {private_home}.")
@@ -127,14 +127,14 @@ def _load_private_conf(private_home: Path | None) -> OmegaConf:
         private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
         _logger.info(f"Loading private config fromWEATHERGEN_PRIVATE_CONF:{private_home}.")
 
-    elif test_script_path.is_file():
+    elif env_script_path.is_file():
         result = subprocess.run(
-            [str(test_script_path), "hpc-config"], capture_output=True, text=True
+            [str(env_script_path), "hpc-config"], capture_output=True, text=True
         )
         private_home = Path(result.stdout.strip())
         _logger.info(f"Loading private config from platform-env.py output: {private_home}.")
     else:
-        _logger.info(f"Could not find platform script at {test_script_path}")
+        _logger.info(f"Could not find platform script at {env_script_path}")
         raise FileNotFoundError(
             "Could not find private config. Please set the environment variable WEATHERGEN_PRIVATE_CONF or provide a path."
         )
