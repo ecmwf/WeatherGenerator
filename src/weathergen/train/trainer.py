@@ -27,9 +27,9 @@ from weathergen.model.model import Model, ModelParams
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
 from weathergen.train.utils import get_run_id
+from weathergen.utils.config import Config
 from weathergen.utils.train_logger import TrainLogger
 from weathergen.utils.validation_io import write_validation
-from weathergen.utils.config import Config
 
 _logger = logging.getLogger(__name__)
 
@@ -47,9 +47,9 @@ class Trainer(Trainer_Base):
         self,
         cf: Config,
         run_id_contd=None,
-        epoch_contd=None, # unused
+        epoch_contd=None,  # unused
         run_id_new=False,
-        run_mode="training", # unused
+        run_mode="training",  # unused
     ):
         print(cf)
         self.cf = cf
@@ -651,7 +651,7 @@ class Trainer(Trainer_Base):
         )
 
     ###########################################
-    def save_model(self, epoch:int, name=None):
+    def save_model(self, epoch: int, name=None):
         # Saving at epoch == max_epoch means that we are saving the latest checkpoint.
         max_epoch = self.cf.num_epochs
         assert epoch <= max_epoch, (epoch, max_epoch)
@@ -690,7 +690,7 @@ class Trainer(Trainer_Base):
     def log(self, bidx):
         log_interval = self.cf.train_log.log_interval
         print("bidx", bidx, "log_interval", log_interval)
-        if bidx % log_interval == 0 :
+        if bidx % log_interval == 0:
             print("log_interval", log_interval)
             l_avg = self.ddp_average(torch.nanmean(torch.stack(self.losses_hist), axis=0))
             stddev_avg = self.ddp_average(torch.nanmean(torch.stack(self.stddev_hist), axis=0))

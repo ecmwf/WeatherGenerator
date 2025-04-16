@@ -31,6 +31,7 @@ except Exception as e:
 
 weathergen_home = Path(__file__).parent.parent
 
+
 @pytest.fixture()
 def setup(test_run_id):
     logger.info(f"setup fixture with {test_run_id}")
