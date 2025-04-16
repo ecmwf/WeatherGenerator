@@ -20,12 +20,12 @@ ERA5 :
   embed : 
     net : transformer
     num_tokens : 1
-    num_heads : 8
-    dim_embed : 256
+    num_heads : 4
+    dim_embed : 128
     num_blocks : 2
   embed_target_coords :
     net : linear
-    dim_embed : 256
+    dim_embed : 128
   target_readout :
     type : 'obs_value'  # token or obs_value
     num_layers : 2
