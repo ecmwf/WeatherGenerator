@@ -15,7 +15,7 @@ import subprocess
 import matplotlib.pyplot as plt
 import numpy as np
 
-from weathergen.utils.config import Config
+import weathergen.utils.config as config
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
 out_folder = pathlib.Path("./plots/")
@@ -30,7 +30,7 @@ def clean_out_folder():
 ####################################################################################################
 def get_stream_names(run_id):
     # return col names from training (should be identical to validation)
-    cf = Config.load(run_id, -1)
+    cf = config.load_model_config(run_id, -1, None)
     return [si["name"].replace(",", "").replace("/", "_").replace(" ", "_") for si in cf.streams]
 
 

@@ -17,16 +17,11 @@ import torch.utils.data.distributed
 import tqdm
 from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    MixedPrecision,
-    ShardingStrategy,
-)
-from torch.distributed.fsdp.wrap import (
-    # default_auto_wrap_policy,
-    size_based_auto_wrap_policy,
-)
+from torch.distributed.fsdp.fully_sharded_data_parallel import MixedPrecision, ShardingStrategy
+from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy  # default_auto_wrap_policy,
 
 import weathergen.train.loss as losses
+import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.train.lr_scheduler import LearningRateScheduler
@@ -75,7 +70,7 @@ class Trainer(Trainer_Base):
         self.init_ddp(cf)
 
         # read configuration of data streams
-        cf = self.init_streams(cf, run_id_contd)
+        cf.streams = config.load_streams(Path(cf.streams_directory))
 
         # create output directory
         cf.run_path = cf.run_path if hasattr(cf, "run_path") else "./results"
@@ -83,12 +78,8 @@ class Trainer(Trainer_Base):
         path_run = Path(cf.run_path) / cf.run_id
         path_model = Path(cf.model_path) / cf.run_id
         if self.cf.rank == 0:
-            path_run.mkdir(exist_ok=True)
-            path_model.mkdir(exist_ok=True)
-            # save config
-            cf.save()
-            if run_mode == "training":
-                cf.print()
+            path_run.mkdir(exist_ok=True, parents=True)
+            path_model.mkdir(exist_ok=True, parents=True)
         self.path_run = path_run
 
         self.init_perf_monitoring()
@@ -136,151 +127,15 @@ class Trainer(Trainer_Base):
         for name, w in cf.loss_fcts_val:
             self.loss_fcts_val += [[getattr(losses, name), w]]
 
+        if self.cf.rank == 0:
+            config.save(self.cf, epoch=None)
+
         # evaluate validation set
         self.validate(epoch=0)
         print(f"Finished evaluation run with id: {cf.run_id}")
 
     ###########################################
-    def evaluate_jac(self, cf, run_id, epoch, mode="row", date=None, obs_id=0, sample_id=0):
-        """Computes a row or column of the Jacobian as determined by mode ('row' or 'col'), i.e.
-        determines sensitivities with respect to outputs or inputs
-        """
-        # TODO: this function is not complete
-
-        # general initalization
-        self.init(cf, run_id, epoch, run_id_new=True, run_mode="offline")
-
-        self.dataset = MultiStreamDataSampler(
-            cf,
-            cf.start_date_val,
-            cf.end_date_val,
-            cf.delta_time,
-            1,
-            cf.masking_mode,
-            cf.masking_rate_sampling,
-            cf.t_win_hour,
-            cf.loss_chs,
-            shuffle=False,
-            source_chs=cf.source_chs,
-            forecast_steps=cf.forecast_steps,
-            forecast_policy=cf.forecast_policy,
-            healpix_level=cf.healpix_level,
-        )
-
-        num_channels = self.dataset.get_num_chs()
-
-        self.model = Model(cf, num_channels).create().to(self.devices[0])
-        self.model.load(run_id, epoch)
-        print(f"Loaded model id={run_id}.")
-
-        # TODO: support loading of specific data
-        dataset_iter = iter(self.dataset)
-        (sources, targets, targets_idxs, s_lens) = next(dataset_iter)
-
-        dev = self.devices[0]
-        sources = [source.to(dev, non_blocking=True) for source in sources]
-        targets = [[toks.to(dev, non_blocking=True) for toks in target] for target in targets]
-
-        # evaluate model
-        with torch.autocast(
-            device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
-        ):
-            if mode == "row":
-                sources_in = [*sources, s_lens.to(torch.float32)]
-                y = self.model(sources, s_lens)
-                # vectors used to extract row from Jacobian
-                vs_sources = [torch.zeros_like(y_obs) for y_obs in y[0]]
-                vs_sources[obs_id][sample_id] = 1.0
-                # evaluate
-                out = torch.autograd.functional.vjp(
-                    self.model.forward_jac, tuple(sources_in), tuple(vs_sources)
-                )
-
-            elif mode == "col":
-                # vectors used to extract col from Jacobian
-                vs_sources = [torch.zeros_like(s_obs) for s_obs in sources]
-                vs_sources[obs_id][sample_id] = 1.0
-                vs_s_lens = torch.zeros_like(s_lens, dtype=torch.float32)
-                # provide one tuple in the end
-                sources_in = [*sources, s_lens.to(torch.float32)]
-                vs_sources.append(vs_s_lens)
-                # evaluate
-                out = torch.autograd.functional.jvp(
-                    self.model.forward_jac, tuple(sources_in), tuple(vs_sources)
-                )
-            else:
-                assert False, "Unsupported mode."
-
-        # extract and write output
-        # TODO: refactor and try to combine with the code in compute_loss
-
-        preds = out[0]
-        jac = [j_obs.cpu().detach().numpy() for j_obs in out[1]]
-
-        sources_all, preds_all = [[] for _ in cf.streams], [[] for _ in cf.streams]
-        targets_all, targets_coords_all = [[] for _ in cf.streams], [[] for _ in cf.streams]
-        targets_idxs_all = [[] for _ in cf.streams]
-        sources_lens = [toks.shape[0] for toks in sources]
-        targets_lens = [[toks.shape[0] for toks in target] for target in targets]
-
-        for i_obs, b_targets_idxs in enumerate(targets_idxs):
-            for i_b, target_idxs_obs in enumerate(b_targets_idxs):  # 1 batch
-                if len(targets[i_obs][i_b]) == 0:
-                    continue
-
-                gs = self.cf.geoinfo_size
-                target_i_obs = torch.cat([t[:, gs:].unsqueeze(0) for t in targets[i_obs][i_b]], 0)
-                preds_i_obs = preds[i_obs][target_idxs_obs]
-                preds_i_obs = preds_i_obs.reshape([*preds_i_obs.shape[:2], *target_i_obs.shape[1:]])
-
-                if self.cf.loss_chs is not None:
-                    if len(self.cf.loss_chs[i_obs]) == 0:
-                        continue
-                    target_i_obs = target_i_obs[..., self.cf.loss_chs[i_obs]]
-                    preds_i_obs = preds_i_obs[..., self.cf.loss_chs[i_obs]]
-
-                ds_val = self.dataset
-                n = self.cf.geoinfo_size
-
-                sources[i_obs][:, :, n:] = ds_val.denormalize_data(i_obs, sources[i_obs][:, :, n:])
-                sources[i_obs][:, :, :n] = ds_val.denormalize_coords(
-                    i_obs, sources[i_obs][:, :, :n]
-                )
-                sources_all[i_obs] += [sources[i_obs].detach().cpu()]
-
-                preds_all[i_obs] += [ds_val.denormalize_data(i_obs, preds_i_obs).detach().cpu()]
-                targets_all[i_obs] += [ds_val.denormalize_data(i_obs, target_i_obs).detach().cpu()]
-
-                target_i_coords = (
-                    torch.cat([t[:, :n].unsqueeze(0) for t in targets[i_obs][i_b]], 0)
-                    .detach()
-                    .cpu()
-                )
-                targets_coords_all[i_obs] += [
-                    ds_val.denormalize_coords(i_obs, target_i_coords).detach().cpu()
-                ]
-                targets_idxs_all[i_obs] += [target_idxs_obs]
-
-        # cols = [ds[0][0].colnames for ds in dataset_val.obs_datasets_norm]
-        cols = []  # TODO
-        write_validation(
-            self.cf,
-            self.path_run,
-            self.cf.rank,
-            epoch,
-            cols,
-            sources_all,
-            preds_all,
-            targets_all,
-            targets_coords_all,
-            targets_idxs_all,
-            sources_lens,
-            targets_lens,
-            jac,
-        )
-
-    ###########################################
-    def run(self, cf, private_cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
+    def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
         # general initalization
         self.init(cf, run_id_contd, epoch_contd, run_id_new)
 
@@ -425,7 +280,8 @@ class Trainer(Trainer_Base):
             torch._dynamo.config.optimize_ddp = False
 
         if self.cf.rank == 0:
-            self.cf.print()
+            config.save(self.cf, None)
+            config.print_cf(self.cf)
 
         # training loop
 
@@ -839,7 +695,7 @@ class Trainer(Trainer_Base):
             file_tmp.replace(file_out)
 
             # save config
-            self.cf.save(epoch)
+            config.save(self.cf, epoch)
 
     ###########################################
     def log(self, bidx, epoch):

@@ -10,8 +10,8 @@
 ERA5 :
   type : anemoi
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
-  source : ["q_50"]
-  target : ["q_50"]
+  # source : ["q_50"]
+  # target : ["q_50"]
   # source : ['u_', 'v_', '10u', '10v', '2d', '2t', 'cp', 'msl', 'skt', 'sp', 'tp', 'q_1000', 'q_500','q_600', 'q_700', 'q_850', 'q_925', 'q_4'] #, 'tcw'] , 'tp' ]
   # target : ['10u', '10v', 'u_', 'v_', '2d', '2t', 'cp', 'msl', 'skt', 'sp', 'tp', 'q_1000', 'q_500','q_600', 'q_700', 'q_850', 'q_925', 'q_4'] #, 'tcw'] #, 'tp']
   loss_weight : 1.
