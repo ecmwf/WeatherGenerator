@@ -538,11 +538,7 @@ class Model(torch.nn.Module):
     #########################################
     def load(self, run_id, epoch=-1):
         path_run = Path(self.cf.model_path) / run_id
-<<<<<<< HEAD
-        epoch_id = f"epoch{epoch:05d}" if epoch is not -1 else "latest"
-=======
         epoch_id = f"epoch{epoch:05d}" if epoch != -1 else "latest"
->>>>>>> 86715053551c8351d1cdb3ad36a2f111d1e1d8de
         filename = f"{run_id}_{epoch_id}.chkpt"
 
         params = torch.load(
@@ -614,10 +610,6 @@ class Model(torch.nn.Module):
 
     #########################################
     def embed_cells(self, model_params, streams_data):
-<<<<<<< HEAD
-        
-=======
->>>>>>> 86715053551c8351d1cdb3ad36a2f111d1e1d8de
         source_tokens_lens = torch.stack(
             [
                 torch.stack(

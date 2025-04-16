@@ -231,13 +231,6 @@ def train() -> None:
         help="Optional experiment specfic configuration file",
     )
 
-    parser.add_argument(
-        "--config",
-        type=str,
-        default=None,
-        help="Path to configuration with parameters to overwrite",
-    )
-
     args = parser.parse_args()
 
     # TODO: move somewhere else
