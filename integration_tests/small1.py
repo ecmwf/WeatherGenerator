@@ -47,7 +47,7 @@ def test_train(setup, test_run_id):
     logger.info(f"test_train with run_id {test_run_id}")
 
     train_with_args(
-        "--config=integration_tests/small1.yaml".split() #"--run_id=testsmall1 ".split()
+        "--config=integration_tests/small1.yaml".split()
         + [
             "--run_id",
             test_run_id,
