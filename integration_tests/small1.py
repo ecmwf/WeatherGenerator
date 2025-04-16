@@ -33,8 +33,8 @@ except Exception as e:
 try:
     weathergen_home = os.environ.get("WEATHERGEN_HOME")
     logger.info(f"WEATHERGEN_HOME: {weathergen_home}")
-except Exception as e:
-    weathergen_home="./"
+except Exception:
+    weathergen_home = "./"
     logger.warning("WEATHERGEN_HOME is not set in the environment. Default to current directory.")
 
 
