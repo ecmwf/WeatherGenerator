@@ -290,9 +290,12 @@ class Trainer(Trainer_Base):
             self.validate(-1)
 
         for epoch in range(epoch_base, cf.num_epochs):
+            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: train.")
             self.train(epoch)
+            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: validate.")
 
             self.validate(epoch)
+            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
 
             self.save_model(epoch)
 
