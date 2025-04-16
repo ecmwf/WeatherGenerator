@@ -16,7 +16,6 @@ import pytest
 
 from weathergen import evaluate_from_args, train_with_args
 
-
 logger = logging.getLogger(__name__)
 
 # Read from git the current commit hash and take the first 5 characters:
@@ -30,14 +29,20 @@ except Exception as e:
     commit_hash = "unknown"
     logger.warning(f"Could not get commit hash: {e}")
 
-
+# get the home directory
+try:
+    weathergen_home = os.environ.get("WEATHERGEN_HOME")
+    logger.info(f"WEATHERGEN_HOME: {weathergen_home}")
+except Exception:
+    weathergen_home = "./"
+    logger.warning("WEATHERGEN_HOME is not set in the environment. Default to current directory.")
 
 
 @pytest.fixture()
 def setup(test_run_id):
     logger.info(f"setup fixture with {test_run_id}")
-    shutil.rmtree(Path("./results") / test_run_id, ignore_errors=True)
-    shutil.rmtree(Path("./models") / test_run_id, ignore_errors=True)
+    shutil.rmtree(Path(f"{weathergen_home}/results") / test_run_id, ignore_errors=True)
+    shutil.rmtree(Path(f"{weathergen_home}/models") / test_run_id, ignore_errors=True)
     yield
     print("end fixture")
 
@@ -47,12 +52,12 @@ def test_train(setup, test_run_id):
     logger.info(f"test_train with run_id {test_run_id}")
 
     train_with_args(
-        "--config=integration_tests/small1.yaml".split()
+        f"--config={weathergen_home}/integration_tests/small1.yaml".split()
         + [
             "--run_id",
             test_run_id,
         ],
-        "./config/streams/streams_test/",
+        f"{weathergen_home}/config/streams/streams_test/",
     )
 
     evaluate_from_args(
@@ -72,7 +77,7 @@ def test_train(setup, test_run_id):
 
 def load_metrics(run_id):
     """Helper function to load metrics"""
-    file_path = f"./results/{run_id}/metrics.json"
+    file_path = f"{weathergen_home}/results/{run_id}/metrics.json"
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Metrics file not found for run_id: {run_id}")
     json_str = open(file_path).readlines()
@@ -81,7 +86,7 @@ def load_metrics(run_id):
 
 def assert_missing_metrics_file(run_id):
     """Test that a missing metrics file raises FileNotFoundError."""
-    file_path = f"./results/{run_id}/metrics.json"
+    file_path = f"{weathergen_home}/results/{run_id}/metrics.json"
     assert os.path.exists(file_path), f"Metrics file does not exist for run_id: {run_id}"
     metrics = load_metrics(run_id)
     logger.info(f"Loaded metrics for run_id: {run_id}: {metrics}")
