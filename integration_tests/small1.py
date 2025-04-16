@@ -29,27 +29,20 @@ except Exception as e:
     commit_hash = "unknown"
     logger.warning(f"Could not get commit hash: {e}")
 
-# get the home directory
-try:
-    weathergen_home = os.environ.get("WEATHERGEN_HOME")
-    logger.info(f"WEATHERGEN_HOME: {weathergen_home}")
-except Exception:
-    weathergen_home = "./"
-    logger.warning("WEATHERGEN_HOME is not set in the environment. Default to current directory.")
-
+weathergen_home = Path(__file__).parent.parent
 
 @pytest.fixture()
 def setup(test_run_id):
     logger.info(f"setup fixture with {test_run_id}")
-    shutil.rmtree(Path(f"{weathergen_home}/results") / test_run_id, ignore_errors=True)
-    shutil.rmtree(Path(f"{weathergen_home}/models") / test_run_id, ignore_errors=True)
+    shutil.rmtree(weathergen_home / "results" / test_run_id, ignore_errors=True)
+    shutil.rmtree(weathergen_home / "models" / test_run_id, ignore_errors=True)
     yield
-    print("end fixture")
+    logger.info("end fixture")
 
 
 @pytest.mark.parametrize("test_run_id", ["test_small1_" + commit_hash])
 def test_train(setup, test_run_id):
-    logger.info(f"test_train with run_id {test_run_id}")
+    logger.info(f"test_train with run_id {test_run_id} {weathergen_home}")
 
     train_with_args(
         f"--config={weathergen_home}/integration_tests/small1.yaml".split()
@@ -66,7 +59,7 @@ def test_train(setup, test_run_id):
             "--run_id",
             test_run_id,
             "--config",
-            "integration_tests/small1.yaml",
+            f"{weathergen_home}/integration_tests/small1.yaml",
         ]
     )
     assert_missing_metrics_file(test_run_id)

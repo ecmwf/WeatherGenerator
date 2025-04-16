@@ -107,8 +107,7 @@ def _load_overwrite_conf(overwrite_path: Path | None) -> OmegaConf:
     "Return the overwrite configuration."
 
     "If path is None, return an empty dictionary."
-    if overwrite_path is None or not overwrite_path.is_file():
-        _logger.info(f"Loading no overwrite config: {overwrite_path} is no valid path.")
+    if overwrite_path is None:
         return {}
     else:
         _logger.info(f"Loading overwrite config from {overwrite_path}.")
