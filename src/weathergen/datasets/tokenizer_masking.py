@@ -15,10 +15,10 @@ import numpy as np
 import torch
 
 from weathergen.datasets.tokenizer_utils import (
-    tokenize_window_space,
-    tokenize_window_spacetime,
     encode_times_source,
     encode_times_target,
+    tokenize_window_space,
+    tokenize_window_spacetime,
 )
 from weathergen.datasets.utils import (
     get_target_coords_local_ffast,
@@ -166,7 +166,7 @@ class TokenizerMasking:
             n_coords=normalizer.normalize_coords,
             n_geoinfos=normalizer.normalize_geoinfos,
             n_data=normalizer.normalize_source_channels,
-            enc_time=encode_times_source
+            enc_time=encode_times_source,
         )
 
         source_tokens_cells = torch.tensor([])
@@ -240,7 +240,6 @@ class TokenizerMasking:
         time_win,
         normalizer,
     ):
-
         si = stream_info
         token_size = si["token_size"]
         tokenize_spacetime = (
@@ -260,7 +259,7 @@ class TokenizerMasking:
         #     else:
         #         masking_rate = 1.0 if self.rng.uniform() < masking_rate else 0.0
 
-        def id( arg) :
+        def id(arg):
             return arg
 
         tokenize_window = partial(
@@ -273,7 +272,7 @@ class TokenizerMasking:
             n_geoinfos=normalizer.normalize_geoinfos,
             n_data=normalizer.normalize_target_channels,
             enc_time=encode_times_target,
-            pad_tokens=False
+            pad_tokens=False,
         )
 
         # TODO: properly set stream_id; don't forget to normalize
@@ -291,23 +290,31 @@ class TokenizerMasking:
 
         # select masked tokens for network input
         target_tokens = [
-            torch.cat([c if p else torch.tensor([]) for c,p in zip(cc,pp,strict=True) ])
+            torch.cat([c if p else torch.tensor([]) for c, p in zip(cc, pp, strict=True)])
             for cc, pp in zip(target_tokens_cells, self.perm_sel, strict=True)
         ]
         target_tokens_lens = [len(t) for t in target_tokens]
 
-        target_tokens_lin = torch.cat( target_tokens)
+        target_tokens_lin = torch.cat(target_tokens)
         offset = 6
-        target_times = torch.split( target_tokens_lin[...,1:offset], target_tokens_lens)
-        target_coords = torch.split(target_tokens_lin[...,offset:offset+coords.shape[-1]],target_tokens_lens)
+        target_times = torch.split(target_tokens_lin[..., 1:offset], target_tokens_lens)
+        target_coords = torch.split(
+            target_tokens_lin[..., offset : offset + coords.shape[-1]], target_tokens_lens
+        )
         offset += coords.shape[-1]
-        target_geoinfos = torch.split(target_tokens_lin[...,offset:offset+geoinfos.shape[-1]],target_tokens_lens)
+        target_geoinfos = torch.split(
+            target_tokens_lin[..., offset : offset + geoinfos.shape[-1]], target_tokens_lens
+        )
         offset += geoinfos.shape[-1]
-        target_tokens = torch.split(target_tokens_lin[...,offset:],target_tokens_lens)
+        target_tokens = torch.split(target_tokens_lin[..., offset:], target_tokens_lens)
 
-        target_coords_raw = torch.split(target_tokens_lin[:,offset:offset+coords.shape[-1]],target_tokens_lens)
+        target_coords_raw = torch.split(
+            target_tokens_lin[:, offset : offset + coords.shape[-1]], target_tokens_lens
+        )
         # TODO
-        target_times_raw = [np.array( [], dtype="datetime64[ns]") for _ in range(len(target_coords_raw))]
+        target_times_raw = [
+            np.array([], dtype="datetime64[ns]") for _ in range(len(target_coords_raw))
+        ]
 
         # compute encoding of target coordinates used in prediction network
         if torch.tensor(target_tokens_lens).sum() > 0:
@@ -324,4 +331,3 @@ class TokenizerMasking:
             target_coords = list(target_coords.split(target_tokens_lens))
 
         return (target_tokens, target_coords, target_coords_raw, target_times_raw)
-

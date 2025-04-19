@@ -15,11 +15,11 @@ import numpy as np
 import torch
 
 from weathergen.datasets.tokenizer_utils import (
+    encode_times_source,
     encode_times_target,
     hpy_cell_splits,
     tokenize_window_space,
     tokenize_window_spacetime,
-    encode_times_source,
 )
 from weathergen.datasets.utils import (
     get_target_coords_local_ffast,
@@ -192,9 +192,7 @@ class TokenizerForecast:
         source_tokens_cells = [
             torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in source_tokens_cells
         ]
-        source_tokens_lens = torch.tensor(
-            [len(s) for s in source_tokens_cells], dtype=torch.int32
-        )
+        source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
 
         if source_tokens_lens.sum() > 0:
             source_means = [

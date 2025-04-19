@@ -62,7 +62,6 @@ def encode_times_target(times, time_win) -> torch.tensor:
     return time_tensor
 
 
-
 def hpy_cell_splits(coords, hl):
     thetas = ((90.0 - coords[:, 0]) / 180.0) * np.pi
     phis = ((coords[:, 1] + 180.0) / 360.0) * 2.0 * np.pi
@@ -75,7 +74,8 @@ def hpy_cell_splits(coords, hl):
     splits = np.flatnonzero(np.diff(hpy_idxs[hpy_idxs_ord]))
     hpy_idxs_ord_split = np.split(hpy_idxs_ord, splits + 1)
 
-    return ( hpy_idxs_ord_split, thetas, phis, posr3)
+    return (hpy_idxs_ord_split, thetas, phis, posr3)
+
 
 def hpy_splits(coords, hl, token_size, pad_tokens):
     """???"""
@@ -86,13 +86,13 @@ def hpy_splits(coords, hl, token_size, pad_tokens):
     # TODO: split by hierarchically traversing healpix scheme
     thetas_sorted = [torch.argsort(thetas[idxs], stable=True) for idxs in hpy_idxs_ord_split]
     # remainder for padding to token size
-    if pad_tokens :
-      rem = [
-          token_size - (len(idxs) % token_size if len(idxs) % token_size != 0 else token_size)
-          for idxs in hpy_idxs_ord_split
-      ]
-    else :
-      rem = np.zeros( len(hpy_idxs_ord_split), dtype=np.int32)
+    if pad_tokens:
+        rem = [
+            token_size - (len(idxs) % token_size if len(idxs) % token_size != 0 else token_size)
+            for idxs in hpy_idxs_ord_split
+        ]
+    else:
+        rem = np.zeros(len(hpy_idxs_ord_split), dtype=np.int32)
 
     # helper variables to split according to cells
     # pad to token size *and* offset by +1 to account for the index 0 that is added for the padding
@@ -109,6 +109,7 @@ def hpy_splits(coords, hl, token_size, pad_tokens):
 
     return idxs_ord, idxs_ord_lens, posr3
 
+
 def tokenize_window_space(
     stream_id,
     coords,
@@ -124,7 +125,7 @@ def tokenize_window_space(
     n_geoinfos,
     n_data,
     enc_time,
-    pad_tokens = True
+    pad_tokens=True,
 ):
     """Process one window into tokens"""
 
@@ -132,11 +133,11 @@ def tokenize_window_space(
     if len(source) < 2:
         return tokens_cells
 
-    idxs_ord, idxs_ord_lens, posr3  = hpy_splits( coords, hl, token_size, pad_tokens)
+    idxs_ord, idxs_ord_lens, posr3 = hpy_splits(coords, hl, token_size, pad_tokens)
 
     times_enc = enc_time(times, time_win)
     times_padded = torch.cat([torch.zeros_like(times_enc[0]).unsqueeze(0), times_enc])
-    geoinfos_padded = torch.cat( [torch.zeros_like(geoinfos[0]).unsqueeze(0), n_geoinfos(geoinfos)])
+    geoinfos_padded = torch.cat([torch.zeros_like(geoinfos[0]).unsqueeze(0), n_geoinfos(geoinfos)])
     source_padded = torch.cat([torch.zeros_like(source[0]).unsqueeze(0), n_data(source)])
 
     # pad with zero at the beggining for token size padding
@@ -169,7 +170,7 @@ def tokenize_window_space(
         idxs_ord_lens,
     )
 
-    tokens_cells = [t + [tc] for t,tc in zip(tokens_cells,tokens_cells_cur,strict=True)]
+    tokens_cells = [t + [tc] for t, tc in zip(tokens_cells, tokens_cells_cur, strict=True)]
 
     return tokens_cells
 
