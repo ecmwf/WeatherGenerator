@@ -70,7 +70,7 @@ def encode_times_target(times, time_win) -> torch.tensor:
     return time_tensor
 
 
-def hpy_cell_splits(coords, hl):
+def hpy_cell_splits(coords: torch.tensor, hl: int):
     """Compute healpix cell id for each coordinate on given level hl"""
     thetas = ((90.0 - coords[:, 0]) / 180.0) * np.pi
     phis = ((coords[:, 1] + 180.0) / 360.0) * 2.0 * np.pi
@@ -86,9 +86,18 @@ def hpy_cell_splits(coords, hl):
     return (hpy_idxs_ord_split, thetas, phis, posr3)
 
 
-def hpy_splits(coords, hl, token_size, pad_tokens):
-    """???"""
+def hpy_splits(coords: torch.tensor, hl: int, token_size: int, pad_tokens: bool):
+    """Compute healpix cell for each data point and splitting information per cell;
+       when the token_size is exceeded then splitting based on lat is used;
+       tokens can be padded
 
+    Return :
+        idxs_ord : flat list of indices (to data points) per healpix cell
+        idxs_ord_lens : lens of lists per cell (so that data[idxs_ord].split( idxs_ord_lens) provides per cell data)
+        posr3 : R^3 positions of coords
+    """
+
+    # list of data points per healpix cell
     (hpy_idxs_ord_split, thetas, phis, posr3) = hpy_cell_splits(coords, hl)
 
     # if token_size is exceeed split based on latitude
@@ -120,8 +129,8 @@ def hpy_splits(coords, hl, token_size, pad_tokens):
 
 
 def tokenize_window_space(
-    stream_id,
-    coords,
+    stream_id: float,
+    coords: torch.tensor,
     geoinfos,
     source,
     times,
