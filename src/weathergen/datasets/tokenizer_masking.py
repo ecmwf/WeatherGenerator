@@ -15,6 +15,7 @@ import numpy as np
 import torch
 
 from weathergen.datasets.tokenizer_utils import (
+    arc_alpha,
     encode_times_source,
     encode_times_target,
     tokenize_window_space,
@@ -144,18 +145,15 @@ class TokenizerMasking:
             si["tokenize_spacetime"] if "tokenize_spacetime" in stream_info else False
         )
 
-        # TODO
-        # if masking_rate > 0.0:
-        #     # adjust if there's a per-stream masking rate
-        #     masking_rate = si["masking_rate"] if "masking_rate" in si else masking_rate
-        #     # mask either patches or entire stream
-        #     if masking_rate_sampling:
-        #         # masking_rate = self.rng.uniform( low=0., high=masking_rate)
-        #         masking_rate = np.clip(
-        #             np.abs(self.rng.normal(loc=0.0, scale=1.0 / np.pi)), 0.0, 1.0
-        #         )
-        #     else:
-        #         masking_rate = 1.0 if self.rng.uniform() < masking_rate else 0.0
+        if masking_rate > 0.0:
+            # adjust if there's a per-stream masking rate
+            masking_rate = si["masking_rate"] if "masking_rate" in si else masking_rate
+            # mask either patches or entire stream
+            if masking_rate_sampling:
+                masking_rate = np.clip(
+                    np.abs(self.rng.normal(loc=masking_rate, scale=1.0 / 2.5 * np.pi)), 0.0, 1.0
+                )
+        self.masking_rate = masking_rate
 
         tokenize_window = partial(
             tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
@@ -172,33 +170,30 @@ class TokenizerMasking:
         source_tokens_cells = torch.tensor([])
         source_centroids = torch.tensor([])
         source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
+        self.perm_sel = []
 
         # return empty
         if is_diagnostic or source.shape[1] == 0 or len(source) < 2 or masking_rate == 1.0:
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
         # TODO: properly set stream_id; don't forget to normalize
-        source_tokens_cells = [[] for _ in range(self.num_healpix_cells_source)]
         source_tokens_cells = tokenize_window(
             0,
             coords,
             geoinfos,
             source,
             times,
-            source_tokens_cells,
         )
 
-        # TODO: over what are we cat'ing here
         source_tokens_cells = [
             torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in source_tokens_cells
         ]
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
 
-        # TODO: variable naming
         # perform masking globally by forgetting cells temporarily
-        qq = self.rng.uniform(0, 1, source_tokens_lens.sum().item()) < masking_rate
-        tt = np.cumsum(source_tokens_lens)[:-1]
-        self.perm_sel = np.split(qq, tt)
+        mask = self.rng.uniform(0, 1, source_tokens_lens.sum().item()) < masking_rate
+        split_lens = np.cumsum(source_tokens_lens)[:-1]
+        self.perm_sel = np.split(mask, split_lens)
         self.token_size = token_size
 
         # select unmasked tokens for network input
@@ -246,18 +241,11 @@ class TokenizerMasking:
             si["tokenize_spacetime"] if "tokenize_spacetime" in stream_info else False
         )
 
-        # TODO
-        # if masking_rate > 0.0:
-        #     # adjust if there's a per-stream masking rate
-        #     masking_rate = si["masking_rate"] if "masking_rate" in si else masking_rate
-        #     # mask either patches or entire stream
-        #     if masking_rate_sampling:
-        #         # masking_rate = self.rng.uniform( low=0., high=masking_rate)
-        #         masking_rate = np.clip(
-        #             np.abs(self.rng.normal(loc=0.0, scale=1.0 / np.pi)), 0.0, 1.0
-        #         )
-        #     else:
-        #         masking_rate = 1.0 if self.rng.uniform() < masking_rate else 0.0
+        target_tokens, target_coords = torch.tensor([]), torch.tensor([])
+        target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
+
+        if len(self.perm_sel) == 0:
+            return (target_tokens, target_coords, torch.tensor([]), torch.tensor([]))
 
         def id(arg):
             return arg
@@ -276,17 +264,13 @@ class TokenizerMasking:
         )
 
         # TODO: properly set stream_id; don't forget to normalize
-        target_tokens_cells = [[] for _ in range(self.num_healpix_cells_source)]
         target_tokens_cells = tokenize_window(
             0,
             coords,
             geoinfos,
             source,
             times,
-            target_tokens_cells,
         )
-
-        # import code; code.interact( local=locals())
 
         # select masked tokens for network input
         target_tokens = [
@@ -295,26 +279,27 @@ class TokenizerMasking:
         ]
         target_tokens_lens = [len(t) for t in target_tokens]
 
-        target_tokens_lin = torch.cat(target_tokens)
+        tt_lin = torch.cat(target_tokens)
+        tt_lens = target_tokens_lens
+        # TODO: can we avoid setting the offsets here manually?
+        # TODO: ideally we would not have recover it; but using tokenize_window seems necessary for
+        #       consistency -> split tokenize_window in two parts with the cat only happening in the
+        #       second
         offset = 6
-        target_times = torch.split(target_tokens_lin[..., 1:offset], target_tokens_lens)
-        target_coords = torch.split(
-            target_tokens_lin[..., offset : offset + coords.shape[-1]], target_tokens_lens
-        )
+        # offset of 1 : stream_id
+        target_times = torch.split(tt_lin[..., 1:offset], tt_lens)
+        target_coords = torch.split(tt_lin[..., offset : offset + coords.shape[-1]], tt_lens)
         offset += coords.shape[-1]
-        target_geoinfos = torch.split(
-            target_tokens_lin[..., offset : offset + geoinfos.shape[-1]], target_tokens_lens
-        )
+        target_geoinfos = torch.split(tt_lin[..., offset : offset + geoinfos.shape[-1]], tt_lens)
         offset += geoinfos.shape[-1]
-        target_tokens = torch.split(target_tokens_lin[..., offset:], target_tokens_lens)
+        target_tokens = torch.split(tt_lin[..., offset:], tt_lens)
 
-        target_coords_raw = torch.split(
-            target_tokens_lin[:, offset : offset + coords.shape[-1]], target_tokens_lens
-        )
-        # TODO
-        target_times_raw = [
-            np.array([], dtype="datetime64[ns]") for _ in range(len(target_coords_raw))
-        ]
+        target_coords_raw = torch.split(tt_lin[:, offset : offset + coords.shape[-1]], tt_lens)
+        # recover absolute time from relatives in encoded ones
+        # TODO: avoid recover; see TODO above
+        deltas_sec = arc_alpha(tt_lin[..., 1], tt_lin[..., 2]) / (2.0 * np.pi) * (12 * 3600)
+        deltas_sec = deltas_sec.numpy().astype("timedelta64[s]")
+        target_times_raw = np.split(time_win[0] + deltas_sec, np.cumsum(tt_lens)[:-1])
 
         # compute encoding of target coordinates used in prediction network
         if torch.tensor(target_tokens_lens).sum() > 0:
