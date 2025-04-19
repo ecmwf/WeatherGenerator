@@ -145,18 +145,6 @@ class TokenizerForecast:
             si["tokenize_spacetime"] if "tokenize_spacetime" in stream_info else False
         )
 
-        if masking_rate > 0.0:
-            # adjust if there's a per-stream masking rate
-            masking_rate = si["masking_rate"] if "masking_rate" in si else masking_rate
-            # mask either patches or entire stream
-            if masking_rate_sampling:
-                # masking_rate = self.rng.uniform( low=0., high=masking_rate)
-                masking_rate = np.clip(
-                    np.abs(self.rng.normal(loc=0.0, scale=1.0 / np.pi)), 0.0, 1.0
-                )
-            else:
-                masking_rate = 1.0 if self.rng.uniform() < masking_rate else 0.0
-
         tokenize_window = partial(
             tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
             time_win=time_win,
@@ -173,7 +161,7 @@ class TokenizerForecast:
         source_centroids = torch.tensor([])
         source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
 
-        if is_diagnostic or source.shape[1] == 0 or len(source) < 2 or masking_rate == 1.0:
+        if is_diagnostic or source.shape[1] == 0 or len(source) < 2 :
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
         # TODO: properly set stream_id; don't forget to normalize
