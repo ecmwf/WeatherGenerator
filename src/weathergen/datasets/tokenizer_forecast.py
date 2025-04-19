@@ -177,17 +177,13 @@ class TokenizerForecast:
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
         # TODO: properly set stream_id; don't forget to normalize
-        source_tokens_cells = [[] for _ in range(self.num_healpix_cells_source)]
         source_tokens_cells = tokenize_window(
             0,
             coords,
             geoinfos,
             source,
             times,
-            source_tokens_cells,
         )
-
-        # import code; code.interact( local=locals())
 
         source_tokens_cells = [
             torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in source_tokens_cells
