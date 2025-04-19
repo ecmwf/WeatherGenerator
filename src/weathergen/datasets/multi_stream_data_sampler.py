@@ -40,7 +40,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.len_hrs = cf.len_hrs
         self.step_hrs = cf.step_hrs
 
-        self.auto_encoder = cf.auto_encoder
+        self.forecast_offset = cf.forecast_offset
         self.forecast_delta_hrs = (
             cf.forecast_delta_hrs if cf.forecast_delta_hrs > 0 else self.len_hrs
         )
@@ -284,7 +284,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 for _, (stream_info, stream_ds) in enumerate(
                     zip(self.streams, self.streams_datasets, strict=False)
                 ):
-                    stream_data = StreamData(forecast_dt, nhc_source, nhc_target)
+                    stream_data = StreamData(
+                        forecast_dt + self.forecast_offset, nhc_source, nhc_target
+                    )
 
                     # for all sources for current stream
                     for _, ds in enumerate(stream_ds):
@@ -326,8 +328,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # target
 
                     # collect for all forecast steps
-                    offset = 0 if self.auto_encoder else 1
-                    for fstep in range(forecast_dt + 1):
+                    for fstep in range(
+                        self.forecast_offset, self.forecast_offset + forecast_dt + 1
+                    ):
                         # collect all targets
                         for _, ds in enumerate(stream_ds):
                             step_forecast_dt = (
@@ -340,9 +343,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                             # TODO: is it really a good idea to have the offset here and not in fstep?
                             #       fstep requires other modifcations but
-                            (coords, geoinfos, target, times) = ds.get_target(
-                                step_forecast_dt + offset
-                            )
+                            (coords, geoinfos, target, times) = ds.get_target(step_forecast_dt)
 
                             if target.shape[0] == 0:
                                 stream_data.add_empty_target(fstep)
@@ -380,7 +381,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # compute offsets and auxiliary data needed for prediction computation
             # (info is not per stream so separate data structure)
             assert self.target_coords_local
-            target_coords_idx = compute_idxs_predict(forecast_dt, batch)
+            target_coords_idx = compute_idxs_predict(self.forecast_offset + forecast_dt, batch)
 
             assert len(batch) == self.batch_size
             yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
