@@ -345,7 +345,7 @@ class Model(torch.nn.Module):
     #########################################
     def load(self, run_id, epoch=-1):
         path_run = Path(self.cf.model_path) / run_id
-        epoch_id = f"epoch{epoch:05d}" if epoch != -1 else "latest"
+        epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"
         filename = f"{run_id}_{epoch_id}.chkpt"
 
         params = torch.load(
