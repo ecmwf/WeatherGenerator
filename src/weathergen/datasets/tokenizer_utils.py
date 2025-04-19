@@ -9,6 +9,14 @@ from weathergen.datasets.utils import (
 )
 
 
+def arc_alpha(sin_alpha, cos_alpha):
+    """Invert cosine/sine for alpha in [0,2pi] using both functions"""
+    t = torch.arccos(cos_alpha)
+    mask = sin_alpha < 0.0
+    t[mask] = (2.0 * np.pi) - t[mask]
+    return t
+
+
 def encode_times_source(times, time_win) -> torch.tensor:
     # assemble tensor as fed to the network, combining geoinfo and data
     fp32 = torch.float32
@@ -63,6 +71,7 @@ def encode_times_target(times, time_win) -> torch.tensor:
 
 
 def hpy_cell_splits(coords, hl):
+    """Compute healpix cell id for each coordinate on given level hl"""
     thetas = ((90.0 - coords[:, 0]) / 180.0) * np.pi
     phis = ((coords[:, 1] + 180.0) / 360.0) * 2.0 * np.pi
     hpy_idxs = ang2pix(2**hl, thetas, phis, nest=True)
@@ -116,7 +125,6 @@ def tokenize_window_space(
     geoinfos,
     source,
     times,
-    tokens_cells,
     time_win,
     token_size,
     hl,
@@ -131,12 +139,12 @@ def tokenize_window_space(
 
     # len(source)==1 would require special case handling that is not worth the effort
     if len(source) < 2:
-        return tokens_cells
+        return
 
     idxs_ord, idxs_ord_lens, posr3 = hpy_splits(coords, hl, token_size, pad_tokens)
 
     times_enc = enc_time(times, time_win)
-    times_padded = torch.cat([torch.zeros_like(times_enc[0]).unsqueeze(0), times_enc])
+    times_enc_padded = torch.cat([torch.zeros_like(times_enc[0]).unsqueeze(0), times_enc])
     geoinfos_padded = torch.cat([torch.zeros_like(geoinfos[0]).unsqueeze(0), n_geoinfos(geoinfos)])
     source_padded = torch.cat([torch.zeros_like(source[0]).unsqueeze(0), n_data(source)])
 
@@ -156,11 +164,11 @@ def tokenize_window_space(
 
     # reorder based on cells (except for coords_local) and then cat along
     # (time,coords,geoinfos,source) dimension and then split based on cells
-    tokens_cells_cur = torch.split(
+    tokens_cells = torch.split(
         torch.cat(
             (
                 torch.full([len(idxs_ord), 1], stream_id, dtype=torch.float32),
-                times_padded[idxs_ord],
+                times_enc_padded[idxs_ord],
                 coords_local,
                 geoinfos_padded[idxs_ord],
                 source_padded[idxs_ord],
@@ -170,12 +178,11 @@ def tokenize_window_space(
         idxs_ord_lens,
     )
 
-    tokens_cells = [t + [tc] for t, tc in zip(tokens_cells, tokens_cells_cur, strict=True)]
+    tokens_cells = [[t] for t in tokens_cells]
 
     return tokens_cells
 
 
-#############################################
 def tokenize_window_spacetime(
     stream_id,
     coords,
@@ -193,15 +200,22 @@ def tokenize_window_spacetime(
     enc_time,
     pad_tokens=True,
 ):
+    """Tokenize respecting an intrinsic time step in the data, i.e. each time step is tokenized
+    separately
+    """
+
+    num_healpix_cells = 12 * 4**hl
+    tokens_cells = [[] for _ in range(num_healpix_cells)]
+
     t_unique = np.unique(times)
     for _, t in enumerate(t_unique):
         mask = t == times
-        tokens_cells = tokenize_window_space(
+        tokens_cells_cur = tokenize_window_space(
+            stream_id,
             coords[mask],
             geoinfos[mask],
             source[mask],
-            None,
-            tokens_cells,
+            times[mask],
             time_win,
             token_size,
             hl,
@@ -211,5 +225,7 @@ def tokenize_window_spacetime(
             n_data,
             pad_tokens,
         )
+
+        tokens_cells = [t + tc for t, tc in zip(tokens_cells, tokens_cells_cur, strict=True)]
 
     return tokens_cells
