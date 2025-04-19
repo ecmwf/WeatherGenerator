@@ -15,7 +15,8 @@ import torch
 
 from weathergen.datasets.anemoi_dataset import AnemoiDataset
 from weathergen.datasets.atmorep_dataset import AtmorepDataset
-from weathergen.datasets.batchifyer import Batchifyer
+from weathergen.datasets.tokenizer_forecast import TokenizerForecast
+from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.fesom_dataset import FesomDataset
 from weathergen.datasets.obs_dataset import ObsDataset
 from weathergen.datasets.stream_data import StreamData
@@ -39,6 +40,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.len_hrs = cf.len_hrs
         self.step_hrs = cf.step_hrs
 
+        self.auto_encoder = cf.auto_encoder
         self.forecast_delta_hrs = (
             cf.forecast_delta_hrs if cf.forecast_delta_hrs > 0 else self.len_hrs
         )
@@ -143,10 +145,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.target_coords_local = cf.target_coords_local
         self.sampling_rate_target = cf.sampling_rate_target
 
-        self.masking_mode = cf.masking_mode
-        self.masking_rate = cf.masking_rate
-        self.masking_rate_sampling = cf.masking_rate_sampling
-
         self.batch_size = batch_size
         self.rng = np.random.default_rng(cf.data_loader_rng_seed)
 
@@ -155,7 +153,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.num_healpix_cells_source = 12 * 4**self.healpix_level_source
         self.num_healpix_cells_target = 12 * 4**self.healpix_level_target
 
-        self.batchifyer = Batchifyer(cf.healpix_level)
+        if cf.training_mode == "forecast" :
+            self.tokenizer = TokenizerForecast(cf.healpix_level)
+        elif cf.training_mode ==  "masking" :
+            self.tokenizer = TokenizerMasking(cf.healpix_level)
+        else :
+            assert False, "Unsupported training mode."
+        self.masking_rate = cf.masking_rate
+        self.masking_rate_sampling = cf.masking_rate_sampling
 
         self.epoch = 0
 
@@ -303,7 +308,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 np.concatenate((coords, geoinfos, source), 1)
                             )
 
-                            (ss_cells, ss_lens, ss_centroids) = self.batchifyer.batchify_source(
+                            (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                                 stream_info,
                                 self.masking_rate,
                                 self.masking_rate_sampling,
@@ -321,6 +326,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # target
 
                     # collect for all forecast steps
+                    offset = 0 if self.auto_encoder else 1
                     for fstep in range(forecast_dt + 1):
                         # collect all targets
                         for _, ds in enumerate(stream_ds):
@@ -332,12 +338,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 self.streams_datasets[-1][0].time_window(step_forecast_dt),
                             )
 
-                            (coords, geoinfos, target, times) = ds.get_target(step_forecast_dt)
+                            # TODO: is it really a good idea to have the offset here and not in fstep?
+                            #       fstep requires other modifcations but
+                            (coords, geoinfos, target, times) = ds.get_target(
+                                step_forecast_dt + offset
+                            )
 
                             if target.shape[0] == 0:
                                 stream_data.add_empty_target(fstep)
                             else:
-                                (tt_cells, tc, tt_c, tt_t) = self.batchifyer.batchify_target(
+                                (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
                                     stream_info,
                                     self.sampling_rate_target,
                                     self.rng,
