@@ -157,6 +157,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.tokenizer = TokenizerForecast(cf.healpix_level)
         elif cf.training_mode == "masking":
             self.tokenizer = TokenizerMasking(cf.healpix_level)
+            assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
         else:
             assert False, "Unsupported training mode."
         self.masking_rate = cf.masking_rate
