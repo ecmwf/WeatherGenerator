@@ -161,7 +161,7 @@ class TokenizerForecast:
         source_centroids = torch.tensor([])
         source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
 
-        if is_diagnostic or source.shape[1] == 0 or len(source) < 2 :
+        if is_diagnostic or source.shape[1] == 0 or len(source) < 2:
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
         # TODO: properly set stream_id; don't forget to normalize
