@@ -375,7 +375,7 @@ class Model(torch.nn.Module):
         return tuple(preds_all[0])
 
     #########################################
-    def forward(self, model_params, batch, forecast_steps):
+    def forward(self, model_params, batch, forecast_offset, forecast_steps):
         (streams_data, source_cell_lens, target_coords_idxs) = batch
 
         # embed
@@ -388,7 +388,7 @@ class Model(torch.nn.Module):
 
         # roll-out in latent space
         preds_all = []
-        for fstep in range(forecast_steps):
+        for fstep in range(forecast_offset, forecast_offset + forecast_steps):
             # prediction
             preds_all += [
                 self.predict(
@@ -406,7 +406,7 @@ class Model(torch.nn.Module):
         preds_all += [
             self.predict(
                 model_params,
-                forecast_steps,
+                forecast_offset + forecast_steps,
                 tokens,
                 streams_data,
                 target_coords_idxs,

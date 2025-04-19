@@ -305,6 +305,7 @@ class Trainer(Trainer_Base):
     def compute_loss(
         self,
         loss_fcts,
+        forecast_offset,
         forecast_steps,
         streams_data,
         preds,
@@ -319,14 +320,14 @@ class Trainer(Trainer_Base):
                 torch.cat([t[i].target_tokens[fstep] for t in streams_data])
                 for i in range(len(self.cf.streams))
             ]
-            for fstep in range(forecast_steps + 1)
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
         ]
         targets_coords_rt = [
             [
                 torch.cat([t[i].target_coords[fstep] for t in streams_data])
                 for i in range(len(self.cf.streams))
             ]
-            for fstep in range(forecast_steps + 1)
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
         ]
 
         if log_data:
@@ -340,14 +341,14 @@ class Trainer(Trainer_Base):
                     torch.cat([t[i].target_coords_raw[fstep] for t in streams_data])
                     for i in range(len(self.cf.streams))
                 ]
-                for fstep in range(forecast_steps + 1)
+                for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
             ]
             targets_times_raw_rt = [
                 [
                     np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
                     for i in range(len(self.cf.streams))
                 ]
-                for fstep in range(forecast_steps + 1)
+                for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
             ]
 
         ctr_ftarget = 0
@@ -492,10 +493,11 @@ class Trainer(Trainer_Base):
             with torch.autocast(
                 device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
             ):
-                preds = self.ddp_model(self.model_params, batch, forecast_steps)
+                preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
 
                 loss, _ = self.compute_loss(
                     self.loss_fcts,
+                    cf.forecast_offset,
                     forecast_steps,
                     batch[0],
                     preds,
@@ -556,12 +558,15 @@ class Trainer(Trainer_Base):
                     with torch.autocast(
                         device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
                     ):
-                        preds = self.ddp_model(self.model_params, batch, forecast_steps)
+                        preds = self.ddp_model(
+                            self.model_params, batch, cf.forecast_offset, forecast_steps
+                        )
 
                     # compute loss and log output
                     if bidx < cf.log_validation:
                         _, ret = self.compute_loss(
                             self.loss_fcts_val,
+                            cf.forecast_offset,
                             forecast_steps,
                             batch[0],
                             preds,
@@ -595,6 +600,7 @@ class Trainer(Trainer_Base):
                     else:
                         self.compute_loss(
                             self.loss_fcts_val,
+                            cf.forecast_offset,
                             forecast_steps,
                             batch[0],
                             preds,
