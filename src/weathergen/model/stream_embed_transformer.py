@@ -90,9 +90,8 @@ class StreamEmbedTransformer(torch.nn.Module):
                 rem = (self.num_tokens * self.dim_out - embed_size_centroids) % num_channels
                 embed_size_centroids += rem
                 dim_out = (self.num_tokens * self.dim_out - embed_size_centroids) // num_channels
-                Linear = torch.nn.Linear
                 self.unembed = torch.nn.ModuleList(
-                    [Linear(dim_embed, dim_out) for _ in range(num_channels)]
+                    [torch.nn.Linear(dim_embed, dim_out) for _ in range(num_channels)]
                 )
                 self.ln_final = torch.nn.ModuleList([norm(dim_embed) for _ in range(num_channels)])
 
@@ -143,6 +142,10 @@ class StreamEmbedTransformer(torch.nn.Module):
         # append centroids
         if self.embed_size_centroids > 0:
             out = torch.cat([out, self.embed_centroids(centroids)], -1)
+        # if self.embed_size_centroids==0 and self.dim_out is not divisible by #channels with
+        # unembed_mode block then we need to pad to have the expected output shape
+        if out.shape[-1] < self.dim_out:
+            out = torch.nn.functional.pad(out, [0, self.dim_out - out.shape[-1]], value=0.0)
         # final reshape
         out = self.dropout_final(out.reshape(-1, self.num_tokens, self.dim_out))
 
