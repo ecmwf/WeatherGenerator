@@ -15,11 +15,11 @@ import torch
 
 from weathergen.datasets.anemoi_dataset import AnemoiDataset
 from weathergen.datasets.atmorep_dataset import AtmorepDataset
-from weathergen.datasets.tokenizer_forecast import TokenizerForecast
-from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.fesom_dataset import FesomDataset
 from weathergen.datasets.obs_dataset import ObsDataset
 from weathergen.datasets.stream_data import StreamData
+from weathergen.datasets.tokenizer_forecast import TokenizerForecast
+from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
     compute_idxs_predict,
     compute_offsets_scatter_embed,
@@ -153,11 +153,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.num_healpix_cells_source = 12 * 4**self.healpix_level_source
         self.num_healpix_cells_target = 12 * 4**self.healpix_level_target
 
-        if cf.training_mode == "forecast" :
+        if cf.training_mode == "forecast":
             self.tokenizer = TokenizerForecast(cf.healpix_level)
-        elif cf.training_mode ==  "masking" :
+        elif cf.training_mode == "masking":
             self.tokenizer = TokenizerMasking(cf.healpix_level)
-        else :
+        else:
             assert False, "Unsupported training mode."
         self.masking_rate = cf.masking_rate
         self.masking_rate_sampling = cf.masking_rate_sampling
