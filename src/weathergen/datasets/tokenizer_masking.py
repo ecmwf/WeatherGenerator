@@ -273,6 +273,7 @@ class TokenizerMasking:
         )
 
         # select masked tokens for network input
+        # TODO: implement sampling rate target
         target_tokens = [
             torch.cat([c if p else torch.tensor([]) for c, p in zip(cc, pp, strict=True)])
             for cc, pp in zip(target_tokens_cells, self.perm_sel, strict=True)
