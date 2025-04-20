@@ -230,6 +230,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         else:
             assert False
 
+        self.tokenizer.reset()
+
     ###################################################
     def denormalize_source_channels(self, obs_id, data):
         # TODO: with multiple ds per stream we need to distinguish these here
