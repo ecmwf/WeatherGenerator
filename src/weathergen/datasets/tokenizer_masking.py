@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import time
 import warnings
 from functools import partial
 
@@ -30,7 +31,6 @@ from weathergen.datasets.utils import (
 from weathergen.utils.logger import init_loggers
 
 
-####################################################################################################
 class TokenizerMasking:
     def __init__(self, hl):
         ref = torch.tensor([1.0, 0.0, 0.0])
@@ -121,9 +121,11 @@ class TokenizerMasking:
             .to(torch.float32)
         )
 
-        self.rng = np.random.default_rng()
+        self.rng = np.random.default_rng(int(time.time()))
 
-    ##############################################
+    def reset(self) -> None:
+        self.rng = np.random.default_rng(int(time.time()))
+
     def batchify_source(
         self,
         stream_info,
@@ -192,6 +194,13 @@ class TokenizerMasking:
 
         # perform masking globally by forgetting cells temporarily
         mask = self.rng.uniform(0, 1, source_tokens_lens.sum().item()) < masking_rate
+
+        # ensure that masking is not degenerate i.e. it is not all true or false
+        if not mask.any():
+            mask[self.rng.integers(low=0, high=len(mask))] = True
+        if mask.all():
+            mask[self.rng.integers(low=0, high=len(mask))] = False
+
         split_lens = np.cumsum(source_tokens_lens)[:-1]
         self.perm_sel = np.split(mask, split_lens)
         self.token_size = token_size
@@ -222,7 +231,6 @@ class TokenizerMasking:
 
         return (source_tokens_cells, source_tokens_lens, source_centroids)
 
-    ##############################################
     def batchify_target(
         self,
         stream_info,
@@ -279,6 +287,8 @@ class TokenizerMasking:
             for cc, pp in zip(target_tokens_cells, self.perm_sel, strict=True)
         ]
         target_tokens_lens = [len(t) for t in target_tokens]
+        if torch.tensor(target_tokens_lens).sum() == 0:
+            return (torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([]))
 
         tt_lin = torch.cat(target_tokens)
         tt_lens = target_tokens_lens
