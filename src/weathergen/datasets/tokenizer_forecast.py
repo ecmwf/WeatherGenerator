@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import time
 import warnings
 from functools import partial
 
@@ -30,7 +31,6 @@ from weathergen.datasets.utils import (
 from weathergen.utils.logger import init_loggers
 
 
-####################################################################################################
 class TokenizerForecast:
     def __init__(self, hl):
         ref = torch.tensor([1.0, 0.0, 0.0])
@@ -121,9 +121,11 @@ class TokenizerForecast:
             .to(torch.float32)
         )
 
-        self.rng = np.random.default_rng()
+        self.rng = np.random.default_rng(int(time.time()))
 
-    ##############################################
+    def reset(self) -> None:
+        self.rng = np.random.default_rng(int(time.time()))
+
     def batchify_source(
         self,
         stream_info,
@@ -198,7 +200,6 @@ class TokenizerForecast:
 
         return (source_tokens_cells, source_tokens_lens, source_centroids)
 
-    ##############################################
     def batchify_target(
         self,
         stream_info,
