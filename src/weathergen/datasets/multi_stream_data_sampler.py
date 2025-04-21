@@ -127,11 +127,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         ).min()
 
         self.len = min(self.len, self.len if not samples_per_epoch else samples_per_epoch)
-        # adjust len to split loading across all workers
+        # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len_native // cf.num_ranks) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)
-        # ensure it is multiple of batch_size
-        self.len = (self.len // batch_size) * batch_size
 
         self.rank = cf.rank
         self.num_ranks = cf.num_ranks
@@ -276,10 +274,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 idx_raw += 1
 
                 # TODO: this has to be independent of specific datasets
-                time_win1, _ = (
-                    self.streams_datasets[-1][0].time_window(idx),
-                    self.streams_datasets[-1][0].time_window(idx + self.len_hrs // self.step_hrs),
-                )
+                time_win1 = self.streams_datasets[-1][0].time_window(idx)
 
                 streams_data = []
 
@@ -339,13 +334,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             step_forecast_dt = (
                                 idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
                             )
-                            _, time_win2 = (
-                                self.streams_datasets[-1][0].time_window(idx),
-                                self.streams_datasets[-1][0].time_window(step_forecast_dt),
-                            )
+                            time_win2 = self.streams_datasets[-1][0].time_window(step_forecast_dt)
 
-                            # TODO: is it really a good idea to have the offset here and not in fstep?
-                            #       fstep requires other modifcations but
                             (coords, geoinfos, target, times) = ds.get_target(step_forecast_dt)
 
                             if target.shape[0] == 0:
