@@ -417,4 +417,4 @@ class AnemoiDataset:
         if not self.ds:
             return (np.array([], dtype=np.datetime64), np.array([], dtype=np.datetime64))
 
-        return (self.ds.dates[idx], self.ds.dates[idx])
+        return (self.ds.dates[idx], self.ds.dates[idx + self.num_steps_per_window])
