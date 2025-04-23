@@ -310,6 +310,7 @@ class Trainer(Trainer_Base):
         stddev_all,
         mode="training",
         log_data=False,
+        fstep_start: int = 0,
     ):
         # merge across batch dimension (and keep streams)
         targets_rt = [
@@ -317,14 +318,14 @@ class Trainer(Trainer_Base):
                 torch.cat([t[i].target_tokens[fstep] for t in streams_data])
                 for i in range(len(self.cf.streams))
             ]
-            for fstep in range(forecast_steps + 1)
+            for fstep in range(fstep_start, forecast_steps + 1)
         ]
         targets_coords_rt = [
             [
                 torch.cat([t[i].target_coords[fstep] for t in streams_data])
                 for i in range(len(self.cf.streams))
             ]
-            for fstep in range(forecast_steps + 1)
+            for fstep in range(fstep_start, forecast_steps + 1)
         ]
 
         if log_data:
@@ -338,14 +339,14 @@ class Trainer(Trainer_Base):
                     torch.cat([t[i].target_coords_raw[fstep] for t in streams_data])
                     for i in range(len(self.cf.streams))
                 ]
-                for fstep in range(forecast_steps + 1)
+                for fstep in range(fstep_start, forecast_steps + 1)
             ]
             targets_times_raw_rt = [
                 [
                     np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
                     for i in range(len(self.cf.streams))
                 ]
-                for fstep in range(forecast_steps + 1)
+                for fstep in range(fstep_start, forecast_steps + 1)
             ]
 
         ctr_ftarget = 0
@@ -477,6 +478,12 @@ class Trainer(Trainer_Base):
         self.optimizer.zero_grad()
         self.losses_hist, self.stddev_hist = [], []
 
+        if cf.auto_encode:
+            fstep_start = 0
+        else:
+            fstep_start = 1
+            assert cf.forecast_steps > 1, "Forecast steps must be > 1 when not using auto-encoding"
+
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
@@ -490,7 +497,7 @@ class Trainer(Trainer_Base):
             with torch.autocast(
                 device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
             ):
-                preds = self.ddp_model(self.model_params, batch, forecast_steps)
+                preds = self.ddp_model(self.model_params, batch, forecast_steps, fstep_start=fstep_start)
 
                 loss, _ = self.compute_loss(
                     self.loss_fcts,
@@ -499,6 +506,7 @@ class Trainer(Trainer_Base):
                     preds,
                     losses_all,
                     stddev_all,
+                    fstep_start=fstep_start,
                 )
 
             # backward pass
@@ -541,6 +549,13 @@ class Trainer(Trainer_Base):
         dataset_val_iter = iter(self.data_loader_validation)
         self.losses_hist, self.stddev_hist = [], []
 
+
+        if cf.auto_encode:
+            fstep_start = 0
+        else:
+            fstep_start = 1
+            assert cf.forecast_steps > 1, "Forecast steps must be > 1 when not using auto-encoding"
+
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(
@@ -557,7 +572,7 @@ class Trainer(Trainer_Base):
                     with torch.autocast(
                         device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
                     ):
-                        preds = self.ddp_model(self.model_params, batch, forecast_steps)
+                        preds = self.ddp_model(self.model_params, batch, forecast_steps, fstep_start=fstep_start)
 
                     # compute loss and log output
                     if bidx < cf.log_validation:
@@ -570,6 +585,7 @@ class Trainer(Trainer_Base):
                             stddev_all,
                             mode="validation",
                             log_data=True,
+                            fstep_start=fstep_start,
                         )
 
                         (
@@ -602,6 +618,7 @@ class Trainer(Trainer_Base):
                             losses_all,
                             stddev_all,
                             mode="validation",
+                            fstep_start=fstep_start,
                         )
 
                     self.losses_hist += [losses_all]
