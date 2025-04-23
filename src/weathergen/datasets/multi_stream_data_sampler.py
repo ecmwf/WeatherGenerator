@@ -381,7 +381,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # compute offsets and auxiliary data needed for prediction computation
             # (info is not per stream so separate data structure)
             assert self.target_coords_local
-            target_coords_idx = compute_idxs_predict(batch, forecast_dt, fstep_start)
+            target_coords_idx = compute_idxs_predict(batch, forecast_dt)
 
             assert len(batch) == self.batch_size
             yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
