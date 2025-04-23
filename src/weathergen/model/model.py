@@ -18,6 +18,7 @@ import torch
 from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
 
+from weathergen.datasets.stream_data import StreamData
 from weathergen.model.attention import (
     MultiCrossAttentionHead_Varlen,
     MultiCrossAttentionHead_Varlen_SlicedQ,
@@ -568,7 +569,27 @@ class Model(torch.nn.Module):
         return tuple(preds_all[0])
 
     #########################################
-    def forward(self, model_params, batch, forecast_steps):
+    def forward(self, model_params: ModelParams, batch: StreamData, forecast_steps: int, fstep_start: int = 0):
+        """
+        Define forward pass of the model.
+
+        Parameters
+        ----------
+        model_params : ModelParams
+            Model parameters containing positional encodings and healpix neighborhood structure
+        batch :
+            StreamData information for current batch
+        forecast_dt : int
+            number of forecast steps
+        fstep_start : int
+            starting forecast step (default: 0)
+
+        Returns
+        -------
+        list
+            List of predictions for each target stream
+        """
+
         (streams_data, source_cell_lens, target_coords_idxs) = batch
 
         # embed
@@ -581,7 +602,7 @@ class Model(torch.nn.Module):
 
         # roll-out in latent space
         preds_all = []
-        for fstep in range(forecast_steps):
+        for fstep in range(fstep_start, forecast_steps):
             # prediction
             preds_all += [
                 self.predict(
