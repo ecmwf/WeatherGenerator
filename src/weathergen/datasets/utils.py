@@ -608,16 +608,18 @@ def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
     return batch
 
 
-def compute_idxs_predict(forecast_dt: int, batch: StreamData) -> list:
+def compute_idxs_predict(batch: StreamData, forecast_dt: int, fstep_start: int = 0 ) -> list:
     """
     Compute auxiliary information for prediction
 
     Parameters
     ----------
-    forecast_dt : str
-        number of forecast steps
     batch :
         StreamData information for current batch
+    forecast_dt : int
+        number of forecast steps
+    fstep_start : int
+        start forecast step (default: 0)
 
     Returns
     -------
@@ -646,7 +648,7 @@ def compute_idxs_predict(forecast_dt: int, batch: StreamData) -> list:
                         ),
                     ]
                 ).to(torch.int32)
-                for fstep in range(forecast_dt + 1)
+                for fstep in range(fstep_start, forecast_dt + 1)
             ]
         ]
 
