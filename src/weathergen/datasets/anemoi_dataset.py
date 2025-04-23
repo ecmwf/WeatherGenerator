@@ -81,21 +81,9 @@ class AnemoiDataset:
         # Ensures that coordinates remain into the interval [-90,90] for latitudes
         # and [-180, 180] for longitudes. Ensures that periodicity has been taken
         # into consideration for the specific intervals.
-        il, ir = (-90.0, 90.0)
+        self.latitudes = 2 * np.clip(self.latitudes, -90, 90) - self.latitudes
 
-        self.latitudes = np.where(
-            self.latitudes >= ir,
-            180.0 - self.latitudes,
-            np.where(self.latitudes <= il, -180.0 - self.latitudes, self.latitudes),
-        )
-
-        il, ir = (-180.0, 180.0)
-
-        self.longitudes = np.where(
-            self.longitudes >= ir,
-            self.longitudes - 360.0,
-            np.where(self.longitudes <= il, self.longitudes + 360.0, self.longitudes),
-        )
+        self.longitudes = (self.longitudes + 180) % 360 - 180
 
         # TODO: define in base class
         self.geoinfo_idx = []
