@@ -260,9 +260,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         else:
             fstep_start = 1
             if np.any(self.perms_forecast_dt == 0):
-                logger.error("Deactivating auto-encoding requires all forecast_steps > 0. Check config.")
+                logger.error(
+                    "Deactivating auto-encoding requires all forecast_steps > 0. Check config."
+                )
                 raise ValueError("Deactivating auto-encoding requires all forecast_steps > 0.")
-            
+
         # bidx is used to count the #batches that have been emitted
         # idx_raw is used to index into the dataset; the decoupling is needed
         # since there are empty batches

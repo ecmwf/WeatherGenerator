@@ -569,7 +569,13 @@ class Model(torch.nn.Module):
         return tuple(preds_all[0])
 
     #########################################
-    def forward(self, model_params: ModelParams, batch: StreamData, forecast_steps: int, fstep_start: int = 0):
+    def forward(
+        self,
+        model_params: ModelParams,
+        batch: StreamData,
+        forecast_steps: int,
+        fstep_start: int = 0,
+    ):
         """
         Define forward pass of the model.
 

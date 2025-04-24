@@ -502,7 +502,9 @@ class Trainer(Trainer_Base):
             with torch.autocast(
                 device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
             ):
-                preds = self.ddp_model(self.model_params, batch, forecast_steps, fstep_start=fstep_start)
+                preds = self.ddp_model(
+                    self.model_params, batch, forecast_steps, fstep_start=fstep_start
+                )
 
                 loss, _ = self.compute_loss(
                     self.loss_fcts,
@@ -554,7 +556,6 @@ class Trainer(Trainer_Base):
         dataset_val_iter = iter(self.data_loader_validation)
         self.losses_hist, self.stddev_hist = [], []
 
-
         if cf.auto_encode:
             fstep_start = 0
         else:
@@ -577,7 +578,9 @@ class Trainer(Trainer_Base):
                     with torch.autocast(
                         device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
                     ):
-                        preds = self.ddp_model(self.model_params, batch, forecast_steps, fstep_start=fstep_start)
+                        preds = self.ddp_model(
+                            self.model_params, batch, forecast_steps, fstep_start=fstep_start
+                        )
 
                     # compute loss and log output
                     if bidx < cf.log_validation:
