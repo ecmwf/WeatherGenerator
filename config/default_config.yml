@@ -111,3 +111,9 @@ run_history: []
 desc: ""
 data_loader_rng_seed: ???
 run_id: ???
+
+# Parameters for logging/printing in the training loop
+train_log:
+  # The period to log metrics (in number of batch steps)
+  log_interval: 20
+
