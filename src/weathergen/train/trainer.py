@@ -320,6 +320,11 @@ class Trainer(Trainer_Base):
             ]
             for fstep in range(fstep_start, forecast_steps + 1)
         ]
+
+        if self.cf.rank == 0:
+            print("Len of targets_rt: ", len(targets_rt))
+            print(targets_rt)
+
         targets_coords_rt = [
             [
                 torch.cat([t[i].target_coords[fstep] for t in streams_data])
@@ -482,7 +487,7 @@ class Trainer(Trainer_Base):
             fstep_start = 0
         else:
             fstep_start = 1
-            assert cf.forecast_steps > 1, "Forecast steps must be > 1 when not using auto-encoding"
+            assert cf.forecast_steps > 0, "Forecast steps must be > 0 when not using auto-encoding"
 
         # training loop
         self.t_start = time.time()
@@ -554,7 +559,7 @@ class Trainer(Trainer_Base):
             fstep_start = 0
         else:
             fstep_start = 1
-            assert cf.forecast_steps > 1, "Forecast steps must be > 1 when not using auto-encoding"
+            assert cf.forecast_steps > 0, "Forecast steps must be > 0 when not using auto-encoding"
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
