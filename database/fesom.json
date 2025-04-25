@@ -1,11 +1,11 @@
 {
     "type": "Collection", 
-    "id": "era5", 
+    "id": "fesom", 
     "stac_version": "1.1.0", 
-    "description": "ERA5 is the fifth generation ECMWF reanalysis for the global climate and weather for the past 8 decades.\nData is available from 1940 onwards.\nERA5 replaces the ERA-Interim reanalysis.", 
-    "title": "ERA5 hourly data on single levels from 1979 to present", 
+    "description": "FESOM data - Ocean model\n", 
+    "title": "FESOM", 
     "data_type": "grid",
-    "representative_fraction": 0.25,
+    "representative_fraction": 1.0,
     "links": [{
         "rel": "root", 
         // "href": "https://raw.githubusercontent.com/eerie-project/intake_catalogues/refs/heads/main/dkrz/disk/stac-templates/ifs-fesom2-sr/eerie-control-1950/stac_ifs-fesom2-sr_eerie-control-1950.json", 
@@ -25,17 +25,17 @@
         }], 
     "extent": {
         "spatial": {
-            "bbox": [[-180, 0, 180, 360]]
+            "bbox": [[-180, -90, 180, 90]]
         }, 
         "temporal": {
-            "interval": [["1979-01-01T00:00:00Z", "2023-12-31T23:59:00Z"]]
+            "interval": [["1950-01-01T00:00:00Z", "2050-01-01T00:00:00Z"]]
         }
     }, 
-    "license": "licence-to-use-copernicus-products", 
-    "keywords": ["ERA5", "atmosphere", "reanalysis"], 
-    "doi": "10.24381/cds.adbb2d47",
+    "license": "other", 
+    "keywords": ["FESOM2", "ocean", "analysis"], 
+    "doi": "doi.org/10.1029/2020MS002438", 
     "providers": [{
-        "name": "ECMWF", 
+        "name": "AWI", 
         "description": "The data host of the dataset", 
         "roles": ["host"], 
         // "url": "????"}], 
@@ -48,5 +48,4 @@
             "roles": ["OVERVIEW"]
         }
     }
-
 }
