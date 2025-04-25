@@ -1,0 +1,55 @@
+{
+"type": "Catalog", 
+"id": "EERIE-static", 
+"stac_version": "1.1.0", 
+"description": "ERA5 is the fifth generation ECMWF reanalysis for the global climate and weather for the past 8 decades.\nData is available from 1940 onwards.\nERA5 replaces the ERA-Interim reanalysis.", 
+"title": "ERA5 hourly data on single levels from 1940 to present",
+"inspire_theme": "Atmospheric conditions",
+"data_type": "grid",
+"unit_measure": "dd",
+"representative_fraction": 0.25,
+"topic": "climatologyMeteorologyAtmosphere",
+"bboxN": 89,
+"bboxW": 0,
+"bboxS": -89,
+"bboxE": 360,
+"begin_date": "1959-01-01",
+"end_date": "2023-05-09",
+"file_format": "grib",
+"format_version": null,
+"lineage": "EC Copernicus program",
+"resource_type": "dataset",
+"doi": "10.24381/cds.adbb2d47",
+"licences": [
+  "licence-to-use-copernicus-products"
+],
+"links": [{
+    "rel": "root", 
+    "href": "https://raw.githubusercontent.com/eerie-project/intake_catalogues/refs/heads/main/dkrz/disk/stac-templates/catalog-experiments.json", 
+    "type": "application/json", "title": "WeatherGenerator static catalog"
+    }, 
+    {"rel": "self", 
+    "href": "https://raw.githubusercontent.com/eerie-project/intake_catalogues/refs/heads/main/dkrz/disk/stac-templates/catalog-experiments.json", 
+    "type": "application/json"
+    }, 
+    {"rel": "child",
+    "href": "era5.json", 
+    "type": "application/json",
+    "title": "ERA5 hourly data on single levels from 1959 to present"
+    }, 
+    {"rel": "child", 
+    "href": "fesom.json",
+    "type": "application/json",
+    "title": "FESOM data - Ocean model"
+    }
+    // {"rel": "child", 
+    // "href": "https://swift.dkrz.de/v1/dkrz_7fa6baba-db43-4d12-a295-8e3ebb1a01ed/apps/eerie-intake-database.htm", 
+    // "type": "text/html",
+    // "title": "Interactive table of the Intake database"
+    // }, 
+    // {"rel": "parent", 
+    // "href": "https://swift.dkrz.de/v1/dkrz_7fa6baba-db43-4d12-a295-8e3ebb1a01ed/catalogs/stac-catalog-eeriecloud.json", 
+    // "type": "application/json"
+    // }
+  ]
+}
