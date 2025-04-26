@@ -1,4 +1,3 @@
-
 import numpy as np
 import pandas as pd
 import torch
@@ -10,11 +9,9 @@ from weathergen.datasets.utils import (
 )
 
 
-def arc_alpha(
-    sin_alpha: np.array | torch.tensor, cos_alpha: np.array | torch.tensor
-) -> np.array | torch.tensor:
-    """Maps a point on the unit circle, defined by its (cosine, sine) coordinates,
-    to its spherical coordinate in [0,2pi)
+def arc_alpha(sin_alpha, cos_alpha):
+    """Maps a point on the unit circle (np.array or torch.tensor), defined by its (cosine, sine)
+    coordinates to its spherical coordinate in [0,2pi)
     """
     t = torch.arccos(cos_alpha)
     mask = sin_alpha < 0.0

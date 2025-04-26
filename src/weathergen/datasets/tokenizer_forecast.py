@@ -128,15 +128,15 @@ class TokenizerForecast:
 
     def batchify_source(
         self,
-        stream_info : dict,
-        masking_rate : float,
-        masking_rate_sampling : bool,
-        coords : np.array,
-        geoinfos : np.array,
-        source : np.array,
-        times : np.array,
-        time_win : tuple,
-        normalizer, # dataset
+        stream_info: dict,
+        masking_rate: float,
+        masking_rate_sampling: bool,
+        coords: np.array,
+        geoinfos: np.array,
+        source: np.array,
+        times: np.array,
+        time_win: tuple,
+        normalizer,  # dataset
     ):
         init_loggers()
         token_size = stream_info["token_size"]
@@ -198,14 +198,14 @@ class TokenizerForecast:
 
     def batchify_target(
         self,
-        stream_info : dict,
-        sampling_rate_target : float,
-        coords : np.array,
-        geoinfos : np.array,
-        source : np.array,
-        times : np.array,
-        time_win : tuple,
-        normalizer, # dataset
+        stream_info: dict,
+        sampling_rate_target: float,
+        coords: np.array,
+        geoinfos: np.array,
+        source: np.array,
+        times: np.array,
+        time_win: tuple,
+        normalizer,  # dataset
     ):
         target_tokens, target_coords = torch.tensor([]), torch.tensor([])
         target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
