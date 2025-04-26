@@ -32,11 +32,11 @@ from weathergen.utils.logger import init_loggers
 
 
 class TokenizerMasking:
-    def __init__(self, hl):
+    def __init__(self, healpix_level: int):
         ref = torch.tensor([1.0, 0.0, 0.0])
 
-        self.hl_source = hl
-        self.hl_target = hl
+        self.hl_source = healpix_level
+        self.hl_target = healpix_level
 
         self.num_healpix_cells_source = 12 * 4**self.hl_source
         self.num_healpix_cells_target = 12 * 4**self.hl_target
@@ -128,34 +128,29 @@ class TokenizerMasking:
 
     def batchify_source(
         self,
-        stream_info,
-        masking_rate,
-        masking_rate_sampling,
-        rng,
-        coords,
-        geoinfos,
-        source,
-        times,
-        time_win,
-        normalizer,
+        stream_info : dict,
+        masking_rate : float,
+        masking_rate_sampling : bool,
+        coords : np.array,
+        geoinfos : np.array,
+        source : np.array,
+        times : np.array,
+        time_win : tuple,
+        normalizer, # dataset
     ):
         init_loggers()
-        si = stream_info
-        token_size = si["token_size"]
-        is_diagnostic = si["diagnostic"] if "diagnostic" in stream_info else False
-        tokenize_spacetime = (
-            si["tokenize_spacetime"] if "tokenize_spacetime" in stream_info else False
-        )
+        token_size = stream_info["token_size"]
+        is_diagnostic = stream_info.get("diagnostic", False)
+        tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
 
         if masking_rate > 0.0:
             # adjust if there's a per-stream masking rate
-            masking_rate = si["masking_rate"] if "masking_rate" in si else masking_rate
+            cur_masking_rate = stream_info.get("masking_rate", masking_rate)
             # mask either patches or entire stream
             if masking_rate_sampling:
-                masking_rate = np.clip(
-                    np.abs(self.rng.normal(loc=masking_rate, scale=1.0 / 2.5 * np.pi)), 0.0, 1.0
+                cur_masking_rate = np.clip(
+                    np.abs(self.rng.normal(loc=cur_masking_rate, scale=1.0 / 2.5 * np.pi)), 0.0, 1.0
                 )
-        self.masking_rate = masking_rate
 
         tokenize_window = partial(
             tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
@@ -175,7 +170,7 @@ class TokenizerMasking:
         self.perm_sel = []
 
         # return empty
-        if is_diagnostic or source.shape[1] == 0 or len(source) < 2 or masking_rate == 1.0:
+        if is_diagnostic or source.shape[1] == 0 or len(source) < 2 or cur_masking_rate == 1.0:
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
         # TODO: properly set stream_id; don't forget to normalize
@@ -193,7 +188,7 @@ class TokenizerMasking:
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
 
         # perform masking globally by forgetting cells temporarily
-        mask = self.rng.uniform(0, 1, source_tokens_lens.sum().item()) < masking_rate
+        mask = self.rng.uniform(0, 1, source_tokens_lens.sum().item()) < cur_masking_rate
 
         # ensure that masking is not degenerate i.e. it is not all true or false
         if not mask.any():
@@ -233,31 +228,30 @@ class TokenizerMasking:
 
     def batchify_target(
         self,
-        stream_info,
-        sampling_rate_target,
-        rng,
-        coords,
-        geoinfos,
-        source,
-        times,
-        time_win,
-        normalizer,
+        stream_info : dict,
+        sampling_rate_target : float,
+        coords : np.array,
+        geoinfos : np.array,
+        source : np.array,
+        times : np.array,
+        time_win : tuple,
+        normalizer, # dataset
     ):
-        si = stream_info
-        token_size = si["token_size"]
-        tokenize_spacetime = (
-            si["tokenize_spacetime"] if "tokenize_spacetime" in stream_info else False
-        )
+        token_size = stream_info["token_size"]
+        tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
 
         target_tokens, target_coords = torch.tensor([]), torch.tensor([])
         target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
 
+        # target is empty
         if len(self.perm_sel) == 0:
             return (target_tokens, target_coords, torch.tensor([]), torch.tensor([]))
 
+        # identity function
         def id(arg):
             return arg
 
+        # set tokenization function, no normalization of coords
         tokenize_window = partial(
             tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
             time_win=time_win,
@@ -271,6 +265,7 @@ class TokenizerMasking:
             pad_tokens=False,
         )
 
+        # tokenize
         # TODO: properly set stream_id; don't forget to normalize
         target_tokens_cells = tokenize_window(
             0,

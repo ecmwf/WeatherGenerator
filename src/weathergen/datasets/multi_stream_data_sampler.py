@@ -83,7 +83,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         end_date,
                         cf.len_hrs,
                         cf.step_hrs,
-                        cf.data_path_anemoi + "/" + fname,
+                        cf.data_path_anemoi + "/" + fname if fname[0] != "/" else fname,
                         stream_info,
                     )
 
@@ -140,7 +140,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.input_window_steps = cf.input_window_steps
         self.embed_local_coords = cf.embed_local_coords
         self.embed_centroids_local_coords = cf.embed_centroids_local_coords
-        self.target_coords_local = cf.target_coords_local
         self.sampling_rate_target = cf.sampling_rate_target
 
         self.batch_size = batch_size
@@ -157,7 +156,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.tokenizer = TokenizerMasking(cf.healpix_level)
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
         else:
-            assert False, "Unsupported training mode."
+            assert False, f"Unsupported training mode: {cf.training_mode}"
         self.masking_rate = cf.masking_rate
         self.masking_rate_sampling = cf.masking_rate_sampling
 
@@ -312,7 +311,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 stream_info,
                                 self.masking_rate,
                                 self.masking_rate_sampling,
-                                self.rng,
                                 torch.from_numpy(coords),
                                 torch.from_numpy(geoinfos),
                                 torch.from_numpy(source),
@@ -344,7 +342,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
                                     stream_info,
                                     self.sampling_rate_target,
-                                    self.rng,
                                     torch.from_numpy(coords),
                                     torch.from_numpy(geoinfos),
                                     torch.from_numpy(target),
@@ -373,7 +370,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # compute offsets and auxiliary data needed for prediction computation
             # (info is not per stream so separate data structure)
-            assert self.target_coords_local
             target_coords_idx = compute_idxs_predict(self.forecast_offset + forecast_dt, batch)
 
             assert len(batch) == self.batch_size

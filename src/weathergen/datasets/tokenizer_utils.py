@@ -1,3 +1,4 @@
+
 import numpy as np
 import pandas as pd
 import torch
@@ -9,8 +10,12 @@ from weathergen.datasets.utils import (
 )
 
 
-def arc_alpha(sin_alpha, cos_alpha):
-    """Invert cosine/sine for alpha in [0,2pi] using both functions"""
+def arc_alpha(
+    sin_alpha: np.array | torch.tensor, cos_alpha: np.array | torch.tensor
+) -> np.array | torch.tensor:
+    """Maps a point on the unit circle, defined by its (cosine, sine) coordinates,
+    to its spherical coordinate in [0,2pi)
+    """
     t = torch.arccos(cos_alpha)
     mask = sin_alpha < 0.0
     t[mask] = (2.0 * np.pi) - t[mask]
@@ -18,6 +23,11 @@ def arc_alpha(sin_alpha, cos_alpha):
 
 
 def encode_times_source(times, time_win) -> torch.tensor:
+    """Encode times in the format used for source
+
+    Return:
+        len(times) x 5
+    """
     # assemble tensor as fed to the network, combining geoinfo and data
     fp32 = torch.float32
     dt = pd.to_datetime(times)
@@ -45,6 +55,11 @@ def encode_times_source(times, time_win) -> torch.tensor:
 
 
 def encode_times_target(times, time_win) -> torch.tensor:
+    """Encode times in the format used for target (relative time in window)
+
+    Return:
+        len(times) x 5
+    """
     dt = pd.to_datetime(times)
     dt_win = pd.to_datetime(time_win)
     # for target only provide local time
@@ -71,7 +86,14 @@ def encode_times_target(times, time_win) -> torch.tensor:
 
 
 def hpy_cell_splits(coords: torch.tensor, hl: int):
-    """Compute healpix cell id for each coordinate on given level hl"""
+    """Compute healpix cell id for each coordinate on given level hl
+
+    Returns
+      hpy_idxs_ord_split : list of per cell indices into thetas,phis,posr3
+      thetas : thetas in rad
+      phis : phis in rad
+      posr3 : (thetas,phis) as position in R3
+    """
     thetas = ((90.0 - coords[:, 0]) / 180.0) * np.pi
     phis = ((coords[:, 1] + 180.0) / 360.0) * 2.0 * np.pi
     # healpix cells for all points
