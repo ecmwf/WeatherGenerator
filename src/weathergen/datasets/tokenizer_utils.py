@@ -74,14 +74,20 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
     """Compute healpix cell id for each coordinate on given level hl"""
     thetas = ((90.0 - coords[:, 0]) / 180.0) * np.pi
     phis = ((coords[:, 1] + 180.0) / 360.0) * 2.0 * np.pi
+    # healpix cells for all points
     hpy_idxs = ang2pix(2**hl, thetas, phis, nest=True)
     posr3 = s2tor3(thetas, phis)
 
+    # extract information to split according to cells by first sorting and then finding split idxs
     hpy_idxs_ord = np.argsort(hpy_idxs, stable=True)
+    splits = np.flatnonzero(np.diff(hpy_idxs[hpy_idxs_ord]))
 
     # extract per cell data
-    splits = np.flatnonzero(np.diff(hpy_idxs[hpy_idxs_ord]))
-    hpy_idxs_ord_split = np.split(hpy_idxs_ord, splits + 1)
+    hpy_idxs_ord_temp = np.split(hpy_idxs_ord, splits + 1)
+    hpy_idxs_ord_split = [np.array([], dtype=np.int64) for _ in range(12 * 4**hl)]
+    # TODO: split smarter (with a augmented splits list?) so that this loop is not needed
+    for b, x in zip(np.unique(np.unique(hpy_idxs[hpy_idxs_ord])), hpy_idxs_ord_temp, strict=True):
+        hpy_idxs_ord_split[b] = x
 
     return (hpy_idxs_ord_split, thetas, phis, posr3)
 
@@ -121,9 +127,10 @@ def hpy_splits(coords: torch.tensor, hl: int, token_size: int, pad_tokens: bool)
         )
         for idxs, ts, r in zip(hpy_idxs_ord_split, thetas_sorted, rem, strict=True)
     ]
+
     # extract length and flatten nested list
-    idxs_ord_lens = [len(a) for aa in idxs_ord for a in aa]
-    idxs_ord = torch.cat([idxs for iidxs in idxs_ord for idxs in iidxs])
+    idxs_ord_lens = [[len(a) for a in aa] for aa in idxs_ord]
+    idxs_ord = [torch.cat([idxs for idxs in iidxs]) for iidxs in idxs_ord]
 
     return idxs_ord, idxs_ord_lens, posr3
 
@@ -152,42 +159,42 @@ def tokenize_window_space(
 
     idxs_ord, idxs_ord_lens, posr3 = hpy_splits(coords, hl, token_size, pad_tokens)
 
+    # pad with zero at the beggining for token size padding
     times_enc = enc_time(times, time_win)
     times_enc_padded = torch.cat([torch.zeros_like(times_enc[0]).unsqueeze(0), times_enc])
     geoinfos_padded = torch.cat([torch.zeros_like(geoinfos[0]).unsqueeze(0), n_geoinfos(geoinfos)])
     source_padded = torch.cat([torch.zeros_like(source[0]).unsqueeze(0), n_data(source)])
 
-    # pad with zero at the beggining for token size padding
-    posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])
-    # reorder based on cells and split
-    posr3 = torch.split(posr3[idxs_ord], idxs_ord_lens)
     # convert to local coordinates
+    posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])
     # TODO: how to vectorize it so that there's no list comprhension (and the Rs are not duplicated)
     # TODO: avoid that padded lists are rotated, which means potentially a lot of zeros
-    coords_local = torch.cat(
-        [
-            n_coords(r3tos2(torch.matmul(R, p.transpose(1, 0)).transpose(1, 0)).to(torch.float32))
-            for R, p in zip(hpy_verts_Rs, posr3, strict=True)
-        ]
-    )
+    fp32 = torch.float32
+    coords_local = [
+        n_coords(r3tos2(torch.matmul(R, posr3[idxs].transpose(1, 0)).transpose(1, 0)).to(fp32))
+        for R, idxs in zip(hpy_verts_Rs, idxs_ord, strict=True)
+    ]
 
     # reorder based on cells (except for coords_local) and then cat along
     # (time,coords,geoinfos,source) dimension and then split based on cells
-    tokens_cells = torch.split(
-        torch.cat(
-            (
-                torch.full([len(idxs_ord), 1], stream_id, dtype=torch.float32),
-                times_enc_padded[idxs_ord],
-                coords_local,
-                geoinfos_padded[idxs_ord],
-                source_padded[idxs_ord],
+    tokens_cells = [
+        torch.split(
+            torch.cat(
+                (
+                    torch.full([len(idxs), 1], stream_id, dtype=torch.float32),
+                    times_enc_padded[idxs],
+                    coords_local[i],
+                    geoinfos_padded[idxs],
+                    source_padded[idxs],
+                ),
+                1,
             ),
-            1,
-        ),
-        idxs_ord_lens,
-    )
-
-    tokens_cells = [[t] for t in tokens_cells]
+            idxs_lens,
+        )
+        if idxs_lens[0] > 0
+        else torch.tensor([])
+        for i, (idxs, idxs_lens) in enumerate(zip(idxs_ord, idxs_ord_lens, strict=True))
+    ]
 
     return tokens_cells
 
