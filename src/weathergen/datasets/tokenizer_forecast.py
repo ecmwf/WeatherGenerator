@@ -32,11 +32,11 @@ from weathergen.utils.logger import init_loggers
 
 
 class TokenizerForecast:
-    def __init__(self, hl):
+    def __init__(self, healpix_level: int):
         ref = torch.tensor([1.0, 0.0, 0.0])
 
-        self.hl_source = hl
-        self.hl_target = hl
+        self.hl_source = healpix_level
+        self.hl_target = healpix_level
 
         self.num_healpix_cells_source = 12 * 4**self.hl_source
         self.num_healpix_cells_target = 12 * 4**self.hl_target
@@ -128,24 +128,20 @@ class TokenizerForecast:
 
     def batchify_source(
         self,
-        stream_info,
-        masking_rate,
-        masking_rate_sampling,
-        rng,
-        coords,
-        geoinfos,
-        source,
-        times,
-        time_win,
-        normalizer,
+        stream_info : dict,
+        masking_rate : float,
+        masking_rate_sampling : bool,
+        coords : np.array,
+        geoinfos : np.array,
+        source : np.array,
+        times : np.array,
+        time_win : tuple,
+        normalizer, # dataset
     ):
         init_loggers()
-        si = stream_info
-        token_size = si["token_size"]
-        is_diagnostic = si["diagnostic"] if "diagnostic" in stream_info else False
-        tokenize_spacetime = (
-            si["tokenize_spacetime"] if "tokenize_spacetime" in stream_info else False
-        )
+        token_size = stream_info["token_size"]
+        is_diagnostic = stream_info.get("diagnostic", False)
+        tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
 
         tokenize_window = partial(
             tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
@@ -202,19 +198,19 @@ class TokenizerForecast:
 
     def batchify_target(
         self,
-        stream_info,
-        sampling_rate_target,
-        rng,
-        coords,
-        geoinfos,
-        source,
-        times,
-        time_win,
-        normalizer,
+        stream_info : dict,
+        sampling_rate_target : float,
+        coords : np.array,
+        geoinfos : np.array,
+        source : np.array,
+        times : np.array,
+        time_win : tuple,
+        normalizer, # dataset
     ):
         target_tokens, target_coords = torch.tensor([]), torch.tensor([])
         target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
 
+        # TODO: currently treated as empty to avoid special case handling
         if len(source) < 2:
             return (target_tokens, target_coords, torch.tensor([]), torch.tensor([]))
 
@@ -248,9 +244,6 @@ class TokenizerForecast:
 
         target_tokens_lens = torch.tensor([len(s) for s in target_tokens], dtype=torch.int32)
 
-        # # select hpy_verts_local_target etc for the non-empty cells
-        # hpy_idxs_filter = [len(idxs)>0 for idxs in hpy_idxs_ord_split]
-
         # compute encoding of target coordinates used in prediction network
         if target_tokens_lens.sum() > 0:
             target_coords = get_target_coords_local_ffast(
@@ -261,9 +254,6 @@ class TokenizerForecast:
                 self.hpy_verts_Rs_target,
                 self.hpy_verts_local_target,
                 self.hpy_nctrs_target,
-                # [Rs[hpy_idxs_filter] for Rs in self.hpy_verts_Rs_target],
-                # self.hpy_verts_local_target[hpy_idxs_filter],
-                # [nctrs[hpy_idxs_filter] for nctrs in self.hpy_nctrs_target],
             )
             target_coords.requires_grad = False
             target_coords = list(target_coords.split(target_tokens_lens.tolist()))
