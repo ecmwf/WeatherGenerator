@@ -128,7 +128,7 @@ class StreamData:
         self.target_coords[fstep] += [torch.tensor([])]
         self.target_coords_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
         self.target_coords_raw[fstep] += [torch.tensor([])]
-        self.target_times_raw_raw[fstep] += [np.array([], dtype="datetime64[ns]")]
+        self.target_times_raw[fstep] += [np.array([], dtype="datetime64[ns]")]
 
     def add_source(
         self, ss_raw: torch.tensor, ss_lens: torch.tensor, ss_cells: list, ss_centroids: list
