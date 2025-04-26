@@ -128,21 +128,22 @@ class TokenizerMasking:
 
     def batchify_source(
         self,
-        stream_info : dict,
-        masking_rate : float,
-        masking_rate_sampling : bool,
-        coords : np.array,
-        geoinfos : np.array,
-        source : np.array,
-        times : np.array,
-        time_win : tuple,
-        normalizer, # dataset
+        stream_info: dict,
+        masking_rate: float,
+        masking_rate_sampling: bool,
+        coords: np.array,
+        geoinfos: np.array,
+        source: np.array,
+        times: np.array,
+        time_win: tuple,
+        normalizer,  # dataset
     ):
         init_loggers()
         token_size = stream_info["token_size"]
         is_diagnostic = stream_info.get("diagnostic", False)
         tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
 
+        cur_masking_rate = 0.0
         if masking_rate > 0.0:
             # adjust if there's a per-stream masking rate
             cur_masking_rate = stream_info.get("masking_rate", masking_rate)
@@ -228,14 +229,14 @@ class TokenizerMasking:
 
     def batchify_target(
         self,
-        stream_info : dict,
-        sampling_rate_target : float,
-        coords : np.array,
-        geoinfos : np.array,
-        source : np.array,
-        times : np.array,
-        time_win : tuple,
-        normalizer, # dataset
+        stream_info: dict,
+        sampling_rate_target: float,
+        coords: np.array,
+        geoinfos: np.array,
+        source: np.array,
+        times: np.array,
+        time_win: tuple,
+        normalizer,  # dataset
     ):
         token_size = stream_info["token_size"]
         tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
