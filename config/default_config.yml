@@ -7,7 +7,6 @@ embed_size_centroids: 0
 embed_unembed_mode: "block"
 
 target_cell_local_prediction: True
-target_coords_local: True   # TOOD: remove
 
 ae_local_dim_embed: 1024
 ae_local_num_blocks: 2
@@ -110,7 +109,7 @@ input_window_steps: 1
 
 val_initial: False
 
-loader_num_workers: 12
+loader_num_workers: 8
 log_validation: 0
 
 istep: 0
