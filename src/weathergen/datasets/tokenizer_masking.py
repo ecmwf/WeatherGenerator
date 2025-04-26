@@ -284,6 +284,8 @@ class TokenizerMasking:
         # TODO: implement sampling rate target
         target_tokens = [
             torch.cat([c if p else torch.tensor([]) for c, p in zip(cc, pp, strict=True)])
+            if len(cc) > 0
+            else cc
             for cc, pp in zip(target_tokens_cells, self.perm_sel, strict=True)
         ]
         target_tokens_lens = [len(t) for t in target_tokens]
