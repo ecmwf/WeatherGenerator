@@ -169,6 +169,7 @@ def tokenize_window_space(
     n_data,
     enc_time,
     pad_tokens=True,
+    local_coords=True,
 ):
     """Process one window into tokens"""
 
@@ -185,14 +186,18 @@ def tokenize_window_space(
     source_padded = torch.cat([torch.zeros_like(source[0]).unsqueeze(0), n_data(source)])
 
     # convert to local coordinates
-    posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])
     # TODO: how to vectorize it so that there's no list comprhension (and the Rs are not duplicated)
     # TODO: avoid that padded lists are rotated, which means potentially a lot of zeros
-    fp32 = torch.float32
-    coords_local = [
-        n_coords(r3tos2(torch.matmul(R, posr3[idxs].transpose(1, 0)).transpose(1, 0)).to(fp32))
-        for R, idxs in zip(hpy_verts_Rs, idxs_ord, strict=True)
-    ]
+    if local_coords:
+        fp32 = torch.float32
+        posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])
+        coords_local = [
+            n_coords(r3tos2(torch.matmul(R, posr3[idxs].transpose(1, 0)).transpose(1, 0)).to(fp32))
+            for R, idxs in zip(hpy_verts_Rs, idxs_ord, strict=True)
+        ]
+    else:
+        coords_local = torch.cat([torch.zeros_like(coords[0]).unsqueeze(0), coords])
+        coords_local = [coords_local[idxs] for idxs in idxs_ord]
 
     # reorder based on cells (except for coords_local) and then cat along
     # (time,coords,geoinfos,source) dimension and then split based on cells
@@ -235,6 +240,7 @@ def tokenize_window_spacetime(
     n_data,
     enc_time,
     pad_tokens=True,
+    local_coords=True,
 ):
     """Tokenize respecting an intrinsic time step in the data, i.e. each time step is tokenized
     separately
@@ -261,6 +267,7 @@ def tokenize_window_spacetime(
             n_data,
             enc_time,
             pad_tokens,
+            local_coords,
         )
 
         tokens_cells = [t + tc for t, tc in zip(tokens_cells, tokens_cells_cur, strict=True)]

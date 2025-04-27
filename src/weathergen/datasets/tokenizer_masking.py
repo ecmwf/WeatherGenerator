@@ -264,6 +264,7 @@ class TokenizerMasking:
             n_data=normalizer.normalize_target_channels,
             enc_time=encode_times_target,
             pad_tokens=False,
+            local_coords=False,
         )
 
         # tokenize
@@ -303,6 +304,7 @@ class TokenizerMasking:
         offset += geoinfos.shape[-1]
         target_tokens = torch.split(tt_lin[..., offset:], tt_lens)
 
+        offset = 6
         target_coords_raw = torch.split(tt_lin[:, offset : offset + coords.shape[-1]], tt_lens)
         # recover absolute time from relatives in encoded ones
         # TODO: avoid recover; see TODO above
