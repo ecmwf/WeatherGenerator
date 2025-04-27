@@ -122,9 +122,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # TODO: fix
         # determine start and end-time for all datasets, determine then the
         # by construction, this is identical for all datasets
-        self.len_native = np.array(
-            [len(ds) for dss in self.streams_datasets for ds in dss if len(ds) > 0]
-        ).min()
+        temp = np.array([len(ds) for dss in self.streams_datasets for ds in dss if len(ds) > 0])
+        assert len(temp)>0, f"No dataset in time window for dataloader: {start_date}-{end_date}."
+        self.len_native = temp.min()
 
         self.len = min(self.len, self.len if not samples_per_epoch else samples_per_epoch)
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
@@ -155,6 +155,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         elif cf.training_mode == "masking":
             self.tokenizer = TokenizerMasking(cf.healpix_level)
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
+            msg = "masked token modeling does not support self.input_window_steps > 1; "
+            msg += "increase window length"
+            assert self.input_window_steps == 1, msg
         else:
             assert False, f"Unsupported training mode: {cf.training_mode}"
         self.masking_rate = cf.masking_rate
