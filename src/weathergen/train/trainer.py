@@ -530,6 +530,10 @@ class Trainer(Trainer_Base):
             self.log_terminal(bidx, epoch)
             self.log(bidx)
 
+            # model checkpoint
+            if bidx % self.checkpoint_freq == 0:
+                self.save_model(-1)
+
             self.cf.istep += cf.batch_size
 
         self.dataset.advance()
@@ -675,7 +679,7 @@ class Trainer(Trainer_Base):
                 [
                     self.cf.run_id,
                     "_",
-                    "latest" if epoch == max_epoch else f"epoch{epoch:05d}",
+                    "latest" if epoch == -1 else f"epoch{epoch:05d}",
                     ("_" + name) if name is not None else "",
                 ]
             )
