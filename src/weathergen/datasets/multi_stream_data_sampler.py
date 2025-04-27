@@ -123,7 +123,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # determine start and end-time for all datasets, determine then the
         # by construction, this is identical for all datasets
         temp = np.array([len(ds) for dss in self.streams_datasets for ds in dss if len(ds) > 0])
-        assert len(temp)>0, f"No dataset in time window for dataloader: {start_date}-{end_date}."
+        assert len(temp) > 0, f"No dataset in time window for dataloader: {start_date}-{end_date}."
         self.len_native = temp.min()
 
         self.len = min(self.len, self.len if not samples_per_epoch else samples_per_epoch)
