@@ -565,6 +565,10 @@ class Model(torch.nn.Module):
 
     #########################################
     def forecast(self, model_params, tokens):
+
+        if len(self.fe_blocks) == 0:
+            return torch.zeros_like(tokens)
+
         for it, block in enumerate(self.fe_blocks):
             aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
             tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
