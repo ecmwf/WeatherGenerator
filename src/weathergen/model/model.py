@@ -18,6 +18,8 @@ import torch
 from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
 
+
+from weathergen.datasets.stream_data import StreamData
 from weathergen.model.engines import (
     EmbeddingEngine,
     EnsPredictionHead,
