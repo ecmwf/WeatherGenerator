@@ -327,9 +327,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # target
 
                     # collect for all forecast steps
-                    for fstep in range(
-                        self.forecast_offset, self.forecast_offset + forecast_dt + 1
-                    ):
+                    for fstep in range(self.forecast_offset, forecast_dt + 1):
                         # collect all targets
                         for _, ds in enumerate(stream_ds):
                             step_forecast_dt = (
