@@ -9,6 +9,7 @@
 
 import datetime
 import logging
+import pathlib
 
 import numpy as np
 import torch
@@ -65,50 +66,41 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         for _, stream_info in enumerate(cf.streams):
             self.streams_datasets.append([])
 
+            shared_kwargs = {
+                "start": start_date,
+                "end": end_date,
+                "len_hrs": cf.len_hrs,
+                "step_hrs": cf.step_hrs,
+                "stream_info": stream_info,
+            }
+
             for fname in stream_info["filenames"]:
                 # TODO: Should we translate the type to the class name and call based on this?
-                if stream_info["type"] == "obs":
-                    ds = ObsDataset(
-                        start_date,
-                        end_date_padded,
-                        cf.len_hrs,
-                        cf.step_hrs,
-                        cf.data_path_obs + "/" + fname,
-                        stream_info,
-                    )
+                kwargs = {}
+                match stream_info["type"]:
+                    case "obs":
+                        dataset = ObsDataset
+                        datapath = cf.data_path_obs
+                        kwargs |= {"end": end_date_padded}
+                    case "anemoi":
+                        dataset = AnemoiDataset
+                        datapath = cf.data_path_anemoi
+                    case "fesom":
+                        dataset = FesomDataset
+                        datapath = cf.data_path_fesom
+                    case "atmorep":
+                        dataset = AtmorepDataset
+                        datapath = cf.data_path_anemoi
+                    case _:
+                        msg = f"Unsupported stream type {stream_info[type]}"
+                        raise ValueError(msg)
 
-                elif stream_info["type"] == "anemoi":
-                    ds = AnemoiDataset(
-                        start_date,
-                        end_date,
-                        cf.len_hrs,
-                        cf.step_hrs,
-                        cf.data_path_anemoi + "/" + fname if fname[0] != "/" else fname,
-                        stream_info,
-                    )
-
-                elif stream_info["type"] == "fesom":
-                    ds = FesomDataset(
-                        start_date,
-                        end_date,
-                        cf.len_hrs,
-                        cf.step_hrs,
-                        cf.data_path_fesom + "/" + fname,
-                        stream_info,
-                    )
-
-                elif stream_info["type"] == "atmorep":
-                    ds = AtmorepDataset(
-                        start_date,
-                        end_date,
-                        cf.len_hrs,
-                        cf.step_hrs,
-                        cf.data_path_anemoi + "/" + fname,
-                        stream_info,
-                    )
-
+                datapath = pathlib.Path(datapath)
+                if datapath.is_file():
+                    kwargs["filename"] = datapath
                 else:
-                    assert False, "Unsupported stream type {}.".format(stream_info["type"])
+                    kwargs["filename"] = pathlib.Path(datapath) / fname
+                ds = dataset(**(shared_kwargs | kwargs))
 
                 fsm = self.forecast_steps[0]
                 if len(ds) > 0:
