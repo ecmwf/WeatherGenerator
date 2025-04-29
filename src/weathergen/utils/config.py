@@ -79,7 +79,6 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
 
     with fname.open() as f:
         json_str = f.read()
-        print(json_str)
 
     return OmegaConf.create(json.loads(json_str))
 
