@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import zarr
@@ -7,13 +8,13 @@ import zarr
 class AtmorepDataset:
     def __init__(
         self,
-        filename: str,
         start: datetime | int,
         end: datetime | int,
         len_hrs: int,
-        step_hrs: int | None = None,
-        normalize: bool = True,
-        select: list[str] | None = None,
+        step_hrs: int | None,
+        filename: Path,
+        normalize: bool = True, # never called
+        select: list[str] | None = None, # never called
     ):
         format_str = "%Y%m%d%H%M%S"
         if type(start) is int:

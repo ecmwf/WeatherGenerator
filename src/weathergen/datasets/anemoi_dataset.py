@@ -9,6 +9,7 @@
 
 import datetime
 import logging
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -26,7 +27,7 @@ class AnemoiDataset:
         end: int,
         len_hrs: int,
         step_hrs: int,
-        filename: str,
+        filename: Path,
         stream_info: dict,
     ) -> None:
         """
