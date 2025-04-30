@@ -237,13 +237,6 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     """
     Training function for WeatherGenerator model."""
     parser = argparse.ArgumentParser(allow_abbrev=False)
-
-    parser.add_argument(
-        "--run_id",
-        type=str,
-        default=None,
-        help="Run id",
-    )
     parser.add_argument(
         "--private_config",
         type=Path,
@@ -263,7 +256,6 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     init_loggers()
 
     cf = config.load_config(args.private_config, None, None, args.config)
-    cf.run_id = args.run_id
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
