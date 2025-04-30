@@ -10,6 +10,7 @@
 import json
 import logging
 import os
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -106,8 +107,7 @@ def _load_overwrite_conf(overwrite_path: Path | None) -> OmegaConf:
     "Return the overwrite configuration."
 
     "If path is None, return an empty dictionary."
-    if overwrite_path is None or not overwrite_path.is_file():
-        _logger.info(f"Loading no overwrite config: {overwrite_path} is no valid path.")
+    if overwrite_path is None:
         return {}
     else:
         _logger.info(f"Loading overwrite config from {overwrite_path}.")
@@ -118,14 +118,26 @@ def _load_private_conf(private_home: Path | None) -> OmegaConf:
     "Return the private configuration."
     "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
 
-    if private_home is None or not private_home.is_file():
-        if "WEATHERGEN_PRIVATE_CONF" in os.environ:
-            private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
-        else:
-            raise ValueError(
-                "No private config path is provided in the command line and WEATHERGEN_PRIVATE_CONF is not set."
-            )
+    env_script_path = _REPO_ROOT.parent / "WeatherGenerator-private" / "hpc" / "platform-env.py"
 
+    if private_home is not None and private_home.is_file():
+        _logger.info(f"Loading private config from {private_home}.")
+
+    elif "WEATHERGEN_PRIVATE_CONF" in os.environ:
+        private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
+        _logger.info(f"Loading private config fromWEATHERGEN_PRIVATE_CONF:{private_home}.")
+
+    elif env_script_path.is_file():
+        result = subprocess.run(
+            [str(env_script_path), "hpc-config"], capture_output=True, text=True
+        )
+        private_home = Path(result.stdout.strip())
+        _logger.info(f"Loading private config from platform-env.py output: {private_home}.")
+    else:
+        _logger.info(f"Could not find platform script at {env_script_path}")
+        raise FileNotFoundError(
+            "Could not find private config. Please set the environment variable WEATHERGEN_PRIVATE_CONF or provide a path."
+        )
     private_cf = OmegaConf.load(private_home)
     private_cf["model_path"] = (
         private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"

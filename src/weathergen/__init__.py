@@ -22,9 +22,16 @@ from weathergen.utils.logger import init_loggers
 
 
 def evaluate():
+    # By default, arguments from the command line are read.
+    evaluate_from_args(sys.argv[1:])
+
+
+def evaluate_from_args(argl: list[str]):
     """
     Evaluation function for WeatherGenerator model.
     Entry point for calling the evaluation code from the command line.
+
+    When running integration tests, the arguments are directly provided.
     """
     parser = argparse.ArgumentParser()
 
@@ -83,19 +90,32 @@ def evaluate():
         default=None,
         help="Path to private configuration file for paths.",
     )
+    parser.add_argument(
+        "-n",
+        "--same_run_id",
+        required=False,
+        dest="run_id_new",
+        action="store_false",
+        help="store evaluation results in the same folder as run_id",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Optional experiment specfic configuration file",
+    )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argl)
 
     # TODO: move somewhere else
     init_loggers()
 
-    cf = config.load_config(args.private_config, args.run_id, args.epoch, None)
+    cf = config.load_config(args.private_config, args.run_id, args.epoch, args.config)
 
     cf.run_history += [(cf.run_id, cf.istep)]
 
     cf.samples_per_validation = args.samples
     cf.log_validation = args.samples if args.save_samples else 0
-
     start_date, end_date = pd.to_datetime(args.start_date), pd.to_datetime(args.end_date)
 
     cf.start_date_val = start_date.strftime("%Y%m%d%H%M")
@@ -113,7 +133,7 @@ def evaluate():
     cf.loader_num_workers = min(cf.loader_num_workers, args.samples)
 
     trainer = Trainer()
-    trainer.evaluate(cf, args.run_id, args.epoch, True)
+    trainer.evaluate(cf, args.run_id, args.epoch, args.run_id_new)
 
 
 ####################################################################################################
@@ -210,6 +230,12 @@ def train() -> None:
 
     Note: All model configurations are set in the function body.
     """
+    train_with_args(sys.argv[1:], None)
+
+
+def train_with_args(argl: list[str], stream_dir: str | None):
+    """
+    Training function for WeatherGenerator model."""
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -231,18 +257,19 @@ def train() -> None:
         help="Optional experiment specfic configuration file",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argl)
 
     # TODO: move somewhere else
     init_loggers()
 
     cf = config.load_config(args.private_config, None, None, args.config)
+    cf.run_id = args.run_id
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
     cf.data_loader_rng_seed = int(time.time())
 
-    trainer = Trainer(log_freq=20, checkpoint_freq=250, print_freq=10)
+    trainer = Trainer(checkpoint_freq=250, print_freq=10)
 
     try:
         trainer.run(cf)
