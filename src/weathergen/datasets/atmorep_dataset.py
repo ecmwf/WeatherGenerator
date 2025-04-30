@@ -13,8 +13,8 @@ class AtmorepDataset:
         len_hrs: int,
         step_hrs: int | None,
         filename: Path,
-        normalize: bool = True, # never called
-        select: list[str] | None = None, # never called
+        normalize: bool = True,  # never called
+        select: list[str] | None = None,  # never called
     ):
         format_str = "%Y%m%d%H%M%S"
         if type(start) is int:
