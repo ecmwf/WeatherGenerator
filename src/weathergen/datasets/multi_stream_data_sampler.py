@@ -66,22 +66,20 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         for _, stream_info in enumerate(cf.streams):
             self.streams_datasets.append([])
 
-            shared_kwargs = {
-                "start": start_date,
-                "end": end_date,
-                "len_hrs": cf.len_hrs,
-                "step_hrs": cf.step_hrs,
-                "stream_info": stream_info,
-            }
-
             for fname in stream_info["filenames"]:
+                kwargs = {
+                    "start": start_date,
+                    "end": end_date,
+                    "len_hrs": cf.len_hrs,
+                    "step_hrs": cf.step_hrs,
+                    "stream_info": stream_info,
+                }
                 # TODO: Should we translate the type to the class name and call based on this?
-                kwargs = {}
                 match stream_info["type"]:
                     case "obs":
                         dataset = ObsDataset
                         datapath = cf.data_path_obs
-                        kwargs |= {"end": end_date_padded}
+                        kwargs["end"] = end_date_padded
                     case "anemoi":
                         dataset = AnemoiDataset
                         datapath = cf.data_path_anemoi
@@ -100,7 +98,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     kwargs["filename"] = datapath
                 else:
                     kwargs["filename"] = pathlib.Path(datapath) / fname
-                ds = dataset(**(shared_kwargs | kwargs))
+                ds = dataset(**kwargs)
 
                 fsm = self.forecast_steps[0]
                 if len(ds) > 0:
