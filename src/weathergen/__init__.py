@@ -33,7 +33,7 @@ def evaluate_from_args(argl: list[str]):
 
     When running integration tests, the arguments are directly provided.
     """
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(allow_abbrev=False)
 
     parser.add_argument(
         "--run_id",
@@ -137,7 +137,7 @@ def evaluate_from_args(argl: list[str]):
 
 ####################################################################################################
 def train_continue() -> None:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(allow_abbrev=False)
 
     parser.add_argument(
         "-id",
@@ -236,7 +236,7 @@ def train() -> None:
 def train_with_args(argl: list[str], stream_dir: str | None):
     """
     Training function for WeatherGenerator model."""
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(allow_abbrev=False)
 
     parser.add_argument(
         "--run_id",
