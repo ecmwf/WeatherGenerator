@@ -126,10 +126,12 @@ class StreamData:
         # self.target_tokens[fstep] += [[torch.zeros((0,0), dtype=torch.int32) for _ in range(self.nhc_target)]]
         self.target_tokens[fstep] += [[torch.tensor([], dtype=torch.int32)]]
         self.target_tokens_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
-        self.target_coords[fstep] += [[torch.zeros( (0,106)) for _ in range(self.nhc_target)]]
+        self.target_coords[fstep] += [[torch.zeros((0, 106)) for _ in range(self.nhc_target)]]
         self.target_coords_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
         self.target_coords_raw[fstep] += [[torch.tensor([]) for _ in range(self.nhc_target)]]
-        self.target_times_raw[fstep] += [[np.array([], dtype="datetime64[ns]") for _ in range(self.nhc_target)]]
+        self.target_times_raw[fstep] += [
+            [np.array([], dtype="datetime64[ns]") for _ in range(self.nhc_target)]
+        ]
 
     def add_source(
         self, ss_raw: torch.tensor, ss_lens: torch.tensor, ss_cells: list, ss_centroids: list
@@ -312,15 +314,25 @@ class StreamData:
                 nt = self.nhc_target
 
                 self.target_coords_lens[fstep] = torch.tensor(
-                    [[len(f) for f in ff] if len(ff)>1 else [0 for _ in range(self.nhc_target)] for ff in self.target_coords[fstep]], dtype=torch.int
+                    [
+                        [len(f) for f in ff] if len(ff) > 1 else [0 for _ in range(self.nhc_target)]
+                        for ff in self.target_coords[fstep]
+                    ],
+                    dtype=torch.int,
                 ).sum(0)
                 self.target_tokens_lens[fstep] = torch.tensor(
-                    [[len(f) for f in ff] if len(ff)>1 else [0 for _ in range(self.nhc_target)] for ff in self.target_tokens[fstep]],dtype=torch.int
+                    [
+                        [len(f) for f in ff] if len(ff) > 1 else [0 for _ in range(self.nhc_target)]
+                        for ff in self.target_tokens[fstep]
+                    ],
+                    dtype=torch.int,
                 ).sum(0)
                 self.target_coords[fstep] = self._merge_cells(self.target_coords[fstep], nt)
                 self.target_coords_raw[fstep] = self._merge_cells(self.target_coords_raw[fstep], nt)
 
-                self.target_times_raw[fstep] = self._merge_cells(self.target_times_raw[fstep], nt, np.array)
+                self.target_times_raw[fstep] = self._merge_cells(
+                    self.target_times_raw[fstep], nt, np.array
+                )
                 self.target_tokens[fstep] = self._merge_cells(self.target_tokens[fstep], nt)
                 # remove NaNs
                 # TODO: it seems better to drop data points with NaN values in the coords than
