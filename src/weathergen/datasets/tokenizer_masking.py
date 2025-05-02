@@ -231,9 +231,9 @@ class TokenizerMasking:
         self,
         stream_info: dict,
         sampling_rate_target: float,
-        coords: np.array,
-        geoinfos: np.array,
-        source: np.array,
+        coords: torch.tensor,
+        geoinfos: torch.tensor,
+        source: torch.tensor,
         times: np.array,
         time_win: tuple,
         normalizer,  # dataset
