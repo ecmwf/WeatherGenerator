@@ -207,7 +207,8 @@ class TokenizerForecast:
         time_win: tuple,
         normalizer,  # dataset
     ):
-        target_tokens, target_coords = torch.tensor([]), torch.tensor([])
+        target_tokens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
+        target_coords = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
         target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
 
         # TODO: currently treated as empty to avoid special case handling
