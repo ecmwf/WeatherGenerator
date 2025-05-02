@@ -210,11 +210,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # data
         if self.shuffle:
             # native length of datasets, independent of epoch length that has potentially been specified
-            self.perms = self.rng.permutation(
-                self.len_native - ((self.len_hrs * (fsm + 1)) // self.step_hrs)
-            )
+            forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
+            self.perms = self.rng.permutation(self.len_native - forecast_len - self.forecast_offset)
         else:
-            self.perms = np.arange(self.len_native)
+            self.perms = np.arange(self.len_native - self.forecast_offset)
 
         # forecast time steps
         len_dt_samples = len(self) // self.batch_size
@@ -324,12 +323,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                             stream_data.add_source(source_raw, ss_lens, ss_cells, ss_centroids)
 
-                    # target
+                        # target
 
-                    # collect for all forecast steps
-                    for fstep in range(self.forecast_offset, forecast_dt + 1):
-                        # collect all targets
-                        for _, ds in enumerate(stream_ds):
+                        # collect for all forecast steps
+                        for fstep in range(
+                            self.forecast_offset, self.forecast_offset + forecast_dt + 1
+                        ):
                             step_forecast_dt = (
                                 idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
                             )
