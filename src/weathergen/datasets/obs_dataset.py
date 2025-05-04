@@ -7,25 +7,30 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import code
 import datetime
 
 import numpy as np
+import torch
 import zarr
 
 
 class ObsDataset:
     def __init__(
         self,
-        filename: str,
+        # filename: str,
+        # start: int,
+        # end: int,
+        # len_hrs: int,
+        # step_hrs: int = None,
+        # normalize: bool = True,
+        # select: list[str] = None,
         start: int,
         end: int,
         len_hrs: int,
-        step_hrs: int = None,
-        normalize: bool = True,
-        select: list[str] = None,
+        step_hrs: int,
+        filename: str,
+        stream_info: dict,
     ) -> None:
-        self.normalize = normalize
         self.filename = filename
         self.z = zarr.open(filename, mode="r")
         self.data = self.z["data"]
@@ -52,8 +57,24 @@ class ObsDataset:
 
         self._load_properties()
 
-        if select:
-            self.select(select)
+        # TODO: re-implement selection of source and target channels
+
+        self.source_idx = [i for i, col in enumerate(self.selected_colnames) if "obsvalue" in col]
+        self.source_channels = [self.selected_colnames[i] for i in self.source_idx]
+
+        self.target_idx = [i for i, col in enumerate(self.selected_colnames) if "obsvalue" in col]
+        self.target_channels = [self.selected_colnames[i] for i in self.target_idx]
+
+        for i, _ in enumerate(self.colnames):
+            idx = i
+            if self.colnames[i] == "lat" and self.colnames[i + 1] == "lon":
+                break
+        self.coords_idx = [i, i + 1]
+        channels_idx = [i for i, col in enumerate(self.selected_colnames) if "obsvalue" in col]
+        self.geoinfo_idx = list(range(i + 2, channels_idx[0]))
+
+        self.mean = np.array(self.properties["means"])
+        self.stdev = np.sqrt(np.array(self.properties["vars"]))
 
     def __getitem__(self, idx: int) -> tuple:
         start_row = self.indices_start[idx]
@@ -189,33 +210,234 @@ class ObsDataset:
         # self.properties["data_idxs"] = self.data.attrs["data_idxs"]
         self.properties["obs_id"] = self.data.attrs["obs_id"]
 
+    def _get(
+        self, idx: int, channels_idx: np.array
+    ) -> tuple[np.array, np.array, np.array, np.array]:
+        """
+        Get data for window
 
-####################################################################################################
-if __name__ == "__main__":
-    # zarrpath = config.zarrpath
-    zarrpath = "/lus/h2resw01/fws4/lb/project/ai-ml/observations/zarr/v0.2"
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+        channels_idx : np.array
+            Selection of channels
 
-    # # polar orbiting satellites
-    # d1 = ObsDataset( zarrpath, '34001', 201301010000, 202112310000, 24)
-    # d2 = ObsDataset( zarrpath, '34002', 201301010000, 202112310000, 24)
-    # d3 = ObsDataset( zarrpath, '1009', 201301010000, 202112310000, 24)
-    # d4 = ObsDataset( zarrpath, '11002', 201301010000, 202112310000, 24)
-    # d5 = ObsDataset( zarrpath, '1001', 201301010000, 202112310000, 24)
-    # d6 = ObsDataset( zarrpath, '1004', 201301010000, 202112310000, 24)
-    # d7 = ObsDataset( zarrpath, '1007', 201301010000, 202112310000, 24)
+        Returns
+        -------
+        data (coords, geoinfos, data, datetimes)
+        """
 
-    # # geostationary satellites
-    # d1 = ObsDataset( zarrpath, '4023', 201301010000, 202112310000, 6,
-    #                  )
+        start_row = self.indices_start[idx]
+        end_row = self.indices_end[idx]
 
-    # conventional obs
-    d1 = ObsDataset(zarrpath + "/16002.zarr", 201301010000, 202112310000, 24)
-    d2 = ObsDataset(zarrpath + "/16045.zarr", 201301010000, 202112310000, 24)
-    d3 = ObsDataset(zarrpath + "/bufr_ship_synop_ofb_ea_0001.zarr", 201301010000, 202112310000, 24)
-    d4 = ObsDataset(zarrpath + "/bufr_land_synop_ofb_ea_0001.zarr", 201301010000, 202112310000, 24)
+        latlon = self.data.oindex[start_row:end_row, self.coords_idx]
+        geoinfos = (
+            self.data.oindex[start_row:end_row, self.geoinfo_idx]
+            if len(self.geoinfo_idx) > 0
+            else np.zeros((latlon.shape[0], 0), np.float32)
+        )
+        data = self.data.oindex[start_row:end_row, channels_idx]
+        datetimes = self.dt[start_row:end_row][:, 0]
 
-    d = d1
-    code.interact(local=locals())
+        return (latlon, geoinfos, data, datetimes)
 
-    sample = d[0]
-    print(sample.shape)
+    def get_source(self, idx: int) -> tuple[np.array, np.array, np.array, np.array]:
+        """
+        Get source data for idx
+
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+
+        Returns
+        -------
+        source data (coords, geoinfos, data, datetimes)
+        """
+        return self._get(idx, self.source_idx)
+
+    def get_target(self, idx: int) -> tuple[np.array, np.array, np.array, np.array]:
+        """
+        Get target data for idx
+
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+
+        Returns
+        -------
+        target data (coords, geoinfos, data, datetimes)
+        """
+        return self._get(idx, self.target_idx)
+
+    def get_source_num_channels(self) -> int:
+        """
+        Get number of source channels
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        number of source channels
+        """
+        return len(self.source_idx)
+
+    def get_target_num_channels(self) -> int:
+        """
+        Get number of target channels
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        number of target channels
+        """
+        return len(self.target_idx)
+
+    def get_coords_size(self) -> int:
+        """
+        Get size of coords
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        size of coords
+        """
+        return 2
+
+    def get_geoinfo_size(self) -> int:
+        """
+        Get size of geoinfos
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        size of geoinfos
+        """
+        return len(self.geoinfo_idx)
+
+    def normalize_coords(self, coords: torch.tensor) -> torch.tensor:
+        """
+        Normalize coordinates
+
+        Parameters
+        ----------
+        coords :
+            coordinates to be normalized
+
+        Returns
+        -------
+        Normalized coordinates
+        """
+        coords[..., 0] = np.sin(np.deg2rad(coords[..., 0]))
+        coords[..., 1] = np.sin(0.5 * np.deg2rad(coords[..., 1]))
+
+        return coords
+
+    def normalize_geoinfos(self, geoinfos: torch.tensor) -> torch.tensor:
+        """
+        Normalize geoinfos
+
+        Parameters
+        ----------
+        geoinfos :
+            geoinfos to be normalized
+
+        Returns
+        -------
+        Normalized geoinfos
+        """
+
+        assert geoinfos.shape[-1] == len(self.geoinfo_idx), "incorrect number of channels"
+        for i, ch in enumerate(self.geoinfo_idx):
+            geoinfos[..., i] = (geoinfos[..., i] - self.mean[ch]) / self.stdev[ch]
+
+        return geoinfos
+
+    def normalize_source_channels(self, source: torch.tensor) -> torch.tensor:
+        """
+        Normalize source channels
+
+        Parameters
+        ----------
+        data :
+            data to be normalized
+
+        Returns
+        -------
+        Normalized data
+        """
+        assert source.shape[-1] == len(self.source_idx), "incorrect number of channels"
+        for i, ch in enumerate(self.source_idx):
+            source[..., i] = (source[..., i] - self.mean[ch]) / self.stdev[ch]
+
+        return source
+
+    def normalize_target_channels(self, target: torch.tensor) -> torch.tensor:
+        """
+        Normalize target channels
+
+        Parameters
+        ----------
+        data :
+            data to be normalized
+
+        Returns
+        -------
+        Normalized data
+        """
+        assert target.shape[-1] == len(self.target_idx), "incorrect number of channels"
+        for i, ch in enumerate(self.target_idx):
+            target[..., i] = (target[..., i] - self.mean[ch]) / self.stdev[ch]
+
+        return target
+
+    def denormalize_source_channels(self, source: torch.tensor) -> torch.tensor:
+        """
+        Denormalize source channels
+
+        Parameters
+        ----------
+        data :
+            data to be denormalized
+
+        Returns
+        -------
+        Denormalized data
+        """
+        assert source.shape[-1] == len(self.source_idx), "incorrect number of channels"
+        for i, ch in enumerate(self.source_idx):
+            source[..., i] = (source[..., i] * self.stdev[ch]) + self.mean[ch]
+
+        return source
+
+    def denormalize_target_channels(self, data: torch.tensor) -> torch.tensor:
+        """
+        Denormalize target channels
+
+        Parameters
+        ----------
+        data :
+            data to be denormalized (target or pred)
+
+        Returns
+        -------
+        Denormalized data
+        """
+        assert data.shape[-1] == len(self.target_idx), "incorrect number of channels"
+        for i, ch in enumerate(self.target_idx):
+            data[..., i] = (data[..., i] * self.stdev[ch]) + self.mean[ch]
+
+        return data
