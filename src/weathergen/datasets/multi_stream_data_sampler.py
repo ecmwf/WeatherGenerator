@@ -356,8 +356,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     stream_data.merge_inputs()
                     streams_data += [stream_data]
 
-                # skip completely empty batch item
-                if np.array([s.empty() for s in streams_data]).all():
+                # skip completely empty batch item or when all targets are empty -> no grad
+                if (
+                    np.array([s.empty() for s in streams_data]).all()
+                    or np.array([s.target_empty() for s in streams_data]).all()
+                ):
                     continue
 
                 batch += [streams_data]
