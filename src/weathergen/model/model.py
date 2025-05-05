@@ -51,16 +51,12 @@ class ModelParams(torch.nn.Module):
                                         or absolute position of the tokens in the sequence.
 
                                         For sinusoidal positional encoding we use sine and cosine in different frequencies. In the
-                                        end we transform the embedding into a learnable parameter for the model and save it in the
-                                        ModelParams object.
+                                        end we transform the embedding into a learnable parameter for the model and save it in self.
 
-        HEALPix neighbourhood structure:    HEALPix is a special kind of Earth System grid, which we use as positional embedding.
-
-                                            Saves all 8 neighbours for every HEALPix cell in local variable nbours and when it is an
+        HEALPix neighbourhood structure:    Saves all 8 neighbours for every HEALPix cell in local variable nbours and when it is an
                                             edge case with only 7 neighbours we add the cell itself as the 8th neighbour. After that
                                             the cell itself is added additionally to the neighbourhood structure of every cell. In
-                                            the end nbours is transformed to a learnable parameter for the model and saved in the
-                                            ModelParams object.
+                                            the end nbours is transformed to a learnable parameter for the model and saved in self.
 
         batch related parameters creation:  We calculate the token_len for every query and store it in a tensor, which is then used as
                                             a learnable parameter for the model. Then we create a tensor for the attention for every
@@ -148,8 +144,18 @@ class ModelParams(torch.nn.Module):
 class Model(torch.nn.Module):
     #########################################
     def __init__(self, cf, sources_size, targets_num_channels, targets_coords_size):
-        """Constructor"""
-
+        '''initializes PyTorch Module and prepares for the creation of model.
+        Args:
+            self : Model object
+            cf : configuration with model parameters
+            sources_size : list of number of channels for models
+            targets_num_channels : list with size of each output sample for coordinates target embedding
+            targets_coords_size : list with size of each input sample for coordinates target embedding
+        Returns:
+            None
+        Raises:
+            None
+        '''
         super(Model, self).__init__()
 
         self.healpix_level = cf.healpix_level
@@ -162,11 +168,56 @@ class Model(torch.nn.Module):
 
     #########################################
     def create(self):
+        '''create model buolding blocks and stores them in self(Model).
+
+        embedding networks: Creates multiple embedding networks of different kinds based upon the configuration.
+
+        local ae (assimilation engine): add neural network blocks to PyTorch ModuleList according to specified
+                                        number of blocks for the local assimilation in the configuration
+
+        ae (assimilation engine) adapter:   create adapters to transform local ae information to a format that
+                                            can be used with the global ae
+
+        learnable parameters:   creates a learnable Tensor with size ("number of healpix cells" * "number of
+                                local queris" * "global embedding dimensions"). Overwrites last 10 values for
+                                "global embedding dimensions" with metadata if ae_local_queries_per_cell is
+                                True
+
+        global ae (assimilation engine):    Uses transformer networks with self attention networks alternating
+                                            between local and global attention based upon global attention
+                                            density rate
+
+        forecasting engine: Uses transformer networks with self attention networks alternating between local and
+                            global attention based upon forecast attention density rate
+
+        get parameters: gets parameters from self and config for further model components creation.
+
+        embedding networks for coordinates: Creates embedding networks specifically for target coordinates and
+                                            uses either a linear layer or a multi-layer perceptron (MLP), as
+                                            defined in the config.
+
+        prediction adapter: This component transforms the output from the global ae to something compatible with
+                            the prediction engine. Uses an MLP if `cf.pred_adapter_kv` is True, otherwise it has
+                            no impact.
+
+        prediction engine:  Core prediction network with attention mechanism and MLPs per layer.
+
+        prediction head:    Final layer to generate probabilistic distributions for the target variables instead
+                            of just scalar values
+
+        Args:
+            self : Model object
+        Returns:
+            Model (self)
+        Raises:
+            AssertionError: If a wrong embedding network type was given
+        '''
         cf = self.cf
 
         # separate embedding networks for differnt observation types
         self.embeds = EmbeddingEngine(cf, self.sources_size).create()
 
+        ##############
         # local assimilation engine
         self.ae_local_blocks = LocalAssimilationEngine(cf).create()
 
@@ -174,6 +225,7 @@ class Model(torch.nn.Module):
         # local -> global assimilation engine adapter
         self.ae_adapter = Local2GlobalAssimilationEngine(cf).create()
 
+        ##############
         # learnable queries
         if cf.ae_local_queries_per_cell:
             s = (self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed)
@@ -210,7 +262,6 @@ class Model(torch.nn.Module):
         self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells).create()
 
         ###############
-
         # embed coordinates yielding one query token for each target token
         dropout_rate = 0.1
         self.embed_target_coords = torch.nn.ModuleList()
@@ -314,7 +365,14 @@ class Model(torch.nn.Module):
 
     #########################################
     def freeze_weights_forecast(self):
-        """Freeze model weights"""
+        """Freeze model weights
+        Args:
+            self : Model object
+        Returns:
+            Model (self)
+        Raises:
+            None
+        """
 
         # freeze everything
         for p in self.parameters():
@@ -329,6 +387,15 @@ class Model(torch.nn.Module):
 
     #########################################
     def print_num_parameters(self):
+        """print number of parameters for entire model and model building blocks
+        Args:
+            self : Model object
+        Returns:
+            None
+        Raises:
+            None
+        """
+
         cf = self.cf
         num_params_embed = [get_num_parameters(embed) for embed in self.embeds]
         num_params_total = get_num_parameters(self)
@@ -375,6 +442,19 @@ class Model(torch.nn.Module):
 
     #########################################
     def load(self, run_id, epoch=-1):
+        """checks for missing and unused keys when loading model parameters.
+
+        Gets model state by selecting the run and its unique epoch.
+        Args:
+            self : Model object
+            run_id : specifies the desired training run
+            epoch : specifies the desired model state by epoch, default -1 selects latest epoch
+        Returns:
+            None
+        Raises:
+            None
+        """
+
         path_run = Path(self.cf.model_path) / run_id
         epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"
         filename = f"{run_id}_{epoch_id}.chkpt"
@@ -396,6 +476,25 @@ class Model(torch.nn.Module):
 
     #########################################
     def forward_jac(self, *args):
+        """performs a simplified forward pass of the model for Jacobian computation.
+        Args:
+            self : Model object
+            *args : tuple with the following arguments
+                    model_params : model parameters
+                    batch : streams_data :  used to initialize first tokens for pre-processing and deliver
+                                            positional information for prediction
+                            source_cell_lens :  used to identify range of tokens to use from generated tokens
+                                                in cell embedding
+                            target_coords_idxs : indices of target coordinates.
+            forecast_steps : Number of forecast steps to iterate (irrelevant for the output)
+        Returns:
+            tuple of first prediction result without any forecasting
+        Raises:
+            AssertionError: if batch_size != 1
+            AssertionError: if tro_type != "obs_value"
+            AssertionError: type(tte_kv) != torch.nn.Identity
+        """
+
         sources = args[:-1]
         sources_lens = args[-1]
         # no-op when satisfied but needed for Jacobian
@@ -407,6 +506,31 @@ class Model(torch.nn.Module):
 
     #########################################
     def forward(self, model_params, batch, forecast_offset, forecast_steps):
+        """Performs the forward pass of the model to generate forecasts
+
+        First it processes thorugh the embedding network, the local assimilation network and the global
+        assimilation network. The output tokens are then used in the prediction and forecast steps that are
+        repeated as often as the given number of 'forecast_steps'. We always use the tokens for predictions and
+        then forecast new tokens based upon the current ones. All prediction results are collected in a list and
+        returned at the end.
+        Args:
+            self : Model object
+            model_params : model parameters
+            batch : streams_data :  used to initialize first tokens for pre-processing and deliver positional
+                                    information for prediction
+                    source_cell_lens :  used to identify range of tokens to use from generated tokens in cell
+                                        embedding
+                    target_coords_idxs : indices of target coordinates.
+            forecast_offset : 
+            forecast_steps : Number of forecast steps to iterate
+        Returns:
+            a list containing all prediction results from the forecasting steps
+        Raises:
+            AssertionError: if batch_size != 1
+            AssertionError: if tro_type != "obs_value"
+            AssertionError: type(tte_kv) != torch.nn.Identity
+        """
+
         (streams_data, source_cell_lens, target_coords_idxs) = batch
 
         # embed
@@ -448,6 +572,18 @@ class Model(torch.nn.Module):
 
     #########################################
     def embed_cells(self, model_params, streams_data):
+        """create tokens for local assimilation
+        Args:
+            self : Model object
+            model_params : model parameters
+            streams_data : used to initialize first tokens for pre-processing
+        Returns:
+            tokens for local assimilation
+        Raises:
+            None
+        """
+
+        # code.interact( local=locals())
         source_tokens_lens = torch.stack(
             [
                 torch.stack(
@@ -486,6 +622,18 @@ class Model(torch.nn.Module):
 
     #########################################
     def assimilate_local(self, model_params, tokens, cell_lens):
+        """create tokens for global assimilation
+        Args:
+            self : Model object
+            model_params : model parameters
+            tokens : input tokens to be processed by local assimilation
+            cell_lens : used to identify range of tokens to use from generated tokens in cell embedding
+        Returns:
+            tokens for global assimilation
+        Raises:
+            None
+        """
+
         batch_size = self.cf.batch_size if self.training else self.cf.batch_size_validation
 
         s = self.q_cells.shape
@@ -560,6 +708,17 @@ class Model(torch.nn.Module):
 
     #########################################
     def assimilate_global(self, model_params, tokens):
+        """create tokens for forecasting
+        Args:
+            self : Model object
+            model_params : model parameters (not used)
+            tokens : input tokens to be pre-processed by global assimilation
+        Returns:
+            tokens for first forecasting step and prediction
+        Raises:
+            None
+        """
+
         # global assimilation engine and adapter
         for block in self.ae_global_blocks:
             tokens = checkpoint(block, tokens, use_reentrant=False)
@@ -568,6 +727,20 @@ class Model(torch.nn.Module):
 
     #########################################
     def forecast(self, model_params, tokens):
+        """iterating through the model by block
+
+        Here we iterate through the model and one step goes though one fe_block updating the tokens and then
+        using them as input in the next iteration with the current index.
+        Args:
+            self : Model object
+            model_params : model parameters (never used)
+            tokens : input tokens to be processed by the model.
+        Returns:
+            processed tokens
+        Raises:
+            ValueError: For unexpected arguments in checkpoint method
+        """
+
         for it, block in enumerate(self.fe_blocks):
             aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
             tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
@@ -576,6 +749,27 @@ class Model(torch.nn.Module):
 
     #########################################
     def predict(self, model_params, fstep, tokens, streams_data, target_coords_idxs):
+        """generates predictions for specific target coordinates based on the current forecast iteration
+
+        takes the current forecast and target coordinate information to generate prediction. It uses the
+        prediction head on the tokens and coordinate information to transform its prediction into physical
+        space.
+
+        Args:
+            self : Model object
+            model_params : model parameters
+            fstep : Number of forecast steps to iterate
+            tokens : input tokens to be processed by the model
+            streams_data : used to initialize target coordinates tokens and index information
+            target_coords_idxs : indices of target coordinates.
+        Returns:
+            prediction output tokens in physical representation
+        Raises:
+            AssertionError: if batch_size != 1
+            AssertionError: if tro_type != "obs_value"
+            AssertionError: type(tte_kv) != torch.nn.Identity
+        """
+
         # fp32, i32 = torch.float32, torch.int32
         batch_size = self.cf.batch_size if self.training else self.cf.batch_size_validation
 
