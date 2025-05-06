@@ -84,6 +84,7 @@
         "type": "application/vnd+zarr",
         "title": "hpc2020",
         "description": "TODO",
+        "HPC local path": "aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
         "roles": [
           "data"
         ]
