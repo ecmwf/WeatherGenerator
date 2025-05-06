@@ -96,13 +96,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 datapath = pathlib.Path(datapath)
                 fname = pathlib.Path(fname)
+                # dont check if file exists since zarr stores might be directories
                 if fname.exists():
                     # check if fname is a valid path to allow for simple overwriting
                     filename = fname
                 else:
                     filename = pathlib.Path(datapath) / fname
 
-                    if not filename.exists():
+                    if not filename.exists(): # see above
                         msg = f"Did not find input data for {stream_info["type"]} stream '{stream_info["name"]}': {filename}."
                         raise FileNotFoundError(msg)
 
