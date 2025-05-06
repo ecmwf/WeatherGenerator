@@ -169,7 +169,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
         except yaml.scanner.ScannerError as e:
             msg = f"Invalid yaml file while parsing stream configs: {config_file}"
             raise RuntimeError(msg) from e
-        except IndexError as e:
+        except IndexError:
             # support commenting out entire stream files to avoid loading them.
             _logger.warning(f"Parsed stream configuration file is empty: {config_file}")
             continue
