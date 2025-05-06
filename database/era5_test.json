@@ -8,19 +8,21 @@
       "created": "2025-05-06T07:49:13Z",
       "keywords": [
         "ERA5",
-        "ECMWF"
+        "ECMWF",
+        "ngc4008",
+        "PT15M_4"
       ],
       "providers": [
         {
-          "name": "ECMWF",
-          "description": "ECMWF is the data host of the dataset",
+          "name": "DKRZ",
+          "description": "The data host of eerie.cloud",
           "roles": [
             "host"
           ],
-          "url": "https://ecmwf.int"
+          "url": "https://dkrz.de"
         }
       ],
-      "start_datetime": "1920-01-01T00:15:00Z",
+      "start_datetime": "2020-01-01T00:15:00Z",
       "end_datetime": "2050-01-01T00:00:00Z",
       "datetime": null,
       "cube:dimensions": {
@@ -33,6 +35,23 @@
         }
       },
       "cube:variables": {
+        "pr": {
+          "type": "data",
+          "dimensions": [
+            "time",
+            "cell"
+          ],
+          "unit": "kg m-2 s-1",
+          "description": "precipitation flux",
+          "attrs": {
+            "cell_methods": "time: mean cell: mean",
+            "component": "atmo",
+            "grid_mapping": "crs",
+            "long_name": "precipitation flux",
+            "units": "kg m-2 s-1",
+            "vgrid": "surface"
+          }
+        },
         "qv2m": {
           "type": "data",
           "dimensions": [
@@ -49,14 +68,85 @@
             "units": "kg kg-1",
             "vgrid": "height_2m"
           }
+        },
+        "rlut": {
+          "type": "data",
+          "dimensions": [
+            "time",
+            "cell"
+          ],
+          "unit": "W m-2",
+          "description": "toa outgoing longwave radiation",
+          "attrs": {
+            "cell_methods": "time: mean cell: mean",
+            "component": "atmo",
+            "grid_mapping": "crs",
+            "long_name": "toa outgoing longwave radiation",
+            "standard_name": "toa_outgoing_longwave_flux",
+            "units": "W m-2",
+            "vgrid": "toa"
+          }
+        },
+        "rsds": {
+          "type": "data",
+          "dimensions": [
+            "time",
+            "cell"
+          ],
+          "unit": "W m-2",
+          "description": "surface downwelling shortwave radiation",
+          "attrs": {
+            "cell_methods": "time: mean cell: mean",
+            "component": "atmo",
+            "grid_mapping": "crs",
+            "long_name": "surface downwelling shortwave radiation",
+            "standard_name": "surface_downwelling_shortwave_flux_in_air",
+            "units": "W m-2",
+            "vgrid": "surface"
+          }
+        },
+        "sfcwind": {
+          "type": "data",
+          "dimensions": [
+            "time",
+            "cell"
+          ],
+          "unit": "m s-1",
+          "description": "10m windspeed",
+          "attrs": {
+            "cell_methods": "time: mean cell: mean",
+            "component": "atmo",
+            "grid_mapping": "crs",
+            "long_name": "10m windspeed",
+            "units": "m s-1",
+            "vgrid": "height_10m"
+          }
+        },
+        "tas": {
+          "type": "data",
+          "dimensions": [
+            "time",
+            "cell"
+          ],
+          "unit": "K",
+          "description": "temperature in 2m",
+          "attrs": {
+            "cell_methods": "time: mean cell: mean",
+            "component": "atmo",
+            "grid_mapping": "crs",
+            "long_name": "temperature in 2m",
+            "standard_name": "air_temperature",
+            "units": "K",
+            "vgrid": "height_2m"
+          }
         }
       },
-      "frequency": "TODO",
-      "creation_date": "TODO",
-      "authors": "TODO",
-      "contact": "TODO",
-      "license": "TODO",
-      "project": "TODO",
+      "frequency": "15m",
+      "creation_date": "2025-05-06T07:49:13Z",
+      "authors": "Wieners, Karl-Hermann (MPIMet), Aguridan, Razvan (ECMWF), Becker, Tobias (ECMWF), Beyer, Sebastian (AWI), Cheedela, Suvarchal Kumar (AWI), Dreier, Nils-Arne (DKRZ), Engels, Jan Frederik (DKRZ), Esch, Monika (MPIMet), Frauen, Claudia (DKRZ), Klocke, Daniel (MPIMet), Kölling, Tobias (MPIMet), Pedruzo-Bagazgoitia, Xabier (ECMWF), Putrasahan, Dian (MPIMet), Rackow, Thomas (ECMWF), Sidorenko, Dmitry (AWI), Schnur, Reiner (MPIMet), Stevens, Bjorn (MPIMet), Zimmermann, Janos (DKRZ)",
+      "contact": "Wieners, Karl-Hermann (MPIMet), Rackow, Thomas (ECMWF)",
+      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0) (https://creativecommons.org/licenses/by/4.0/)",
+      "project": "nextGEMS",
       "experiment_id": "nextgems_prefinal",
       "source_id": "ICON-ESM",
       "simulation_id": "ngc4008",
