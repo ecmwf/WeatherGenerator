@@ -24,8 +24,6 @@ class ObsDataset:
         step_hrs: int,
         filename: Path,
         stream_info: dict,
-        # normalize: bool = True, # never called
-        # select: list[str] = None, # never called
     ) -> None:
         self.filename = filename
         self.z = zarr.open(filename, mode="r")

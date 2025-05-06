@@ -170,8 +170,9 @@ def load_streams(streams_directory: Path) -> list[Config]:
             msg = f"Invalid yaml file while parsing stream configs: {config_file}"
             raise RuntimeError(msg) from e
         except IndexError as e:
-            msg = f"Parsed stream configuration file is empty: {config_file}"
-            raise RuntimeError(msg) from e
+            # support commenting out entire stream files to avoid loading them.
+            _logger.warning(f"Parsed stream configuration file is empty: {config_file}")
+            continue
 
         stream_config.name = stream_name
         streams.append(stream_config)

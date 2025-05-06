@@ -75,6 +75,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     "stream_info": stream_info,
                 }
                 # TODO: Should we translate the type to the class name and call based on this?
+                # TODO: Put this intialization logic into a factory method (maybe a static method on a potential future baseclass)
                 match stream_info["type"]:
                     case "obs":
                         dataset = ObsDataset
@@ -90,15 +91,25 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         dataset = AtmorepDataset
                         datapath = cf.data_path_anemoi
                     case _:
-                        msg = f"Unsupported stream type {stream_info[type]}"
+                        msg = f"Unsupported stream type {stream_info['type']}"
                         raise ValueError(msg)
 
                 datapath = pathlib.Path(datapath)
-                if datapath.is_file():
-                    kwargs["filename"] = datapath
+                fname = pathlib.Path(fname)
+                if fname.exists():
+                    # check if fname is a valid path to allow for simple overwriting
+                    filename = fname
                 else:
-                    kwargs["filename"] = pathlib.Path(datapath) / fname
-                ds = dataset(**kwargs)
+                    filename = pathlib.Path(datapath) / fname
+
+                    if not filename.exists():
+                        msg = f"Did not find input data for {stream_info["type"]} stream '{stream_info["name"]}': {filename}."
+                        raise FileNotFoundError(msg)
+
+                logger.info(
+                    f"Opening dataset with type: {type(dataset)} from stream config {stream_info['name']}."
+                )
+                ds = dataset(filename=filename, **kwargs)
 
                 fsm = self.forecast_steps[0]
                 if len(ds) > 0:
