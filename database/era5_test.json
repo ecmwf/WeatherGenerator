@@ -88,7 +88,7 @@
     ],
     "assets": {
       "hpc2020": {
-        "href": "aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
+        "href": "local://aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
         "type": "application/vnd+zarr",
         "title": "hpc2020",
         "description": "TODO",
