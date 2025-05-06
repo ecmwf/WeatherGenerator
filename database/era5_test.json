@@ -87,13 +87,13 @@
       }
     ],
     "assets": {
-      "dkrz-disk": {
-        "href": "/work/kd1453/rechunked_ngc4008/ngc4008_PT15M_4.zarr",
+      "hpc2020": {
+        "href": "aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
         "type": "application/vnd+zarr",
-        "title": "Zarr-access on dkrz",
-        "description": "Chunk-based access on raw data",
-        "Volume": "72 GB uncompressed",
-        "No of data variables": "6",
+        "title": "hpc2020",
+        "description": "TODO",
+        "Volume": "TODO",
+        "No of data variables": "TODO",
         "xarray:open_kwargs": {
           "engine": "zarr",
           "chunks": "auto",
