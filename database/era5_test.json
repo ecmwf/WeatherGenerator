@@ -112,13 +112,13 @@
       "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
     ],
     "default_var": "pr",
-    "name": "nextgems.ICON.ngc4008.PT15M_4",
+    "name": "weathergen.atmo.ERA5",
     "levels": [
       {
-        "name": "nextgems.ICON.ngc4008.PT15M_4",
+        "name": "weathergen.atmo.ERA5",
         "time": {
           "store": "https://eerie.cloud.dkrz.de/datasets",
-          "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
+          "dataset": "weathergen.atmo.ERA5/zarr"
         },
         "grid": {
           "store": "https://eerie.cloud.dkrz.de/datasets",
