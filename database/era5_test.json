@@ -57,6 +57,10 @@
       "contact": "TODO",
       "license": "TODO",
       "project": "TODO",
+      "experiment_id": "nextgems_prefinal",
+      "source_id": "ICON-ESM",
+      "simulation_id": "ngc4008",
+      "_xpublish_id": "nextgems.ICON.ngc4008.PT15M_4"
     },
     "geometry": {
       "type": "Polygon",
@@ -73,18 +77,39 @@
     "links": [
       {
         "rel": "DOC",
-        "href": "https://confluence.ecmwf.int/display/MAEL/WeatherGenerator+Dataset",
-        "title": "Master spreadsheet"
+        "href": "https://easy.gems.dkrz.de/simulations/EERIE/eerie_data-access_online.html",
+        "title": "Usage of the eerie.cloud"
+      },
+      {
+        "rel": "collection",
+        "href": "https://eerie.cloud.dkrz.de//stac-collection-all.json",
+        "type": "application/json"
       }
     ],
     "assets": {
-      "hpc2020": {
-        "href": "aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
+      "dkrz-disk": {
+        "href": "/work/kd1453/rechunked_ngc4008/ngc4008_PT15M_4.zarr",
         "type": "application/vnd+zarr",
-        "title": "hpc2020",
-        "description": "",
-        "Volume": "N/A",
-        "No of data variables": "N/A",
+        "title": "Zarr-access on dkrz",
+        "description": "Chunk-based access on raw data",
+        "Volume": "72 GB uncompressed",
+        "No of data variables": "6",
+        "xarray:open_kwargs": {
+          "engine": "zarr",
+          "chunks": "auto",
+          "consolidated": true
+        },
+        "roles": [
+          "data"
+        ]
+      },
+      "eerie-cloud": {
+        "href": "https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/kerchunk",
+        "type": "application/vnd+zarr",
+        "title": "Zarr-access through eerie cloud",
+        "description": "Chunk-based access on raw-encoded data",
+        "Volume": "72 GB uncompressed",
+        "No of data variables": "6",
         "xarray:open_kwargs": {
           "engine": "zarr",
           "chunks": "auto",
