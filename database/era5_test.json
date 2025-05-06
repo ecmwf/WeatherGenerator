@@ -114,42 +114,5 @@
     "default_var": "pr",
     "name": "weathergen.atmo.ERA5",
     "levels": [
-      {
-        "name": "weathergen.atmo.ERA5",
-        "time": {
-          "store": "https://eerie.cloud.dkrz.de/datasets",
-          "dataset": "weathergen.atmo.ERA5/zarr"
-        },
-        "grid": {
-          "store": "https://eerie.cloud.dkrz.de/datasets",
-          "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
-        },
-        "datasources": {
-          "pr": {
-            "store": "https://eerie.cloud.dkrz.de/datasets",
-            "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
-          },
-          "qv2m": {
-            "store": "https://eerie.cloud.dkrz.de/datasets",
-            "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
-          },
-          "rlut": {
-            "store": "https://eerie.cloud.dkrz.de/datasets",
-            "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
-          },
-          "rsds": {
-            "store": "https://eerie.cloud.dkrz.de/datasets",
-            "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
-          },
-          "sfcwind": {
-            "store": "https://eerie.cloud.dkrz.de/datasets",
-            "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
-          },
-          "tas": {
-            "store": "https://eerie.cloud.dkrz.de/datasets",
-            "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
-          }
-        }
-      }
     ]
   }
