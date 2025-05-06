@@ -39,16 +39,8 @@
             "time",
             "cell"
           ],
-          "unit": "kg kg-1",
-          "description": "specific humidity in 2m",
-          "attrs": {
-            "cell_methods": "time: mean cell: mean",
-            "component": "atmo",
-            "grid_mapping": "crs",
-            "long_name": "specific humidity in 2m",
-            "units": "kg kg-1",
-            "vgrid": "height_2m"
-          }
+          "unit": "TODO",
+          "description": "TODO"
         }
       },
       "frequency": "TODO",
@@ -57,9 +49,9 @@
       "contact": "TODO",
       "license": "TODO",
       "project": "TODO",
-      "experiment_id": "nextgems_prefinal",
-      "source_id": "ICON-ESM",
-      "simulation_id": "ngc4008",
+      "experiment_id": "TODO",
+      "source_id": "TODO",
+      "simulation_id": "TODO",
       "_xpublish_id": "nextgems.ICON.ngc4008.PT15M_4"
     },
     "geometry": {
