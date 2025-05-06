@@ -1,294 +1,294 @@
 {
-    "type": "Feature",
-    "stac_version": "1.0.0",
-    "id": "nextgems.ICON.ngc4008.PT15M_4",
-    "properties": {
-      "description": "Simulation data from project 'not Set' produced by Earth System Model 'not Set' and run by institution 'not Set' for the experiment 'not Set'\nYou can use this dataset in xarray.\n\n```python\nimport xarray as xr\nimport json\nimport fsspec\nitem=json.load(fsspec.open(\n    \"https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/stac\"\n).open())\nasset=\"dkrz-disk\"\n#asset=\"eerie-cloud\" # from everywhere else\nxr.open_dataset(\n    item[\"assets\"][asset][\"href\"],\n    **item[\"assets\"][asset][\"xarray:open_kwargs\"],\n    storage_options=item[\"assets\"][asset].get(\"xarray:storage_options\",None)\n)\n```\n",
-      "title": "nextgems ICON ngc4008 PT15M_4",
-      "created": "2025-05-06T07:49:13Z",
-      "keywords": [
-        "nextgems",
-        "ICON",
-        "ngc4008",
-        "PT15M_4"
-      ],
-      "providers": [
-        {
-          "name": "DKRZ",
-          "description": "The data host of eerie.cloud",
-          "roles": [
-            "host"
-          ],
-          "url": "https://dkrz.de"
-        }
-      ],
-      "start_datetime": "2020-01-01T00:15:00Z",
-      "end_datetime": "2050-01-01T00:00:00Z",
-      "datetime": null,
-      "cube:dimensions": {
-        "time": {
-          "type": "temporal",
-          "extent": [
-            "2020-01-01T00:15:00Z",
-            "2050-01-01T00:00:00Z"
-          ]
-        }
-      },
-      "cube:variables": {
-        "pr": {
-          "type": "data",
-          "dimensions": [
-            "time",
-            "cell"
-          ],
-          "unit": "kg m-2 s-1",
-          "description": "precipitation flux",
-          "attrs": {
-            "cell_methods": "time: mean cell: mean",
-            "component": "atmo",
-            "grid_mapping": "crs",
-            "long_name": "precipitation flux",
-            "units": "kg m-2 s-1",
-            "vgrid": "surface"
-          }
-        },
-        "qv2m": {
-          "type": "data",
-          "dimensions": [
-            "time",
-            "cell"
-          ],
-          "unit": "kg kg-1",
-          "description": "specific humidity in 2m",
-          "attrs": {
-            "cell_methods": "time: mean cell: mean",
-            "component": "atmo",
-            "grid_mapping": "crs",
-            "long_name": "specific humidity in 2m",
-            "units": "kg kg-1",
-            "vgrid": "height_2m"
-          }
-        },
-        "rlut": {
-          "type": "data",
-          "dimensions": [
-            "time",
-            "cell"
-          ],
-          "unit": "W m-2",
-          "description": "toa outgoing longwave radiation",
-          "attrs": {
-            "cell_methods": "time: mean cell: mean",
-            "component": "atmo",
-            "grid_mapping": "crs",
-            "long_name": "toa outgoing longwave radiation",
-            "standard_name": "toa_outgoing_longwave_flux",
-            "units": "W m-2",
-            "vgrid": "toa"
-          }
-        },
-        "rsds": {
-          "type": "data",
-          "dimensions": [
-            "time",
-            "cell"
-          ],
-          "unit": "W m-2",
-          "description": "surface downwelling shortwave radiation",
-          "attrs": {
-            "cell_methods": "time: mean cell: mean",
-            "component": "atmo",
-            "grid_mapping": "crs",
-            "long_name": "surface downwelling shortwave radiation",
-            "standard_name": "surface_downwelling_shortwave_flux_in_air",
-            "units": "W m-2",
-            "vgrid": "surface"
-          }
-        },
-        "sfcwind": {
-          "type": "data",
-          "dimensions": [
-            "time",
-            "cell"
-          ],
-          "unit": "m s-1",
-          "description": "10m windspeed",
-          "attrs": {
-            "cell_methods": "time: mean cell: mean",
-            "component": "atmo",
-            "grid_mapping": "crs",
-            "long_name": "10m windspeed",
-            "units": "m s-1",
-            "vgrid": "height_10m"
-          }
-        },
-        "tas": {
-          "type": "data",
-          "dimensions": [
-            "time",
-            "cell"
-          ],
-          "unit": "K",
-          "description": "temperature in 2m",
-          "attrs": {
-            "cell_methods": "time: mean cell: mean",
-            "component": "atmo",
-            "grid_mapping": "crs",
-            "long_name": "temperature in 2m",
-            "standard_name": "air_temperature",
-            "units": "K",
-            "vgrid": "height_2m"
-          }
-        }
-      },
-      "frequency": "15m",
-      "creation_date": "2025-05-06T07:49:13Z",
-      "authors": "Wieners, Karl-Hermann (MPIMet), Aguridan, Razvan (ECMWF), Becker, Tobias (ECMWF), Beyer, Sebastian (AWI), Cheedela, Suvarchal Kumar (AWI), Dreier, Nils-Arne (DKRZ), Engels, Jan Frederik (DKRZ), Esch, Monika (MPIMet), Frauen, Claudia (DKRZ), Klocke, Daniel (MPIMet), Kölling, Tobias (MPIMet), Pedruzo-Bagazgoitia, Xabier (ECMWF), Putrasahan, Dian (MPIMet), Rackow, Thomas (ECMWF), Sidorenko, Dmitry (AWI), Schnur, Reiner (MPIMet), Stevens, Bjorn (MPIMet), Zimmermann, Janos (DKRZ)",
-      "contact": "Wieners, Karl-Hermann (MPIMet), Rackow, Thomas (ECMWF)",
-      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0) (https://creativecommons.org/licenses/by/4.0/)",
-      "project": "nextGEMS",
-      "experiment_id": "nextgems_prefinal",
-      "source_id": "ICON-ESM",
-      "simulation_id": "ngc4008",
-      "_xpublish_id": "nextgems.ICON.ngc4008.PT15M_4"
-    },
-    "geometry": {
-      "type": "Polygon",
-      "coordinates": [
-        [
-          [-180, -90],
-          [-180, 90],
-          [180, 90],
-          [180, -90],
-          [-180, -90]
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "id": "nextgems.ICON.ngc4008.PT15M_4",
+  "properties": {
+    "description": "Simulation data from project 'not Set' produced by Earth System Model 'not Set' and run by institution 'not Set' for the experiment 'not Set'\nYou can use this dataset in xarray.\n\n```python\nimport xarray as xr\nimport json\nimport fsspec\nitem=json.load(fsspec.open(\n    \"https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/stac\"\n).open())\nasset=\"dkrz-disk\"\n#asset=\"eerie-cloud\" # from everywhere else\nxr.open_dataset(\n    item[\"assets\"][asset][\"href\"],\n    **item[\"assets\"][asset][\"xarray:open_kwargs\"],\n    storage_options=item[\"assets\"][asset].get(\"xarray:storage_options\",None)\n)\n```\n",
+    "title": "nextgems ICON ngc4008 PT15M_4",
+    "created": "2025-05-06T07:49:13Z",
+    "keywords": [
+      "nextgems",
+      "ICON",
+      "ngc4008",
+      "PT15M_4"
+    ],
+    "providers": [
+      {
+        "name": "DKRZ",
+        "description": "The data host of eerie.cloud",
+        "roles": [
+          "host"
+        ],
+        "url": "https://dkrz.de"
+      }
+    ],
+    "start_datetime": "2020-01-01T00:15:00Z",
+    "end_datetime": "2050-01-01T00:00:00Z",
+    "datetime": null,
+    "cube:dimensions": {
+      "time": {
+        "type": "temporal",
+        "extent": [
+          "2020-01-01T00:15:00Z",
+          "2050-01-01T00:00:00Z"
         ]
+      }
+    },
+    "cube:variables": {
+      "pr": {
+        "type": "data",
+        "dimensions": [
+          "time",
+          "cell"
+        ],
+        "unit": "kg m-2 s-1",
+        "description": "precipitation flux",
+        "attrs": {
+          "cell_methods": "time: mean cell: mean",
+          "component": "atmo",
+          "grid_mapping": "crs",
+          "long_name": "precipitation flux",
+          "units": "kg m-2 s-1",
+          "vgrid": "surface"
+        }
+      },
+      "qv2m": {
+        "type": "data",
+        "dimensions": [
+          "time",
+          "cell"
+        ],
+        "unit": "kg kg-1",
+        "description": "specific humidity in 2m",
+        "attrs": {
+          "cell_methods": "time: mean cell: mean",
+          "component": "atmo",
+          "grid_mapping": "crs",
+          "long_name": "specific humidity in 2m",
+          "units": "kg kg-1",
+          "vgrid": "height_2m"
+        }
+      },
+      "rlut": {
+        "type": "data",
+        "dimensions": [
+          "time",
+          "cell"
+        ],
+        "unit": "W m-2",
+        "description": "toa outgoing longwave radiation",
+        "attrs": {
+          "cell_methods": "time: mean cell: mean",
+          "component": "atmo",
+          "grid_mapping": "crs",
+          "long_name": "toa outgoing longwave radiation",
+          "standard_name": "toa_outgoing_longwave_flux",
+          "units": "W m-2",
+          "vgrid": "toa"
+        }
+      },
+      "rsds": {
+        "type": "data",
+        "dimensions": [
+          "time",
+          "cell"
+        ],
+        "unit": "W m-2",
+        "description": "surface downwelling shortwave radiation",
+        "attrs": {
+          "cell_methods": "time: mean cell: mean",
+          "component": "atmo",
+          "grid_mapping": "crs",
+          "long_name": "surface downwelling shortwave radiation",
+          "standard_name": "surface_downwelling_shortwave_flux_in_air",
+          "units": "W m-2",
+          "vgrid": "surface"
+        }
+      },
+      "sfcwind": {
+        "type": "data",
+        "dimensions": [
+          "time",
+          "cell"
+        ],
+        "unit": "m s-1",
+        "description": "10m windspeed",
+        "attrs": {
+          "cell_methods": "time: mean cell: mean",
+          "component": "atmo",
+          "grid_mapping": "crs",
+          "long_name": "10m windspeed",
+          "units": "m s-1",
+          "vgrid": "height_10m"
+        }
+      },
+      "tas": {
+        "type": "data",
+        "dimensions": [
+          "time",
+          "cell"
+        ],
+        "unit": "K",
+        "description": "temperature in 2m",
+        "attrs": {
+          "cell_methods": "time: mean cell: mean",
+          "component": "atmo",
+          "grid_mapping": "crs",
+          "long_name": "temperature in 2m",
+          "standard_name": "air_temperature",
+          "units": "K",
+          "vgrid": "height_2m"
+        }
+      }
+    },
+    "frequency": "15m",
+    "creation_date": "2025-05-06T07:49:13Z",
+    "authors": "Wieners, Karl-Hermann (MPIMet), Aguridan, Razvan (ECMWF), Becker, Tobias (ECMWF), Beyer, Sebastian (AWI), Cheedela, Suvarchal Kumar (AWI), Dreier, Nils-Arne (DKRZ), Engels, Jan Frederik (DKRZ), Esch, Monika (MPIMet), Frauen, Claudia (DKRZ), Klocke, Daniel (MPIMet), Kölling, Tobias (MPIMet), Pedruzo-Bagazgoitia, Xabier (ECMWF), Putrasahan, Dian (MPIMet), Rackow, Thomas (ECMWF), Sidorenko, Dmitry (AWI), Schnur, Reiner (MPIMet), Stevens, Bjorn (MPIMet), Zimmermann, Janos (DKRZ)",
+    "contact": "Wieners, Karl-Hermann (MPIMet), Rackow, Thomas (ECMWF)",
+    "license": "Creative Commons Attribution 4.0 International (CC BY 4.0) (https://creativecommons.org/licenses/by/4.0/)",
+    "project": "nextGEMS",
+    "experiment_id": "nextgems_prefinal",
+    "source_id": "ICON-ESM",
+    "simulation_id": "ngc4008",
+    "_xpublish_id": "nextgems.ICON.ngc4008.PT15M_4"
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [-180, -90],
+        [-180, 90],
+        [180, 90],
+        [180, -90],
+        [-180, -90]
+      ]
+    ]
+  },
+  "links": [
+    {
+      "rel": "DOC",
+      "href": "https://easy.gems.dkrz.de/simulations/EERIE/eerie_data-access_online.html",
+      "title": "Usage of the eerie.cloud"
+    },
+    {
+      "rel": "collection",
+      "href": "https://eerie.cloud.dkrz.de//stac-collection-all.json",
+      "type": "application/json"
+    }
+  ],
+  "assets": {
+    "dkrz-disk": {
+      "href": "/work/kd1453/rechunked_ngc4008/ngc4008_PT15M_4.zarr",
+      "type": "application/vnd+zarr",
+      "title": "Zarr-access on dkrz",
+      "description": "Chunk-based access on raw data",
+      "Volume": "72 GB uncompressed",
+      "No of data variables": "6",
+      "xarray:open_kwargs": {
+        "engine": "zarr",
+        "chunks": "auto",
+        "consolidated": true
+      },
+      "roles": [
+        "data"
       ]
     },
-    "links": [
-      {
-        "rel": "DOC",
-        "href": "https://easy.gems.dkrz.de/simulations/EERIE/eerie_data-access_online.html",
-        "title": "Usage of the eerie.cloud"
+    "eerie-cloud": {
+      "href": "https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/kerchunk",
+      "type": "application/vnd+zarr",
+      "title": "Zarr-access through eerie cloud",
+      "description": "Chunk-based access on raw-encoded data",
+      "Volume": "72 GB uncompressed",
+      "No of data variables": "6",
+      "xarray:open_kwargs": {
+        "engine": "zarr",
+        "chunks": "auto",
+        "consolidated": true
       },
-      {
-        "rel": "collection",
-        "href": "https://eerie.cloud.dkrz.de//stac-collection-all.json",
-        "type": "application/json"
-      }
-    ],
-    "assets": {
-      "dkrz-disk": {
-        "href": "/work/kd1453/rechunked_ngc4008/ngc4008_PT15M_4.zarr",
-        "type": "application/vnd+zarr",
-        "title": "Zarr-access on dkrz",
-        "description": "Chunk-based access on raw data",
-        "Volume": "72 GB uncompressed",
-        "No of data variables": "6",
-        "xarray:open_kwargs": {
-          "engine": "zarr",
-          "chunks": "auto",
-          "consolidated": true
-        },
-        "roles": [
-          "data"
-        ]
+      "alternate": {
+        "processed": {
+          "name": "Rechunked and uniformly compressed data",
+          "description": "Server-side on-the-fly rechunked and unifromly encoded data",
+          "href": "https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/zarr"
+        }
       },
-      "eerie-cloud": {
-        "href": "https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/kerchunk",
-        "type": "application/vnd+zarr",
-        "title": "Zarr-access through eerie cloud",
-        "description": "Chunk-based access on raw-encoded data",
-        "Volume": "72 GB uncompressed",
-        "No of data variables": "6",
-        "xarray:open_kwargs": {
-          "engine": "zarr",
-          "chunks": "auto",
-          "consolidated": true
-        },
-        "alternate": {
-          "processed": {
-            "name": "Rechunked and uniformly compressed data",
-            "description": "Server-side on-the-fly rechunked and unifromly encoded data",
-            "href": "https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/zarr"
-          }
-        },
-        "roles": [
-          "data"
-        ]
-      },
-      "xarray_view": {
-        "href": "https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/",
-        "type": "text/html",
-        "title": "Xarray dataset",
-        "description": "HTML representation of the xarray dataset",
-        "roles": [
-          "overview"
-        ]
-      },
-      "jupyterlite": {
-        "href": "https://swift.dkrz.de/v1/dkrz_7fa6baba-db43-4d12-a295-8e3ebb1a01ed/apps/jupyterlite/index.html",
-        "type": "text/html",
-        "title": "Jupyterlite access",
-        "description": "Web-assembly based analysis platform with access to this item",
-        "roles": [
-          "analysis"
-        ]
-      },
-      "gridlook": {
-        "href": "https://swift.dkrz.de/v1/dkrz_7fa6baba-db43-4d12-a295-8e3ebb1a01ed/apps/gridlook/index.html#https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/stac",
-        "type": "text/html",
-        "title": "Visualization with gridlook",
-        "description": "Visualization with gridlook",
-        "roles": [
-          "Visualization"
-        ]
-      }
+      "roles": [
+        "data"
+      ]
     },
-    "bbox": [-180, -90, 180, 90],
-    "stac_extensions": [
-      "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
-      "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json",
-      "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
-    ],
-    "default_var": "pr",
-    "name": "nextgems.ICON.ngc4008.PT15M_4",
-    "levels": [
-      {
-        "name": "nextgems.ICON.ngc4008.PT15M_4",
-        "time": {
+    "xarray_view": {
+      "href": "https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/",
+      "type": "text/html",
+      "title": "Xarray dataset",
+      "description": "HTML representation of the xarray dataset",
+      "roles": [
+        "overview"
+      ]
+    },
+    "jupyterlite": {
+      "href": "https://swift.dkrz.de/v1/dkrz_7fa6baba-db43-4d12-a295-8e3ebb1a01ed/apps/jupyterlite/index.html",
+      "type": "text/html",
+      "title": "Jupyterlite access",
+      "description": "Web-assembly based analysis platform with access to this item",
+      "roles": [
+        "analysis"
+      ]
+    },
+    "gridlook": {
+      "href": "https://swift.dkrz.de/v1/dkrz_7fa6baba-db43-4d12-a295-8e3ebb1a01ed/apps/gridlook/index.html#https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/stac",
+      "type": "text/html",
+      "title": "Visualization with gridlook",
+      "description": "Visualization with gridlook",
+      "roles": [
+        "Visualization"
+      ]
+    }
+  },
+  "bbox": [-180, -90, 180, 90],
+  "stac_extensions": [
+    "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
+    "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json",
+    "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
+  ],
+  "default_var": "pr",
+  "name": "nextgems.ICON.ngc4008.PT15M_4",
+  "levels": [
+    {
+      "name": "nextgems.ICON.ngc4008.PT15M_4",
+      "time": {
+        "store": "https://eerie.cloud.dkrz.de/datasets",
+        "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
+      },
+      "grid": {
+        "store": "https://eerie.cloud.dkrz.de/datasets",
+        "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
+      },
+      "datasources": {
+        "pr": {
           "store": "https://eerie.cloud.dkrz.de/datasets",
           "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
         },
-        "grid": {
+        "qv2m": {
           "store": "https://eerie.cloud.dkrz.de/datasets",
           "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
         },
-        "datasources": {
-          "pr": {
-            "store": "https://eerie.cloud.dkrz.de/datasets",
-            "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
-          },
-          "qv2m": {
-            "store": "https://eerie.cloud.dkrz.de/datasets",
-            "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
-          },
-          "rlut": {
-            "store": "https://eerie.cloud.dkrz.de/datasets",
-            "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
-          },
-          "rsds": {
-            "store": "https://eerie.cloud.dkrz.de/datasets",
-            "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
-          },
-          "sfcwind": {
-            "store": "https://eerie.cloud.dkrz.de/datasets",
-            "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
-          },
-          "tas": {
-            "store": "https://eerie.cloud.dkrz.de/datasets",
-            "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
-          }
+        "rlut": {
+          "store": "https://eerie.cloud.dkrz.de/datasets",
+          "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
+        },
+        "rsds": {
+          "store": "https://eerie.cloud.dkrz.de/datasets",
+          "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
+        },
+        "sfcwind": {
+          "store": "https://eerie.cloud.dkrz.de/datasets",
+          "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
+        },
+        "tas": {
+          "store": "https://eerie.cloud.dkrz.de/datasets",
+          "dataset": "nextgems.ICON.ngc4008.PT15M_4/zarr"
         }
       }
-    ]
-  }
+    }
+  ]
+}
