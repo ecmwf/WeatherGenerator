@@ -84,18 +84,10 @@
         "type": "application/vnd+zarr",
         "title": "hpc2020",
         "description": "TODO",
-        "Volume": "TODO",
-        "No of data variables": "TODO",
-        "xarray:open_kwargs": {
-          "engine": "zarr",
-          "chunks": "auto",
-          "consolidated": true
-        },
         "roles": [
           "data"
         ]
       }
-
     },
     "bbox": [-180, -90, 180, 90],
     "stac_extensions": [
