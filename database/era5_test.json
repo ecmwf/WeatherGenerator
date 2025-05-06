@@ -101,6 +101,7 @@
       "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json",
       "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
     ],
+    "default_var": "pr",
     "name": "nextgems.ICON.ngc4008.PT15M_4",
     "levels": [
       {
