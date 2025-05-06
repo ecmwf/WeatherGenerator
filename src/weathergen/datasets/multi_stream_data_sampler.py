@@ -103,8 +103,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 else:
                     filename = pathlib.Path(datapath) / fname
 
-                    if not filename.exists(): # see above
-                        msg = f"Did not find input data for {stream_info["type"]} stream '{stream_info["name"]}': {filename}."
+                    if not filename.exists():  # see above
+                        msg = f"Did not find input data for {stream_info['type']} stream '{stream_info['name']}': {filename}."
                         raise FileNotFoundError(msg)
 
                 logger.info(
