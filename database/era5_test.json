@@ -1,14 +1,14 @@
 {
     "type": "Feature",
     "stac_version": "1.0.0",
-    "id": "weathergen.atmo.ERA5",
+    "id": "nextgems.ICON.ngc4008.PT15M_4",
     "properties": {
-      "description": "ERA5 dataset (climate)",
-      "title": "test",
+      "description": "Simulation data from project 'not Set' produced by Earth System Model 'not Set' and run by institution 'not Set' for the experiment 'not Set'\nYou can use this dataset in xarray.\n\n```python\nimport xarray as xr\nimport json\nimport fsspec\nitem=json.load(fsspec.open(\n    \"https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/stac\"\n).open())\nasset=\"dkrz-disk\"\n#asset=\"eerie-cloud\" # from everywhere else\nxr.open_dataset(\n    item[\"assets\"][asset][\"href\"],\n    **item[\"assets\"][asset][\"xarray:open_kwargs\"],\n    storage_options=item[\"assets\"][asset].get(\"xarray:storage_options\",None)\n)\n```\n",
+      "title": "nextgems ICON ngc4008 PT15M_4",
       "created": "2025-05-06T07:49:13Z",
       "keywords": [
-        "ERA5",
-        "ECMWF",
+        "nextgems",
+        "ICON",
         "ngc4008",
         "PT15M_4"
       ],
