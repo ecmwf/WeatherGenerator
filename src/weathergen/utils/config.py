@@ -161,7 +161,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
 
     # append streams to existing (only relevant for evaluation)
     streams = []
-    for config_file in sorted(streams_directory.rglob("*.yml")):
+    for config_file in sorted(streams_directory.rglob("[!.]*.yml")):
         try:
             # Stream config schema is {stream_name: stream_config} where stream_config
             # itself is a dict containing the actual options. stream_name needs to be
