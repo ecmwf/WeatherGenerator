@@ -74,7 +74,7 @@
       },
       {
         "rel": "collection",
-        "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/era5_test.json",
+        "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/catalogue.json",
         "type": "application/json"
       }
     ],
