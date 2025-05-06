@@ -1,0 +1,30 @@
+{
+    "type": "Catalog",
+    "id": "weathergen",
+    "stac_version": "1.0.0",
+    "description": "The data catalogue of the WeatherGenerator project",
+    "links": [
+      {
+        "rel": "root",
+        "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/catalogue.json",
+        "type": "application/json",
+        "title": "The EERIE cloud data server"
+      },
+      {
+        "rel": "self",
+        "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/catalogue.json",
+        "type": "application/json"
+      },
+      {
+        "rel": "child",
+        "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/era5_test.json",
+        "type": "application/json",
+        "title": "ERA5"
+      }
+    ],
+    "stac_extensions": [
+      "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
+      "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json"
+    ],
+    "title": "The EERIE cloud data server"
+  }
