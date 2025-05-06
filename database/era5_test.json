@@ -51,12 +51,12 @@
           }
         }
       },
-      "frequency": "N/A",
-      "creation_date": "N/A",
-      "authors": "N/A",
-      "contact": "Wieners, Karl-Hermann (MPIMet), Rackow, Thomas (ECMWF)",
-      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0) (https://creativecommons.org/licenses/by/4.0/)",
-      "project": "nextGEMS",
+      "frequency": "TODO",
+      "creation_date": "TODO",
+      "authors": "TODO",
+      "contact": "TODO",
+      "license": "TODO",
+      "project": "TODO",
       "experiment_id": "nextgems_prefinal",
       "source_id": "ICON-ESM",
       "simulation_id": "ngc4008",
