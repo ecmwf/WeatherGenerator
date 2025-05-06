@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -28,7 +29,7 @@ class FesomDataset:
         Length of temporal windows in days
     step_hrs : int
         (Currently unused) Intended step size between windows in hours
-    filename : str
+    filename : Path
         Path to Zarr dataset containing FESOM output
     stream_info : dict
         Dictionary with "source" and "target" keys specifying channel subsets to use
@@ -66,7 +67,7 @@ class FesomDataset:
         end: datetime | int,
         len_hrs: int,
         step_hrs: int,
-        filename: str,
+        filename: Path,
         stream_info: dict,
     ):
         self.len_hrs = len_hrs

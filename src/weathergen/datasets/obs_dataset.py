@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -17,18 +18,11 @@ import zarr
 class ObsDataset:
     def __init__(
         self,
-        # filename: str,
-        # start: int,
-        # end: int,
-        # len_hrs: int,
-        # step_hrs: int = None,
-        # normalize: bool = True,
-        # select: list[str] = None,
         start: int,
         end: int,
         len_hrs: int,
         step_hrs: int,
-        filename: str,
+        filename: Path,
         stream_info: dict,
     ) -> None:
         self.filename = filename

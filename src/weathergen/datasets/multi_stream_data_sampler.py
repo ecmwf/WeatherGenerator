@@ -9,6 +9,7 @@
 
 import datetime
 import logging
+import pathlib
 
 import numpy as np
 import torch
@@ -66,49 +67,50 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.streams_datasets.append([])
 
             for fname in stream_info["filenames"]:
+                kwargs = {
+                    "start": start_date,
+                    "end": end_date,
+                    "len_hrs": cf.len_hrs,
+                    "step_hrs": cf.step_hrs,
+                    "stream_info": stream_info,
+                }
                 # TODO: Should we translate the type to the class name and call based on this?
-                if stream_info["type"] == "obs":
-                    ds = ObsDataset(
-                        start_date,
-                        end_date_padded,
-                        cf.len_hrs,
-                        cf.step_hrs,
-                        cf.data_path_obs + "/" + fname,
-                        stream_info,
-                    )
+                # TODO: Put this intialization logic into a factory method (maybe a static method on a potential future baseclass)
+                match stream_info["type"]:
+                    case "obs":
+                        dataset = ObsDataset
+                        datapath = cf.data_path_obs
+                        kwargs["end"] = end_date_padded
+                    case "anemoi":
+                        dataset = AnemoiDataset
+                        datapath = cf.data_path_anemoi
+                    case "fesom":
+                        dataset = FesomDataset
+                        datapath = cf.data_path_fesom
+                    case "atmorep":
+                        dataset = AtmorepDataset
+                        datapath = cf.data_path_anemoi
+                    case _:
+                        msg = f"Unsupported stream type {stream_info['type']}"
+                        raise ValueError(msg)
 
-                elif stream_info["type"] == "anemoi":
-                    ds = AnemoiDataset(
-                        start_date,
-                        end_date,
-                        cf.len_hrs,
-                        cf.step_hrs,
-                        cf.data_path_anemoi + "/" + fname if fname[0] != "/" else fname,
-                        stream_info,
-                    )
-
-                elif stream_info["type"] == "fesom":
-                    ds = FesomDataset(
-                        start_date,
-                        end_date,
-                        cf.len_hrs,
-                        cf.step_hrs,
-                        cf.data_path_fesom + "/" + fname,
-                        stream_info,
-                    )
-
-                elif stream_info["type"] == "atmorep":
-                    ds = AtmorepDataset(
-                        start_date,
-                        end_date,
-                        cf.len_hrs,
-                        cf.step_hrs,
-                        cf.data_path_anemoi + "/" + fname,
-                        stream_info,
-                    )
-
+                datapath = pathlib.Path(datapath)
+                fname = pathlib.Path(fname)
+                # dont check if file exists since zarr stores might be directories
+                if fname.exists():
+                    # check if fname is a valid path to allow for simple overwriting
+                    filename = fname
                 else:
-                    assert False, "Unsupported stream type {}.".format(stream_info["type"])
+                    filename = pathlib.Path(datapath) / fname
+
+                    if not filename.exists():  # see above
+                        msg = f"Did not find input data for {stream_info['type']} stream '{stream_info['name']}': {filename}."
+                        raise FileNotFoundError(msg)
+
+                logger.info(
+                    f"Opening dataset with type: {type(dataset)} from stream config {stream_info['name']}."
+                )
+                ds = dataset(filename=filename, **kwargs)
 
                 fsm = self.forecast_steps[0]
                 if len(ds) > 0:
