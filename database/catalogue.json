@@ -26,5 +26,5 @@
       "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
       "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json"
     ],
-    "title": "The EERIE cloud data server"
+    "title": "The WeatherGenerator data catalogue"
   }

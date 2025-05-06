@@ -4,7 +4,7 @@
     "id": "weathergen.atmo.ERA5",
     "properties": {
       "description": "ERA5 dataset (climate)",
-      "title": "test",
+      "title": "ERA5 dataset",
       "created": "2025-05-06T07:49:13Z",
       "keywords": [
         "ERA5",
@@ -69,12 +69,12 @@
     "links": [
       {
         "rel": "DOC",
-        "href": "https://easy.gems.dkrz.de/simulations/EERIE/eerie_data-access_online.html",
-        "title": "Usage of the eerie.cloud"
+        "href": "https://confluence.ecmwf.int/display/MAEL/WeatherGenerator+Dataset",
+        "title": "Master documentation (ECMWF Confluence)"
       },
       {
         "rel": "collection",
-        "href": "https://eerie.cloud.dkrz.de//stac-collection-all.json",
+        "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/era5_test.json",
         "type": "application/json"
       }
     ],
