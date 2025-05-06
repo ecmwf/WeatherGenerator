@@ -90,8 +90,42 @@
           "chunks": "auto",
           "consolidated": true
         },
+        "alternate": {
+          "processed": {
+            "name": "Rechunked and uniformly compressed data",
+            "description": "Server-side on-the-fly rechunked and unifromly encoded data",
+            "href": "https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/zarr"
+          }
+        },
         "roles": [
           "data"
+        ]
+      },
+      "xarray_view": {
+        "href": "https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/",
+        "type": "text/html",
+        "title": "Xarray dataset",
+        "description": "HTML representation of the xarray dataset",
+        "roles": [
+          "overview"
+        ]
+      },
+      "jupyterlite": {
+        "href": "https://swift.dkrz.de/v1/dkrz_7fa6baba-db43-4d12-a295-8e3ebb1a01ed/apps/jupyterlite/index.html",
+        "type": "text/html",
+        "title": "Jupyterlite access",
+        "description": "Web-assembly based analysis platform with access to this item",
+        "roles": [
+          "analysis"
+        ]
+      },
+      "gridlook": {
+        "href": "https://swift.dkrz.de/v1/dkrz_7fa6baba-db43-4d12-a295-8e3ebb1a01ed/apps/gridlook/index.html#https://eerie.cloud.dkrz.de/datasets/nextgems.ICON.ngc4008.PT15M_4/stac",
+        "type": "text/html",
+        "title": "Visualization with gridlook",
+        "description": "Visualization with gridlook",
+        "roles": [
+          "Visualization"
         ]
       }
     },
