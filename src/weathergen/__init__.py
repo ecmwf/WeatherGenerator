@@ -69,44 +69,42 @@ def train_continue() -> None:
     parser = cli.get_continue_parser()
     args = parser.parse_args()
 
-    cf = config.load_config(args.private_config, args.run_id, args.epoch, None)
+    if args.finetune_forecast:
+        finetune_overwrite = dict(
+            forecast_delta_hrs = 0,  # 12
+            forecast_steps = 1,  # [j for j in range(1,9) for i in range(4)]
+            forecast_policy = "fixed",  # 'sequential_random' # 'fixed' #'sequential' #_random'
+            forecast_freeze_model = True,
+            forecast_att_dense_rate = 1.0,  # 0.25
+            fe_num_blocks = 8,
+            fe_num_heads = 16,
+            fe_dropout_rate = 0.1,
+            fe_with_qk_lnorm = True,
+            lr_start = 0.000001,
+            lr_max = 0.00003,
+            lr_final_decay = 0.00003,
+            lr_final = 0.0,
+            lr_steps_warmup = 1024,
+            lr_steps_cooldown = 4096,
+            lr_policy_warmup = "cosine",
+            lr_policy_decay = "linear",
+            lr_policy_cooldown = "linear",
+            num_epochs = 12,  # len(cf.forecast_steps) + 4
+            istep = 0,
+            training_mode = "forecast"
+        )
+
+    cf = config.load_config(args.private_config, args.run_id, args.epoch, args.config,finetune_overwrite)
 
     # track history of run to ensure traceability of results
     cf.run_history += [(cf.run_id, cf.istep)]
 
-    #########################
     if args.finetune_forecast:
-        cf.training_mode = "forecast"
-        cf.forecast_delta_hrs = 0  # 12
-        cf.forecast_steps = 1  # [j for j in range(1,9) for i in range(4)]
-        cf.forecast_policy = "fixed"  # 'sequential_random' # 'fixed' #'sequential' #_random'
-        cf.forecast_freeze_model = True
-        cf.forecast_att_dense_rate = 1.0  # 0.25
-
         if cf.forecast_freeze_model:
             cf.with_fsdp = False
             import torch
 
             torch._dynamo.config.optimize_ddp = False
-
-        cf.fe_num_blocks = 8
-        cf.fe_num_heads = 16
-        cf.fe_dropout_rate = 0.1
-        cf.fe_with_qk_lnorm = True
-
-        cf.lr_start = 0.000001
-        cf.lr_max = 0.00003
-        cf.lr_final_decay = 0.00003
-        cf.lr_final = 0.0
-        cf.lr_steps_warmup = 1024
-        cf.lr_steps_cooldown = 4096
-        cf.lr_policy_warmup = "cosine"
-        cf.lr_policy_decay = "linear"
-        cf.lr_policy_cooldown = "linear"
-
-        cf.num_epochs = 12  # len(cf.forecast_steps) + 4
-        cf.istep = 0
-
     trainer = Trainer()
     trainer.run(cf, args.run_id, args.epoch, args.run_id_new)
 
