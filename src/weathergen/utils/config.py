@@ -87,10 +87,24 @@ def load_config(
     private_home: Path | None,
     run_id: str | None,
     epoch: int | None,
-    overwrite_path: Path | None,
+    *overwrites: Path | dict | Config,
 ) -> Config:
+    """
+    Merge config information from multiple sources into one run_config.
+
+    Args:
+        private_home: Configuration file containing platform dependent information and secretes
+        run_id: Run/model id of pretrained WeatherGenerator model to continue training or evaluate
+        epoch: epoch of the checkpoint to load.
+        *overwrites: Additional overwrites from different sources
+
+    Note: The order of precendence for merging the final config is in ascending order:
+        - base config (either default config or loaded from previuos run)
+        - private config
+        - overwrites (also in ascending order)
+    """
     private_config = _load_private_conf(private_home)
-    overwrite_config = _load_overwrite_conf(overwrite_path)
+    overwrite_configs = [_load_overwrite_conf(overwrite) for overwrite in overwrites]
 
     if run_id is None:
         base_config = _load_default_conf()
@@ -99,18 +113,31 @@ def load_config(
         base_config = load_model_config(run_id, epoch, private_config["model_path"])
 
     # use OmegaConf.unsafe_merge if too slow
-    return OmegaConf.merge(base_config, private_config, overwrite_config)
+    return OmegaConf.merge(base_config, private_config, *overwrite_configs)
 
 
-def _load_overwrite_conf(overwrite_path: Path | None) -> OmegaConf:
-    "Return the overwrite configuration."
 
-    "If path is None, return an empty dictionary."
-    if overwrite_path is None:
-        return {}
-    else:
-        _logger.info(f"Loading overwrite config from {overwrite_path}.")
-        return OmegaConf.load(overwrite_path)
+
+def _load_overwrite_conf(overwrite: Path | dict | OmegaConf) -> OmegaConf:
+    "Convert different sources into configs that can be used as overwrites."
+
+    "If source can not be converted return an empty config."
+    match overwrite:  # match the type
+        case Path():
+            _logger.info(f"Loading overwrite config from file: {overwrite}.")
+            overwrite_config = OmegaConf.load(overwrite)
+        case dict():
+            _logger.info(f"Loading overwrite config from dict: {overwrite}.")
+            overwrite_config = OmegaConf.create(overwrite)
+        case OmegaConf():
+            _logger.info(f"Using existing config as overwrite: {overwrite}.")
+            overwrite_config = overwrite
+        case _:
+            # maybe raise exception instead?
+            _logger.warning(f"Cannot build config from overwrite: {overwrite}")
+            overwrite_config = OmegaConf.create()
+    
+    return overwrite_config
 
 
 def _load_private_conf(private_home: Path | None) -> OmegaConf:
