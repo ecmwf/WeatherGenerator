@@ -73,27 +73,27 @@ def train_continue() -> None:
 
     if args.finetune_forecast:
         finetune_overwrite = dict(
-            forecast_delta_hrs = 0,  # 12
-            forecast_steps = 1,  # [j for j in range(1,9) for i in range(4)]
-            forecast_policy = "fixed",  # 'sequential_random' # 'fixed' #'sequential' #_random'
-            forecast_freeze_model = True,
-            forecast_att_dense_rate = 1.0,  # 0.25
-            fe_num_blocks = 8,
-            fe_num_heads = 16,
-            fe_dropout_rate = 0.1,
-            fe_with_qk_lnorm = True,
-            lr_start = 0.000001,
-            lr_max = 0.00003,
-            lr_final_decay = 0.00003,
-            lr_final = 0.0,
-            lr_steps_warmup = 1024,
-            lr_steps_cooldown = 4096,
-            lr_policy_warmup = "cosine",
-            lr_policy_decay = "linear",
-            lr_policy_cooldown = "linear",
-            num_epochs = 12,  # len(cf.forecast_steps) + 4
-            istep = 0,
-            training_mode = "forecast"
+            training_mode="forecast",
+            forecast_delta_hrs=0,  # 12
+            forecast_steps=1,  # [j for j in range(1,9) for i in range(4)]
+            forecast_policy="fixed",  # 'sequential_random' # 'fixed' #'sequential' #_random'
+            forecast_freeze_model=True,
+            forecast_att_dense_rate=1.0,  # 0.25
+            fe_num_blocks=8,
+            fe_num_heads=16,
+            fe_dropout_rate=0.1,
+            fe_with_qk_lnorm=True,
+            lr_start=0.000001,
+            lr_max=0.00003,
+            lr_final_decay=0.00003,
+            lr_final=0.0,
+            lr_steps_warmup=1024,
+            lr_steps_cooldown=4096,
+            lr_policy_warmup="cosine",
+            lr_policy_decay="linear",
+            lr_policy_cooldown="linear",
+            num_epochs=12,  # len(cf.forecast_steps) + 4
+            istep=0,
         )
 
     cf = config.load_config(

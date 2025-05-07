@@ -16,8 +16,9 @@ def get_train_parser():
         default=None,
         help="Optional experiment specfic configuration file",
     )
-    
+
     return parser
+
 
 def get_continue_parser():
     parser = argparse.ArgumentParser(allow_abbrev=False)
@@ -64,6 +65,7 @@ def get_continue_parser():
     )
 
     return parser
+
 
 def get_evaluate_parser():
     parser = argparse.ArgumentParser(allow_abbrev=False)
@@ -136,5 +138,5 @@ def get_evaluate_parser():
         default=None,
         help="Optional experiment specfic configuration file",
     )
-    
+
     return parser

@@ -146,7 +146,7 @@ def _load_overwrite_conf(overwrite: Path | dict | OmegaConf) -> OmegaConf:
             # maybe raise exception instead?
             _logger.warning(f"Cannot build config from overwrite: {overwrite}")
             overwrite_config = OmegaConf.create()
-    
+
     return overwrite_config
 
 
