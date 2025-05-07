@@ -33,12 +33,14 @@ def evaluate_from_args(argl: list[str]):
     When running integration tests, the arguments are directly provided.
     """
     parser = cli.get_evaluate_parser()
-    args = parser.parse_args(argl)
+    args, additional_args = parser.parse_known_args(argl)
 
     # TODO: move somewhere else
     init_loggers()
 
-    cf = config.load_config(args.private_config, args.run_id, args.epoch, args.config)
+    cf = config.load_config(
+        args.private_config, args.run_id, args.epoch, args.config, additional_args
+    )
 
     cf.run_history += [(cf.run_id, cf.istep)]
 
@@ -67,7 +69,7 @@ def evaluate_from_args(argl: list[str]):
 ####################################################################################################
 def train_continue() -> None:
     parser = cli.get_continue_parser()
-    args = parser.parse_args()
+    args, additional_args = parser.parse_known_args()
 
     if args.finetune_forecast:
         finetune_overwrite = dict(
@@ -94,7 +96,14 @@ def train_continue() -> None:
             training_mode = "forecast"
         )
 
-    cf = config.load_config(args.private_config, args.run_id, args.epoch, args.config,finetune_overwrite)
+    cf = config.load_config(
+        args.private_config,
+        args.run_id,
+        args.epoch,
+        args.config,
+        finetune_overwrite,
+        additional_args,
+    )
 
     # track history of run to ensure traceability of results
     cf.run_history += [(cf.run_id, cf.istep)]
@@ -128,12 +137,13 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     """
     Training function for WeatherGenerator model."""
     parser = cli.get_train_parser()
-    args = parser.parse_args(argl)
+    args, additional_args = parser.parse_known_args(argl)
 
     # TODO: move somewhere else
     init_loggers()
 
-    cf = config.load_config(args.private_config, None, None, args.config)
+    cli_overwrite = config.from_cli_arglist(additional_args)
+    cf = config.load_config(args.private_config, None, None, args.config, cli_overwrite)
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
