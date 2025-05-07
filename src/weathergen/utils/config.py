@@ -116,6 +116,16 @@ def load_config(
     return OmegaConf.merge(base_config, private_config, *overwrite_configs)
 
 
+def from_cli_arglist(arg_list: list[str]) -> Config:
+    """
+    Parse a Config instance from cli arguments.
+
+    This enables convenient collecting of arguments into an overwrite.
+
+    Args:
+        arg_list: items in this list should be of the form: parent_obj.nested_obj=value
+    """
+    return OmegaConf.from_cli(arg_list)
 
 
 def _load_overwrite_conf(overwrite: Path | dict | OmegaConf) -> OmegaConf:
