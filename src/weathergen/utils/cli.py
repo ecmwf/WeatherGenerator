@@ -56,7 +56,13 @@ def get_continue_parser():
         action="store_true",
         help="Fine tune for forecasting. It overwrites some of the Config settings.",
     )
-    
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Optional experiment specfic configuration file",
+    )
+
     return parser
 
 def get_evaluate_parser():
