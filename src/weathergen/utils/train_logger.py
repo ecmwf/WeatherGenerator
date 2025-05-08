@@ -74,10 +74,10 @@ class TrainLogger:
         log_vals = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
         log_vals += [samples]
 
-        metrics["loss_avg_0_mean"] = loss_avg[0].mean()
+        metrics["loss_avg_0_mean"] = np.nanmean(loss_avg[0])
         metrics["learning_rate"] = lr
         metrics["num_samples"] = int(samples)
-        log_vals += [loss_avg[0].mean()]
+        log_vals += [np.nanmean(loss_avg[0])]
         log_vals += [lr]
 
         for i_obs, st in enumerate(self.cf.streams):
@@ -284,6 +284,7 @@ def clean_df(df, columns: list[str] | None):
     _logger.info(f"schema {df.schema}")
 
     if columns:
+        columns = list(set(columns))  # remove duplicates
         df = df.select(columns)
         # Remove all rows where all columns are null
         df = df.filter(~pl.all_horizontal(pl.col(c).is_null() for c in columns))

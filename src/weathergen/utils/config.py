@@ -79,7 +79,6 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
 
     with fname.open() as f:
         json_str = f.read()
-        print(json_str)
 
     return OmegaConf.create(json.loads(json_str))
 
@@ -161,7 +160,8 @@ def load_streams(streams_directory: Path) -> list[Config]:
 
     # append streams to existing (only relevant for evaluation)
     streams = []
-    for config_file in sorted(streams_directory.rglob("*.yml")):
+    # exclude temp files starting with "." or "#" (eg. emacs, vim, macos savefiles)
+    for config_file in sorted(streams_directory.rglob("[!.#]*.yml")):
         try:
             # Stream config schema is {stream_name: stream_config} where stream_config
             # itself is a dict containing the actual options. stream_name needs to be
@@ -170,6 +170,10 @@ def load_streams(streams_directory: Path) -> list[Config]:
         except yaml.scanner.ScannerError as e:
             msg = f"Invalid yaml file while parsing stream configs: {config_file}"
             raise RuntimeError(msg) from e
+        except IndexError:
+            # support commenting out entire stream files to avoid loading them.
+            _logger.warning(f"Parsed stream configuration file is empty: {config_file}")
+            continue
 
         stream_config.name = stream_name
         streams.append(stream_config)

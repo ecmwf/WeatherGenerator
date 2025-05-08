@@ -51,7 +51,7 @@ class StreamData:
         # this is not directly used but to precompute index in compute_idxs_predict()
         self.target_coords_lens = [[] for _ in range(forecast_steps + 1)]
         self.target_tokens = [[] for _ in range(forecast_steps + 1)]
-        self.target_tokens_lens = [[] for _ in range(forecast_steps + 1)]
+        self.target_tokens_lens = [[0] for _ in range(forecast_steps + 1)]
         # source tokens per cell
         self.source_tokens_cells = []
         # length of source tokens per cell (without padding)
@@ -123,12 +123,15 @@ class StreamData:
         None
         """
 
-        self.target_tokens[fstep] += [torch.tensor([])]
+        # self.target_tokens[fstep] += [[torch.zeros((0,0), dtype=torch.int32) for _ in range(self.nhc_target)]]
+        self.target_tokens[fstep] += [[torch.tensor([], dtype=torch.int32)]]
         self.target_tokens_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
-        self.target_coords[fstep] += [torch.tensor([])]
+        self.target_coords[fstep] += [[torch.zeros((0, 106)) for _ in range(self.nhc_target)]]
         self.target_coords_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
-        self.target_coords_raw[fstep] += [torch.tensor([])]
-        self.target_times_raw_raw[fstep] += [np.array([], dtype="datetime64[ns]")]
+        self.target_coords_raw[fstep] += [[torch.tensor([]) for _ in range(self.nhc_target)]]
+        self.target_times_raw[fstep] += [
+            [np.array([], dtype="datetime64[ns]") for _ in range(self.nhc_target)]
+        ]
 
     def add_source(
         self, ss_raw: torch.tensor, ss_lens: torch.tensor, ss_cells: list, ss_centroids: list
@@ -237,7 +240,7 @@ class StreamData:
         return self.source_empty() and self.target_empty()
 
     ####################################################################################################
-    def _merge_cells(self, s_list: list, num_healpix_cells: int) -> list:
+    def _merge_cells(self, s_list: list, num_healpix_cells: int, arr_type=torch.Tensor) -> list:
         """
         Helper function to merge different inputs for the stream
         (preserving in particular the per cell information)
@@ -255,13 +258,13 @@ class StreamData:
             Merged inputs
         """
 
-        if torch.tensor([len(s) for s in s_list]).sum() == 0:
-            return torch.tensor([]) if type(s_list[0][0]) is torch.Tensor else np.array([])
+        if torch.tensor([len(s) for ss in s_list for s in ss]).sum() == 0:
+            return arr_type([])
 
-        cat = torch.cat if type(s_list[0][0]) is torch.Tensor else np.concatenate
+        cat = torch.cat if arr_type is torch.Tensor else np.concatenate
         ret = cat(
             [
-                cat([s_list[i_s][i] for i_s in range(len(s_list)) if len(s_list[i_s]) > 0])
+                cat([s_list[i_s][i] for i_s in range(len(s_list)) if len(s_list[i_s]) > 1], 0)
                 for i in range(num_healpix_cells)
             ]
         )
@@ -311,21 +314,31 @@ class StreamData:
                 nt = self.nhc_target
 
                 self.target_coords_lens[fstep] = torch.tensor(
-                    [[len(f) for f in ff] for ff in self.target_coords[fstep]]
+                    [
+                        [len(f) for f in ff] if len(ff) > 1 else [0 for _ in range(self.nhc_target)]
+                        for ff in self.target_coords[fstep]
+                    ],
+                    dtype=torch.int,
                 ).sum(0)
                 self.target_tokens_lens[fstep] = torch.tensor(
-                    [[len(f) for f in ff] for ff in self.target_tokens[fstep]]
+                    [
+                        [len(f) for f in ff] if len(ff) > 1 else [0 for _ in range(self.nhc_target)]
+                        for ff in self.target_tokens[fstep]
+                    ],
+                    dtype=torch.int,
                 ).sum(0)
                 self.target_coords[fstep] = self._merge_cells(self.target_coords[fstep], nt)
                 self.target_coords_raw[fstep] = self._merge_cells(self.target_coords_raw[fstep], nt)
 
-                self.target_times_raw[fstep] = self._merge_cells(self.target_times_raw[fstep], nt)
+                self.target_times_raw[fstep] = self._merge_cells(
+                    self.target_times_raw[fstep], nt, np.array
+                )
                 self.target_tokens[fstep] = self._merge_cells(self.target_tokens[fstep], nt)
                 # remove NaNs
                 # TODO: it seems better to drop data points with NaN values in the coords than
                 #       to mask them
-                assert not torch.isnan(self.target_coords[fstep]).any()
-                # self.target_coords[fstep][torch.isnan(self.target_coords[fstep])] = self.mask_value
+                # assert not torch.isnan(self.target_coords[fstep]).any()
+                self.target_coords[fstep][torch.isnan(self.target_coords[fstep])] = self.mask_value
 
             else:
                 # TODO: is this branch still needed
@@ -333,5 +346,5 @@ class StreamData:
                 self.target_coords_raw[fstep] = torch.tensor([])
                 self.target_times_raw[fstep] = np.array([], dtype="datetime64[ns]")
                 self.target_tokens[fstep] = torch.tensor([])
-                self.target_tokens_lens[fstep] = torch.tensor([])
+                self.target_tokens_lens[fstep] = torch.tensor([0])
                 self.target_coords_lens[fstep] = torch.tensor([])
