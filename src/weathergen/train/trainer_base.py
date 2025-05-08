@@ -71,19 +71,23 @@ class Trainer_Base:
             cf.rank = rank
             cf.num_ranks = num_ranks
             return
+        
+        master_port = os.environ.get("MASTER_PORT", "29514")
 
         local_rank = int(os.environ.get("SLURM_LOCALID"))
         ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
-        rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
+        rank = int(os.environ.get("SLURM_PROCID")) 
         num_ranks = int(os.environ.get("SLURM_NTASKS"))
 
         dist.init_process_group(
             backend="nccl",
-            init_method="tcp://" + master_node + ":1345",
-            timeout=datetime.timedelta(seconds=10 * 8192),
+            init_method=f"tcp://{master_node}:{master_port}",
+            timeout=datetime.timedelta(seconds=60),
             world_size=num_ranks,
             rank=rank,
         )
+        
+        
 
         # communicate run id to all nodes
         run_id_int = torch.zeros(8, dtype=torch.int32).cuda()
