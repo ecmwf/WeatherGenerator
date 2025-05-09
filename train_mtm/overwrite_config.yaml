@@ -1,0 +1,24 @@
+
+streams_directory: "/users/ktezcan/projects/Meteoswiss/WeatherGenerator/config/streams/streams_era5_ts32"
+
+
+start_date: 201501010000
+end_date: 202012310000
+start_date_val: 202101010000
+end_date_val: 202112310000
+num_epochs: 256
+
+with_mixed_precision: True
+
+# training mode: "forecast" or "masking" (masked token modeling)
+# for "masking" to train with auto-encoder mode, forecast_offset should be 0
+training_mode: "masking"
+# masking rate when training mode is "masking"; ignored in foreacast mode
+masking_rate: 0.6
+# sample the masking rate (with normal distribution centered at masking_rate)
+masking_rate_sampling: True
+
+forecast_offset : 0
+
+with_ddp: True
+with_fsdp: True

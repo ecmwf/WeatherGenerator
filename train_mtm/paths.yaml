@@ -1,0 +1,7 @@
+
+# data_path_anemoi: "/iopsstor/scratch/cscs/fzanetta/data/anemoi"
+data_path_anemoi: "/iopsstor/scratch/cscs/ktezcan/data"
+model_path:  "/iopsstor/scratch/cscs/ktezcan/weathergen/models"
+run_path:  "/iopsstor/scratch/cscs/ktezcan/weathergen/results" 
+
+# data_path_obs: "/lus/h2resw01/fws4/lb/project/ai-ml/observations/v1"

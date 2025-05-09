@@ -1,0 +1,7 @@
+create a new venv with uv venv --system-site-packages ./my-venv-name
+
+(you can pip install uv if you don't have it)
+
+install the packages (should be weathergen only in theory) uv pip install . -e
+
+now you can exit the job with exit and if you check the contents of the folder where you were working you should see that ./my-venv-nameshould have persisted!
