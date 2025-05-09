@@ -80,7 +80,8 @@ def evaluate_from_args(argl: list[str]):
     )
     parser.add_argument(
         "--analysis_streams_output",
-        type=list,
+        type=str,
+        nargs="+",
         default=["ERA5"],
         help="Analysis output streams during evaluation.",
     )
@@ -118,15 +119,11 @@ def evaluate_from_args(argl: list[str]):
     cf.log_validation = args.samples if args.save_samples else 0
     start_date, end_date = pd.to_datetime(args.start_date), pd.to_datetime(args.end_date)
 
-    cf.start_date_val = start_date.strftime("%Y%m%d%H%M")
-    cf.end_date_val = end_date.strftime("%Y%m%d%H%M")
+    cf.start_date_val = int(start_date.strftime("%Y%m%d%H%M"))
+    cf.end_date_val = int(end_date.strftime("%Y%m%d%H%M"))
 
     cf.shuffle = args.shuffle
-
     cf.forecast_steps = args.forecast_steps if args.forecast_steps else cf.forecast_steps
-    # cf.forecast_policy = 'fixed'
-
-    # cf.analysis_streams_output = ['Surface', 'Air', 'METEOSAT', 'ATMS', 'IASI', 'AMSR2']
     cf.analysis_streams_output = args.analysis_streams_output
 
     # make sure number of loaders does not exceed requested samples
@@ -190,13 +187,7 @@ def train_continue() -> None:
         cf.forecast_freeze_model = True
         cf.forecast_att_dense_rate = 1.0  # 0.25
 
-        if cf.forecast_freeze_model:
-            cf.with_fsdp = False
-            import torch
-
-            torch._dynamo.config.optimize_ddp = False
-
-        cf.fe_num_blocks = 8
+        cf.fe_num_blocks = 4
         cf.fe_num_heads = 16
         cf.fe_dropout_rate = 0.1
         cf.fe_with_qk_lnorm = True
