@@ -455,7 +455,7 @@ class Trainer(Trainer_Base):
 
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)
-        loss /= ctr_ftarget
+        loss = loss / ctr_ftarget
 
         return (
             loss,
