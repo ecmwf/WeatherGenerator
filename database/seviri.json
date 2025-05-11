@@ -9,9 +9,9 @@
       "keywords": [
           "atmosphere",
           "observation",
-	  "geostationary",
-	  "satellite"
-      ],
+	       "geostationary",
+        "satellite"
+    ],
       "providers": [
         {
           "name": "ECMWF",
@@ -85,7 +85,7 @@
       "creation_date": "TODO",
       "authors": "EUMETSAT",
       "contact": "TODO",
-      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)", 
+      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
       "project": "TODO",
       "experiment_id": "TODO",
       "source_id": "TODO",
