@@ -53,21 +53,9 @@
         },
 	{
             "rel": "child",
-	    "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/fesom.json",
+	        "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/fesom.json",
             "type": "application/json",
             "title": "FESOM - Ocean reanalysis"
-        },
-	{
-            "rel": "child",
-            "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/radklim.json",
-            "type": "application/json",
-            "title": "RADKLIM - Radar precipitation"
-        },
-	{
-            "rel": "child",
-            "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/imerg.json",
-            "type": "application/json",
-            "title": "IMERG - Radar precipitation"
         }
     ],
     "stac_extensions": [

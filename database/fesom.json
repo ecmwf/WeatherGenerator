@@ -90,7 +90,8 @@
           "Levante"
         ],
         "roles": ["data"]
-      },
+      }
+    },
     "bbox": [-180, -90, 180, 90],
     "stac_extensions": [
       "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",

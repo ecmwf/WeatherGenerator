@@ -20,7 +20,7 @@
             "host"
           ],
           "url": "https://ecmwf.int"
-        }
+        },
         {
           "name": "EUMETNET OPERA program",
           "description": "The OPERA is the data provider of the dataset",
@@ -51,7 +51,7 @@
       "creation_date": "TODO",
       "authors": "ECMWF Anemoi",
       "contact": "ECMWF",
-      "license": "EMCWF anemoi",
+      "license": "EMCWF anemoi"
     },
     "geometry": {
       "type": "Polygon",

@@ -20,7 +20,7 @@
             "host"
           ],
           "url": "https://ecmwf.int"
-        }
+        },
         {
           "name": "EUMETSAT",
           "description": "EUMETSAT is the data provider of the dataset",

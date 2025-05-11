@@ -7,8 +7,8 @@
       "title": "CERRA dataset from 1984 to 2020",
       "created": "2025-05-06T11:42:14Z",
       "keywords": [
-          "Europe",
-          "Copernicus",
+          "europe",
+          "copernicus",
           "atmosphere",
           "reanalysis"
       ],
@@ -22,22 +22,22 @@
           "url": "https://copernicus.eu"
         }
       ],
-      "start_datetime": "1984-01-01T00:15:00Z",
-      "end_datetime": "2020-12-31T00:00:00Z",
+      "start_datetime": "1984-09-01T06:00:00Z",
+      "end_datetime": "2022-09-31T18:00:00Z",
       "datetime": null,
       "cube:dimensions": {
         "time": {
           "type": "temporal",
           "extent": [
-            "1984-01-01T06:00:00Z",
-            "2020-12-31T18:00:00Z"
+            "1984-09-01T06:00:00Z",
+            "2022-09-31T18:00:00Z"
           ]
         }
       },
       "variables": [
        "TODO"
           ],
-      "frequency": "TODO",
+      "frequency": "3h",
       "creation_date": "TODO",
       "authors": "TODO",
       "contact": "TODO",
