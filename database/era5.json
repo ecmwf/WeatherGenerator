@@ -33,7 +33,7 @@
       ]
     }
   },
-    "cube:variables": [
+    "variables": [
       "tp", 
       "cp",
       "10u",
@@ -136,7 +136,7 @@
       "z_925",
       "z_1000"
     ],
-    "cube:levels": [
+    "levels": [
           "50",
           "100",
           "150",
@@ -157,7 +157,7 @@
     "license": "licence-to-use-copernicus-products" 
     },
     "geometry": {
-      "type": "Healpix grid",
+      "type": "Polygon",
       "coordinates": [
         [
           [-180, -90],

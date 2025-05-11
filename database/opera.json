@@ -1,16 +1,16 @@
 {
     "type": "Feature",
     "stac_version": "1.0.0",
-    "id": "weathergen.atmo.ERA5",
+    "id": "weathergen.atmo.OPERA",
     "properties": {
-      "description": "ERA5 is the fifth generation ECMWF reanalysis for the global climate and weather for the past 8 decades.\nData is available from 1940 onwards.\nERA5 replaces the ERA-Interim reanalysis.",
-      "title": "ERA5 dataset from 1979 to present",
-      "created": "2025-05-06T07:49:13Z",
+      "description": "The OPERA radar dataset is produced by the EUMETNET OPERA program, which coordinates and harmonizes European weather radar observations. It provides quality-controlled, pan-European radar composites and individual radar data from national meteorological services. ",
+      "title": "OPERA - Radar precipitation",
+      "created": "2025-05-11T11:15:13Z",
       "keywords": [
-          "ERA5",
-          "ECMWF",
+          "radar",
+          "precipitation",
 	  "atmosphere",
-	  "reanalysis"
+	  "observations"
       ],
       "providers": [
         {
@@ -21,58 +21,55 @@
           ],
           "url": "https://ecmwf.int"
         }
+        {
+          "name": "EUMETNET OPERA program",
+          "description": "The OPERA is the data provider of the dataset",
+          "roles": [
+            "provider"
+          ],
+          "url": "https://www.eumetnet.eu/wp-content/themes/aeron-child/observations-programme/current-activities/opera/database/OPERA_Database/index.html"
+        }
       ],
-      "start_datetime": "1979-01-01T00:15:00Z",
-      "end_datetime": "2024-01-01T00:00:00Z",
+      "start_datetime": "2013-01-22T15:00:00Z",
+      "end_datetime": "2024-02-15T14:05:00",
       "datetime": null,
       "cube:dimensions": {
         "time": {
           "type": "temporal",
           "extent": [
-            "1979-01-01T00:15:00Z",
-            "2024-01-01T00:00:00Z"
+            "2013-01-22T15:00:00Z",
+            "2024-02-15T14:05:00"
           ]
         }
       },
-      "cube:variables": {
-        "qv2m": {
-          "type": "data",
-          "dimensions": [
-            "time",
-            "cell"
-          ],
-          "unit": "TODO",
-          "description": "TODO"
-        }
-      },
-      "frequency": "TODO",
+      "variables": [
+        "mask",
+        "quality", 
+        "tp"
+    ],
+      "frequency": "15m",
       "creation_date": "TODO",
       "authors": "ECMWF Anemoi",
-      "contact": "TODO",
-      "license": "licence-to-use-copernicus-products", 
-      "project": "TODO",
-      "experiment_id": "TODO",
-      "source_id": "TODO",
-      "simulation_id": "TODO",
-      "_xpublish_id": "nextgems.ICON.ngc4008.PT15M_4"
+      "contact": "ECMWF",
+      "license": "EMCWF anemoi",
     },
     "geometry": {
       "type": "Polygon",
       "coordinates": [
         [
-          [-180, -90],
-          [-180, 90],
-          [180, 90],
-          [180, -90],
-          [-180, -90]
+          [-40, 32],
+          [-40, 68],
+          [58, 68],
+          [58, 32],
+          [-40, 32]
         ]
       ]
     },
     "links": [
       {
         "rel": "DOC",
-        "href": "https://confluence.ecmwf.int/display/MAEL/WeatherGenerator+Dataset",
-        "title": "Master documentation (ECMWF Confluence)"
+        "href": "https://www.eumetnet.eu/wp-content/uploads/2017/01/OPERA_hdf_description_2014.pdf",
+        "title": "EUMETNET OPERA program documentation"
       },
       {
         "rel": "collection",
@@ -81,12 +78,17 @@
       }
     ],
     "assets": {
-      "hpc2020": {
-        "href": "local://aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
+      "rodeo-opera-files-2km-2013-2023-15m-v1-lambert-azimuthal-equal-area": {
+        "href": "local://rodeo-opera-files-2km-2013-2023-15m-v1-lambert-azimuthal-equal-area",
         "type": "application/vnd+zarr",
-        "title": "hpc2020",
-        "description": "TODO",
-        "HPC local path": "aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
+        "title": "rodeo-opera-files-2km-2013-2023-15m-v1-lambert-azimuthal-equal-area",
+        "description": "Opera dataset for RODEO 2km",
+        "HPC location": [
+          "HPC2020", 
+          "MareNostrum5",
+          "Leonardo", 
+          "Juwels"
+        ],
         "roles": [
           "data"
         ]
@@ -99,7 +101,7 @@
       "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
     ],
     "default_var": "pr",
-    "name": "weathergen.atmo.ERA5",
+    "name": "weathergen.atmo.OPERA",
     "levels": [
     ]
   }

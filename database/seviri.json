@@ -1,78 +1,114 @@
 {
     "type": "Feature",
     "stac_version": "1.0.0",
-    "id": "weathergen.atmo.ERA5",
+    "id": "weathergen.atmo.SEVIRI",
     "properties": {
-      "description": "ERA5 is the fifth generation ECMWF reanalysis for the global climate and weather for the past 8 decades.\nData is available from 1940 onwards.\nERA5 replaces the ERA-Interim reanalysis.",
-      "title": "ERA5 dataset from 1979 to present",
+      "description": "The Spinning Enhanced Visible and InfraRed Imager (SEVIRI) is an onboard sensor of the Meteosat Second Generation (MSG) satellites operated by EUMETSAT. SEVIRI provides high-frequency geostationary observations of the Earth’s atmosphere, land, and ocean surfaces over Europe, Africa, and parts of the Atlantic. ",
+      "title": "SEVIRI - Geostationary Satellite",
       "created": "2025-05-06T07:49:13Z",
       "keywords": [
-          "ERA5",
-          "ECMWF",
-	  "atmosphere",
-	  "reanalysis"
+          "atmosphere",
+          "observation",
+	  "geostationary",
+	  "satellite"
       ],
       "providers": [
         {
           "name": "ECMWF",
-          "description": "ECMWF is the data host of the dataset",
+          "description": "ECMWF is the data host of the dataset for this project",
           "roles": [
             "host"
           ],
           "url": "https://ecmwf.int"
         }
+        {
+          "name": "EUMETSAT",
+          "description": "EUMETSAT is the data provider of the dataset",
+          "roles": [
+            "provider"
+          ],
+          "url": "https://eumetsat.int"
+        }
       ],
-      "start_datetime": "1979-01-01T00:15:00Z",
+      "start_datetime": "2013-01-01T00:00:00Z",
       "end_datetime": "2024-01-01T00:00:00Z",
       "datetime": null,
       "cube:dimensions": {
         "time": {
           "type": "temporal",
           "extent": [
-            "1979-01-01T00:15:00Z",
+            "2013-01-01T00:00:00Z",
             "2024-01-01T00:00:00Z"
           ]
         }
       },
       "cube:variables": {
-        "qv2m": {
-          "type": "data",
-          "dimensions": [
-            "time",
-            "cell"
-          ],
-          "unit": "TODO",
-          "description": "TODO"
+        "HRV": {
+          "description": "High resolution visible"
+        }, 
+        "VIS0.6": {
+          "description": "Visible channel 0.6"
+        },
+        "VIS0.8": {
+          "description": "Visible channel 0.8"
+        },
+        
+        "NIR1.6": {
+          "description": "near infrared channel 1.6"
+        },
+        "IR3.9": {
+          "description": "Infrared channel 3.9"
+        },
+        "WV6.2": {
+          "description": "Water vapour channel 6.2"
+        },
+        "WV7.3": {
+          "description": "Water vapour channel 7.3"
+        },
+        "IR8.7": {
+          "description": "Infrared channel 8.7"
+        },
+        "IR9.7": {
+          "description": "Infrared channel 9.7"
+        },
+        "IR10.8": {
+          "description": "Infrared channel 10.8"
+        },
+        "IR12.0": {
+          "description": "Infrared channel 12.0"
+        },
+        "IR13.4": {
+          "description": "Infrared channel 13.4"
         }
       },
       "frequency": "TODO",
       "creation_date": "TODO",
-      "authors": "ECMWF Anemoi",
+      "authors": "EUMETSAT",
       "contact": "TODO",
-      "license": "licence-to-use-copernicus-products", 
+      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)", 
       "project": "TODO",
       "experiment_id": "TODO",
       "source_id": "TODO",
       "simulation_id": "TODO",
-      "_xpublish_id": "nextgems.ICON.ngc4008.PT15M_4"
+      "_xpublish_id": "TODO"
     },
     "geometry": {
       "type": "Polygon",
       "coordinates": [
         [
-          [-180, -90],
-          [-180, 90],
-          [180, 90],
-          [180, -90],
-          [-180, -90]
+          [-70, -65],
+          [-70, 65],
+          [70, 65],
+          [70, -65],
+          [-70, -65]
         ]
       ]
     },
     "links": [
       {
         "rel": "DOC",
-        "href": "https://confluence.ecmwf.int/display/MAEL/WeatherGenerator+Dataset",
-        "title": "Master documentation (ECMWF Confluence)"
+        "href": "https://user.eumetsat.int/resources/service-statuses/MSG-instruments-status-and-calibration",
+        "title": "EUMETSAT documentation"
       },
       {
         "rel": "collection",
@@ -81,25 +117,27 @@
       }
     ],
     "assets": {
-      "hpc2020": {
-        "href": "local://aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
+      "seviri dataset - in preparation": {
+        "href": "local://temp.zarr",
         "type": "application/vnd+zarr",
-        "title": "hpc2020",
+        "title": "seviri dataset - in preparation",
         "description": "TODO",
-        "HPC local path": "aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
+        "HPC locations": [
+          "HPC2020"
+        ],
         "roles": [
           "data"
         ]
       }
     },
-    "bbox": [-180, -90, 180, 90],
+    "bbox": [-70, -65, 70, 65],
     "stac_extensions": [
       "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
       "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json",
       "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
     ],
     "default_var": "pr",
-    "name": "weathergen.atmo.ERA5",
+    "name": "weathergen.atmo.SEVIRI",
     "levels": [
     ]
   }

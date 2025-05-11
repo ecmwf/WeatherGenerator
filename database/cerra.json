@@ -1,78 +1,65 @@
 {
     "type": "Feature",
     "stac_version": "1.0.0",
-    "id": "weathergen.atmo.ERA5",
+    "id": "weathergen.atmo.CERRA",
     "properties": {
-      "description": "ERA5 is the fifth generation ECMWF reanalysis for the global climate and weather for the past 8 decades.\nData is available from 1940 onwards.\nERA5 replaces the ERA-Interim reanalysis.",
-      "title": "ERA5 dataset from 1979 to present",
-      "created": "2025-05-06T07:49:13Z",
+      "description": "The Copernicus European Regional Reanalysis (CERRA), developed under the Copernicus Climate Change Service (C3S), provides a high-resolution reanalysis of atmospheric conditions over Europe. Covering the period from 1984 onward, CERRA delivers hourly data at a spatial resolution of 5.5 km, capturing fine-scale climate and weather patterns with improved detail compared to global reanalyses",
+      "title": "CERRA dataset from 1984 to 2020",
+      "created": "2025-05-06T11:42:14Z",
       "keywords": [
-          "ERA5",
-          "ECMWF",
-	  "atmosphere",
-	  "reanalysis"
+          "Europe",
+          "Copernicus",
+          "atmosphere",
+          "reanalysis"
       ],
       "providers": [
         {
-          "name": "ECMWF",
-          "description": "ECMWF is the data host of the dataset",
+          "name": "Copernicus",
+          "description": "Copernicus is the data provider of the dataset",
           "roles": [
-            "host"
+            "provider"
           ],
-          "url": "https://ecmwf.int"
+          "url": "https://copernicus.eu"
         }
       ],
-      "start_datetime": "1979-01-01T00:15:00Z",
-      "end_datetime": "2024-01-01T00:00:00Z",
+      "start_datetime": "1984-01-01T00:15:00Z",
+      "end_datetime": "2020-12-31T00:00:00Z",
       "datetime": null,
       "cube:dimensions": {
         "time": {
           "type": "temporal",
           "extent": [
-            "1979-01-01T00:15:00Z",
-            "2024-01-01T00:00:00Z"
+            "1984-01-01T06:00:00Z",
+            "2020-12-31T18:00:00Z"
           ]
         }
       },
-      "cube:variables": {
-        "qv2m": {
-          "type": "data",
-          "dimensions": [
-            "time",
-            "cell"
+      "variables": [
+       "TODO"
           ],
-          "unit": "TODO",
-          "description": "TODO"
-        }
-      },
       "frequency": "TODO",
       "creation_date": "TODO",
-      "authors": "ECMWF Anemoi",
+      "authors": "TODO",
       "contact": "TODO",
-      "license": "licence-to-use-copernicus-products", 
-      "project": "TODO",
-      "experiment_id": "TODO",
-      "source_id": "TODO",
-      "simulation_id": "TODO",
-      "_xpublish_id": "nextgems.ICON.ngc4008.PT15M_4"
+      "license": "licence-to-use-copernicus-products"
     },
     "geometry": {
       "type": "Polygon",
       "coordinates": [
         [
-          [-180, -90],
-          [-180, 90],
-          [180, 90],
-          [180, -90],
-          [-180, -90]
+          [17, 20],
+          [17, 65],
+          [35, 65],
+          [35, 20],
+          [17, 20]
         ]
       ]
     },
     "links": [
       {
         "rel": "DOC",
-        "href": "https://confluence.ecmwf.int/display/MAEL/WeatherGenerator+Dataset",
-        "title": "Master documentation (ECMWF Confluence)"
+        "href": "https://climate.copernicus.eu/copernicus-regional-reanalysis-europe-cerra",
+        "title": "Master documentation (Copernicus Data store)"
       },
       {
         "rel": "collection",
@@ -81,25 +68,25 @@
       }
     ],
     "assets": {
-      "hpc2020": {
-        "href": "local://aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
+      "TODO": {
+        "href": "local://temp.zarr",
         "type": "application/vnd+zarr",
-        "title": "hpc2020",
-        "description": "TODO",
-        "HPC local path": "aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
-        "roles": [
-          "data"
-        ]
+        "title": "CERRA dataset - in preparation",
+        "description": "dataset at 5.5 km resolution",
+        "HPC locations": [
+          "TODO"
+        ],
+        "roles": [ "data" ]
       }
     },
-    "bbox": [-180, -90, 180, 90],
+    "bbox": [17, 20, 35, 65],
     "stac_extensions": [
       "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
       "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json",
       "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
     ],
     "default_var": "pr",
-    "name": "weathergen.atmo.ERA5",
+    "name": "weathergen.atmo.CERRA",
     "levels": [
     ]
   }

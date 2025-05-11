@@ -1,16 +1,16 @@
 {
     "type": "Feature",
     "stac_version": "1.0.0",
-    "id": "weathergen.atmo.ERA5",
+    "id": "weathergen.atmo.NPPATMS",
     "properties": {
-      "description": "ERA5 is the fifth generation ECMWF reanalysis for the global climate and weather for the past 8 decades.\nData is available from 1940 onwards.\nERA5 replaces the ERA-Interim reanalysis.",
-      "title": "ERA5 dataset from 1979 to present",
-      "created": "2025-05-06T07:49:13Z",
+      "description": "The NPP-ATMS (Advanced Technology Microwave Sounder) dataset is derived from the ATMS instrument onboard the NOAA/NASA National Polar-orbiting Partnership (NPP) satellite. It provides global measurements of atmospheric temperature, moisture, and pressure profiles, crucial for weather forecasting and climate monitoring",
+      "title": "NPP ATMS - polar orbiter",
+      "created": "2025-05-11T11:49:32Z",
       "keywords": [
-          "ERA5",
-          "ECMWF",
-	  "atmosphere",
-	  "reanalysis"
+          "polar orbiter",
+          "satellite",
+          "atmosphere",
+          "observations"
       ],
       "providers": [
         {
@@ -22,39 +22,136 @@
           "url": "https://ecmwf.int"
         }
       ],
-      "start_datetime": "1979-01-01T00:15:00Z",
-      "end_datetime": "2024-01-01T00:00:00Z",
+      "start_datetime": "TODO",
+      "end_datetime": "TODO",
       "datetime": null,
       "cube:dimensions": {
         "time": {
           "type": "temporal",
           "extent": [
-            "1979-01-01T00:15:00Z",
-            "2024-01-01T00:00:00Z"
+            "TODO",
+            "TODO"
           ]
         }
       },
-      "cube:variables": {
-        "qv2m": {
-          "type": "data",
-          "dimensions": [
-            "time",
-            "cell"
-          ],
-          "unit": "TODO",
-          "description": "TODO"
+      "variables": 
+      [
+        {
+          "channel": 1,
+          "frequency_GHz": 23.8,
+          "description": "Surface and precipitation sensitivity; window channel"
+        },
+        {
+          "channel": 2,
+          "frequency_GHz": 31.4,
+          "description": "Cloud liquid water and surface properties; window channel"
+        },
+        {
+          "channel": 3,
+          "frequency_GHz": 50.3,
+          "description": "Lower tropospheric temperature sounding"
+        },
+        {
+          "channel": 4,
+          "frequency_GHz": 51.76,
+          "description": "Lower tropospheric temperature sounding"
+        },
+        {
+          "channel": 5,
+          "frequency_GHz": 52.8,
+          "description": "Lower to mid-tropospheric temperature sounding"
+        },
+        {
+          "channel": 6,
+          "frequency_GHz": 53.596,
+          "description": "Mid-tropospheric temperature sounding"
+        },
+        {
+          "channel": 7,
+          "frequency_GHz": 54.4,
+          "description": "Mid to upper tropospheric temperature sounding"
+        },
+        {
+          "channel": 8,
+          "frequency_GHz": 54.94,
+          "description": "Upper tropospheric temperature sounding"
+        },
+        {
+          "channel": 9,
+          "frequency_GHz": 55.5,
+          "description": "Upper tropospheric/lower stratospheric temperature sounding"
+        },
+        {
+          "channel": 10,
+          "frequency_GHz": 57.29,
+          "description": "Lower stratospheric temperature sounding"
+        },
+        {
+          "channel": 11,
+          "frequency_GHz": 57.29,
+          "description": "Lower stratospheric temperature sounding (alternate bandwidth)"
+        },
+        {
+          "channel": 12,
+          "frequency_GHz": 57.29,
+          "description": "Middle stratospheric temperature sounding"
+        },
+        {
+          "channel": 13,
+          "frequency_GHz": 57.29,
+          "description": "Upper stratospheric temperature sounding"
+        },
+        {
+          "channel": 14,
+          "frequency_GHz": 57.29,
+          "description": "Upper stratospheric temperature sounding (narrower bandwidth)"
+        },
+        {
+          "channel": 15,
+          "frequency_GHz": 57.29,
+          "description": "Upper stratospheric/lower mesospheric temperature sounding"
+        },
+        {
+          "channel": 16,
+          "frequency_GHz": 57.29,
+          "description": "Mesospheric temperature sounding"
+        },
+        {
+          "channel": 17,
+          "frequency_GHz": 88.2,
+          "description": "Cloud and precipitation detection"
+        },
+        {
+          "channel": 18,
+          "frequency_GHz": 165.5,
+          "description": "Water vapor; sensitive to cloud ice and snow"
+        },
+        {
+          "channel": 19,
+          "frequency_GHz": 183.31,
+          "description": "Water vapor absorption line (center)"
+        },
+        {
+          "channel": 20,
+          "frequency_GHz": 183.31,
+          "description": "Water vapor absorption line (+1 GHz offset)"
+        },
+        {
+          "channel": 21,
+          "frequency_GHz": 183.31,
+          "description": "Water vapor absorption line (+3 GHz offset)"
+        },
+        {
+          "channel": 22,
+          "frequency_GHz": 183.31,
+          "description": "Water vapor absorption line (+7 GHz offset)"
         }
-      },
-      "frequency": "TODO",
+      ],
+      "frequency": "15m",
       "creation_date": "TODO",
-      "authors": "ECMWF Anemoi",
+      "authors": "EUMETSAT",
       "contact": "TODO",
-      "license": "licence-to-use-copernicus-products", 
-      "project": "TODO",
-      "experiment_id": "TODO",
-      "source_id": "TODO",
-      "simulation_id": "TODO",
-      "_xpublish_id": "nextgems.ICON.ngc4008.PT15M_4"
+      "license": "TODO"
     },
     "geometry": {
       "type": "Polygon",
@@ -71,8 +168,8 @@
     "links": [
       {
         "rel": "DOC",
-        "href": "https://confluence.ecmwf.int/display/MAEL/WeatherGenerator+Dataset",
-        "title": "Master documentation (ECMWF Confluence)"
+        "href": "https://user.eumetsat.int/catalogue/EO:EUM:DAT:0345",
+        "title": "EUMETSAT catalogue"
       },
       {
         "rel": "collection",
@@ -81,12 +178,14 @@
       }
     ],
     "assets": {
-      "hpc2020": {
-        "href": "local://aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
+      "ADD NAME": {
+        "href": "local://temp.zarr",
         "type": "application/vnd+zarr",
-        "title": "hpc2020",
+        "title": "NPP ATMS dataset - in preparation",
         "description": "TODO",
-        "HPC local path": "aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
+        "HPC locaions": [
+          "HPC2020"
+        ],
         "roles": [
           "data"
         ]
@@ -99,7 +198,7 @@
       "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
     ],
     "default_var": "pr",
-    "name": "weathergen.atmo.ERA5",
+    "name": "weathergen.atmo.NPPATMS",
     "levels": [
     ]
   }

@@ -1,51 +1,104 @@
 {
-    "type": "Collection", 
-    "id": "fesom", 
-    "stac_version": "1.1.0", 
-    "description": "FESOM data - Ocean model\n", 
-    "title": "FESOM", 
-    "data_type": "grid",
-    "representative_fraction": 1.0,
-    "links": [{
-        "rel": "root", 
-        // "href": "https://raw.githubusercontent.com/eerie-project/intake_catalogues/refs/heads/main/dkrz/disk/stac-templates/ifs-fesom2-sr/eerie-control-1950/stac_ifs-fesom2-sr_eerie-control-1950.json", 
-        "href": "???",
-        "type": "application/json", 
-        "title": "FESOM"
-        }, 
-        {"rel": "self", 
-        // "href": "https://raw.githubusercontent.com/eerie-project/intake_catalogues/refs/heads/main/dkrz/disk/stac-templates/ifs-fesom2-sr/eerie-control-1950/stac_ifs-fesom2-sr_eerie-control-1950.json", 
-        "href": "???",
-        "type": "application/json"
-        }, 
-        {"rel": "parent", 
-        // "href": "https://raw.githubusercontent.com/eerie-project/intake_catalogues/refs/heads/main/dkrz/disk/stac-templates/catalog-experiments.json", 
-        "href": "???",
-        "type": "application/json"
-        }], 
-    "extent": {
-        "spatial": {
-            "bbox": [[-180, -90, 180, 90]]
-        }, 
-        "temporal": {
-            "interval": [["1950-01-01T00:00:00Z", "2050-01-01T00:00:00Z"]]
+    "type": "Feature",
+    "stac_version": "1.0.0",
+    "id": "weathergen.ocean.FESOM",
+    "properties": {
+      "description": "FESOM (Finite-Element/volumE Sea ice-Ocean Model) is a multi-resolution sea ice-ocean model that solves the equations of motion on unstructured meshes. The model is developed and supported by researchers at the Alfred Wegener Institute, Helmholtz Centre for Polar and Marine Research (AWI), in Bremerhaven, Germany..",
+      "title": "FESOM - Ocean reanalysis",
+      "created": "2025-05-06T07:49:13Z",
+      "keywords": [
+          "FESOM",
+          "AWI",
+	  "ocean",
+	  "simulation"
+      ],
+      "providers": [
+        {
+          "name": "AWI",
+          "description": "Alfred Wegener Institute, Helmholtz Centre for Polar and Marine Research (AWI)",
+          "roles": [
+            "host"
+          ],
+          "url": "http://awi.de/"
         }
-    }, 
-    "license": "other", 
-    "keywords": ["FESOM2", "ocean", "analysis"], 
-    "doi": "doi.org/10.1029/2020MS002438", 
-    "providers": [{
-        "name": "AWI", 
-        "description": "The data host of the dataset", 
-        "roles": ["host"], 
-        // "url": "????"}], 
-    }],
+      ],
+      "start_datetime": "TODO",
+      "end_datetime": "TODO",
+      "datetime": null,
+      "cube:dimensions": {
+        "time": {
+          "type": "temporal",
+          "extent": [
+            "TODO",
+            "TODO"
+          ]
+        }
+      },
+      "cube:variables": {
+        "TODO": {
+          "type": "data",
+          "dimensions": [
+            "time",
+            "cell"
+          ],
+          "unit": "TODO",
+          "description": "TODO"
+        }
+      },
+      "frequency": "TODO",
+      "creation_date": "TODO",
+      "authors": "ECMWF Anemoi",
+      "contact": "TODO",
+      "license": "GNU General Public License v3.0 (GPL-3.0)", 
+      "project": "TODO",
+      "experiment_id": "TODO",
+      "source_id": "TODO",
+      "simulation_id": "TODO",
+      "_xpublish_id": "TODO"
+    },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [-180, -90],
+          [-180, 90],
+          [180, 90],
+          [180, -90],
+          [-180, -90]
+        ]
+      ]
+    },
+    "links": [
+      {
+        "rel": "DOC",
+        "href": "https://confluence.ecmwf.int/display/MAEL/WeatherGenerator+Dataset",
+        "title": "Master documentation (ECMWF Confluence)"
+      },
+      {
+        "rel": "collection",
+        "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/catalogue.json",
+        "type": "application/json"
+      }
+    ],
     "assets": {
-        "doc": {
-            "href": "https://pad.gwdg.de/OZo5HMC4R6iljvZHlo-BzQ#", 
-            "type": "text/html", 
-            "title": "Technical documentation", 
-            "roles": ["OVERVIEW"]
-        }
-    }
-}
+      "ADD NAME": {
+        "href": "local://temp.zarr",
+        "type": "application/vnd+zarr",
+        "title": "ADD NAME",
+        "description": "Ocean reanalysis data from XXXX to XXXX",
+        "HPC locations": [
+          "Levante"
+        ],
+        "roles": ["data"]
+      },
+    "bbox": [-180, -90, 180, 90],
+    "stac_extensions": [
+      "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
+      "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json",
+      "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
+    ],
+    "default_var": "pr",
+    "name": "weathergen.ocean.FESOM",
+    "levels": [
+    ]
+  }

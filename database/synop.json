@@ -1,16 +1,15 @@
 {
     "type": "Feature",
     "stac_version": "1.0.0",
-    "id": "weathergen.atmo.ERA5",
+    "id": "weathergen.atmo.SYNOP",
     "properties": {
-      "description": "ERA5 is the fifth generation ECMWF reanalysis for the global climate and weather for the past 8 decades.\nData is available from 1940 onwards.\nERA5 replaces the ERA-Interim reanalysis.",
-      "title": "ERA5 dataset from 1979 to present",
-      "created": "2025-05-06T07:49:13Z",
+      "description": "SYNOP (surface synoptic observation) data consist of standardized meteorological observations collected from land-based weather stations worldwide, typically at 6-hourly or hourly intervals. These observations include key atmospheric variables such as temperature, wind speed and direction, pressure, humidity, cloud cover, and precipitation. ",
+      "title": "SYNOP - Ground stations",
+      "created": "2025-05-11T11:32:13Z",
       "keywords": [
-          "ERA5",
-          "ECMWF",
-	  "atmosphere",
-	  "reanalysis"
+          "ground stations",
+          "observations",
+	  "atmosphere"
       ],
       "providers": [
         {
@@ -21,40 +20,28 @@
           ],
           "url": "https://ecmwf.int"
         }
+
       ],
-      "start_datetime": "1979-01-01T00:15:00Z",
-      "end_datetime": "2024-01-01T00:00:00Z",
+      "start_datetime": "TODO",
+      "end_datetime": "TODO",
       "datetime": null,
       "cube:dimensions": {
         "time": {
           "type": "temporal",
           "extent": [
-            "1979-01-01T00:15:00Z",
-            "2024-01-01T00:00:00Z"
+            "TODO",
+            "TODO"
           ]
         }
       },
-      "cube:variables": {
-        "qv2m": {
-          "type": "data",
-          "dimensions": [
-            "time",
-            "cell"
-          ],
-          "unit": "TODO",
-          "description": "TODO"
-        }
-      },
+      "cube:variables": [
+        "add name"
+      ],
       "frequency": "TODO",
       "creation_date": "TODO",
-      "authors": "ECMWF Anemoi",
+      "authors": "mixed",
       "contact": "TODO",
-      "license": "licence-to-use-copernicus-products", 
-      "project": "TODO",
-      "experiment_id": "TODO",
-      "source_id": "TODO",
-      "simulation_id": "TODO",
-      "_xpublish_id": "nextgems.ICON.ngc4008.PT15M_4"
+      "license": "TODO"
     },
     "geometry": {
       "type": "Polygon",
@@ -71,8 +58,8 @@
     "links": [
       {
         "rel": "DOC",
-        "href": "https://confluence.ecmwf.int/display/MAEL/WeatherGenerator+Dataset",
-        "title": "Master documentation (ECMWF Confluence)"
+        "href": "https://docs.synopticdata.com/services/synop",
+        "title": "WMO synoptic data documentation"
       },
       {
         "rel": "collection",
@@ -81,12 +68,14 @@
       }
     ],
     "assets": {
-      "hpc2020": {
-        "href": "local://aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
+      "ADD NAME": {
+        "href": "local://temp.zarr",
         "type": "application/vnd+zarr",
-        "title": "hpc2020",
+        "title": "ADD NAME",
         "description": "TODO",
-        "HPC local path": "aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr",
+        "HPC locations": [
+          "HPC2020"
+        ],
         "roles": [
           "data"
         ]
@@ -99,7 +88,7 @@
       "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
     ],
     "default_var": "pr",
-    "name": "weathergen.atmo.ERA5",
+    "name": "weathergen.atmo.SYNOP",
     "levels": [
     ]
   }
