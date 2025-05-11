@@ -119,7 +119,7 @@
     "assets": {
       "seviri dataset - in preparation": {
         "href": "local://temp.zarr",
-        "type": "application/vnd+zarr",
+        "type": "application/vnd+prep",
         "title": "seviri dataset - in preparation",
         "description": "TODO",
         "HPC locations": [
