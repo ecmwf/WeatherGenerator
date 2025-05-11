@@ -68,7 +68,7 @@
             "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/imerg.json",
             "type": "application/json",
             "title": "IMERG - Radar precipitation"
-        },
+        }
     ],
     "stac_extensions": [
 	"https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
