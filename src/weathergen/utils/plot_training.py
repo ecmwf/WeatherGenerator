@@ -8,8 +8,11 @@
 # nor does it submit to any jurisdiction.
 
 import argparse
+from typing import List, Dict
 import logging
 import pathlib
+from pathlib import Path
+import json as js
 import subprocess
 
 import matplotlib.pyplot as plt
@@ -18,24 +21,67 @@ import numpy as np
 import weathergen.utils.config as config
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
-out_folder = pathlib.Path("./plots/")
-
 
 ####################################################################################################
-def clean_out_folder():
-    for image in out_folder.glob("*.png"):
+def clean_plot_folder(
+        plot_dir: Path = "./plots/"):
+    """
+    Clean the plot folder by removing all png-files in it.
+    
+    Parameters
+    ----------
+    plot_dir : Path
+        Path to the plot directory
+"""
+    for image in plot_dir.glob("*.png"):
         image.unlink()
 
 
 ####################################################################################################
-def get_stream_names(run_id):
+def get_stream_names(run_id: str, model_path: Path | None = "./model"):
+    """
+    Get the stream names from the model configuration file.
+
+    Parameters
+    ----------
+    run_id : str
+        ID of the training run
+    model_path : Path
+        Path to the model directory
+    Returns
+    -------
+    -------
+    list
+        List of stream names
+    """
     # return col names from training (should be identical to validation)
-    cf = config.load_model_config(run_id, -1, None)
+    cf = config.load_model_config(run_id, -1, model_path=model_path)
     return [si["name"].replace(",", "").replace("/", "_").replace(" ", "_") for si in cf.streams]
 
 
 ####################################################################################################
-def plot_lr(runs_ids, runs_data: list[Metrics], runs_active, x_axis="samples"):
+def plot_lr(
+        runs_ids: Dict[str, List],
+        runs_data: List[Metrics],
+        runs_active: List[bool],
+        x_axis: str ="samples",
+        plot_dir: Path = Path("./plots")):
+    """
+    Plot learning rate curves of training runs.
+    
+    Parameters
+    ----------
+    runs_ids : dict
+        dictionary with run ids as keys and list of SLURM job ids and descriptions as values
+    runs_data : list
+        list of Metrics objects containing the training data
+    runs_active : list
+        list of booleans indicating whether the run is still active
+    x_axis : str
+        x-axis strings used in the column names (options: "samples", "dtime")
+    plot_dir : Path
+        directory to save the plots
+    """
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
     _fig = plt.figure(figsize=(10, 7), dpi=300)
@@ -71,12 +117,33 @@ def plot_lr(runs_ids, runs_data: list[Metrics], runs_active, x_axis="samples"):
     plt.xlabel(x_axis)
     plt.tight_layout()
     rstr = "".join([f"{r}_" for r in runs_ids])
-    plt.savefig(f"./plots/{rstr}lr.png")
+    plt.savefig(plot_dir / f"{rstr}lr.png")
     plt.close()
 
 
 ####################################################################################################
-def plot_utilization(runs_ids, runs_data: list[Metrics], runs_active, x_axis="samples"):
+def plot_utilization(
+        runs_ids: Dict[str, List],
+        runs_data: List[Metrics],
+        runs_active: List[bool],
+        x_axis: str = "samples",
+        plot_dir: Path = Path("./plots")):
+    """
+    Plot compute utilization of training runs.
+
+    Parameters
+    ----------
+    runs_ids : dict
+        dictionary with run ids as keys and list of SLURM job ids and descriptions as values
+    runs_data : list
+        list of Metrics objects containing the training data
+    runs_active : list
+        list of booleans indicating whether the run is still active
+    x_axis : str
+        x-axis strings used in the column names (options: "samples", "dtime")
+    plot_dir : Path
+        directory to save the plots
+    """
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
     _fig = plt.figure(figsize=(10, 7), dpi=300)
@@ -119,24 +186,48 @@ def plot_utilization(runs_ids, runs_data: list[Metrics], runs_active, x_axis="sa
     plt.xlabel(x_axis)
     plt.tight_layout()
     rstr = "".join([f"{r}_" for r in runs_ids])
-    plt.savefig(f"./plots/{rstr}utilization.png")
+    plt.savefig(plot_dir/ f"{rstr}utilization.png")
     plt.close()
 
 
 ####################################################################################################
 def plot_loss_per_stream(
-    modes,
-    runs_ids,
-    runs_data: list[Metrics],
-    runs_active,
-    stream_names,
-    errs=["mse"],
-    x_axis="samples",
-    x_type="step",
-    x_scale_log=False,
+    modes: List[str],
+    runs_ids: Dict[str, list],
+    runs_data: List[Metrics],
+    runs_active: List[bool],
+    stream_names: List[str],
+    errs: List[str] = ["mse"],
+    x_axis: str = "samples",
+    x_type: str = "step",
+    x_scale_log: bool = False,
+    plot_dir: Path = Path("./plots"),
 ):
     """
     Plot each stream in stream_names (using matching to data columns) for all run_ids
+
+    Parameters
+    ----------
+    modes : list
+        list of modes for which losses are plotted (e.g. train, val)
+    runs_ids : dict
+        dictionary with run ids as keys and list of SLURM job ids and descriptions as values
+    runs_data : list
+        list of Metrics objects containing the training data
+    runs_active : list
+        list of booleans indicating whether the run is still active
+    stream_names : list
+        list of stream names to plot
+    errs : list
+        list of errors to plot (e.g. mse, stddev)
+    x_axis : str
+        x-axis strings used in the column names (options: "samples", "dtime")
+    x_type : str
+        x-axis type (options: "step", "reltime")
+    x_scale_log : bool
+        whether to use log scale for x-axis
+    plot_dir : Path
+        directory to save the plots
     """
 
     modes = [modes] if type(modes) is not list else modes
@@ -216,27 +307,48 @@ def plot_loss_per_stream(
         plt.tight_layout()
         rstr = "".join([f"{r}_" for r in runs_ids])
         plt.savefig(
-            out_folder / "{}{}{}.png".format(rstr, "".join([f"{m}_" for m in modes]), stream_name)
+            plot_dir / "{}{}{}.png".format(rstr, "".join([f"{m}_" for m in modes]), stream_name)
         )
         plt.close()
 
 
 ####################################################################################################
 def plot_loss_per_run(
-    modes,
-    run_id,
-    run_desc,
+    modes: List[str],
+    run_id: str,
+    run_desc: str,
     run_data: Metrics,
-    stream_names,
-    errs=["mse"],
-    x_axis="samples",
-    x_scale_log=False,
+    stream_names: List[str],
+    errs: List[str] = ["mse"],
+    x_axis: str ="samples",
+    x_scale_log: bool = False,
+    plot_dir: Path = Path("./plots"),
 ):
     """
     Plot all stream_names (using matching to data columns) for given run_id
 
-    x_axis : {samples,dtime} as used in the column names
+    Parameters
+    ----------
+    modes : list
+        list of modes for which losses are plotted (e.g. train, val)
+    run_id : str
+        ID of the training run to plot
+    run_desc : List[str]
+        Description of the training run
+    run_data : Metrics
+        Metrics object containing the training data
+    stream_names : list
+        list of stream names to plot
+    errs : list
+        list of errors to plot (e.g. mse, stddev)
+    x_axis : str
+        x-axis strings used in the column names (options: "samples", "dtime")
+    x_scale_log : bool
+        whether to use log scale for x-axis
+    plot_dir : Path
+        directory to save the plots
     """
+    plot_dir = Path(plot_dir)
 
     modes = [modes] if type(modes) is not list else modes
     # repeat colors when train and val is plotted simultaneously
@@ -298,25 +410,40 @@ def plot_loss_per_run(
     sstr = "".join(
         [f"{r}_".replace(",", "").replace("/", "_").replace(" ", "_") for r in legend_str]
     )
-    plt.savefig(out_folder / "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr))
+    plt.savefig(plot_dir / "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr))
     plt.close()
 
 
 ####################################################################################################
 if __name__ == "__main__":
+
+    # Example usage:
+    # python plot_training.py -ids '{"qlz6n9eg": [12341234, "My experiments"]}' -m ./trained_models -o ./training_plots
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     parser = argparse.ArgumentParser()
-    parser.add_argument("-d", "--delete")
+
+    parser.add_argument("-o", "--output_dir", default="./plots/", type=str,
+                        help="Directory where plots are saved")
+    parser.add_argument("-m", "--model_base_dir", default="./models/", type=str, 
+                        help="Base-directory where models are saved")
+    parser.add_argument("-d", "--delete", default=False, action="store_true", 
+                        help="Delete all plots in the output directory before plotting")
+    parser.add_argument("-ids", "--runs_ids", type=js.loads, required=True,
+                        help="JSON string with run ids as keys and list of SLURM job ids and descriptions as values")
+    
     args = parser.parse_args()
 
+    model_base_dir = Path(args.model_base_dir)
+    out_dir = Path(args.output_dir)
+    runs_ids = args.runs_ids
+
     if args.delete == "True":
-        clean_out_folder()
+        clean_plot_folder(out_dir)
 
-    runs_ids = {
-        "fb89k61l": [34298989, "ERA5 test"],
-    }
+    # read logged data
 
-    runs_data = [TrainLogger.read(run_id) for run_id in runs_ids]
+    runs_data = [TrainLogger.read(run_id, model_path=model_base_dir) for run_id in runs_ids]
 
     # determine which runs are still alive (as a process, though they might hang internally)
     ret = subprocess.run(["squeue"], capture_output=True)
@@ -324,14 +451,14 @@ if __name__ == "__main__":
     runs_active = [np.array([str(v[0]) in l for l in lines[1:]]).any() for v in runs_ids.values()]
 
     x_scale_log = False
-    x_type = ("reltime",)  #'step'
+    x_type = ("step",)  #'reltime'
     # x_type = "step"
 
     # plot learning rate
-    plot_lr(runs_ids, runs_data, runs_active)
+    plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir)
 
     # plot performance
-    plot_utilization(runs_ids, runs_data, runs_active)
+    #plot_utilization(runs_ids, runs_data, runs_active, plot_dir=plt_path)
 
     # compare different runs
     plot_loss_per_stream(
@@ -342,6 +469,7 @@ if __name__ == "__main__":
         ["era5", "METEOSAT", "NPP"],
         x_type=x_type,
         x_scale_log=x_scale_log,
+        plot_dir = out_dir
     )
     plot_loss_per_stream(
         ["val"],
@@ -351,6 +479,7 @@ if __name__ == "__main__":
         ["era5", "METEOSAT", "NPP"],
         x_type=x_type,
         x_scale_log=x_scale_log,
+        plot_dir = out_dir
     )
     plot_loss_per_stream(
         ["train"],
@@ -360,11 +489,13 @@ if __name__ == "__main__":
         ["ERA5", "METEOSAT", "NPP"],
         x_type=x_type,
         x_scale_log=x_scale_log,
+        plot_dir = out_dir
     )
 
     # plot all cols for all run_ids
     for run_id, run_data in zip(runs_ids, runs_data, strict=False):
         plot_loss_per_run(
-            ["train", "val"], run_id, runs_ids[run_id], run_data, get_stream_names(run_id)
-        )
-    plot_loss_per_run(["val"], run_id, runs_ids[run_id], run_data, get_stream_names(run_id))
+            ["train", "val"], run_id, runs_ids[run_id], run_data, get_stream_names(run_id, model_path=model_base_dir),
+            plot_dir=out_dir)
+    plot_loss_per_run(["val"], run_id, runs_ids[run_id], run_data, get_stream_names(run_id, model_path=model_base_dir),
+                      plot_dir=out_dir)
