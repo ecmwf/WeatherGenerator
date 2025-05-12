@@ -8,12 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 import argparse
-from typing import List, Dict
-import logging
-import pathlib
-from pathlib import Path
 import json as js
+import logging
 import subprocess
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,16 +21,15 @@ from weathergen.utils.train_logger import Metrics, TrainLogger
 
 
 ####################################################################################################
-def clean_plot_folder(
-        plot_dir: Path = "./plots/"):
+def clean_plot_folder(plot_dir: Path = "./plots/"):
     """
     Clean the plot folder by removing all png-files in it.
-    
+
     Parameters
     ----------
     plot_dir : Path
         Path to the plot directory
-"""
+    """
     for image in plot_dir.glob("*.png"):
         image.unlink()
 
@@ -61,14 +58,15 @@ def get_stream_names(run_id: str, model_path: Path | None = "./model"):
 
 ####################################################################################################
 def plot_lr(
-        runs_ids: Dict[str, List],
-        runs_data: List[Metrics],
-        runs_active: List[bool],
-        x_axis: str ="samples",
-        plot_dir: Path = Path("./plots")):
+    runs_ids: dict[str, list],
+    runs_data: list[Metrics],
+    runs_active: list[bool],
+    x_axis: str = "samples",
+    plot_dir: Path = Path("./plots"),
+):
     """
     Plot learning rate curves of training runs.
-    
+
     Parameters
     ----------
     runs_ids : dict
@@ -123,11 +121,12 @@ def plot_lr(
 
 ####################################################################################################
 def plot_utilization(
-        runs_ids: Dict[str, List],
-        runs_data: List[Metrics],
-        runs_active: List[bool],
-        x_axis: str = "samples",
-        plot_dir: Path = Path("./plots")):
+    runs_ids: dict[str, list],
+    runs_data: list[Metrics],
+    runs_active: list[bool],
+    x_axis: str = "samples",
+    plot_dir: Path = Path("./plots"),
+):
     """
     Plot compute utilization of training runs.
 
@@ -186,18 +185,18 @@ def plot_utilization(
     plt.xlabel(x_axis)
     plt.tight_layout()
     rstr = "".join([f"{r}_" for r in runs_ids])
-    plt.savefig(plot_dir/ f"{rstr}utilization.png")
+    plt.savefig(plot_dir / f"{rstr}utilization.png")
     plt.close()
 
 
 ####################################################################################################
 def plot_loss_per_stream(
-    modes: List[str],
-    runs_ids: Dict[str, list],
-    runs_data: List[Metrics],
-    runs_active: List[bool],
-    stream_names: List[str],
-    errs: List[str] = ["mse"],
+    modes: list[str],
+    runs_ids: dict[str, list],
+    runs_data: list[Metrics],
+    runs_active: list[bool],
+    stream_names: list[str],
+    errs: list[str] = ["mse"],
     x_axis: str = "samples",
     x_type: str = "step",
     x_scale_log: bool = False,
@@ -314,13 +313,13 @@ def plot_loss_per_stream(
 
 ####################################################################################################
 def plot_loss_per_run(
-    modes: List[str],
+    modes: list[str],
     run_id: str,
     run_desc: str,
     run_data: Metrics,
-    stream_names: List[str],
-    errs: List[str] = ["mse"],
-    x_axis: str ="samples",
+    stream_names: list[str],
+    errs: list[str] = ["mse"],
+    x_axis: str = "samples",
     x_scale_log: bool = False,
     plot_dir: Path = Path("./plots"),
 ):
@@ -416,22 +415,37 @@ def plot_loss_per_run(
 
 ####################################################################################################
 if __name__ == "__main__":
-
     # Example usage:
     # python plot_training.py -ids '{"qlz6n9eg": [12341234, "My experiments"]}' -m ./trained_models -o ./training_plots
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("-o", "--output_dir", default="./plots/", type=str,
-                        help="Directory where plots are saved")
-    parser.add_argument("-m", "--model_base_dir", default="./models/", type=str, 
-                        help="Base-directory where models are saved")
-    parser.add_argument("-d", "--delete", default=False, action="store_true", 
-                        help="Delete all plots in the output directory before plotting")
-    parser.add_argument("-ids", "--runs_ids", type=js.loads, required=True,
-                        help="JSON string with run ids as keys and list of SLURM job ids and descriptions as values")
-    
+    parser.add_argument(
+        "-o", "--output_dir", default="./plots/", type=str, help="Directory where plots are saved"
+    )
+    parser.add_argument(
+        "-m",
+        "--model_base_dir",
+        default="./models/",
+        type=str,
+        help="Base-directory where models are saved",
+    )
+    parser.add_argument(
+        "-d",
+        "--delete",
+        default=False,
+        action="store_true",
+        help="Delete all plots in the output directory before plotting",
+    )
+    parser.add_argument(
+        "-ids",
+        "--runs_ids",
+        type=js.loads,
+        required=True,
+        help="JSON string with run ids as keys and list of SLURM job ids and descriptions as values",
+    )
+
     args = parser.parse_args()
 
     model_base_dir = Path(args.model_base_dir)
@@ -458,7 +472,7 @@ if __name__ == "__main__":
     plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir)
 
     # plot performance
-    #plot_utilization(runs_ids, runs_data, runs_active, plot_dir=plt_path)
+    plot_utilization(runs_ids, runs_data, runs_active, plot_dir=out_dir)
 
     # compare different runs
     plot_loss_per_stream(
@@ -469,7 +483,7 @@ if __name__ == "__main__":
         ["era5", "METEOSAT", "NPP"],
         x_type=x_type,
         x_scale_log=x_scale_log,
-        plot_dir = out_dir
+        plot_dir=out_dir,
     )
     plot_loss_per_stream(
         ["val"],
@@ -479,7 +493,7 @@ if __name__ == "__main__":
         ["era5", "METEOSAT", "NPP"],
         x_type=x_type,
         x_scale_log=x_scale_log,
-        plot_dir = out_dir
+        plot_dir=out_dir,
     )
     plot_loss_per_stream(
         ["train"],
@@ -489,13 +503,24 @@ if __name__ == "__main__":
         ["ERA5", "METEOSAT", "NPP"],
         x_type=x_type,
         x_scale_log=x_scale_log,
-        plot_dir = out_dir
+        plot_dir=out_dir,
     )
 
     # plot all cols for all run_ids
     for run_id, run_data in zip(runs_ids, runs_data, strict=False):
         plot_loss_per_run(
-            ["train", "val"], run_id, runs_ids[run_id], run_data, get_stream_names(run_id, model_path=model_base_dir),
-            plot_dir=out_dir)
-    plot_loss_per_run(["val"], run_id, runs_ids[run_id], run_data, get_stream_names(run_id, model_path=model_base_dir),
-                      plot_dir=out_dir)
+            ["train", "val"],
+            run_id,
+            runs_ids[run_id],
+            run_data,
+            get_stream_names(run_id, model_path=model_base_dir),
+            plot_dir=out_dir,
+        )
+    plot_loss_per_run(
+        ["val"],
+        run_id,
+        runs_ids[run_id],
+        run_data,
+        get_stream_names(run_id, model_path=model_base_dir),
+        plot_dir=out_dir,
+    )

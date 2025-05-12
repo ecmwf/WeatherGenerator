@@ -141,7 +141,7 @@ class TrainLogger:
         cf = config.load_model_config(run_id, epoch, model_path)
         run_id = cf.run_id
 
-        result_dir_base = Path(cf.run_path) 
+        result_dir_base = Path(cf.run_path)
         result_dir = result_dir_base / run_id
         fname_log_train = result_dir / f"{run_id}_train_log.txt"
         fname_log_val = result_dir / f"{run_id}_val_log.txt"
@@ -219,8 +219,11 @@ class TrainLogger:
             print(f"Warning: no performance data loaded for run_id={run_id}")
             log_perf = np.array([])
         metrics_system_df = read_metrics(
-            cf, run_id, None, [_weathergen_timestamp, _performance_gpu, _performance_memory], 
-            results_path=result_dir_base
+            cf,
+            run_id,
+            None,
+            [_weathergen_timestamp, _performance_gpu, _performance_memory],
+            results_path=result_dir_base,
         )
 
         return Metrics(run_id, "train", log_train_df, metrics_val_df, metrics_system_df)
@@ -245,7 +248,11 @@ class Metrics:
 
 
 def read_metrics(
-        cf: config.Config, run_id: RunId | None, stage: Stage | None, cols: list[str] | None, results_path: Path = "./results/"
+    cf: config.Config,
+    run_id: RunId | None,
+    stage: Stage | None,
+    cols: list[str] | None,
+    results_path: Path = "./results/",
 ) -> pl.DataFrame:
     """
     Read metrics for run_id
