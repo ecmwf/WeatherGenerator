@@ -8,8 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import argparse
-import json as js
 import logging
+import yaml
 import subprocess
 from pathlib import Path
 
@@ -19,6 +19,43 @@ import numpy as np
 import weathergen.utils.config as config
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
+####################################################################################################
+
+def yaml_or_path(str_or_path: str) -> dict:
+    """
+    Custom argparse type to handle both YAML strings and file paths.
+    If the input is a valid file path, it loads the YAML content from the file.
+    If the input is a valid YAML string, it loads the content directly.
+
+    Parameters
+    ----------
+    value : str
+        The input string to be parsed as YAML or file path.
+    Returns
+    dict
+        The parsed YAML content as a dictionary.
+    """ 
+    # Load from file if it's a valid path
+    if Path(str_or_path).is_file():
+        with open(str_or_path, 'r') as f:
+            data_dict = yaml.safe_load(f)
+    else:
+        try:
+            data_dict = yaml.safe_load(str_or_path)
+        except yaml.YAMLError as e:
+            raise argparse.ArgumentTypeError(f"Invalid YAML string or path: {e}")
+
+    # Validate the structure: {run_id: [job_id, experiment_name]}
+    if not isinstance(data_dict, dict):
+        raise argparse.ArgumentTypeError("Input must be a dictionary mapping run_id to [job_id, experiment_name].")
+    
+    for k, v in data_dict.items():
+        if not (isinstance(v, list) and len(v) == 2):
+            raise argparse.ArgumentTypeError(
+                f"Each value must be a list of [job_id, experiment_name], but got: {k}: {v}"
+            )
+
+    return data_dict
 
 ####################################################################################################
 def clean_plot_folder(plot_dir: Path = "./plots/"):
@@ -441,9 +478,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "-ids",
         "--runs_ids",
-        type=js.loads,
+        type=yaml_or_path,
         required=True,
-        help="JSON string with run ids as keys and list of SLURM job ids and descriptions as values",
+        help="YAML config file or dictionary-string of form {run_id: [job_id, experiment_name]}",
     )
 
     args = parser.parse_args()
