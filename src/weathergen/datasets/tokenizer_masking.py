@@ -123,6 +123,12 @@ class TokenizerMasking:
 
         self.rng = np.random.default_rng(int(time.time()))
 
+        self.size_time_embedding = 6
+
+    def get_size_time_embedding(self) -> int:
+        """Get size of time embedding"""
+        return self.size_time_embedding
+
     def reset(self) -> None:
         self.rng = np.random.default_rng(int(time.time()))
 
@@ -150,7 +156,9 @@ class TokenizerMasking:
             # mask either patches or entire stream
             if masking_rate_sampling:
                 cur_masking_rate = np.clip(
-                    np.abs(self.rng.normal(loc=cur_masking_rate, scale=1.0 / 2.5 * np.pi)), 0.0, 1.0
+                    np.abs(self.rng.normal(loc=cur_masking_rate, scale=1.0 / (2.5 * np.pi))),
+                    0.0,
+                    1.0,
                 )
 
         tokenize_window = partial(

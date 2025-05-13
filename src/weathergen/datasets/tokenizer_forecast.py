@@ -123,6 +123,12 @@ class TokenizerForecast:
 
         self.rng = np.random.default_rng(int(time.time()))
 
+        self.size_time_embedding = 6
+
+    def get_size_time_embedding(self) -> int:
+        """Get size of time embedding"""
+        return self.size_time_embedding
+
     def reset(self) -> None:
         self.rng = np.random.default_rng(int(time.time()))
 
