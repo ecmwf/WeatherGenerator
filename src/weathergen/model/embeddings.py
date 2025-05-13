@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
+import numpy as np
 import torch
 from torch.utils.checkpoint import checkpoint
 
@@ -45,6 +45,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         super(StreamEmbedTransformer, self).__init__()
 
         self.num_tokens = num_tokens
+        self.token_size = token_size
         self.num_channels = num_channels
         self.dim_in = token_size if mode == "channels" else num_channels
         self.dim_embed = dim_embed
@@ -55,8 +56,6 @@ class StreamEmbedTransformer(torch.nn.Module):
         self.unembed_mode = unembed_mode
 
         norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
-
-        self.embed = torch.nn.Linear(self.dim_in, self.dim_embed)
 
         self.layers = torch.nn.ModuleList()
         for _ in range(self.num_blocks):
@@ -80,6 +79,8 @@ class StreamEmbedTransformer(torch.nn.Module):
             )
 
         if mode == "channels":
+            self.embed = torch.nn.Linear(self.dim_in, self.dim_embed)
+
             if self.unembed_mode == "full":
                 self.ln_final = norm(num_channels * self.dim_embed)
                 self.unembed = torch.nn.Linear(
@@ -94,6 +95,11 @@ class StreamEmbedTransformer(torch.nn.Module):
                 dim_out = (self.num_tokens * self.dim_out - embed_size_centroids) // num_channels
                 self.unembed = torch.nn.ModuleList(
                     [torch.nn.Linear(dim_embed, dim_out) for _ in range(num_channels)]
+                    # [
+                    #     torch.nn.Sequential(torch.nn.Linear(dim_embed, max(dim_embed//2,4*dim_out)),
+                    #     torch.nn.GELU(),
+                    #     torch.nn.Linear(max(dim_embed//2,4*dim_out), dim_out)) for _ in range(num_channels)
+                    # ]
                 )
                 self.ln_final = torch.nn.ModuleList([norm(dim_embed) for _ in range(num_channels)])
 
@@ -103,9 +109,12 @@ class StreamEmbedTransformer(torch.nn.Module):
             self.forward = self.forward_channels
 
         elif mode == "columns":
+            assert embed_size_centroids == 0
+            self.embed = torch.nn.Linear(self.dim_in, self.dim_embed)
+
             assert self.unembed_mode == "block"  # only supported mode at the moment
             # padding needed if the unembedded columns cannot be concatenated to dim_out (e.g GPSRO)
-            self.pad = (self.dim_out - embed_size_centroids) % token_size
+            self.pad = self.dim_out % token_size
             self.out_pad = torch.nn.Parameter(torch.zeros(self.pad))
             self.unembed = torch.nn.Linear(
                 self.dim_embed,
@@ -113,6 +122,13 @@ class StreamEmbedTransformer(torch.nn.Module):
             )
             self.ln_final = norm(dim_out)
             self.forward = self.forward_columns
+
+            # TODO: factorization when sqrt is not int
+            dim1 = int(np.sqrt(dim_out))
+            assert dim1 * dim1 == dim_out
+            self.unembed1 = torch.nn.Linear(self.dim_embed, dim1)
+            self.unembed_nonlin = torch.nn.GELU()
+            self.unembed2 = torch.nn.Linear(self.token_size, dim1)
 
         else:
             assert False
@@ -135,7 +151,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         elif self.unembed_mode == "block":
             out = [
                 checkpoint(ue, ln(x[:, i]), use_reentrant=False)
-                for i, (ue, ln) in enumerate(zip(self.unembed, self.ln_final, strict=False))
+                for i, (ue, ln) in enumerate(zip(self.unembed, self.ln_final, strict=True))
             ]
             out = torch.stack(out, dim=1).flatten(-2, -1)
         else:
@@ -153,7 +169,6 @@ class StreamEmbedTransformer(torch.nn.Module):
 
         return out
 
-    # @torch.compile( dynamic=True)
     def forward_columns(self, x_in, centroids):
         # embed provided input data
         x = positional_encoding_harmonic(checkpoint(self.embed, x_in, use_reentrant=False))
@@ -161,19 +176,15 @@ class StreamEmbedTransformer(torch.nn.Module):
         for layer in self.layers:
             x = checkpoint(layer, x, use_reentrant=False)
 
-        # append centroids
-        # unembed and reshape
-        out = checkpoint(self.unembed, x, use_reentrant=False)
-        out = out.flatten(-2, -1).reshape(x.shape[0], self.num_tokens, -1)
-        # TODO: unsqueeze will not work with num_tokens > 1
-        out = torch.cat([out, self.embed_centroids(centroids).unsqueeze(1)], -1)
-        # pad to uniform dim_out (that has to be uniform across streams)
-        if self.pad > 0:
-            out = torch.cat((out, self.out_pad.repeat((x.shape[0], self.num_tokens, 1))), -1)
-        # also encode centroids with overlayed positional encoding
+        out = checkpoint(self.unembed1, x, use_reentrant=False)
+        out = self.unembed_nonlin(out)
+        out = checkpoint(self.unembed2, out.transpose(-2, -1), use_reentrant=False)
+        out = out.flatten(-2, -1).unsqueeze(1)
+
+        # final normalize and dropout
         out = self.dropout_final(self.ln_final(out))
 
-        return out
+        return out.to(torch.float16)
 
 
 class StreamEmbedLinear(torch.nn.Module):
