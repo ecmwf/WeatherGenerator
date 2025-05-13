@@ -587,6 +587,12 @@ class Model(torch.nn.Module):
                     f"Skipping prediction for {nn} because of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens."
                 )
                 preds_tokens += [torch.tensor([], device=tc_tokens.device)]
+                
+                for i_b in range(len(streams_data)):
+                    print(i_b, ii, streams_data[i_b][ii].target_coords[fstep])
+                    print(i_b, ii, streams_data[i_b][ii].target_coords[fstep].shape)
+                        
+                
                 continue
             if tc_tokens.shape[0] == 0:
                 preds_tokens += [torch.tensor([], device=tc_tokens.device)]
