@@ -30,7 +30,6 @@ def read_metrics_file(f: str) -> pl.DataFrame:
     # 3. Read the numbers
     # 4. Merge the two dataframes
 
-
     # Find the list of all columns (read everything)
     df0 = pl.read_ndjson(f, infer_schema_length=None)
     # Read with the final schema:
