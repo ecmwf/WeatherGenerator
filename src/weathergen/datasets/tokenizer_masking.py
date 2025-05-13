@@ -155,7 +155,7 @@ class TokenizerMasking:
             cur_masking_rate = stream_info.get("masking_rate", masking_rate)
             # mask either patches or entire stream
             if masking_rate_sampling:
-                cur_masking_rate = np.clip( dfgdsfgdsfgfdsgd
+                cur_masking_rate = np.clip(
                     np.abs(self.rng.normal(loc=cur_masking_rate, scale=1.0 / (2.5 * np.pi))), 0.0, 1.0
                 )
 
