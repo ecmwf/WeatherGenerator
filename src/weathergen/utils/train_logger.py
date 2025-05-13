@@ -20,6 +20,7 @@ import numpy as np
 import polars as pl
 
 import weathergen.utils.config as config
+from weathergen.utils.metrics import read_metrics_file
 
 _weathergen_timestamp = "weathergen.timestamp"
 _weathergen_reltime = "weathergen.reltime"
@@ -257,7 +258,7 @@ def read_metrics(
         run_id = cf.run_id
 
     # TODO: this should be a config option
-    df = pl.read_ndjson(f"./results/{run_id}/metrics.json")
+    df = read_metrics_file(f"./results/{run_id}/metrics.json")
     if stage is not None:
         df = df.filter(pl.col("stage") == stage)
     df = df.drop("stage")
@@ -294,7 +295,7 @@ def clean_df(df, columns: list[str] | None):
 
 def _clean_name(n: str) -> str:
     """Cleans the stream name to only retain alphanumeric characters"""
-    return "".join([c for c in n if c.isalnum()]).lower()
+    return "".join([c for c in n if c.isalnum()])
 
 
 def _key_loss(st_name: str, lf_name: str) -> str:
