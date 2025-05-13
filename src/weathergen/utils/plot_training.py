@@ -9,17 +9,18 @@
 
 import argparse
 import logging
-import yaml
 import subprocess
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import yaml
 
 import weathergen.utils.config as config
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
 ####################################################################################################
+
 
 def yaml_or_path(str_or_path: str) -> dict:
     """
@@ -34,21 +35,23 @@ def yaml_or_path(str_or_path: str) -> dict:
     Returns
     dict
         The parsed YAML content as a dictionary.
-    """ 
+    """
     # Load from file if it's a valid path
     if Path(str_or_path).is_file():
-        with open(str_or_path, 'r') as f:
+        with open(str_or_path) as f:
             data_dict = yaml.safe_load(f)
     else:
         try:
             data_dict = yaml.safe_load(str_or_path)
         except yaml.YAMLError as e:
-            raise argparse.ArgumentTypeError(f"Invalid YAML string or path: {e}")
+            raise argparse.ArgumentTypeError(f"Invalid YAML string or path: {e}") from e
 
     # Validate the structure: {run_id: [job_id, experiment_name]}
     if not isinstance(data_dict, dict):
-        raise argparse.ArgumentTypeError("Input must be a dictionary mapping run_id to [job_id, experiment_name].")
-    
+        raise argparse.ArgumentTypeError(
+            "Input must be a dictionary mapping run_id to [job_id, experiment_name]."
+        )
+
     for k, v in data_dict.items():
         if not (isinstance(v, list) and len(v) == 2):
             raise argparse.ArgumentTypeError(
@@ -56,6 +59,7 @@ def yaml_or_path(str_or_path: str) -> dict:
             )
 
     return data_dict
+
 
 ####################################################################################################
 def clean_plot_folder(plot_dir: Path = "./plots/"):
