@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import io
 import json
 import logging
 import os
@@ -30,13 +31,24 @@ Config = OmegaConf
 
 def print_cf(config: Config):
     """Print formatted the contents of the configuration."""
+    return _format_cf(config)
+
+
+def _format_cf(config: Config) -> str:
+    stream = io.StringIO()
     for key, value in config.items():
-        if key != "streams":
-            print(f"{key} : {value}")
-        else:
-            for rt in value:
-                for k, v in rt.items():
-                    print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
+        match key:
+            case "secrets":
+                continue
+            case "streams":
+                for rt in value:
+                    for k, v in rt.items():
+                        whitespace = "" if k == "reportypes" else "  "
+                        stream.write(f"{whitespace}{k} : {v}")
+            case _:
+                stream.write(f"{key} : {value}\n")
+                
+    return stream.getvalue()
 
 
 def save(config: Config, epoch: int | None):
