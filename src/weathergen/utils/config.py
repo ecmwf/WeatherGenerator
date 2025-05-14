@@ -111,7 +111,7 @@ def load_config(
         *overwrites: Additional overwrites from different sources
 
     Note: The order of precendence for merging the final config is in ascending order:
-        - base config (either default config or loaded from previuos run)
+        - base config (either default config or loaded from previous run)
         - private config
         - overwrites (also in ascending order)
     """
