@@ -139,7 +139,7 @@ class IconDataset:
         # TODO, TODO, TODO:
         self.step_hrs = 1
 
-        self.data = self.ds["data"]
+        self.data = self.ds
 
         self.properties = {
             "stream_id": self.ds.data.attrs["obs_id"], # @asma: this is from FESOM. does not exist in ICON. Purpose?
@@ -174,7 +174,7 @@ class IconDataset:
         Get functions only returned for these specified columns.
         """
 
-        mask = [np.array([f in c for f in ch_filters]).any() for c in self.colnames]
+        mask = [np.array([f in c for f ["data"]in ch_filters]).any() for c in self.colnames]
 
         selected_cols_idx = np.where(mask)[0]
         selected_colnames = [self.colnames[i] for i in selected_cols_idx]
@@ -263,198 +263,196 @@ class IconDataset:
         """
         return self._get(idx, self.target_idx)
 
-# Not sure if these are working, but keeping them for now
+    def get_source_size(self) -> int:
+        """
+        Get size of all columns, including coordinates and geoinfo, with source
 
-    # def get_source_size(self) -> int:
-    #     """
-    #     Get size of all columns, including coordinates and geoinfo, with source
+        Parameters
+        ----------
+        None
 
-    #     Parameters
-    #     ----------
-    #     None
+        Returns
+        -------
+        size of coords
+        """
+        return 2 + len(self.geoinfo_idx) + len(self.source_idx) if self.ds else 0
 
-    #     Returns
-    #     -------
-    #     size of coords
-    #     """
-    #     return 2 + len(self.geoinfo_idx) + len(self.source_idx) if self.ds else 0
+    def get_target_size(self) -> int:
+        """
+        Get size of all columns, including coordinates and geoinfo, with source
 
-    # def get_target_size(self) -> int:
-    #     """
-    #     Get size of all columns, including coordinates and geoinfo, with source
+        Parameters
+        ----------
+        None
 
-    #     Parameters
-    #     ----------
-    #     None
+        Returns
+        -------
+        size of coords
+        """
+        return 2 + len(self.geoinfo_idx) + len(self.target_idx) if self.ds else 0
 
-    #     Returns
-    #     -------
-    #     size of coords
-    #     """
-    #     return 2 + len(self.geoinfo_idx) + len(self.target_idx) if self.ds else 0
+    def get_coords_size(self) -> int:
+        """
+        Get size of coords
 
-    # def get_coords_size(self) -> int:
-    #     """
-    #     Get size of coords
+        Parameters
+        ----------
+        None
 
-    #     Parameters
-    #     ----------
-    #     None
+        Returns
+        -------
+        size of coords
+        """
+        return 2
 
-    #     Returns
-    #     -------
-    #     size of coords
-    #     """
-    #     return 2
+    def normalize_coords(self, coords: torch.tensor) -> torch.tensor:
+        """
+        Normalize coordinates
 
-    # def normalize_coords(self, coords: torch.tensor) -> torch.tensor:
-    #     """
-    #     Normalize coordinates
+        Parameters
+        ----------
+        coords :
+            coordinates to be normalized
 
-    #     Parameters
-    #     ----------
-    #     coords :
-    #         coordinates to be normalized
+        Returns
+        -------
+        Normalized coordinates
+        """
+        coords[..., 0] = np.sin(np.deg2rad(coords[..., 0]))
+        coords[..., 1] = np.sin(0.5 * np.deg2rad(coords[..., 1]))
 
-    #     Returns
-    #     -------
-    #     Normalized coordinates
-    #     """
-    #     coords[..., 0] = np.sin(np.deg2rad(coords[..., 0]))
-    #     coords[..., 1] = np.sin(0.5 * np.deg2rad(coords[..., 1]))
+        return coords
 
-    #     return coords
+    def normalize_source_channels(self, source: torch.tensor) -> torch.tensor:
+        """
+        Normalize source channels
 
-    # def normalize_source_channels(self, source: torch.tensor) -> torch.tensor:
-    #     """
-    #     Normalize source channels
+        Parameters
+        ----------
+        source :
+            data to be normalized
 
-    #     Parameters
-    #     ----------
-    #     source :
-    #         data to be normalized
+        Returns
+        -------
+        Normalized data
+        """
+        assert source.shape[1] == len(self.source_idx)
+        for i, ch in enumerate(self.source_idx):
+            source[..., i] = (source[..., i] - self.mean[ch]) / self.stdev[ch]
 
-    #     Returns
-    #     -------
-    #     Normalized data
-    #     """
-    #     assert source.shape[1] == len(self.source_idx)
-    #     for i, ch in enumerate(self.source_idx):
-    #         source[..., i] = (source[..., i] - self.mean[ch]) / self.stdev[ch]
+        return source
 
-    #     return source
+    def normalize_target_channels(self, target: torch.tensor) -> torch.tensor:
+        """
+        Normalize target channels
 
-    # def normalize_target_channels(self, target: torch.tensor) -> torch.tensor:
-    #     """
-    #     Normalize target channels
+        Parameters
+        ----------
+        target :
+            data to be normalized
 
-    #     Parameters
-    #     ----------
-    #     target :
-    #         data to be normalized
+        Returns
+        -------
+        Normalized data
+        """
+        assert target.shape[1] == len(self.target_idx)
+        for i, ch in enumerate(self.target_idx):
+            target[..., i] = (target[..., i] - self.mean[ch + 2]) / self.stdev[ch + 2]
 
-    #     Returns
-    #     -------
-    #     Normalized data
-    #     """
-    #     assert target.shape[1] == len(self.target_idx)
-    #     for i, ch in enumerate(self.target_idx):
-    #         target[..., i] = (target[..., i] - self.mean[ch + 2]) / self.stdev[ch + 2]
+        return target
 
-    #     return target
+    def time_window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
+        """
+        Temporal window corresponding to index
 
-    # def time_window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
-    #     """
-    #     Temporal window corresponding to index
+        Parameters
+        ----------
+        idx :
+            index of temporal window
 
-    #     Parameters
-    #     ----------
-    #     idx :
-    #         index of temporal window
+        Returns
+        -------
+            start and end of temporal window
+        """
+        start_row = self.start_idx + idx * self.mesh_size
+        end_row = start_row + self.len_hrs * self.mesh_size
 
-    #     Returns
-    #     -------
-    #         start and end of temporal window
-    #     """
-    #     start_row = self.start_idx + idx * self.mesh_size
-    #     end_row = start_row + self.len_hrs * self.mesh_size
+        return (self.time[start_row, 0], self.time[end_row, 0])
 
-    #     return (self.time[start_row, 0], self.time[end_row, 0])
+    def denormalize_target_channels(self, data: torch.tensor) -> torch.tensor:
+        """
+        Denormalize target channels
 
-    # def denormalize_target_channels(self, data: torch.tensor) -> torch.tensor:
-    #     """
-    #     Denormalize target channels
+        Parameters
+        ----------
+        data :
+            data to be denormalized (target or pred)
 
-    #     Parameters
-    #     ----------
-    #     data :
-    #         data to be denormalized (target or pred)
+        Returns
+        -------
+        Denormalized data
+        """
+        assert data.shape[-1] == len(self.target_idx), "incorrect number of channels"
+        for i, ch in enumerate(self.target_idx):
+            data[..., i] = (data[..., i] * self.stdev[ch + 2]) + self.mean[ch + 2]
 
-    #     Returns
-    #     -------
-    #     Denormalized data
-    #     """
-    #     assert data.shape[-1] == len(self.target_idx), "incorrect number of channels"
-    #     for i, ch in enumerate(self.target_idx):
-    #         data[..., i] = (data[..., i] * self.stdev[ch + 2]) + self.mean[ch + 2]
+        return data
 
-    #     return data
+    def get_source_num_channels(self) -> int:
+        """
+        Get number of source channels
 
-    # def get_source_num_channels(self) -> int:
-    #     """
-    #     Get number of source channels
+        Parameters
+        ----------
+        None
 
-    #     Parameters
-    #     ----------
-    #     None
+        Returns
+        -------
+        number of source channels
+        """
+        return len(self.source_idx)
 
-    #     Returns
-    #     -------
-    #     number of source channels
-    #     """
-    #     return len(self.source_idx)
+    def get_target_num_channels(self) -> int:
+        """
+        Get number of target channels
 
-    # def get_target_num_channels(self) -> int:
-    #     """
-    #     Get number of target channels
+        Parameters
+        ----------
+        None
 
-    #     Parameters
-    #     ----------
-    #     None
+        Returns
+        -------
+        number of target channels
+        """
+        return len(self.target_idx)
 
-    #     Returns
-    #     -------
-    #     number of target channels
-    #     """
-    #     return len(self.target_idx)
+    def get_geoinfo_size(self) -> int:
+        """
+        Get size of geoinfos
 
-    # def get_geoinfo_size(self) -> int:
-    #     """
-    #     Get size of geoinfos
+        Parameters
+        ----------
+        None
 
-    #     Parameters
-    #     ----------
-    #     None
+        Returns
+        -------
+        size of geoinfos
+        """
+        return len(self.geoinfo_idx)
 
-    #     Returns
-    #     -------
-    #     size of geoinfos
-    #     """
-    #     return len(self.geoinfo_idx)
+    def normalize_geoinfos(self, geoinfos: torch.tensor) -> torch.tensor:
+        """
+        Normalize geoinfos
 
-    # def normalize_geoinfos(self, geoinfos: torch.tensor) -> torch.tensor:
-    #     """
-    #     Normalize geoinfos
+        Parameters
+        ----------
+        geoinfos :
+            geoinfos to be normalized
 
-    #     Parameters
-    #     ----------
-    #     geoinfos :
-    #         geoinfos to be normalized
+        Returns
+        -------
+        Normalized geoinfo
+        """
 
-    #     Returns
-    #     -------
-    #     Normalized geoinfo
-    #     """
-
-    #     assert geoinfos.shape[-1] == 0, "incorrect number of geoinfo channels"
-    #     return geoinfos
+        assert geoinfos.shape[-1] == 0, "incorrect number of geoinfo channels"
+        return geoinfos
