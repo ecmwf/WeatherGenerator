@@ -141,9 +141,12 @@ def from_cli_arglist(arg_list: list[str]) -> Config:
 
 
 def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
-    "Convert different sources into configs that can be used as overwrites."
+    """
+    Convert different sources into configs that can be used as overwrites.
+    
+    raises: ValueError if argument cannot be turned into DictConfig.
+    """
 
-    "If source can not be converted return an empty config."
     match overwrite:  # match the type
         case Path():
             _logger.info(f"Loading overwrite config from file: {overwrite}.")
@@ -155,9 +158,8 @@ def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
             _logger.info(f"Using existing config as overwrite: {overwrite}.")
             overwrite_config = overwrite
         case _:
-            # maybe raise exception instead?
-            _logger.warning(f"Cannot build config from overwrite: {overwrite}")
-            overwrite_config = OmegaConf.create()
+            msg = f"Cannot build config from overwrite: {overwrite}, with type {type(overwrite)}"
+            raise ValueError(msg)
 
     return overwrite_config
 
