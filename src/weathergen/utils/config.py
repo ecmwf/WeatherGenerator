@@ -15,7 +15,7 @@ import subprocess
 from pathlib import Path
 
 import yaml
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from weathergen.train.utils import get_run_id
 
@@ -26,7 +26,7 @@ _DEFAULT_MODEL_PATH = "./models"
 _logger = logging.getLogger(__name__)
 
 
-Config = OmegaConf
+Config = DictConfig
 
 
 def print_cf(config: Config):
@@ -47,7 +47,7 @@ def _format_cf(config: Config) -> str:
                         stream.write(f"{whitespace}{k} : {v}")
             case _:
                 stream.write(f"{key} : {value}\n")
-                
+
     return stream.getvalue()
 
 
@@ -71,7 +71,7 @@ def save(config: Config, epoch: int | None):
         f.write(json_str)
 
 
-def load_model_config(run_id: str, epoch: int | None, model_path: str | None) -> OmegaConf:
+def load_model_config(run_id: str, epoch: int | None, model_path: str | None) -> DictConfig:
     """
     Load a configuration file from a given run_id and epoch.
     If run_id is a full path, loads it from the full path.
@@ -140,7 +140,7 @@ def from_cli_arglist(arg_list: list[str]) -> Config:
     return OmegaConf.from_cli(arg_list)
 
 
-def _load_overwrite_conf(overwrite: Path | dict | OmegaConf) -> OmegaConf:
+def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
     "Convert different sources into configs that can be used as overwrites."
 
     "If source can not be converted return an empty config."
@@ -151,7 +151,7 @@ def _load_overwrite_conf(overwrite: Path | dict | OmegaConf) -> OmegaConf:
         case dict():
             _logger.info(f"Loading overwrite config from dict: {overwrite}.")
             overwrite_config = OmegaConf.create(overwrite)
-        case OmegaConf():
+        case DictConfig():
             _logger.info(f"Using existing config as overwrite: {overwrite}.")
             overwrite_config = overwrite
         case _:
@@ -162,7 +162,7 @@ def _load_overwrite_conf(overwrite: Path | dict | OmegaConf) -> OmegaConf:
     return overwrite_config
 
 
-def _load_private_conf(private_home: Path | None) -> OmegaConf:
+def _load_private_conf(private_home: Path | None) -> DictConfig:
     "Return the private configuration."
     "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
 
@@ -211,7 +211,7 @@ def _load_private_conf(private_home: Path | None) -> OmegaConf:
     return private_cf
 
 
-def _load_default_conf() -> OmegaConf:
+def _load_default_conf() -> DictConfig:
     """Deserialize default configuration."""
     return OmegaConf.load(_DEFAULT_CONFIG_PTH)
 
