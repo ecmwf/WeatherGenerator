@@ -590,28 +590,70 @@ class Model(torch.nn.Module):
                         import numpy as np
                         import time
                         
-                        save_dir = "/users/ktezcan/projects/Meteoswiss/WeatherGenerator/runlogs"
+                        try: 
+                            save_dir = "/iopsstor/scratch/cscs/ktezcan/weathergen/temp_iss250"
+                            os.makedirs(save_dir, exist_ok=True)
 
 
-                        # Get Slurm job ID if available, otherwise use "local"
-                        job_id = os.environ.get("SLURM_JOB_ID", "local")
+                            # Get Slurm job ID if available, otherwise use "local"
+                            job_id = os.environ.get("SLURM_JOB_ID", "local")
 
-                        # Generate a unique timestamp for related files
-                        timestamp = int(time.time())
+                            # Generate a unique timestamp for related files
+                            timestamp = int(time.time())
 
-                        # Save target coordinates
-                        coords_filename = f"target_coords_ib{i_b}_ii{ii}_fstep{fstep}_job{job_id}_{timestamp}.npy"
-                        coords_filepath = os.path.join(save_dir, coords_filename)
-                        coords_tensor_cpu = streams_data[i_b][ii].target_coords[fstep].clone().detach().cpu().numpy()
-                        np.save(coords_filepath, coords_tensor_cpu)
+                            # Save target coordinates
+                            coords_filename = f"target_coords_ib{i_b}_ii{ii}_fstep{fstep}_job{job_id}_{timestamp}.npy"
+                            coords_filepath = os.path.join(save_dir, coords_filename)
+                            coords_tensor_cpu = streams_data[i_b][ii].target_coords[fstep].clone().detach().cpu().numpy()
+                            np.save(coords_filepath, coords_tensor_cpu)
 
-                        # Save tokens as well
-                        tokens_filename = f"tokens_ib{i_b}_ii{ii}_fstep{fstep}_job{job_id}_{timestamp}.npy"
-                        tokens_filepath = os.path.join(save_dir, tokens_filename)
-                        tokens_tensor_cpu = tokens.clone().detach().cpu().numpy()
-                        np.save(tokens_filepath, tokens_tensor_cpu)
+                            # Save tokens as well
+                            tokens_filename = f"tokens_ib{i_b}_ii{ii}_fstep{fstep}_job{job_id}_{timestamp}.npy"
+                            tokens_filepath = os.path.join(save_dir, tokens_filename)
+                            tokens_tensor_cpu = tokens.clone().detach().cpu().numpy()
+                            np.save(tokens_filepath, tokens_tensor_cpu)
+                            
+                            # Save the complete model
+                            model_filename = f"full_model_ib{i_b}_ii{ii}_fstep{fstep}_job{job_id}_{timestamp}.pt"
+                            model_filepath = os.path.join(save_dir, model_filename)
+                            
+                            # Save the entire model (self refers to the Model instance)
+                            torch.save(self.state_dict(), model_filepath)
 
-                        print(f"Saved tensors to {save_dir} with job ID {job_id} and timestamp {timestamp}")
+                            print(f"Saved model and tensors to {save_dir} with job ID {job_id} and timestamp {timestamp}")
+                            
+                        except:
+                            
+                            save_dir = "/users/ktezcan/projects/Meteoswiss/WeatherGenerator/runlogs"
+                            os.makedirs(save_dir, exist_ok=True)
+
+
+                            # Get Slurm job ID if available, otherwise use "local"
+                            job_id = os.environ.get("SLURM_JOB_ID", "local")
+
+                            # Generate a unique timestamp for related files
+                            timestamp = int(time.time())
+
+                            # Save target coordinates
+                            coords_filename = f"target_coords_ib{i_b}_ii{ii}_fstep{fstep}_job{job_id}_{timestamp}.npy"
+                            coords_filepath = os.path.join(save_dir, coords_filename)
+                            coords_tensor_cpu = streams_data[i_b][ii].target_coords[fstep].clone().detach().cpu().numpy()
+                            np.save(coords_filepath, coords_tensor_cpu)
+
+                            # Save tokens as well
+                            tokens_filename = f"tokens_ib{i_b}_ii{ii}_fstep{fstep}_job{job_id}_{timestamp}.npy"
+                            tokens_filepath = os.path.join(save_dir, tokens_filename)
+                            tokens_tensor_cpu = tokens.clone().detach().cpu().numpy()
+                            np.save(tokens_filepath, tokens_tensor_cpu)
+                            
+                            # Save the complete model
+                            model_filename = f"full_model_ib{i_b}_ii{ii}_fstep{fstep}_job{job_id}_{timestamp}.pt"
+                            model_filepath = os.path.join(save_dir, model_filename)
+                            
+                            # Save the entire model (self refers to the Model instance)
+                            torch.save(self.state_dict(), model_filepath)
+
+                            print(f"Saved model and tensors to {save_dir} with job ID {job_id} and timestamp {timestamp}")
 
                     
 
