@@ -68,10 +68,12 @@ def contains_keys(super_config, sub_config):
 
     return all(keys_present)
 
+
 def contains_values(super_config, sub_config):
     correct_values = [super_config[key] == value for key, value in sub_config.items()]
 
     return all(correct_values)
+
 
 def contains(super_config, sub_config):
     return contains_keys(super_config, sub_config) and contains_values(super_config, sub_config)
@@ -138,16 +140,18 @@ def overwrite_file(overwrite_config):
     temp_file.flush()
     yield pathlib.Path(temp_file.name)
 
+
 @pytest.fixture
 def config_fresh(private_config_file):
     cf = config.load_config(private_config_file, None, None)
     cf.data_loader_rng_seed = 42
-    
+
     return cf
 
 
 def test_contains_private(config_fresh):
     assert contains_keys(config_fresh, DUMMY_PRIVATE_CONF)
+
 
 @pytest.mark.parametrize("overwrite_dict", DUMMY_OVERWRITES, indirect=True)
 def test_load_with_overwrite_dict(overwrite_dict, private_config_file):
@@ -155,11 +159,13 @@ def test_load_with_overwrite_dict(overwrite_dict, private_config_file):
 
     assert contains(cf, overwrite_dict)
 
+
 @pytest.mark.parametrize("overwrite_dict", DUMMY_OVERWRITES, indirect=True)
 def test_load_with_overwrite_config(overwrite_config, private_config_file):
     cf = config.load_config(private_config_file, None, None, overwrite_config)
 
     assert contains(cf, overwrite_config)
+
 
 @pytest.mark.parametrize("overwrite_dict", DUMMY_OVERWRITES, indirect=True)
 def test_load_with_overwrite_file(private_config_file, overwrite_file):
@@ -168,31 +174,29 @@ def test_load_with_overwrite_file(private_config_file, overwrite_file):
 
     assert contains(cf, sub_cf)
 
+
 def test_load_multiple_overwrites(private_config_file):
-    overwrites = [
-        {"foo": 1, "bar": 1, "baz": 1},
-        {"foo": 2, "bar": 2},
-        {"foo": 3}
-    ]
-    
+    overwrites = [{"foo": 1, "bar": 1, "baz": 1}, {"foo": 2, "bar": 2}, {"foo": 3}]
+
     expected = {"foo": 3, "bar": 2, "baz": 1}
     cf = config.load_config(private_config_file, None, None, *overwrites)
-    
+
     assert contains(cf, expected)
+
 
 @pytest.mark.parametrize("epoch", [None, 0, 1, 2, -1])
 def test_load_existing_config(epoch, private_config_file, config_fresh):
     test_run_id = "test123"
     test_num_epochs = 3000
-    
+
     config_fresh.run_id = test_run_id  # done in trainer
-    config_fresh.num_epochs = test_num_epochs # some specific change
+    config_fresh.num_epochs = test_num_epochs  # some specific change
     config.save(config_fresh, epoch)
-    
+
     cf = config.load_config(private_config_file, test_run_id, epoch)
-    
+
     assert cf.num_epochs == test_num_epochs
-    
+
 
 def test_from_cli():
     args = ["foo=1", "bar=2"]
@@ -212,7 +216,7 @@ def test_print_cf_no_secrets(config_fresh):
 def test_load_streams(streams_dir, stream_config):
     name, expected = [*stream_config.items()][0]
     expected.name = name
-    
+
     streams = config.load_streams(streams_dir)
     print(streams)
     assert all(is_equal(stream, expected) for stream in streams)
@@ -233,7 +237,7 @@ def test_load_empty_stream(streams_dir):
 @pytest.mark.parametrize("streams_dir", [(pathlib.Path("error.yml"), "ae:{")], indirect=True)
 def test_load_malformed_stream(streams_dir):
     with pytest.raises(RuntimeError):
-        streams = config.load_streams(streams_dir)
+        config.load_streams(streams_dir)
 
 
 @pytest.mark.parametrize("epoch", [None, 0, 1, 2, -1])  # maybe add -5 as test case

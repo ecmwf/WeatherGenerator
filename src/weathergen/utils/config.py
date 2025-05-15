@@ -143,7 +143,7 @@ def from_cli_arglist(arg_list: list[str]) -> Config:
 def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
     """
     Convert different sources into configs that can be used as overwrites.
-    
+
     raises: ValueError if argument cannot be turned into DictConfig.
     """
 
