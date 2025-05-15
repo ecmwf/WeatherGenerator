@@ -19,47 +19,71 @@ import yaml
 import weathergen.utils.config as config
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
+_logger = logging.getLogger(__name__)
+
 ####################################################################################################
 
-
-def yaml_or_path(str_or_path: str) -> dict:
+def check_run_id_dict(run_id_dict: dict) -> bool:
     """
-    Custom argparse type to handle both YAML strings and file paths.
-    If the input is a valid file path, it loads the YAML content from the file.
-    If the input is a valid YAML string, it loads the content directly.
+    Check if the run_id_dict is valid.
 
     Parameters
     ----------
-    value : str
-        The input string to be parsed as YAML or file path.
+    run_id_dict : dict
+        Dictionary to check.
     Returns
-    dict
-        The parsed YAML content as a dictionary.
+    -------
     """
-    # Load from file if it's a valid path
-    if Path(str_or_path).is_file():
-        with open(str_or_path) as f:
-            data_dict = yaml.safe_load(f)
-    else:
-        try:
-            data_dict = yaml.safe_load(str_or_path)
-        except yaml.YAMLError as e:
-            raise argparse.ArgumentTypeError(f"Invalid YAML string or path: {e}") from e
+    if not isinstance(run_id_dict, dict):
+        return False
 
-    # Validate the structure: {run_id: [job_id, experiment_name]}
-    if not isinstance(data_dict, dict):
-        raise argparse.ArgumentTypeError(
-            "Input must be a dictionary mapping run_id to [job_id, experiment_name]."
-        )
-
-    for k, v in data_dict.items():
-        if not (isinstance(v, list) and len(v) == 2):
+    for k, v in run_id_dict.items():
+        if not isinstance(k, str) or not isinstance(v, list) or len(v) != 2:
             raise argparse.ArgumentTypeError(
-                f"Each value must be a list of [job_id, experiment_name], but got: {k}: {v}"
+                f"Each key must be a string and each value must be a list of [job_id, experiment_name], but got: {k}: {v}"
             )
 
+
+def read_yaml_file(file_path: Path) -> dict:
+    """
+    Read a YAML file and return its content as a dictionary.
+
+    Parameters
+    ----------
+    file_path : Path
+        Path to the YAML file.
+    Returns
+    -------
+    dict
+        The content of the YAML file as a dictionary.
+    """
+    with open(file_path) as f:
+        data_dict = yaml.safe_load(f)
+
+    # Validate the structure: {run_id: [job_id, experiment_name]}
+    check_run_id_dict(data_dict)
+    
     return data_dict
 
+def read_yaml_string(yaml_string: str) -> dict:
+    """
+    Read a YAML string and return its content as a dictionary.
+
+    Parameters
+    ----------
+    yaml_string : str
+        YAML string to read.
+    Returns
+    -------
+    dict
+        The content of the YAML string as a dictionary.
+    """
+    data_dict = yaml.safe_load(yaml_string)
+
+    # Validate the structure: {run_id: [job_id, experiment_name]}
+    check_run_id_dict(data_dict)
+    
+    return data_dict
 
 ####################################################################################################
 def clean_plot_folder(plot_dir: Path = "./plots/"):
@@ -146,6 +170,7 @@ def plot_lr(
         ]
 
     if len(legend_str) < 1:
+        _logger.warning("Could not find any data for plotting the learning rates of the runs: ", runs_ids)
         return
 
     plt.legend(legend_str)
@@ -156,7 +181,11 @@ def plot_lr(
     plt.xlabel(x_axis)
     plt.tight_layout()
     rstr = "".join([f"{r}_" for r in runs_ids])
-    plt.savefig(plot_dir / f"{rstr}lr.png")
+
+    # save the plot
+    plt_fname = plot_dir / f"{rstr}lr.png"
+    _logger.info(f"Saving learning rate plot to '{plt_fname}'")
+    plt.savefig(plt_fname)
     plt.close()
 
 
@@ -216,6 +245,7 @@ def plot_utilization(
             ]
 
     if len(legend_str) < 1:
+        _logger.warning("Could not find any data for utilization plot")
         return
 
     plt.legend(legend_str)
@@ -226,7 +256,11 @@ def plot_utilization(
     plt.xlabel(x_axis)
     plt.tight_layout()
     rstr = "".join([f"{r}_" for r in runs_ids])
-    plt.savefig(plot_dir / f"{rstr}utilization.png")
+    
+    # save the plot
+    plt_fname = plot_dir / f"{rstr}utilization.png"
+    _logger.info(f"Saving utilization plot to '{plt_fname}'")
+    plt.savefig(plt_fname)
     plt.close()
 
 
@@ -237,7 +271,7 @@ def plot_loss_per_stream(
     runs_data: list[Metrics],
     runs_active: list[bool],
     stream_names: list[str],
-    errs: list[str] = ["mse"],
+    errs: list[str] = ["loss_mse"],
     x_axis: str = "samples",
     x_type: str = "step",
     x_scale_log: bool = False,
@@ -299,7 +333,7 @@ def plot_loss_per_stream(
                     # find the cols of the requested metric (e.g. mse) for all streams
                     # TODO: fix captialization
                     data_cols = filter(
-                        lambda c: err in c and stream_name in c, run_data_mode.columns
+                        lambda c: err in c and stream_name.lower() in c.lower(), run_data_mode.columns
                     )
 
                     for col in data_cols:
@@ -330,6 +364,7 @@ def plot_loss_per_stream(
         legend_str = legend_strs[0]
         if len(legend_str) < 1:
             plt.close()
+            _logger.warning(f"Could not find any data for stream: {stream_name}")
             continue
 
         legend = plt.legend(legend_str, loc="upper right" if not x_scale_log else "lower left")
@@ -346,9 +381,11 @@ def plot_loss_per_stream(
         plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
         plt.tight_layout()
         rstr = "".join([f"{r}_" for r in runs_ids])
-        plt.savefig(
-            plot_dir / "{}{}{}.png".format(rstr, "".join([f"{m}_" for m in modes]), stream_name)
-        )
+
+        # save the plot
+        plt_fname = plot_dir / "{}{}{}.png".format(rstr, "".join([f"{m}_" for m in modes]), stream_name)
+        _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
+        plt.savefig(plt_fname)
         plt.close()
 
 
@@ -412,9 +449,11 @@ def plot_loss_per_run(
             # find the cols of the requested metric (e.g. mse) for all streams
             data_cols = [c for _, c in enumerate(run_data_mode.columns) if err in c]
 
+            data_cols = list(data_cols)
+
             for _, col in enumerate(data_cols):
                 for j, stream_name in enumerate(stream_names):
-                    if stream_name in col:
+                    if stream_name.lower() in col.lower():
                         # skip when no data is available
                         if run_data_mode[col].shape[0] == 0:
                             continue
@@ -433,6 +472,7 @@ def plot_loss_per_run(
 
     legend_str = legend_strs[0]
     if len(legend_str) < 1:
+        _logger.warning(f"Could not find any data for run: {run_id}")
         plt.close()
         return
 
@@ -450,6 +490,10 @@ def plot_loss_per_run(
     sstr = "".join(
         [f"{r}_".replace(",", "").replace("/", "_").replace(" ", "_") for r in legend_str]
     )
+
+    # save the plot
+    plt_fname = plot_dir / "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr)
+    _logger.info(f"Saving loss plot for {run_id}-run to '{plt_fname}'")
     plt.savefig(plot_dir / "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr))
     plt.close()
 
@@ -457,7 +501,10 @@ def plot_loss_per_run(
 ####################################################################################################
 if __name__ == "__main__":
     # Example usage:
-    # python plot_training.py -ids '{"qlz6n9eg": [12341234, "My experiments"]}' -m ./trained_models -o ./training_plots
+    # When providing a YAML for configuring the run IDs:
+    # python plot_training.py -rf eval_run.yml -m ./trained_models -o ./training_plots
+    # When providing a string for configuring the run IDs:
+    # python plot_training.py -rs "{run_id: [job_id, experiment_name]}" -m ./trained_models -o ./training_plots
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     parser = argparse.ArgumentParser()
@@ -480,19 +527,55 @@ if __name__ == "__main__":
         help="Delete all plots in the output directory before plotting",
     )
     parser.add_argument(
-        "-ids",
-        "--runs_ids",
-        type=yaml_or_path,
-        required=True,
-        help="YAML config file or dictionary-string of form {run_id: [job_id, experiment_name]}",
+        "--streams",
+        "-s",
+        dest="streams",
+        default=["ERA5", "METEOSAT", "NPP"],
+        type=str,
+        nargs="+",
+        help="List of streams to plot",
+    )
+    parser.add_argument(
+        "--x_type",
+        "-x",
+        dest="x_type",
+        default="step",
+        type=str,
+        choices=["step", "reltime"],
+        help="Type of x-axis used in plots. Options: 'step' or 'reltime'",
     )
 
+    run_id_group = parser.add_mutually_exclusive_group(required=True)
+    run_id_group.add_argument(
+        "-rs",
+        "--run_ids_str",
+        type=read_yaml_string,
+        dest="rs",
+        help="Dictionary-string of form '{run_id: [job_id, experiment_name]}' for training runs to plot",
+    )
+
+    run_id_group.add_argument(
+        "-rf",
+        "--run_ids_file",
+        dest="rf",
+        type=read_yaml_file,
+        help="YAML file configuring the training run IDS to plot",
+    )
+
+    # parse the command line arguments
     args = parser.parse_args()
 
     model_base_dir = Path(args.model_base_dir)
     out_dir = Path(args.output_dir)
-    runs_ids = args.runs_ids
+    streams = list(args.streams)
+    x_type = args.x_type
+    if x_type == "reltime":
+        raise ValueError(
+            "Relative time is not supported yet. Please use 'step' for the x-axis type."
+        )
 
+    runs_ids = args.rs if args.rs is not None else args.rf
+    
     if args.delete == "True":
         clean_plot_folder(out_dir)
 
@@ -506,8 +589,6 @@ if __name__ == "__main__":
     runs_active = [np.array([str(v[0]) in l for l in lines[1:]]).any() for v in runs_ids.values()]
 
     x_scale_log = False
-    x_type = ("step",)  #'reltime'
-    # x_type = "step"
 
     # plot learning rate
     plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir)
@@ -521,7 +602,7 @@ if __name__ == "__main__":
         runs_ids,
         runs_data,
         runs_active,
-        ["era5", "METEOSAT", "NPP"],
+        streams,
         x_type=x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
@@ -531,7 +612,7 @@ if __name__ == "__main__":
         runs_ids,
         runs_data,
         runs_active,
-        ["era5", "METEOSAT", "NPP"],
+        streams,
         x_type=x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
@@ -541,7 +622,7 @@ if __name__ == "__main__":
         runs_ids,
         runs_data,
         runs_active,
-        ["ERA5", "METEOSAT", "NPP"],
+        streams,
         x_type=x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
@@ -554,7 +635,7 @@ if __name__ == "__main__":
             run_id,
             runs_ids[run_id],
             run_data,
-            get_stream_names(run_id, model_path=model_base_dir),
+            get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
             plot_dir=out_dir,
         )
     plot_loss_per_run(
@@ -562,6 +643,6 @@ if __name__ == "__main__":
         run_id,
         runs_ids[run_id],
         run_data,
-        get_stream_names(run_id, model_path=model_base_dir),
+        get_stream_names(run_id, model_path=model_base_dir),     # limit to available streams
         plot_dir=out_dir,
     )
