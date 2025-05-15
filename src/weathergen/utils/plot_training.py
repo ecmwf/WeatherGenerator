@@ -23,6 +23,7 @@ _logger = logging.getLogger(__name__)
 
 ####################################################################################################
 
+
 def check_run_id_dict(run_id_dict: dict) -> bool:
     """
     Check if the run_id_dict is valid.
@@ -62,8 +63,9 @@ def read_yaml_file(file_path: Path) -> dict:
 
     # Validate the structure: {run_id: [job_id, experiment_name]}
     check_run_id_dict(data_dict)
-    
+
     return data_dict
+
 
 def read_yaml_string(yaml_string: str) -> dict:
     """
@@ -82,8 +84,9 @@ def read_yaml_string(yaml_string: str) -> dict:
 
     # Validate the structure: {run_id: [job_id, experiment_name]}
     check_run_id_dict(data_dict)
-    
+
     return data_dict
+
 
 ####################################################################################################
 def clean_plot_folder(plot_dir: Path = "./plots/"):
@@ -170,7 +173,9 @@ def plot_lr(
         ]
 
     if len(legend_str) < 1:
-        _logger.warning("Could not find any data for plotting the learning rates of the runs: ", runs_ids)
+        _logger.warning(
+            "Could not find any data for plotting the learning rates of the runs: ", runs_ids
+        )
         return
 
     plt.legend(legend_str)
@@ -256,7 +261,7 @@ def plot_utilization(
     plt.xlabel(x_axis)
     plt.tight_layout()
     rstr = "".join([f"{r}_" for r in runs_ids])
-    
+
     # save the plot
     plt_fname = plot_dir / f"{rstr}utilization.png"
     _logger.info(f"Saving utilization plot to '{plt_fname}'")
@@ -333,7 +338,8 @@ def plot_loss_per_stream(
                     # find the cols of the requested metric (e.g. mse) for all streams
                     # TODO: fix captialization
                     data_cols = filter(
-                        lambda c: err in c and stream_name.lower() in c.lower(), run_data_mode.columns
+                        lambda c: err in c and stream_name.lower() in c.lower(),
+                        run_data_mode.columns,
                     )
 
                     for col in data_cols:
@@ -383,7 +389,9 @@ def plot_loss_per_stream(
         rstr = "".join([f"{r}_" for r in runs_ids])
 
         # save the plot
-        plt_fname = plot_dir / "{}{}{}.png".format(rstr, "".join([f"{m}_" for m in modes]), stream_name)
+        plt_fname = plot_dir / "{}{}{}.png".format(
+            rstr, "".join([f"{m}_" for m in modes]), stream_name
+        )
         _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
         plt.savefig(plt_fname)
         plt.close()
@@ -575,7 +583,7 @@ if __name__ == "__main__":
         )
 
     runs_ids = args.rs if args.rs is not None else args.rf
-    
+
     if args.delete == "True":
         clean_plot_folder(out_dir)
 
@@ -643,6 +651,6 @@ if __name__ == "__main__":
         run_id,
         runs_ids[run_id],
         run_data,
-        get_stream_names(run_id, model_path=model_base_dir),     # limit to available streams
+        get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
         plot_dir=out_dir,
     )
