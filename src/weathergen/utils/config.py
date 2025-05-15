@@ -230,13 +230,19 @@ def load_streams(streams_directory: Path) -> list[Config]:
     # append streams to existing (only relevant for evaluation)
     streams = []
     # exclude temp files starting with "." or "#" (eg. emacs, vim, macos savefiles)
-    for config_file in sorted(streams_directory.rglob("[!.#]*.yml")):
+    stream_files = sorted(streams_directory.rglob("[!.#]*.yml"))
+    _logger.info(f"discover stream configs: {stream_files}")
+    for config_file in stream_files:
         try:
             # Stream config schema is {stream_name: stream_config} where stream_config
             # itself is a dict containing the actual options. stream_name needs to be
             # added to this dict since only stream_config will be further processed.
             stream_name, stream_config = [*OmegaConf.load(config_file).items()][0]
+            stream_config.name = stream_name
         except yaml.scanner.ScannerError as e:
+            msg = f"Invalid yaml file while parsing stream configs: {config_file}"
+            raise RuntimeError(msg) from e
+        except AttributeError as e:
             msg = f"Invalid yaml file while parsing stream configs: {config_file}"
             raise RuntimeError(msg) from e
         except IndexError:
@@ -244,7 +250,6 @@ def load_streams(streams_directory: Path) -> list[Config]:
             _logger.warning(f"Parsed stream configuration file is empty: {config_file}")
             continue
 
-        stream_config.name = stream_name
         streams.append(stream_config)
         _logger.info(f"Loaded stream config: {stream_name}")
 
