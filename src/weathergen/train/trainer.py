@@ -130,7 +130,7 @@ class Trainer(Trainer_Base):
             config.save(self.cf, epoch=None)
 
         # evaluate validation set
-        self.validate(epoch=0)
+        self.validate(epoch=epoch)
         _logger.info(f"Finished evaluation run with id: {cf.run_id}")
 
     ###########################################
