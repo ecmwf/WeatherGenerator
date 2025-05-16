@@ -73,9 +73,13 @@ class Trainer_Base:
             return
 
         local_rank = int(os.environ.get("SLURM_LOCALID"))
+        _logger.info(f"local_rank: {local_rank}")
+        _logger.info(f"master_node: {master_node}")
         ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
+        _logger.info(f"ranks_per_node: {ranks_per_node}")
         rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
         num_ranks = int(os.environ.get("SLURM_NTASKS"))
+        _logger.info(f"num_ranks: {num_ranks} rank: {rank}")
 
         dist.init_process_group(
             backend="nccl",

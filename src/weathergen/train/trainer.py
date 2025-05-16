@@ -48,12 +48,12 @@ class Trainer(Trainer_Base):
         cf: Config,
         run_id_contd=None,
         epoch_contd=None,  # unused
-        run_id_new=False,
+        run_id_new: bool | str | None = False,
         run_mode="training",  # unused
     ):
         self.cf = cf
 
-        if isinstance(run_id_new, str):
+        if run_id_new is not None and isinstance(run_id_new, str):
             cf.run_id = run_id_new
         elif run_id_new or cf.run_id is None:
             cf.run_id = get_run_id()
@@ -64,9 +64,12 @@ class Trainer(Trainer_Base):
         assert cf.samples_per_epoch % cf.batch_size == 0
         assert cf.samples_per_validation % cf.batch_size_validation == 0
 
+        _logger.info(f"Starting run with id: {cf.run_id}")
         self.devices = self.init_torch()
+        _logger.info(f"Using devices: {self.devices}")
 
         self.init_ddp(cf)
+        _logger.info(f"Using DDP with {cf.num_ranks} ranks.")
 
         # read configuration of data streams
         cf.streams = config.load_streams(Path(cf.streams_directory))
@@ -81,8 +84,9 @@ class Trainer(Trainer_Base):
             path_model.mkdir(exist_ok=True, parents=True)
         self.path_run = path_run
 
+        _logger.info(f"Run path: {path_run}")
         self.init_perf_monitoring()
-
+        _logger.info("Using performance monitoring")
         self.train_logger = TrainLogger(cf, self.path_run)
 
     ###########################################
@@ -134,7 +138,8 @@ class Trainer(Trainer_Base):
         _logger.info(f"Finished evaluation run with id: {cf.run_id}")
 
     ###########################################
-    def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
+    def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new: bool | str = False):
+        _logger.info(f"Starting training run: {cf.run_id} run_id_contd={run_id_contd} run_id_new={run_id_new}")
         # general initalization
         self.init(cf, run_id_contd, epoch_contd, run_id_new)
 
@@ -161,6 +166,7 @@ class Trainer(Trainer_Base):
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset_val, **loader_params, sampler=None
         )
+        _logger.info(f"Loaded {len(self.dataset)} training samples.")
 
         sources_size = self.dataset.get_sources_size()
         targets_num_channels = self.dataset.get_targets_num_channels()
@@ -169,6 +175,7 @@ class Trainer(Trainer_Base):
         self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         # load model if specified
         if run_id_contd is not None:
+            _logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
             self.model.load(run_id_contd, epoch_contd)
             _logger.info(f"Loaded model id={run_id_contd}.")
 
@@ -176,9 +183,12 @@ class Trainer(Trainer_Base):
             self.model = self.model.freeze_weights_forecast()
 
         self.model = self.model.to(self.devices[0])
+        _logger.info("Model created")
 
         if cf.compile_model:
             self.model = torch.compile(self.model, dynamic=True)
+
+        _logger.info("Model compiled.")
 
         self.ddp_model = self.model
         if cf.with_ddp and not cf.with_fsdp:

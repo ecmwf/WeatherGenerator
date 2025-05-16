@@ -272,7 +272,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     trainer = Trainer(checkpoint_freq=250, print_freq=10)
 
     try:
-        trainer.run(cf)
+        trainer.run(cf, run_id_new=args.run_id)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()

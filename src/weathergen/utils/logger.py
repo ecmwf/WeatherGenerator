@@ -33,7 +33,10 @@ def init_loggers():
 
     This function can be called only once, so that it can be called repeatedly in multiprocessing pipelines.
     """
-    formatter = RelPathFormatter("%(pathname)s:%(lineno)d : %(levelname)-8s : %(message)s")
+    # Add the time in iso format to the message
+    formatter = RelPathFormatter(
+        "%(asctime)s %(pathname)s:%(lineno)d : %(levelname)-8s : %(message)s"
+    )
     for package in ["obslearn", "weathergen"]:
         logger = logging.getLogger(package)
         logger.handlers.clear()
