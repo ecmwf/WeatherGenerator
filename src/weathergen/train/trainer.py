@@ -66,10 +66,8 @@ class Trainer(Trainer_Base):
 
         _logger.info(f"Starting run with id: {cf.run_id}")
         self.devices = self.init_torch()
-        _logger.info(f"Using devices: {self.devices}")
 
         self.init_ddp(cf)
-        _logger.info(f"Using DDP with {cf.num_ranks} ranks.")
 
         # read configuration of data streams
         cf.streams = config.load_streams(Path(cf.streams_directory))
@@ -84,9 +82,7 @@ class Trainer(Trainer_Base):
             path_model.mkdir(exist_ok=True, parents=True)
         self.path_run = path_run
 
-        _logger.info(f"Run path: {path_run}")
         self.init_perf_monitoring()
-        _logger.info("Using performance monitoring")
         self.train_logger = TrainLogger(cf, self.path_run)
 
     ###########################################
@@ -139,7 +135,6 @@ class Trainer(Trainer_Base):
 
     ###########################################
     def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new: bool | str = False):
-        _logger.info(f"Starting training run: {cf.run_id} run_id_contd={run_id_contd} run_id_new={run_id_new}")
         # general initalization
         self.init(cf, run_id_contd, epoch_contd, run_id_new)
 
@@ -183,12 +178,9 @@ class Trainer(Trainer_Base):
             self.model = self.model.freeze_weights_forecast()
 
         self.model = self.model.to(self.devices[0])
-        _logger.info("Model created")
 
         if cf.compile_model:
             self.model = torch.compile(self.model, dynamic=True)
-
-        _logger.info("Model compiled.")
 
         self.ddp_model = self.model
         if cf.with_ddp and not cf.with_fsdp:
