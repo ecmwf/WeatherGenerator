@@ -145,11 +145,9 @@ class IconDataset:
             "stream_id": self.ds.data.attrs["obs_id"], # @asma: this is from FESOM. does not exist in ICON. Purpose?
         }
 
-        # @asma: not yet added to the dataset. unclear if specific to order of channels in FESOM
-        self.mean = np.concatenate((np.array([0, 0]), np.array(self.ds.attrs["means"])))
-        self.stdev = np.sqrt(
-            np.concatenate((np.array([1, 1]), np.array(self.ds.attrs["vars"])))
-        )
+        # @asma: not yet added to the dataset. Setting mean to 0 and stdev to 1 for now. +2 to account for clat/clon
+        self.mean = np.repeat(0, len(self.colnames) + 2)
+        self.stdev = np.repeat(0, len(self.colnames) + 2)
 
         source_channels = stream_info["source"] if "source" in stream_info else None
         if source_channels:
