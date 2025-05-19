@@ -10,6 +10,16 @@
 import datetime
 import logging
 import os
+import os
+import socket
+import time
+import errno
+import contextlib
+import socket
+import errno
+import contextlib
+import socket
+
 
 import pynvml
 import torch
@@ -76,6 +86,24 @@ class Trainer_Base:
         ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
         rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
         num_ranks = int(os.environ.get("SLURM_NTASKS"))
+
+        if rank == 0:
+            # Check that port 1345 is available
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind((master_node, 1345))
+                except OSError as e:
+                    if e.errno == errno.EADDRINUSE:
+                        _logger.error(
+                            f"Port 1345 is already in use on {master_node}. Please check your network configuration."
+                        )
+                        raise
+                    else:
+                        _logger.error(
+                            f"Error while binding to port 1345 on {master_node}: {e}"
+                        )
+                        raise
+
 
         dist.init_process_group(
             backend="nccl",
