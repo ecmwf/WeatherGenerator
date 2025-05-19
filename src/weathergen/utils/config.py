@@ -128,7 +128,7 @@ def _load_private_conf(private_home: Path | None) -> OmegaConf:
 
     elif env_script_path.is_file():
         result = subprocess.run(
-            [str(env_script_path), "hpc-config"], capture_output=True, text=True
+            [str(env_script_path), "hpc-config"], capture_output=True, text=True, check=True
         )
         private_home = Path(result.stdout.strip())
         _logger.info(f"Loading private config from platform-env.py output: {private_home}.")
