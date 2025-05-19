@@ -34,9 +34,8 @@ def get_continue_parser():
         "-e",
         "--epoch",
         type=int,
-        required=False,
         default=-1,
-        help="epoch where to continue run",
+        help="Epoch of pretrained WeatherGenerator model used (Default -1 corresponds to the last checkpoint).",
     )
     parser.add_argument(
         "-n",
@@ -95,8 +94,8 @@ def get_evaluate_parser():
     parser.add_argument(
         "--epoch",
         type=int,
-        default=None,
-        help="Epoch of pretrained WeatherGenerator model used for evaluation (Default None corresponds to the last checkpoint).",
+        default=-1,
+        help="Epoch of pretrained WeatherGenerator model used (Default -1 corresponds to the last checkpoint).",
     )
     parser.add_argument(
         "--forecast_steps",

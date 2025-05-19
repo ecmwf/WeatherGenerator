@@ -108,7 +108,7 @@ def load_config(
     Args:
         private_home: Configuration file containing platform dependent information and secretes
         run_id: Run/model id of pretrained WeatherGenerator model to continue training or evaluate
-        epoch: epoch of the checkpoint to load.
+        epoch: epoch of the checkpoint to load. -1 indicates last checkpoint available.
         *overwrites: Additional overwrites from different sources
 
     Note: The order of precendence for merging the final config is in ascending order:
