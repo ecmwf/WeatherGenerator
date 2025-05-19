@@ -28,6 +28,7 @@ import torch.multiprocessing
 import torch.utils.data.distributed
 
 from weathergen.train.utils import str_to_tensor, tensor_to_str
+from weathergen.utils.distributed import (is_root)
 
 _logger = logging.getLogger(__name__)
 
@@ -115,6 +116,10 @@ class Trainer_Base:
             world_size=num_ranks,
             rank=rank,
         )
+        if is_root():
+            _logger.info(
+                f"DDP initialized: root."
+            )
 
         # communicate run id to all nodes
         run_id_int = torch.zeros(8, dtype=torch.int32).cuda()

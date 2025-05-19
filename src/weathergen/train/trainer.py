@@ -282,7 +282,7 @@ class Trainer(Trainer_Base):
         if cf.forecast_policy is not None:
             torch._dynamo.config.optimize_ddp = False
 
-        if self.cf.rank == 0:
+        if is_root():
             config.save(self.cf, None)
             config.print_cf(self.cf)
 
