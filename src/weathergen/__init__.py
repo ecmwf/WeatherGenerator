@@ -39,10 +39,10 @@ def evaluate_from_args(argl: list[str]):
     init_loggers()
 
     cf = config.load_config(
-        args.private_config, args.run_id, args.epoch, args.config, additional_args
+        args.private_config, args.run_id_base, args.epoch, args.config, additional_args
     )
 
-    cf.run_history += [(cf.run_id, cf.istep)]
+    cf.run_history += [(cf.run_id_base, cf.istep)]
 
     cf.samples_per_validation = args.samples
     cf.log_validation = args.samples if args.save_samples else 0
@@ -63,7 +63,7 @@ def evaluate_from_args(argl: list[str]):
     cf.loader_num_workers = min(cf.loader_num_workers, args.samples)
 
     trainer = Trainer()
-    trainer.evaluate(cf, args.run_id, args.epoch, run_id_new=args.eval_run_id)
+    trainer.evaluate(cf, args.run_id_base, args.epoch, run_id_new=args.run_id)
 
 
 ####################################################################################################
@@ -98,7 +98,7 @@ def train_continue() -> None:
 
     cf = config.load_config(
         args.private_config,
-        args.run_id,
+        args.run_id_base,
         args.epoch,
         args.config,
         finetune_overwrite,
@@ -106,7 +106,7 @@ def train_continue() -> None:
     )
 
     # track history of run to ensure traceability of results
-    cf.run_history += [(cf.run_id, cf.istep)]
+    cf.run_history += [(cf.run_id_base, cf.istep)]
 
     if args.finetune_forecast:
         if cf.forecast_freeze_model:
@@ -115,7 +115,7 @@ def train_continue() -> None:
 
             torch._dynamo.config.optimize_ddp = False
     trainer = Trainer()
-    trainer.run(cf, args.run_id, args.epoch, args.run_id_new)
+    trainer.run(cf, args.run_id_base, args.epoch, run_id_new=args.run_id)
 
 
 ####################################################################################################

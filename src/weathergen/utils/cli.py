@@ -16,6 +16,11 @@ def get_train_parser():
         default=None,
         help="Optional experiment specfic configuration file",
     )
+    parser.add_argument(
+        "--run_id",
+        type=str,
+        help="(optional) if specified, uses the provided run id to store the training artifacts",
+    )
 
     return parser
 
@@ -25,7 +30,7 @@ def get_continue_parser():
 
     parser.add_argument(
         "-id",
-        "--run_id",
+        "--run_id_base",
         type=str,
         required=True,
         help="run id of to be continued",
@@ -38,12 +43,9 @@ def get_continue_parser():
         help="Epoch of pretrained WeatherGenerator model used (Default -1 corresponds to the last checkpoint).",
     )
     parser.add_argument(
-        "-n",
-        "--run_id_new",
-        type=bool,
-        required=False,
-        default=False,
-        help="create new run id for cont'd run",
+        "--run_id",
+        type=str,
+        help="(optional) if specified, uses the provided run id to store the training artifacts",
     )
     parser.add_argument(
         "--private_config",
@@ -70,7 +72,7 @@ def get_evaluate_parser():
     parser = argparse.ArgumentParser(allow_abbrev=False)
 
     parser.add_argument(
-        "--run_id",
+        "--run_id_base",
         type=str,
         required=True,
         help="Run/model id of pretrained WeatherGenerator model.",
@@ -125,10 +127,9 @@ def get_evaluate_parser():
         help="Path to private configuration file for paths.",
     )
     parser.add_argument(
-        "--eval_run_id",
+        "--run_id",
         type=str,
-        required=False,
-        dest="eval_run_id",
+        dest="run_id",
         help="(optional) if specified, uses the provided run id to store the evaluation results",
     )
     parser.add_argument(
