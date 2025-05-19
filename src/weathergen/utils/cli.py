@@ -47,16 +47,7 @@ def get_evaluate_parser():
         help="End date for evaluation. Format must be parsable with pd.to_datetime.",
     )
     parser.add_argument(
-        "--forecast_steps",
-        type=int,
-        default=None,
-        help="Number of forecast steps for evaluation. Uses attribute from config when None is set.",
-    )
-    parser.add_argument(
         "--samples", type=int, default=10000000, help="Number of evaluation samples."
-    )
-    parser.add_argument(
-        "--shuffle", type=bool, default=False, help="Shuffle samples from evaluation."
     )
     parser.add_argument(
         "--save_samples", type=bool, default=True, help="Save samples from evaluation."
