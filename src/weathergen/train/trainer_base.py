@@ -104,11 +104,14 @@ class Trainer_Base:
                         )
                         raise
 
+        _logger.info(
+            f"Initializing DDP with rank {rank} out of {num_ranks} on master_node:{master_node}."
+        )
 
         dist.init_process_group(
             backend="nccl",
             init_method="tcp://" + master_node + ":1345",
-            timeout=datetime.timedelta(seconds=10 * 8192),
+            timeout=datetime.timedelta(seconds=120),
             world_size=num_ranks,
             rank=rank,
         )
