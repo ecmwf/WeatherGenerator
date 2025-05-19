@@ -4,23 +4,7 @@ from pathlib import Path
 
 def get_train_parser():
     parser = argparse.ArgumentParser(allow_abbrev=False)
-    parser.add_argument(
-        "--private_config",
-        type=Path,
-        default=None,
-        help="Path to private configuration file for paths",
-    )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help="Optional experiment specfic configuration file",
-    )
-    parser.add_argument(
-        "--run_id",
-        type=str,
-        help="(optional) if specified, uses the provided run id to store the training artifacts",
-    )
+    _add_general_arguments(parser)
 
     return parser
 
@@ -28,41 +12,13 @@ def get_train_parser():
 def get_continue_parser():
     parser = argparse.ArgumentParser(allow_abbrev=False)
 
-    parser.add_argument(
-        "-id",
-        "--run_id_base",
-        type=str,
-        required=True,
-        help="run id of to be continued",
-    )
-    parser.add_argument(
-        "-e",
-        "--epoch",
-        type=int,
-        default=-1,
-        help="Epoch of pretrained WeatherGenerator model used (Default -1 corresponds to the last checkpoint).",
-    )
-    parser.add_argument(
-        "--run_id",
-        type=str,
-        help="(optional) if specified, uses the provided run id to store the training artifacts",
-    )
-    parser.add_argument(
-        "--private_config",
-        type=Path,
-        default=None,
-        help="Path to private configuration file for paths.",
-    )
+    _add_general_arguments(parser)
+    _add_model_loading_params(parser)
+    
     parser.add_argument(
         "--finetune_forecast",
         action="store_true",
         help="Fine tune for forecasting. It overwrites some of the Config settings.",
-    )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help="Optional experiment specfic configuration file",
     )
 
     return parser
@@ -71,12 +27,9 @@ def get_continue_parser():
 def get_evaluate_parser():
     parser = argparse.ArgumentParser(allow_abbrev=False)
 
-    parser.add_argument(
-        "--run_id_base",
-        type=str,
-        required=True,
-        help="Run/model id of pretrained WeatherGenerator model.",
-    )
+    _add_model_loading_params(parser)
+    _add_general_arguments(parser)
+
     parser.add_argument(
         "--start_date",
         "-start",
@@ -92,12 +45,6 @@ def get_evaluate_parser():
         required=False,
         default="2022-12-01",
         help="End date for evaluation. Format must be parsable with pd.to_datetime.",
-    )
-    parser.add_argument(
-        "--epoch",
-        type=int,
-        default=-1,
-        help="Epoch of pretrained WeatherGenerator model used (Default -1 corresponds to the last checkpoint).",
     )
     parser.add_argument(
         "--forecast_steps",
@@ -120,6 +67,10 @@ def get_evaluate_parser():
         default=["ERA5"],
         help="Analysis output streams during evaluation.",
     )
+
+    return parser
+
+def _add_general_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--private_config",
         type=Path,
@@ -127,16 +78,29 @@ def get_evaluate_parser():
         help="Path to private configuration file for paths.",
     )
     parser.add_argument(
-        "--run_id",
-        type=str,
-        dest="run_id",
-        help="(optional) if specified, uses the provided run id to store the evaluation results",
-    )
-    parser.add_argument(
         "--config",
         type=Path,
         default=None,
         help="Optional experiment specfic configuration file",
     )
+    parser.add_argument(
+        "--run_id",
+        default=False,
+        help="Store training and evaluation artifacts under the given same run_id",
+    )
 
-    return parser
+
+def _add_model_loading_params(parser: argparse.ArgumentParser):
+    parser.add_argument(
+        "-id",
+        "--run_id_base",
+        required=True,
+        help="run id of to be continued",
+    )
+    parser.add_argument(
+        "-e",
+        "--epoch",
+        type=int,
+        default=-1,
+        help="Epoch of pretrained WeatherGenerator model used (Default -1 corresponds to the last checkpoint).",
+    )
