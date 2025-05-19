@@ -58,13 +58,7 @@ def save(config: Config, epoch: int | None):
     dirname = path_models / config.run_id
     dirname.mkdir(exist_ok=True, parents=True)
 
-    if epoch is None:
-        epoch_str = ""
-    elif epoch == -1:
-        epoch_str = "_latest"
-    else:
-        epoch_str = f"_epoch{epoch:05d}"
-    fname = dirname / f"model_{config.run_id}{epoch_str}.json"
+    fname = dirname / _get_model_config_file_name(config.run_id, epoch)
 
     json_str = json.dumps(OmegaConf.to_container(config))
     with fname.open("w") as f:
@@ -82,10 +76,7 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
         _logger.info(f"Loading config from provided full run_id path: {fname}")
     else:
         path_models = Path(model_path or _DEFAULT_MODEL_PATH)
-        epoch_str = ""
-        if epoch is not None:
-            epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
-        fname = path_models / run_id / f"model_{run_id}{epoch_str}.json"
+        fname = path_models / run_id / _get_model_config_file_name(run_id, epoch)
 
     _logger.info(f"Loading config from specified run_id and epoch: {fname}")
 
@@ -93,6 +84,16 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
         json_str = f.read()
 
     return OmegaConf.create(json.loads(json_str))
+
+
+def _get_model_config_file_name(run_id: str, epoch: int | None):
+    if epoch is None:
+        epoch_str = ""
+    elif epoch == -1:
+        epoch_str = "_latest"
+    else:
+        epoch_str = f"_epoch{epoch:05d}"
+    return f"model_{run_id}{epoch_str}.json"
 
 
 def load_config(
