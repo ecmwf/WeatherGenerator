@@ -59,9 +59,6 @@ def evaluate_from_args(argl: list[str]):
     # cf.analysis_streams_output = ['Surface', 'Air', 'METEOSAT', 'ATMS', 'IASI', 'AMSR2']
     cf.analysis_streams_output = args.analysis_streams_output
 
-    # make sure number of loaders does not exceed requested samples
-    cf.loader_num_workers = min(cf.loader_num_workers, args.samples)
-
     trainer = Trainer()
     trainer.evaluate(cf, args.run_id_base, args.epoch, run_id_new=args.run_id)
 
