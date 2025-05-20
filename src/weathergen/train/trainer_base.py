@@ -81,6 +81,9 @@ class Trainer_Base:
             cf.with_ddp = False
             cf.rank = rank
             cf.num_ranks = num_ranks
+            _logger.info(
+                "DDP not initialized. MASTER_ADDR not set. Running in single process mode."
+            )
             return
 
         local_rank = int(os.environ.get("SLURM_LOCALID"))
