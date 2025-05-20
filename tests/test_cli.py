@@ -24,17 +24,20 @@ def test_private_config_is_path():
 
     assert args.private_config.name == "bar"
 
-@pytest.mark.parametrize("files", [["foo/bar"],["foo/bar", "baz"]])
+
+@pytest.mark.parametrize("files", [["foo/bar"], ["foo/bar", "baz"]])
 def test_config_is_pathes(files):
     args = cli.get_train_parser().parse_args(["--config"] + files)
 
     assert all([isinstance(file, pathlib.Path) for file in args.config])
 
+
 @pytest.mark.parametrize("overwrites", [["foo=/bar", "baz.foo=1"], ["foo=2"]])
 def test_options(overwrites):
     args = cli.get_train_parser().parse_args(["--options"] + overwrites)
-    
+
     assert all([overwrite in args.options for overwrite in overwrites])
+
 
 def test_train_general_has_params():
     args = cli.get_train_parser().parse_args([])
@@ -45,14 +48,14 @@ def test_train_general_has_params():
 @pytest.mark.parametrize("parser", MODEL_LOADING_PARSERS)
 def test_general_has_params(parser):
     args = parser.parse_args(BASIC_ARGLIST)
-    
+
     assert all([arg in vars(args).keys() for arg in GENERAL_ARGS])
 
 
 @pytest.mark.parametrize("parser", MODEL_LOADING_PARSERS)
 def test_model_loading_has_params(parser):
     args = parser.parse_args(BASIC_ARGLIST)
-    
+
     assert all([arg in vars(args).keys() for arg in MODEL_LOADING_ARGS])
 
 
