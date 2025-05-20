@@ -93,7 +93,7 @@ class Trainer_Base:
         _logger.info(f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, rank={rank}, num_ranks={num_ranks}")
 
         if rank == 0:
-            # Check that port 1345 is available
+            # Check that port 1345 is available, raise an error if not
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 try:
                     s.bind((master_node, 1345))
@@ -119,6 +119,7 @@ class Trainer_Base:
             timeout=datetime.timedelta(seconds=240),
             world_size=num_ranks,
             rank=rank,
+            device_id=torch.device("cuda", local_rank)
         )
         if is_root():
             _logger.info(
@@ -128,12 +129,16 @@ class Trainer_Base:
         dist.barrier()
 
         # TODO: run_id currently fixed
-        # # communicate run id to all nodes
-        # run_id_int = torch.zeros(8, dtype=torch.int32).cuda()
-        # if rank == 0:
-        #     run_id_int = str_to_tensor(cf.run_id).cuda()
-        # dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
-        # cf.run_id = tensor_to_str(run_id_int)
+        if True:
+            # communicate run id to all nodes
+            len_run_id = len(cf.run_id)
+            run_id_int = torch.zeros(len_run_id, dtype=torch.int32).cuda()
+            if is_root():
+                _logger.info("Communicating run_id to all nodes: {cf.run_id}")
+                run_id_int = str_to_tensor(cf.run_id).cuda()
+            dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
+            if not is_root():
+                cf.run_id = tensor_to_str(run_id_int)
         _logger.info(f"rank: {rank} has run_id: {cf.run_id}")
 
         # communicate data_loader_rng_seed
