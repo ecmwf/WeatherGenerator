@@ -184,6 +184,7 @@ def train_continue() -> None:
 
     #########################
     if args.finetune_forecast:
+        cf.training_mode = "forecast"
         cf.forecast_delta_hrs = 0  # 12
         cf.forecast_steps = 1  # [j for j in range(1,9) for i in range(4)]
         cf.forecast_policy = "fixed"  # 'sequential_random' # 'fixed' #'sequential' #_random'
