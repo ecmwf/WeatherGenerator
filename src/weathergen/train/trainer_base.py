@@ -121,7 +121,7 @@ class Trainer_Base:
         len_run_id = len(cf.run_id)
         run_id_int = torch.zeros(len_run_id, dtype=torch.int32).cuda()
         if is_root():
-            _logger.info("Communicating run_id to all nodes: {cf.run_id}")
+            _logger.info(f"Communicating run_id to all nodes: {cf.run_id}")
             run_id_int = str_to_tensor(cf.run_id).cuda()
         dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
         if not is_root():
