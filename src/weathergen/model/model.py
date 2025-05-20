@@ -127,16 +127,13 @@ class Model(torch.nn.Module):
     def create(self):
         cf = self.cf
 
-        # KCT:iss130
         # separate embedding networks for differnt observation types
         self.embeds = EmbeddingEngine(cf, self.sources_size).create()
 
-        # KCT:iss130
         # local assimilation engine
         self.ae_local_blocks = LocalAssimilationEngine(cf).create()
 
         ##############
-        # KCT:iss130
         # local -> global assimilation engine adapter
         self.ae_adapter = Local2GlobalAssimilationEngine(cf).create()
 
@@ -168,12 +165,10 @@ class Model(torch.nn.Module):
         self.q_cells = torch.nn.Parameter(q_cells, requires_grad=True)
 
         ##############
-        # KCT:iss130
         # global assimilation engine
         self.ae_global_blocks = GlobalAssimilationEngine(cf, self.num_healpix_cells).create()
 
         ###############
-        # KCT:iss130
         # forecasting engine
         self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells).create()
 
@@ -254,7 +249,6 @@ class Model(torch.nn.Module):
             else:
                 self.pred_adapter_kv.append(torch.nn.Identity())
 
-            # KCT:iss130
             # target prediction engines
             tte = TargetPredictionEngine(
                 cf,
@@ -558,109 +552,24 @@ class Model(torch.nn.Module):
             zip(self.target_token_engines, self.pred_adapter_kv, strict=False)
         ):
             si = self.cf.streams[ii]
-            tro_type = si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
             tc_embed = self.embed_target_coords[ii]
 
             assert batch_size == 1
 
             # embed token coords, concatenating along batch dimension (which is taking care of through
             # the varlen attention)
-            if tro_type == "obs_value":
-                # Initialize empty list to collect tensors
-                tc_tokens_list = []
-
-                # Loop through each batch element
-                for i_b in range(len(streams_data)):
-                    # Get the target coordinates for this batch element
-                    target_coords = streams_data[i_b][ii].target_coords[fstep]
-                    
-                    # Apply the same conditional logic
-                    if len(target_coords.shape) > 1:
-                        # Use checkpoint for multi-dimensional inputs
-                        tokens = checkpoint(tc_embed, target_coords, use_reentrant=False)
-                    else:
-                        # Use coordinates directly for flat inputs
-                        tokens = target_coords
-                    
-                    # Append to our collection list
-                    tc_tokens_list.append(tokens)
-                    
-                    if torch.isnan(tokens).any():
-                        import os
-                        import numpy as np
-                        import time
-                        
-                        try: 
-                            save_dir = "/iopsstor/scratch/cscs/ktezcan/weathergen/temp_iss250"
-                            os.makedirs(save_dir, exist_ok=True)
-
-
-                            # Get Slurm job ID if available, otherwise use "local"
-                            job_id = os.environ.get("SLURM_JOB_ID", "local")
-
-                            # Generate a unique timestamp for related files
-                            timestamp = int(time.time())
-
-                            # Save target coordinates
-                            coords_filename = f"target_coords_ib{i_b}_ii{ii}_fstep{fstep}_job{job_id}_{timestamp}.npy"
-                            coords_filepath = os.path.join(save_dir, coords_filename)
-                            coords_tensor_cpu = streams_data[i_b][ii].target_coords[fstep].clone().detach().cpu().numpy()
-                            np.save(coords_filepath, coords_tensor_cpu)
-
-                            # Save tokens as well
-                            tokens_filename = f"tokens_ib{i_b}_ii{ii}_fstep{fstep}_job{job_id}_{timestamp}.npy"
-                            tokens_filepath = os.path.join(save_dir, tokens_filename)
-                            tokens_tensor_cpu = tokens.clone().detach().cpu().numpy()
-                            np.save(tokens_filepath, tokens_tensor_cpu)
-                            
-                            # Save the complete model
-                            model_filename = f"full_model_ib{i_b}_ii{ii}_fstep{fstep}_job{job_id}_{timestamp}.pt"
-                            model_filepath = os.path.join(save_dir, model_filename)
-                            
-                            # Save the entire model (self refers to the Model instance)
-                            torch.save(self.state_dict(), model_filepath)
-
-                            print(f"Saved model and tensors to {save_dir} with job ID {job_id} and timestamp {timestamp}")
-                            
-                        except:
-                            
-                            save_dir = "/users/ktezcan/projects/Meteoswiss/WeatherGenerator/runlogs"
-                            os.makedirs(save_dir, exist_ok=True)
-
-
-                            # Get Slurm job ID if available, otherwise use "local"
-                            job_id = os.environ.get("SLURM_JOB_ID", "local")
-
-                            # Generate a unique timestamp for related files
-                            timestamp = int(time.time())
-
-                            # Save target coordinates
-                            coords_filename = f"target_coords_ib{i_b}_ii{ii}_fstep{fstep}_job{job_id}_{timestamp}.npy"
-                            coords_filepath = os.path.join(save_dir, coords_filename)
-                            coords_tensor_cpu = streams_data[i_b][ii].target_coords[fstep].clone().detach().cpu().numpy()
-                            np.save(coords_filepath, coords_tensor_cpu)
-
-                            # Save tokens as well
-                            tokens_filename = f"tokens_ib{i_b}_ii{ii}_fstep{fstep}_job{job_id}_{timestamp}.npy"
-                            tokens_filepath = os.path.join(save_dir, tokens_filename)
-                            tokens_tensor_cpu = tokens.clone().detach().cpu().numpy()
-                            np.save(tokens_filepath, tokens_tensor_cpu)
-                            
-                            # Save the complete model
-                            model_filename = f"full_model_ib{i_b}_ii{ii}_fstep{fstep}_job{job_id}_{timestamp}.pt"
-                            model_filepath = os.path.join(save_dir, model_filename)
-                            
-                            # Save the entire model (self refers to the Model instance)
-                            torch.save(self.state_dict(), model_filepath)
-
-                            print(f"Saved model and tensors to {save_dir} with job ID {job_id} and timestamp {timestamp}")
-
-                    
-
-                # Concatenate all tensors
-                tc_tokens = torch.cat(tc_tokens_list)
-            else:
-                assert False
+            tc_tokens = torch.cat(
+                [
+                    checkpoint(
+                        tc_embed,
+                        streams_data[i_b][ii].target_coords[fstep],
+                        use_reentrant=False,
+                    )
+                    if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
+                    else streams_data[i_b][ii].target_coords[fstep]
+                    for i_b in range(len(streams_data))
+                ]
+            )
 
             if torch.isnan(tc_tokens).any():
                 nn = si["name"]

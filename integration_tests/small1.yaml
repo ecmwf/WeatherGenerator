@@ -10,5 +10,10 @@ lr_steps: 4
 lr_steps_warmup: 2
 lr_steps_cooldown: 2
 loader_num_workers: 1
+
+forecast_offset : 0
+# len_hrs: 6
+# step_hrs: 6
+
 train_log:
   log_interval: 1
