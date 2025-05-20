@@ -54,7 +54,7 @@ def get_evaluate_parser():
     )
     parser.add_argument(
         "--analysis_streams_output",
-        type=list,
+        nargs="+",
         default=["ERA5"],
         help="Analysis output streams during evaluation.",
     )
@@ -72,6 +72,7 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
         "--config",
         type=Path,
         default=None,
+        nargs="+",
         help="Optional experiment specfic configuration file",
     )
     parser.add_argument(
