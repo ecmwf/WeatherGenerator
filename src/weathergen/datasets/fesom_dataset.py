@@ -139,7 +139,7 @@ class FesomDataset:
 
         source_channels = stream_info["source"] if "source" in stream_info else None
         if source_channels:
-            self.source_channels, self.source_idx = self.selec(source_channels)
+            self.source_channels, self.source_idx = self.select(source_channels)
         else:
             self.source_channels = self.colnames
             self.source_idx = self.cols_idx
@@ -159,11 +159,10 @@ class FesomDataset:
         Allow user to specify which columns they want to access.
         Get functions only returned for these specified columns.
         """
-
         mask = [np.array([f in c for f in ch_filters]).any() for c in self.colnames]
 
-        selected_cols_idx = np.where(mask)[0]
-        selected_colnames = [self.colnames[i] for i in selected_cols_idx]
+        selected_cols_idx = self.cols_idx[np.where(mask)[0]]
+        selected_colnames = [self.colnames[i] for i in np.where(mask)[0]]
 
         return selected_colnames, selected_cols_idx
 
@@ -343,7 +342,7 @@ class FesomDataset:
         """
         assert target.shape[1] == len(self.target_idx)
         for i, ch in enumerate(self.target_idx):
-            target[..., i] = (target[..., i] - self.mean[ch + 2]) / self.stdev[ch + 2]
+            target[..., i] = (target[..., i] - self.mean[ch]) / self.stdev[ch]
 
         return target
 
@@ -380,7 +379,7 @@ class FesomDataset:
         """
         assert data.shape[-1] == len(self.target_idx), "incorrect number of channels"
         for i, ch in enumerate(self.target_idx):
-            data[..., i] = (data[..., i] * self.stdev[ch + 2]) + self.mean[ch + 2]
+            data[..., i] = (data[..., i] * self.stdev[ch]) + self.mean[ch]
 
         return data
 
