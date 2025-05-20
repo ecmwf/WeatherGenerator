@@ -36,7 +36,6 @@ def get_evaluate_parser():
         "--start_date",
         "-start",
         type=_format_date,
-        required=False,
         default="2022-10-01",
         help="Start date for evaluation. Format must be parsable with pd.to_datetime.",
     )
@@ -44,15 +43,14 @@ def get_evaluate_parser():
         "--end_date",
         "-end",
         type=_format_date,
-        required=False,
         default="2022-12-01",
         help="End date for evaluation. Format must be parsable with pd.to_datetime.",
     )
     parser.add_argument(
         "--samples", type=int, default=10000000, help="Number of evaluation samples."
     )
-    parser.add_argument(
-        "--save_samples", type=bool, default=True, help="Save samples from evaluation."
+    parser.add_argument(  # behaviour changed => implies default=False
+        "--save_samples", action="store_true", help="Save samples from evaluation."
     )
     parser.add_argument(
         "--analysis_streams_output",
@@ -64,7 +62,7 @@ def get_evaluate_parser():
     return parser
 
 
-def _format_date(date) -> str:
+def _format_date(date: str) -> str:
     try:
         parsed = pd.to_datetime(date, errors="raise")
     except (pd.errors.ParserError, ValueError) as e:
@@ -84,8 +82,8 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--config",
         type=Path,
-        default=None,
         nargs="+",
+        default=[],
         help="Optional experiment specfic configuration files in ascending order of precedence.",
     )
     parser.add_argument(
@@ -96,6 +94,7 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--options",
         nargs="+",
+        default=[],
         help="Overwrite individual config options. This takes precedence over overwrites passed via --config or --finetune_forecast. Individual items should be of the form: parent_obj.nested_obj=value",
     )
 
