@@ -18,7 +18,7 @@ def get_continue_parser():
     parser.add_argument(
         "--finetune_forecast",
         action="store_true",
-        help="Fine tune for forecasting. It overwrites some of the Config settings.",
+        help="Fine tune for forecasting. It overwrites some of the Config settings. Overwrites specified with --config take precedence.",
     )
 
     return parser
@@ -66,14 +66,14 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
         "--private_config",
         type=Path,
         default=None,
-        help="Path to private configuration file for paths.",
+        help="Path to the private configuration file that includes platform specific information like paths.",
     )
     parser.add_argument(
         "--config",
         type=Path,
         default=None,
         nargs="+",
-        help="Optional experiment specfic configuration file",
+        help="Optional experiment specfic configuration files in ascending order of precedence.",
     )
     parser.add_argument(
         "--run_id",
@@ -87,7 +87,7 @@ def _add_model_loading_params(parser: argparse.ArgumentParser):
         "-id",
         "--run_id_base",
         required=True,
-        help="run id of to be continued",
+        help="run id of the pretrained WeatherGenerator model to be used.",
     )
     parser.add_argument(
         "-e",
