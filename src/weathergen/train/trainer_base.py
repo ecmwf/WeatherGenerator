@@ -127,13 +127,14 @@ class Trainer_Base:
         # Wait for all ranks to reach this point
         dist.barrier()
 
-        # communicate run id to all nodes
-        run_id_int = torch.zeros(8, dtype=torch.int32).cuda()
-        if rank == 0:
-            run_id_int = str_to_tensor(cf.run_id).cuda()
-        dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
-        cf.run_id = tensor_to_str(run_id_int)
-        _logger.info(f"rank: {rank} received run_id: {cf.run_id}")
+        # TODO: run_id currently fixed
+        # # communicate run id to all nodes
+        # run_id_int = torch.zeros(8, dtype=torch.int32).cuda()
+        # if rank == 0:
+        #     run_id_int = str_to_tensor(cf.run_id).cuda()
+        # dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
+        # cf.run_id = tensor_to_str(run_id_int)
+        _logger.info(f"rank: {rank} has run_id: {cf.run_id}")
 
         # communicate data_loader_rng_seed
         if hasattr(cf, "data_loader_rng_seed"):
