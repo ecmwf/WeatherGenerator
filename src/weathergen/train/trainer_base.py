@@ -10,25 +10,17 @@
 import datetime
 import logging
 import os
-import os
-import socket
-import time
-import errno
-import contextlib
 import socket
 import errno
-import contextlib
-import socket
 
 
 import pynvml
 import torch
 import torch.distributed as dist
 import torch.multiprocessing
-import torch.utils.data.distributed
 
 from weathergen.train.utils import str_to_tensor, tensor_to_str
-from weathergen.utils.distributed import (is_root)
+from weathergen.utils.distributed import is_root
 
 _logger = logging.getLogger(__name__)
 
@@ -128,17 +120,15 @@ class Trainer_Base:
         # Wait for all ranks to reach this point
         dist.barrier()
 
-        # TODO: run_id currently fixed
-        if True:
-            # communicate run id to all nodes
-            len_run_id = len(cf.run_id)
-            run_id_int = torch.zeros(len_run_id, dtype=torch.int32).cuda()
-            if is_root():
-                _logger.info("Communicating run_id to all nodes: {cf.run_id}")
-                run_id_int = str_to_tensor(cf.run_id).cuda()
-            dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
-            if not is_root():
-                cf.run_id = tensor_to_str(run_id_int)
+        # communicate run id to all nodes
+        len_run_id = len(cf.run_id)
+        run_id_int = torch.zeros(len_run_id, dtype=torch.int32).cuda()
+        if is_root():
+            _logger.info("Communicating run_id to all nodes: {cf.run_id}")
+            run_id_int = str_to_tensor(cf.run_id).cuda()
+        dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
+        if not is_root():
+            cf.run_id = tensor_to_str(run_id_int)
         _logger.info(f"rank: {rank} has run_id: {cf.run_id}")
 
         # communicate data_loader_rng_seed
@@ -150,6 +140,7 @@ class Trainer_Base:
                 dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
                 cf.data_loader_rng_seed = l_seed.item()
 
+        # TODO: move outside of the config
         cf.rank = rank
         cf.num_ranks = num_ranks
         cf.with_ddp = True

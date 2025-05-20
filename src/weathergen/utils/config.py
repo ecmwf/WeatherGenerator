@@ -128,6 +128,9 @@ def _load_private_conf(private_home: Path | None) -> OmegaConf:
 
     elif env_script_path.is_file():
         _logger.info(f"Loading private config from platform-env.py: {env_script_path}.")
+        # This code does many checks to ensure that any error message is surfaced. Since it is a process call,
+        # it can be hard to diagnose the error.
+        # TODO: eventually, put all this wrapper code in a separate function
         try:
             result_hpc = subprocess.run(
                 [str(env_script_path), "hpc"], capture_output=True, text=True, check=True

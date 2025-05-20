@@ -163,7 +163,6 @@ class Trainer(Trainer_Base):
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset_val, **loader_params, sampler=None
         )
-        _logger.info(f"Loaded {len(self.dataset)} training samples.")
 
         sources_size = self.dataset.get_sources_size()
         targets_num_channels = self.dataset.get_targets_num_channels()

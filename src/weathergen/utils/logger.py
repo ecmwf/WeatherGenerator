@@ -31,9 +31,9 @@ def init_loggers():
 
     WARNING: this function resets all the logging handlers.
 
-    This function can be called only once, so that it can be called repeatedly in multiprocessing pipelines.
+    This function follows a singleton pattern, it will only operate once per process
+    and will be a no-op if called again.
     """
-    # Add the time in iso format to the message
     formatter = RelPathFormatter(
         "%(asctime)s %(pathname)s:%(lineno)d : %(levelname)-8s : %(message)s"
     )
