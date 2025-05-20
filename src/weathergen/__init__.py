@@ -51,7 +51,7 @@ def evaluate_from_args(argl: list[str]):
         args.private_config,
         args.run_id_base,
         args.epoch,
-        args.config,
+        *args.config,
         evaluate_overwrite,
         additional_args,
     )
@@ -100,13 +100,15 @@ def train_continue() -> None:
             num_epochs=12,  # len(cf.forecast_steps) + 4
             istep=0,
         )
+    else:
+        finetune_overwrite = dict()
 
     cf = config.load_config(
         args.private_config,
         args.run_id_base,
         args.epoch,
-        args.config,
         finetune_overwrite,
+        *args.config,
         additional_args,
     )
 
@@ -148,7 +150,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     init_loggers()
 
     cli_overwrite = config.from_cli_arglist(additional_args)
-    cf = config.load_config(args.private_config, None, None, args.config, cli_overwrite)
+    cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
