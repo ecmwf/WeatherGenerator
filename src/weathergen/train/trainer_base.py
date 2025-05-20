@@ -116,7 +116,7 @@ class Trainer_Base:
         dist.init_process_group(
             backend="nccl",
             init_method="tcp://" + master_node + ":1345",
-            timeout=datetime.timedelta(seconds=120),
+            timeout=datetime.timedelta(seconds=240),
             world_size=num_ranks,
             rank=rank,
         )
@@ -124,6 +124,8 @@ class Trainer_Base:
             _logger.info(
                 f"DDP initialized: root."
             )
+        # Wait for all ranks to reach this point
+        dist.barrier()
 
         # communicate run id to all nodes
         run_id_int = torch.zeros(8, dtype=torch.int32).cuda()
@@ -131,6 +133,7 @@ class Trainer_Base:
             run_id_int = str_to_tensor(cf.run_id).cuda()
         dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
         cf.run_id = tensor_to_str(run_id_int)
+        _logger.info(f"rank: {rank} received run_id: {cf.run_id}")
 
         # communicate data_loader_rng_seed
         if hasattr(cf, "data_loader_rng_seed"):
