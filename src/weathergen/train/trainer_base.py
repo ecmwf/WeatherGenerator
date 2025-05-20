@@ -90,6 +90,7 @@ class Trainer_Base:
         ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
         rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
         num_ranks = int(os.environ.get("SLURM_NTASKS"))
+        _logger.info(f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, rank={rank}, num_ranks={num_ranks}")
 
         if rank == 0:
             # Check that port 1345 is available
