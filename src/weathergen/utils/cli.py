@@ -1,6 +1,8 @@
 import argparse
 from pathlib import Path
 
+import pandas as pd
+
 
 def get_train_parser():
     parser = argparse.ArgumentParser(allow_abbrev=False)
@@ -14,7 +16,7 @@ def get_continue_parser():
 
     _add_general_arguments(parser)
     _add_model_loading_params(parser)
-    
+
     parser.add_argument(
         "--finetune_forecast",
         action="store_true",
@@ -33,7 +35,7 @@ def get_evaluate_parser():
     parser.add_argument(
         "--start_date",
         "-start",
-        type=str,
+        type=_format_date,
         required=False,
         default="2022-10-01",
         help="Start date for evaluation. Format must be parsable with pd.to_datetime.",
@@ -41,7 +43,7 @@ def get_evaluate_parser():
     parser.add_argument(
         "--end_date",
         "-end",
-        type=str,
+        type=_format_date,
         required=False,
         default="2022-12-01",
         help="End date for evaluation. Format must be parsable with pd.to_datetime.",
@@ -60,6 +62,17 @@ def get_evaluate_parser():
     )
 
     return parser
+
+
+def _format_date(date) -> str:
+    try:
+        parsed = pd.to_datetime(date, errors="raise")
+    except (pd.errors.ParserError, ValueError) as e:
+        msg = f"Can not parse a valid date from input: {date}, with type {type(date)}."
+        raise ValueError(msg) from e
+
+    return parsed.strftime("%Y%m%d%H%M")
+
 
 def _add_general_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(

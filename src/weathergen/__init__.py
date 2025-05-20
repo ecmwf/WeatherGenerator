@@ -40,8 +40,8 @@ def evaluate_from_args(argl: list[str]):
 
     evaluate_overwrite = dict(
         shuffle=False,
-        start_date_val=_format_date(args.start_date),
-        end_date_val=_format_date(args.end_date),
+        start_date_val=args.start_date,
+        end_date_val=args.end_date,
         samples_per_validation=args.samples,
         log_validation=args.samples if args.save_samples else 0,
         analysis_streams_output=args.analysis_streams_output,
@@ -61,16 +61,6 @@ def evaluate_from_args(argl: list[str]):
 
     trainer = Trainer()
     trainer.evaluate(cf, args.run_id_base, args.epoch, run_id_new=args.run_id)
-
-
-def _format_date(date) -> str:
-    try:
-        parsed = pd.to_datetime(date, errors="raise")
-    except (pd.errors.ParserError, ValueError) as e:
-        msg = f"Can not parse a valid date from input: {date}, with type {type(date)}."
-        raise ValueError(msg) from e
-
-    return parsed.strftime("%Y%m%d%H%M")
 
 
 ####################################################################################################
