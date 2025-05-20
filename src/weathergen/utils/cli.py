@@ -80,6 +80,11 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
         default=False,
         help="Store training and evaluation artifacts under the given same run_id",
     )
+    parser.add_argument(
+        "--options",
+        nargs="+",
+        help="Overwrite individual config options. This takes precedence over overwrites passed via --config or --finetune_forecast. Individual items should be of the form: parent_obj.nested_obj=value",
+    )
 
 
 def _add_model_loading_params(parser: argparse.ArgumentParser):

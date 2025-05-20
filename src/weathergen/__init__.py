@@ -33,7 +33,7 @@ def evaluate_from_args(argl: list[str]):
     When running integration tests, the arguments are directly provided.
     """
     parser = cli.get_evaluate_parser()
-    args, additional_args = parser.parse_known_args(argl)
+    args = parser.parse_args(argl)
 
     # TODO: move somewhere else
     init_loggers()
@@ -47,13 +47,14 @@ def evaluate_from_args(argl: list[str]):
         analysis_streams_output=args.analysis_streams_output,
     )
 
+    cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_config(
         args.private_config,
         args.run_id_base,
         args.epoch,
         *args.config,
         evaluate_overwrite,
-        additional_args,
+        cli_overwrite,
     )
 
     cf.run_history += [(cf.run_id_base, cf.istep)]
@@ -75,7 +76,7 @@ def _format_date(date) -> str:
 ####################################################################################################
 def train_continue() -> None:
     parser = cli.get_continue_parser()
-    args, additional_args = parser.parse_known_args()
+    args = parser.parse_args()
 
     if args.finetune_forecast:
         finetune_overwrite = dict(
@@ -104,13 +105,14 @@ def train_continue() -> None:
     else:
         finetune_overwrite = dict()
 
+    cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_config(
         args.private_config,
         args.run_id_base,
         args.epoch,
         finetune_overwrite,
         *args.config,
-        additional_args,
+        cli_overwrite,
     )
 
     # track history of run to ensure traceability of results
@@ -145,12 +147,12 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     """
     Training function for WeatherGenerator model."""
     parser = cli.get_train_parser()
-    args, additional_args = parser.parse_known_args(argl)
+    args = parser.parse_args(argl)
 
     # TODO: move somewhere else
     init_loggers()
 
-    cli_overwrite = config.from_cli_arglist(additional_args)
+    cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
 
     if cf.with_flash_attention:
