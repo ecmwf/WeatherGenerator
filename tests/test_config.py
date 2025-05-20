@@ -198,11 +198,11 @@ def test_load_existing_config(epoch, private_config_file, config_fresh):
     assert cf.num_epochs == test_num_epochs
 
 
-def test_from_cli():
-    args = ["foo=1", "bar=2"]
+@pytest.mark.parametrize("options,cf", [(["foo=1", "bar=2"], {"foo": 1, "bar": 2}), ([], {})])
+def test_from_cli(options, cf):
+    parsed_config = config.from_cli_arglist(options)
 
-    parsed_config = config.from_cli_arglist(args)
-    assert parsed_config == OmegaConf.create({"foo": 1, "bar": 2})
+    assert parsed_config == OmegaConf.create(cf)
 
 
 def test_print_cf_no_secrets(config_fresh):
