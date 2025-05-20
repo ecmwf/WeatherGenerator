@@ -15,7 +15,6 @@ import numpy as np
 import torch
 import torch.utils.data.distributed
 import tqdm
-import torch.distributed as dist
 from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import MixedPrecision, ShardingStrategy
@@ -29,9 +28,9 @@ from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
 from weathergen.train.utils import get_run_id
 from weathergen.utils.config import Config
+from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TrainLogger
 from weathergen.utils.validation_io import write_validation
-from weathergen.utils.distributed import (is_root, root_only)
 
 _logger = logging.getLogger(__name__)
 
@@ -765,4 +764,3 @@ class Trainer(Trainer_Base):
                 print("\n", flush=True)
 
             self.t_start = time.time()
-

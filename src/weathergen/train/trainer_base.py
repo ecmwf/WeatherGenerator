@@ -8,11 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
+import errno
 import logging
 import os
 import socket
-import errno
-
 
 import pynvml
 import torch
@@ -82,7 +81,9 @@ class Trainer_Base:
         ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
         rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
         num_ranks = int(os.environ.get("SLURM_NTASKS"))
-        _logger.info(f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, rank={rank}, num_ranks={num_ranks}")
+        _logger.info(
+            f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, rank={rank}, num_ranks={num_ranks}"
+        )
 
         if rank == 0:
             # Check that port 1345 is available, raise an error if not
@@ -96,9 +97,7 @@ class Trainer_Base:
                         )
                         raise
                     else:
-                        _logger.error(
-                            f"Error while binding to port 1345 on {master_node}: {e}"
-                        )
+                        _logger.error(f"Error while binding to port 1345 on {master_node}: {e}")
                         raise
 
         _logger.info(
@@ -111,12 +110,10 @@ class Trainer_Base:
             timeout=datetime.timedelta(seconds=240),
             world_size=num_ranks,
             rank=rank,
-            device_id=torch.device("cuda", local_rank)
+            device_id=torch.device("cuda", local_rank),
         )
         if is_root():
-            _logger.info(
-                f"DDP initialized: root."
-            )
+            _logger.info("DDP initialized: root.")
         # Wait for all ranks to reach this point
         dist.barrier()
 

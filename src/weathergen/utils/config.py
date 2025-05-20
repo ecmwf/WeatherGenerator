@@ -136,13 +136,13 @@ def _load_private_conf(private_home: Path | None) -> OmegaConf:
                 [str(env_script_path), "hpc"], capture_output=True, text=True, check=True
             )
         except subprocess.CalledProcessError as e:
-            _logger.error(f"Error while running platform-env.py: {e} {e.stderr} {e.stdout} {e.output} {e.returncode}")
+            _logger.error(
+                f"Error while running platform-env.py: {e} {e.stderr} {e.stdout} {e.output} {e.returncode}"
+            )
             raise
         if result_hpc.returncode != 0:
             _logger.error(f"Error while running platform-env.py: {result_hpc.stderr.strip()}")
-            raise RuntimeError(
-                f"Error while running platform-env.py: {result_hpc.stderr.strip()}"
-            )
+            raise RuntimeError(f"Error while running platform-env.py: {result_hpc.stderr.strip()}")
         _logger.info(f"Detected HPC: {result_hpc.stdout.strip()}.")
 
         result = subprocess.run(
