@@ -55,9 +55,11 @@ def test_train(setup, test_run_id):
     )
 
     evaluate_from_args(
-        "-start 2022-10-10 -end 2022-10-11 --samples 10 --same_run_id --epoch 0".split()
+        "-start 2022-10-10 -end 2022-10-11 --samples 10 --epoch 0".split()
         + [
             "--run_id",
+            test_run_id,
+            "--eval_run_id",
             test_run_id,
             "--config",
             f"{weathergen_home}/integration_tests/small1.yaml",
