@@ -1,9 +1,11 @@
 import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-import xarray as xr
 import torch
-from pathlib import Path
+import xarray as xr
+
 
 class RadklimDataset:
     """
@@ -47,8 +49,12 @@ class RadklimDataset:
         self.len_hrs = len_hrs
         self.step_hrs = step_hrs
         if not self.step_hrs == self.len_hrs:
-            raise ValueError(f"Parameters step_hrs {step_hrs} and len_hrs {len_hrs} must be the same.")
-        self.data_path = Path(filename)      # rename to path (filename is ekept for consistency with other dataloaders)
+            raise ValueError(
+                f"Parameters step_hrs {step_hrs} and len_hrs {len_hrs} must be the same."
+            )
+        self.data_path = Path(
+            filename
+        )  # rename to path (filename is ekept for consistency with other dataloaders)
         self.fname_patt = fname_patt
 
         # get list of required files
@@ -60,17 +66,17 @@ class RadklimDataset:
             )
 
         # Retrieve metadata
-        self.variables = ["RR"]     # TODO: allow support for YW product
+        self.variables = ["RR"]  # TODO: allow support for YW product
 
         # Read normalization data
         with open(normalization_path) as f:
             stats = json.load(f)
-        
+
         means = stats.get("mean")
         stds = stats.get("std")
         if not (isinstance(means, list) and isinstance(stds, list)):
             raise ValueError("Normalization JSON must have 'mean' and 'std' lists.")
-            
+
         if len(means) != len(self.variables) or len(stds) != len(self.variables):
             raise ValueError(
                 f"Stats length {len(means)}/{len(stds)} != num variables {len(self.variables)}"
@@ -88,22 +94,22 @@ class RadklimDataset:
             # time-coordinate
             times_all = ds_meta["time"].load()
             # spatial coordinates
-            y1d    = ds_meta['y'].values.astype(np.float32)
-            x1d    = ds_meta['x'].values.astype(np.float32)
+            y1d = ds_meta["y"].values.astype(np.float32)
+            x1d = ds_meta["x"].values.astype(np.float32)
             # 2D geographic coords
-            lat2d  = ds_meta['lat'].values.astype(np.float32)
-            lon2d  = ds_meta['lon'].values.astype(np.float32)
+            lat2d = ds_meta["lat"].values.astype(np.float32)
+            lon2d = ds_meta["lon"].values.astype(np.float32)
 
         # get start and end indices for slicing of dataset
         self.start_idx = int(np.searchsorted(times_all, np.datetime64(self.start_time)))
-        self.end_idx   = int(np.searchsorted(times_all, np.datetime64(self.end_time), side="right"))
+        self.end_idx = int(np.searchsorted(times_all, np.datetime64(self.end_time), side="right"))
 
-        times_req =  times_all.isel({"time": slice(self.start_idx, self.end_idx)})
+        times_req = times_all.isel({"time": slice(self.start_idx, self.end_idx)})
         dt = times_req.diff(dim="time")
-        assert len(np.unique(dt)) == 1, f"Inconsistent time step length in dataset."
+        assert len(np.unique(dt)) == 1, "Inconsistent time step length in dataset."
         self.times = times_req.values
 
-        self.num_steps_per_window = int((len_hrs * 3600) / (dt[0] / np.timedelta64(1, 's')))
+        self.num_steps_per_window = int((len_hrs * 3600) / (dt[0] / np.timedelta64(1, "s")))
 
         # handle spatial coordinates
         self.ny, self.nx = len(y1d), len(x1d)
@@ -121,7 +127,7 @@ class RadklimDataset:
             concat_dim="time",
             engine="netcdf4",
             chunks={"time": self.num_steps_per_window * 2, "y": -1, "x": -1},
-            parallel=False,     # TODO: How to handle together with torch's parallelized data loading
+            parallel=False,  # TODO: How to handle together with torch's parallelized data loading
         )
 
         self.ds = ds[self.variables].isel(time=slice(self.start_idx, self.end_idx))
@@ -154,25 +160,30 @@ class RadklimDataset:
         data (coords, geoinfos, data, datetimes)
         """
         if idx < 0 or idx >= len(self):
-            raise IndexError(f"Index {idx} out of range (0..{len(self)-1}).")
+            raise IndexError(f"Index {idx} out of range (0..{len(self) - 1}).")
         # slice required data
-        ds_now = self.ds.isel({"time": slice(idx, idx + self.num_steps_per_window)})  # shape (len_hrs, nvar, y, x)
-        arr = ds_now.to_array('var').load()
+        ds_now = self.ds.isel(
+            {"time": slice(idx, idx + self.num_steps_per_window)}
+        )  # shape (len_hrs, nvar, y, x)
+        arr = ds_now.to_array("var").load()
         arr = arr.transpose("time", "y", "x", "var")
         nt, ny, nx, nc = arr.shape
         arr = arr.values.reshape(-1, nc)
 
         # get coords
-        lats_data, lons_data = np.broadcast_to(self.latitudes, (nt, *self.latlon_sh)), np.broadcast_to(self.longitudes, (nt, *self.latlon_sh))
+        lats_data, lons_data = (
+            np.broadcast_to(self.latitudes, (nt, *self.latlon_sh)),
+            np.broadcast_to(self.longitudes, (nt, *self.latlon_sh)),
+        )
         lats_data, lons_data = lats_data.reshape(-1), lons_data.reshape(-1)
         latlon = np.column_stack((lats_data, lons_data))
 
-        tda = ds_now['time'].expand_dims({'y': ny,'x': nx}, axis=[1,2]).data.reshape(-1)
+        tda = ds_now["time"].expand_dims({"y": ny, "x": nx}, axis=[1, 2]).data.reshape(-1)
 
         # filter for Nan
         mask = np.any(np.isnan(arr), axis=1)
         idx_valid = np.where(~mask)[0]
-        
+
         latlon = latlon[idx_valid, :]
         arr = arr[idx_valid, :]
         tda = tda[idx_valid]
@@ -180,9 +191,9 @@ class RadklimDataset:
         # placeholder for geoinfos
         geoinfos = np.zeros((arr.shape[0], 0), dtype=np.float32)
 
-        return latlon, geoinfos, arr, tda 
+        return latlon, geoinfos, arr, tda
 
-    def get_source(self, idx:int) -> tuple:
+    def get_source(self, idx: int) -> tuple:
         """
         Get source data for idx
 
@@ -220,7 +231,7 @@ class RadklimDataset:
         ----------
         idx : int
             Index of temporal window
-        
+
         Returns
         -------
         data (coords, geoinfos, data, datetimes)
@@ -230,7 +241,7 @@ class RadklimDataset:
     def get_source_num_channels(self) -> int:
         """
         Get number of source channels
-        
+
         Parameters
         ----------
         None
@@ -245,7 +256,7 @@ class RadklimDataset:
     def get_target_num_channels(self) -> int:
         """
         Get number of target channels
-        
+
         Parameters
         ----------
         None
@@ -362,7 +373,7 @@ class RadklimDataset:
         Returns
         -------
         Denormalized data
-        """    
+        """
         return data * self.std + self.mean
 
     def denormalize_target_channels(self, data: torch.tensor) -> torch.tensor:
@@ -415,16 +426,18 @@ class RadklimDataset:
         end = self.last_day_of_month(self.end_time)
         months = pd.date_range(self.start_time.strftime("%Y-%m-01"), end, freq="ME")
         files = [
-            self.data_path / m.strftime('%Y') / f"{self.fname_patt}{m.strftime('%Y%m')}.nc"
+            self.data_path / m.strftime("%Y") / f"{self.fname_patt}{m.strftime('%Y%m')}.nc"
             for m in months
-            if (self.data_path / m.strftime('%Y') / f"{self.fname_patt}{m.strftime('%Y%m')}.nc").is_file()
+            if (
+                self.data_path / m.strftime("%Y") / f"{self.fname_patt}{m.strftime('%Y%m')}.nc"
+            ).is_file()
         ]
         return files
 
     def close(self):
         """
         Close the dataset.
-        
+
         Parameters
         ----------
         None
@@ -433,10 +446,7 @@ class RadklimDataset:
         -------
         None
         """
-        try:
-            self.ds.close()
-        except Exception:
-            pass
+        self.ds.close()
 
     @staticmethod
     def last_day_of_month(any_day: pd.Timestamp) -> pd.Timestamp:
@@ -448,7 +458,7 @@ class RadklimDataset:
         ----------
         any_day : datetime object with any day of the month
             any day of the month
-        
+
         Returns
         -------
             datetime object of lat day of month
