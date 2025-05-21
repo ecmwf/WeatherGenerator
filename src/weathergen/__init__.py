@@ -214,8 +214,6 @@ def train_continue() -> None:
 
         cf.num_epochs = 12  # len(cf.forecast_steps) + 4
         cf.istep = 0
-        
-        
 
     trainer = Trainer()
     trainer.run(cf, args.run_id, args.epoch, args.run_id_new)
@@ -283,5 +281,5 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
 
 if __name__ == "__main__":
-    # train()
-    train_continue()
+    train()
+    # train_continue()
