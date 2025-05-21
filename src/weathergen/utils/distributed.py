@@ -23,4 +23,12 @@ def is_root(pg: dist.ProcessGroup | None = None) -> bool:
     Args:
         group (ProcessGroup, optional): The process group to work on. If None (default), the default process group will be used.
     """
+    if not _is_distributed_initialized():
+        # If not initialized, it assumed to be in single process mode.
+        # TODO: check what should happen if a process group is passed
+        return True
     return dist.get_rank(pg) == 0
+
+
+def _is_distributed_initialized():
+    return dist.is_available() and dist.is_initialized()
