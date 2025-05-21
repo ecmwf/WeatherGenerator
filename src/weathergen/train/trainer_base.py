@@ -8,16 +8,18 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
+import errno
 import logging
 import os
+import socket
 
 import pynvml
 import torch
 import torch.distributed as dist
 import torch.multiprocessing
-import torch.utils.data.distributed
 
 from weathergen.train.utils import str_to_tensor, tensor_to_str
+from weathergen.utils.distributed import is_root
 
 _logger = logging.getLogger(__name__)
 
@@ -70,27 +72,61 @@ class Trainer_Base:
             cf.with_ddp = False
             cf.rank = rank
             cf.num_ranks = num_ranks
+            _logger.info(
+                "DDP not initialized. MASTER_ADDR not set. Running in single process mode."
+            )
             return
 
         local_rank = int(os.environ.get("SLURM_LOCALID"))
         ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
         rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
         num_ranks = int(os.environ.get("SLURM_NTASKS"))
+        _logger.info(
+            f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, rank={rank}, num_ranks={num_ranks}"
+        )
+
+        if rank == 0:
+            # Check that port 1345 is available, raise an error if not
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind((master_node, 1345))
+                except OSError as e:
+                    if e.errno == errno.EADDRINUSE:
+                        _logger.error(
+                            f"Port 1345 is already in use on {master_node}. Please check your network configuration."
+                        )
+                        raise
+                    else:
+                        _logger.error(f"Error while binding to port 1345 on {master_node}: {e}")
+                        raise
+
+        _logger.info(
+            f"Initializing DDP with rank {rank} out of {num_ranks} on master_node:{master_node}."
+        )
 
         dist.init_process_group(
             backend="nccl",
             init_method="tcp://" + master_node + ":1345",
-            timeout=datetime.timedelta(seconds=10 * 8192),
+            timeout=datetime.timedelta(seconds=240),
             world_size=num_ranks,
             rank=rank,
+            device_id=torch.device("cuda", local_rank),
         )
+        if is_root():
+            _logger.info("DDP initialized: root.")
+        # Wait for all ranks to reach this point
+        dist.barrier()
 
         # communicate run id to all nodes
-        run_id_int = torch.zeros(8, dtype=torch.int32).cuda()
-        if rank == 0:
+        len_run_id = len(cf.run_id)
+        run_id_int = torch.zeros(len_run_id, dtype=torch.int32).cuda()
+        if is_root():
+            _logger.info(f"Communicating run_id to all nodes: {cf.run_id}")
             run_id_int = str_to_tensor(cf.run_id).cuda()
         dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
-        cf.run_id = tensor_to_str(run_id_int)
+        if not is_root():
+            cf.run_id = tensor_to_str(run_id_int)
+        _logger.info(f"rank: {rank} has run_id: {cf.run_id}")
 
         # communicate data_loader_rng_seed
         if hasattr(cf, "data_loader_rng_seed"):
@@ -101,6 +137,7 @@ class Trainer_Base:
                 dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
                 cf.data_loader_rng_seed = l_seed.item()
 
+        # TODO: move outside of the config
         cf.rank = rank
         cf.num_ranks = num_ranks
         cf.with_ddp = True

@@ -28,6 +28,7 @@ from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
 from weathergen.train.utils import get_run_id
 from weathergen.utils.config import Config
+from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TrainLogger
 from weathergen.utils.validation_io import write_validation
 
@@ -48,12 +49,12 @@ class Trainer(Trainer_Base):
         cf: Config,
         run_id_contd=None,
         epoch_contd=None,  # unused
-        run_id_new=False,
+        run_id_new: bool | str | None = False,
         run_mode="training",  # unused
     ):
         self.cf = cf
 
-        if isinstance(run_id_new, str):
+        if run_id_new is not None and isinstance(run_id_new, str):
             cf.run_id = run_id_new
         elif run_id_new or cf.run_id is None:
             cf.run_id = get_run_id()
@@ -64,6 +65,7 @@ class Trainer(Trainer_Base):
         assert cf.samples_per_epoch % cf.batch_size == 0
         assert cf.samples_per_validation % cf.batch_size_validation == 0
 
+        _logger.info(f"Starting run with id: {cf.run_id}")
         self.devices = self.init_torch()
 
         self.init_ddp(cf)
@@ -82,7 +84,6 @@ class Trainer(Trainer_Base):
         self.path_run = path_run
 
         self.init_perf_monitoring()
-
         self.train_logger = TrainLogger(cf, self.path_run)
 
     ###########################################
@@ -134,7 +135,7 @@ class Trainer(Trainer_Base):
         _logger.info(f"Finished evaluation run with id: {cf.run_id}")
 
     ###########################################
-    def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
+    def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new: bool | str = False):
         # general initalization
         self.init(cf, run_id_contd, epoch_contd, run_id_new)
 
@@ -169,6 +170,7 @@ class Trainer(Trainer_Base):
         self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         # load model if specified
         if run_id_contd is not None:
+            _logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
             self.model.load(run_id_contd, epoch_contd)
             _logger.info(f"Loaded model id={run_id_contd}.")
 
@@ -278,7 +280,7 @@ class Trainer(Trainer_Base):
         if cf.forecast_policy is not None:
             torch._dynamo.config.optimize_ddp = False
 
-        if self.cf.rank == 0:
+        if is_root():
             config.save(self.cf, None)
             config.print_cf(self.cf)
 
@@ -674,7 +676,7 @@ class Trainer(Trainer_Base):
         else:
             state = self.ddp_model.state_dict()
 
-        if self.cf.rank == 0:
+        if is_root():
             filename = "".join(
                 [
                     self.cf.run_id,
