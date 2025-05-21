@@ -160,7 +160,7 @@ def train_continue() -> None:
         "--run_id_new",
         type=bool,
         required=False,
-        default=False,
+        default=True,
         help="create new run id for cont'd run",
     )
     parser.add_argument(
@@ -214,6 +214,8 @@ def train_continue() -> None:
 
         cf.num_epochs = 12  # len(cf.forecast_steps) + 4
         cf.istep = 0
+        
+        
 
     trainer = Trainer()
     trainer.run(cf, args.run_id, args.epoch, args.run_id_new)
@@ -281,5 +283,5 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
 
 if __name__ == "__main__":
-    train()
-    # train_continue()
+    # train()
+    train_continue()
