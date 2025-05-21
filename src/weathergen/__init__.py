@@ -55,7 +55,7 @@ def evaluate_from_args(argl: list[str]):
         cli_overwrite,
     )
 
-    cf.run_history += [(cf.run_id_base, cf.istep)]
+    cf.run_history += [(args.run_id_base, cf.istep)]
 
     trainer = Trainer()
     trainer.evaluate(cf, args.run_id_base, args.epoch, run_id_new=args.run_id)
@@ -104,7 +104,7 @@ def train_continue() -> None:
     )
 
     # track history of run to ensure traceability of results
-    cf.run_history += [(cf.run_id_base, cf.istep)]
+    cf.run_history += [(args.run_id_base, cf.istep)]
 
     if args.finetune_forecast:
         if cf.forecast_freeze_model:
