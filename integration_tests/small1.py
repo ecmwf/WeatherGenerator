@@ -57,7 +57,7 @@ def test_train(setup, test_run_id):
     evaluate_from_args(
         "-start 2022-10-10 -end 2022-10-11 --samples 10 --epoch 0".split()
         + [
-            "--base_run_id",
+            "--run_id_base",
             test_run_id,
             "--run_id",
             test_run_id,
