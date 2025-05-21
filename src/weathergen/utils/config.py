@@ -127,8 +127,26 @@ def _load_private_conf(private_home: Path | None) -> OmegaConf:
         _logger.info(f"Loading private config fromWEATHERGEN_PRIVATE_CONF:{private_home}.")
 
     elif env_script_path.is_file():
+        _logger.info(f"Loading private config from platform-env.py: {env_script_path}.")
+        # This code does many checks to ensure that any error message is surfaced. Since it is a process call,
+        # it can be hard to diagnose the error.
+        # TODO: eventually, put all this wrapper code in a separate function
+        try:
+            result_hpc = subprocess.run(
+                [str(env_script_path), "hpc"], capture_output=True, text=True, check=True
+            )
+        except subprocess.CalledProcessError as e:
+            _logger.error(
+                f"Error while running platform-env.py: {e} {e.stderr} {e.stdout} {e.output} {e.returncode}"
+            )
+            raise
+        if result_hpc.returncode != 0:
+            _logger.error(f"Error while running platform-env.py: {result_hpc.stderr.strip()}")
+            raise RuntimeError(f"Error while running platform-env.py: {result_hpc.stderr.strip()}")
+        _logger.info(f"Detected HPC: {result_hpc.stdout.strip()}.")
+
         result = subprocess.run(
-            [str(env_script_path), "hpc-config"], capture_output=True, text=True
+            [str(env_script_path), "hpc-config"], capture_output=True, text=True, check=True
         )
         private_home = Path(result.stdout.strip())
         _logger.info(f"Loading private config from platform-env.py output: {private_home}.")
