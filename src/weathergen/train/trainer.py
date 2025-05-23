@@ -130,6 +130,8 @@ class Trainer(Trainer_Base):
         if self.cf.rank == 0:
             config.save(self.cf, epoch=None)
 
+        logging.getLogger("obslearn").info(f"Starting evaluation with id={self.cf.run_id}.")
+
         # evaluate validation set
         self.validate(epoch=0)
         _logger.info(f"Finished evaluation run with id: {cf.run_id}")
