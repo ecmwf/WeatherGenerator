@@ -127,16 +127,13 @@ class Model(torch.nn.Module):
     def create(self):
         cf = self.cf
 
-        # KCT:iss130
         # separate embedding networks for differnt observation types
         self.embeds = EmbeddingEngine(cf, self.sources_size).create()
 
-        # KCT:iss130
         # local assimilation engine
         self.ae_local_blocks = LocalAssimilationEngine(cf).create()
 
         ##############
-        # KCT:iss130
         # local -> global assimilation engine adapter
         self.ae_adapter = Local2GlobalAssimilationEngine(cf).create()
 
@@ -168,12 +165,10 @@ class Model(torch.nn.Module):
         self.q_cells = torch.nn.Parameter(q_cells, requires_grad=True)
 
         ##############
-        # KCT:iss130
         # global assimilation engine
         self.ae_global_blocks = GlobalAssimilationEngine(cf, self.num_healpix_cells).create()
 
         ###############
-        # KCT:iss130
         # forecasting engine
         self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells).create()
 
@@ -254,7 +249,6 @@ class Model(torch.nn.Module):
             else:
                 self.pred_adapter_kv.append(torch.nn.Identity())
 
-            # KCT:iss130
             # target prediction engines
             tte = TargetPredictionEngine(
                 cf,
@@ -558,28 +552,24 @@ class Model(torch.nn.Module):
             zip(self.target_token_engines, self.pred_adapter_kv, strict=False)
         ):
             si = self.cf.streams[ii]
-            tro_type = si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
             tc_embed = self.embed_target_coords[ii]
 
             assert batch_size == 1
 
             # embed token coords, concatenating along batch dimension (which is taking care of through
             # the varlen attention)
-            if tro_type == "obs_value":
-                tc_tokens = torch.cat(
-                    [
-                        checkpoint(
-                            tc_embed,
-                            streams_data[i_b][ii].target_coords[fstep],
-                            use_reentrant=False,
-                        )
-                        if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
-                        else streams_data[i_b][ii].target_coords[fstep]
-                        for i_b in range(len(streams_data))
-                    ]
-                )
-            else:
-                assert False
+            tc_tokens = torch.cat(
+                [
+                    checkpoint(
+                        tc_embed,
+                        streams_data[i_b][ii].target_coords[fstep],
+                        use_reentrant=False,
+                    )
+                    if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
+                    else streams_data[i_b][ii].target_coords[fstep]
+                    for i_b in range(len(streams_data))
+                ]
+            )
 
             if torch.isnan(tc_tokens).any():
                 nn = si["name"]

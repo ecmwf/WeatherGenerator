@@ -55,9 +55,11 @@ def test_train(setup, test_run_id):
     )
 
     evaluate_from_args(
-        "-start 2022-10-10 -end 2022-10-11 --samples 10 --same_run_id --epoch 0".split()
+        "-start 2022-10-10 -end 2022-10-11 --samples 10 --epoch 0".split()
         + [
             "--run_id",
+            test_run_id,
+            "--eval_run_id",
             test_run_id,
             "--config",
             f"{weathergen_home}/integration_tests/small1.yaml",
@@ -88,42 +90,42 @@ def assert_missing_metrics_file(run_id):
 
 
 def assert_train_loss_below_threshold(run_id):
-    """Test that the 'stream.era5.loss_mse.loss_avg' metric is below a threshold."""
+    """Test that the 'stream.ERA5.loss_mse.loss_avg' metric is below a threshold."""
     metrics = load_metrics(run_id)
     loss_metric = next(
         (
-            metric.get("stream.era5.loss_mse.loss_avg", None)
+            metric.get("stream.ERA5.loss_mse.loss_avg", None)
             for metric in reversed(metrics)
             if metric.get("stage") == "train"
         ),
         None,
     )
     assert loss_metric is not None, (
-        "'stream.era5.loss_mse.loss_avg' metric is missing in metrics file"
+        "'stream.ERA5.loss_mse.loss_avg' metric is missing in metrics file"
     )
     # Check that the loss does not explode in a single epoch
     # This is meant to be a quick test, not a convergence test
     assert loss_metric < 1.25, (
-        f"'stream.era5.loss_mse.loss_avg' is {loss_metric}, expected to be below 0.25"
+        f"'stream.ERA5.loss_mse.loss_avg' is {loss_metric}, expected to be below 0.25"
     )
 
 
 def assert_val_loss_below_threshold(run_id):
-    """Test that the 'stream.era5.loss_mse.loss_avg' metric is below a threshold."""
+    """Test that the 'stream.ERA5.loss_mse.loss_avg' metric is below a threshold."""
     metrics = load_metrics(run_id)
     loss_metric = next(
         (
-            metric.get("stream.era5.loss_mse.loss_avg", None)
+            metric.get("stream.ERA5.loss_mse.loss_avg", None)
             for metric in reversed(metrics)
             if metric.get("stage") == "val"
         ),
         None,
     )
     assert loss_metric is not None, (
-        "'stream.era5.loss_mse.loss_avg' metric is missing in metrics file"
+        "'stream.ERA5.loss_mse.loss_avg' metric is missing in metrics file"
     )
     # Check that the loss does not explode in a single epoch
     # This is meant to be a quick test, not a convergence test
     assert loss_metric < 1.25, (
-        f"'stream.era5.loss_mse.loss_avg' is {loss_metric}, expected to be below 0.25"
+        f"'stream.ERA5.loss_mse.loss_avg' is {loss_metric}, expected to be below 0.25"
     )

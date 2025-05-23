@@ -91,12 +91,11 @@ def evaluate_from_args(argl: list[str]):
         help="Path to private configuration file for paths.",
     )
     parser.add_argument(
-        "-n",
-        "--same_run_id",
+        "--eval_run_id",
+        type=str,
         required=False,
-        dest="run_id_new",
-        action="store_false",
-        help="store evaluation results in the same folder as run_id",
+        dest="eval_run_id",
+        help="(optional) if specified, uses the provided run id to store the evaluation results",
     )
     parser.add_argument(
         "--config",
@@ -133,7 +132,7 @@ def evaluate_from_args(argl: list[str]):
     cf.loader_num_workers = min(cf.loader_num_workers, args.samples)
 
     trainer = Trainer()
-    trainer.evaluate(cf, args.run_id, args.epoch, args.run_id_new)
+    trainer.evaluate(cf, args.run_id, args.epoch, run_id_new=args.eval_run_id)
 
 
 ####################################################################################################
@@ -184,6 +183,7 @@ def train_continue() -> None:
 
     #########################
     if args.finetune_forecast:
+        cf.training_mode = "forecast"
         cf.forecast_delta_hrs = 0  # 12
         cf.forecast_steps = 1  # [j for j in range(1,9) for i in range(4)]
         cf.forecast_policy = "fixed"  # 'sequential_random' # 'fixed' #'sequential' #_random'
@@ -272,7 +272,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     trainer = Trainer(checkpoint_freq=250, print_freq=10)
 
     try:
-        trainer.run(cf)
+        trainer.run(cf, run_id_new=args.run_id)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
