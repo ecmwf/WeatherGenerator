@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pandas as pd
 
-import weathergen.utils.config as config
-from weathergen.train.trainer import Trainer
-from weathergen.utils.logger import init_loggers
+# import weathergen.utils.config as config
+# from weathergen.train.trainer import Trainer
+# from weathergen.utils.logger import init_loggers
 
 
 def evaluate():
@@ -279,6 +279,9 @@ def train_with_args(argl: list[str], stream_dir: str | None):
         pdb.post_mortem(tb)
 
 
-if __name__ == "__main__":
-    train()
-    # train_continue()
+# from weathergen.evaluation.test import test
+
+# if __name__ == "__main__":
+#     test()
+#     # train()
+#     # train_continue()

@@ -10,6 +10,12 @@ resolution-markers = [
     "python_full_version < '3.12' and sys_platform != 'linux' and sys_platform != 'macosx' and sys_platform != 'win32'",
 ]
 
+[manifest]
+members = [
+    "weathergen",
+    "weathergen-evaluation",
+]
+
 [[package]]
 name = "anemoi-datasets"
 version = "0.5.16"
@@ -1620,7 +1626,7 @@ wheels = [
 [[package]]
 name = "weathergen"
 version = "0.1.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "anemoi-datasets" },
     { name = "astropy-healpix" },
@@ -1637,6 +1643,7 @@ dependencies = [
     { name = "torch", version = "2.6.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'macosx'" },
     { name = "torch", version = "2.6.0+cu124", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "tqdm" },
+    { name = "weathergen-evaluation" },
     { name = "wheel" },
     { name = "zarr" },
 ]
@@ -1664,6 +1671,7 @@ requires-dist = [
     { name = "torch", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = "==2.6.0", index = "https://download.pytorch.org/whl/cu124" },
     { name = "torch", marker = "sys_platform == 'macosx'", specifier = "==2.6.0", index = "https://download.pytorch.org/whl/cpu" },
     { name = "tqdm" },
+    { name = "weathergen-evaluation", editable = "packages/weathergen-evaluation" },
     { name = "wheel" },
     { name = "zarr", specifier = "~=2.17" },
 ]
@@ -1672,6 +1680,23 @@ requires-dist = [
 dev = [
     { name = "pytest", specifier = "~=8.3.5" },
     { name = "ruff", specifier = "==0.9.7" },
+]
+
+[[package]]
+name = "weathergen-evaluation"
+version = "0.1.0"
+source = { editable = "packages/weathergen-evaluation" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "pandas" },
+    { name = "polars" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "matplotlib" },
+    { name = "pandas" },
+    { name = "polars" },
 ]
 
 [[package]]

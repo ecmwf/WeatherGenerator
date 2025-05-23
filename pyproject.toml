@@ -10,6 +10,7 @@ authors = [
 requires-python = ">=3.11,<3.13"
 # TODO: split the plotting dependencies into their own dep groups, they are not required.
 dependencies = [
+ 'weathergen-evaluation',
  'torch==2.6.0',
  'numpy~=2.2',
  'astropy_healpix~=1.1.2',
@@ -34,7 +35,7 @@ Repository = "https://github.com/ecmwf/WeatherGenerator.git"
 Issues = "https://github.com/ecmwf/WeatherGenerator/issues"
 
 [project.scripts]
-train = "weathergen:train"
+train = "weathergen.run_train:test_wrap"
 train_continue = "weathergen:train_continue"
 evaluate = "weathergen:evaluate"
 
@@ -99,7 +100,16 @@ ignore = [
   "E741",
 ]
 
+
+# BELOW ARE REQUIRED FOR PACKAGED APPS
+[tool.hatch.build.targets.wheel]
+packages = ["src/weathergen"]
+
+
 [tool.uv]
+
+package = false
+
 # This guarantees that the build is deterministic and will not be impacted 
 # by future releases of dependencies or sub-dependencies. 
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer
@@ -123,6 +133,7 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [tool.uv.sources]
+weathergen-evaluation = { workspace = true }
 torch = [
   { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
   { index = "pytorch-cpu", marker = "sys_platform == 'macosx'"},
@@ -138,3 +149,6 @@ log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
 log_cli_date_format = "%Y-%m-%d %H:%M:%S"
+
+[tool.uv.workspace]
+members = [ "packages/weathergen-evaluation" ]
