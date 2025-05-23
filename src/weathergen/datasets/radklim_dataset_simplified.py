@@ -9,11 +9,7 @@ import xarray as xr
 
 class RadklimDataset:
     """
-    Provides point-cloud formatting of spatiotemporal windows:
-    - latlon: (N_points, 2)
-    - geoinfos: (N_points, 0) placeholder
-    - data: (N_points, N_channels)
-    - times: (N_points,)
+    Data loader to read the monthly netCDF-files of the RADKLIM dataset. 
 
     Parameters
     ----------
@@ -24,8 +20,8 @@ class RadklimDataset:
     len_hrs : int
         Window length in hours.
     step_hrs : int
-        Step between windows in hours.
-    data_path : str or Path
+        Step between windows in hours (not used!).
+    filename : str or Path
         Root directory with NetCDF files organized by year/month.
     normalization_path : str or Path
         JSON file with "mean" and "std" lists matching sorted variables.
@@ -49,12 +45,8 @@ class RadklimDataset:
         self.len_hrs = len_hrs
         self.step_hrs = step_hrs
         if not self.step_hrs == self.len_hrs:
-            raise ValueError(
-                f"Parameters step_hrs {step_hrs} and len_hrs {len_hrs} must be the same."
-            )
-        self.data_path = Path(
-            filename
-        )  # rename to path (filename is ekept for consistency with other dataloaders)
+            raise ValueError(f"Parameters step_hrs {step_hrs} and len_hrs {len_hrs} must be the same.")
+        self.data_path = Path(filename)      # rename to path (filename is ekept for consistency with other dataloaders)
         self.fname_patt = fname_patt
 
         # get list of required files
@@ -66,17 +58,18 @@ class RadklimDataset:
             )
 
         # Retrieve metadata
-        self.variables = ["RR"]  # TODO: allow support for YW product
+        self.variables = ["RR"]     # TODO: allow support for YW product
 
         # Read normalization data
         with open(normalization_path) as f:
             stats = json.load(f)
-
+        #stats = normalization_path
+        
         means = stats.get("mean")
         stds = stats.get("std")
         if not (isinstance(means, list) and isinstance(stds, list)):
             raise ValueError("Normalization JSON must have 'mean' and 'std' lists.")
-
+            
         if len(means) != len(self.variables) or len(stds) != len(self.variables):
             raise ValueError(
                 f"Stats length {len(means)}/{len(stds)} != num variables {len(self.variables)}"
@@ -84,34 +77,39 @@ class RadklimDataset:
         self.mean = np.array(means, dtype=np.float32)
         self.std = np.array(stds, dtype=np.float32)
 
-        with xr.open_mfdataset(
+        ds = xr.open_mfdataset(
             self.file_list,
             combine="nested",
             concat_dim="time",
             engine="netcdf4",
             parallel=False,
-        ) as ds_meta:
-            # time-coordinate
-            times_all = ds_meta["time"].load()
-            # spatial coordinates
-            y1d = ds_meta["y"].values.astype(np.float32)
-            x1d = ds_meta["x"].values.astype(np.float32)
-            # 2D geographic coords
-            lat2d = ds_meta["lat"].values.astype(np.float32)
-            lon2d = ds_meta["lon"].values.astype(np.float32)
+            data_vars="minimal",
+            coords="minimal",
+            compat="override" 
+        )
+
+        # get relevant metadata from dataset
+        # time-coordinate
+        times_all = ds["time"].load()
 
         # get start and end indices for slicing of dataset
         self.start_idx = int(np.searchsorted(times_all, np.datetime64(self.start_time)))
-        self.end_idx = int(np.searchsorted(times_all, np.datetime64(self.end_time), side="right"))
+        self.end_idx   = int(np.searchsorted(times_all, np.datetime64(self.end_time), side="right"))
 
-        times_req = times_all.isel({"time": slice(self.start_idx, self.end_idx)})
+        times_req =  times_all.isel({"time": slice(self.start_idx, self.end_idx)})
         dt = times_req.diff(dim="time")
-        assert len(np.unique(dt)) == 1, "Inconsistent time step length in dataset."
+        assert len(np.unique(dt)) == 1, f"Inconsistent time step length in dataset."
         self.times = times_req.values
 
-        self.num_steps_per_window = int((len_hrs * 3600) / (dt[0] / np.timedelta64(1, "s")))
+        self.num_steps_per_window = int((len_hrs * 3600) / (dt[0] / np.timedelta64(1, 's')))
 
         # handle spatial coordinates
+        y1d    = ds['y'].values.astype(np.float32)
+        x1d    = ds['x'].values.astype(np.float32)
+        # 2D geographic coords
+        lat2d  = ds['lat'].values.astype(np.float32)
+        lon2d  = ds['lon'].values.astype(np.float32)
+        
         self.ny, self.nx = len(y1d), len(x1d)
         if lat2d.shape != (self.ny, self.nx) or lon2d.shape != (self.ny, self.nx):
             raise ValueError("lat/lon shape mismatch with y/x dims.")
@@ -120,17 +118,10 @@ class RadklimDataset:
         self.longitudes = (lon2d + 180) % 360 - 180
         self.latlon_sh = np.shape(self.latitudes)
 
-        # open dataset for data sampling
-        ds = xr.open_mfdataset(
-            self.file_list,
-            combine="nested",
-            concat_dim="time",
-            engine="netcdf4",
-            chunks={"time": self.num_steps_per_window * 2, "y": -1, "x": -1},
-            parallel=False,  # TODO: How to handle together with torch's parallelized data loading
-        )
+        ds = ds[self.variables].isel({"time": slice(self.start_idx, self.end_idx)})
 
-        self.ds = ds[self.variables].isel(time=slice(self.start_idx, self.end_idx))
+        # re-chunk the data for efficient data retrieval
+        self.ds = ds.chunk({"time": self.num_steps_per_window * 2, "y": -1, "x": -1})
 
     def __len__(self) -> int:
         """
@@ -423,7 +414,7 @@ class RadklimDataset:
         list of files matching the pattern
         """
         # Generate months start sequence
-        end = self.last_day_of_month(self.end_time)
+        end = self._last_day_of_month(self.end_time)
         months = pd.date_range(self.start_time.strftime("%Y-%m-01"), end, freq="ME")
         files = [
             self.data_path / m.strftime("%Y") / f"{self.fname_patt}{m.strftime('%Y%m')}.nc"
@@ -449,7 +440,7 @@ class RadklimDataset:
         self.ds.close()
 
     @staticmethod
-    def last_day_of_month(any_day: pd.Timestamp) -> pd.Timestamp:
+    def _last_day_of_month(any_day: pd.Timestamp) -> pd.Timestamp:
         """
         TODO: Move to utils
         Returns the last day of a month
