@@ -7,6 +7,8 @@ authors = [
     { name = "WeatherGenerator collaboration" }
 ]
 
+# https://github.com/astral-sh/uv/issues/7576 for how to structure the workspaces
+
 requires-python = ">=3.11,<3.13"
 # TODO: split the plotting dependencies into their own dep groups, they are not required.
 dependencies = [
