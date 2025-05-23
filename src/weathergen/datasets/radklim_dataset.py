@@ -9,7 +9,7 @@ import xarray as xr
 
 class RadklimDataset:
     """
-    Data loader to read the monthly netCDF-files of the RADKLIM dataset. 
+    Data loader to read the monthly netCDF-files of the RADKLIM dataset.
 
     Parameters
     ----------
@@ -45,8 +45,12 @@ class RadklimDataset:
         self.len_hrs = len_hrs
         self.step_hrs = step_hrs
         if not self.step_hrs == self.len_hrs:
-            raise ValueError(f"Parameters step_hrs {step_hrs} and len_hrs {len_hrs} must be the same.")
-        self.data_path = Path(filename)      # rename to path (filename is ekept for consistency with other dataloaders)
+            raise ValueError(
+                f"Parameters step_hrs {step_hrs} and len_hrs {len_hrs} must be the same."
+            )
+        self.data_path = Path(
+            filename
+        )  # rename to path (filename is ekept for consistency with other dataloaders)
         self.fname_patt = fname_patt
 
         # get list of required files
@@ -58,18 +62,18 @@ class RadklimDataset:
             )
 
         # Retrieve metadata
-        self.variables = ["RR"]     # TODO: allow support for YW product
+        self.variables = ["RR"]  # TODO: allow support for YW product
 
         # Read normalization data
         with open(normalization_path) as f:
             stats = json.load(f)
-        #stats = normalization_path
-        
+        # stats = normalization_path
+
         means = stats.get("mean")
         stds = stats.get("std")
         if not (isinstance(means, list) and isinstance(stds, list)):
             raise ValueError("Normalization JSON must have 'mean' and 'std' lists.")
-            
+
         if len(means) != len(self.variables) or len(stds) != len(self.variables):
             raise ValueError(
                 f"Stats length {len(means)}/{len(stds)} != num variables {len(self.variables)}"
@@ -85,7 +89,7 @@ class RadklimDataset:
             parallel=False,
             data_vars="minimal",
             coords="minimal",
-            compat="override" 
+            compat="override",
         )
 
         # get relevant metadata from dataset
@@ -94,22 +98,22 @@ class RadklimDataset:
 
         # get start and end indices for slicing of dataset
         self.start_idx = int(np.searchsorted(times_all, np.datetime64(self.start_time)))
-        self.end_idx   = int(np.searchsorted(times_all, np.datetime64(self.end_time), side="right"))
+        self.end_idx = int(np.searchsorted(times_all, np.datetime64(self.end_time), side="right"))
 
-        times_req =  times_all.isel({"time": slice(self.start_idx, self.end_idx)})
+        times_req = times_all.isel({"time": slice(self.start_idx, self.end_idx)})
         dt = times_req.diff(dim="time")
-        assert len(np.unique(dt)) == 1, f"Inconsistent time step length in dataset."
+        assert len(np.unique(dt)) == 1, "Inconsistent time step length in dataset."
         self.times = times_req.values
 
-        self.num_steps_per_window = int((len_hrs * 3600) / (dt[0] / np.timedelta64(1, 's')))
+        self.num_steps_per_window = int((len_hrs * 3600) / (dt[0] / np.timedelta64(1, "s")))
 
         # handle spatial coordinates
-        y1d    = ds['y'].values.astype(np.float32)
-        x1d    = ds['x'].values.astype(np.float32)
+        y1d = ds["y"].values.astype(np.float32)
+        x1d = ds["x"].values.astype(np.float32)
         # 2D geographic coords
-        lat2d  = ds['lat'].values.astype(np.float32)
-        lon2d  = ds['lon'].values.astype(np.float32)
-        
+        lat2d = ds["lat"].values.astype(np.float32)
+        lon2d = ds["lon"].values.astype(np.float32)
+
         self.ny, self.nx = len(y1d), len(x1d)
         if lat2d.shape != (self.ny, self.nx) or lon2d.shape != (self.ny, self.nx):
             raise ValueError("lat/lon shape mismatch with y/x dims.")
