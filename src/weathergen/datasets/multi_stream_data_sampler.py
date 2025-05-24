@@ -14,8 +14,8 @@ import pathlib
 import numpy as np
 import torch
 
-from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.atmorep_dataset import AtmorepDataset
+from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.fesom_dataset import FesomDataset
 from weathergen.datasets.obs_dataset import ObsDataset
 from weathergen.datasets.stream_data import StreamData

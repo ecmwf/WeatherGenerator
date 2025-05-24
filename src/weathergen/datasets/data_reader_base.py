@@ -7,29 +7,34 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datetime
-from pathlib import Path
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
 _logger = logging.getLogger(__name__)
 
+
 @dataclass
-class ReaderData : 
-    coords : np.array #[np.float32]
-    geoinfos: np.array #[np.float32]
-    data: np.array #[np.float32]
-    times: np.array #[np.datetime64]
+class ReaderData:
+    """
+    Wrapper for return values from DataReader.get_source and DataReader.get_target
+    """
 
-    def __init__() :
-        self.coords = np.array( [0,0], dtype=np.float32)
-        self.geoinfos = np.array( [0,0], dtype=np.float32)
-        self.data = np.array( [0,0], dtype=np.float32)
-        self.times = np.array( [0], dtype=np.datetime64)
+    coords: np.array  # [np.float32]
+    geoinfos: np.array  # [np.float32]
+    data: np.array  # [np.float32]
+    times: np.array  # [np.datetime64]
 
-class DataReaderBase :
+    def __init__(self):
+        self.coords = np.array([0, 0], dtype=np.float32)
+        self.geoinfos = np.array([0, 0], dtype=np.float32)
+        self.data = np.array([0, 0], dtype=np.float32)
+        self.times = np.array([0], dtype=np.datetime64)
+
+
+class DataReaderBase:
     "Base class for data readers"
 
     def __init__(
@@ -78,10 +83,10 @@ class DataReaderBase :
         self.source_channels = []
         self.target_channels = []
 
-        self.mean = np.zeros( 0)
-        self.stdev = np.ones( 0)
-        self.mean_geoinfo = np.zeros( 0)
-        self.stdev_geoinfo = np.ones( 0)
+        self.mean = np.zeros(0)
+        self.stdev = np.ones(0)
+        self.mean_geoinfo = np.zeros(0)
+        self.stdev_geoinfo = np.ones(0)
 
         self.len_hrs = len_hrs
         self.step_hrs = step_hrs
@@ -101,7 +106,7 @@ class DataReaderBase :
 
         return self.len
 
-    def get_source(self, idx: int) -> ReaderData :
+    def get_source(self, idx: int) -> ReaderData:
         """
         Get source data for idx
 
@@ -116,7 +121,7 @@ class DataReaderBase :
         """
         return self._get(idx, self.source_idx)
 
-    def get_target(self, idx: int) -> ReaderData :
+    def get_target(self, idx: int) -> ReaderData:
         """
         Get target data for idx
 
@@ -131,7 +136,7 @@ class DataReaderBase :
         """
         return self._get(idx, self.target_idx)
 
-    def _get( self, idx: int, channels_idx: np.array ) -> ReaderData :
+    def _get(self, idx: int, channels_idx: np.array) -> ReaderData:
         """
         Get data for window
 
@@ -239,8 +244,8 @@ class DataReaderBase :
 
         assert geoinfos.shape[-1] == len(self.geoinfo_idx), "incorrect number of geoinfo channels"
         for i, ch in enumerate(self.geoinfo_idx):
-            source[..., i] = (source[..., i] - self.mean_geoinfo[ch]) / self.stdev_geoinfo[ch]
-        
+            geoinfos[..., i] = (geoinfos[..., i] - self.mean_geoinfo[ch]) / self.stdev_geoinfo[ch]
+
         return geoinfos
 
     def normalize_source_channels(self, source: np.array) -> np.array:
@@ -332,5 +337,5 @@ class DataReaderBase :
         -------
             start and end of temporal window
         """
-        
+
         return (np.array([], dtype=np.datetime64), np.array([], dtype=np.datetime64))

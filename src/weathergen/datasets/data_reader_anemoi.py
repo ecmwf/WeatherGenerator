@@ -11,18 +11,15 @@ import datetime
 import logging
 from pathlib import Path
 
-import numpy as np
-import torch
-import anemoi
 import anemoi.datasets as anemoi_datasets
+import numpy as np
 
-from weathergen.datasets.data_reader_base import DataReaderBase
-from weathergen.datasets.data_reader_base import ReaderData
+from weathergen.datasets.data_reader_base import DataReaderBase, ReaderData
 
 _logger = logging.getLogger(__name__)
 
 
-class DataReaderAnemoi( DataReaderBase):
+class DataReaderAnemoi(DataReaderBase):
     "Wrapper for Anemoi dataset"
 
     def __init__(
@@ -57,7 +54,7 @@ class DataReaderAnemoi( DataReaderBase):
         None
         """
 
-        super().__init__( start, end, len_hrs, step_hrs, filename, stream_info)
+        super().__init__(start, end, len_hrs, step_hrs, filename, stream_info)
 
         # TODO: add support for different normalization modes
 
@@ -139,10 +136,12 @@ class DataReaderAnemoi( DataReaderBase):
         if dt_start >= ds_dt_end or dt_end <= ds_dt_start:
             self.ds = None
         else:
-            self.ds = anemoi_datasets.open_dataset(ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end)
+            self.ds = anemoi_datasets.open_dataset(
+                ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end
+            )
             self.len = len(self.ds)
 
-    def _get( self, idx: int, channels_idx: np.array) -> ReaderData :
+    def _get(self, idx: int, channels_idx: np.array) -> ReaderData:
         """
         Get data for window
 
