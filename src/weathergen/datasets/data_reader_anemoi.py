@@ -13,12 +13,16 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from anemoi.datasets import open_dataset
+import anemoi
+import anemoi.datasets as anemoi_datasets
+
+from weathergen.datasets.data_reader_base import DataReaderBase
+from weathergen.datasets.data_reader_base import ReaderData
 
 _logger = logging.getLogger(__name__)
 
 
-class AnemoiDataset:
+class DataReaderAnemoi( DataReaderBase):
     "Wrapper for Anemoi dataset"
 
     def __init__(
@@ -53,15 +57,14 @@ class AnemoiDataset:
         None
         """
 
+        super().__init__( start, end, len_hrs, step_hrs, filename, stream_info)
+
         # TODO: add support for different normalization modes
 
         assert len_hrs == step_hrs, "Currently only step_hrs=len_hrs is supported"
 
-        self.len_hrs = len_hrs
-        self.step_hrs = step_hrs
-
         # open  dataset to peak that it is compatible with requested parameters
-        ds = open_dataset(filename)
+        ds = anemoi_datasets.open_dataset(filename)
 
         # check that start and end time are within the dataset time range
 
@@ -88,9 +91,6 @@ class AnemoiDataset:
         self.latitudes = 2 * np.clip(self.latitudes, -90, 90) - self.latitudes
 
         self.longitudes = (self.longitudes + 180) % 360 - 180
-
-        # TODO: define in base class
-        self.geoinfo_idx = []
 
         # Determine source and target channels, filtering out forcings etc and using
         # specified source and target channels if specified
@@ -139,58 +139,10 @@ class AnemoiDataset:
         if dt_start >= ds_dt_end or dt_end <= ds_dt_start:
             self.ds = None
         else:
-            self.ds = open_dataset(ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end)
+            self.ds = anemoi_datasets.open_dataset(ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end)
+            self.len = len(self.ds)
 
-    def __len__(self) -> int:
-        """
-        Length of dataset
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        length of dataset
-        """
-        if not self.ds:
-            return 0
-
-        return len(self.ds)
-
-    def get_source(self, idx: int) -> tuple[np.array, np.array, np.array, np.array]:
-        """
-        Get source data for idx
-
-        Parameters
-        ----------
-        idx : int
-            Index of temporal window
-
-        Returns
-        -------
-        source data (coords, geoinfos, data, datetimes)
-        """
-        return self._get(idx, self.source_idx)
-
-    def get_target(self, idx: int) -> tuple[np.array, np.array, np.array, np.array]:
-        """
-        Get target data for idx
-
-        Parameters
-        ----------
-        idx : int
-            Index of temporal window
-
-        Returns
-        -------
-        target data (coords, geoinfos, data, datetimes)
-        """
-        return self._get(idx, self.target_idx)
-
-    def _get(
-        self, idx: int, channels_idx: np.array
-    ) -> tuple[np.array, np.array, np.array, np.array]:
+    def _get( self, idx: int, channels_idx: np.array) -> ReaderData :
         """
         Get data for window
 
@@ -244,173 +196,6 @@ class AnemoiDataset:
         ).flatten()
 
         return (latlon, geoinfos, data, datetimes)
-
-    def get_source_num_channels(self) -> int:
-        """
-        Get number of source channels
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        number of source channels
-        """
-        return len(self.source_idx)
-
-    def get_target_num_channels(self) -> int:
-        """
-        Get number of target channels
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        number of target channels
-        """
-        return len(self.target_idx)
-
-    def get_coords_size(self) -> int:
-        """
-        Get size of coords
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        size of coords
-        """
-        return 2
-
-    def get_geoinfo_size(self) -> int:
-        """
-        Get size of geoinfos
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        size of geoinfos
-        """
-        return len(self.geoinfo_idx)
-
-    def normalize_coords(self, coords: torch.tensor) -> torch.tensor:
-        """
-        Normalize coordinates
-
-        Parameters
-        ----------
-        coords :
-            coordinates to be normalized
-
-        Returns
-        -------
-        Normalized coordinates
-        """
-        coords[..., 0] = np.sin(np.deg2rad(coords[..., 0]))
-        coords[..., 1] = np.sin(0.5 * np.deg2rad(coords[..., 1]))
-
-        return coords
-
-    def normalize_geoinfos(self, geoinfos: torch.tensor) -> torch.tensor:
-        """
-        Normalize geoinfos
-
-        Parameters
-        ----------
-        geoinfos :
-            geoinfos to be normalized
-
-        Returns
-        -------
-        Normalized geoinfo
-        """
-
-        assert geoinfos.shape[-1] == 0, "incorrect number of geoinfo channels"
-        return geoinfos
-
-    def normalize_source_channels(self, source: torch.tensor) -> torch.tensor:
-        """
-        Normalize source channels
-
-        Parameters
-        ----------
-        data :
-            data to be normalized
-
-        Returns
-        -------
-        Normalized data
-        """
-        assert source.shape[-1] == len(self.source_idx), "incorrect number of channels"
-        for i, ch in enumerate(self.source_idx):
-            source[..., i] = (source[..., i] - self.mean[ch]) / self.stdev[ch]
-
-        return source
-
-    def normalize_target_channels(self, target: torch.tensor) -> torch.tensor:
-        """
-        Normalize target channels
-
-        Parameters
-        ----------
-        data :
-            data to be normalized
-
-        Returns
-        -------
-        Normalized data
-        """
-        assert target.shape[-1] == len(self.target_idx), "incorrect number of channels"
-        for i, ch in enumerate(self.target_idx):
-            target[..., i] = (target[..., i] - self.mean[ch]) / self.stdev[ch]
-
-        return target
-
-    def denormalize_source_channels(self, source: torch.tensor) -> torch.tensor:
-        """
-        Denormalize source channels
-
-        Parameters
-        ----------
-        data :
-            data to be denormalized
-
-        Returns
-        -------
-        Denormalized data
-        """
-        assert source.shape[-1] == len(self.source_idx), "incorrect number of channels"
-        for i, ch in enumerate(self.source_idx):
-            source[..., i] = (source[..., i] * self.stdev[ch]) + self.mean[ch]
-
-        return source
-
-    def denormalize_target_channels(self, data: torch.tensor) -> torch.tensor:
-        """
-        Denormalize target channels
-
-        Parameters
-        ----------
-        data :
-            data to be denormalized (target or pred)
-
-        Returns
-        -------
-        Denormalized data
-        """
-        assert data.shape[-1] == len(self.target_idx), "incorrect number of channels"
-        for i, ch in enumerate(self.target_idx):
-            data[..., i] = (data[..., i] * self.stdev[ch]) + self.mean[ch]
-
-        return data
 
     def time_window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
         """

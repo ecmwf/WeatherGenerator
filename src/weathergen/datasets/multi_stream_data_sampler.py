@@ -14,7 +14,7 @@ import pathlib
 import numpy as np
 import torch
 
-from weathergen.datasets.anemoi_dataset import AnemoiDataset
+from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.atmorep_dataset import AtmorepDataset
 from weathergen.datasets.fesom_dataset import FesomDataset
 from weathergen.datasets.obs_dataset import ObsDataset
@@ -82,7 +82,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         datapath = cf.data_path_obs
                         kwargs["end"] = end_date_padded
                     case "anemoi":
-                        dataset = AnemoiDataset
+                        dataset = DataReaderAnemoi
                         datapath = cf.data_path_anemoi
                     case "fesom":
                         dataset = FesomDataset
