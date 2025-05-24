@@ -121,7 +121,7 @@ class Trainer(Trainer_Base):
         _logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
         self.ddp_model = self.model
         self.model_params = ModelParams().create(cf).to(self.devices[0])
-        logging.getLogger("obslearn").info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
+        _logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
 
         self.loss_fcts_val = []
         for name, w in cf.loss_fcts_val:
@@ -130,7 +130,7 @@ class Trainer(Trainer_Base):
         if self.cf.rank == 0:
             config.save(self.cf, epoch=None)
 
-        logging.getLogger("obslearn").info(f"Starting evaluation with id={self.cf.run_id}.")
+        _logger.info(f"Starting evaluation with id={self.cf.run_id}.")
 
         # evaluate validation set
         self.validate(epoch=0)
@@ -248,7 +248,7 @@ class Trainer(Trainer_Base):
             s = f"cf.lr_steps_warmup and cf.lr_steps_cooldown were larger than cf.lr_steps={cf.lr_steps}"
             s += f". The value have been adjusted to cf.lr_steps_warmup={cf.lr_steps_warmup} and "
             s += f" cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}."
-            logging.getLogger("obslearn").warning(s)
+            _logger.warning(s)
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             cf.batch_size,
@@ -269,7 +269,7 @@ class Trainer(Trainer_Base):
 
         if self.cf.istep > 0 and self.cf.rank == 0:
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
-            logging.getLogger("obslearn").info(str)
+            _logger.info(str)
 
         # get function handles for loss function terms
         self.loss_fcts = [[getattr(losses, name), w] for name, w in cf.loss_fcts]
