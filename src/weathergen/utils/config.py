@@ -65,7 +65,7 @@ def save(config: Config, epoch: int | None):
         f.write(json_str)
 
 
-def load_model_config(run_id: str, epoch: int | None, model_path: str | None) -> DictConfig:
+def load_model_config(run_id: str, epoch: int | None, model_path: str | None) -> Config:
     """
     Load a configuration file from a given run_id and epoch.
     If run_id is a full path, loads it from the full path.
@@ -214,7 +214,7 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
     return private_cf
 
 
-def _load_default_conf() -> DictConfig:
+def _load_default_conf() -> Config:
     """Deserialize default configuration."""
     return OmegaConf.load(_DEFAULT_CONFIG_PTH)
 

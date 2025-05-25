@@ -4,14 +4,14 @@ from pathlib import Path
 import pandas as pd
 
 
-def get_train_parser():
+def get_train_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     _add_general_arguments(parser)
 
     return parser
 
 
-def get_continue_parser():
+def get_continue_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
 
     _add_general_arguments(parser)
@@ -26,7 +26,7 @@ def get_continue_parser():
     return parser
 
 
-def get_evaluate_parser():
+def get_evaluate_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
 
     _add_model_loading_params(parser)
@@ -89,7 +89,7 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--run_id",
         default=False,
-        help="Store training and evaluation artifacts under the given same run_id",
+        help="The run id for this run. All artifacts (models, metrics, ...) will be stored under this run_id. If not provided, a new run_id will be created",
     )
     parser.add_argument(
         "--options",
