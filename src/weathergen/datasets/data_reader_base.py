@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import datetime
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,59 @@ from pathlib import Path
 import numpy as np
 
 _logger = logging.getLogger(__name__)
+
+
+class TimeWindowHandler:
+    def __init__(self, t_start, t_end, t_window_len, t_window_step):
+        self.zero_time = np.datetime64("1850-01-01T00:00")
+
+        format_str = "%Y%m%d%H%M%S"
+        self.t_start = np.datetime64(datetime.datetime.strptime(str(t_start), format_str))
+        self.t_end = np.datetime64(datetime.datetime.strptime(str(t_end), format_str))
+        self.t_window_len = np.timedelta64(t_window_len, "h")
+        self.t_window_step = np.timedelta64(t_window_step, "h")
+
+        assert self.t_start < self.t_end, "end datetime has to be in the past of start datetime"
+        assert self.t_start > self.zero_time, "start datetime has to be >= 1850-01-01T00:00."
+
+    def get_index_range(self):
+        """
+        Temporal window corresponding to index
+
+        Parameters
+        ----------
+        idx :
+            index of temporal window
+
+        Returns
+        -------
+            start and end of temporal window
+        """
+
+        idx_start = (self.t_start - self.zero_time) // self.t_window_step
+        idx_end = (self.t_end - self.zero_time) // self.t_window_step
+        assert idx_start <= idx_end, "time window idxs invalid"
+
+        return idx_start, idx_end
+
+    def time_window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
+        """
+        Temporal window corresponding to index
+
+        Parameters
+        ----------
+        idx :
+            index of temporal window
+
+        Returns
+        -------
+            start and end of temporal window
+        """
+
+        t_start = self.zero_time + self.t_window_len * idx
+        t_end = t_start + self.t_window_step
+
+        return (t_start, t_end)
 
 
 @dataclass
@@ -25,24 +79,28 @@ class ReaderData:
     coords: np.array  # [np.float32]
     geoinfos: np.array  # [np.float32]
     data: np.array  # [np.float32]
-    times: np.array  # [np.datetime64]
+    datetimes: np.array  # [np.datetime64]
 
     def __init__(self):
-        self.coords = np.array([0, 0], dtype=np.float32)
-        self.geoinfos = np.array([0, 0], dtype=np.float32)
-        self.data = np.array([0, 0], dtype=np.float32)
-        self.times = np.array([0], dtype=np.datetime64)
+        self.coords = np.zeros([0, 0], dtype=np.float32)
+        self.geoinfos = np.zeros([0, 0], dtype=np.float32)
+        self.data = np.zeros([0, 0], dtype=np.float32)
+        self.datetimes = np.zeros([0], dtype=np.datetime64)
+
+    def is_empty(self):
+        return self.data.shape[0] == 0
 
 
 class DataReaderBase:
     "Base class for data readers"
 
+    # @abstractmethod
     def __init__(
         self,
         start: int,
         end: int,
-        len_hrs: int,
-        step_hrs: int,
+        t_window_len: int,
+        t_window_step: int,
         filename: Path,
         stream_info: dict,
     ) -> None:
@@ -55,9 +113,9 @@ class DataReaderBase:
             Start time
         end : int
             End time
-        len_hrs : int
+        t_window_len : int
             length of data window
-        step_hrs :
+        t_window_step :
             delta hours between start times of windows
         filename :
             filename (and path) of dataset
@@ -88,8 +146,11 @@ class DataReaderBase:
         self.mean_geoinfo = np.zeros(0)
         self.stdev_geoinfo = np.ones(0)
 
-        self.len_hrs = len_hrs
-        self.step_hrs = step_hrs
+        self.t_window_len = np.timedelta64(t_window_len, "h")
+        self.t_window_step = np.timedelta64(t_window_step, "h")
+        self.t_eps = np.timedelta64(1, "ms")
+
+        self.time_window_handler = TimeWindowHandler(start, end, t_window_len, t_window_step)
 
     def __len__(self) -> int:
         """
@@ -323,19 +384,3 @@ class DataReaderBase:
             data[..., i] = (data[..., i] * self.stdev[ch]) + self.mean[ch]
 
         return data
-
-    def time_window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
-        """
-        Temporal window corresponding to index
-
-        Parameters
-        ----------
-        idx :
-            index of temporal window
-
-        Returns
-        -------
-            start and end of temporal window
-        """
-
-        return (np.array([], dtype=np.datetime64), np.array([], dtype=np.datetime64))

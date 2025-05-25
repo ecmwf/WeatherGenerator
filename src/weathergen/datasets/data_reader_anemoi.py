@@ -26,8 +26,8 @@ class DataReaderAnemoi(DataReaderBase):
         self,
         start: int,
         end: int,
-        len_hrs: int,
-        step_hrs: int,
+        t_window_len: int,
+        t_window_step: int,
         filename: Path,
         stream_info: dict,
     ) -> None:
@@ -40,9 +40,9 @@ class DataReaderAnemoi(DataReaderBase):
             Start time
         end : int
             End time
-        len_hrs : int
+        t_window_len : int
             length of data window
-        step_hrs :
+        t_window_step :
             delta hours between start times of windows
         filename :
             filename (and path) of dataset
@@ -54,17 +54,12 @@ class DataReaderAnemoi(DataReaderBase):
         None
         """
 
-        super().__init__(start, end, len_hrs, step_hrs, filename, stream_info)
-
-        # TODO: add support for different normalization modes
-
-        assert len_hrs == step_hrs, "Currently only step_hrs=len_hrs is supported"
+        super().__init__(start, end, t_window_len, t_window_step, filename, stream_info)
 
         # open  dataset to peak that it is compatible with requested parameters
         ds = anemoi_datasets.open_dataset(filename)
 
         # check that start and end time are within the dataset time range
-
         ds_dt_start = ds.dates[0]
         ds_dt_end = ds.dates[-1]
 
@@ -72,9 +67,8 @@ class DataReaderAnemoi(DataReaderBase):
         dt_start = datetime.datetime.strptime(str(start), format_str)
         dt_end = datetime.datetime.strptime(str(end), format_str)
 
-        # TODO, TODO, TODO: we need proper alignment for the case where self.ds.frequency
-        # is not a multile of len_hrs
-        self.num_steps_per_window = int((len_hrs * 3600) / ds.frequency.seconds)
+        # TODO, TODO, TODO: add support for sub-sampling of dataset using stream_info['data_frequency]
+        self.sub_sampling_per_window = 1
 
         # open dataset
 
@@ -137,9 +131,11 @@ class DataReaderAnemoi(DataReaderBase):
             self.ds = None
         else:
             self.ds = anemoi_datasets.open_dataset(
-                ds, frequency=str(step_hrs) + "h", start=dt_start, end=dt_end
+                ds, frequency=str(t_window_step) + "h", start=dt_start, end=dt_end
             )
             self.len = len(self.ds)
+            self.ds_start_time = self.ds.dates[0]
+            self.ds_end_time = self.ds.dates[-1]
 
     def _get(self, idx: int, channels_idx: np.array) -> ReaderData:
         """
@@ -157,21 +153,21 @@ class DataReaderAnemoi(DataReaderBase):
         data (coords, geoinfos, data, datetimes)
         """
 
-        if not self.ds:
-            return (
-                np.array([], dtype=np.float32),
-                np.array([], dtype=np.float32),
-                np.array([], dtype=np.float32),
-                np.array([], dtype=np.float32),
-            )
+        rdata = ReaderData()
+        t_idxs = self.translate_window_idx(idx)
+
+        if self.len == 0 or len(t_idxs) == 0:
+            return rdata
 
         # extract number of time steps and collapse ensemble dimension
+        # rdata.data = self.ds[t_idxs][:, :, 0]
+        rdata.data = self.ds[t_idxs[0] : t_idxs[-1] + 1][:, :, 0]
 
-        data = self.ds[idx : idx + self.num_steps_per_window][:, :, 0]
-
-        # # extract channels
-        data = (
-            data[:, channels_idx].transpose([0, 2, 1]).reshape((data.shape[0] * data.shape[2], -1))
+        # extract channels
+        rdata.data = (
+            rdata.data[:, channels_idx]
+            .transpose([0, 2, 1])
+            .reshape((rdata.data.shape[0] * rdata.data.shape[2], -1))
         )
 
         # construct lat/lon coords
@@ -182,23 +178,23 @@ class DataReaderAnemoi(DataReaderBase):
             ],
             0,
         ).transpose()
-        latlon = np.repeat(latlon, self.num_steps_per_window, axis=0).reshape((-1, latlon.shape[1]))
+        rdata.coords = np.repeat(latlon, len(t_idxs), axis=0).reshape((-1, latlon.shape[1]))
 
         # empty geoinfos for anemoi
-        geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
+        rdata.geoinfos = np.zeros((rdata.data.shape[0], 0), dtype=rdata.data.dtype)
 
         # date time matching #data points of data
-        datetimes = np.repeat(
-            np.expand_dims(self.ds.dates[idx : idx + self.num_steps_per_window], 0),
-            data.shape[0],
+        rdata.datetimes = np.repeat(
+            np.expand_dims(self.ds.dates[t_idxs[0] : t_idxs[-1] + 1], 0),
+            rdata.data.shape[0],
             axis=0,
         ).flatten()
 
-        return (latlon, geoinfos, data, datetimes)
+        return rdata
 
-    def time_window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
+    def translate_window_idx(self, idx) -> np.array:
         """
-        Temporal window corresponding to index
+        Translate idx for time window to idxs into dataset
 
         Parameters
         ----------
@@ -209,7 +205,20 @@ class DataReaderAnemoi(DataReaderBase):
         -------
             start and end of temporal window
         """
-        if not self.ds:
-            return (np.array([], dtype=np.datetime64), np.array([], dtype=np.datetime64))
 
-        return (self.ds.dates[idx], self.ds.dates[idx] + np.timedelta64(self.len_hrs, "h"))
+        win_start, win_end = self.time_window_handler.time_window(idx)
+        if win_start < self.ds_start_time or win_end > self.ds_end_time:
+            return np.array([], dtype=np.int32)
+
+        delta_t_start = win_start - self.ds_start_time
+        # delta_t_end = win_end - self.ds_start_time
+
+        steps_to_start = delta_t_start // self.ds.frequency
+        rem_to_start = delta_t_start % self.ds.frequency
+
+        s_idx = steps_to_start + (0 if rem_to_start == 0.0 else 1)
+        e_idx = s_idx + ((self.t_window_len - self.t_eps - rem_to_start) // self.ds.frequency)
+
+        # TODO, TODO, TODO: read times and check
+
+        return np.arange(s_idx, e_idx + 1, self.sub_sampling_per_window)
