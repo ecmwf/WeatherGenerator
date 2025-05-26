@@ -24,7 +24,7 @@ _logger = logging.getLogger(__name__)
 ####################################################################################################
 
 
-def check_run_id_dict(run_id_dict: dict) -> bool:
+def _check_run_id_dict(run_id_dict: dict) -> bool:
     """
     Check if the run_id_dict is valid.
 
@@ -45,51 +45,33 @@ def check_run_id_dict(run_id_dict: dict) -> bool:
             )
 
 
-def read_yaml_file(file_path: Path) -> dict:
+def _read_yaml_config(yaml_path_or_str: str | Path) -> dict:
     """
-    Read a YAML file and return its content as a dictionary.
+    Read a from a YAML file or a dictionary-like string to get a configuration dictionary.
 
     Parameters
     ----------
-    file_path : Path
-        Path to the YAML file.
+    yaml_path_or_str : string or Path
+        Path to the YAML file or dictonary string to read.
     Returns
     -------
     dict
         The content of the YAML file as a dictionary.
     """
-    with open(file_path) as f:
-        data_dict = yaml.safe_load(f)
+    if Path(yaml_path_or_str).is_file():
+        with open(yaml_path_or_str) as f:
+            data_dict = yaml.safe_load(f)
+    else:
+        data_dict = yaml.safe_load(yaml_path_or_str)
 
     # Validate the structure: {run_id: [job_id, experiment_name]}
-    check_run_id_dict(data_dict)
-
-    return data_dict
-
-
-def read_yaml_string(yaml_string: str) -> dict:
-    """
-    Read a YAML string and return its content as a dictionary.
-
-    Parameters
-    ----------
-    yaml_string : str
-        YAML string to read.
-    Returns
-    -------
-    dict
-        The content of the YAML string as a dictionary.
-    """
-    data_dict = yaml.safe_load(yaml_string)
-
-    # Validate the structure: {run_id: [job_id, experiment_name]}
-    check_run_id_dict(data_dict)
+    _check_run_id_dict(data_dict)
 
     return data_dict
 
 
 ####################################################################################################
-def clean_plot_folder(plot_dir: Path = "./plots/"):
+def clean_plot_folder(plot_dir: Path):
     """
     Clean the plot folder by removing all png-files in it.
 
@@ -129,8 +111,8 @@ def plot_lr(
     runs_ids: dict[str, list],
     runs_data: list[Metrics],
     runs_active: list[bool],
+    plot_dir: Path,
     x_axis: str = "samples",
-    plot_dir: Path = Path("./plots"),
 ):
     """
     Plot learning rate curves of training runs.
@@ -143,10 +125,10 @@ def plot_lr(
         list of Metrics objects containing the training data
     runs_active : list
         list of booleans indicating whether the run is still active
-    x_axis : str
-        x-axis strings used in the column names (options: "samples", "dtime")
     plot_dir : Path
         directory to save the plots
+    x_axis : str
+        x-axis strings used in the column names (options: "samples", "dtime")
     """
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
@@ -199,8 +181,8 @@ def plot_utilization(
     runs_ids: dict[str, list],
     runs_data: list[Metrics],
     runs_active: list[bool],
+    plot_dir: Path,
     x_axis: str = "samples",
-    plot_dir: Path = Path("./plots"),
 ):
     """
     Plot compute utilization of training runs.
@@ -213,10 +195,10 @@ def plot_utilization(
         list of Metrics objects containing the training data
     runs_active : list
         list of booleans indicating whether the run is still active
-    x_axis : str
-        x-axis strings used in the column names (options: "samples", "dtime")
     plot_dir : Path
         directory to save the plots
+    x_axis : str
+        x-axis strings used in the column names (options: "samples", "dtime")
     """
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
@@ -276,11 +258,11 @@ def plot_loss_per_stream(
     runs_data: list[Metrics],
     runs_active: list[bool],
     stream_names: list[str],
+    plot_dir: Path,
     errs: list[str] = ["loss_mse"],
     x_axis: str = "samples",
     x_type: str = "step",
     x_scale_log: bool = False,
-    plot_dir: Path = Path("./plots"),
 ):
     """
     Plot each stream in stream_names (using matching to data columns) for all run_ids
@@ -297,6 +279,8 @@ def plot_loss_per_stream(
         list of booleans indicating whether the run is still active
     stream_names : list
         list of stream names to plot
+    plot_dir : Path
+        directory to save the plots
     errs : list
         list of errors to plot (e.g. mse, stddev)
     x_axis : str
@@ -305,8 +289,6 @@ def plot_loss_per_stream(
         x-axis type (options: "step", "reltime")
     x_scale_log : bool
         whether to use log scale for x-axis
-    plot_dir : Path
-        directory to save the plots
     """
 
     modes = [modes] if type(modes) is not list else modes
@@ -404,10 +386,10 @@ def plot_loss_per_run(
     run_desc: str,
     run_data: Metrics,
     stream_names: list[str],
+    plot_dir: Path,
     errs: list[str] = ["mse"],
     x_axis: str = "samples",
     x_scale_log: bool = False,
-    plot_dir: Path = Path("./plots"),
 ):
     """
     Plot all stream_names (using matching to data columns) for given run_id
@@ -424,14 +406,14 @@ def plot_loss_per_run(
         Metrics object containing the training data
     stream_names : list
         list of stream names to plot
+    plot_dir : Path
+        directory to save the plots
     errs : list
         list of errors to plot (e.g. mse, stddev)
     x_axis : str
         x-axis strings used in the column names (options: "samples", "dtime")
     x_scale_log : bool
         whether to use log scale for x-axis
-    plot_dir : Path
-        directory to save the plots
     """
     plot_dir = Path(plot_dir)
 
@@ -518,13 +500,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "-o", "--output_dir", default="./plots/", type=str, help="Directory where plots are saved"
+        "-o",
+        "--output_dir",
+        default="./plots/",
+        type=Path,
+        help="Directory where plots are saved"
     )
     parser.add_argument(
         "-m",
         "--model_base_dir",
         default="./models/",
-        type=str,
+        type=Path,
         help="Base-directory where models are saved",
     )
     parser.add_argument(
@@ -557,7 +543,7 @@ if __name__ == "__main__":
     run_id_group.add_argument(
         "-rs",
         "--run_ids_str",
-        type=read_yaml_string,
+        type=_read_yaml_config,
         dest="rs",
         help="Dictionary-string of form '{run_id: [job_id, experiment_name]}' for training runs to plot",
     )
@@ -566,7 +552,7 @@ if __name__ == "__main__":
         "-rf",
         "--run_ids_file",
         dest="rf",
-        type=read_yaml_file,
+        type=_read_yaml_config,
         help="YAML file configuring the training run IDS to plot",
     )
 
@@ -602,7 +588,7 @@ if __name__ == "__main__":
     plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir)
 
     # plot performance
-    plot_utilization(runs_ids, runs_data, runs_active, plot_dir=out_dir)
+    #plot_utilization(runs_ids, runs_data, runs_active, plot_dir=out_dir)
 
     # compare different runs
     plot_loss_per_stream(

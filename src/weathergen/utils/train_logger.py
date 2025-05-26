@@ -133,7 +133,7 @@ class TrainLogger:
 
     #######################################
     @staticmethod
-    def read(run_id, epoch=-1, model_path: str | None = None):
+    def read(run_id, model_path: str, epoch=-1):
         """
         Read data for run_id
         """
@@ -176,7 +176,7 @@ class TrainLogger:
             _logger.warning(f"Warning: no training data loaded for run_id={run_id}")
             log_train = np.array([])
 
-        log_train_df = read_metrics(cf, run_id, "train", cols1, results_path=result_dir_base)
+        log_train_df = read_metrics(cf, run_id, "train", cols1, result_dir_base)
 
         # validation
         # define cols for validation
@@ -205,7 +205,7 @@ class TrainLogger:
         except:
             print(f"Warning: no validation data loaded for run_id={run_id}")
             log_val = np.array([])
-        metrics_val_df = read_metrics(cf, run_id, "val", cols2, results_path=result_dir_base)
+        metrics_val_df = read_metrics(cf, run_id, "val", cols2, result_dir_base)
 
         # performance
         # define cols for performance monitoring
@@ -223,7 +223,7 @@ class TrainLogger:
             run_id,
             None,
             [_weathergen_timestamp, _performance_gpu, _performance_memory],
-            results_path=result_dir_base,
+            result_dir_base,
         )
 
         return Metrics(run_id, "train", log_train_df, metrics_val_df, metrics_system_df)
@@ -252,7 +252,7 @@ def read_metrics(
     run_id: RunId | None,
     stage: Stage | None,
     cols: list[str] | None,
-    results_path: Path = "./results/",
+    results_path: Path,
 ) -> pl.DataFrame:
     """
     Read metrics for run_id
