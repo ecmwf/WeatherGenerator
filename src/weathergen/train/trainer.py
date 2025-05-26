@@ -100,11 +100,13 @@ class Trainer(Trainer_Base):
             shuffle=cf.shuffle,
         )
 
+        # make sure number of loaders does not exceed requested samples
+        loader_num_workers = min(cf.samples_per_validation, cf.loader_num_workers)
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
             "shuffle": False,
-            "num_workers": cf.loader_num_workers,
+            "num_workers": loader_num_workers,
             "pin_memory": True,
         }
         self.data_loader_validation = torch.utils.data.DataLoader(
