@@ -500,11 +500,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "-o",
-        "--output_dir",
-        default="./plots/",
-        type=Path,
-        help="Directory where plots are saved"
+        "-o", "--output_dir", default="./plots/", type=Path, help="Directory where plots are saved"
     )
     parser.add_argument(
         "-m",
@@ -588,7 +584,7 @@ if __name__ == "__main__":
     plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir)
 
     # plot performance
-    #plot_utilization(runs_ids, runs_data, runs_active, plot_dir=out_dir)
+    # plot_utilization(runs_ids, runs_data, runs_active, plot_dir=out_dir)
 
     # compare different runs
     plot_loss_per_stream(
