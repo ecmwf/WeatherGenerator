@@ -100,7 +100,8 @@ def load_config(
     *overwrites: Path | dict | Config,
 ) -> Config:
     """
-    Merge config information from multiple sources into one run_config.
+    Merge config information from multiple sources into one run_config. Anything in the
+    private configs "secrets" section will be discarted.
 
     Args:
         private_home: Configuration file containing platform dependent information and secretes
