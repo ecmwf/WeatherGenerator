@@ -460,7 +460,7 @@ class Model(torch.nn.Module):
                                     for prediction
                     source_cell_lens :  Used to identify range of tokens to use from generated tokens in cell embedding
                     target_coords_idxs : Indices of target coordinates.
-            forecast_offset : 
+            forecast_offset : starting index for iteration
             forecast_steps : Number of forecast steps to iterate
         Returns:
             A list containing all prediction results
