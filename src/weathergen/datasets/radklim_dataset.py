@@ -71,9 +71,7 @@ class RadklimDataset:
             normalization_file = self.data_path / normalization_file
 
         if not normalization_file.is_file():
-            raise FileNotFoundError(
-                f"Normalization file '{normalization_file}' not found."
-            )
+            raise FileNotFoundError(f"Normalization file '{normalization_file}' not found.")
         with open(normalization_file) as f:
             stats = json.load(f)
 

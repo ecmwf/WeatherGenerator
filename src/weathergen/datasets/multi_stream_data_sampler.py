@@ -18,8 +18,8 @@ from weathergen.datasets.anemoi_dataset import AnemoiDataset
 from weathergen.datasets.atmorep_dataset import AtmorepDataset
 from weathergen.datasets.fesom_dataset import FesomDataset
 from weathergen.datasets.obs_dataset import ObsDataset
-from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.radklim_dataset import RadklimDataset
+from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
