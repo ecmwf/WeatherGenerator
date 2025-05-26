@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from pathlib import Path
+from collections import namedtuple
 
 import numpy as np
 import torch
@@ -55,6 +56,12 @@ def read_validation(cf, epoch, base_path: Path, instruments, forecast_steps, ran
     return streams, columns, data
 
 
+Data = namedtuple(
+    "Data",
+    ["source", "preds", "targets", "target_coords", "target_times", "target_lens", "source_lens"],
+)
+
+
 #################################
 def write_validation(
     cf,
@@ -71,70 +78,91 @@ def write_validation(
     if len(cf.analysis_streams_output) == 0:
         return
 
-    fname = f"validation_epoch{epoch:05d}_rank{rank:04d}"
-    fname += ".zarr"
+    data = Data(
+        sources, preds_all, targets_all, targets_coords_all, targets_times_all, targets_lens, None
+    )
+    data_root, store = _get_data_root(base_path, rank, epoch)
+    streams = [
+        stream_info
+        for stream_info in cf.streams
+        if stream_info["name"] in cf.analysis_streams_output
+    ]
 
-    store = zarr.DirectoryStore(base_path / fname)
-    ds = zarr.group(store=store)
+    # FIXME: does not include forecast offset
+    for forecast_step in range(len(preds_all)):
+        # TODO simplify this conditional
+        # skip empty entries (e.g. no channels from the sources are used as targets)
+        streams_without_empty_entries = (
+            stream_info
+            for stream_info, k in streams
+            if not (
+                len(targets_all[forecast_step][k]) == 0
+                or len(targets_all[forecast_step][k][0]) == 0
+            )
+        )
+        for k, si in enumerate(streams_without_empty_entries):
+            extracted_data = _extract_data(data, forecast_step, k)
 
-    for fstep in range(len(preds_all)):
-        for k, si in enumerate(cf.streams):
-            # only store requested streams
-            if not np.array([s in si["name"] for s in cf.analysis_streams_output]).any():
-                continue
-
-            # skip empty entries (e.g. no channels from the sources are used as targets)
-            if len(targets_all[fstep][k]) == 0 or len(targets_all[fstep][k][0]) == 0:
-                continue
-
-            # TODO: this only saves the first batch
-            source_k = sources[0][k].cpu().detach().numpy()
-            source_lens_k = np.array([source_k.shape[0]])
-            preds_k = torch.cat(preds_all[fstep][k], 1).transpose(1, 0).cpu().detach().numpy()
-            targets_k = torch.cat(targets_all[fstep][k], 0).cpu().detach().numpy()
-            targets_coords_k = targets_coords_all[fstep][k].numpy()
-            targets_times_k = targets_times_all[fstep][k]
-            targets_lens_k = np.array(targets_lens[fstep][k], dtype=np.int64)
-
-            rn = si["name"].replace(" ", "_").replace("-", "_").replace(",", "")
-
-            # TODO: handle more robustly
-            write_first = False
-            if rn in ds.group_keys():
-                if f"{fstep}" not in ds[rn].group_keys():
-                    write_first = True
-            else:
-                write_first = True
+            stream_name = _sanitize_stream_name(si["name"])
+            group = data_root.require_group(f"{stream_name}/{forecast_step}")
 
             # TODO: how to avoid the case distinction for write_first
-            if write_first:
-                ds_source = ds.require_group(f"{rn}/{fstep}")
-                ds_source.create_dataset(
-                    "sources", data=source_k, chunks=(1024, *source_k.shape[1:])
-                )
-                ds_source.create_dataset("sources_lens", data=source_lens_k)
-                ds_source.create_dataset("preds", data=preds_k, chunks=(1024, *preds_k.shape[1:]))
-                ds_source.create_dataset(
-                    "targets", data=targets_k, chunks=(1024, *targets_k.shape[1:])
-                )
-                ds_source.create_dataset(
-                    "targets_coords",
-                    data=targets_coords_k,
-                    chunks=(1024, *targets_coords_k.shape[1:]),
-                )
-                ds_source.create_dataset(
-                    "targets_times", data=targets_times_k, chunks=(1024, *targets_times_k.shape[1:])
-                )
-                ds_source.create_dataset("targets_lens", data=targets_lens_k)
+            if _is_first_write(data_root, stream_name, forecast_step):
+                _write_first(group, extracted_data)
             else:
-                rn = rn + f"/{fstep}"
-                if source_lens_k.sum() > 0:
-                    ds[f"{rn}/sources"].append(source_k)
-                ds[f"{rn}/sources_lens"].append(source_lens_k)
-                ds[f"{rn}/preds"].append(preds_k)
-                ds[f"{rn}/targets"].append(targets_k)
-                ds[f"{rn}/targets_coords"].append(targets_coords_k)
-                ds[f"{rn}/targets_times"].append(targets_times_k)
-                ds[f"{rn}/targets_lens"].append(targets_lens_k)
+                _successive_write(group, extracted_data)
 
     store.close()
+
+
+def _extract_data(data: Data, fstep, k) -> Data:
+    # TODO: this only saves the first batch
+    source = data.source[0][k].cpu().detach().numpy()
+    source_lens = np.array([source.shape[0]])  # ?
+    preds = torch.cat(data.preds[fstep][k], 1).transpose(1, 0).cpu().detach().numpy()
+    targets = torch.cat(data.targets[fstep][k], 0).cpu().detach().numpy()
+    targets_coords = data.target_coords[fstep][k].numpy()
+    targets_times = data.target_times[fstep][k]
+    targets_lens = np.array(data.target_lens[fstep][k], dtype=np.int64)
+    return Data(source, preds, targets, targets_coords, targets_times, targets_lens, source_lens)
+
+
+def _is_first_write(data_root, stream_name, forecast_step):
+    # TODO: handle more robustly
+    if stream_name in data_root.group_keys():
+        if f"{forecast_step}" in data_root[stream_name].group_keys():
+            return False
+
+    return True
+
+
+def _write_first(ds_source: zarr.Group, data: Data):
+    ds_source.create_dataset("datasources", data=data.source, chunks=(1024, *data.source.shape[1:]))
+    ds_source.create_dataset("sources_lens", data=data.source_lens)
+    ds_source.create_dataset("preds", data=data.preds, chunks=(1024, *data.preds.shape[1:]))
+    ds_source.create_dataset("targets", data=data.targets, chunks=(1024, *data.targets.shape[1:]))
+    ds_source.create_dataset(
+        "targets_coords", data=data.target_coords, chunks=(1024, *data.target_coords.shape[1:])
+    )
+    ds_source.create_dataset(
+        "targets_times", data=data.target_times, chunks=(1024, *data.target_times.shape[1:])
+    )
+    ds_source.create_dataset("targets_lens", data=data.target_lens)
+
+
+def _successive_write(ds_source: zarr.Group, data: Data):
+    if data.source_lens.sum() > 0:
+        ds_source["sources"].append(data.source)
+    ds_source["sources_lens"].append(data.source_lens)
+    ds_source["preds"].append(data.preds)
+    ds_source["targets"].append(data.targets)
+    ds_source["targets_coords"].append(data.target_coords)
+    ds_source["targets_times"].append(data.target_times)
+    ds_source["targets_lens"].append(data.target_lens)
+
+
+def _get_data_root(base_path, epoch, rank):
+    fname = f"validation_epoch{epoch:05d}_rank{rank:04d}.zarr"
+
+    store = zarr.DirectoryStore(base_path / fname)
+    return zarr.group(store=store), store
