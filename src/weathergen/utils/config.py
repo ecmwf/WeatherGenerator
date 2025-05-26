@@ -38,8 +38,6 @@ def _format_cf(config: Config) -> str:
     stream = io.StringIO()
     for key, value in config.items():
         match key:
-            case "secrets":
-                continue
             case "streams":
                 for rt in value:
                     for k, v in rt.items():
@@ -63,7 +61,6 @@ def save(config: Config, epoch: int | None):
     json_str = json.dumps(OmegaConf.to_container(config))
     with fname.open("w") as f:
         f.write(json_str)
-
 
 def load_model_config(run_id: str, epoch: int | None, model_path: str | None) -> Config:
     """
@@ -211,6 +208,7 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
     private_cf["model_path"] = (
         private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
     )
+    del private_cf["secrets"]
     return private_cf
 
 
