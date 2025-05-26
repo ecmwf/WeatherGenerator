@@ -23,7 +23,7 @@ class RadklimDataset:
         Step between windows in hours (not used!).
     filename : str or Path
         Root directory with NetCDF files organized by year/month.
-    normalization_path : str or Path
+    normalization_file : str or Path
         JSON file with "mean" and "std" lists matching sorted variables.
     fname_patt : str
         Filename prefix (default "RW_2017.002_").
@@ -36,7 +36,7 @@ class RadklimDataset:
         len_hrs: int,
         step_hrs: int,
         filename: str | Path,
-        normalization_path: str | Path,
+        normalization_file: str | Path,
         fname_patt: str = "RW_2017.002_",  # file prefix
     ):
         # Parse parameters
@@ -65,9 +65,17 @@ class RadklimDataset:
         self.variables = ["RR"]  # TODO: allow support for YW product
 
         # Read normalization data
-        with open(normalization_path) as f:
+        # If normaliation file does not exist, look for it under the data path
+        normalization_file = Path(normalization_file)
+        if not normalization_file.is_file():
+            normalization_file = self.data_path / normalization_file
+
+        if not normalization_file.is_file():
+            raise FileNotFoundError(
+                f"Normalization file '{normalization_file}' not found."
+            )
+        with open(normalization_file) as f:
             stats = json.load(f)
-        # stats = normalization_path
 
         means = stats.get("mean")
         stds = stats.get("std")
