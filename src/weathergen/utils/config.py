@@ -62,6 +62,7 @@ def save(config: Config, epoch: int | None):
     with fname.open("w") as f:
         f.write(json_str)
 
+
 def load_model_config(run_id: str, epoch: int | None, model_path: str | None) -> Config:
     """
     Load a configuration file from a given run_id and epoch.
