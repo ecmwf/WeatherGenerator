@@ -150,7 +150,9 @@ def config_fresh(private_config_file):
 
 
 def test_contains_private(config_fresh):
-    assert contains_keys(config_fresh, DUMMY_PRIVATE_CONF)
+    sanitized_private_conf = DUMMY_PRIVATE_CONF.copy()
+    del sanitized_private_conf["secrets"]
+    assert contains_keys(config_fresh, sanitized_private_conf)
 
 
 @pytest.mark.parametrize("overwrite_dict", DUMMY_OVERWRITES, indirect=True)
@@ -207,9 +209,8 @@ def test_from_cli(options, cf):
 
 def test_print_cf_no_secrets(config_fresh):
     output = config._format_cf(config_fresh)
-    print(output)
 
-    assert "53CR3T" not in output
+    assert "53CR3T" not in output and "secrets" not in config_fresh.keys()
 
 
 @pytest.mark.parametrize("streams_dir", VALID_STREAMS, indirect=True)
