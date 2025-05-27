@@ -4,4 +4,6 @@
   "id": "weathergen.atmo.ERA51",
    "description": "ERA5 is a reanalysis dataset produced by ECMWF, providing hourly estimates of a large number of atmospheric, land, and oceanic climate variables.",
    "title": "ERA5 Dataset",
+   "name": "weathergen.atmo.ERA51",
+   "created": "2025-05-06T07:49:13Z"
 }
