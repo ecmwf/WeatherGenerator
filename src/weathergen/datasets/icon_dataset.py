@@ -97,11 +97,11 @@ class IconDataset:
         self.ds = zarr.open(filename, mode="r")
         self.mesh_size = self.ds.attrs["ncells"]
 
-        # @asma: Time needs decoding due to xarray compatibility. code below should work but isn't tested
-        self.time = np.array(ds['time'], dtype='timedelta64[D]')+np.datetime64(ds['time'].attrs['units'].split('since ')[-1])
+        time_as_in_data_file = np.array(self.ds['time'], dtype='timedelta64[D]')+np.datetime64(self.ds['time'].attrs['units'].split('since ')[-1])
 
-        start_ds = self.time[0]
-        end_ds = self.time[-1]
+        start_ds = time_as_in_data_file[0]
+        end_ds = time_as_in_data_file[-1]
+
 
         if start_ds > end or end_ds < start:
             # TODO: this should be set in the base class
@@ -126,32 +126,52 @@ class IconDataset:
         )
 
         self.colnames = list(self.ds)
-        self.cols_idx = list(np.arange(len(self.colnames)))
+        # self.cols_idx = list(np.arange(len(self.colnames)))
         self.lat_index = list(self.colnames).index("clat")
         self.lon_index = list(self.colnames).index("clon")
         self.colnames.remove("clat")
         self.colnames.remove("clon")
-        self.cols_idx.remove(self.lat_index)
-        self.cols_idx.remove(self.lon_index)
-        self.cols_idx = np.array(self.cols_idx)
+        self.colnames.remove("time")
+        # Only use these if ICON is stored same as FESOM otherwise, pointless
+        # self.cols_idx.remove(self.lat_index)
+        # self.cols_idx.remove(self.lon_index)
+        # self.cols_idx = np.array(self.cols_idx)
+        self.cols_idx = np.array(list(np.arange(len(self.colnames))))
 
         # Ignore step_hrs, idk how it supposed to work
         # TODO, TODO, TODO:
         self.step_hrs = 1
 
-        self.data = self.ds
+        # self.data = self.ds
+        # Extracting data values and making it look like FESOM one (idk if it is needed)
+        icon_data_content = self.ds
+        icon_data_content_reshaped = [icon_data_content[col_][:].reshape(-1, 1) for col_ in self.colnames]
+        icon_data_content_stacked = np.concatenate(icon_data_content_reshaped, axis=1)  # shape (N, 14)
+
+        # in-memory Zarr array
+        temp_store = zarr.MemoryStore()
+        temp_root = zarr.group(store=temp_store)
+        temp_root.create_dataset('data', data=icon_data_content_stacked, dtype='float32')
+
+        self.data = temp_root['data']
+
+        # making time array looks like the FESOM one
+        # Repeat each timestamp for every grid point
+        repeated_times = np.repeat(time_as_in_data_file, self.mesh_size).reshape(-1, 1)
+        # temp_root.create_dataset('time', data=repeated_times, dtype='datetime64[ns]')
+        self.time = repeated_times # temp_root['time']
 
         self.properties = {
-            "stream_id": self.ds.data.attrs["obs_id"], # @asma: this is from FESOM. does not exist in ICON. Purpose?
+            "stream_id":  0 
         }
 
         # @asma: not yet added to the dataset. Setting mean to 0 and stdev to 1 for now. +2 to account for clat/clon
         self.mean = np.repeat(0, len(self.colnames) + 2)
-        self.stdev = np.repeat(0, len(self.colnames) + 2)
+        self.stdev = np.repeat(1, len(self.colnames) + 2)
 
         source_channels = stream_info["source"] if "source" in stream_info else None
         if source_channels:
-            self.source_channels, self.source_idx = self.selec(source_channels)
+            self.source_channels, self.source_idx = self.select(source_channels)
         else:
             self.source_channels = self.colnames
             self.source_idx = self.cols_idx
@@ -172,7 +192,7 @@ class IconDataset:
         Get functions only returned for these specified columns.
         """
 
-        mask = [np.array([f in c for f ["data"]in ch_filters]).any() for c in self.colnames]
+        mask = [np.array([f in c for f in ch_filters]).any() for c in self.colnames]
 
         selected_cols_idx = np.where(mask)[0]
         selected_colnames = [self.colnames[i] for i in selected_cols_idx]
@@ -355,7 +375,7 @@ class IconDataset:
         """
         assert target.shape[1] == len(self.target_idx)
         for i, ch in enumerate(self.target_idx):
-            target[..., i] = (target[..., i] - self.mean[ch + 2]) / self.stdev[ch + 2]
+            target[..., i] = (target[..., i] - self.mean[ch]) / self.stdev[ch]
 
         return target
 
@@ -374,7 +394,7 @@ class IconDataset:
         """
         start_row = self.start_idx + idx * self.mesh_size
         end_row = start_row + self.len_hrs * self.mesh_size
-
+        
         return (self.time[start_row, 0], self.time[end_row, 0])
 
     def denormalize_target_channels(self, data: torch.tensor) -> torch.tensor:
@@ -392,7 +412,7 @@ class IconDataset:
         """
         assert data.shape[-1] == len(self.target_idx), "incorrect number of channels"
         for i, ch in enumerate(self.target_idx):
-            data[..., i] = (data[..., i] * self.stdev[ch + 2]) + self.mean[ch + 2]
+            data[..., i] = (data[..., i] * self.stdev[ch]) + self.mean[ch]
 
         return data
 
