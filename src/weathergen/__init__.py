@@ -58,7 +58,7 @@ def evaluate_from_args(argl: list[str]):
     cf.run_history += [(args.from_run_id, cf.istep)]
 
     trainer = Trainer()
-    trainer.evaluate(cf, args.from_run_id, args.epoch, run_id_new=args.run_id)
+    trainer.evaluate(cf, args.from_run_id, args.epoch)
 
 
 ####################################################################################################
@@ -116,7 +116,7 @@ def train_continue() -> None:
 
             torch._dynamo.config.optimize_ddp = False
     trainer = Trainer()
-    trainer.run(cf, args.from_run_id, args.epoch, run_id_new=args.run_id)
+    trainer.run(cf, args.from_run_id, args.epoch)
 
 
 ####################################################################################################
@@ -153,7 +153,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     trainer = Trainer(checkpoint_freq=250, print_freq=10)
 
     try:
-        trainer.run(cf, run_id_new=args.run_id)
+        trainer.run(cf)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()

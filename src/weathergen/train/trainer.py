@@ -71,7 +71,7 @@ class Trainer(Trainer_Base):
         self.train_logger = TrainLogger(cf, self.path_run)
 
     ###########################################
-    def evaluate(self, cf, run_id_trained, epoch, run_id_new=False):
+    def evaluate(self, cf, run_id_trained, epoch):
         # general initalization
         self.init(cf)
 
@@ -123,7 +123,7 @@ class Trainer(Trainer_Base):
         _logger.info(f"Finished evaluation run with id: {cf.run_id}")
 
     ###########################################
-    def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new: bool | str = False):
+    def run(self, cf, run_id_contd=None, epoch_contd=None):
         # general initalization
         self.init(cf)
 
