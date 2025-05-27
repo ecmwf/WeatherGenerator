@@ -26,7 +26,6 @@ from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
-from weathergen.train.utils import get_run_id
 from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TrainLogger
@@ -44,9 +43,12 @@ class Trainer(Trainer_Base):
         self.print_freq = print_freq
 
     ###########################################
-    def init(self, cf: Config,):
+    def init(
+        self,
+        cf: Config,
+    ):
         self.cf = cf
-        
+
         assert cf.samples_per_epoch % cf.batch_size == 0
         assert cf.samples_per_validation % cf.batch_size_validation == 0
 

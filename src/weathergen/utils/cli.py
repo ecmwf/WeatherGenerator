@@ -116,5 +116,5 @@ def _add_model_loading_params(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--reuse_run_id",
         action="store_true",
-        help="Use the id given via --from_run_id also for the current run."
+        help="Use the id given via --from_run_id also for the current run.",
     )

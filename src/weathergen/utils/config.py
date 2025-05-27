@@ -112,20 +112,20 @@ def load_config(
     """
     private_config = _load_private_conf(private_home)
     overwrite_configs = [_load_overwrite_conf(overwrite) for overwrite in overwrites]
-    
+
     if from_run_id is None:
         base_config = _load_default_conf()
     else:
         base_config = load_model_config(from_run_id, epoch, private_config["model_path"])
-    
 
     # use OmegaConf.unsafe_merge if too slow
     return OmegaConf.merge(base_config, private_config, *overwrite_configs)
 
+
 def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool):
     """
     Determine run_id of current run.
-    
+
     Args:
         config: Base configuration loaded from previous run or default.
         run_id: Id assigned to this run. If None a new one will be generated.
@@ -136,9 +136,9 @@ def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool):
             run_id = get_run_id()
 
         config.run_id = run_id
-    
+
     assert config.run_id is not None
-    
+
 
 def from_cli_arglist(arg_list: list[str]) -> Config:
     """
