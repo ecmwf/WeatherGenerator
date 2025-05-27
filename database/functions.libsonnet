@@ -1,16 +1,28 @@
 // Variable filler
-// Variable filler
 
 local fill_variables(vars) = {
   [k]: {
-    description: vars[k][0],
-    mean: vars[k][1],
-    std: vars[k][2],
-    tendency_mean: vars[k][3],
-    tendency_std: vars[k][4],
-    level: vars[k][5],
+    min: vars[k][0],
+    max: vars[k][1],
+    mean: vars[k][2],
+    std: vars[k][3],
+    tendency_mean: if std.length(vars[k]) > 4 then vars[k][4] else "NA",
+    tendency_std: if std.length(vars[k]) > 5 then vars[k][5] else "NA",
   }
   for k in std.objectFields(vars)
+};
+
+local fill_properties(ds) = {
+  name: ds.name,
+  description: ds.description,
+  unique_id: ds.unique_id,
+  title: ds.title,
+  start_datetime: ds.start_datetime,
+  end_datetime: ds.end_datetime,
+  keywords: ds.keywords,
+  providers: ds.providers,
+  variables: fill_variables(ds.variables),
+  frequency: ds.frequency,
 };
 
 local fill_geometry(vars) = {
@@ -26,22 +38,22 @@ local fill_geometry(vars) = {
   ]
 };
 
-local fill_assets(d) = {
-  [d.dataset_name]: {
-    title: d.dataset_name,
-    type: d.type,
-    roles: d.roles,
-    version: d.version,
-    notes: d.notes,
-    locations: d.locations,
-    size: d.size,
-    inodes: d.inodes
+local fill_assets(ds) = {
+  [ds.dataset_name]: {
+    title: ds.dataset_name,
+    href: ds.dataset_name,
+    type: ds.type,
+    roles: ds.roles,
+    description: ds.description,
+    locations: ds.locations,
+    size: ds.size,
+    inodes: ds.inodes
   }
 };
 
 // Optional: create catalogue link
 local dataset_entry_catalogue(ds, href_link) = {
-  rel: "item",
+  rel: "child",
   href: href_link + "/" + ds.filename,
   title: ds.title,
   type: "application/json"
@@ -49,25 +61,18 @@ local dataset_entry_catalogue(ds, href_link) = {
 
 // Create full STAC item for a dataset
 local dataset_entry_fill(ds) = {
-  type: "Feature",
-  stac_version: "1.0.0",
-  id: "weathergen.atmo." + ds.name,
-  description: ds.description,
-  unique_id: ds.unique_id,
-  title: ds.title,
-  keywords: ds.keywords,
-  providers: ds.providers,
-  start_datetime: ds.start_datetime,
-  end_datetime: ds.end_datetime,
-  "cube:variables": fill_variables(ds.variables),
-  geometry: fill_geometry(ds.geometry), 
-  bbox: [ds.geometry[0], ds.geometry[2], ds.geometry[1], ds.geometry[3]],
-  stac_extensions: [
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "id": "weathergen.atmo." + ds.name,
+   "properties": fill_properties(ds),
+  "geometry": fill_geometry(ds.geometry), 
+  "bbox": [ds.geometry[0], ds.geometry[2], ds.geometry[1], ds.geometry[3]],
+  "stac_extensions": [
       "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
       "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json",
       "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
     ],
-  assets: fill_assets(ds.dataset) 
+  "assets": fill_assets(ds.dataset),
 };
 
 {

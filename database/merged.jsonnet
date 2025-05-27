@@ -4,9 +4,12 @@ local fn = import 'functions.libsonnet';
 // URL for hrefs
 local href_link = "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/";
 
+// TODO: improve this
 local era5v8 = import "era5_v8.jsonnet";
+local opera = import "opera.jsonnet";
+local cerra = import "cerra.jsonnet";
 
-local datasets = [era5v8];
+local datasets = [era5v8, opera, cerra];
 
 local files = [ds.filename + ".json" for ds in datasets];
 { "catalogue.json":
