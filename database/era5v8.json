@@ -1,9 +1,53 @@
 {
+   "assets": {
+      "aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr": {
+         "inodes": "1000000",
+         "locations": "HPC2020, MareNostrum5, Leonardo",
+         "notes": "ERA5 data on O96 healPix grid. version 8. Contains tendencies",
+         "roles": "data",
+         "size": "1.2 TB",
+         "title": "aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr",
+         "type": "application/vnd+zarr",
+         "version": "v8"
+      }
+   },
+   "bbox": [
+      -180,
+      -90,
+      180,
+      90
+   ],
+   "geometry": {
+      "coordinates": [
+         [
+            [
+               -180,
+               -90
+            ],
+            [
+               -180,
+               90
+            ],
+            [
+               180,
+               90
+            ],
+            [
+               180,
+               -90
+            ],
+            [
+               -180,
+               -90
+            ]
+         ]
+      ],
+      "type": "Polygon"
+   },
    "id": "weathergen.atmo.ERA5v8",
    "properties": {
       "description": "ERA5 is a reanalysis dataset produced by ECMWF, providing hourly estimates of a large number of atmospheric, land, and oceanic climate variables.",
       "end_datetime": "2023-12-31T23:59:59Z",
-      "filename": "era5v8.json",
       "keywords": [
          "polar orbiter",
          "satellite",
@@ -67,6 +111,11 @@
          }
       }
    },
+   "stac_extensions": [
+      "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
+      "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json",
+      "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
+   ],
    "stac_version": "1.0.0",
    "type": "Feature"
 }
