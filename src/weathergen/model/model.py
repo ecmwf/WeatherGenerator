@@ -558,18 +558,19 @@ class Model(torch.nn.Module):
 
             # embed token coords, concatenating along batch dimension (which is taking care of through
             # the varlen attention)
-            tc_tokens = torch.cat(
-                [
-                    checkpoint(
-                        tc_embed,
-                        streams_data[i_b][ii].target_coords[fstep],
-                        use_reentrant=False,
-                    )
-                    if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
-                    else streams_data[i_b][ii].target_coords[fstep]
-                    for i_b in range(len(streams_data))
-                ]
-            )
+            with torch.amp.autocast('cuda', enabled=False):
+                tc_tokens = torch.cat(
+                    [
+                        checkpoint(
+                            tc_embed,
+                            streams_data[i_b][ii].target_coords[fstep],
+                            use_reentrant=False,
+                        )
+                        if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
+                        else streams_data[i_b][ii].target_coords[fstep]
+                        for i_b in range(len(streams_data))
+                    ]
+                )
 
             if torch.isnan(tc_tokens).any():
                 nn = si["name"]
