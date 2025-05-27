@@ -1,31 +1,24 @@
 [
    {
-      "key": "type",
-      "value": "Feature"
+      "type": "Feature"
    },
    {
-      "key": "stac_version",
-      "value": "1.0.0"
+      "stac_version": "1.0.0"
    },
    {
-      "key": "id",
-      "value": "weathergen.atmo.ERA5v8"
+      "id": "weathergen.atmo.ERA5v8"
    },
    {
-      "key": "description",
-      "value": "ERA5 is a reanalysis dataset produced by ECMWF, providing hourly estimates of a large number of atmospheric, land, and oceanic climate variables."
+      "description": "ERA5 is a reanalysis dataset produced by ECMWF, providing hourly estimates of a large number of atmospheric, land, and oceanic climate variables."
    },
    {
-      "key": "unique_id",
-      "value": 0
+      "unique_id": 0
    },
    {
-      "key": "title",
-      "value": "ERA5 Dataset"
+      "title": "ERA5 Dataset"
    },
    {
-      "key": "keywords",
-      "value": [
+      "keywords": [
          "polar orbiter",
          "satellite",
          "atmosphere",
@@ -33,8 +26,7 @@
       ]
    },
    {
-      "key": "providers",
-      "value": [
+      "providers": [
          {
             "name": "ECMWF",
             "roles": [
@@ -46,16 +38,13 @@
       ]
    },
    {
-      "key": "start_datetime",
-      "value": "1950-01-01T00:00:00Z"
+      "start_datetime": "1950-01-01T00:00:00Z"
    },
    {
-      "key": "end_datetime",
-      "value": "2023-12-31T23:59:59Z"
+      "end_datetime": "2023-12-31T23:59:59Z"
    },
    {
-      "key": "cube:variables",
-      "value": {
+      "cube:variables": {
          "10u": {
             "description": "10m u component of wind in m/s",
             "level": 0,
@@ -99,8 +88,7 @@
       }
    },
    {
-      "key": "geometry",
-      "value": {
+      "geometry": {
          "coordinates": [
             [
                [
@@ -129,8 +117,7 @@
       }
    },
    {
-      "key": "bbox",
-      "value": [
+      "bbox": [
          -180,
          -90,
          180,
@@ -138,16 +125,14 @@
       ]
    },
    {
-      "key": "stac_extensions",
-      "value": [
+      "stac_extensions": [
          "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
          "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json",
          "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
       ]
    },
    {
-      "key": "assets",
-      "value": {
+      "assets": {
          "aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr": {
             "inodes": "1000000",
             "locations": "HPC2020, MareNostrum5, Leonardo",
