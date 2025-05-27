@@ -15,13 +15,7 @@
       },
       {
          "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database//era5v8.json",
-         "rel": "item",
-         "title": "ERA5 Dataset",
-         "type": "application/json"
-      },
-      {
-         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database//era5.json",
-         "rel": "item",
+         "rel": "child",
          "title": "ERA5 Dataset",
          "type": "application/json"
       }
