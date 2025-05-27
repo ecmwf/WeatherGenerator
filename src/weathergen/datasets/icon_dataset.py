@@ -13,11 +13,12 @@ from pathlib import Path
 import numpy as np
 import torch
 import zarr
+import json
 
 
 class IconDataset:
     """
-    A dataset class for handling temporal windows of ICON model output data stored in Zarr format.
+    A data reader for ICON model output stored in zarr.
 
     Parameters
     ----------
@@ -52,25 +53,6 @@ class IconDataset:
     properties : dict
         Dataset metadata including 'stream_id' from Zarr attributes
 
-    Notes
-    -----
-    - Automatically handles datetime conversion and alignment with dataset time axis
-    - Returns empty data containers if requested period doesn't overlap with dataset
-    - Implements coordinate normalization using sinusoidal projections
-    - Provides channel-wise normalization/denormalization for source/target variables
-    - Uses Zarr's orthogonal indexing for efficient data access
-
-    Examples
-    --------
-    Loads an xarray compatible zarr dataset of the form:
-    Name	/
-    Type	zarr.hierarchy.Group
-    Read-only	True
-    Store type	zarr.storage.DirectoryStore
-    No. members	38
-    No. arrays	38
-    No. groups	0
-    Arrays	TRCH4_chemtr_00, TRCH4_chemtr_20, TRCH4_chemtr_40, ...
     """
 
     def __init__(
@@ -80,6 +62,7 @@ class IconDataset:
         len_hrs: int,
         step_hrs: int,
         filename: Path,
+        normalization_file: str | Path,
         stream_info: dict,
     ):
         self.len_hrs = len_hrs
@@ -126,16 +109,14 @@ class IconDataset:
         )
 
         self.colnames = list(self.ds)
+        orig_colnames = self.colnames.copy()
+        n_cols = len(self.colnames)
         # self.cols_idx = list(np.arange(len(self.colnames)))
         self.lat_index = list(self.colnames).index("clat")
         self.lon_index = list(self.colnames).index("clon")
         self.colnames.remove("clat")
         self.colnames.remove("clon")
         self.colnames.remove("time")
-        # Only use these if ICON is stored same as FESOM otherwise, pointless
-        # self.cols_idx.remove(self.lat_index)
-        # self.cols_idx.remove(self.lon_index)
-        # self.cols_idx = np.array(self.cols_idx)
         self.cols_idx = np.array(list(np.arange(len(self.colnames))))
 
         # Ignore step_hrs, idk how it supposed to work
@@ -165,9 +146,22 @@ class IconDataset:
             "stream_id":  0 
         }
 
-        # @asma: not yet added to the dataset. Setting mean to 0 and stdev to 1 for now. +2 to account for clat/clon
-        self.mean = np.repeat(0, len(self.colnames) + 2)
-        self.stdev = np.repeat(1, len(self.colnames) + 2)
+
+        if not normalization_file.is_file():
+            raise FileNotFoundError(f"Normalization file '{normalization_file}' not found.")
+        with open(normalization_file) as f:
+            stats = json.load(f)
+
+        self.mean = np.array(stats['statistics']['mean'], dtype=np.float32)
+        self.stdev = np.array(stats['statistics']['std'], dtype=np.float32)
+        stats_vars = stats['metadata']['variables']
+        # check if order of mean and stdev matches the order of columns
+        assert len(self.mean) == len(self.stdev) == n_cols, (
+            f"Mean and stdev length {len(self.mean)} and {len(self.stdev)} do not match number of columns {n_cols}"
+        )
+        assert stats_vars == orig_colnames, (
+            f"Variables in normalization file {stats_vars} do not match dataset columns {self.colnames}"
+        )
 
         source_channels = stream_info["source"] if "source" in stream_info else None
         if source_channels:
