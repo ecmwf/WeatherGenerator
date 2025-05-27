@@ -7,53 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from pathlib import Path
 from collections import namedtuple
+from pathlib import Path
 
 import numpy as np
 import torch
 import zarr
 
 
-def sanitize_stream_str(istr):
+def _sanitize_stream_name(istr):
     return istr.replace(" ", "_").replace("-", "_").replace(",", "")
-
-
-#################################
-def read_validation(cf, epoch, base_path: Path, instruments, forecast_steps, rank=0):
-    streams, columns, data = [], [], []
-
-    fname = base_path / f"validation_epoch{epoch:05d}_rank{rank:04d}.zarr"
-    store = zarr.DirectoryStore(fname)
-    ds = zarr.group(store=store)
-
-    for _ii, stream_info in enumerate(cf.streams):
-        n = stream_info["name"]
-        if len(instruments):
-            if not np.array([r in n for r in instruments]).any():
-                continue
-
-        streams += [stream_info["name"]]
-        columns.append(ds[f"{sanitize_stream_str(n)}/0"].attrs["cols"])
-        data += [[]]
-
-        for fstep in forecast_steps:
-            data[-1] += [[]]
-            istr = sanitize_stream_str(n)
-
-            data[-1][-1].append(ds[f"{istr}/{fstep}/sources"])
-            data[-1][-1].append(ds[f"{istr}/{fstep}/sources_coords"])
-            data[-1][-1].append(ds[f"{istr}/{fstep}/preds"])
-            data[-1][-1].append(ds[f"{istr}/{fstep}/targets"])
-            data[-1][-1].append(ds[f"{istr}/{fstep}/targets_coords"])
-            data[-1][-1].append(ds[f"{istr}/{fstep}/sources_lens"])
-            data[-1][-1].append(ds[f"{istr}/{fstep}/targets_lens"])
-            data[-1][-1].append(~np.isnan(data[-1][-1][3]))
-
-            data[-1][-1].append(np.mean(data[-1][-1][2], axis=1))
-            data[-1][-1].append(np.std(data[-1][-1][2], axis=1))
-
-    return streams, columns, data
 
 
 Data = namedtuple(
@@ -62,7 +25,6 @@ Data = namedtuple(
 )
 
 
-#################################
 def write_validation(
     cf,
     base_path: Path,
