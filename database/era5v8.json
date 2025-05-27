@@ -1,10 +1,17 @@
 {
    "assets": {
       "aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr": {
+         "href": "local://aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr",
          "inodes": "1000000",
-         "locations": "HPC2020, MareNostrum5, Leonardo",
+         "locations": [
+            "HPC2020",
+            "MareNostrum5",
+            "Leonardo"
+         ],
          "notes": "ERA5 data on O96 healPix grid. version 8. Contains tendencies",
-         "roles": "data",
+         "roles": [
+            "data"
+         ],
          "size": "1.2 TB",
          "title": "aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr",
          "type": "application/vnd+zarr",
@@ -48,6 +55,7 @@
    "properties": {
       "description": "ERA5 is a reanalysis dataset produced by ECMWF, providing hourly estimates of a large number of atmospheric, land, and oceanic climate variables.",
       "end_datetime": "2023-12-31T23:59:59Z",
+      "frequency": "6h",
       "keywords": [
          "polar orbiter",
          "satellite",
@@ -66,7 +74,7 @@
          }
       ],
       "start_datetime": "1950-01-01T00:00:00Z",
-      "title": "ERA5 Dataset",
+      "title": "ERA5",
       "unique_id": 0,
       "variables": {
          "cube:10u": {
