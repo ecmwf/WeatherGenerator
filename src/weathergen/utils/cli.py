@@ -88,8 +88,8 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
     )
     parser.add_argument(
         "--run_id",
-        default=False,
-        help="The run id for this run. All artifacts (models, metrics, ...) will be stored under this run_id. If not provided, a new run_id will be created",
+        type=str,
+        help="The run id for this run. All artifacts (models, metrics, ...) will be stored under this run_id. If not provided, a new run_id will be generated. If --reuse_run_id is given for continuing or evaluation --from_run_id will be used instead.",
     )
     parser.add_argument(
         "--options",
@@ -112,4 +112,9 @@ def _add_model_loading_params(parser: argparse.ArgumentParser):
         type=int,
         default=-1,
         help="Epoch of pretrained WeatherGenerator model used (Default -1 corresponds to the last checkpoint).",
+    )
+    parser.add_argument(
+        "--reuse_run_id",
+        action="store_true",
+        help="Use the id given via --from_run_id also for the current run."
     )
