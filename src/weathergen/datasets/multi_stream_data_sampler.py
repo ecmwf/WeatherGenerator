@@ -17,6 +17,7 @@ import torch
 from weathergen.datasets.anemoi_dataset import AnemoiDataset
 from weathergen.datasets.atmorep_dataset import AtmorepDataset
 from weathergen.datasets.fesom_dataset import FesomDataset
+from weathergen.datasets.icon_dataset import IconDataset
 from weathergen.datasets.obs_dataset import ObsDataset
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
@@ -90,6 +91,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     case "atmorep":
                         dataset = AtmorepDataset
                         datapath = cf.data_path_anemoi
+                    case "icon":
+                        dataset = IconDataset
+                        datapath = cf.data_path_icon
                     case _:
                         msg = f"Unsupported stream type {stream_info['type']}"
                         raise ValueError(msg)
