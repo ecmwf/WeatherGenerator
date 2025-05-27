@@ -3,7 +3,18 @@
    "id": "weathergen",
    "links": [
       {
-         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/folder/era5v8.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/catalogue.json",
+         "rel": "root",
+         "title": "The WeatherGenerator data server",
+         "type": "application/json"
+      },
+      {
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/catalogue.json",
+         "rel": "self",
+         "type": "application/json"
+      },
+      {
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database//era5v8.json",
          "rel": "item",
          "title": "ERA5 Dataset",
          "type": "application/json"
