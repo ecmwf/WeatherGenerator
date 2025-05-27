@@ -22,8 +22,21 @@ from weathergen.utils.train_logger import Metrics, TrainLogger
 _logger = logging.getLogger(__name__)
 
 ####################################################################################################
+def _ensure_list(value):
+    """
+    Ensure that the input value is a list. If it is not a list, convert it to a list.
+    Parameters
+    ----------
+    value : any
+        Input value to check.
+    Returns
+    -------
+    list
+        A list containing the input value if it was not a list, or the input value itself if it was already a list.
+    """
+    return value if isinstance(value, list) else [value]
 
-
+####################################################################################################
 def _check_run_id_dict(run_id_dict: dict) -> bool:
     """
     Check if the run_id_dict is valid.
@@ -44,30 +57,73 @@ def _check_run_id_dict(run_id_dict: dict) -> bool:
                 f"Each key must be a string and each value must be a list of [job_id, experiment_name], but got: {k}: {v}"
             )
 
-
-def _read_yaml_config(yaml_path_or_str: str | Path) -> dict:
+####################################################################################################
+def _read_str_config(yaml_str: str) -> dict:
     """
-    Read a from a YAML file or a dictionary-like string to get a configuration dictionary.
+    Read a dictionary-like string to get a configuration dictionary.
 
     Parameters
     ----------
-    yaml_path_or_str : string or Path
-        Path to the YAML file or dictonary string to read.
+    yaml_str : str
+        Dictionary-like string to read.
     Returns
     -------
     dict
-        The content of the YAML file as a dictionary.
+        The content of the string as a dictionary.
     """
-    if Path(yaml_path_or_str).is_file():
-        with open(yaml_path_or_str) as f:
-            data_dict = yaml.safe_load(f)
-    else:
-        data_dict = yaml.safe_load(yaml_path_or_str)
+    config_dict = yaml.safe_load(yaml_str)
 
     # Validate the structure: {run_id: [job_id, experiment_name]}
-    _check_run_id_dict(data_dict)
+    _check_run_id_dict(config_dict)
 
-    return data_dict
+    return config_dict
+
+####################################################################################################
+def _read_yaml_config(yaml_file_path):
+    """
+    Read a YAML file to get a configuration dictionary for plotting training diagnostics.
+    Expected structure in the YAML file:
+    train:
+        plot:
+            run_ids: [run_id1, run_id2, ...]
+            job_ids: [job_id1, job_id2, ...]
+            experiment_names: [experiment_name1, experiment_name2, ...]
+
+    Parameters
+    ----------
+    yaml_file_path : str or Path
+        Path to the YAML file containing the configuration.
+    Returns
+    -------
+    dict
+        A dictionary with run IDs as keys and a list of [job ID, experiment name] as values.
+    """
+    with open(yaml_file_path, 'r') as f:
+        data = yaml.safe_load(f)
+
+    # Extract configuration for plotting training diagnostics
+    config_plot = data.get('train', {}).get('plot', {})
+    
+    # Init lists 
+    run_ids = _ensure_list(config_plot.get('run_ids', []))
+    job_ids = _ensure_list(config_plot.get('job_ids', []))
+    experiment_names = _ensure_list(config_plot.get('experiment_names', []))
+
+    # sanity checks
+    assert len(run_ids) > 0, "At least one run_id must be provided."
+    assert len(run_ids) == len(job_ids) == len(experiment_names), (
+        "The lengths of run_ids, job_ids, and experiment_names must be equal."
+    )
+
+    config_dict = {
+        run_id: [job_id, exp_name]
+        for run_id, job_id, exp_name in zip(run_ids, job_ids, experiment_names)
+    }
+
+    # Validate the structure: {run_id: [job_id, experiment_name]}
+    _check_run_id_dict(config_dict)
+
+    return config_dict
 
 
 ####################################################################################################
@@ -484,7 +540,7 @@ def plot_loss_per_run(
     # save the plot
     plt_fname = plot_dir / "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr)
     _logger.info(f"Saving loss plot for {run_id}-run to '{plt_fname}'")
-    plt.savefig(plot_dir / "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr))
+    plt.savefig(plt_fname)
     plt.close()
 
 
@@ -497,7 +553,17 @@ if __name__ == "__main__":
     # python plot_training.py -rs "{run_id: [job_id, experiment_name]}" -m ./trained_models -o ./training_plots
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="""Plot training diagnostics from logged data during training.
+                                     An example YAML file looks like this:
+                                     train:
+                                        plot:
+                                            - run_ids: [abcde, fghij]
+                                            - job_ids: [123456, 654321]
+                                            - experiment_names: [experiment1, experiment2]
+                                     A dictionary-string can also be used, e.g.:
+                                     "{'abcde': ['123456', 'experiment1'],
+                                       'fghij': ['654321', 'experiment2']}"
+                                     """)
 
     parser.add_argument(
         "-o", "--output_dir", default="./plots/", type=Path, help="Directory where plots are saved"
@@ -520,7 +586,7 @@ if __name__ == "__main__":
         "--streams",
         "-s",
         dest="streams",
-        default=["ERA5", "METEOSAT", "NPP"],
+        default=["ERA5"],
         type=str,
         nargs="+",
         help="List of streams to plot",
@@ -538,8 +604,8 @@ if __name__ == "__main__":
     run_id_group = parser.add_mutually_exclusive_group(required=True)
     run_id_group.add_argument(
         "-rs",
-        "--run_ids_str",
-        type=_read_yaml_config,
+        "--run_ids_dict",
+        type=_read_str_config,
         dest="rs",
         help="Dictionary-string of form '{run_id: [job_id, experiment_name]}' for training runs to plot",
     )
@@ -558,11 +624,10 @@ if __name__ == "__main__":
     model_base_dir = Path(args.model_base_dir)
     out_dir = Path(args.output_dir)
     streams = list(args.streams)
-    x_type = args.x_type
-    if x_type == "reltime":
-        raise ValueError(
-            "Relative time is not supported yet. Please use 'step' for the x-axis type."
-        )
+    x_types_valid = ["step"]            # TODO: add "reltime" support when fix available
+    if args.x_type not in x_types_valid:
+        raise ValueError(f"x_type must be one of {x_types_valid}, but got {args.x_type}")
+
 
     runs_ids = args.rs if args.rs is not None else args.rf
 
@@ -593,7 +658,7 @@ if __name__ == "__main__":
         runs_data,
         runs_active,
         streams,
-        x_type=x_type,
+        x_type=args.x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
     )
@@ -603,7 +668,7 @@ if __name__ == "__main__":
         runs_data,
         runs_active,
         streams,
-        x_type=x_type,
+        x_type=args.x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
     )
@@ -613,7 +678,7 @@ if __name__ == "__main__":
         runs_data,
         runs_active,
         streams,
-        x_type=x_type,
+        x_type=args.x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
     )
