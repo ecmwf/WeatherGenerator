@@ -21,6 +21,7 @@ from weathergen.utils.train_logger import Metrics, TrainLogger
 
 _logger = logging.getLogger(__name__)
 
+
 ####################################################################################################
 def _ensure_list(value):
     """
@@ -35,6 +36,7 @@ def _ensure_list(value):
         A list containing the input value if it was not a list, or the input value itself if it was already a list.
     """
     return value if isinstance(value, list) else [value]
+
 
 ####################################################################################################
 def _check_run_id_dict(run_id_dict: dict) -> bool:
@@ -57,6 +59,7 @@ def _check_run_id_dict(run_id_dict: dict) -> bool:
                 f"Each key must be a string and each value must be a list of [job_id, experiment_name], but got: {k}: {v}"
             )
 
+
 ####################################################################################################
 def _read_str_config(yaml_str: str) -> dict:
     """
@@ -78,6 +81,7 @@ def _read_str_config(yaml_str: str) -> dict:
 
     return config_dict
 
+
 ####################################################################################################
 def _read_yaml_config(yaml_file_path):
     """
@@ -98,16 +102,16 @@ def _read_yaml_config(yaml_file_path):
     dict
         A dictionary with run IDs as keys and a list of [job ID, experiment name] as values.
     """
-    with open(yaml_file_path, 'r') as f:
+    with open(yaml_file_path, "r") as f:
         data = yaml.safe_load(f)
 
     # Extract configuration for plotting training diagnostics
-    config_plot = data.get('train', {}).get('plot', {})
-    
-    # Init lists 
-    run_ids = _ensure_list(config_plot.get('run_ids', []))
-    job_ids = _ensure_list(config_plot.get('job_ids', []))
-    experiment_names = _ensure_list(config_plot.get('experiment_names', []))
+    config_plot = data.get("train", {}).get("plot", {})
+
+    # Init lists
+    run_ids = _ensure_list(config_plot.get("run_ids", []))
+    job_ids = _ensure_list(config_plot.get("job_ids", []))
+    experiment_names = _ensure_list(config_plot.get("experiment_names", []))
 
     # sanity checks
     assert len(run_ids) > 0, "At least one run_id must be provided."
@@ -553,7 +557,8 @@ if __name__ == "__main__":
     # python plot_training.py -rs "{run_id: [job_id, experiment_name]}" -m ./trained_models -o ./training_plots
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-    parser = argparse.ArgumentParser(description="""Plot training diagnostics from logged data during training.
+    parser = argparse.ArgumentParser(
+        description="""Plot training diagnostics from logged data during training.
                                      An example YAML file looks like this:
                                      train:
                                         plot:
@@ -563,7 +568,8 @@ if __name__ == "__main__":
                                      A dictionary-string can also be used, e.g.:
                                      "{'abcde': ['123456', 'experiment1'],
                                        'fghij': ['654321', 'experiment2']}"
-                                     """)
+                                     """
+    )
 
     parser.add_argument(
         "-o", "--output_dir", default="./plots/", type=Path, help="Directory where plots are saved"
@@ -624,10 +630,9 @@ if __name__ == "__main__":
     model_base_dir = Path(args.model_base_dir)
     out_dir = Path(args.output_dir)
     streams = list(args.streams)
-    x_types_valid = ["step"]            # TODO: add "reltime" support when fix available
+    x_types_valid = ["step"]  # TODO: add "reltime" support when fix available
     if args.x_type not in x_types_valid:
         raise ValueError(f"x_type must be one of {x_types_valid}, but got {args.x_type}")
-
 
     runs_ids = args.rs if args.rs is not None else args.rf
 
