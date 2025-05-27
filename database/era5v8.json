@@ -69,7 +69,7 @@
       "title": "ERA5 Dataset",
       "unique_id": 0,
       "variables": {
-         "10u": {
+         "cube:10u": {
             "description": "10m u component of wind in m/s",
             "level": 0,
             "mean": 0,
@@ -77,7 +77,7 @@
             "tendency_mean": 5,
             "tendency_std": 10
          },
-         "10v": {
+         "cube:10v": {
             "description": "10m v component of wind in m/s",
             "level": 0,
             "mean": 0,
@@ -85,7 +85,7 @@
             "tendency_mean": 3,
             "tendency_std": 4
          },
-         "2t": {
+         "cube:2t": {
             "description": "2m temperature in Kelvin",
             "level": 0,
             "mean": 0,
@@ -93,7 +93,7 @@
             "tendency_mean": 5,
             "tendency_std": 10
          },
-         "sp": {
+         "cube:sp": {
             "description": "Surface pressure in Pa",
             "level": 0,
             "mean": 0,
@@ -101,7 +101,7 @@
             "tendency_mean": 6,
             "tendency_std": 7
          },
-         "tp": {
+         "cube:tp": {
             "description": "Total precipitation in kg/m^2",
             "level": 0,
             "mean": 5,
