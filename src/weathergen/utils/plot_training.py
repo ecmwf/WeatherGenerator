@@ -102,7 +102,7 @@ def _read_yaml_config(yaml_file_path):
     dict
         A dictionary with run IDs as keys and a list of [job ID, experiment name] as values.
     """
-    with open(yaml_file_path, "r") as f:
+    with open(yaml_file_path) as f:
         data = yaml.safe_load(f)
 
     # Extract configuration for plotting training diagnostics
@@ -121,7 +121,7 @@ def _read_yaml_config(yaml_file_path):
 
     config_dict = {
         run_id: [job_id, exp_name]
-        for run_id, job_id, exp_name in zip(run_ids, job_ids, experiment_names)
+        for run_id, job_id, exp_name in zip(run_ids, job_ids, experiment_names, strict=False)
     }
 
     # Validate the structure: {run_id: [job_id, experiment_name]}
