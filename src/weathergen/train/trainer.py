@@ -51,15 +51,7 @@ class Trainer(Trainer_Base):
         run_id_new: bool | str | None = False,
     ):
         self.cf = cf
-
-        if run_id_new is not None and isinstance(run_id_new, str):
-            cf.run_id = run_id_new
-        elif run_id_new or cf.run_id is None:
-            cf.run_id = get_run_id()
-        elif run_id_contd is not None and not run_id_new:
-            cf.run_id = run_id_contd
-        assert cf.run_id is not None
-
+        
         assert cf.samples_per_epoch % cf.batch_size == 0
         assert cf.samples_per_validation % cf.batch_size_validation == 0
 
