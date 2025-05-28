@@ -109,31 +109,31 @@ class IconDataset:
         )
 
         self.colnames = list(self.ds)
-        orig_colnames = self.colnames.copy()
-        n_cols = len(self.colnames)
-        # self.cols_idx = list(np.arange(len(self.colnames)))
-        self.lat_index = list(self.colnames).index("clat")
-        self.lon_index = list(self.colnames).index("clon")
+        self.colnames.remove("time")
         self.colnames.remove("clat")
         self.colnames.remove("clon")
-        self.colnames.remove("time")
         self.cols_idx = np.array(list(np.arange(len(self.colnames))))
-
+    
         # Ignore step_hrs, idk how it supposed to work
         # TODO, TODO, TODO:
         self.step_hrs = 1
 
-        # self.data = self.ds
         # Extracting data values and making it look like FESOM one (idk if it is needed)
         icon_data_content = self.ds
+
+        lat_as_in_data_file = self.ds["clat"][:].astype("f")
+        lon_as_in_data_file = self.ds["clon"][:].astype("f")
+
+        self.lat = np.tile(lat_as_in_data_file, len(time_as_in_data_file))
+        self.lon = np.tile(lon_as_in_data_file, len(time_as_in_data_file))
+
         icon_data_content_reshaped = [icon_data_content[col_][:].reshape(-1, 1) for col_ in self.colnames]
-        icon_data_content_stacked = np.concatenate(icon_data_content_reshaped, axis=1)  # shape (N, 14)
+        icon_data_content_stacked = np.concatenate(icon_data_content_reshaped, axis=1)  # shape (N, 35)
 
         # in-memory Zarr array
         temp_store = zarr.MemoryStore()
         temp_root = zarr.group(store=temp_store)
         temp_root.create_dataset('data', data=icon_data_content_stacked, dtype='float32')
-
         self.data = temp_root['data']
 
         # making time array looks like the FESOM one
@@ -235,10 +235,11 @@ class IconDataset:
         end_row = start_row + self.len_hrs * self.mesh_size
         data = self.data.oindex[start_row:end_row, idx_channels]
 
-        lat = np.expand_dims(self.data.oindex[start_row:end_row, self.lat_index], 1)
-        lon = np.expand_dims(self.data.oindex[start_row:end_row, self.lon_index], 1)
+        lat = np.expand_dims(self.lat[start_row:end_row],1)
+        lon = np.expand_dims(self.lon[start_row:end_row],1)
 
         latlon = np.concatenate([lat, lon], 1)
+
         # empty geoinfos
         geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
         datetimes = np.squeeze(self.time[start_row:end_row])
