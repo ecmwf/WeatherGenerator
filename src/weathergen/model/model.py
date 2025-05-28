@@ -329,7 +329,7 @@ class Model(torch.nn.Module):
         return self
 
     #########################################
-    def freeze_weights_forecast(self) -> Model:
+    def freeze_weights_forecast(self) -> 'Model':
         """Freezes core model weights and makes forecasting engine weights trainable"""
 
         # freeze everything
