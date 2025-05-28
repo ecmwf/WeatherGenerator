@@ -124,20 +124,37 @@ def load_config(
 
 def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool):
     """
-    Determine run_id of current run.
+    Determine and set run_id of current run.
+
+    Determining the run id should follow the following logic:
+
+    1. (default case): run train, train_continue or evaluate without any flags => generate a new run_id for this run.
+    2. (assign run_id): run train, train_continue or evaluate with --run_id <RUNID> flag => assign a run_id manually to this run
+    3. (reuse run_id -> only for train_continue and evaluate): reuse the run_id from the run specified by --from_run_id <RUNID>. Since the run_id correct run_id is already loaded in the config nothing has to be assigned. This case will happen if --reuse_run_id is specified.
+
 
     Args:
         config: Base configuration loaded from previous run or default.
         run_id: Id assigned to this run. If None a new one will be generated.
         reuse_run_id: Reuse run_id from base configuration instead.
+
+    Returns:
+        config object with the run_id attribute properly set.
     """
-    if not reuse_run_id:
+    config = config.copy()
+    if reuse_run_id:
+        assert config.run_id is not None, "run_id loaded from previous run should not be None."
+        _logger.info(f"reusing run_id from previous run: {config.run_id}")
+    else:
         if run_id is None:
-            run_id = get_run_id()
+            # generate new id if run_id is None
+            config.run_id = run_id or get_run_id()
+            _logger.info(f"using generated run_id: {config.run_id}")
+        else:
+            config.run_id = run_id
+            _logger.info(f"using assigned run_id: {config.run_id}")
 
-        config.run_id = run_id
-
-    assert config.run_id is not None
+    return config
 
 
 def from_cli_arglist(arg_list: list[str]) -> Config:

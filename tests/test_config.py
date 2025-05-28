@@ -145,7 +145,7 @@ def overwrite_file(overwrite_config):
 @pytest.fixture
 def config_fresh(private_config_file):
     cf = config.load_config(private_config_file, None, None)
-    config.set_run_id(cf, TEST_RUN_ID, False)
+    cf = config.set_run_id(cf, TEST_RUN_ID, False)
     cf.data_loader_rng_seed = 42
 
     return cf
@@ -205,13 +205,24 @@ def test_from_cli(options, cf):
     parsed_config = config.from_cli_arglist(options)
 
     assert parsed_config == OmegaConf.create(cf)
-@pytest.mark.parametrize("run_id,reuse,expected", [(None, False, "generated"), ("new_id", False, "new_id"), (None, True, TEST_RUN_ID), ("new_id", True, TEST_RUN_ID)])
+
+
+@pytest.mark.parametrize(
+    "run_id,reuse,expected",
+    [
+        (None, False, "generated"),
+        ("new_id", False, "new_id"),
+        (None, True, TEST_RUN_ID),
+        ("new_id", True, TEST_RUN_ID),
+    ],
+)
 def test_set_run_id(config_fresh, run_id, reuse, expected, mocker):
-    patch = mocker.patch("weathergen.utils.config.get_run_id", return_value="generated")
-    
-    config.set_run_id(config_fresh, run_id, reuse)    
-    
+    mocker.patch("weathergen.utils.config.get_run_id", return_value="generated")
+
+    config_fresh = config.set_run_id(config_fresh, run_id, reuse)
+
     assert config_fresh.run_id == expected
+
 
 def test_print_cf_no_secrets(config_fresh):
     output = config._format_cf(config_fresh)

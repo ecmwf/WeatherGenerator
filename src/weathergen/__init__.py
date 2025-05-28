@@ -53,7 +53,7 @@ def evaluate_from_args(argl: list[str]):
         evaluate_overwrite,
         cli_overwrite,
     )
-    config.set_run_id(cf, args.run_id, args.reuse_run_id)
+    cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
     cf.run_history += [(args.from_run_id, cf.istep)]
 
@@ -104,7 +104,7 @@ def train_continue() -> None:
         *args.config,
         cli_overwrite,
     )
-    config.set_run_id(cf, args.run_id, args.reuse_run_id)
+    cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
     # track history of run to ensure traceability of results
     cf.run_history += [(args.from_run_id, cf.istep)]
@@ -144,7 +144,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
     cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
-    config.set_run_id(cf, args.run_id, False)
+    cf = config.set_run_id(cf, args.run_id, False)
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
