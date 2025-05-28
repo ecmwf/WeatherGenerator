@@ -9,7 +9,7 @@
 
 ICON :
   type : icon
-  filenames : ['icon-art-NWP_OH_CHEMISTRY-chem_DOM01_ML_daily_repeat_reduced_levels.zarr']
+  filenames : ['icon-art-NWP_OH_CHEMISTRY-chem_DOM01_ML_daily_repeat_reduced_levels_to_deg.zarr'] # 'icon-art-NWP_OH_CHEMISTRY-chem_DOM01_ML_daily_repeat_reduced_levels.zarr']
   source : ['u_00', 'v_00', 'w_00', 'temp_00']
   target : ['u_00', 'v_00', 'w_00', 'temp_00']
   loss_weight : 1.
