@@ -1,0 +1,113 @@
+{
+   "assets": {
+      "rodeo-opera-files-2km-2013-2023-15m-v1-lambert-azimuthal-equal-area.zarr": {
+         "description": "Anemoi dataset",
+         "href": "rodeo-opera-files-2km-2013-2023-15m-v1-lambert-azimuthal-equal-area.zarr",
+         "inodes": "380,987",
+         "locations": [
+            "HPC2020",
+            "EWC",
+            "MareNostrum5",
+            "JSC"
+         ],
+         "roles": [
+            "data"
+         ],
+         "size": "959 GiB",
+         "title": "rodeo-opera-files-2km-2013-2023-15m-v1-lambert-azimuthal-equal-area.zarr",
+         "type": "application/vnd+zarr"
+      }
+   },
+   "bbox": [
+      -39.5,
+      31.800000000000001,
+      57.700000000000003,
+      73.900000000000006
+   ],
+   "geometry": {
+      "coordinates": [
+         [
+            [
+               -39.5,
+               31.800000000000001
+            ],
+            [
+               -39.5,
+               73.900000000000006
+            ],
+            [
+               57.700000000000003,
+               73.900000000000006
+            ],
+            [
+               57.700000000000003,
+               31.800000000000001
+            ],
+            [
+               -39.5,
+               31.800000000000001
+            ]
+         ]
+      ],
+      "type": "Polygon"
+   },
+   "id": "weathergen.atmo.OPERA",
+   "properties": {
+      "description": "The OPERA radar dataset is produced by the EUMETNET OPERA program, which coordinates and harmonizes European weather radar observations. It provides quality-controlled, pan-European radar composites and individual radar data from national meteorological services. ",
+      "end_datetime": "2024-02-15T14:05:00",
+      "fixed_timesteps": "True",
+      "frequency": "15m",
+      "keywords": [
+         "radar",
+         "precipitation",
+         "atmosphere",
+         "observations"
+      ],
+      "name": "OPERA",
+      "providers": [
+         {
+            "name": "ECMWF",
+            "roles": [
+               "host"
+            ],
+            "url": "https://ecmwf.int"
+         }
+      ],
+      "start_datetime": "2013-01-22T15:05:00",
+      "title": "OPERA",
+      "unique_id": "3",
+      "variables": {
+         "mask": {
+            "max": 3,
+            "mean": 1.24214,
+            "min": 0,
+            "std": 0.64675499999999997,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "quality": {
+            "max": 24.600000000000001,
+            "mean": 0.23305400000000001,
+            "min": 0,
+            "std": 0.19542599999999999,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "tp": {
+            "max": 10995900000000000000,
+            "mean": 2996100000000,
+            "min": 0,
+            "std": 2780720000000000,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         }
+      }
+   },
+   "stac_extensions": [
+      "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
+      "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json",
+      "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
+   ],
+   "stac_version": "1.0.0",
+   "type": "Feature"
+}

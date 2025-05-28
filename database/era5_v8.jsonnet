@@ -2,14 +2,15 @@
   name: "ERA5v8",
   filename: "era5v8.json",
   description: "ERA5 is a reanalysis dataset produced by ECMWF, providing hourly estimates of a large number of atmospheric, land, and oceanic climate variables.",
-  unique_id: 0,
+  unique_id: "1",
   title: "ERA5",
   start_datetime: "1979-01-01T00:00:00",
   end_datetime: "2023-12-31T18:00:00",
   frequency: "6h",
+  fixed_timesteps: "True", 
   keywords: [
     "ERA5",
-    "ECMWF",
+    "global",
     "atmosphere",
     "reanalysis"
   ],
@@ -130,14 +131,6 @@
   },
   
   geometry: [-180, 180, -90, 90], 
-  
-  ref_links: [
-    {
-    rel: "DOC",
-    href: "https://confluence.ecmwf.int/display/MAEL/WeatherGenerator+Dataset",
-    title: "ERA5 Documentation (ECMWF Confluence)"
-    }
-  ],
 
   dataset: {
     dataset_name: "aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr", 

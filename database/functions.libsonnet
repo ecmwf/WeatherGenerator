@@ -1,5 +1,14 @@
 // Variable filler
 
+
+local check_unique_ids(datasets) = 
+  local ids = [ds.unique_id for ds in datasets];
+  local unique_ids = std.set(ids);
+  if std.length(unique_ids) != std.length(ids) then
+    error "Duplicate in unique IDs: " + std.join(", ", ids)
+  else
+    {};
+
 local fill_variables(vars) = {
   [k]: {
     min: vars[k][0],
@@ -23,6 +32,7 @@ local fill_properties(ds) = {
   providers: ds.providers,
   variables: fill_variables(ds.variables),
   frequency: ds.frequency,
+  fixed_timesteps: ds.fixed_timesteps, 
 };
 
 local fill_geometry(vars) = {
@@ -76,6 +86,7 @@ local dataset_entry_fill(ds) = {
 };
 
 {
+  check_unique_ids: check_unique_ids, 
   fill_variables: fill_variables,
   fill_geometry: fill_geometry,
   fill_assets: fill_assets,

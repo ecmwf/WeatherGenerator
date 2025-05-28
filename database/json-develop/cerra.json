@@ -55,6 +55,7 @@
    "properties": {
       "description": "The Copernicus European Regional Reanalysis (CERRA), developed under the Copernicus Climate Change Service (C3S), provides a high-resolution reanalysis of atmospheric conditions over Europe. Covering the period from 1984 onward, CERRA delivers hourly data at a spatial resolution of 5.5 km, capturing fine-scale climate and weather patterns with improved detail compared to global reanalyses",
       "end_datetime": "2020-12-31T18:00:00",
+      "fixed_timesteps": "True",
       "frequency": "3h",
       "keywords": [
          "europe",
@@ -74,7 +75,7 @@
       ],
       "start_datetime": "1984-09-01T06:00:00",
       "title": "CERRA",
-      "unique_id": 1,
+      "unique_id": "2",
       "variables": {
          "10si_10": {
             "max": 52.802783966064453,

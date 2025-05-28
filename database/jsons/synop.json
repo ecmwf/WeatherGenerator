@@ -1,0 +1,254 @@
+{
+   "assets": {
+      "observations-ea-ofb-0001-1979-2023-combined-surface-v2": {
+         "description": "Observation dataset",
+         "href": "observations-ea-ofb-0001-1979-2023-combined-surface-v2",
+         "inodes": "4711",
+         "locations": [
+            "HPC2020",
+            "Lumi"
+         ],
+         "roles": [
+            "data"
+         ],
+         "size": "61.5 GB",
+         "title": "observations-ea-ofb-0001-1979-2023-combined-surface-v2",
+         "type": "application/vnd+zarr"
+      }
+   },
+   "bbox": [
+      -180,
+      -90,
+      180,
+      90
+   ],
+   "geometry": {
+      "coordinates": [
+         [
+            [
+               -180,
+               -90
+            ],
+            [
+               -180,
+               90
+            ],
+            [
+               180,
+               90
+            ],
+            [
+               180,
+               -90
+            ],
+            [
+               -180,
+               -90
+            ]
+         ]
+      ],
+      "type": "Polygon"
+   },
+   "id": "weathergen.atmo.SYNOP",
+   "properties": {
+      "description": "SYNOP (surface synoptic observation) data consist of standardized meteorological observations collected from land-based weather stations worldwide, typically at 6-hourly or hourly intervals. These observations include key atmospheric variables such as temperature, wind speed and direction, pressure, humidity, cloud cover, and precipitation. ",
+      "end_datetime": "2023-05-31T21:00:0",
+      "fixed_timesteps": "False",
+      "frequency": "3h",
+      "keywords": [
+         "atmosphere",
+         "observation",
+         "synoptic data"
+      ],
+      "name": "SYNOP",
+      "providers": [
+         {
+            "name": "ECMWF",
+            "roles": [
+               "host"
+            ],
+            "url": "https://ecmwf.int"
+         }
+      ],
+      "start_datetime": "1979-01-01T00:00:00",
+      "title": "SYNOP",
+      "unique_id": "7",
+      "variables": {
+         "cos_julian_day": {
+            "max": 1,
+            "mean": 0,
+            "min": -1,
+            "std": 1,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "cos_latitude": {
+            "max": 1,
+            "mean": 0,
+            "min": -4.3711388286737929e-08,
+            "std": 1,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "cos_local_time": {
+            "max": 1,
+            "mean": 0,
+            "min": -1,
+            "std": 1,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "cos_longitude": {
+            "max": 1,
+            "mean": 0,
+            "min": -1,
+            "std": 1,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "cos_sza": {
+            "max": 1,
+            "mean": 0,
+            "min": 0,
+            "std": 1,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "healpix_idx_8": {
+            "max": 767,
+            "mean": 211.55131530761719,
+            "min": 0,
+            "std": 208.08619689941406,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "lat": {
+            "max": 90,
+            "mean": 0,
+            "min": -90,
+            "std": 90,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "lon": {
+            "max": 180,
+            "mean": 0,
+            "min": -180,
+            "std": 180,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "lsm": {
+            "max": 1,
+            "mean": 0.70989722013473511,
+            "min": 0,
+            "std": 0.37073072791099548,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "obsvalue_ps_0": {
+            "max": 113770,
+            "mean": 97822.171875,
+            "min": 15990,
+            "std": 5907.458984375,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "obsvalue_rh2m_0": {
+            "max": 1,
+            "mean": 0.71966838836669922,
+            "min": 1.1888814687225063e-14,
+            "std": 0.20914055407047272,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "obsvalue_t2m_0": {
+            "max": 338,
+            "mean": 285.33074951171875,
+            "min": 184.30000305175781,
+            "std": 13.912480354309082,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "obsvalue_tsts_0": {
+            "max": 320.20001220703125,
+            "mean": 291.65081787109375,
+            "min": 229.55000305175781,
+            "std": 8.8829250335693359,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "obsvalue_u10m_0": {
+            "max": 80,
+            "mean": 0.20722207427024841,
+            "min": -55.149234771728516,
+            "std": 3.4235959053039551,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "obsvalue_v10m_0": {
+            "max": 51.645042419433594,
+            "mean": 0.055502079427242279,
+            "min": -51.210002899169922,
+            "std": 3.2893860340118408,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "seqno": {
+            "max": 22173636,
+            "mean": 5340427.5,
+            "min": 5704,
+            "std": 4946647.5,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "sin_julian_day": {
+            "max": 0.99999940395355225,
+            "mean": 0,
+            "min": -0.99999940395355225,
+            "std": 1,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "sin_latitude": {
+            "max": 1,
+            "mean": 0,
+            "min": -1,
+            "std": 1,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "sin_local_time": {
+            "max": 1,
+            "mean": 0,
+            "min": -1,
+            "std": 1,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "sin_longitude": {
+            "max": 1,
+            "mean": 0,
+            "min": -1,
+            "std": 1,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "stalt": {
+            "max": 31072,
+            "mean": 307.25546264648438,
+            "min": -389,
+            "std": 532.384521484375,
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         }
+      }
+   },
+   "stac_extensions": [
+      "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
+      "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json",
+      "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
+   ],
+   "stac_version": "1.0.0",
+   "type": "Feature"
+}

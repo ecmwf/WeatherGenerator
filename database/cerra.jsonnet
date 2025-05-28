@@ -3,10 +3,11 @@
   filename: "cerra.json",
   description: "The Copernicus European Regional Reanalysis (CERRA), developed under the Copernicus Climate Change Service (C3S), provides a high-resolution reanalysis of atmospheric conditions over Europe. Covering the period from 1984 onward, CERRA delivers hourly data at a spatial resolution of 5.5 km, capturing fine-scale climate and weather patterns with improved detail compared to global reanalyses",
   title: "CERRA",
-  unique_id: 1,
+  unique_id: "2",
   start_datetime: "1984-09-01T06:00:00",
   end_datetime: "2020-12-31T18:00:00",
   frequency: "3h",
+  fixed_timesteps: "True", 
   keywords: [
     "europe",
     "copernicus",
@@ -117,19 +118,6 @@
   },
   
   geometry: [17, 35, 20, 65], 
-  
-  ref_links: [
-    {
-        "rel": "DOC",
-        "href": "https://climate.copernicus.eu/copernicus-regional-reanalysis-europe-cerra",
-        "title": "Master documentation (Copernicus Data store)"
-      },
-      {
-        "rel": "collection",
-        "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/catalogue.json",
-        "type": "application/json"
-      }
-  ],
 
   dataset: {
     dataset_name: "cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi.zarr", 
