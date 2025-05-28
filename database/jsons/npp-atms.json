@@ -3,7 +3,7 @@
       "MICROWAVE_FCDR_V1.1-20200512/SNPP/*/*.nc": {
          "description": "Observation dataset",
          "href": "MICROWAVE_FCDR_V1.1-20200512/SNPP/*/*.nc",
-         "inodes": "",
+         "inodes": "44469",
          "locations": [
             "HPC2020",
             "JSC"
@@ -11,7 +11,7 @@
          "roles": [
             "data"
          ],
-         "size": "120GB",
+         "size": "2.9T",
          "title": "MICROWAVE_FCDR_V1.1-20200512/SNPP/*/*.nc",
          "type": "application/vnd+netcdf"
       }
