@@ -152,7 +152,7 @@ class Trainer(Trainer_Base):
             cf.end_date_val,
             cf.batch_size_validation,
             cf.samples_per_validation,
-            shuffle=True,
+            shuffle=cf.shuffle,
         )
 
         loader_params = {
