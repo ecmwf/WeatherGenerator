@@ -56,7 +56,7 @@ class TimeWindowHandler:
 
     def get_absolute_index(self, idx: int) -> tuple[np.int64, np.int64]:
         """
-        Temporal window corresponding to index
+        Absolute index (in sec) with respect to reference base time
 
         Parameters
         ----------
@@ -65,7 +65,7 @@ class TimeWindowHandler:
 
         Returns
         -------
-            start and end of temporal window
+            start and end of absolute indices
         """
 
         idx_start = (self.t_start + self.t_window_step * idx - self.zero_time).seconds
