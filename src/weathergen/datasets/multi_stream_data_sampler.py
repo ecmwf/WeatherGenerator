@@ -286,7 +286,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 idx = self.perms[idx_raw % self.perms.shape[0]]
                 idx_raw += 1
 
-                time_win1 = self.time_window_handler.time_window(idx)
+                time_win1 = self.time_window_handler.window(idx)
 
                 streams_data = []
 
@@ -344,7 +344,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             step_forecast_dt = (
                                 idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
                             )
-                            time_win2 = self.time_window_handler.time_window(step_forecast_dt)
+                            time_win2 = self.time_window_handler.window(step_forecast_dt)
 
                             rdata = ds.get_target(step_forecast_dt)
 
@@ -417,5 +417,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 f"{self.rank}::{worker_info.id}"
                 + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
             )
+
+        # ensure the tokenizers use different seeds
+        self.tokenizer.reset()
 
         return iter_start, iter_end
