@@ -9,8 +9,8 @@
 
 ERA5 :
   type : anemoi
-  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr']
-  # source : ['u_', 'v_', '10u', '10v']
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
+  # source : ['u_', 'v_', '10u', '10v']s
   # target : ['10u', '10v']
   loss_weight : 1.
   diagnostic : False
