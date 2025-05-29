@@ -172,7 +172,7 @@ class Model(torch.nn.Module):
         # forecasting engine
         if cf.forecast_steps > 0 and cf.fe_num_blocks == 0:
             raise ValueError("Empty forecast engine (fe_num_blocks = 0), but forecast_steps > 0")
-        
+
         self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells).create()
 
         ###############
