@@ -69,7 +69,7 @@ class TimeWindowHandler:
         """
 
         idx_start = (self.t_start + self.t_window_step * idx - self.zero_time).seconds
-        idx_end = (t_start + self.t_window_len - self.zero_time).seconds
+        idx_end = (idx_start + self.t_window_len - self.zero_time).seconds
         assert idx_start <= idx_end, "time window idxs invalid"
 
         return idx_start, idx_end
