@@ -31,7 +31,7 @@ Config = DictConfig
 
 def print_cf(config: Config):
     """Print formatted the contents of the configuration."""
-    return _format_cf(config)
+    print(_format_cf(config))
 
 
 def _format_cf(config: Config) -> str:
