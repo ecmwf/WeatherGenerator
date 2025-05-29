@@ -38,8 +38,6 @@ def _format_cf(config: Config) -> str:
     stream = io.StringIO()
     for key, value in config.items():
         match key:
-            case "secrets":
-                continue
             case "streams":
                 for rt in value:
                     for k, v in rt.items():
@@ -103,7 +101,8 @@ def load_config(
     *overwrites: Path | dict | Config,
 ) -> Config:
     """
-    Merge config information from multiple sources into one run_config.
+    Merge config information from multiple sources into one run_config. Anything in the
+    private configs "secrets" section will be discarted.
 
     Args:
         private_home: Configuration file containing platform dependent information and secretes
@@ -211,6 +210,7 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
     private_cf["model_path"] = (
         private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
     )
+    del private_cf["secrets"]
     return private_cf
 
 
