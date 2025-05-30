@@ -122,8 +122,8 @@ class TokenizerMasking:
         )
 
         worker_info = torch.utils.data.get_worker_info()
-        id = worker_info.id if worker_info is not None else 1
-        self.rng = np.random.default_rng(int(time.time()) + id)
+        div_factor = worker_info.id if worker_info is not None else 1
+        self.rng = np.random.default_rng(int(time.time() / div_factor))
 
         self.size_time_embedding = 6
 
@@ -133,8 +133,8 @@ class TokenizerMasking:
 
     def reset(self) -> None:
         worker_info = torch.utils.data.get_worker_info()
-        id = worker_info.id if worker_info is not None else 1
-        self.rng = np.random.default_rng(int(time.time()) + id)
+        div_factor = worker_info.id if worker_info is not None else 1
+        self.rng = np.random.default_rng(int(time.time() / div_factor))
 
     def batchify_source(
         self,
