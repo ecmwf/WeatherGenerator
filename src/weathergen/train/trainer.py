@@ -435,11 +435,10 @@ class Trainer(Trainer_Base):
                                     )
                                     val_uw += temp.item()
                                     val = val + channel_loss_weight[i] * temp
+                                    losses_all[j, i_obs, i] = temp
                                     ctr_chs += 1
                         val = val / ctr_chs if (ctr_chs > 0) else val
-                        val_uw = val_uw / ctr_chs if (ctr_chs > 0) else val_uw
 
-                        losses_all[j, i_obs] = val_uw
                         if self.cf.loss_fcts[j][0] == "stats" or self.cf.loss_fcts[j][0] == "kcrps":
                             stddev_all[i_obs] = pred[:, mask_nan].std(0).mean().item()
                         # ignore NaNs so that training can continue even if one pred-net diverges
@@ -465,15 +464,17 @@ class Trainer(Trainer_Base):
 
         return (
             loss,
-            None
-            if not log_data
-            else [
-                preds_all,
-                targets_all,
-                targets_coords_raw_rt,
-                targets_times_raw_rt,
-                targets_lens,
-            ],
+            (
+                None
+                if not log_data
+                else [
+                    preds_all,
+                    targets_all,
+                    targets_coords_raw_rt,
+                    targets_times_raw_rt,
+                    targets_lens,
+                ]
+            ),
         )
 
     ###########################################
@@ -492,7 +493,10 @@ class Trainer(Trainer_Base):
             forecast_steps = batch[-1]
             batch = self.batch_to_device(batch)
 
-            losses_all = torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
+            losses_all = (
+                torch.ones((len(self.loss_fcts), len(cf.streams), self.dataset.max_channels))
+                * torch.nan
+            )
             stddev_all = torch.zeros(len(cf.streams)) * torch.nan
 
             # evaluate model
@@ -560,8 +564,16 @@ class Trainer(Trainer_Base):
                 for bidx, batch in enumerate(dataset_val_iter):
                     forecast_steps = batch[-1]
                     batch = self.batch_to_device(batch)
-
-                    losses_all = torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
+                    losses_all = (
+                        torch.ones(
+                            (
+                                len(self.loss_fcts_val),
+                                len(cf.streams),
+                                self.dataset_val.max_channels,
+                            )
+                        )
+                        * torch.nan
+                    )
                     stddev_all = torch.zeros(len(cf.streams)) * torch.nan
 
                     # evaluate model
@@ -638,7 +650,7 @@ class Trainer(Trainer_Base):
                     loss_dict["validation std_dev"] = torch.nanmean(stddev_all.mean()).item()
                     for i_obs, rt in enumerate(cf.streams):
                         loss_dict["validation {}".format(rt["name"].replace(",", ""))] = float(
-                            losses_all[0, i_obs]
+                            losses_all[0, i_obs].nanmean(0)  # Average over channels
                         )
 
                     # add data to plain logger
@@ -647,11 +659,13 @@ class Trainer(Trainer_Base):
 
                 if self.cf.rank == 0:
                     print(
-                        f"validation ({cf.run_id}) : {epoch:03d} : loss = {torch.nanmean(losses_all[0]):.4E}",
+                        f"validation ({cf.run_id}) : {epoch:03d} : loss = {torch.nanmean(losses_all[0].nanmean(0)):.4E}",
                         flush=True,
                     )
                     for i_obs, rt in enumerate(cf.streams):
-                        print("{}".format(rt["name"]) + f" : {losses_all[0, i_obs]:0.4E}")
+                        print(
+                            "{}".format(rt["name"]) + f" : {losses_all[0, i_obs].nanmean(0):0.4E}"
+                        )
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
@@ -717,7 +731,7 @@ class Trainer(Trainer_Base):
                 }
                 for i_obs, rt in enumerate(self.cf.streams):
                     loss_dict["training {}".format(rt["name"].replace(",", ""))] = float(
-                        l_avg[0, i_obs]
+                        l_avg[0, i_obs, :].nanmean(0)
                     )
 
                 # plain logger
@@ -753,7 +767,7 @@ class Trainer(Trainer_Base):
                         bidx,
                         len_dataset,
                         self.cf.istep,
-                        np.nanmean(l_avg[0]),
+                        np.nanmean(l_avg[0].detach()),
                         self.lr_scheduler.get_lr(),
                         (self.print_freq * self.cf.batch_size) / dt,
                     ),
@@ -762,7 +776,7 @@ class Trainer(Trainer_Base):
                 print("\t", end="")
                 for i_obs, rt in enumerate(self.cf.streams):
                     print(
-                        "{}".format(rt["name"]) + f" : {l_avg[0, i_obs]:0.4E} \t",
+                        "{}".format(rt["name"]) + f" : {l_avg[0, i_obs].nanmean(0):0.4E} \t",
                         end="",
                     )
                 print("\n", flush=True)

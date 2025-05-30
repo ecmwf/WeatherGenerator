@@ -63,6 +63,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.len = 100000000
 
         self.streams_datasets = []
+        self.max_channels = 0  # Maximum number of target channels across all streams
+
         for _, stream_info in enumerate(cf.streams):
             self.streams_datasets.append([])
 
@@ -118,6 +120,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 stream_info["source_channels"] = ds.source_channels
                 stream_info["target_channels"] = ds.target_channels
+
+                self.max_channels = max(len(ds.target_channels), self.max_channels)
 
                 self.streams_datasets[-1] += [ds]
 

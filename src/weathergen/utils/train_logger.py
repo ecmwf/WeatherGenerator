@@ -69,13 +69,13 @@ class TrainLogger:
         """
         Log training data
         """
-
         metrics = dict(num_samples=samples)
+        loss_avg = loss_avg.detach()
 
         log_vals = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
         log_vals += [samples]
 
-        metrics["loss_avg_0_mean"] = np.nanmean(loss_avg[0])
+        metrics["loss_avg_0_mean"] = np.nanmean(loss_avg[0, :, :])
         metrics["learning_rate"] = lr
         metrics["num_samples"] = int(samples)
         log_vals += [np.nanmean(loss_avg[0])]
@@ -85,10 +85,13 @@ class TrainLogger:
             st_name = _clean_name(st["name"])
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts):
                 lf_name = _clean_name(lf_name)
-                metrics[_key_loss(st_name, lf_name)] = loss_avg[j, i_obs]
+                metrics[_key_loss(st["name"], lf_name)] = loss_avg[j, i_obs, :].nanmean(0)
+                for k, ch_n in enumerate(st.target):
+                    metrics[_key_loss_chn(st["name"], lf_name, ch_n)] = loss_avg[j, i_obs, k]
+                log_vals += [loss_avg[j, i_obs, :].nanmean(0)]
+
                 if len(stddev_avg) > 0:
                     metrics[_key_stddev(st_name)] = stddev_avg[i_obs]
-                log_vals += [loss_avg[j, i_obs]]
         if len(stddev_avg) > 0:
             for i_obs, _rt in enumerate(self.cf.streams):
                 log_vals += [stddev_avg[i_obs]]
@@ -119,9 +122,13 @@ class TrainLogger:
         log_vals += [samples]
 
         for i_obs, st in enumerate(self.cf.streams):
-            for j, (l_n, _) in enumerate(self.cf.loss_fcts):
-                metrics[_key_loss(st["name"], l_n)] = loss_avg[j, i_obs]
-                log_vals += [loss_avg[j, i_obs]]
+            st_name = _clean_name(st["name"])
+            for j, (lf_name, _) in enumerate(self.cf.loss_fcts_val):
+                metrics[_key_loss(st_name, lf_name)] = loss_avg[j, i_obs, :].nanmean(0)
+                for k, ch_n in enumerate(st.target):
+                    metrics[_key_loss_chn(st_name, lf_name, ch_n)] = loss_avg[j, i_obs, k]
+                log_vals += [loss_avg[j, i_obs, :].nanmean(0)]
+
         if len(stddev_avg) > 0:
             for i_obs, st in enumerate(self.cf.streams):
                 metrics[_key_stddev(st["name"])] = stddev_avg[i_obs]
@@ -311,6 +318,13 @@ def _key_loss(st_name: str, lf_name: str) -> str:
     st_name = _clean_name(st_name)
     lf_name = _clean_name(lf_name)
     return f"stream.{st_name}.loss_{lf_name}.loss_avg"
+
+
+def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
+    st_name = _clean_name(st_name)
+    lf_name = _clean_name(lf_name)
+    ch_name = _clean_name(ch_name)
+    return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
 
 
 def _key_stddev(st_name: str) -> str:
