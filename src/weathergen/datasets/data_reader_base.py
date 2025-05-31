@@ -333,8 +333,8 @@ class DataReaderBase:
         """
 
         assert geoinfos.shape[-1] == len(self.geoinfo_idx), "incorrect number of geoinfo channels"
-        for i, ch in enumerate(self.geoinfo_idx):
-            geoinfos[..., i] = (geoinfos[..., i] - self.mean_geoinfo[ch]) / self.stdev_geoinfo[ch]
+        for i, _ in enumerate(self.geoinfo_idx):
+            geoinfos[..., i] = (geoinfos[..., i] - self.mean_geoinfo[i]) / self.stdev_geoinfo[i]
 
         return geoinfos
 
@@ -452,6 +452,7 @@ class DataReaderTimestep(DataReaderBase):
         super().__init__(start, end, t_window_len, t_window_step, filename, stream_info)
 
         # variables need to be set by child classes
+
         self.frequency = np.datetime64(0, "s")
         self.ds_start_time = self.time_window_handler.zero_time
         self.ds_end_time = self.time_window_handler.zero_time

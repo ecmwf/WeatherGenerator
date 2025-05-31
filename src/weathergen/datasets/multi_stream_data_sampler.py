@@ -17,8 +17,8 @@ import torch
 from weathergen.datasets.atmorep_dataset import AtmorepDataset
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.fesom_dataset import FesomDataset
-from weathergen.datasets.obs_dataset import ObsDataset
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
@@ -80,7 +80,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 match stream_info["type"]:
                     case "obs":
-                        dataset = ObsDataset
+                        dataset = DataReaderObs
                         datapath = cf.data_path_obs
                         kwargs["end"] = end_date_padded
                     case "anemoi":
