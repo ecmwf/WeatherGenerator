@@ -133,7 +133,7 @@ class TokenizerMasking:
 
     def reset(self) -> None:
         worker_info = torch.utils.data.get_worker_info()
-        div_factor = worker_info.id if worker_info is not None else 1
+        div_factor = (worker_info.id + 1) if worker_info is not None else 1
         self.rng = np.random.default_rng(int(time.time() / div_factor))
 
     def batchify_source(
