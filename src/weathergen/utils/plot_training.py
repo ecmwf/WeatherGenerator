@@ -89,9 +89,13 @@ def _read_yaml_config(yaml_file_path):
     Expected structure in the YAML file:
     train:
         plot:
-            run_ids: [run_id1, run_id2, ...]
-            job_ids: [job_id1, job_id2, ...]
-            experiment_names: [experiment_name1, experiment_name2, ...]
+            run_id:
+                slurm_id : SLURM_JOB (specify 0 if not available)
+                description: job description
+            run_id:
+                slurm_id : SLURM_JOB (specify 0 if not available)
+                description : job description
+            ...
 
     Parameters
     ----------
@@ -106,23 +110,17 @@ def _read_yaml_config(yaml_file_path):
         data = yaml.safe_load(f)
 
     # Extract configuration for plotting training diagnostics
-    config_plot = data.get("train", {}).get("plot", {})
-
-    # Init lists
-    run_ids = _ensure_list(config_plot.get("run_ids", []))
-    job_ids = _ensure_list(config_plot.get("job_ids", []))
-    experiment_names = _ensure_list(config_plot.get("experiment_names", []))
+    config_dict_temp = data.get("train", {}).get("plot", {})
 
     # sanity checks
-    assert len(run_ids) > 0, "At least one run_id must be provided."
-    assert len(run_ids) == len(job_ids) == len(experiment_names), (
-        "The lengths of run_ids, job_ids, and experiment_names must be equal."
-    )
+    assert len(config_dict_temp) > 0, "At least one run must be specified."
 
-    config_dict = {
-        run_id: [job_id, exp_name]
-        for run_id, job_id, exp_name in zip(run_ids, job_ids, experiment_names, strict=False)
-    }
+    # convert to legacy format
+    config_dict = {}
+    for k, v in config_dict_temp.items():
+        assert type(v["slurm_id"]) == int, "slurm_id has to be int."
+        assert type(v["description"]) == str, "description has to be str."
+        config_dict[k] = [v["slurm_id"], v["description"]]
 
     # Validate the structure: {run_id: [job_id, experiment_name]}
     _check_run_id_dict(config_dict)
@@ -559,16 +557,21 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     parser = argparse.ArgumentParser(
         description="""Plot training diagnostics from logged data during training.
-                                     An example YAML file looks like this:
-                                     train:
-                                        plot:
-                                            - run_ids: [abcde, fghij]
-                                            - job_ids: [123456, 654321]
-                                            - experiment_names: [experiment1, experiment2]
-                                     A dictionary-string can also be used, e.g.:
-                                     "{'abcde': ['123456', 'experiment1'],
-                                       'fghij': ['654321', 'experiment2']}"
-                                     """
+                       An example YAML file looks like this:
+                            train:
+                                plot:
+                                    run_id:
+                                        slurm_id : SLURM_JOB (specify 0 if not available)
+                                        description: job description
+                                    run_id:
+                                        slurm_id : SLURM_JOB (specify 0 if not available)
+                                        description : job description
+                                            ...
+
+                        A dictionary-string can also be specified on the command line, e.g.:
+                            "{'abcde': ['123456', 'experiment1'],
+                            'fghij': ['654321', 'experiment2']}"
+                            """
     )
 
     parser.add_argument(
@@ -653,8 +656,8 @@ if __name__ == "__main__":
     # plot learning rate
     plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir)
 
-    # plot performance
-    plot_utilization(runs_ids, runs_data, runs_active, plot_dir=out_dir)
+    # # plot performance
+    # plot_utilization(runs_ids, runs_data, runs_active, plot_dir=out_dir)
 
     # compare different runs
     plot_loss_per_stream(
