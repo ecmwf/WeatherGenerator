@@ -33,7 +33,6 @@ def evaluate_from_args(argl: list[str]):
     parser = cli.get_evaluate_parser()
     args = parser.parse_args(argl)
 
-    # TODO: move somewhere else
     init_loggers()
 
     evaluate_overwrite = dict(
@@ -65,6 +64,8 @@ def evaluate_from_args(argl: list[str]):
 def train_continue() -> None:
     parser = cli.get_continue_parser()
     args = parser.parse_args()
+
+    init_loggers()
 
     if args.finetune_forecast:
         finetune_overwrite = dict(
@@ -137,7 +138,6 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     parser = cli.get_train_parser()
     args = parser.parse_args(argl)
 
-    # TODO: move somewhere else
     init_loggers()
 
     cli_overwrite = config.from_cli_arglist(args.options)

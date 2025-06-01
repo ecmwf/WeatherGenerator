@@ -417,6 +417,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 f"{self.rank}::{worker_info.id}"
                 + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
             )
+        # ensure the tokenizers use different seeds
+        self.tokenizer.reset()
 
         # ensure the tokenizers use different seeds
         self.tokenizer.reset()
