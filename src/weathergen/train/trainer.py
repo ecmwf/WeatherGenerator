@@ -68,7 +68,6 @@ class Trainer(Trainer_Base):
         self.devices = self.init_torch()
 
         self.init_ddp(cf)
-        _logger.info(f"Starting run with id: {cf.run_id}")
 
         # read configuration of data streams
         cf.streams = config.load_streams(Path(cf.streams_directory))
