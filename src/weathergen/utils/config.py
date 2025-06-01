@@ -29,12 +29,7 @@ _logger = logging.getLogger(__name__)
 Config = DictConfig
 
 
-def print_cf(config: Config):
-    """Print formatted the contents of the configuration."""
-    return _format_cf(config)
-
-
-def _format_cf(config: Config) -> str:
+def format_cf(config: Config) -> str:
     stream = io.StringIO()
     for key, value in config.items():
         match key:
