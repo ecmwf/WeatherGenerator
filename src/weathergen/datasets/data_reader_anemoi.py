@@ -13,6 +13,7 @@ from pathlib import Path
 
 import anemoi.datasets as anemoi_datasets
 import numpy as np
+from numpy.typing import NDArray, ArrayLike
 
 from weathergen.datasets.data_reader_base import DataReaderBase, ReaderData
 
@@ -85,7 +86,7 @@ class DataReaderAnemoi(DataReaderBase):
 
         # Determine source and target channels, filtering out forcings etc and using
         # specified source and target channels if specified
-        source_channels = stream_info["source"] if "source" in stream_info else None
+        source_channels = stream_info.get("source")
         self.source_idx = np.sort(
             [
                 ds.name_to_index[k]
@@ -101,7 +102,7 @@ class DataReaderAnemoi(DataReaderBase):
                 )
             ]
         )
-        target_channels = stream_info["target"] if "target" in stream_info else None
+        target_channels = stream_info.get("target")
         self.target_idx = np.sort(
             [
                 ds.name_to_index[k]
@@ -137,7 +138,7 @@ class DataReaderAnemoi(DataReaderBase):
             self.ds_start_time = self.ds.dates[0]
             self.ds_end_time = self.ds.dates[-1]
 
-    def _get(self, idx: int, channels_idx: np.array) -> ReaderData:
+    def _get(self, idx: int, channels_idx: ArrayLike) -> ReaderData:
         """
         Get data for window
 
@@ -161,6 +162,7 @@ class DataReaderAnemoi(DataReaderBase):
 
         # extract number of time steps and collapse ensemble dimension
         # rdata.data = self.ds[t_idxs][:, :, 0]
+        assert self.ds is not None, "Dataset is not initialized"
         rdata.data = self.ds[t_idxs[0] : t_idxs[-1] + 1][:, :, 0]
 
         # extract channels
@@ -176,7 +178,7 @@ class DataReaderAnemoi(DataReaderBase):
                 np.expand_dims(self.latitudes, 0),
                 np.expand_dims(self.longitudes, 0),
             ],
-            0,
+            axis=0,
         ).transpose()
         rdata.coords = np.repeat(latlon, len(t_idxs), axis=0).reshape((-1, latlon.shape[1]))
 
