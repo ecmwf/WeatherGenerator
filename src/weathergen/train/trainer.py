@@ -65,7 +65,6 @@ class Trainer(Trainer_Base):
         assert cf.samples_per_epoch % cf.batch_size == 0
         assert cf.samples_per_validation % cf.batch_size_validation == 0
 
-        _logger.info(f"Starting run with id: {cf.run_id}")
         self.devices = self.init_torch()
 
         self.init_ddp(cf)
@@ -100,11 +99,13 @@ class Trainer(Trainer_Base):
             shuffle=cf.shuffle,
         )
 
+        # make sure number of loaders does not exceed requested samples
+        loader_num_workers = min(cf.samples_per_validation, cf.loader_num_workers)
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
             "shuffle": False,
-            "num_workers": cf.loader_num_workers,
+            "num_workers": loader_num_workers,
             "pin_memory": True,
         }
         self.data_loader_validation = torch.utils.data.DataLoader(
@@ -150,7 +151,7 @@ class Trainer(Trainer_Base):
             cf.end_date_val,
             cf.batch_size_validation,
             cf.samples_per_validation,
-            shuffle=True,
+            shuffle=cf.shuffle,
         )
 
         loader_params = {
@@ -284,7 +285,7 @@ class Trainer(Trainer_Base):
 
         if is_root():
             config.save(self.cf, None)
-            config.print_cf(self.cf)
+            _logger.info(config.format_cf(self.cf))
 
         # training loop
 

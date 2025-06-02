@@ -15,13 +15,13 @@ import anemoi.datasets as anemoi_datasets
 import numpy as np
 from numpy.typing import NDArray, ArrayLike
 
-from weathergen.datasets.data_reader_base import DataReaderBase, ReaderData
+from weathergen.datasets.data_reader_base import DataReaderTimestep, ReaderData
 
 _logger = logging.getLogger(__name__)
 
 
-class DataReaderAnemoi(DataReaderBase):
-    "Wrapper for Anemoi dataset"
+class DataReaderAnemoi(DataReaderTimestep):
+    "Wrapper for Anemoi datasets"
 
     def __init__(
         self,
@@ -33,7 +33,7 @@ class DataReaderAnemoi(DataReaderBase):
         stream_info: dict,
     ) -> None:
         """
-        Construct dataset based on anemoi dataset
+        Construct data reader for anemoi dataset
 
         Parameters
         ----------
@@ -67,9 +67,6 @@ class DataReaderAnemoi(DataReaderBase):
         format_str = "%Y%m%d%H%M%S"
         dt_start = datetime.datetime.strptime(str(start), format_str)
         dt_end = datetime.datetime.strptime(str(end), format_str)
-
-        # TODO, TODO, TODO: add support for sub-sampling of dataset using stream_info['data_frequency]
-        self.sub_sampling_per_window = 1
 
         # open dataset
 
@@ -131,16 +128,19 @@ class DataReaderAnemoi(DataReaderBase):
         if dt_start >= ds_dt_end or dt_end <= ds_dt_start:
             self.ds = None
         else:
-            self.ds = anemoi_datasets.open_dataset(
-                ds, frequency=str(t_window_step) + "h", start=dt_start, end=dt_end
-            )
+            # TODO: specify frequency more flexibly and with finer granularity if necessary
+            f = str(stream_info["frequency"]) + "h" if "frequency" in stream_info else ds.frequency
+            self.ds = anemoi_datasets.open_dataset(ds, frequency=f, start=dt_start, end=dt_end)
+            self.dates = self.ds.dates
             self.len = len(self.ds)
-            self.ds_start_time = self.ds.dates[0]
-            self.ds_end_time = self.ds.dates[-1]
+            self.ds_start_time = self.ds.start_date
+            self.ds_end_time = self.ds.end_date
+            self.sub_sampling_per_window = 1
+            self.frequency = self.ds.frequency
 
     def _get(self, idx: int, channels_idx: ArrayLike) -> ReaderData:
         """
-        Get data for window
+        Get data for window (for either source or target, through public interface)
 
         Parameters
         ----------
@@ -151,18 +151,19 @@ class DataReaderAnemoi(DataReaderBase):
 
         Returns
         -------
-        data (coords, geoinfos, data, datetimes)
+        ReaderData providing coords, geoinfos, data, datetimes
         """
 
         rdata = ReaderData()
-        t_idxs = self.translate_window_idx(idx)
+        t_idxs = self._get_dataset_idxs(idx)
 
         if self.len == 0 or len(t_idxs) == 0:
             return rdata
 
         # extract number of time steps and collapse ensemble dimension
-        # rdata.data = self.ds[t_idxs][:, :, 0]
-        assert self.ds is not None, "Dataset is not initialized"
+        # ds is a wrapper around zarr with get_coordinate_selection not being exposed since
+        # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
+        # sampling is required here
         rdata.data = self.ds[t_idxs[0] : t_idxs[-1] + 1][:, :, 0]
 
         # extract channels
@@ -193,34 +194,3 @@ class DataReaderAnemoi(DataReaderBase):
         ).flatten()
 
         return rdata
-
-    def translate_window_idx(self, idx) -> np.array:
-        """
-        Translate idx for time window to idxs into dataset
-
-        Parameters
-        ----------
-        idx :
-            index of temporal window
-
-        Returns
-        -------
-            start and end of temporal window
-        """
-
-        win_start, win_end = self.time_window_handler.time_window(idx)
-        if win_start < self.ds_start_time or win_end > self.ds_end_time:
-            return np.array([], dtype=np.int32)
-
-        delta_t_start = win_start - self.ds_start_time
-        # delta_t_end = win_end - self.ds_start_time
-
-        steps_to_start = delta_t_start // self.ds.frequency
-        rem_to_start = delta_t_start % self.ds.frequency
-
-        s_idx = steps_to_start + (0 if rem_to_start == 0.0 else 1)
-        e_idx = s_idx + ((self.t_window_len - self.t_eps - rem_to_start) // self.ds.frequency)
-
-        # TODO, TODO, TODO: read times and check
-
-        return np.arange(s_idx, e_idx + 1, self.sub_sampling_per_window)
