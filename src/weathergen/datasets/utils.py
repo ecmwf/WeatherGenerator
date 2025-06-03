@@ -221,7 +221,9 @@ def add_local_vert_coords_ctrs2(ctrs, verts, tcs, a, zi, geoinfo_offset):
 
 
 ####################################################################################################
-def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
+# TODO improve naming, previously had the same name as above (i.e. without the v2), but due to duplication was never
+# called, in enforcing F811, the function was renamed
+def add_local_vert_coords_ctrs2_v2(verts_local, tcs_lens, a, zi, geoinfo_offset):
     ref = torch.tensor([1.0, 0.0, 0.0])
     # aa = locs_to_cell_coords_ctrs(ctrs, verts.transpose(0, 1))
     aa = ref - torch.cat(

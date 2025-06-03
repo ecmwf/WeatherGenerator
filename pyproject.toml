@@ -94,7 +94,7 @@ ignore = [
   "SIM210",
   "SIM212",
   "SIM401",
-  "F811",
+  # "F811",
   # To ignore, not relevant for us
   "E741",
 ]
