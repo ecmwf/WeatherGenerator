@@ -49,18 +49,17 @@ DUMMY_STREAM_CONF = {
         "pred_head": {"ens_size": 1, "num_layers": 1},
     }
 }
-
-DUMMY_STREAM_CONF_STR = OmegaConf.to_yaml(OmegaConf.create(DUMMY_STREAM_CONF))
+DUMMY_MULTIPLE_STREAM_CONF = DUMMY_STREAM_CONF | {"FOO": DUMMY_STREAM_CONF["ERA5"]}
 
 VALID_STREAMS = [
-    (pathlib.Path("test.yml"), DUMMY_STREAM_CONF_STR),
-    (pathlib.Path("foo/test.yml"), DUMMY_STREAM_CONF_STR),
-    (pathlib.Path("bar/foo/test.yml"), DUMMY_STREAM_CONF_STR),
+    (pathlib.Path("test.yml"), DUMMY_STREAM_CONF),
+    (pathlib.Path("foo/test.yml"), DUMMY_STREAM_CONF),
+    (pathlib.Path("bar/foo/test.yml"), DUMMY_STREAM_CONF),
 ]
 
 EXCLUDED_STREAMS = [
-    (pathlib.Path(".test.yml"), DUMMY_STREAM_CONF_STR),
-    (pathlib.Path("#test.yml"), DUMMY_STREAM_CONF_STR),
+    (pathlib.Path(".test.yml"), DUMMY_STREAM_CONF),
+    (pathlib.Path("#test.yml"), DUMMY_STREAM_CONF),
 ]
 
 
@@ -91,14 +90,25 @@ def models_dir():
 
 
 @pytest.fixture
-def streams_dir(request):
+def streams_params(request):
+    return request.param
+
+
+@pytest.fixture
+def streams_config(streams_params):
+    _, content = streams_params
+    return OmegaConf.create(content)
+
+
+@pytest.fixture
+def streams_dir(streams_params, streams_config):
     with tempfile.TemporaryDirectory(prefix="streams") as temp_dir:
         root = pathlib.Path(temp_dir)
 
-        relpath, content = request.param
+        relpath, _ = streams_params
         (root / relpath).parent.mkdir(parents=True, exist_ok=True)
         with open(root / relpath, "w") as stream_file:
-            stream_file.write(content)
+            stream_file.write(OmegaConf.to_yaml(streams_config))
 
         yield root
 
@@ -116,11 +126,6 @@ def private_config_file(private_conf):
         temp.write(OmegaConf.to_yaml(private_conf))
         temp.flush()
         yield pathlib.Path(temp.name)
-
-
-@pytest.fixture
-def stream_config():
-    return OmegaConf.create(DUMMY_STREAM_CONF)
 
 
 @pytest.fixture
@@ -231,29 +236,51 @@ def test_print_cf_no_secrets(config_fresh):
     assert "53CR3T" not in output and "secrets" not in config_fresh.keys()
 
 
-@pytest.mark.parametrize("streams_dir", VALID_STREAMS, indirect=True)
-def test_load_streams(streams_dir, stream_config):
-    name, expected = [*stream_config.items()][0]
+@pytest.mark.parametrize("streams_params", VALID_STREAMS, indirect=True)
+def test_load_streams(streams_dir, streams_config):
+    name, expected = [*streams_config.items()][0]
     expected.name = name
 
     streams = config.load_streams(streams_dir)
-    print(streams)
     assert all(is_equal(stream, expected) for stream in streams)
 
 
-@pytest.mark.parametrize("streams_dir", EXCLUDED_STREAMS, indirect=True)
+@pytest.mark.parametrize(
+    "streams_params", [("test.yml", DUMMY_MULTIPLE_STREAM_CONF)], indirect=True
+)
+def test_load_multiple_streams_len(streams_dir, streams_config):
+    streams = config.load_streams(streams_dir)
+    assert len(streams) == len(streams_config)
+
+
+@pytest.mark.parametrize(
+    "streams_params", [("test.yml", DUMMY_MULTIPLE_STREAM_CONF)], indirect=True
+)
+def test_load_multiple_streams_content(streams_dir, streams_config):
+    name, expected = [*streams_config.items()][0]
+
+    streams = config.load_streams(streams_dir)
+
+    # dont test name since this will be different
+    for stream in streams:
+        del stream["name"]
+
+    assert all(is_equal(stream, expected) for stream in streams)
+
+
+@pytest.mark.parametrize("streams_params", EXCLUDED_STREAMS, indirect=True)
 def test_load_streams_exclude_files(streams_dir):
     streams = config.load_streams(streams_dir)
     assert streams == []
 
 
-@pytest.mark.parametrize("streams_dir", [(pathlib.Path("empty.yml"), "")], indirect=True)
+@pytest.mark.parametrize("streams_params", [(pathlib.Path("empty.yml"), "")], indirect=True)
 def test_load_empty_stream(streams_dir):
     streams = config.load_streams(streams_dir)
     assert streams == []
 
 
-@pytest.mark.parametrize("streams_dir", [(pathlib.Path("error.yml"), "ae:{")], indirect=True)
+@pytest.mark.parametrize("streams_params", [(pathlib.Path("error.yml"), "ae:{")], indirect=True)
 def test_load_malformed_stream(streams_dir):
     with pytest.raises(RuntimeError):
         config.load_streams(streams_dir)
