@@ -651,8 +651,6 @@ class Trainer(Trainer_Base):
                         sources = [[item.source_raw for item in b] for b in batch[0]]
                         write_validation(
                             self.cf,
-                            config.get_path_run(self.cf),
-                            self.cf.rank,
                             epoch,
                             sources,
                             preds_all,

@@ -29,8 +29,6 @@ Data = namedtuple(
 
 def write_validation(
     cf,
-    base_path: Path,
-    rank,
     epoch,
     sources,
     preds_all,
@@ -115,6 +113,7 @@ def _write_first(ds_source: zarr.Group, data: Data):
 
 
 def _successive_write(ds_source: zarr.Group, data: Data):
+    # appends along the first dimension
     if data.source_lens.sum() > 0:
         ds_source["sources"].append(data.source)
     ds_source["sources_lens"].append(data.source_lens)
