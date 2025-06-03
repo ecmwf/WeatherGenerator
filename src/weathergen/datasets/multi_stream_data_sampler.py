@@ -114,6 +114,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     f"Opening dataset with type: {ds_type} from stream config {stream_info['name']}."
                 )
                 ds = dataset(filename=filename, **kwargs)
+                # VSCode breakpoint
+                # code.interact(local=locals())
 
                 fsm = self.forecast_steps[0]
                 if len(ds) > 0:
