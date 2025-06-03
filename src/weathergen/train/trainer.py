@@ -68,10 +68,9 @@ class Trainer(Trainer_Base):
         if self.cf.rank == 0:
             config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
             config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
-        self.path_run = config.get_path_run(cf)
 
         self.init_perf_monitoring()
-        self.train_logger = TrainLogger(cf, self.path_run)
+        self.train_logger = TrainLogger(cf, self.config.get_path_run(cf))
 
     ###########################################
     def inference(self, cf, run_id_trained, epoch):
@@ -652,7 +651,7 @@ class Trainer(Trainer_Base):
                         sources = [[item.source_raw for item in b] for b in batch[0]]
                         write_validation(
                             self.cf,
-                            self.path_run,
+                            config.get_path_run(self.cf),
                             self.cf.rank,
                             epoch,
                             sources,
