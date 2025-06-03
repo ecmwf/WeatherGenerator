@@ -13,7 +13,7 @@ from pathlib import Path
 
 import anemoi.datasets as anemoi_datasets
 import numpy as np
-from numpy.typing import NDArray, ArrayLike
+from numpy.typing import ArrayLike
 
 from weathergen.datasets.data_reader_base import DataReaderTimestep, ReaderData
 
@@ -123,6 +123,10 @@ class DataReaderAnemoi(DataReaderTimestep):
         }
         self.mean = ds.statistics["mean"]
         self.stdev = ds.statistics["stdev"]
+
+        import pdbpp
+
+        pdbpp.set_trace()
 
         # set dataset to None when no overlap with time range
         if dt_start >= ds_dt_end or dt_end <= ds_dt_start:
