@@ -394,9 +394,7 @@ class Trainer(Trainer_Base):
                     # accumulate loss from different loss functions and channels
                     for j, (loss_fct, w) in enumerate(loss_fcts):
                         # compute per channel loss
-                        # val_uw is unweighted loss for logging
                         val = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
-                        val_uw = 0.0
                         ctr_chs = 0.0
 
                         # loop over all channels
@@ -415,7 +413,6 @@ class Trainer(Trainer_Base):
                                             pred[:, mask, i].mean(0),
                                             (pred[:, mask, i].std(0) if ens else torch.zeros(1)),
                                         )
-                                        val_uw += temp.item()
                                         val = val + channel_loss_weight[i] * temp
                                         ctr_chs += 1
 
@@ -432,9 +429,8 @@ class Trainer(Trainer_Base):
                                             else torch.zeros(1)
                                         ),
                                     )
-                                    val_uw += temp.item()
                                     val = val + channel_loss_weight[i] * temp
-                                    losses_all[j, i_obs, i] = temp
+                                    losses_all[j, i_obs, i] = temp.item()
                                     ctr_chs += 1
                         val = val / ctr_chs if (ctr_chs > 0) else val
 
@@ -766,7 +762,7 @@ class Trainer(Trainer_Base):
                         bidx,
                         len_dataset,
                         self.cf.istep,
-                        np.nanmean(l_avg[0].detach()),
+                        np.nanmean(l_avg[0]),
                         self.lr_scheduler.get_lr(),
                         (self.print_freq * self.cf.batch_size) / dt,
                     ),

@@ -70,7 +70,6 @@ class TrainLogger:
         Log training data
         """
         metrics = dict(num_samples=samples)
-        loss_avg = loss_avg.detach()
 
         log_vals = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
         log_vals += [samples]
@@ -86,7 +85,8 @@ class TrainLogger:
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts):
                 lf_name = _clean_name(lf_name)
                 metrics[_key_loss(st["name"], lf_name)] = loss_avg[j, i_obs, :].nanmean(0)
-                for k, ch_n in enumerate(st.target):
+
+                for k, ch_n in enumerate(st.target_channels):
                     metrics[_key_loss_chn(st["name"], lf_name, ch_n)] = loss_avg[j, i_obs, k]
                 log_vals += [loss_avg[j, i_obs, :].nanmean(0)]
 
@@ -125,7 +125,7 @@ class TrainLogger:
             st_name = _clean_name(st["name"])
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts_val):
                 metrics[_key_loss(st_name, lf_name)] = loss_avg[j, i_obs, :].nanmean(0)
-                for k, ch_n in enumerate(st.target):
+                for k, ch_n in enumerate(st.target_channels):
                     metrics[_key_loss_chn(st_name, lf_name, ch_n)] = loss_avg[j, i_obs, k]
                 log_vals += [loss_avg[j, i_obs, :].nanmean(0)]
 
