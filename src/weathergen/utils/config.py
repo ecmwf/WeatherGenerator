@@ -323,8 +323,8 @@ def load_streams(streams_directory: Path) -> list[Config]:
 
 def set_pathes(config: Config) -> Config:
     config = config.copy()
-    config.run_path = config.run_path if hasattr(config, "run_path") else _DEFAULT_RESULT_PATH
-    config.model_path = config.model_path if hasattr(config, "model_path") else _DEFAULT_MODEL_PATH
+    config.run_path = Path(config.get("run_path", None) or _DEFAULT_RESULT_PATH)
+    config.model_path = Path(config.get("model_path", None) or _DEFAULT_MODEL_PATH)
 
     return config
 
