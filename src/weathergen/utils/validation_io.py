@@ -14,6 +14,8 @@ import numpy as np
 import torch
 import zarr
 
+import weathergen.utils.config as config
+
 
 def _sanitize_stream_name(istr):
     return istr.replace(" ", "_").replace("-", "_").replace(",", "")
@@ -43,7 +45,7 @@ def write_validation(
     data = Data(
         sources, preds_all, targets_all, targets_coords_all, targets_times_all, targets_lens, None
     )
-    data_root, store = _get_data_root(base_path, rank, epoch)
+    data_root, store = _get_data_root(cf, epoch)
     streams = [
         stream_info
         for stream_info in cf.streams
@@ -123,8 +125,9 @@ def _successive_write(ds_source: zarr.Group, data: Data):
     ds_source["targets_lens"].append(data.target_lens)
 
 
-def _get_data_root(base_path, epoch, rank):
-    fname = f"validation_epoch{epoch:05d}_rank{rank:04d}.zarr"
+def _get_data_root(cf, epoch):
+    base_path = config.get_path_run(cf)
+    fname = f"validation_epoch{epoch:05d}_rank{cf.rank:04d}.zarr"
 
     store = zarr.DirectoryStore(base_path / fname)
     return zarr.group(store=store), store
