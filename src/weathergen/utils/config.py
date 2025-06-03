@@ -22,6 +22,7 @@ from weathergen.train.utils import get_run_id
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
 _DEFAULT_MODEL_PATH = "./models"
+_DEFAULT_RESULT_PATH = "./results"
 
 _logger = logging.getLogger(__name__)
 
@@ -318,3 +319,19 @@ def load_streams(streams_directory: Path) -> list[Config]:
             continue
 
     return list(streams.values())
+
+
+def set_pathes(config: Config) -> Config:
+    config = config.copy()
+    config.run_path = config.run_path if hasattr(config, "run_path") else _DEFAULT_RESULT_PATH
+    config.model_path = config.model_path if hasattr(config, "model_path") else _DEFAULT_MODEL_PATH
+
+    return config
+
+
+def get_path_run(config: Config) -> Path:
+    return config.run_path / config.run_id
+
+
+def get_path_model(config: Config) -> Path:
+    return config.model_path / config.run_id

@@ -65,14 +65,10 @@ class Trainer(Trainer_Base):
         cf.streams = config.load_streams(Path(cf.streams_directory))
 
         # create output directory
-        cf.run_path = cf.run_path if hasattr(cf, "run_path") else "./results"
-        cf.model_path = cf.model_path if hasattr(cf, "model_path") else "./models"
-        path_run = Path(cf.run_path) / cf.run_id
-        path_model = Path(cf.model_path) / cf.run_id
         if self.cf.rank == 0:
-            path_run.mkdir(exist_ok=True, parents=True)
-            path_model.mkdir(exist_ok=True, parents=True)
-        self.path_run = path_run
+            config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
+            config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
+        self.path_run = config.get_path_run(cf)
 
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, self.path_run)
