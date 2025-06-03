@@ -89,7 +89,7 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--run_id",
         type=str,
-        help="The run id for this run. All artifacts (models, metrics, ...) will be stored under this run_id. If not provided, a new run_id will be generated. If --reuse_run_id is given for continuing or evaluation --from_run_id will be used instead.",
+        help="The run id for this run. All artifacts (models, metrics, ...) will be stored under this run_id. If not provided, a new run_id will be generated. This option is intend for outside tooling and should not be used manually. If --reuse_run_id is given for continuing or evaluation --from_run_id will be used instead.",
     )
     parser.add_argument(
         "--options",
@@ -116,5 +116,5 @@ def _add_model_loading_params(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--reuse_run_id",
         action="store_true",
-        help="Use the id given via --from_run_id also for the current run. The storage location for artifacts will be reused as well. This might overwrite artifacts from previous runns.",
+        help="Use the id given via --from_run_id also for the current run. The storage location for artifacts will be reused as well. This might overwrite artifacts from previous runs.",
     )
