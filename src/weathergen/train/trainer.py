@@ -9,7 +9,6 @@
 
 import logging
 import time
-from pathlib import Path
 
 import numpy as np
 import torch
@@ -711,9 +710,9 @@ class Trainer(Trainer_Base):
                     ("_" + name) if name is not None else "",
                 ]
             )
-            base_path = Path(self.cf.model_path) / self.cf.run_id
-            file_out: Path = base_path / (filename + ".chkpt")
-            file_tmp: Path = base_path / (filename + "_tmp.chkpt")
+            base_path = config.get_path_model(self.cf)
+            file_out = base_path / (filename + ".chkpt")
+            file_tmp = base_path / (filename + "_tmp.chkpt")
             # save temp file (slow)
             torch.save(state, file_tmp)
             # move file (which is changing the link in the file system and very fast)

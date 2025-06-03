@@ -154,6 +154,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
     cf = config.set_run_id(cf, args.run_id, False)
+
     cf.streams = config.load_streams(Path(cf.streams_directory))
     cf = config.set_pathes(cf)
 
