@@ -225,7 +225,7 @@ def test_set_run_id(config_fresh, run_id, reuse, expected, mocker):
 
 
 def test_print_cf_no_secrets(config_fresh):
-    output = config._format_cf(config_fresh)
+    output = config.format_cf(config_fresh)
 
     assert "53CR3T" not in output and "secrets" not in config_fresh.keys()
 
