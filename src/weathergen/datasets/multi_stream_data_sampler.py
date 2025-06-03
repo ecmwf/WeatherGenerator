@@ -128,7 +128,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         assert len(temp) > 0, f"No dataset in time window for dataloader: {start_date}-{end_date}."
         self.len_native = temp.min()
 
-        self.len = min(self.len, self.len if not samples_per_epoch else samples_per_epoch)
+        self.len = min(self.len, samples_per_epoch if samples_per_epoch else self.len)
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len_native // cf.num_ranks) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)
