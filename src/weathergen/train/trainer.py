@@ -61,9 +61,6 @@ class Trainer(Trainer_Base):
 
         self.init_ddp(cf)
 
-        # read configuration of data streams
-        cf.streams = config.load_streams(Path(cf.streams_directory))
-
         # create output directory
         if self.cf.rank == 0:
             config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
