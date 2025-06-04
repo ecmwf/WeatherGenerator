@@ -10,6 +10,7 @@
 import datetime
 import logging
 from pathlib import Path
+from typing import override
 
 import anemoi.datasets as anemoi_datasets
 import numpy as np
@@ -124,10 +125,6 @@ class DataReaderAnemoi(DataReaderTimestep):
         self.mean = ds.statistics["mean"]
         self.stdev = ds.statistics["stdev"]
 
-        import pdbpp
-
-        pdbpp.set_trace()
-
         # set dataset to None when no overlap with time range
         if dt_start >= ds_dt_end or dt_end <= ds_dt_start:
             self.ds = None
@@ -142,6 +139,7 @@ class DataReaderAnemoi(DataReaderTimestep):
             self.sub_sampling_per_window = 1
             self.frequency = self.ds.frequency
 
+    @override
     def _get(self, idx: int, channels_idx: ArrayLike) -> ReaderData:
         """
         Get data for window (for either source or target, through public interface)

@@ -9,12 +9,66 @@
 
 import datetime
 import logging
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from numpy import datetime64, timedelta64
+from numpy.typing import NDArray
 
 _logger = logging.getLogger(__name__)
+
+# The numpy date time 64 time (nanosecond precision)
+type NPDT64 = datetime64
+# The numpy delta time 64 time (nanosecond precision)
+type NPTDel64 = timedelta64
+
+type DType = np.float32  # The type for the data in the datasets.
+
+"""
+The type for indexing into datasets. It is a multiple of hours.
+"""
+type TIndex = np.int32
+
+
+_DT_ZERO = np.datetime64("1850-01-01T00:00")
+
+
+@dataclass
+class TimeIndexRange:
+    """
+    Defines a time window for indexing into datasets.
+
+    It is defined as number of hours since the start of the dataset.
+    """
+
+    start: TIndex
+    end: TIndex
+
+
+@dataclass
+class DTRange:
+    """
+    Defines a time window for indexing into datasets.
+
+    It is defined as numpy datetime64 objects.
+    """
+
+    start: NPDT64
+    end: NPDT64
+
+    def __post_init__(self):
+        assert self.start < self.end, "start time must be before end time"
+        assert self.start > _DT_ZERO, "start time must be after 1850-01-01T00:00"
+
+
+def str_to_datetime64(s: str | int) -> NPDT64:
+    """
+    Convert a string to a numpy datetime64 object.
+    """
+    format_str = "%Y%m%d%H%M%S"
+    return np.datetime64(datetime.datetime.strptime(str(s), format_str))
 
 
 class TimeWindowHandler:
@@ -23,18 +77,16 @@ class TimeWindowHandler:
     """
 
     def __init__(self, t_start, t_end, t_window_len, t_window_step):
-        self.zero_time = np.datetime64("1850-01-01T00:00")
-
-        format_str = "%Y%m%d%H%M%S"
-        self.t_start = np.datetime64(datetime.datetime.strptime(str(t_start), format_str))
-        self.t_end = np.datetime64(datetime.datetime.strptime(str(t_end), format_str))
-        self.t_window_len = np.timedelta64(t_window_len, "h")
-        self.t_window_step = np.timedelta64(t_window_step, "h")
+        self.t_start: NPDT64 = str_to_datetime64(str(t_start))
+        self.t_end: NPDT64 = str_to_datetime64(str(t_end))
+        self.t_window_len: NPTDel64 = np.timedelta64(t_window_len, "h")
+        self.t_window_step: NPTDel64 = np.timedelta64(t_window_step, "h")
 
         assert self.t_start < self.t_end, "end datetime has to be in the past of start datetime"
-        assert self.t_start > self.zero_time, "start datetime has to be >= 1850-01-01T00:00."
+        assert self.t_start > _DT_ZERO, "start datetime has to be >= 1850-01-01T00:00."
+        # TODO: check t_start and t_end are aligned with t_window_step and in hours
 
-    def get_index_range(self) -> tuple[np.int64, np.int64]:
+    def get_index_range(self) -> TimeIndexRange:
         """
         Temporal window corresponding to index
 
@@ -48,33 +100,33 @@ class TimeWindowHandler:
             start and end of temporal window
         """
 
-        idx_start = 0
-        idx_end = (self.t_end - self.t_start) // self.t_window_step
-        assert idx_start <= idx_end, "time window idxs invalid"
+        idx_start: TIndex = np.int32(0)
+        idx_end = np.int32((self.t_end - self.t_start) // self.t_window_step)
+        assert idx_start <= idx_end, f"time window idxs invalid: {idx_start} <= {idx_end}"
 
-        return (idx_start, idx_end)
+        return TimeIndexRange(idx_start, idx_end)
 
-    def get_absolute_index(self, idx: int) -> tuple[np.int64, np.int64]:
-        """
-        Absolute index (in sec) with respect to reference base time
+    # def get_absolute_index(self, idx: int) -> tuple[np.int64, np.int64]:
+    #     """
+    #     Absolute index (in sec) with respect to reference base time
 
-        Parameters
-        ----------
-        idx :
-            index of temporal window
+    #     Parameters
+    #     ----------
+    #     idx :
+    #         index of temporal window
 
-        Returns
-        -------
-            start and end of absolute indices
-        """
+    #     Returns
+    #     -------
+    #         start and end of absolute indices
+    #     """
 
-        idx_start = (self.t_start + self.t_window_step * idx - self.zero_time).seconds
-        idx_end = (idx_start + self.t_window_len - self.zero_time).seconds
-        assert idx_start <= idx_end, "time window idxs invalid"
+    #     idx_start = (self.t_start + self.t_window_step * idx - self.zero_time).seconds
+    #     idx_end = (idx_start + self.t_window_len - self.zero_time).seconds
+    #     assert idx_start <= idx_end, "time window idxs invalid"
 
-        return idx_start, idx_end
+    #     return idx_start, idx_end
 
-    def window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
+    def window(self, idx: TIndex) -> tuple[np.datetime64, np.datetime64]:
         """
         Temporal window corresponding to index
 
@@ -100,10 +152,10 @@ class ReaderData:
     Wrapper for return values from DataReader.get_source and DataReader.get_target
     """
 
-    coords: np.array  # [np.float32]
-    geoinfos: np.array  # [np.float32]
-    data: np.array  # [np.float32]
-    datetimes: np.array  # [np.datetime64]
+    coords: NDArray[DType]
+    geoinfos: NDArray[DType]
+    data: NDArray[DType]
+    datetimes: NDArray[NPDT64]
 
     def __init__(self):
         self.coords = np.zeros([0, 0], dtype=np.float32)
@@ -112,13 +164,61 @@ class ReaderData:
         self.datetimes = np.zeros([0], dtype=np.datetime64)
 
     def is_empty(self):
-        return self.data.shape[0] == 0
+        return self.len() == 0
+
+    def len(self):
+        """
+        Length of data
+
+        Returns
+        -------
+        length of data
+        """
+        return self.data.shape[0]
 
 
-class DataReaderBase:
+def check_reader_data(rdata: ReaderData) -> None:
+    """
+    Check that ReaderData is valid
+
+    Parameters
+    ----------
+    rdata : ReaderData
+        ReaderData to check
+
+    Returns
+    -------
+    None
+    """
+
+    assert rdata.coords.ndim == 2, f"coords must be 2D {rdata.coords.shape}"
+    assert rdata.coords.shape[1] == 2, (
+        f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
+    )
+    assert rdata.geoinfos.ndim == 2, f"geoinfos must be 2D, got {rdata.geoinfos.shape}"
+    assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
+    assert rdata.data.shape[1] > 0, f"data must have at least one channel {rdata.data.shape}"
+    assert rdata.datetimes.ndim == 1, f"datetimes must be 1D {rdata.datetimes.shape}"
+
+    assert rdata.coords.shape[0] == rdata.data.shape[0], "coords and data must have same length"
+    assert rdata.geoinfos.shape[0] == rdata.data.shape[0], "geoinfos and data must have same length"
+
+    # Check that all fields have the same length
+    assert (
+        rdata.coords.shape[0]
+        == rdata.geoinfos.shape[0]
+        == rdata.data.shape[0]
+        == rdata.datetimes.shape[0]
+    ), (
+        f"coords, geoinfos, data and datetimes must have the same length "
+        f"{rdata.coords.shape[0]}, {rdata.geoinfos.shape[0]}, {rdata.data.shape[0]}, "
+        f"{rdata.datetimes.shape[0]}"
+    )
+
+
+class DataReaderBase(ABC):
     "Base class for data readers"
 
-    # @abstractmethod
     def __init__(
         self,
         start: int,
@@ -171,6 +271,28 @@ class DataReaderBase:
         self.mean_geoinfo = np.zeros(0)
         self.stdev_geoinfo = np.ones(0)
 
+    @abstractmethod
+    def source_channels(self) -> list[str]:
+        """The list of the source channels that the reader provides. Must be constant."""
+        pass
+
+    @abstractmethod
+    def target_channels(self) -> list[str]:
+        """The list of the target channels that the reader provides. Must be constant."""
+        pass
+
+    @abstractmethod
+    def length(self) -> int:
+        """The length of this dataset. Must be constant."""
+        pass
+
+    def geoinfo_channels(self) -> list[str]:
+        """
+        The list of the geoinfo channels that the reader provides. Must be constant.
+
+        The default implementation returns an empty list (no extra geoinformation)."""
+        return []
+
     def __len__(self) -> int:
         """
         Length of dataset
@@ -184,9 +306,9 @@ class DataReaderBase:
         length of dataset
         """
 
-        return self.len
+        return self.length()
 
-    def get_source(self, idx: int) -> ReaderData:
+    def get_source(self, idx: TIndex) -> ReaderData:
         """
         Get source data for idx
 
@@ -206,7 +328,7 @@ class DataReaderBase:
 
         return rdata
 
-    def get_target(self, idx: int) -> ReaderData:
+    def get_target(self, idx: TIndex) -> ReaderData:
         """
         Get target data for idx
 
@@ -226,7 +348,7 @@ class DataReaderBase:
 
         return rdata
 
-    def _get(self, idx: int, channels_idx: np.array) -> ReaderData:
+    def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
         """
         Get data for window
 
@@ -242,7 +364,7 @@ class DataReaderBase:
         data (coords, geoinfos, data, datetimes)
         """
 
-        return ReaderData()
+        raise NotImplementedError()
 
     def get_source_num_channels(self) -> int:
         """
@@ -300,7 +422,7 @@ class DataReaderBase:
         """
         return len(self.geoinfo_idx)
 
-    def normalize_coords(self, coords: np.array) -> np.array:
+    def normalize_coords(self, coords: NDArray[DType]) -> NDArray[DType]:
         """
         Normalize coordinates
 
@@ -318,7 +440,7 @@ class DataReaderBase:
 
         return coords
 
-    def normalize_geoinfos(self, geoinfos: np.array) -> np.array:
+    def normalize_geoinfos(self, geoinfos: NDArray[DType]) -> NDArray[DType]:
         """
         Normalize geoinfos
 
@@ -338,7 +460,7 @@ class DataReaderBase:
 
         return geoinfos
 
-    def normalize_source_channels(self, source: np.array) -> np.array:
+    def normalize_source_channels(self, source: NDArray[DType]) -> NDArray[DType]:
         """
         Normalize source channels
 
@@ -357,7 +479,7 @@ class DataReaderBase:
 
         return source
 
-    def normalize_target_channels(self, target: np.array) -> np.array:
+    def normalize_target_channels(self, target: NDArray[DType]) -> NDArray[DType]:
         """
         Normalize target channels
 
@@ -376,7 +498,7 @@ class DataReaderBase:
 
         return target
 
-    def denormalize_source_channels(self, source: np.array) -> np.array:
+    def denormalize_source_channels(self, source: NDArray[DType]) -> NDArray[DType]:
         """
         Denormalize source channels
 
@@ -395,7 +517,7 @@ class DataReaderBase:
 
         return source
 
-    def denormalize_target_channels(self, data: np.array) -> np.array:
+    def denormalize_target_channels(self, data: NDArray[DType]) -> NDArray[DType]:
         """
         Denormalize target channels
 
@@ -457,7 +579,7 @@ class DataReaderTimestep(DataReaderBase):
         self.ds_start_time = self.time_window_handler.zero_time
         self.ds_end_time = self.time_window_handler.zero_time
 
-    def _get_dataset_idxs(self, idx) -> np.array:
+    def _get_dataset_idxs(self, idx) -> NDArray[TIndex]:
         """
         Translate idx for time window to idxs into dataset
 
