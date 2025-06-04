@@ -46,7 +46,8 @@ build-backend = "hatchling.build"
 # The development dependencies
 dev = [
  "pytest~=8.3.5",
-  "ruff==0.9.7"
+ "pytest-mock>=3.14.1",
+ "ruff==0.9.7",
 ]
 
 
