@@ -409,7 +409,7 @@ class TargetPredictionEngine:
                     self.dims_embed[i],
                     self.dims_embed[i + 1],
                     with_residual=(
-                        bool(self.cf.pred_dyadic_dims or self.tro_type == "obs_value")
+                        self.cf.pred_dyadic_dims or self.tro_type == "obs_value"
                     ),
                     hidden_factor=self.tr_mlp_hidden_factor,
                     dropout_rate=0.1,  # Assuming dropout_rate is 0.1
