@@ -111,7 +111,6 @@ def private_conf(models_dir):
 
 @pytest.fixture
 def private_config_file(private_conf):
-
     with tempfile.NamedTemporaryFile("w+") as temp:
         temp.write(OmegaConf.to_yaml(private_conf))
         temp.flush()
@@ -136,7 +135,7 @@ def overwrite_config(overwrite_dict):
 
 @pytest.fixture
 def overwrite_file(overwrite_config):
-    #TODO should this be "w+t" instead of "w"?
+    # TODO should this be "w+t" instead of "w"?
     with tempfile.NamedTemporaryFile("w+") as temp:
         temp.write(OmegaConf.to_yaml(overwrite_config))
         temp.flush()
