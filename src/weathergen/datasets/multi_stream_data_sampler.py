@@ -379,13 +379,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     streams_data += [stream_data]
 
                 # skip completely empty batch item or when all targets are empty -> no grad
-                if (
-                    np.array([s.empty() for s in streams_data]).all()
-                    or np.array([s.target_empty() for s in streams_data]).all()
+                if not (
+                    all(s.empty() or s.target_empty() for s in streams_data)
                 ):
-                    continue
+                    batch += [streams_data]
 
-                batch += [streams_data]
 
             # aggregated lens of tokens per cell
             source_cell_lens = compute_source_cell_lens(batch)
