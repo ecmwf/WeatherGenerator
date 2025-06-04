@@ -5,10 +5,10 @@
          "href": "rodeo-opera-files-2km-2013-2023-15m-v1-lambert-azimuthal-equal-area.zarr",
          "inodes": "380,987",
          "locations": [
-            "HPC2020",
-            "EWC",
-            "MareNostrum5",
-            "JSC"
+            "hpc2020",
+            "juwels_booster",
+            "marenostrum5",
+            "juwels_booster"
          ],
          "roles": [
             "data"
@@ -87,7 +87,7 @@
          },
          "quality": {
             "max": 24.600000000000001,
-            "mean": 0.23305400000000001,
+            "mean": 233054,
             "min": 0,
             "std": 0.19542599999999999,
             "tendency_mean": "NA",

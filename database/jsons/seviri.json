@@ -5,8 +5,8 @@
          "href": "observations-od-ai-0001-2018-2023-meteosat-11-seviri-v1.zarr",
          "inodes": "2727",
          "locations": [
-            "HPC2020",
-            "Leonardo"
+            "hpc2020",
+            "leonardo"
          ],
          "roles": [
             "data"
@@ -63,6 +63,13 @@
       ],
       "name": "SEVIRI",
       "providers": [
+         {
+            "name": "ECMWF",
+            "roles": [
+               "host"
+            ],
+            "url": "https://ecmwf.int"
+         },
          {
             "name": "EUMETSAT",
             "roles": [
@@ -163,7 +170,7 @@
             "tendency_mean": "NA",
             "tendency_std": "NA"
          },
-         "obsvalue_rawbt_4 (IR3.9)": {
+         "obsvalue_rawbt_4  (IR3.9)": {
             "max": 335.70001220703125,
             "mean": 282.11981201171875,
             "min": 80,
@@ -171,7 +178,7 @@
             "tendency_mean": "NA",
             "tendency_std": "NA"
          },
-         "obsvalue_rawbt_5 (WV6.2)": {
+         "obsvalue_rawbt_5  (WV6.2)": {
             "max": 263.29998779296875,
             "mean": 237.96363830566406,
             "min": 80.199996948242188,
