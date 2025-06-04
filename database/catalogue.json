@@ -3,54 +3,54 @@
    "id": "weathergen",
    "links": [
       {
-         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/database/jsons/catalogue.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/catalogue.json",
          "rel": "root",
          "title": "The WeatherGenerator data server",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/database/jsons/catalogue.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/catalogue.json",
          "rel": "self",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/database/jsons//era5v8.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database//era5v8.json",
          "rel": "child",
          "title": "ERA5",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/database/jsons//opera.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database//opera.json",
          "rel": "child",
          "title": "OPERA",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/database/jsons//cerra.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database//cerra.json",
          "rel": "child",
          "title": "CERRA",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/database/jsons//seviri.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database//seviri.json",
          "rel": "child",
          "title": "SEVIRI",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/database/jsons//imerg.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database//imerg.json",
          "rel": "child",
          "title": "IMERG",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/database/jsons//npp-atms.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database//npp-atms.json",
          "rel": "child",
          "title": "NPP-ATMS",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/database/jsons//synop.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database//synop.json",
          "rel": "child",
          "title": "SYNOP",
          "type": "application/json"
