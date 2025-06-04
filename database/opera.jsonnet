@@ -1,3 +1,5 @@
+local common = import 'common.jsonnet';
+
 {
   name: "OPERA",
   filename: "opera.json",
@@ -15,16 +17,14 @@
 	  "observations"
   ],
   providers: [
-    {
-      "name": "ECMWF",
-      "roles": ["host"],
-      "url": "https://ecmwf.int"
-    }
+    common.providers.ecmwf_host
   ],
   variables: {
-    "mask":	[0,	3,	1.24214,	0.646755],
-    "quality":	[0,	24.6,	0.233054,	0.195426],
-    "tp":	[0,	1.09959e+19,	2.9961e+12,	2.78072e+15]
+    names: ["mask", "quality", "tp"], 
+    mins: [0, 0, 0], 
+    maxs: [3, 24.6, 1.09959e+19], 
+    means: [1.24214, 233054, 2.9961e+12], 
+    stds: [0.646755, 0.195426, 2.78072e+15]
   },
   
   geometry: [-39.5, 57.7, 31.8, 73.9], 
@@ -33,7 +33,7 @@
     dataset_name: "rodeo-opera-files-2km-2013-2023-15m-v1-lambert-azimuthal-equal-area.zarr", 
     type: "application/vnd+zarr",
     description: "Anemoi dataset", 
-    locations: ["HPC2020", "EWC", "MareNostrum5", "JSC"],
+    locations: [common.hpc.hpc2020, common.hpc.jsc, common.hpc.marenostrum5, common.hpc.jsc],
     size: "959 GiB",
     inodes: "380,987",
     roles: ["data"]

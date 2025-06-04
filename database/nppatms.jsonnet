@@ -1,3 +1,5 @@
+local common = import 'common.jsonnet';
+
 {
   name: "NPP-ATMS",
   filename: "npp-atms.json",
@@ -15,60 +17,27 @@
     "satellite"
   ],
   providers: [
-    {
-      "name": "ECMWF",
-          "roles": [ "host"], 
-          "url": "https://ecmwf.int" 
-    }
-    {
-          "name": "EUMETSAT",
-          "roles": ["provider"],
-          "url": "https://eumetsat.int"
-        }
+    common.providers.ecmwf_host, 
+    common.providers.eumetsat, 
   ],
 
   variables: {
-    "quality_pixel_bitmask": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"], 
-    "instrtemp": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],  
-    "scnlin": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],       
-    "satellite_azimuth_angle": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"], 
-    "satellite_zenith_angle": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],  
-    "solar_azimuth_angle": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],  
-    "solar_zenith_angle": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],   
-    "data_quality_bitmask": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],  
-    "quality_scanline_bitmask": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],  
-    "time": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],            
-    "warmnedt": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],            
-    "coldnedt": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],            
-    "btemps": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],               
-    "u_independent_btemps": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],    
-    "u_structured_btemps": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],       
-    "u_common_btemps": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],             
-    "quality_issue_pixel_bitmask": ["TBA", "TBA", "TBA", "TBA", "TBA", "TBA"],   
+    names: ["quality_pixel_bitmask", "instrtemp", "scnlin", "satellite_azimuth_angle", "satellite_zenith_angle", "solar_azimuth_angle", "solar_zenith_angle",   
+    "data_quality_bitmask", "quality_scanline_bitmask", "time", "warmnedt", "coldnedt", "btemps", "u_independent_btemps", "u_structured_btemps",        
+    "u_common_btemps", "quality_issue_pixel_bitmask",
+    ]
+    
   },
   
   geometry: [-180, 180, -90, 90], 
-  
-  ref_links: [
-    {
-        "rel": "DOC",
-        "href": "https://user.eumetsat.int/catalogue/EO:EUM:DAT:0345",
-        "title": "EUMETSAT documentation"
-      },
-      {
-        "rel": "collection",
-        "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/catalogue.json",
-        "type": "application/json"
-      }
-  ],
 
   dataset: {
     dataset_name: "MICROWAVE_FCDR_V1.1-20200512/SNPP/*/*.nc", 
     type: "application/vnd+netcdf",
     description: "Observation dataset", 
-    locations: ["HPC2020", "JSC"],
-    size: "120GB",
-    inodes: "",
+    locations: [common.hpc.hpc2020, common.hpc.jsc],
+    size: "2.9T",
+    inodes: "44469",
     roles: ["data"]
   }
 }

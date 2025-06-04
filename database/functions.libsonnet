@@ -9,17 +9,51 @@ local check_unique_ids(datasets) =
   else
     {};
 
-local fill_variables(vars) = {
-  [k]: {
-    min: vars[k][0],
-    max: vars[k][1],
-    mean: vars[k][2],
-    std: vars[k][3],
-    tendency_mean: if std.length(vars[k]) > 4 then vars[k][4] else "NA",
-    tendency_std: if std.length(vars[k]) > 5 then vars[k][5] else "NA",
-  }
-  for k in std.objectFields(vars)
-};
+local check_variable_lengths(vars) = 
+  if std.objectHas(vars, 'means' ) && std.length(vars.names) != std.length(vars.means) then
+    error "lengths of variables and means do not match"
+  else if std.objectHas(vars, 'stds' ) && std.length(vars.names) != std.length(vars.stds) then
+    error "lengths of variables and stds do not match"
+  else if std.objectHas(vars, 'mins' ) && std.length(vars.names) != std.length(vars.mins) then
+    error "length of variables and minimum do not match"
+  else if std.objectHas(vars, 'maxs' ) && std.length(vars.names) != std.length(vars.maxs) then
+    error "lengths of variables and maximum do not match"
+  
+  else if std.objectHas(vars, 'tendencies') && 
+      std.length(vars.tendencies.means) > 0 && 
+      std.length(vars.names) != std.length(vars.tendencies.means) then
+      error "lengths of variables and tendencies (means) do not match"
+  else if std.objectHas(vars, 'tendencies') && 
+      std.length(vars.tendencies.stds) > 0 && 
+      std.length(vars.names) != std.length(vars.tendencies.stds) then
+      error "lengths of variables and tendencies (stds) do not match"
+  else
+    {};
+
+  
+
+local fill_variables(vars) = 
+  check_variable_lengths(vars)
+  +
+  {
+    [vars.names[k]]: {
+      min : (if std.objectHas(vars, 'mins' ) then vars.mins[k] else "NA"),
+      max : (if std.objectHas(vars, 'maxs' ) then vars.maxs[k] else "NA"),
+      mean: (if std.objectHas(vars, 'means') then vars.means[k] else "NA"),
+      std : (if std.objectHas(vars, 'stds' ) then vars.stds[k] else "NA"),
+      tendency_mean: (
+          if std.objectHas(vars, 'tendencies') && std.length(vars.tendencies.means) > 0
+          then vars.tendencies.means[k]
+          else "NA"
+        ),
+      tendency_std: (
+        if std.objectHas(vars, 'tendencies') && std.length(vars.tendencies.stds) > 0
+        then vars.tendencies.stds[k]
+        else "NA"
+      ),
+    }
+    for k in std.range(0, std.length(vars.names) - 1)
+  };
 
 local fill_properties(ds) = {
   name: ds.name,

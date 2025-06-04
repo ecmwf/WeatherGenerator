@@ -5,8 +5,8 @@
          "href": "observations-ea-ofb-0001-1979-2023-combined-surface-v2",
          "inodes": "4711",
          "locations": [
-            "HPC2020",
-            "Lumi"
+            "hpc2020",
+            "lumi"
          ],
          "roles": [
             "data"

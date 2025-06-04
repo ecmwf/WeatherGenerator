@@ -1,3 +1,5 @@
+local common = import 'common.jsonnet';
+
 {
   name: "IMERG",
   filename: "imerg.json",
@@ -15,20 +17,21 @@
     "global"
   ],
   providers: [
-    {
-      "name": "ECMWF",
-          "roles": [ "host"], 
-          "url": "https://ecmwf.int" 
-    }
-    {
-          "name": "NASA",
-          "roles": ["provider"],
-          "url": "https://www.nasa.gov"
-        }
+    common.providers.ecmwf_host, 
+    common.providers.nasa, 
   ],
  
   variables: {
-    "tp":	[0,	0.814545,	0.00067628,	0.00326012, -6.54337427e-10, 0.00350661]
+    names: ["tp"], 
+    mins: [0],
+    maxs:	[0.814545],	
+    means: [0.00067628],
+    stds: [0.00326012],
+    tendencies:
+    {
+      means: [-6.54337427e-10],
+      stds: [0.00350661]
+    }
   },
   
   geometry: [-180, 180, -90,90], 
@@ -37,7 +40,7 @@
     dataset_name: "nasa-imerg-grib-n320-1998-2024-6h-v1.zarr", 
     type: "application/vnd+zarr",
     description: "Anemoi dataset", 
-    locations: ["HPC2020", "EWC", "JSC"],
+    locations: [common.hpc.hpc2020, common.hpc.ewc, common.hpc.jsc],
     size: "18 GiB",
     inodes: "38,966",
     roles: ["data"]

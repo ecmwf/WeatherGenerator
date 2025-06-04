@@ -5,9 +5,9 @@
          "href": "nasa-imerg-grib-n320-1998-2024-6h-v1.zarr",
          "inodes": "38,966",
          "locations": [
-            "HPC2020",
-            "EWC",
-            "JSC"
+            "hpc2020",
+            "European Weather Cloud",
+            "juwels_booster"
          ],
          "roles": [
             "data"
@@ -64,6 +64,13 @@
       ],
       "name": "IMERG",
       "providers": [
+         {
+            "name": "ECMWF",
+            "roles": [
+               "host"
+            ],
+            "url": "https://ecmwf.int"
+         },
          {
             "name": "NASA",
             "roles": [
