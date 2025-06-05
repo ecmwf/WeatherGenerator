@@ -94,7 +94,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     case "icon":
                         dataset = IconDataset
                         datapath = cf.data_path_icon                        
-                        kwargs["normalization_file"] = stream_info.get("normalization_file")
                     case _:
                         msg = f"Unsupported stream type {stream_info['type']}"
                         raise ValueError(msg)
