@@ -15,7 +15,6 @@ import torch
 import zarr
 import json
 
-
 class IconDataset:
     """
     A data reader for ICON model output stored in zarr.
@@ -76,16 +75,22 @@ class IconDataset:
             end = datetime.strptime(str(end), format_str)
         end = np.datetime64(end).astype("datetime64[D]")
 
+        # loading datafile
         self.filename = filename
         self.ds = zarr.open(filename, mode="r")
         self.mesh_size = self.ds.attrs["ncells"]
+
+        # Loading stat file
+        stats_filename = Path(filename).with_suffix('.json')
+        with open(stats_filename, 'r') as stats_file:
+            self.stats = json.load(stats_file)
 
         time_as_in_data_file = np.array(self.ds['time'], dtype='timedelta64[D]')+np.datetime64(self.ds['time'].attrs['units'].split('since ')[-1])
 
         start_ds = time_as_in_data_file[0]
         end_ds = time_as_in_data_file[-1]
 
-
+        # asserting start and end times
         if start_ds > end or end_ds < start:
             # TODO: this should be set in the base class
             self.source_channels = []
@@ -108,39 +113,51 @@ class IconDataset:
             f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
         )
 
+        # variables
+        self.colnames_as_in_file = list(self.ds)
         self.colnames = list(self.ds)
         self.colnames.remove("time")
         self.colnames.remove("clat")
         self.colnames.remove("clon")
+        self.colnames.remove("w_00") # constant value. Temporary removed to avoid inf values in the data array
         self.cols_idx = np.array(list(np.arange(len(self.colnames))))
     
         # Ignore step_hrs, idk how it supposed to work
         # TODO, TODO, TODO:
         self.step_hrs = 1
 
-        # Extracting data values and making it look like FESOM one (idk if it is needed)
+        # data
         icon_data_content = self.ds
 
-        lat_as_in_data_file = self.ds["clat"][:].astype("f")
-        lon_as_in_data_file = self.ds["clon"][:].astype("f")
-
-        self.lat = np.tile(lat_as_in_data_file, len(time_as_in_data_file))
-        self.lon = np.tile(lon_as_in_data_file, len(time_as_in_data_file))
-
         icon_data_content_reshaped = [icon_data_content[col_][:].reshape(-1, 1) for col_ in self.colnames]
-        icon_data_content_stacked = np.concatenate(icon_data_content_reshaped, axis=1)  # shape (N, 35)
+        icon_data_content_stacked = np.concatenate(icon_data_content_reshaped, axis=1)  # shape (N, 34)
 
-        # in-memory Zarr array
         temp_store = zarr.MemoryStore()
         temp_root = zarr.group(store=temp_store)
         temp_root.create_dataset('data', data=icon_data_content_stacked, dtype='float32')
         self.data = temp_root['data']
 
-        # making time array looks like the FESOM one
-        # Repeat each timestamp for every grid point
+        assert self.end_idx + len_hrs <= len(self.data), (
+            f"Abort: end_date must be set at least {len_hrs} before the last date in the dataset"
+        )
+
+        # time
         repeated_times = np.repeat(time_as_in_data_file, self.mesh_size).reshape(-1, 1)
-        # temp_root.create_dataset('time', data=repeated_times, dtype='datetime64[ns]')
-        self.time = repeated_times # temp_root['time']
+        self.time = repeated_times 
+
+        # coordinates
+        coords_units = self.ds['clat'].attrs['units']
+
+        if coords_units == 'radian':
+            lat_as_in_data_file = np.rad2deg(self.ds["clat"][:].astype("f"))
+            lon_as_in_data_file = np.rad2deg(self.ds["clon"][:].astype("f"))
+
+        else:
+            lat_as_in_data_file = self.ds["clat"][:].astype("f")
+            lon_as_in_data_file = self.ds["clon"][:].astype("f")
+
+        self.lat = np.tile(lat_as_in_data_file, len(time_as_in_data_file))
+        self.lon = np.tile(lon_as_in_data_file, len(time_as_in_data_file))
 
         self.properties = {
             "stream_id":  0 
