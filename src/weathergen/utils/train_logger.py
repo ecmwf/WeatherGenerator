@@ -133,15 +133,16 @@ class TrainLogger:
 
     #######################################
     @staticmethod
-    def read(run_id, epoch=-1):
+    def read(run_id, model_path: str, epoch=-1):
         """
         Read data for run_id
         """
 
-        cf = config.load_model_config(run_id, epoch, None)
+        cf = config.load_model_config(run_id, epoch, model_path)
         run_id = cf.run_id
 
-        result_dir = Path(cf.run_path) / run_id
+        result_dir_base = Path(cf.run_path)
+        result_dir = result_dir_base / run_id
         fname_log_train = result_dir / f"{run_id}_train_log.txt"
         fname_log_val = result_dir / f"{run_id}_val_log.txt"
         fname_perf_val = result_dir / f"{run_id}_perf_log.txt"
@@ -157,7 +158,7 @@ class TrainLogger:
                 cols_train += [
                     si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
                 ]
-        with_stddev = [(True if "stats" in lf else False) for lf in cf.loss_fcts]
+        with_stddev = [("stats" in lf) for lf in cf.loss_fcts]
         if with_stddev:
             for si in cf.streams:
                 cols1 += [_key_stddev(si["name"])]
@@ -175,7 +176,7 @@ class TrainLogger:
             _logger.warning(f"Warning: no training data loaded for run_id={run_id}")
             log_train = np.array([])
 
-        log_train_df = read_metrics(cf, run_id, "train", cols1)
+        log_train_df = read_metrics(cf, run_id, "train", cols1, result_dir_base)
 
         # validation
         # define cols for validation
@@ -187,7 +188,7 @@ class TrainLogger:
                     si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
                 ]
                 cols2 += [_key_loss(si["name"], lf[0])]
-        with_stddev = [(True if "stats" in lf else False) for lf in cf.loss_fcts_val]
+        with_stddev = [("stats" in lf) for lf in cf.loss_fcts_val]
         if with_stddev:
             for si in cf.streams:
                 cols2 += [_key_stddev(si["name"])]
@@ -204,7 +205,7 @@ class TrainLogger:
         except:
             print(f"Warning: no validation data loaded for run_id={run_id}")
             log_val = np.array([])
-        metrics_val_df = read_metrics(cf, run_id, "val", cols2)
+        metrics_val_df = read_metrics(cf, run_id, "val", cols2, result_dir_base)
 
         # performance
         # define cols for performance monitoring
@@ -218,7 +219,11 @@ class TrainLogger:
             print(f"Warning: no performance data loaded for run_id={run_id}")
             log_perf = np.array([])
         metrics_system_df = read_metrics(
-            cf, run_id, None, [_weathergen_timestamp, _performance_gpu, _performance_memory]
+            cf,
+            run_id,
+            None,
+            [_weathergen_timestamp, _performance_gpu, _performance_memory],
+            result_dir_base,
         )
 
         return Metrics(run_id, "train", log_train_df, metrics_val_df, metrics_system_df)
@@ -243,7 +248,11 @@ class Metrics:
 
 
 def read_metrics(
-    cf: config.Config, run_id: RunId | None, stage: Stage | None, cols: list[str] | None
+    cf: config.Config,
+    run_id: RunId | None,
+    stage: Stage | None,
+    cols: list[str] | None,
+    results_path: Path,
 ) -> pl.DataFrame:
     """
     Read metrics for run_id
@@ -258,7 +267,7 @@ def read_metrics(
         run_id = cf.run_id
 
     # TODO: this should be a config option
-    df = read_metrics_file(f"./results/{run_id}/metrics.json")
+    df = read_metrics_file(results_path / run_id / "metrics.json")
     if stage is not None:
         df = df.filter(pl.col("stage") == stage)
     df = df.drop("stage")
