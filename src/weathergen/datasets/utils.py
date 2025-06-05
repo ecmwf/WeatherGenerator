@@ -205,25 +205,8 @@ def add_local_vert_coords(hl, a, verts, tcs, zi, dx, dy, geoinfo_offset):
 
 
 ####################################################################################################
-def add_local_vert_coords_ctrs2(ctrs, verts, tcs, a, zi, geoinfo_offset):
-    ref = torch.tensor([1.0, 0.0, 0.0])
-    aa = locs_to_cell_coords_ctrs(ctrs, verts.transpose(0, 1))
-    aa = ref - torch.cat(
-        [
-            aaa.unsqueeze(0).repeat([*tt.shape[:-1], 1, 1]) if len(tt) > 0 else torch.tensor([])
-            for tt, aaa in zip(tcs, aa, strict=False)
-        ],
-        0,
-    )
-    aa = aa.flatten(1, 2)
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + aa.shape[-1])] = aa
-    return a
-
-
-####################################################################################################
 def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
     ref = torch.tensor([1.0, 0.0, 0.0])
-    # aa = locs_to_cell_coords_ctrs(ctrs, verts.transpose(0, 1))
     aa = ref - torch.cat(
         [
             aaa.unsqueeze(0).repeat([*tcs_lens, 1, 1]) if len(tt) > 0 else torch.tensor([])

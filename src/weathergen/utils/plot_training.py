@@ -317,7 +317,7 @@ def plot_loss_per_stream(
     runs_active: list[bool],
     stream_names: list[str],
     plot_dir: Path,
-    errs: list[str] = ["loss_mse"],
+    errs: list[str] | None = None,
     x_axis: str = "samples",
     x_type: str = "step",
     x_scale_log: bool = False,
@@ -348,6 +348,9 @@ def plot_loss_per_stream(
     x_scale_log : bool
         whether to use log scale for x-axis
     """
+
+    if errs is None:
+        errs = ["loss_mse"]
 
     modes = [modes] if type(modes) is not list else modes
     # repeat colors when train and val is plotted simultaneously
@@ -445,7 +448,7 @@ def plot_loss_per_run(
     run_data: Metrics,
     stream_names: list[str],
     plot_dir: Path,
-    errs: list[str] = ["mse"],
+    errs: list[str] | None = None,
     x_axis: str = "samples",
     x_scale_log: bool = False,
 ):
@@ -473,6 +476,9 @@ def plot_loss_per_run(
     x_scale_log : bool
         whether to use log scale for x-axis
     """
+    if errs is None:
+        errs = ["mse"]
+
     plot_dir = Path(plot_dir)
 
     modes = [modes] if type(modes) is not list else modes

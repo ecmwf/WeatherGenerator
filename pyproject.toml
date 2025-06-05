@@ -46,7 +46,8 @@ build-backend = "hatchling.build"
 # The development dependencies
 dev = [
  "pytest~=8.3.5",
-  "ruff==0.9.7"
+ "pytest-mock>=3.14.1",
+ "ruff==0.9.7",
 ]
 
 
@@ -84,17 +85,13 @@ ignore = [
   "E501",
   "E721",
   "E722",
-  "B006",
+  # "B006",
   "B011",
   "UP008",
-  "SIM115",
   "SIM117",
   "SIM118",
   "SIM102",
-  "SIM210",
-  "SIM212",
   "SIM401",
-  "F811",
   # To ignore, not relevant for us
   "E741",
 ]
