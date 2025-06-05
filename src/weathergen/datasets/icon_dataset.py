@@ -14,6 +14,7 @@ import numpy as np
 import torch
 import zarr
 import json
+import warnings
 
 class IconDataset:
     """
@@ -169,7 +170,15 @@ class IconDataset:
 
         self.mean = np.array(self.stats["statistics"]["mean"], dtype='d')[cols_idx_for_stats]
         self.stdev = np.array(self.stats["statistics"]["std"], dtype='d')[cols_idx_for_stats]
-
+        # Check if standard deviations are strictly positive
+        non_positive_stds = np.where(self.stdev <= 0)[0]
+        if len(non_positive_stds) > 0:
+            problem_cols = [self.colnames[i] for i in non_positive_stds]
+            warnings.warn(f"Found {len(non_positive_stds)} standard deviation values that are non-positive. "
+                          f"Replacing them with 1.0 to avoid division by zero.")
+            warnings.warn(f"Problematic columns: {problem_cols}")
+            # Replace non-positive values with 1.0
+            self.stdev[non_positive_stds] = 1.0
         # Channel selection and indexing
         source_channels = stream_info["source"] if "source" in stream_info else None
         if source_channels:
