@@ -1,8 +1,10 @@
+// run it with: jsonnet -m ./jsons merged.jsonnet --ext-str branch_name=develop
+
 // import functions
 local fn = import 'functions.libsonnet';
 local branch_name = std.extVar("branch_name");
+
 // URL for hrefs
-// local href_link = 'https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/database/jsons/';
 local href_link = 'https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/'+branch_name+'/database/jsons';
 
 // TODO: improve this
