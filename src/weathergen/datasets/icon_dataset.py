@@ -15,7 +15,6 @@ import torch
 import zarr
 import json
 
-
 class IconDataset:
     """
     A data reader for ICON model output stored in zarr.
@@ -62,7 +61,6 @@ class IconDataset:
         len_hrs: int,
         step_hrs: int,
         filename: Path,
-        normalization_file: str | Path,
         stream_info: dict,
     ):
         self.len_hrs = len_hrs
@@ -76,16 +74,22 @@ class IconDataset:
             end = datetime.strptime(str(end), format_str)
         end = np.datetime64(end).astype("datetime64[D]")
 
+        # loading datafile
         self.filename = filename
         self.ds = zarr.open(filename, mode="r")
         self.mesh_size = self.ds.attrs["ncells"]
+
+        # Loading stat file
+        stats_filename = Path(filename).with_suffix('.json')
+        with open(stats_filename, 'r') as stats_file:
+            self.stats = json.load(stats_file)
 
         time_as_in_data_file = np.array(self.ds['time'], dtype='timedelta64[D]')+np.datetime64(self.ds['time'].attrs['units'].split('since ')[-1])
 
         start_ds = time_as_in_data_file[0]
         end_ds = time_as_in_data_file[-1]
 
-
+        # asserting start and end times
         if start_ds > end or end_ds < start:
             # TODO: this should be set in the base class
             self.source_channels = []
@@ -108,61 +112,65 @@ class IconDataset:
             f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
         )
 
-        self.colnames = list(self.ds)
-        orig_colnames = self.colnames.copy()
-        n_cols = len(self.colnames)
-        # self.cols_idx = list(np.arange(len(self.colnames)))
-        self.lat_index = list(self.colnames).index("clat")
-        self.lon_index = list(self.colnames).index("clon")
-        self.colnames.remove("clat")
-        self.colnames.remove("clon")
-        self.colnames.remove("time")
+        # variables
+        self.colnames_as_in_file = list(self.ds)
+        excluded = {"time", "clat", "clon", "w_00"}  # set lookup is faster
+        self.colnames = [name for name in self.ds if name not in excluded]
         self.cols_idx = np.array(list(np.arange(len(self.colnames))))
-
+    
         # Ignore step_hrs, idk how it supposed to work
         # TODO, TODO, TODO:
         self.step_hrs = 1
 
-        # self.data = self.ds
-        # Extracting data values and making it look like FESOM one (idk if it is needed)
+        # data
         icon_data_content = self.ds
-        icon_data_content_reshaped = [icon_data_content[col_][:].reshape(-1, 1) for col_ in self.colnames]
-        icon_data_content_stacked = np.concatenate(icon_data_content_reshaped, axis=1)  # shape (N, 14)
 
-        # in-memory Zarr array
+        icon_data_content_reshaped = [icon_data_content[col_][:].reshape(-1, 1) for col_ in self.colnames]
+        icon_data_content_stacked = np.concatenate(icon_data_content_reshaped, axis=1)  # shape (N, 34)
+
         temp_store = zarr.MemoryStore()
         temp_root = zarr.group(store=temp_store)
         temp_root.create_dataset('data', data=icon_data_content_stacked, dtype='float32')
-
         self.data = temp_root['data']
 
-        # making time array looks like the FESOM one
-        # Repeat each timestamp for every grid point
+        assert self.end_idx + len_hrs <= len(self.data), (
+            f"Abort: end_date must be set at least {len_hrs} before the last date in the dataset"
+        )
+
+        # time
         repeated_times = np.repeat(time_as_in_data_file, self.mesh_size).reshape(-1, 1)
-        # temp_root.create_dataset('time', data=repeated_times, dtype='datetime64[ns]')
-        self.time = repeated_times # temp_root['time']
+        self.time = repeated_times 
+
+        # coordinates
+        coords_units = self.ds['clat'].attrs['units']
+
+        if coords_units == 'radian':
+            lat_as_in_data_file = np.rad2deg(self.ds["clat"][:].astype("f"))
+            lon_as_in_data_file = np.rad2deg(self.ds["clon"][:].astype("f"))
+
+        else:
+            lat_as_in_data_file = self.ds["clat"][:].astype("f")
+            lon_as_in_data_file = self.ds["clon"][:].astype("f")
+
+        self.lat = np.tile(lat_as_in_data_file, len(time_as_in_data_file))
+        self.lon = np.tile(lon_as_in_data_file, len(time_as_in_data_file))
 
         self.properties = {
             "stream_id":  0 
         }
 
-
-        if not normalization_file.is_file():
-            raise FileNotFoundError(f"Normalization file '{normalization_file}' not found.")
-        with open(normalization_file) as f:
-            stats = json.load(f)
-
-        self.mean = np.array(stats['statistics']['mean'], dtype=np.float32)
-        self.stdev = np.array(stats['statistics']['std'], dtype=np.float32)
-        stats_vars = stats['metadata']['variables']
-        # check if order of mean and stdev matches the order of columns
-        assert len(self.mean) == len(self.stdev) == n_cols, (
-            f"Mean and stdev length {len(self.mean)} and {len(self.stdev)} do not match number of columns {n_cols}"
-        )
-        assert stats_vars == orig_colnames, (
+        # stats
+        stats_vars = self.stats['metadata']['variables']
+        assert stats_vars == self.colnames_as_in_file, (
             f"Variables in normalization file {stats_vars} do not match dataset columns {self.colnames}"
         )
 
+        cols_idx_for_stats = [idx_ for idx_, col_ in enumerate(self.colnames_as_in_file) if col_ in self.colnames]
+
+        self.mean = np.array(self.stats["statistics"]["mean"], dtype='d')[cols_idx_for_stats]
+        self.stdev = np.array(self.stats["statistics"]["std"], dtype='d')[cols_idx_for_stats]
+
+        # Channel selection and indexing
         source_channels = stream_info["source"] if "source" in stream_info else None
         if source_channels:
             self.source_channels, self.source_idx = self.select(source_channels)
@@ -235,10 +243,11 @@ class IconDataset:
         end_row = start_row + self.len_hrs * self.mesh_size
         data = self.data.oindex[start_row:end_row, idx_channels]
 
-        lat = np.expand_dims(self.data.oindex[start_row:end_row, self.lat_index], 1)
-        lon = np.expand_dims(self.data.oindex[start_row:end_row, self.lon_index], 1)
+        lat = np.expand_dims(self.lat[start_row:end_row],1)
+        lon = np.expand_dims(self.lon[start_row:end_row],1)
 
         latlon = np.concatenate([lat, lon], 1)
+
         # empty geoinfos
         geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
         datetimes = np.squeeze(self.time[start_row:end_row])
