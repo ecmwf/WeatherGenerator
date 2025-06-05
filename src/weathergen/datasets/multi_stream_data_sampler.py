@@ -21,6 +21,7 @@ from weathergen.datasets.data_reader_base import (
     TimeWindowHandler,
     TIndex,
     check_reader_data,
+    str_to_datetime64,
 )
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.stream_data import StreamData
@@ -47,8 +48,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     def __init__(
         self,
         cf,
-        start_date,
-        end_date,
+        start_date_,
+        end_date_,
         batch_size,
         samples_per_epoch,
         train_logger: TrainLogger,
@@ -57,15 +58,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ):
         super(MultiStreamDataSampler, self).__init__()
 
-        assert end_date > start_date
+        start_date = str_to_datetime64(start_date_)
+        end_date = str_to_datetime64(end_date_)
+        # TODO: why do we need to pad for AnemoiReaderObs? This is not consistent with other streams.
+
+        assert end_date > start_date, (end_date, start_date)
 
         self.mask_value = 0.0
         self._train_logger = train_logger
         self._stage = stage
 
         # TODO: replace with arbitrary length
-        self.len_hrs = cf.len_hrs
-        self.step_hrs = cf.step_hrs
+        self.len_hrs: int = cf.len_hrs
+        self.step_hrs: int = cf.step_hrs
         self.time_window_handler = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
         _logger.info(
             f"Time window handler: start={start_date}, end={end_date}, len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
@@ -85,10 +90,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.forecast_policy = cf.forecast_policy
 
         # end date needs to be adjusted to account for window length
-        format_str = "%Y%m%d%H%M%S"
-        end_dt = datetime.datetime.strptime(str(end_date), format_str)
-        end_dt = end_dt + datetime.timedelta(hours=cf.len_hrs)
-        end_date_padded = end_dt.strftime(format_str)
+        end_date_padded = end_date + datetime.timedelta(hours=cf.len_hrs)
 
         self.len = 100000000
 
@@ -98,18 +100,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             for fname in stream_info["filenames"]:
                 kwargs = {
-                    "start": start_date,
-                    "end": end_date,
-                    "t_window_len": cf.len_hrs,
-                    "t_window_step": cf.step_hrs,
+                    "tw_handler": self.time_window_handler,
                     "stream_info": stream_info,
                 }
                 dataset: type[AnyDataReader] | None = None
                 match stream_info["type"]:
-                    case "obs":
-                        dataset = DataReaderObs
-                        datapath = cf.data_path_obs
-                        kwargs["end"] = end_date_padded
+                    # case "obs":
+                    #     dataset = DataReaderObs
+                    #     datapath = cf.data_path_obs
+                    #     # kwargs["end"] = end_date_padded # TODO: implement the padding
                     case "anemoi":
                         dataset = DataReaderAnemoi
                         datapath = cf.data_path_anemoi
@@ -120,7 +119,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     #     dataset = AtmorepDataset
                     #     datapath = cf.data_path_anemoi
                     case _:
-                        msg = f"Unsupported stream type {stream_info['type']}"
+                        msg = f"Unsupported stream type {stream_info['type']} for stream name '{stream_info['name']}'."
                         raise ValueError(msg)
 
                 datapath = pathlib.Path(datapath)
@@ -146,8 +145,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if len(ds) > 0:
                     self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
 
-                stream_info["source_channels"] = ds.source_channels
-                stream_info["target_channels"] = ds.target_channels
+                stream_info["source_channels"] = ds.source_channels()
+                stream_info["target_channels"] = ds.target_channels()
 
                 self.streams_datasets[-1] += [ds]
 
@@ -346,10 +345,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                         _logger.info(f"type ds={type(ds)}, rdata={rdata}, {type(rdata)}, idx={idx}")
 
-                        import pdb
-
-                        pdb.set_trace()
-
                         if rdata.is_empty():
                             stream_data.add_empty_source()
                         else:
@@ -367,7 +362,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 torch.from_numpy(rdata.geoinfos),
                                 torch.from_numpy(rdata.data),
                                 rdata.datetimes,
-                                time_win1,
+                                (time_win1.start, time_win1.end),
                                 ds,
                             )
 
@@ -396,7 +391,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                     torch.from_numpy(rdata.geoinfos),
                                     torch.from_numpy(rdata.data),
                                     rdata.datetimes,
-                                    time_win2,
+                                    (time_win2.start, time_win2.end),
                                     ds,
                                 )
 
