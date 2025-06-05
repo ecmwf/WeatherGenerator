@@ -12,7 +12,7 @@
          "roles": [
             "data"
          ],
-         "size": "18 GiB",
+         "size": "18 GB",
          "title": "nasa-imerg-grib-n320-1998-2024-6h-v1.zarr",
          "type": "application/vnd+zarr"
       }

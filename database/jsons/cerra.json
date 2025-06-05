@@ -13,7 +13,7 @@
          "roles": [
             "data"
          ],
-         "size": "9TB",
+         "size": "9 TB",
          "title": "cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi.zarr",
          "type": "application/vnd+zarr"
       }

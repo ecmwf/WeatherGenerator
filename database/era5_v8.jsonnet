@@ -759,7 +759,7 @@ local common = import 'common.jsonnet';
     type: 'application/vnd+zarr',
     description: 'ERA5 data on O96 healPix grid. version 8. Contains tendencies',
     locations: [common.hpc.hpc2020, common.hpc.ewc, common.hpc.jsc, common.hpc.marenostrum5, common.hpc.leonardo],
-    size: '593 GiB',
+    size: '593 GB',
     inodes: '65,863',
     roles: ['data'],
   },

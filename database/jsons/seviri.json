@@ -11,7 +11,7 @@
          "roles": [
             "data"
          ],
-         "size": "106GB",
+         "size": "106 GB",
          "title": "observations-od-ai-0001-2018-2023-meteosat-11-seviri-v1.zarr",
          "type": "application/vnd+zarr"
       }

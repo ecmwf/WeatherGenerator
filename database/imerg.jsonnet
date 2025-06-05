@@ -41,7 +41,7 @@ local common = import 'common.jsonnet';
     type: 'application/vnd+zarr',
     description: 'Anemoi dataset',
     locations: [common.hpc.hpc2020, common.hpc.ewc, common.hpc.jsc],
-    size: '18 GiB',
+    size: '18 GB',
     inodes: '38,966',
     roles: ['data'],
   },

@@ -13,7 +13,7 @@
          "roles": [
             "data"
          ],
-         "size": "959 GiB",
+         "size": "959 GB",
          "title": "rodeo-opera-files-2km-2013-2023-15m-v1-lambert-azimuthal-equal-area.zarr",
          "type": "application/vnd+zarr"
       }

@@ -11,7 +11,7 @@
          "roles": [
             "data"
          ],
-         "size": "2.9T",
+         "size": "2.9 TB",
          "title": "MICROWAVE_FCDR_V1.1-20200512/SNPP/*/*.nc",
          "type": "application/vnd+netcdf"
       }

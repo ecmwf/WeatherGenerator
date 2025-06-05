@@ -51,7 +51,7 @@ local common = import 'common.jsonnet';
     type: 'application/vnd+netcdf',
     description: 'Observation dataset',
     locations: [common.hpc.hpc2020, common.hpc.jsc],
-    size: '2.9T',
+    size: '2.9 TB',
     inodes: '44469',
     roles: ['data'],
   },

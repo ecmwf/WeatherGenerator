@@ -39,7 +39,7 @@ local common = import 'common.jsonnet';
     type: 'application/vnd+zarr',
     description: 'Observation dataset',
     locations: [common.hpc.hpc2020, common.hpc.leonardo],
-    size: '106GB',
+    size: '106 GB',
     inodes: '2727',
     roles: ['data'],
   },
