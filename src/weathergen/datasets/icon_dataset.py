@@ -61,7 +61,6 @@ class IconDataset:
         len_hrs: int,
         step_hrs: int,
         filename: Path,
-        normalization_file: str | Path,
         stream_info: dict,
     ):
         self.len_hrs = len_hrs
@@ -115,11 +114,8 @@ class IconDataset:
 
         # variables
         self.colnames_as_in_file = list(self.ds)
-        self.colnames = list(self.ds)
-        self.colnames.remove("time")
-        self.colnames.remove("clat")
-        self.colnames.remove("clon")
-        self.colnames.remove("w_00") # constant value. Temporary removed to avoid inf values in the data array
+        excluded = {"time", "clat", "clon", "w_00"}  # set lookup is faster
+        self.colnames = [name for name in self.ds if name not in excluded]
         self.cols_idx = np.array(list(np.arange(len(self.colnames))))
     
         # Ignore step_hrs, idk how it supposed to work
@@ -163,23 +159,18 @@ class IconDataset:
             "stream_id":  0 
         }
 
-
-        if not normalization_file.is_file():
-            raise FileNotFoundError(f"Normalization file '{normalization_file}' not found.")
-        with open(normalization_file) as f:
-            stats = json.load(f)
-
-        self.mean = np.array(stats['statistics']['mean'], dtype=np.float32)
-        self.stdev = np.array(stats['statistics']['std'], dtype=np.float32)
-        stats_vars = stats['metadata']['variables']
-        # check if order of mean and stdev matches the order of columns
-        assert len(self.mean) == len(self.stdev) == n_cols, (
-            f"Mean and stdev length {len(self.mean)} and {len(self.stdev)} do not match number of columns {n_cols}"
-        )
-        assert stats_vars == orig_colnames, (
+        # stats
+        stats_vars = self.stats['metadata']['variables']
+        assert stats_vars == self.colnames_as_in_file, (
             f"Variables in normalization file {stats_vars} do not match dataset columns {self.colnames}"
         )
 
+        cols_idx_for_stats = [idx_ for idx_, col_ in enumerate(self.colnames_as_in_file) if col_ in self.colnames]
+
+        self.mean = np.array(self.stats["statistics"]["mean"], dtype='d')[cols_idx_for_stats]
+        self.stdev = np.array(self.stats["statistics"]["std"], dtype='d')[cols_idx_for_stats]
+
+        # Channel selection and indexing
         source_channels = stream_info["source"] if "source" in stream_info else None
         if source_channels:
             self.source_channels, self.source_idx = self.select(source_channels)
