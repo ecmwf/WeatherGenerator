@@ -11,7 +11,6 @@ import datetime
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 from numpy import datetime64, timedelta64
@@ -77,6 +76,19 @@ class TimeWindowHandler:
     """
 
     def __init__(self, t_start, t_end, t_window_len, t_window_step):
+        """
+        Parameters
+        ----------
+                start : int
+            start time
+        end : int
+            end time
+        t_window_len : int
+            length of data window
+        t_window_step :
+            delta hours between start times of windows
+
+        """
         self.t_start: NPDT64 = str_to_datetime64(str(t_start))
         self.t_end: NPDT64 = str_to_datetime64(str(t_end))
         self.t_window_len: NPTDel64 = np.timedelta64(t_window_len, "h")
@@ -126,7 +138,7 @@ class TimeWindowHandler:
 
     #     return idx_start, idx_end
 
-    def window(self, idx: TIndex) -> tuple[np.datetime64, np.datetime64]:
+    def window(self, idx: TIndex) -> DTRange:
         """
         Temporal window corresponding to index
 
@@ -143,7 +155,7 @@ class TimeWindowHandler:
         t_start_win = self.t_start + self.t_window_step * idx
         t_end_win = t_start_win + self.t_window_len
 
-        return (t_start_win, t_end_win)
+        return DTRange(t_start_win, t_end_win)
 
 
 @dataclass
@@ -221,24 +233,11 @@ class DataReaderBase(ABC):
 
     def __init__(
         self,
-        start: int,
-        end: int,
-        t_window_len: int,
-        t_window_step: int,
-        filename: Path,
-        stream_info: dict,
+        tw_handler: TimeWindowHandler,
     ) -> None:
         """
         Parameters
         ----------
-        start : int
-            start time
-        end : int
-            end time
-        t_window_len : int
-            length of data window
-        t_window_step :
-            delta hours between start times of windows
         filename :
             filename (and path) of dataset
         stream_info :
@@ -249,27 +248,24 @@ class DataReaderBase(ABC):
         None
         """
 
-        self.t_eps = np.timedelta64(1, "ms")
-
-        self.t_window_len = np.timedelta64(t_window_len, "h")
-        self.t_window_step = np.timedelta64(t_window_step, "h")
-
-        self.time_window_handler = TimeWindowHandler(start, end, t_window_len, t_window_step)
+        self.time_window_handler = tw_handler
 
         # variables that need to be set / properly initialized by child classes that provide
         # concrete implementation
 
-        self.len = 0
+        # self.len = 0
         self.source_idx = []
         self.target_idx = []
         self.geoinfo_idx = []
-        self.source_channels = []
-        self.target_channels = []
+        # self.source_channels = []
+        # self.target_channels = []
 
         self.mean = np.zeros(0)
         self.stdev = np.ones(0)
         self.mean_geoinfo = np.zeros(0)
         self.stdev_geoinfo = np.ones(0)
+
+    # Methods that need to be implemented by data readers.
 
     @abstractmethod
     def source_channels(self) -> list[str]:
@@ -540,46 +536,50 @@ class DataReaderBase(ABC):
 class DataReaderTimestep(DataReaderBase):
     "Base class for data readers with regular time step"
 
-    # @abstractmethod
     def __init__(
         self,
-        start: int,
-        end: int,
-        t_window_len: int,
-        t_window_step: int,
-        filename: Path,
-        stream_info: dict,
+        tw_handler: TimeWindowHandler,
     ) -> None:
         """
         Parameters
         ----------
-        start : int
-            start time
-        end : int
-            end time
-        t_window_len : int
-            length of data window
-        t_window_step :
-            delta hours between start times of windows
-        filename :
-            filename (and path) of dataset
-        stream_info :
-            information about stream
-
+        tw_handler : TimeWindowHandler
+            Time window handler for the dataset
         Returns
         -------
         None
         """
 
-        super().__init__(start, end, t_window_len, t_window_step, filename, stream_info)
+        super().__init__(tw_handler)
 
-        # variables need to be set by child classes
+    @abstractmethod
+    def interval(self) -> NPTDel64:
+        """Get the time interval of the dataset. It is also called frequency in Anemoi."""
+        pass
 
-        self.frequency = np.datetime64(0, "s")
-        self.ds_start_time = self.time_window_handler.zero_time
-        self.ds_end_time = self.time_window_handler.zero_time
+    @abstractmethod
+    def data_start_time(self) -> NPDT64:
+        """
+        Get the start time of the dataset.
 
-    def _get_dataset_idxs(self, idx) -> NDArray[TIndex]:
+        Returns
+        -------
+        The start time of the dataset as a numpy datetime64 object.
+        """
+        pass
+
+    @abstractmethod
+    def data_end_time(self) -> NPDT64:
+        """
+        Get the end time of the dataset.
+
+        Returns
+        -------
+        The end time of the dataset as a numpy datetime64 object.
+        """
+        pass
+
+    def _get_dataset_idxs(self, idx: TIndex) -> NDArray[np.int32]:
         """
         Translate idx for time window to idxs into dataset
 
@@ -590,11 +590,13 @@ class DataReaderTimestep(DataReaderBase):
 
         Returns
         -------
-            indices for dataset corresponding to idx
+            indices in the dataset corresponding to the time window described by idx
         """
 
-        win_start, win_end = self.time_window_handler.window(idx)
-        if win_start < self.ds_start_time or win_end > self.ds_end_time:
+        dtr = self.time_window_handler.window(idx)
+        # If there is no overlap with the dataset, return empty array
+        # TODO: boundary conditions
+        if dtr.end < self.data_start_time() or dtr.start > self.data_end_time():
             return np.array([], dtype=np.int32)
 
         # relative time in dataset
