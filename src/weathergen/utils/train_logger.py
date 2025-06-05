@@ -12,13 +12,13 @@ import json
 import logging
 import math
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 import numpy as np
 import polars as pl
-import traceback
 
 import weathergen.utils.config as config
 from weathergen.utils.metrics import read_metrics_file
@@ -190,7 +190,7 @@ class TrainLogger:
                 "File system error occurred while handling the log file.",
                 f"Due to specific error: {e}"
             ))
-        except Exception as e:
+        except Exception:
             _logger.error((
                 f"Error: no training data loaded for run_id={run_id}",
                 f"Due to exception with trace:\n{traceback.format_exc()}"
@@ -235,7 +235,7 @@ class TrainLogger:
                 "File system error occurred while handling the log file.",
                 f"Due to specific error: {e}"
             ))
-        except Exception as e:
+        except Exception:
             _logger.error((
                 f"Error: no validation data loaded for run_id={run_id}",
                 f"Due to exception with trace:\n{traceback.format_exc()}"
@@ -263,7 +263,7 @@ class TrainLogger:
                 "File system error occurred while handling the log file.",
                 f"Due to specific error: {e}"
             ))
-        except Exception as e:
+        except Exception:
             _logger.error((
                 f"Error: no validation data loaded for run_id={run_id}",
                 f"Due to exception with trace:\n{traceback.format_exc()}"
