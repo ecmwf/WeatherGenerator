@@ -2,8 +2,8 @@
 local fn = import 'functions.libsonnet';
 
 // URL for hrefs
-// local href_link = 'https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/database/jsons/';
-local href_link = 'https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/';
+local href_link = 'https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/database/jsons/';
+// local href_link = 'https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/iluise/develop/stac-database/database/';
 
 // TODO: improve this
 local era5v8 = import 'era5_v8.jsonnet';
