@@ -10,6 +10,7 @@
 import datetime
 import logging
 from pathlib import Path
+from typing import override
 
 import numpy as np
 import zarr
@@ -22,6 +23,7 @@ _logger = logging.getLogger(__name__)
 class DataReaderObs(DataReaderBase):
     def __init__(
         self,
+        # TODO: pass a TimeWindowHandler instead of start, end, t_window_len, t_window_step
         start: int,
         end: int,
         t_window_len: int,
@@ -56,6 +58,7 @@ class DataReaderObs(DataReaderBase):
         self._load_properties()
 
         # TODO: re-implement selection of source and target channels
+        # TODO: factorize with anemoi reader
 
         channels_idx = [i for i, col in enumerate(self.selected_colnames) if "obsvalue" in col]
         self.data_offset = channels_idx[0]
@@ -130,6 +133,7 @@ class DataReaderObs(DataReaderBase):
         )
 
         # Derive new index based on hourly backbone index
+        # TODO: use str_to_datetime64
         format_str = "%Y%m%d%H%M%S"
         base_dt = datetime.datetime.strptime(str(base_yyyymmddhhmm), format_str)
         self.start_dt = datetime.datetime.strptime(str(start), format_str)
@@ -188,7 +192,8 @@ class DataReaderObs(DataReaderBase):
         # self.properties["data_idxs"] = self.data.attrs["data_idxs"]
         self.properties["obs_id"] = self.data.attrs["obs_id"]
 
-    def _get(self, idx: int, channels_idx: np.array) -> ReaderData:
+    @override
+    def _get(self, idx: int, channels_idx: list[int]) -> ReaderData:
         """
         Get data for window
 
@@ -204,20 +209,23 @@ class DataReaderObs(DataReaderBase):
         ReaderDatas (coords, geoinfos, data, datetimes)
         """
 
-        rdata = ReaderData()
-
         start_row = self.indices_start[idx]
         end_row = self.indices_end[idx]
 
-        rdata.coords = self.data.oindex[start_row:end_row, self.coords_idx]
-        rdata.geoinfos = (
+        coords = self.data.oindex[start_row:end_row, self.coords_idx]
+        geoinfos = (
             self.data.oindex[start_row:end_row, self.geoinfo_idx]
             if len(self.geoinfo_idx) > 0
             else np.zeros((rdata.coords.shape[0], 0), np.float32)
         )
 
         channels_idx = np.array(channels_idx)
-        rdata.data = self.data.oindex[start_row:end_row, self.data_offset + channels_idx]
-        rdata.datetimes = self.dt[start_row:end_row][:, 0]
+        data = self.data.oindex[start_row:end_row, self.data_offset + channels_idx]
+        datetimes = self.dt[start_row:end_row][:, 0]
 
-        return rdata
+        return ReaderData(
+            coords=coords,
+            geoinfos=geoinfos,
+            data=data,
+            datetimes=datetimes,
+        )

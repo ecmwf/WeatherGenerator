@@ -127,6 +127,7 @@ class TimeWindowHandler:
 
         return TimeIndexRange(idx_start, idx_end)
 
+    # TODO: unused
     # def get_absolute_index(self, idx: int) -> tuple[np.int64, np.int64]:
     #     """
     #     Absolute index (in sec) with respect to reference base time
@@ -362,6 +363,7 @@ class DataReaderBase(ABC):
 
         return rdata
 
+    @abstractmethod
     def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
         """
         Get data for window
