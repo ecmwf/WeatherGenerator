@@ -97,7 +97,7 @@ local fill_assets(ds) = {
 // Optional: create catalogue link
 local dataset_entry_catalogue(ds, href_link) = {
   rel: 'child',
-  href: href_link + '/' + ds.filename,
+  href: href_link + ds.filename,
   title: ds.title,
   type: 'application/json',
 };

@@ -5,7 +5,7 @@ local fn = import 'functions.libsonnet';
 local branch_name = std.extVar("branch_name");
 
 // URL for hrefs
-local href_link = 'https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/'+branch_name+'/database/jsons';
+local href_link = 'https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/'+branch_name+'/database/jsons/';
 
 // TODO: improve this
 local era5v8 = import 'era5_v8.jsonnet';
