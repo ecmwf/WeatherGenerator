@@ -57,6 +57,9 @@ class AnemoiDataset:
 
         assert len_hrs == step_hrs, "Currently only step_hrs=len_hrs is supported"
 
+        self.len_hrs = len_hrs
+        self.step_hrs = step_hrs
+
         # open  dataset to peak that it is compatible with requested parameters
         ds = open_dataset(filename)
 
@@ -425,4 +428,4 @@ class AnemoiDataset:
         if not self.ds:
             return (np.array([], dtype=np.datetime64), np.array([], dtype=np.datetime64))
 
-        return (self.ds.dates[idx], self.ds.dates[idx + self.num_steps_per_window])
+        return (self.ds.dates[idx], self.ds.dates[idx] + np.timedelta64(self.len_hrs, "h"))
