@@ -18,6 +18,7 @@ from typing import Literal
 
 import numpy as np
 import polars as pl
+import traceback
 
 import weathergen.utils.config as config
 from weathergen.utils.metrics import read_metrics_file
@@ -49,7 +50,8 @@ class TrainLogger:
         Log metrics to a file.
         For now, just scalar values are expected. There is no check.
         """
-        # Clean all the metrics to convert to float. Any other type (numpy etc.) will trigger a serialization error.
+        ## Clean all the metrics to convert to float.
+        #  Any other type (numpy etc.) will trigger a serialization error.
         clean_metrics = {
             _weathergen_timestamp: time.time_ns() // 1_000_000,
             _weathergen_time: int(datetime.datetime.now().strftime("%Y%m%d%H%M%S")),
@@ -176,8 +178,23 @@ class TrainLogger:
             with open(fname_log_train, "rb") as f:
                 log_train = np.loadtxt(f, delimiter=",")
             log_train = log_train.reshape((log_train.shape[0] // len(cols_train), len(cols_train)))
+        except (TypeError, AttributeError, IndexError, ZeroDivisionError, ValueError) as e:
+            _logger.warning((
+                f"Warning: no training data loaded for run_id={run_id}",
+                "Data loading or reshaping failed — possible format, dimension, or logic issue.",
+                f"Due to specific error: {e}"
+            ))
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            _logger.error((
+                f"Error: no training data loaded for run_id={run_id}",
+                "File system error occurred while handling the log file.",
+                f"Due to specific error: {e}"
+            ))
         except Exception as e:
-            _logger.warning(f"Warning: no training data loaded for run_id={run_id} due to exception: {e}")
+            _logger.error((
+                f"Error: no training data loaded for run_id={run_id}",
+                f"Due to exception with trace:\n{traceback.format_exc()}"
+            ))
             log_train = np.array([])
 
         log_train_df = read_metrics(cf, run_id, "train", cols1, result_dir_base)
@@ -206,8 +223,23 @@ class TrainLogger:
             with open(fname_log_val, "rb") as f:
                 log_val = np.loadtxt(f, delimiter=",")
             log_val = log_val.reshape((log_val.shape[0] // len(cols_val), len(cols_val)))
+        except (TypeError, AttributeError, IndexError, ZeroDivisionError, ValueError) as e:
+            _logger.warning((
+                f"Warning: no validation data loaded for run_id={run_id}",
+                "Data loading or reshaping failed — possible format, dimension, or logic issue.",
+                f"Due to specific error: {e}"
+            ))
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            _logger.error((
+                f"Error: no validation data loaded for run_id={run_id}",
+                "File system error occurred while handling the log file.",
+                f"Due to specific error: {e}"
+            ))
         except Exception as e:
-            print(f"Warning: no validation data loaded for run_id={run_id} due to exception: {e}")
+            _logger.error((
+                f"Error: no validation data loaded for run_id={run_id}",
+                f"Due to exception with trace:\n{traceback.format_exc()}"
+            ))
             log_val = np.array([])
         metrics_val_df = read_metrics(cf, run_id, "val", cols2, result_dir_base)
 
@@ -219,8 +251,23 @@ class TrainLogger:
             with open(fname_perf_val, "rb") as f:
                 log_perf = np.loadtxt(f, delimiter=",")
             log_perf = log_perf.reshape((log_perf.shape[0] // len(cols_perf), len(cols_perf)))
+        except (TypeError, AttributeError, IndexError, ZeroDivisionError, ValueError) as e:
+            _logger.warning((
+                f"Warning: no validation data loaded for run_id={run_id}",
+                "Data loading or reshaping failed — possible format, dimension, or logic issue.",
+                f"Due to specific error: {e}"
+            ))
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            _logger.error((
+                f"Error: no validation data loaded for run_id={run_id}",
+                "File system error occurred while handling the log file.",
+                f"Due to specific error: {e}"
+            ))
         except Exception as e:
-            print(f"Warning: no validation data loaded for run_id={run_id} due to exception: {e}")
+            _logger.error((
+                f"Error: no validation data loaded for run_id={run_id}",
+                f"Due to exception with trace:\n{traceback.format_exc()}"
+            ))
             log_perf = np.array([])
         metrics_system_df = read_metrics(
             cf,

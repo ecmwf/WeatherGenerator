@@ -61,7 +61,7 @@ line-length = 100
 [tool.ruff]
 
 # Wide rows
-line-length = 120
+line-length = 100
 
 [tool.ruff.lint]
 # All disabled until the code is formatted.
@@ -90,7 +90,7 @@ ignore = [
   "SIM102",
   "SIM401",
   # To ignore, not relevant for us
-  "SIM108" # in case additional norm layer supports are added in futureml  
+  "SIM108" # in case additional norm layer supports are added in future  
 ]
 
 [tool.uv]

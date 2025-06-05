@@ -39,7 +39,8 @@ class StreamEmbedTransformer(torch.nn.Module):
         unembed_mode : { 'full' , 'block'}
           full : monolithic (and correspondingly large) unembedding network that maps from
                  (num_tokens x dim_embed) to dim_out, allowing for mixing between channels/columns
-          block : per-channel/column unembedding network (which is hence a block-sparse form of full)
+          block : per-channel/column unembedding network 
+                (which is hence a block-sparse form of full)
         """
 
         super(StreamEmbedTransformer, self).__init__()
@@ -96,9 +97,11 @@ class StreamEmbedTransformer(torch.nn.Module):
                 self.unembed = torch.nn.ModuleList(
                     [torch.nn.Linear(dim_embed, dim_out) for _ in range(num_channels)]
                     # [
-                    #     torch.nn.Sequential(torch.nn.Linear(dim_embed, max(dim_embed//2,4*dim_out)),
-                    #     torch.nn.GELU(),
-                    #     torch.nn.Linear(max(dim_embed//2,4*dim_out), dim_out)) for _ in range(num_channels)
+                    #     torch.nn.Sequential(
+                    #         torch.nn.Linear(dim_embed, max(dim_embed//2,4*dim_out)),
+                    #         torch.nn.GELU(),
+                    #         torch.nn.Linear(max(dim_embed//2,4*dim_out), dim_out)
+                    #     ) for _ in range(num_channels)
                     # ]
                 )
                 self.ln_final = torch.nn.ModuleList([norm(dim_embed) for _ in range(num_channels)])

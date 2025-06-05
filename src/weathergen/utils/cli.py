@@ -121,7 +121,10 @@ def _add_model_loading_params(parser: argparse.ArgumentParser):
         "-id",
         "--from_run_id",
         required=True,
-        help="Start evaluation or continue training from the WeatherGenerator model with the given run id.",
+        help=(
+            "Start evaluation or continue training from the WeatherGenerator",
+            " model with the given run id."
+        ),
     )
     parser.add_argument(
         "-e",

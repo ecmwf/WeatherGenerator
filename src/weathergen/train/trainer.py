@@ -244,7 +244,9 @@ class Trainer(Trainer_Base):
             cf.lr_steps_warmup = int(0.1 * cf.lr_steps)
             cf.lr_steps_cooldown = int(0.05 * cf.lr_steps)
             steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
-            s = f"cf.lr_steps_warmup and cf.lr_steps_cooldown were larger than cf.lr_steps={cf.lr_steps}"
+            s = (
+                "cf.lr_steps_warmup and cf.lr_steps_cooldown",
+                f" were larger than cf.lr_steps={cf.lr_steps}")
             s += f". The value have been adjusted to cf.lr_steps_warmup={cf.lr_steps_warmup} and "
             s += f" cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}."
             _logger.warning(s)
@@ -656,7 +658,8 @@ class Trainer(Trainer_Base):
 
                 if self.cf.rank == 0:
                     print(
-                        f"validation ({cf.run_id}) : {epoch:03d} : loss = {torch.nanmean(losses_all[0]):.4E}",
+                        f"validation ({cf.run_id}) : {epoch:03d} :",
+                        f" loss = {torch.nanmean(losses_all[0]):.4E}",
                         flush=True,
                     )
                     for i_obs, rt in enumerate(cf.streams):

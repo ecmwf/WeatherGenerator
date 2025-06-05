@@ -112,7 +112,8 @@ class IconDataset:
         self.len = (self.end_idx - self.start_idx) // self.mesh_size
 
         assert self.end_idx > self.start_idx, (
-            f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
+            f"Abort: Final index of {self.end_idx} is the same of larger than",
+            f" start index {self.start_idx}"
         )
 
         len_data_entries = len(self.ds["time"]) * self.mesh_size
