@@ -26,7 +26,6 @@ from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
-from weathergen.train.utils import get_run_id
 from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TrainLogger
@@ -49,20 +48,8 @@ class Trainer(Trainer_Base):
     def init(
         self,
         cf: Config,
-        run_id_contd=None,
-        epoch_contd=None,  # unused
-        run_id_new: bool | str | None = False,
-        run_mode="training",  # unused
     ):
         self.cf = cf
-
-        if run_id_new is not None and isinstance(run_id_new, str):
-            cf.run_id = run_id_new
-        elif run_id_new or cf.run_id is None:
-            cf.run_id = get_run_id()
-        elif run_id_contd is not None and not run_id_new:
-            cf.run_id = run_id_contd
-        assert cf.run_id is not None
 
         assert cf.samples_per_epoch % cf.batch_size == 0
         assert cf.samples_per_validation % cf.batch_size_validation == 0
@@ -88,9 +75,9 @@ class Trainer(Trainer_Base):
         self.train_logger = TrainLogger(cf, self.path_run)
 
     ###########################################
-    def evaluate(self, cf, run_id_trained, epoch, run_id_new=False):
+    def evaluate(self, cf, run_id_trained, epoch):
         # general initalization
-        self.init(cf, run_id_trained, epoch, run_id_new, run_mode="evaluate")
+        self.init(cf)
 
         self.dataset_val = MultiStreamDataSampler(
             cf,
@@ -140,9 +127,9 @@ class Trainer(Trainer_Base):
         _logger.info(f"Finished evaluation run with id: {cf.run_id}")
 
     ###########################################
-    def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new: bool | str = False):
+    def run(self, cf, run_id_contd=None, epoch_contd=None):
         # general initalization
-        self.init(cf, run_id_contd, epoch_contd, run_id_new)
+        self.init(cf)
 
         self.dataset = MultiStreamDataSampler(
             cf, cf.start_date, cf.end_date, cf.batch_size, cf.samples_per_epoch, shuffle=True

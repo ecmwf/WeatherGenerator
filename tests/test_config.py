@@ -6,6 +6,7 @@ from omegaconf import OmegaConf
 
 import weathergen.utils.config as config
 
+TEST_RUN_ID = "test123"
 SECRET_COMPONENT = "53CR3T"
 DUMMY_PRIVATE_CONF = {
     "data_path_anemoi": "/path/to/anmoi/data",
@@ -111,10 +112,10 @@ def private_conf(models_dir):
 
 @pytest.fixture
 def private_config_file(private_conf):
-    temp_file = tempfile.NamedTemporaryFile("w+", delete=False)
-    temp_file.write(OmegaConf.to_yaml(private_conf))
-    temp_file.flush()
-    yield pathlib.Path(temp_file.name)
+    with tempfile.NamedTemporaryFile("w+") as temp:
+        temp.write(OmegaConf.to_yaml(private_conf))
+        temp.flush()
+        yield pathlib.Path(temp.name)
 
 
 @pytest.fixture
@@ -135,15 +136,17 @@ def overwrite_config(overwrite_dict):
 
 @pytest.fixture
 def overwrite_file(overwrite_config):
-    temp_file = tempfile.NamedTemporaryFile("w+", delete=False)
-    temp_file.write(OmegaConf.to_yaml(overwrite_config))
-    temp_file.flush()
-    yield pathlib.Path(temp_file.name)
+    # TODO should this be "w+t" instead of "w"?
+    with tempfile.NamedTemporaryFile("w+") as temp:
+        temp.write(OmegaConf.to_yaml(overwrite_config))
+        temp.flush()
+        yield pathlib.Path(temp.name)
 
 
 @pytest.fixture
 def config_fresh(private_config_file):
     cf = config.load_config(private_config_file, None, None)
+    cf = config.set_run_id(cf, TEST_RUN_ID, False)
     cf.data_loader_rng_seed = 42
 
     return cf
@@ -188,14 +191,12 @@ def test_load_multiple_overwrites(private_config_file):
 
 @pytest.mark.parametrize("epoch", [None, 0, 1, 2, -1])
 def test_load_existing_config(epoch, private_config_file, config_fresh):
-    test_run_id = "test123"
     test_num_epochs = 3000
 
-    config_fresh.run_id = test_run_id  # done in trainer
     config_fresh.num_epochs = test_num_epochs  # some specific change
     config.save(config_fresh, epoch)
 
-    cf = config.load_config(private_config_file, test_run_id, epoch)
+    cf = config.load_config(private_config_file, config_fresh.run_id, epoch)
 
     assert cf.num_epochs == test_num_epochs
 
@@ -207,8 +208,25 @@ def test_from_cli(options, cf):
     assert parsed_config == OmegaConf.create(cf)
 
 
+@pytest.mark.parametrize(
+    "run_id,reuse,expected",
+    [
+        (None, False, "generated"),
+        ("new_id", False, "new_id"),
+        (None, True, TEST_RUN_ID),
+        ("new_id", True, TEST_RUN_ID),
+    ],
+)
+def test_set_run_id(config_fresh, run_id, reuse, expected, mocker):
+    mocker.patch("weathergen.utils.config.get_run_id", return_value="generated")
+
+    config_fresh = config.set_run_id(config_fresh, run_id, reuse)
+
+    assert config_fresh.run_id == expected
+
+
 def test_print_cf_no_secrets(config_fresh):
-    output = config._format_cf(config_fresh)
+    output = config.format_cf(config_fresh)
 
     assert "53CR3T" not in output and "secrets" not in config_fresh.keys()
 
@@ -243,9 +261,7 @@ def test_load_malformed_stream(streams_dir):
 
 @pytest.mark.parametrize("epoch", [None, 0, 1, 2, -1])  # maybe add -5 as test case
 def test_save(epoch, config_fresh):
-    test_run_id = "test123"
-    config_fresh.run_id = test_run_id
     config.save(config_fresh, epoch)
 
-    cf = config.load_model_config(test_run_id, epoch, config_fresh.model_path)
+    cf = config.load_model_config(config_fresh.run_id, epoch, config_fresh.model_path)
     assert is_equal(cf, config_fresh)
