@@ -65,7 +65,9 @@ class TrainLogger:
             f.write(s.encode("utf-8"))
 
     #######################################
-    def add_train(self, samples, lr, loss_avg, stddev_avg, perf_gpu=0.0, perf_mem=0.0) -> None:
+    def add_train(
+        self, samples, lr, avg_loss, losses_all, stddev_all, perf_gpu=0.0, perf_mem=0.0
+    ) -> None:
         """
         Log training data
         """
@@ -74,27 +76,28 @@ class TrainLogger:
         log_vals = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
         log_vals += [samples]
 
-        metrics["loss_avg_0_mean"] = np.nanmean(loss_avg[0, :, :])
+        metrics["loss_avg_mean"] = avg_loss
         metrics["learning_rate"] = lr
         metrics["num_samples"] = int(samples)
-        log_vals += [np.nanmean(loss_avg[0])]
+        log_vals += [avg_loss]
         log_vals += [lr]
 
-        for i_obs, st in enumerate(self.cf.streams):
+        for _, st in enumerate(self.cf.streams):
             st_name = _clean_name(st["name"])
+            loss = losses_all[st_name]
+            stddev = stddev_all[st_name]
+
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts):
                 lf_name = _clean_name(lf_name)
-                metrics[_key_loss(st["name"], lf_name)] = loss_avg[j, i_obs, :].nanmean(0)
+                metrics[_key_loss(st["name"], lf_name)] = loss[:, j].nanmean()
 
                 for k, ch_n in enumerate(st.target_channels):
-                    metrics[_key_loss_chn(st["name"], lf_name, ch_n)] = loss_avg[j, i_obs, k]
-                log_vals += [loss_avg[j, i_obs, :].nanmean(0)]
+                    metrics[_key_loss_chn(st["name"], lf_name, ch_n)] = loss[k, j]
+                log_vals += [loss[:, j].nanmean(0)]
 
-                if len(stddev_avg) > 0:
-                    metrics[_key_stddev(st_name)] = stddev_avg[i_obs]
-        if len(stddev_avg) > 0:
-            for i_obs, _rt in enumerate(self.cf.streams):
-                log_vals += [stddev_avg[i_obs]]
+            metrics[_key_stddev(st_name)] = stddev.nanmean()
+
+            log_vals += [stddev.nanmean()]
 
         with open(self.path_run / f"{self.cf.run_id}_train_log.txt", "ab") as f:
             np.savetxt(f, log_vals)
@@ -111,7 +114,7 @@ class TrainLogger:
             np.savetxt(f, log_vals)
 
     #######################################
-    def add_val(self, samples, loss_avg, stddev_avg) -> None:
+    def add_val(self, samples, losses_all, stddev_all) -> None:
         """
         Log validation data
         """
@@ -121,18 +124,18 @@ class TrainLogger:
         log_vals = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
         log_vals += [samples]
 
-        for i_obs, st in enumerate(self.cf.streams):
+        for _, st in enumerate(self.cf.streams):
             st_name = _clean_name(st["name"])
+            loss = losses_all[st_name]
+            stddev = stddev_all[st_name]
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts_val):
-                metrics[_key_loss(st_name, lf_name)] = loss_avg[j, i_obs, :].nanmean(0)
+                metrics[_key_loss(st_name, lf_name)] = loss[:, j].nanmean()
                 for k, ch_n in enumerate(st.target_channels):
-                    metrics[_key_loss_chn(st_name, lf_name, ch_n)] = loss_avg[j, i_obs, k]
-                log_vals += [loss_avg[j, i_obs, :].nanmean(0)]
+                    metrics[_key_loss_chn(st_name, lf_name, ch_n)] = loss[k, j]
+                log_vals += [loss[:, j].nanmean()]
 
-        if len(stddev_avg) > 0:
-            for i_obs, st in enumerate(self.cf.streams):
-                metrics[_key_stddev(st["name"])] = stddev_avg[i_obs]
-                log_vals += [stddev_avg[i_obs]]
+            metrics[_key_stddev(st_name)] = stddev.nanmean()
+            log_vals += [stddev.nanmean()]
 
         self.log_metrics("val", metrics)
         with open(self.path_run / (self.cf.run_id + "_val_log.txt"), "ab") as f:
