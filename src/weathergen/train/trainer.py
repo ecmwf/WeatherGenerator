@@ -28,7 +28,7 @@ from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
 from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.train_logger import TrainLogger
+from weathergen.utils.train_logger import TRAIN, VAL, TrainLogger
 from weathergen.utils.validation_io import write_validation
 
 _logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ class Trainer(Trainer_Base):
             path_model.mkdir(exist_ok=True, parents=True)
         self.path_run = path_run
 
-        self.init_perf_monitoring()
+        # self.init_perf_monitoring() # TODO restore default
         self.train_logger = TrainLogger(cf, self.path_run)
 
     ###########################################
@@ -83,6 +83,8 @@ class Trainer(Trainer_Base):
             cf.end_date_val,
             cf.batch_size_validation,
             cf.samples_per_validation,
+            train_logger=self.train_logger,
+            stage=VAL,
             shuffle=cf.shuffle,
         )
 
@@ -130,7 +132,14 @@ class Trainer(Trainer_Base):
         self.init(cf)
 
         self.dataset = MultiStreamDataSampler(
-            cf, cf.start_date, cf.end_date, cf.batch_size, cf.samples_per_epoch, shuffle=True
+            cf,
+            cf.start_date,
+            cf.end_date,
+            cf.batch_size,
+            cf.samples_per_epoch,
+            train_logger=self.train_logger,
+            stage=TRAIN,
+            shuffle=True,
         )
         self.dataset_val = MultiStreamDataSampler(
             cf,
@@ -138,6 +147,8 @@ class Trainer(Trainer_Base):
             cf.end_date_val,
             cf.batch_size_validation,
             cf.samples_per_validation,
+            train_logger=self.train_logger,
+            stage=VAL,  # TODO not sure it should be called VAL. "trainval" or just "train"?
             shuffle=cf.shuffle,
         )
 
