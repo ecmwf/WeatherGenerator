@@ -191,6 +191,7 @@ class ReaderData:
         ReaderData
             Empty ReaderData object
         """
+        # TODO: it should also get the right shapes for data and geoinfos
         return ReaderData(
             coords=np.zeros((0, 2), dtype=np.float32),
             geoinfos=np.zeros((0, 0), dtype=np.float32),

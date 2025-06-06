@@ -69,7 +69,7 @@ class Trainer(Trainer_Base):
             path_model.mkdir(exist_ok=True, parents=True)
         self.path_run = path_run
 
-        # self.init_perf_monitoring()
+        # self.init_perf_monitoring() # TODO restore default
         self.train_logger = TrainLogger(cf, self.path_run)
 
     ###########################################
@@ -148,7 +148,7 @@ class Trainer(Trainer_Base):
             cf.batch_size_validation,
             cf.samples_per_validation,
             train_logger=self.train_logger,
-            stage=VAL,
+            stage=VAL,  # TODO not sure it should be called VAL. "trainval" or just "train"?
             shuffle=cf.shuffle,
         )
 
