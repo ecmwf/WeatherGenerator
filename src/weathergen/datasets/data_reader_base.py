@@ -90,11 +90,11 @@ class TimeWindowHandler:
         """
         Parameters
         ----------
-                start : int
+        start :
             start time
-        end : int
+        end :
             end time
-        t_window_len : int
+        t_window_len :
             length of data window
         t_window_step :
             delta hours between start times of windows
