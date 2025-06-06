@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datetime
 import logging
 import pathlib
 
@@ -89,9 +88,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 logger.warning("forecast policy is not None but number of forecast steps is 0.")
         self.forecast_policy = cf.forecast_policy
 
-        # end date needs to be adjusted to account for window length
-        end_date_padded = end_date + datetime.timedelta(hours=cf.len_hrs)
-
         self.len = 100000000
 
         self.streams_datasets: list[list[AnyDataReader]] = []
@@ -105,10 +101,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 }
                 dataset: type[AnyDataReader] | None = None
                 match stream_info["type"]:
-                    # case "obs":
-                    #     dataset = DataReaderObs
-                    #     datapath = cf.data_path_obs
-                    #     # kwargs["end"] = end_date_padded # TODO: implement the padding
+                    case "obs":
+                        dataset = DataReaderObs
+                        datapath = cf.data_path_obs
+                        # kwargs["end"] = end_date_padded # TODO: implement the padding
                     case "anemoi":
                         dataset = DataReaderAnemoi
                         datapath = cf.data_path_anemoi
