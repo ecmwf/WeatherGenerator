@@ -145,8 +145,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if len(ds) > 0:
                     self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
 
-                stream_info["source_channels"] = ds.source_channels()
-                stream_info["target_channels"] = ds.target_channels()
+                stream_info["source_channels"] = ds.source_channels
+                stream_info["target_channels"] = ds.target_channels
 
                 self.streams_datasets[-1] += [ds]
 

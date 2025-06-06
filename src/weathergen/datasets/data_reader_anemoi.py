@@ -104,11 +104,12 @@ class DataReaderAnemoi(DataReaderBase):
                 )
             ]
         )
-        self._source_channels = [ds.variables[i] for i in self.source_idx]
-        self._target_channels = [ds.variables[i] for i in self.target_idx]
+        self.source_channels = [ds.variables[i] for i in self.source_idx]
+        self.target_channels = [ds.variables[i] for i in self.target_idx]
+        self.geoinfo_channels = []
 
-        _logger.info(f"Source channels: {self.source_channels()}")
-        _logger.info(f"Target channels: {self.target_channels()}")
+        _logger.info(f"Source channels: {self.source_channels}")
+        _logger.info(f"Target channels: {self.target_channels}")
 
         self.properties = {  # TODO: unused?
             "stream_id": 0,
@@ -135,14 +136,6 @@ class DataReaderAnemoi(DataReaderBase):
     @override
     def length(self) -> int:
         return self.len
-
-    @override
-    def source_channels(self) -> list[str]:
-        return self._source_channels
-
-    @override
-    def target_channels(self) -> list[str]:
-        return self._target_channels
 
     @override
     def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:

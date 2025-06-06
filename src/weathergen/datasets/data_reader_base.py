@@ -9,13 +9,15 @@
 
 import datetime
 import logging
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from dataclasses import dataclass
 from typing import TypeAlias
 
 import numpy as np
 from numpy import datetime64, timedelta64
 from numpy.typing import NDArray
+
+from weathergen.utils.better_abc import ABCMeta, abstract_attribute
 
 _logger = logging.getLogger(__name__)
 
@@ -249,8 +251,15 @@ def check_reader_data(rdata: ReaderData) -> None:
     )
 
 
-class DataReaderBase(ABC):
-    "Base class for data readers"
+class DataReaderBase(metaclass=ABCMeta):
+    """
+    Base class for data readers.
+    """
+
+    # The fields that need to be set by the child classes
+    source_channels: list[str] = abstract_attribute()
+    target_channels: list[str] = abstract_attribute()
+    geoinfo_channels: list[str] = abstract_attribute()
 
     def __init__(
         self,
@@ -273,7 +282,7 @@ class DataReaderBase(ABC):
 
         # variables that need to be set / properly initialized by child classes that provide
         # concrete implementation
-        # TODO: since we are using base classes, these should be properly defined as abstract
+        # TODO: move these fields to abstract fields
 
         self.source_idx = []
         self.target_idx = []
@@ -284,29 +293,10 @@ class DataReaderBase(ABC):
         self.mean_geoinfo = np.zeros(0)
         self.stdev_geoinfo = np.ones(0)
 
-    # Methods that need to be implemented by data readers.
-
-    @abstractmethod
-    def source_channels(self) -> list[str]:
-        """The list of the source channels that the reader provides. Must be constant."""
-        pass
-
-    @abstractmethod
-    def target_channels(self) -> list[str]:
-        """The list of the target channels that the reader provides. Must be constant."""
-        pass
-
     @abstractmethod
     def length(self) -> int:
         """The length of this dataset. Must be constant."""
         pass
-
-    def geoinfo_channels(self) -> list[str]:
-        """
-        The list of the geoinfo channels that the reader provides. Must be constant.
-
-        The default implementation returns an empty list (no extra geoinformation)."""
-        return []
 
     def __len__(self) -> int:
         """
