@@ -766,7 +766,7 @@ class Trainer(Trainer_Base):
                 print("\t", end="")
                 for _, st in enumerate(self.cf.streams):
                     print(
-                        "{}".format(st["name"]) + f" : {losses_all[st["name"]].nanmean():0.4E} \t",
+                        "{}".format(st["name"]) + f" : {losses_all[st['name']].nanmean():0.4E} \t",
                         end="",
                     )
                 print("\n", flush=True)
