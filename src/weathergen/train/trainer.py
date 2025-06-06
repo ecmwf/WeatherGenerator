@@ -26,8 +26,8 @@ from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
-from weathergen.train.utils import get_run_id
 from weathergen.utils.config import Config
+from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TrainLogger
 from weathergen.utils.validation_io import write_validation
 
@@ -46,20 +46,8 @@ class Trainer(Trainer_Base):
     def init(
         self,
         cf: Config,
-        run_id_contd=None,
-        epoch_contd=None,  # unused
-        run_id_new=False,
-        run_mode="training",  # unused
     ):
         self.cf = cf
-
-        if isinstance(run_id_new, str):
-            cf.run_id = run_id_new
-        elif run_id_new or cf.run_id is None:
-            cf.run_id = get_run_id()
-        elif run_id_contd is not None and not run_id_new:
-            cf.run_id = run_id_contd
-        assert cf.run_id is not None
 
         assert cf.samples_per_epoch % cf.batch_size == 0
         assert cf.samples_per_validation % cf.batch_size_validation == 0
@@ -82,13 +70,12 @@ class Trainer(Trainer_Base):
         self.path_run = path_run
 
         self.init_perf_monitoring()
-
         self.train_logger = TrainLogger(cf, self.path_run)
 
     ###########################################
-    def evaluate(self, cf, run_id_trained, epoch, run_id_new=False):
+    def evaluate(self, cf, run_id_trained, epoch):
         # general initalization
-        self.init(cf, run_id_trained, epoch, run_id_new, run_mode="evaluate")
+        self.init(cf)
 
         self.dataset_val = MultiStreamDataSampler(
             cf,
@@ -99,11 +86,13 @@ class Trainer(Trainer_Base):
             shuffle=cf.shuffle,
         )
 
+        # make sure number of loaders does not exceed requested samples
+        loader_num_workers = min(cf.samples_per_validation, cf.loader_num_workers)
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
             "shuffle": False,
-            "num_workers": cf.loader_num_workers,
+            "num_workers": loader_num_workers,
             "pin_memory": True,
         }
         self.data_loader_validation = torch.utils.data.DataLoader(
@@ -120,7 +109,7 @@ class Trainer(Trainer_Base):
         _logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
         self.ddp_model = self.model
         self.model_params = ModelParams().create(cf).to(self.devices[0])
-        logging.getLogger("obslearn").info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
+        _logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
 
         self.loss_fcts_val = []
         for name, w in cf.loss_fcts_val:
@@ -129,14 +118,16 @@ class Trainer(Trainer_Base):
         if self.cf.rank == 0:
             config.save(self.cf, epoch=None)
 
+        _logger.info(f"Starting evaluation with id={self.cf.run_id}.")
+
         # evaluate validation set
         self.validate(epoch=0)
         _logger.info(f"Finished evaluation run with id: {cf.run_id}")
 
     ###########################################
-    def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new=False):
+    def run(self, cf, run_id_contd=None, epoch_contd=None):
         # general initalization
-        self.init(cf, run_id_contd, epoch_contd, run_id_new)
+        self.init(cf)
 
         self.dataset = MultiStreamDataSampler(
             cf, cf.start_date, cf.end_date, cf.batch_size, cf.samples_per_epoch, shuffle=True
@@ -169,6 +160,7 @@ class Trainer(Trainer_Base):
         self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         # load model if specified
         if run_id_contd is not None:
+            _logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
             self.model.load(run_id_contd, epoch_contd)
             _logger.info(f"Loaded model id={run_id_contd}.")
 
@@ -244,7 +236,7 @@ class Trainer(Trainer_Base):
             s = f"cf.lr_steps_warmup and cf.lr_steps_cooldown were larger than cf.lr_steps={cf.lr_steps}"
             s += f". The value have been adjusted to cf.lr_steps_warmup={cf.lr_steps_warmup} and "
             s += f" cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}."
-            logging.getLogger("obslearn").warning(s)
+            _logger.warning(s)
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             cf.batch_size,
@@ -265,7 +257,7 @@ class Trainer(Trainer_Base):
 
         if self.cf.istep > 0 and self.cf.rank == 0:
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
-            logging.getLogger("obslearn").info(str)
+            _logger.info(str)
 
         # get function handles for loss function terms
         self.loss_fcts = [[getattr(losses, name), w] for name, w in cf.loss_fcts]
@@ -278,9 +270,9 @@ class Trainer(Trainer_Base):
         if cf.forecast_policy is not None:
             torch._dynamo.config.optimize_ddp = False
 
-        if self.cf.rank == 0:
+        if is_root():
             config.save(self.cf, None)
-            config.print_cf(self.cf)
+            _logger.info(config.format_cf(self.cf))
 
         # training loop
 
@@ -674,7 +666,7 @@ class Trainer(Trainer_Base):
         else:
             state = self.ddp_model.state_dict()
 
-        if self.cf.rank == 0:
+        if is_root():
             filename = "".join(
                 [
                     self.cf.run_id,

@@ -121,10 +121,20 @@ class TokenizerMasking:
             .to(torch.float32)
         )
 
-        self.rng = np.random.default_rng(int(time.time()))
+        worker_info = torch.utils.data.get_worker_info()
+        div_factor = worker_info.id if worker_info is not None else 1
+        self.rng = np.random.default_rng(int(time.time() / div_factor))
+
+        self.size_time_embedding = 6
+
+    def get_size_time_embedding(self) -> int:
+        """Get size of time embedding"""
+        return self.size_time_embedding
 
     def reset(self) -> None:
-        self.rng = np.random.default_rng(int(time.time()))
+        worker_info = torch.utils.data.get_worker_info()
+        div_factor = (worker_info.id + 1) if worker_info is not None else 1
+        self.rng = np.random.default_rng(int(time.time() / div_factor))
 
     def batchify_source(
         self,
@@ -150,7 +160,9 @@ class TokenizerMasking:
             # mask either patches or entire stream
             if masking_rate_sampling:
                 cur_masking_rate = np.clip(
-                    np.abs(self.rng.normal(loc=cur_masking_rate, scale=1.0 / 2.5 * np.pi)), 0.0, 1.0
+                    np.abs(self.rng.normal(loc=cur_masking_rate, scale=1.0 / (2.5 * np.pi))),
+                    0.0,
+                    1.0,
                 )
 
         tokenize_window = partial(
@@ -280,9 +292,11 @@ class TokenizerMasking:
         # select masked tokens for network input
         # TODO: implement sampling rate target
         target_tokens = [
-            torch.cat([c if p else torch.tensor([]) for c, p in zip(cc, pp, strict=True)])
-            if len(cc) > 0
-            else torch.tensor(cc)
+            (
+                torch.cat([c if p else torch.tensor([]) for c, p in zip(cc, pp, strict=True)])
+                if len(cc) > 0
+                else torch.tensor(cc)
+            )
             for cc, pp in zip(target_tokens_cells, self.perm_sel, strict=True)
         ]
         target_tokens_lens = [len(t) for t in target_tokens]
