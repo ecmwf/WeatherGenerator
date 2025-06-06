@@ -182,7 +182,7 @@ class ReaderData:
     datetimes: NDArray[NPDT64]
 
     @staticmethod
-    def empty() -> "ReaderData":
+    def empty(num_data_fields: int, num_geo_fields: int) -> "ReaderData":
         """
         Create an empty ReaderData object
 
@@ -194,8 +194,8 @@ class ReaderData:
         # TODO: it should also get the right shapes for data and geoinfos
         return ReaderData(
             coords=np.zeros((0, 2), dtype=np.float32),
-            geoinfos=np.zeros((0, 0), dtype=np.float32),
-            data=np.zeros((0, 0), dtype=np.float32),
+            geoinfos=np.zeros((0, num_geo_fields), dtype=np.float32),
+            data=np.zeros((0, num_data_fields), dtype=np.float32),
             datetimes=np.zeros((0,), dtype=np.datetime64),
         )
 
@@ -544,6 +544,66 @@ class DataReaderBase(metaclass=ABCMeta):
         return data
 
 
+class DataReaderTimestep(DataReaderBase):
+    """
+    An abstract class for data readers that provide data at fixed time intervals.
+
+    On top of all the fields to be defined in DataReaderBase, they must define the following fields:
+
+    """
+
+    # The start time of the dataset.
+    data_start_time: NPDT64
+    # The end time of the dataset (possibly none).
+    data_end_time: NPDT64 | None = None
+    # The period of the dataset, i.e. the time interval between two consecutive samples.
+    # It is also called 'frequency' in Anemoi.
+    period: NPTDel64
+    # The subsampling rate, i.e. the number of samples to skip between two consecutive samples.
+    window_subsampling_rate: int | None = None
+
+    def __init__(
+        self,
+        tw_handler: TimeWindowHandler,
+        data_start_time: NPDT64 | None,
+        data_end_time: NPDT64 | None,
+        period: NPTDel64,
+        window_subsampling_rate: int | None,
+    ) -> None:
+        super().__init__(tw_handler)
+        self.data_start_time = data_start_time or tw_handler.t_start
+        self.data_end_time = data_end_time
+        self.period = period
+        self.window_subsampling_rate = window_subsampling_rate
+
+        assert window_subsampling_rate is None or window_subsampling_rate > 0, (
+            window_subsampling_rate
+        )
+
+    def _get_dataset_idxs(self, idx: TIndex) -> NDArray[np.int32]:
+        """
+        Get dataset indexes for a given time window index.
+
+        Parameters
+        ----------
+        idx : TIndex
+            Index of the time window.
+
+        Returns
+        -------
+        NDArray[np.int32]
+            Array of dataset indexes corresponding to the time window.
+        """
+        return get_dataset_indexes_periodic(
+            self.data_start_time,
+            self.data_end_time,
+            self.period,
+            idx,
+            self.time_window_handler,
+            self.window_subsampling_rate,
+        )
+
+
 # to avoid rounding issues
 # The basic time precision is 1 second.
 t_epsilon = np.timedelta64(1, "s")
@@ -555,9 +615,12 @@ def get_dataset_indexes_periodic(
     period: NPTDel64,
     idx: TIndex,
     tw_handler: TimeWindowHandler,
+    subsampling_rate: int | None,
 ) -> NDArray[np.int32]:
     """
     Get dataset indexes for a given time window index, when the dataset is periodic.
+
+    Keeping this function separate for testing purposes.
 
     Parameters
     ----------
@@ -570,6 +633,8 @@ def get_dataset_indexes_periodic(
         Index of the time window.
     tw_handler : TimeWindowHandler
         Handler for time windows.
+    subsampling_rate : int | None
+        Subsampling rate. If not or set to 1, then no subsampling is applied.
 
     Returns
     -------
@@ -578,6 +643,7 @@ def get_dataset_indexes_periodic(
 
     dataset_start_time and period must be aligned with the time window handler.
     """
+    # Function is separated from the class to allow testing without instantiating the class.
     dtr = tw_handler.window(idx)
     # If there is no overlap with the dataset, return empty array
     # TODO: boundary conditions
@@ -593,6 +659,10 @@ def get_dataset_indexes_periodic(
     if (delta_t_start % period) > np.timedelta64(0, "s"):
         start_didx += 1
 
-    end_didx = start_didx + (dtr.end - dtr.start - t_epsilon) / period
+    end_didx = start_didx + int((dtr.end - dtr.start - t_epsilon) / period)
+    if subsampling_rate is None:
+        subsampling_rate = 1
+    assert subsampling_rate > 0, ("Subsampling rate must be positive", subsampling_rate)
+
     # TODO: add subsampling (but not implemented yet in the code anyway)
-    return np.arange(start_didx, end_didx + 1, dtype=np.int32)
+    return np.arange(start_didx, end_didx + 1, step=subsampling_rate, dtype=np.int32)

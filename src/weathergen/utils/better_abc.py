@@ -2,6 +2,9 @@
 Coding recipe for abstract fields in Python.
 
 Based on https://stackoverflow.com/questions/23831510/abstract-attribute-not-property
+
+It is necessary because of our coding style and python's limited support for abstract fields.
+This code is a workaround to allow defining abstract attributes in classes that use the `ABCMeta` metaclass.
 """
 
 from abc import ABCMeta as NativeABCMeta

@@ -13,22 +13,22 @@ from typing import override
 
 import anemoi.datasets as anemoi_datasets
 import numpy as np
+from anemoi.datasets.data.dataset import Dataset
 from numpy.typing import NDArray
 
 from weathergen.datasets.data_reader_base import (
-    DataReaderBase,
+    DataReaderTimestep,
     # DataReaderTimestep,
     ReaderData,
     TimeWindowHandler,
     TIndex,
     check_reader_data,
-    get_dataset_indexes_periodic,
 )
 
 _logger = logging.getLogger(__name__)
 
 
-class DataReaderAnemoi(DataReaderBase):
+class DataReaderAnemoi(DataReaderTimestep):
     "Wrapper for Anemoi datasets"
 
     def __init__(
@@ -52,19 +52,36 @@ class DataReaderAnemoi(DataReaderBase):
         None
         """
 
-        super().__init__(tw_handler)
-
         # open  dataset to peak that it is compatible with requested parameters
-        ds = anemoi_datasets.open_dataset(filename)
+        ds0: Dataset = anemoi_datasets.open_dataset(filename)
+        kwargs = {}
+        if "frequency" in stream_info:
+            kwargs["frequency"] = str(stream_info["frequency"]) + "h"
+        ds: Dataset = anemoi_datasets.open_dataset(
+            ds0, **kwargs, start=tw_handler.t_start, end=tw_handler.t_end
+        )
 
-        # check that start and end time are within the dataset time range
-        ds_dt_start = ds.dates[0]
-        ds_dt_end = ds.dates[-1]
-        assert ds_dt_start is not None and ds_dt_end is not None, (ds_dt_start, ds_dt_end)
-        # assert ds_dt_start <= tw_handler.t_start, (ds_dt_start, tw_handler)
-        # assert ds_dt_end >= tw_handler.t_end, (ds_dt_end, tw_handler)
-
-        # open dataset
+        period = np.timedelta64(ds.frequency)
+        data_start_time = ds.dates[0]
+        data_end_time = ds.dates[-1]
+        assert data_start_time is not None and data_end_time is not None, (
+            data_start_time,
+            data_end_time,
+        )
+        super().__init__(
+            tw_handler,
+            data_start_time,
+            data_end_time,
+            period,
+            window_subsampling_rate=None,
+        )
+        # If there is no overlap with the time range, no need to keep the dataset.
+        if tw_handler.t_start >= data_end_time or tw_handler.t_end <= data_start_time:
+            self.ds = None
+            self.len = 0
+        else:
+            self.ds = ds
+            self.len = len(ds)
 
         # caches lats and lons
         self.latitudes = _clip_lat(ds.latitudes)
@@ -76,7 +93,7 @@ class DataReaderAnemoi(DataReaderBase):
         self.source_idx = np.sort(
             [
                 ds.name_to_index[k]
-                for i, (k, v) in enumerate(ds.typed_variables.items())
+                for i, (k, v) in enumerate(ds0.typed_variables.items())
                 if (
                     not v.is_computed_forcing
                     and not v.is_constant_in_time
@@ -92,7 +109,7 @@ class DataReaderAnemoi(DataReaderBase):
         self.target_idx = np.sort(
             [
                 ds.name_to_index[k]
-                for (k, v) in ds.typed_variables.items()
+                for (k, v) in ds0.typed_variables.items()  # Only in ds0, not in Subset?
                 if (
                     not v.is_computed_forcing
                     and not v.is_constant_in_time
@@ -116,22 +133,6 @@ class DataReaderAnemoi(DataReaderBase):
         }
         self.mean = ds.statistics["mean"]
         self.stdev = ds.statistics["stdev"]
-
-        # set dataset to None when no overlap with time range
-        if tw_handler.t_start >= ds_dt_end or tw_handler.t_end <= ds_dt_start:
-            self.ds = None
-        else:
-            # TODO: specify frequency more flexibly and with finer granularity if necessary
-            f = str(stream_info["frequency"]) + "h" if "frequency" in stream_info else ds.frequency
-            self.ds = anemoi_datasets.open_dataset(
-                ds, frequency=f, start=tw_handler.t_start, end=tw_handler.t_end
-            )
-            # self.dates = self.ds.dates
-            self.len = len(self.ds)
-            # self.ds_start_time = self.ds.start_date
-            # self.ds_end_time = self.ds.end_date
-            # self.sub_sampling_per_window = 1
-            # self.frequency = self.ds.frequency
 
     @override
     def length(self) -> int:
@@ -157,20 +158,16 @@ class DataReaderAnemoi(DataReaderBase):
         # rdata = ReaderData()
 
         # TODO: we will always assume it return a range -> no need to build array
-        t_idxs = get_dataset_indexes_periodic(
-            self.ds.start_date,
-            self.ds.end_date,
-            np.timedelta64(self.ds.frequency),
-            idx,
-            self.time_window_handler,
-        )
+        t_idxs = self._get_dataset_idxs(idx)
         # TODO: this would not work with sub-sampling
         didx_start = t_idxs[0]
         # End is inclusive
         didx_end = t_idxs[-1] + 1
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
-            return ReaderData.empty()
+            return ReaderData.empty(
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_channels)
+            )
 
         # extract number of time steps and collapse ensemble dimension
         # ds is a wrapper around zarr with get_coordinate_selection not being exposed since
