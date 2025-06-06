@@ -18,6 +18,7 @@ from weathergen.datasets.anemoi_dataset import AnemoiDataset
 from weathergen.datasets.atmorep_dataset import AtmorepDataset
 from weathergen.datasets.fesom_dataset import FesomDataset
 from weathergen.datasets.obs_dataset import ObsDataset
+from weathergen.datasets.radklim_dataset import RadklimDataset
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
@@ -90,6 +91,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     case "atmorep":
                         dataset = AtmorepDataset
                         datapath = cf.data_path_anemoi
+                    case "radklim":
+                        dataset = RadklimDataset
+                        datapath = cf.data_path_obs
+                        kwargs["normalization_file"] = stream_info.get("normalization_file")
                     case _:
                         msg = f"Unsupported stream type {stream_info['type']}"
                         raise ValueError(msg)

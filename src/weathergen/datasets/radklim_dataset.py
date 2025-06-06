@@ -1,385 +1,468 @@
-#!/usr/bin/env python
-
 import json
-import re
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
+import torch
 import xarray as xr
 
 
 class RadklimDataset:
     """
-    A Dataset class for loading and processing monthly RADKLIM NetCDF files.
+    Data loader to read the monthly netCDF-files of the RADKLIM dataset.
 
-    This dataloader is designed to work with the DWD RADKLIM radar-based
-    precipitation climatology data, specifically the monthly aggregated files
-    typically named like 'RW_YYYY.VVV_YYYYMM.nc' (e.g., 'RW_2017.002_201210.nc').
-    It loads specified time windows of precipitation data ('RR' variable),
-    normalizes it using provided statistics, and returns NumPy arrays.
-
-    Attributes:
-        data_dir (Path): The root directory containing year subdirectories
-                         which in turn hold the monthly NetCDF files.
-        stats_json_path (Path): Path to the JSON file containing normalization
-                                statistics (mean and std for the 'RR' variable).
-        start_datetime (datetime): The beginning of the overall period from which
-                                   to draw samples.
-        end_datetime (datetime): The end of the overall period (exclusive for the
-                                 end of the last possible sample) from which
-                                 to draw samples.
-        sample_length_hours (int): The duration of each sample in hours.
-        sample_step_hours (int): The time step between the start of consecutive
-                                 samples, in hours.
-        verbose (bool): If True, enables print statements for debugging.
-        xr_parallel (bool): If True, enables parallel I/O in xarray.open_mfdataset
-                            (requires a Dask cluster setup).
+    Parameters
+    ----------
+    start_time : int or str
+        Inclusive start timestamp in YYYYMMDDHHMM format.
+    end_time : int or str
+        Inclusive end timestamp in YYYYMMDDHHMM format.
+    len_hrs : int
+        Window length in hours.
+    step_hrs : int
+        Step between windows in hours (not used!).
+    filename : str or Path
+        Root directory with NetCDF files organized by year/month.
+    normalization_file : str or Path
+        JSON file with "mean" and "std" lists matching sorted variables.
+    fname_patt : str
+        Filename prefix (default "RW_2017.002_").
     """
 
     def __init__(
         self,
-        data_dir: Path,
-        stats_json: Path,
-        start_datetime: datetime,
-        end_datetime: datetime,
-        sample_length_hours: int,
-        sample_step_hours: int | None = None,
-        primary_file_pattern: str = "RW_*.nc",  # Pattern to identify main Radklim files
-        verbose: bool = False,
-        xr_parallel: bool = False,
+        start_time: int | str,
+        end_time: int | str,
+        len_hrs: int,
+        step_hrs: int,
+        filename: str | Path,
+        normalization_file: str | Path,
+        fname_patt: str = "RW_2017.002_",  # file prefix
     ):
-        """
-        Initializes the RadklimDataset.
-
-        Args:
-            data_dir (Path): Root directory for Radklim data (e.g., containing year folders).
-            stats_json (Path): Path to the JSON file with 'RR' mean/std statistics.
-            start_datetime (datetime): Start datetime for the dataset period.
-            end_datetime (datetime): End datetime for the dataset period.
-            sample_length_hours (int): Length of each data sample in hours.
-            sample_step_hours (Optional[int]): Step between samples in hours.
-                                               Defaults to `sample_length_hours`.
-            primary_file_pattern (str): Glob pattern to identify the primary Radklim files
-                                        (e.g., "RW_*.nc" or "RW_2017.002_*.nc").
-                                        This helps filter out other NetCDF files if present.
-            verbose (bool): Enables verbose logging for debugging.
-            xr_parallel (bool): Enables parallel file opening in xarray.
-        """
-        self.data_dir = Path(data_dir)
-        self.stats_json_path = Path(stats_json)
-        self.start_datetime = start_datetime
-        self.end_datetime = end_datetime  # This is the exclusive end for data to be included
-        self.sample_length_hours = sample_length_hours
-        self.sample_step_hours = sample_step_hours or sample_length_hours
-        self.primary_file_pattern = primary_file_pattern
-        self.verbose = verbose
-        self.xr_parallel = xr_parallel
-
-        if not self.data_dir.is_dir():
-            raise NotADirectoryError(f"Data directory not found: {self.data_dir}")
-        if not self.stats_json_path.is_file():
-            raise FileNotFoundError(f"Statistics JSON file not found: {self.stats_json_path}")
-        if self.sample_length_hours <= 0:
-            raise ValueError("sample_length_hours must be positive.")
-        if self.sample_step_hours <= 0:
-            raise ValueError("sample_step_hours must be positive.")
-
-        self._load_normalization_stats()
-        self._select_and_load_files()
-        self._prepare_time_axis_and_samples()
-
-    def _load_normalization_stats(self) -> None:
-        """Loads mean and standard deviation for 'RR' from the stats JSON file."""
-        if self.verbose:
-            print(f"[RadklimDataset] Loading stats from: {self.stats_json_path}")
-        with open(self.stats_json_path) as f:
-            stats_content = json.load(f)
-
-        if "RR" not in stats_content:
+        # Parse parameters
+        self.start_time = pd.to_datetime(str(start_time), format="%Y%m%d%H%M")
+        self.end_time = pd.to_datetime(str(end_time), format="%Y%m%d%H%M")
+        self.len_hrs = len_hrs
+        self.step_hrs = step_hrs
+        if not self.step_hrs == self.len_hrs:
             raise ValueError(
-                "Statistics for 'RR' variable not found in stats JSON. Expected a top-level 'RR' key."
+                f"Parameters step_hrs {step_hrs} and len_hrs {len_hrs} must be the same."
             )
-        if "mean" not in stats_content["RR"] or "std" not in stats_content["RR"]:
-            raise ValueError("Stats JSON for 'RR' must contain 'mean' and 'std' sub-keys.")
+        self.data_path = Path(
+            filename
+        )  # rename to path (filename is ekept for consistency with other dataloaders)
+        self.fname_patt = fname_patt
 
-        self.rr_mean = float(stats_content["RR"]["mean"])
-        self.rr_std = float(stats_content["RR"]["std"])
-
-        if self.rr_std == 0:
-            if self.verbose:
-                print(
-                    "[RadklimDataset] Warning: Standard deviation from stats is 0. "
-                    "Using std=1e-6 to prevent division by zero errors."
-                )
-            self.rr_std = 1e-6
-        if self.verbose:
-            print(f"[RadklimDataset] Stats loaded: RR mean={self.rr_mean}, RR std={self.rr_std}")
-
-    def _collect_relevant_files(self) -> list[str]:
-        """
-        Collects paths to NetCDF files within the data directory that match
-        the primary file pattern and whose monthly period overlaps with the
-        requested [start_datetime, end_datetime] range.
-        Assumes filenames contain YYYYMM (e.g., '..._201210.nc').
-        """
-        all_matching_files = list(self.data_dir.rglob(self.primary_file_pattern))
-        if self.verbose:
-            print(
-                f"[RadklimDataset] Found {len(all_matching_files)} files matching pattern '{self.primary_file_pattern}' "
-                f"in {self.data_dir} and subdirectories."
-            )
-
-        valid_files_for_period = []
-        # Regex to extract YYYYMM from typical Radklim filenames
-        # e.g., RW_2017.002_201210.nc -> finds 2012 and 10
-        date_pattern = re.compile(r"(\d{4})(\d{2})(?=(?:_|\.)nc)")
-
-        for file_path in sorted(all_matching_files):
-            file_name = file_path.name
-            match = date_pattern.search(file_name)
-
-            if not match:
-                if self.verbose:
-                    print(
-                        f"[RadklimDataset] Skipping '{file_name}': could not parse YYYYMM from filename."
-                    )
-                continue
-
-            year_str, month_str = match.group(1), match.group(2)
-            try:
-                file_year = int(year_str)
-                file_month = int(month_str)
-
-                file_month_start = datetime(file_year, file_month, 1)
-                if file_month == 12:
-                    file_month_end = datetime(file_year + 1, 1, 1) - timedelta(microseconds=1)
-                else:
-                    file_month_end = datetime(file_year, file_month + 1, 1) - timedelta(
-                        microseconds=1
-                    )
-            except ValueError:
-                if self.verbose:
-                    print(
-                        f"[RadklimDataset] Invalid year/month '{year_str}{month_str}' in '{file_name}'."
-                    )
-                continue
-
-            # Check if the file's month overlaps with the requested datetime range
-            if file_month_start <= self.end_datetime and file_month_end >= self.start_datetime:
-                valid_files_for_period.append(str(file_path))
-                if self.verbose:
-                    print(
-                        f"[RadklimDataset] Including '{file_name}' (covers {file_month_start.date()} to {file_month_end.date()})"
-                    )
-            elif self.verbose:
-                print(
-                    f"[RadklimDataset] Excluding '{file_name}': its month does not overlap with requested period."
-                )
-
-        if self.verbose and not valid_files_for_period and all_matching_files:
-            print(
-                f"[RadklimDataset] All {len(all_matching_files)} files matching pattern were outside the date range."
-            )
-
-        return valid_files_for_period
-
-    def _select_and_load_files(self) -> None:
-        """
-        Selects relevant files and opens them as a single xarray Dataset,
-        then slices it to the precise start_datetime and end_datetime.
-        """
-        self.selected_files = self._collect_relevant_files()
-
-        if not self.selected_files:
+        # get list of required files
+        self.file_list = self._get_file_list()
+        if not self.file_list:
             raise FileNotFoundError(
-                f"No suitable NetCDF files found in '{self.data_dir}' (matching "
-                f"'{self.primary_file_pattern}') for the period "
-                f"[{self.start_datetime.strftime('%Y-%m-%d')} to "
-                f"{self.end_datetime.strftime('%Y-%m-%d')}]."
-            )
-        if self.verbose:
-            print(
-                f"[RadklimDataset] Opening mfdataset with {len(self.selected_files)} selected files..."
+                f"No files matching pattern '{self.fname_patt}' in {self.data_path}"
+                f" between {self.start_time} and {self.end_time}."
             )
 
-        try:
-            self.dataset = xr.open_mfdataset(
-                self.selected_files,
-                combine="by_coords",
-                parallel=self.xr_parallel,
-                engine="netcdf4",
-            )
-        except Exception as e:
-            if self.verbose:
-                print(
-                    f"[RadklimDataset] Error during xr.open_mfdataset with files: {self.selected_files[:3]}..."
-                )
-            raise OSError(f"Failed to open NetCDF files with xarray: {e}") from e
+        # Retrieve metadata
+        self.variables = ["RR"]  # TODO: allow support for YW product
 
-        if self.verbose:
-            print(
-                f"[RadklimDataset] Raw mfdataset time range: {self.dataset.time.min().values} to {self.dataset.time.max().values}"
-            )
+        # Read normalization data
+        # If normaliation file does not exist, look for it under the data path
+        normalization_file = Path(normalization_file)
+        if not normalization_file.is_file():
+            normalization_file = self.data_path / normalization_file
 
-        # Slice to the exact requested period
-        # xarray's slice is inclusive of start and end if exact matches are found in the coordinates.
-        # If not, it behaves like standard Python slicing for sorted coordinates.
-        self.dataset = self.dataset.sel(time=slice(self.start_datetime, self.end_datetime))
-        self.dataset = self.dataset.sortby("time")  # Crucial for consistent data
+        if not normalization_file.is_file():
+            raise FileNotFoundError(f"Normalization file '{normalization_file}' not found.")
+        with open(normalization_file) as f:
+            stats = json.load(f)
 
-        if self.verbose:
-            if self.dataset.time.size > 0:
-                print(
-                    f"[RadklimDataset] Dataset sliced to time range: "
-                    f"{self.dataset.time.min().values} to {self.dataset.time.max().values}"
-                )
-            else:
-                print(
-                    "[RadklimDataset] Warning: No data remains after slicing to the precise requested time range. "
-                    "Dataset will be empty."
-                )
+        means = stats.get("mean")
+        stds = stats.get("std")
+        if not (isinstance(means, list) and isinstance(stds, list)):
+            raise ValueError("Normalization JSON must have 'mean' and 'std' lists.")
 
-        if "RR" not in self.dataset:
+        if len(means) != len(self.variables) or len(stds) != len(self.variables):
             raise ValueError(
-                "'RR' variable not found in the dataset after time selection and loading."
+                f"Stats length {len(means)}/{len(stds)} != num variables {len(self.variables)}"
             )
-        self.rr_data_array = self.dataset["RR"]
+        self.mean = np.array(means, dtype=np.float32)
+        self.std = np.array(stds, dtype=np.float32)
 
-    def _prepare_time_axis_and_samples(self) -> None:
-        """
-        Extracts the time axis and builds an index of valid sample start points.
-        """
-        if self.dataset.time.size == 0:
-            if self.verbose:
-                print(
-                    "[RadklimDataset] No time steps in dataset; sample generation will be skipped."
-                )
-            self.available_times_np = np.array([], dtype="datetime64[ns]")
-            self.sample_start_indices = []
-            return
-
-        self.available_times_np = self.dataset["time"].values  # NumPy array of datetime64[ns]
-
-        self.sample_start_indices = []
-        current_window_start_dt = self.start_datetime
-
-        # Iterate creating potential window start times
-        while current_window_start_dt + timedelta(
-            hours=self.sample_length_hours
-        ) <= self.end_datetime + timedelta(microseconds=1):
-            # Find the index in self.available_times_np for the current_window_start_dt
-            # This is the actual start of a window in our loaded data
-            actual_data_start_idx = np.searchsorted(
-                self.available_times_np, np.datetime64(current_window_start_dt), side="left"
-            )
-
-            # Ensure this found index is a valid start for a full sample
-            if actual_data_start_idx + self.sample_length_hours <= self.available_times_np.size:
-                # The last timestamp of this potential sample
-                sample_actual_end_time = self.available_times_np[
-                    actual_data_start_idx + self.sample_length_hours - 1
-                ]
-
-                # Ensure this sample's actual end time doesn't exceed the overall end_datetime
-                if np.datetime64(sample_actual_end_time) <= np.datetime64(self.end_datetime):
-                    self.sample_start_indices.append(actual_data_start_idx)
-
-            current_window_start_dt += timedelta(hours=self.sample_step_hours)
-
-        if self.verbose:
-            print(
-                f"[RadklimDataset] Generated {len(self.sample_start_indices)} sample start indices."
-            )
-
-    def __len__(self) -> int:
-        """Returns the total number of available samples."""
-        return len(self.sample_start_indices)
-
-    def __getitem__(self, idx: int) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Retrieves, normalizes, and returns a data sample and its corresponding timestamps.
-
-        Args:
-            idx (int): The index of the sample to retrieve.
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray]:
-                - data_sample (np.ndarray): Normalized precipitation data for the sample,
-                  with shape (sample_length_hours, 1, height, width) and dtype float32.
-                  The channel dimension is added.
-                - time_stamps (np.ndarray): Timestamps for the sample,
-                  with shape (sample_length_hours,) and dtype datetime64[ns].
-
-        Raises:
-            IndexError: If the index `idx` is out of bounds.
-        """
-        if not 0 <= idx < len(self.sample_start_indices):
-            raise IndexError(
-                f"Sample index {idx} is out of range for {len(self.sample_start_indices)} samples."
-            )
-
-        start_idx_in_times_axis = self.sample_start_indices[idx]
-        end_idx_in_times_axis = start_idx_in_times_axis + self.sample_length_hours
-
-        # Extract data for the window using integer-based slicing
-        # .load().data ensures that if rr_data_array is a Dask array, it's computed and converted to NumPy
-        data_slice_np = (
-            self.rr_data_array[start_idx_in_times_axis:end_idx_in_times_axis]
-            .load()
-            .data.astype(np.float32)
+        ds = xr.open_mfdataset(
+            self.file_list,
+            combine="nested",
+            concat_dim="time",
+            engine="netcdf4",
+            parallel=False,
+            data_vars="minimal",
+            coords="minimal",
+            compat="override",
         )
 
-        # Add a channel dimension for model compatibility: (T, Y, X) -> (T, 1, Y, X)
-        data_slice_np = data_slice_np[:, np.newaxis, :, :]
+        # get relevant metadata from dataset
+        # time-coordinate
+        times_all = ds["time"].load()
 
-        # Normalize the data
-        normalized_data = (data_slice_np - self.rr_mean) / self.rr_std
+        # get start and end indices for slicing of dataset
+        self.start_idx = int(np.searchsorted(times_all, np.datetime64(self.start_time)))
+        self.end_idx = int(np.searchsorted(times_all, np.datetime64(self.end_time), side="right"))
 
-        time_stamps_for_sample = self.available_times_np[
-            start_idx_in_times_axis:end_idx_in_times_axis
+        times_req = times_all.isel({"time": slice(self.start_idx, self.end_idx)})
+        dt = times_req.diff(dim="time")
+        assert len(np.unique(dt)) == 1, "Inconsistent time step length in dataset."
+        self.times = times_req.values
+
+        self.num_steps_per_window = int((len_hrs * 3600) / (dt[0] / np.timedelta64(1, "s")))
+
+        # handle spatial coordinates
+        y1d = ds["y"].values.astype(np.float32)
+        x1d = ds["x"].values.astype(np.float32)
+        # 2D geographic coords
+        lat2d = ds["lat"].values.astype(np.float32)
+        lon2d = ds["lon"].values.astype(np.float32)
+
+        self.ny, self.nx = len(y1d), len(x1d)
+        if lat2d.shape != (self.ny, self.nx) or lon2d.shape != (self.ny, self.nx):
+            raise ValueError("lat/lon shape mismatch with y/x dims.")
+        # clip/wrap
+        self.latitudes = 2 * np.clip(lat2d, -90, 90) - lat2d
+        self.longitudes = (lon2d + 180) % 360 - 180
+        self.latlon_sh = np.shape(self.latitudes)
+
+        ds = ds[self.variables].isel({"time": slice(self.start_idx, self.end_idx)})
+
+        # re-chunk the data for efficient data retrieval
+        self.ds = ds.chunk({"time": self.num_steps_per_window * 2, "y": -1, "x": -1})
+
+    def __len__(self) -> int:
+        """
+        Length of dataset
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        length of dataset
+        """
+        return len(self.ds["time"]) - self.num_steps_per_window
+
+    def _get(self, idx: int) -> tuple:
+        """
+        Get data for window
+
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+
+        Returns
+        -------
+        data (coords, geoinfos, data, datetimes)
+        """
+        if idx < 0 or idx >= len(self):
+            raise IndexError(f"Index {idx} out of range (0..{len(self) - 1}).")
+        # slice required data
+        ds_now = self.ds.isel(
+            {"time": slice(idx, idx + self.num_steps_per_window)}
+        )  # shape (len_hrs, nvar, y, x)
+        arr = ds_now.to_array("var").load()
+        arr = arr.transpose("time", "y", "x", "var")
+        nt, ny, nx, nc = arr.shape
+        arr = arr.values.reshape(-1, nc)
+
+        # get coords
+        lats_data, lons_data = (
+            np.broadcast_to(self.latitudes, (nt, *self.latlon_sh)),
+            np.broadcast_to(self.longitudes, (nt, *self.latlon_sh)),
+        )
+        lats_data, lons_data = lats_data.reshape(-1), lons_data.reshape(-1)
+        latlon = np.column_stack((lats_data, lons_data))
+
+        tda = ds_now["time"].expand_dims({"y": ny, "x": nx}, axis=[1, 2]).data.reshape(-1)
+
+        # filter for Nan
+        mask = np.any(np.isnan(arr), axis=1)
+        idx_valid = np.where(~mask)[0]
+
+        latlon = latlon[idx_valid, :]
+        arr = arr[idx_valid, :]
+        tda = tda[idx_valid]
+
+        # placeholder for geoinfos
+        geoinfos = np.zeros((arr.shape[0], 0), dtype=np.float32)
+
+        return latlon, geoinfos, arr, tda
+
+    def get_source(self, idx: int) -> tuple:
+        """
+        Get source data for idx
+
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+
+        Returns
+        -------
+        source data (coords, geoinfos, data, datetimes)
+        """
+        return self._get(idx)
+
+    def get_target(self, idx: int) -> tuple:
+        """
+        Get target data for idx
+
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+
+        Returns
+        -------
+        target data (coords, geoinfos, data, datetimes)
+        """
+        return self._get(idx)
+
+    def __getitem__(self, idx: int) -> tuple:
+        """
+        Get data for idx
+
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+
+        Returns
+        -------
+        data (coords, geoinfos, data, datetimes)
+        """
+        return self._get(idx)
+
+    def get_source_num_channels(self) -> int:
+        """
+        Get number of source channels
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        int
+        number of source channels
+        """
+        return len(self.variables)
+
+    def get_target_num_channels(self) -> int:
+        """
+        Get number of target channels
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        int
+        number of target channels
+        """
+        return len(self.variables)
+
+    def get_coords_size(self) -> int:
+        """
+        Get size of coords
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        size of coords
+        """
+        return 2
+
+    def get_geoinfo_size(self) -> int:
+        """
+        Get size of geoinfos
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        size of geoinfos
+        """
+        return 0
+
+    def normalize_coords(self, coords: torch.tensor) -> torch.tensor:
+        """
+        Normalize coordinates
+
+        Parameters
+        ----------
+        coords :
+            coordinates to be normalized
+
+        Returns
+        -------
+        Normalized coordinates
+        """
+        coords[..., 0] = np.sin(np.deg2rad(coords[..., 0]))
+        coords[..., 1] = np.sin(0.5 * np.deg2rad(coords[..., 1]))
+
+        return coords
+
+    def normalize_geoinfos(self, geoinfos: torch.tensor) -> torch.tensor:
+        """
+        Normalize geoinfos
+
+        Parameters
+        ----------
+        geoinfos :
+            geoinfos to be normalized
+
+        Returns
+        -------
+        Normalized geoinfo
+        """
+
+        assert geoinfos.shape[-1] == 0, "incorrect number of geoinfo channels"
+        return geoinfos
+
+    def normalize_source_channels(self, data: torch.tensor) -> torch.tensor:
+        """
+        Normalize source channels
+
+        Parameters
+        ----------
+        data :
+            data to be normalized
+
+        Returns
+        -------
+        Normalized data
+        """
+        return (data - self.mean) / self.std
+
+    def normalize_target_channels(self, data: torch.tensor) -> torch.tensor:
+        """
+        Normalize target channels
+
+        Parameters
+        ----------
+        data :
+            data to be normalized
+
+        Returns
+        -------
+        Normalized data
+        """
+        return (data - self.mean) / self.std
+
+    def denormalize_source_channels(self, data: torch.tensor) -> torch.tensor:
+        """
+        Denormalize source channels
+
+        Parameters
+        ----------
+        data :
+            data to be denormalized
+
+        Returns
+        -------
+        Denormalized data
+        """
+        return data * self.std + self.mean
+
+    def denormalize_target_channels(self, data: torch.tensor) -> torch.tensor:
+        """
+        Denormalize target channels
+
+        Parameters
+        ----------
+        data :
+            data to be denormalized (target or pred)
+
+        Returns
+        -------
+        Denormalized data
+        """
+        return data * self.std + self.mean
+
+    def time_window(self, idx: int):
+        """
+        Temporal window corresponding to index
+
+        Parameters
+        ----------
+        idx :
+            index of temporal window
+
+        Returns
+        -------
+            start and end data of temporal window
+        """
+        if not self.ds:
+            return (np.array([], dtype=np.datetime64), np.array([], dtype=np.datetime64))
+
+        return (self.ds.dates[idx], self.ds.dates[idx + self.num_steps_per_window])
+
+    def _get_file_list(self):
+        """
+        Get list of files matching the pattern in the data path
+        between start and end time
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        list of files matching the pattern
+        """
+        # Generate months start sequence
+        end = self._last_day_of_month(self.end_time)
+        months = pd.date_range(self.start_time.strftime("%Y-%m-01"), end, freq="ME")
+        files = [
+            self.data_path / m.strftime("%Y") / f"{self.fname_patt}{m.strftime('%Y%m')}.nc"
+            for m in months
+            if (
+                self.data_path / m.strftime("%Y") / f"{self.fname_patt}{m.strftime('%Y%m')}.nc"
+            ).is_file()
         ]
+        return files
 
-        return normalized_data, time_stamps_for_sample
-
-    def denormalize(self, normalized_data: np.ndarray) -> np.ndarray:
+    def close(self):
         """
-        Reverses the normalization process on a data sample.
+        Close the dataset.
 
-        Args:
-            normalized_data (np.ndarray): The normalized data sample, typically
-                                          output from __getitem__.
+        Parameters
+        ----------
+        None
 
-        Returns:
-            np.ndarray: The data sample restored to its original scale.
+        Returns
+        -------
+        None
         """
-        return (normalized_data * self.rr_std) + self.rr_mean
+        self.ds.close()
 
-    def get_sample_time_window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
+    @staticmethod
+    def _last_day_of_month(any_day: pd.Timestamp) -> pd.Timestamp:
         """
-        Returns the actual start and end np.datetime64 timestamps for a given sample index.
+        TODO: Move to utils
+        Returns the last day of a month
 
-        Args:
-            idx (int): The index of the sample.
+        Parameters
+        ----------
+        any_day : datetime object with any day of the month
+            any day of the month
 
-        Returns:
-            Tuple[np.datetime64, np.datetime64]: A tuple containing the start and end
-                                                 timestamps of the sample.
-
-        Raises:
-            IndexError: If the index `idx` is out of bounds.
+        Returns
+        -------
+            datetime object of lat day of month
         """
-        if not 0 <= idx < len(self.sample_start_indices):
-            raise IndexError(f"Sample index {idx} is out of range.")
-
-        start_idx_in_times_axis = self.sample_start_indices[idx]
-        actual_start_time = self.available_times_np[start_idx_in_times_axis]
-        actual_end_time = self.available_times_np[
-            start_idx_in_times_axis + self.sample_length_hours - 1
-        ]
-
-        return actual_start_time, actual_end_time
-
-    def __del__(self):
-        """Ensures dataset is closed when the object is deleted."""
-        self.close()
+        next_month = any_day.replace(day=28) + pd.Timedelta(days=4)  # this will never fail
+        return next_month - pd.Timedelta(days=next_month.day)
