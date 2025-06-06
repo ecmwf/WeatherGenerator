@@ -7,15 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import argparse
 import pdb
 import sys
 import time
 import traceback
-from pathlib import Path
 
-import pandas as pd
-
+import weathergen.utils.cli as cli
 import weathergen.utils.config as config
 from weathergen.train.trainer import Trainer
 from weathergen.utils.logger import init_loggers
@@ -33,189 +30,93 @@ def evaluate_from_args(argl: list[str]):
 
     When running integration tests, the arguments are directly provided.
     """
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--run_id",
-        type=str,
-        required=True,
-        help="Run/model id of pretrained WeatherGenerator model.",
-    )
-    parser.add_argument(
-        "--start_date",
-        "-start",
-        type=str,
-        required=False,
-        default="2022-10-01",
-        help="Start date for evaluation. Format must be parsable with pd.to_datetime.",
-    )
-    parser.add_argument(
-        "--end_date",
-        "-end",
-        type=str,
-        required=False,
-        default="2022-12-01",
-        help="End date for evaluation. Format must be parsable with pd.to_datetime.",
-    )
-    parser.add_argument(
-        "--epoch",
-        type=int,
-        default=None,
-        help="Epoch of pretrained WeatherGenerator model used for evaluation (Default None corresponds to the last checkpoint).",
-    )
-    parser.add_argument(
-        "--forecast_steps",
-        type=int,
-        default=None,
-        help="Number of forecast steps for evaluation. Uses attribute from config when None is set.",
-    )
-    parser.add_argument(
-        "--samples", type=int, default=10000000, help="Number of evaluation samples."
-    )
-    parser.add_argument(
-        "--shuffle", type=bool, default=False, help="Shuffle samples from evaluation."
-    )
-    parser.add_argument(
-        "--save_samples", type=bool, default=True, help="Save samples from evaluation."
-    )
-    parser.add_argument(
-        "--analysis_streams_output",
-        type=list,
-        default=["ERA5"],
-        help="Analysis output streams during evaluation.",
-    )
-    parser.add_argument(
-        "--private_config",
-        type=Path,
-        default=None,
-        help="Path to private configuration file for paths.",
-    )
-    parser.add_argument(
-        "-n",
-        "--same_run_id",
-        required=False,
-        dest="run_id_new",
-        action="store_false",
-        help="store evaluation results in the same folder as run_id",
-    )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help="Optional experiment specfic configuration file",
-    )
-
+    parser = cli.get_evaluate_parser()
     args = parser.parse_args(argl)
 
-    # TODO: move somewhere else
     init_loggers()
 
-    cf = config.load_config(args.private_config, args.run_id, args.epoch, args.config)
+    evaluate_overwrite = dict(
+        shuffle=False,
+        start_date_val=args.start_date,
+        end_date_val=args.end_date,
+        samples_per_validation=args.samples,
+        log_validation=args.samples if args.save_samples else 0,
+        analysis_streams_output=args.analysis_streams_output,
+    )
 
-    cf.run_history += [(cf.run_id, cf.istep)]
+    cli_overwrite = config.from_cli_arglist(args.options)
+    cf = config.load_config(
+        args.private_config,
+        args.from_run_id,
+        args.epoch,
+        *args.config,
+        evaluate_overwrite,
+        cli_overwrite,
+    )
+    cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    cf.samples_per_validation = args.samples
-    cf.log_validation = args.samples if args.save_samples else 0
-    start_date, end_date = pd.to_datetime(args.start_date), pd.to_datetime(args.end_date)
-
-    cf.start_date_val = start_date.strftime("%Y%m%d%H%M")
-    cf.end_date_val = end_date.strftime("%Y%m%d%H%M")
-
-    cf.shuffle = args.shuffle
-
-    cf.forecast_steps = args.forecast_steps if args.forecast_steps else cf.forecast_steps
-    # cf.forecast_policy = 'fixed'
-
-    # cf.analysis_streams_output = ['Surface', 'Air', 'METEOSAT', 'ATMS', 'IASI', 'AMSR2']
-    cf.analysis_streams_output = args.analysis_streams_output
-
-    # make sure number of loaders does not exceed requested samples
-    cf.loader_num_workers = min(cf.loader_num_workers, args.samples)
+    cf.run_history += [(args.from_run_id, cf.istep)]
 
     trainer = Trainer()
-    trainer.evaluate(cf, args.run_id, args.epoch, args.run_id_new)
+    trainer.evaluate(cf, args.from_run_id, args.epoch)
 
 
 ####################################################################################################
 def train_continue() -> None:
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "-id",
-        "--run_id",
-        type=str,
-        required=True,
-        help="run id of to be continued",
-    )
-    parser.add_argument(
-        "-e",
-        "--epoch",
-        type=int,
-        required=False,
-        default=-1,
-        help="epoch where to continue run",
-    )
-    parser.add_argument(
-        "-n",
-        "--run_id_new",
-        type=bool,
-        required=False,
-        default=False,
-        help="create new run id for cont'd run",
-    )
-    parser.add_argument(
-        "--private_config",
-        type=Path,
-        default=None,
-        help="Path to private configuration file for paths.",
-    )
-    parser.add_argument(
-        "--finetune_forecast",
-        action="store_true",
-        help="Fine tune for forecasting. It overwrites some of the Config settings.",
-    )
-
+    parser = cli.get_continue_parser()
     args = parser.parse_args()
 
-    cf = config.load_config(args.private_config, args.run_id, args.epoch, None)
+    init_loggers()
+
+    if args.finetune_forecast:
+        finetune_overwrite = dict(
+            training_mode="forecast",
+            forecast_delta_hrs=0,  # 12
+            forecast_steps=1,  # [j for j in range(1,9) for i in range(4)]
+            forecast_policy="fixed",  # 'sequential_random' # 'fixed' #'sequential' #_random'
+            forecast_freeze_model=True,
+            forecast_att_dense_rate=1.0,  # 0.25
+            fe_num_blocks=8,
+            fe_num_heads=16,
+            fe_dropout_rate=0.1,
+            fe_with_qk_lnorm=True,
+            lr_start=0.000001,
+            lr_max=0.00003,
+            lr_final_decay=0.00003,
+            lr_final=0.0,
+            lr_steps_warmup=1024,
+            lr_steps_cooldown=4096,
+            lr_policy_warmup="cosine",
+            lr_policy_decay="linear",
+            lr_policy_cooldown="linear",
+            num_epochs=12,  # len(cf.forecast_steps) + 4
+            istep=0,
+        )
+    else:
+        finetune_overwrite = dict()
+
+    cli_overwrite = config.from_cli_arglist(args.options)
+    cf = config.load_config(
+        args.private_config,
+        args.from_run_id,
+        args.epoch,
+        finetune_overwrite,
+        *args.config,
+        cli_overwrite,
+    )
+    cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
     # track history of run to ensure traceability of results
-    cf.run_history += [(cf.run_id, cf.istep)]
+    cf.run_history += [(args.from_run_id, cf.istep)]
 
-    #########################
     if args.finetune_forecast:
-        cf.forecast_delta_hrs = 0  # 12
-        cf.forecast_steps = 1  # [j for j in range(1,9) for i in range(4)]
-        cf.forecast_policy = "fixed"  # 'sequential_random' # 'fixed' #'sequential' #_random'
-        cf.forecast_freeze_model = True
-        cf.forecast_att_dense_rate = 1.0  # 0.25
-
         if cf.forecast_freeze_model:
             cf.with_fsdp = False
             import torch
 
             torch._dynamo.config.optimize_ddp = False
-
-        cf.fe_num_blocks = 8
-        cf.fe_num_heads = 16
-        cf.fe_dropout_rate = 0.1
-        cf.fe_with_qk_lnorm = True
-
-        cf.lr_start = 0.000001
-        cf.lr_max = 0.00003
-        cf.lr_final_decay = 0.00003
-        cf.lr_final = 0.0
-        cf.lr_steps_warmup = 1024
-        cf.lr_steps_cooldown = 4096
-        cf.lr_policy_warmup = "cosine"
-        cf.lr_policy_decay = "linear"
-        cf.lr_policy_cooldown = "linear"
-
-        cf.num_epochs = 12  # len(cf.forecast_steps) + 4
-        cf.istep = 0
-
     trainer = Trainer()
-    trainer.run(cf, args.run_id, args.epoch, args.run_id_new)
+    trainer.run(cf, args.from_run_id, args.epoch)
 
 
 ####################################################################################################
@@ -236,34 +137,14 @@ def train() -> None:
 def train_with_args(argl: list[str], stream_dir: str | None):
     """
     Training function for WeatherGenerator model."""
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--run_id",
-        type=str,
-        default=None,
-        help="Run id",
-    )
-    parser.add_argument(
-        "--private_config",
-        type=Path,
-        default=None,
-        help="Path to private configuration file for paths",
-    )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help="Optional experiment specfic configuration file",
-    )
-
+    parser = cli.get_train_parser()
     args = parser.parse_args(argl)
 
-    # TODO: move somewhere else
     init_loggers()
 
-    cf = config.load_config(args.private_config, None, None, args.config)
-    cf.run_id = args.run_id
+    cli_overwrite = config.from_cli_arglist(args.options)
+    cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
+    cf = config.set_run_id(cf, args.run_id, False)
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision

@@ -55,8 +55,10 @@ def test_train(setup, test_run_id):
     )
 
     evaluate_from_args(
-        "-start 2022-10-10 -end 2022-10-11 --samples 10 --same_run_id --epoch 0".split()
+        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--epoch", "0"]
         + [
+            "--from_run_id",
+            test_run_id,
             "--run_id",
             test_run_id,
             "--config",
@@ -74,7 +76,8 @@ def load_metrics(run_id):
     file_path = f"{weathergen_home}/results/{run_id}/metrics.json"
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Metrics file not found for run_id: {run_id}")
-    json_str = open(file_path).readlines()
+    with open(file_path) as f:
+        json_str = f.readlines()
     return json.loads("[" + r"".join([s.replace("\n", ",") for s in json_str])[:-1] + "]")
 
 

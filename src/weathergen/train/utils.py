@@ -29,5 +29,6 @@ def tensor_to_str(tensor):
 
 
 def json_to_dict(fname):
-    json_str = open(fname).readlines()
+    with open(fname) as f:
+        json_str = f.readlines()
     return json.loads("".join([s.replace("\n", "") for s in json_str]))
