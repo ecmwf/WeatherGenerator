@@ -133,7 +133,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         idx_start, idx_end = self.time_window_handler.get_index_range()
         self.len = idx_end - idx_start
-        self.len = min(self.len, self.len if not samples_per_epoch else samples_per_epoch)
+        self.len = min(self.len, samples_per_epoch if samples_per_epoch else self.len)
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len // cf.num_ranks) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)

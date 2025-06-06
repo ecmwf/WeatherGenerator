@@ -6,7 +6,7 @@ import weathergen.utils.cli as cli
 
 DATE_FORMATS = ["2022-12-01T00:00:00", "20221201", "2022-12-01", "12.01.2022"]
 EXPECTED_DATE_STR = "202212010000"
-MODEL_LOADING_ARGS = ["from_run_id", "epoch"]
+MODEL_LOADING_ARGS = ["from_run_id", "epoch", "reuse_run_id"]
 GENERAL_ARGS = ["config", "private_config", "options", "run_id"]
 MODEL_LOADING_PARSERS = [cli.get_continue_parser(), cli.get_evaluate_parser()]
 BASIC_ARGLIST = ["--from_run_id", "test123"]

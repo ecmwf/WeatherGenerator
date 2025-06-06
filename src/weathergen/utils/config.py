@@ -91,7 +91,7 @@ def _get_model_config_file_name(run_id: str, epoch: int | None):
 
 def load_config(
     private_home: Path | None,
-    run_id: str | None,
+    from_run_id: str | None,
     epoch: int | None,
     *overwrites: Path | dict | Config,
 ) -> Config:
@@ -101,7 +101,7 @@ def load_config(
 
     Args:
         private_home: Configuration file containing platform dependent information and secretes
-        run_id: Run/model id of pretrained WeatherGenerator model to continue training or evaluate
+        from_run_id: Run id of the pretrained WeatherGenerator model to continue training or evaluate
         epoch: epoch of the checkpoint to load. -1 indicates last checkpoint available.
         *overwrites: Additional overwrites from different sources
 
@@ -113,14 +113,50 @@ def load_config(
     private_config = _load_private_conf(private_home)
     overwrite_configs = [_load_overwrite_conf(overwrite) for overwrite in overwrites]
 
-    if run_id is None:
+    if from_run_id is None:
         base_config = _load_default_conf()
-        base_config.run_id = get_run_id()
     else:
-        base_config = load_model_config(run_id, epoch, private_config["model_path"])
+        base_config = load_model_config(from_run_id, epoch, private_config["model_path"])
 
     # use OmegaConf.unsafe_merge if too slow
     return OmegaConf.merge(base_config, private_config, *overwrite_configs)
+
+
+def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config:
+    """
+    Determine and set run_id of current run.
+
+    Determining the run id should follow the following logic:
+
+    1. (default case): run train, train_continue or evaluate without any flags => generate a new run_id for this run.
+    2. (assign run_id): run train, train_continue or evaluate with --run_id <RUNID> flag => assign a run_id manually to this run. This is intend for outside tooling and should not be used manually.
+    3. (reuse run_id -> only for train_continue and evaluate): reuse the run_id from the run specified by --from_run_id <RUNID>. Since the run_id correct run_id is already loaded in the config nothing has to be assigned. This case will happen if --reuse_run_id is specified.
+
+
+    Args:
+        config: Base configuration loaded from previous run or default.
+        run_id: Id assigned to this run. If None a new one will be generated.
+        reuse_run_id: Reuse run_id from base configuration instead.
+
+    Returns:
+        config object with the run_id attribute properly set.
+    """
+    config = config.copy()
+    if reuse_run_id:
+        assert config.run_id is not None, "run_id loaded from previous run should not be None."
+        _logger.info(f"reusing run_id from previous run: {config.run_id}")
+    else:
+        if run_id is None:
+            # generate new id if run_id is None
+            config.run_id = run_id or get_run_id()
+            _logger.info(f"using generated run_id: {config.run_id}")
+        else:
+            config.run_id = run_id
+            _logger.info(
+                f"using assigned run_id: {config.run_id}. If you manually selected this run_id, this is an error."
+            )
+
+    return config
 
 
 def from_cli_arglist(arg_list: list[str]) -> Config:
