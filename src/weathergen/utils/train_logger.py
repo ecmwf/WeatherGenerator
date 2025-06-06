@@ -162,7 +162,7 @@ class TrainLogger:
                 cols_train += [
                     si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
                 ]
-        with_stddev = [(True if "stats" in lf else False) for lf in cf.loss_fcts]
+        with_stddev = [("stats" in lf) for lf in cf.loss_fcts]
         if with_stddev:
             for si in cf.streams:
                 cols1 += [_key_stddev(si["name"])]
@@ -192,7 +192,7 @@ class TrainLogger:
                     si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
                 ]
                 cols2 += [_key_loss(si["name"], lf[0])]
-        with_stddev = [(True if "stats" in lf else False) for lf in cf.loss_fcts_val]
+        with_stddev = [("stats" in lf) for lf in cf.loss_fcts_val]
         if with_stddev:
             for si in cf.streams:
                 cols2 += [_key_stddev(si["name"])]
