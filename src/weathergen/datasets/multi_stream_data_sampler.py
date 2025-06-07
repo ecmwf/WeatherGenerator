@@ -19,7 +19,6 @@ from weathergen.datasets.data_reader_base import (
     ReaderData,
     TimeWindowHandler,
     TIndex,
-    check_reader_data,
     str_to_datetime64,
 )
 from weathergen.datasets.data_reader_obs import DataReaderObs
@@ -141,8 +140,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if len(ds) > 0:
                     self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
 
-                stream_info["source_channels"] = ds.source_channels
-                stream_info["target_channels"] = ds.target_channels
+                stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
+                stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
 
                 self.streams_datasets[-1] += [ds]
 
@@ -332,14 +331,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # for all sources for current stream
                     for _, ds in enumerate(stream_ds):
                         # source window (of potentially multi-step length)
+                        # TODO: Kacper is using this -- cannot so easily remove
                         rdata: ReaderData = ds.get_source(idx)
-                        check_reader_data(rdata)
 
                         self._train_logger.log_metrics(
                             self._stage, {f"stream.{name}.source_len": rdata.len()}
                         )
-
-                        _logger.info(f"type ds={type(ds)}, rdata={rdata}, {type(rdata)}, idx={idx}")
 
                         if rdata.is_empty():
                             stream_data.add_empty_source()
