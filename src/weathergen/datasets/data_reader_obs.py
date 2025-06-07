@@ -15,20 +15,26 @@ from typing import override
 import numpy as np
 import zarr
 
-from weathergen.datasets.data_reader_base import DataReaderBase, ReaderData, TimeWindowHandler
+from weathergen.datasets.data_reader_base import (
+    DataReaderBase,
+    ReaderData,
+    TimeWindowHandler,
+    check_reader_data,
+)
 
 _logger = logging.getLogger(__name__)
 
 
 class DataReaderObs(DataReaderBase):
     def __init__(self, tw_handler: TimeWindowHandler, filename: Path, stream_info: dict) -> None:
+        super().__init__(tw_handler)
+
         self.filename = filename
         self.z = zarr.open(filename, mode="r")
         self.data = self.z["data"]
         self.dt = self.z["dates"]  # datetime only
         self.hrly_index = self.z["idx_197001010000_1"]
         self.colnames = self.data.attrs["colnames"]
-        self.tw_handler = tw_handler
 
         # self.selected_colnames = self.colnames
         # self.selected_cols_idx = np.arange(len(self.colnames))
@@ -42,7 +48,7 @@ class DataReaderObs(DataReaderBase):
         self.selected_cols_idx = np.arange(len(self.colnames))[: len(self.colnames) - idx]
 
         # Create index for samples
-        self._setup_sample_index(self.tw_handler)
+        self._setup_sample_index()
         # assert len(self.indices_start) == len(self.indices_end)
 
         self._load_properties()
@@ -111,7 +117,7 @@ class DataReaderObs(DataReaderBase):
 
         return last_sample
 
-    def _setup_sample_index(self, tw_handler: TimeWindowHandler) -> None:
+    def _setup_sample_index(self) -> None:
         """
         Dataset is divided into samples;
            - each n_hours long
@@ -121,14 +127,14 @@ class DataReaderObs(DataReaderBase):
         """
 
         # TODO: generalize this
-        assert self.tw_handler.t_window_len.item().total_seconds() % 3600 == 0, (
-            "t_window_len has to be full hour (currently {self.tw_handler.t_window_len})"
+        assert self.time_window_handler.t_window_len.item().total_seconds() % 3600 == 0, (
+            "t_window_len has to be full hour (currently {self.time_window_handler.t_window_len})"
         )
-        len_hrs = int(self.tw_handler.t_window_len.item().total_seconds()) // 3600
-        assert self.tw_handler.t_window_step.item().total_seconds() % 3600 == 0, (
-            "t_window_step has to be full hour (currently {self.tw_handler.t_window_len})"
+        len_hrs = int(self.time_window_handler.t_window_len.item().total_seconds()) // 3600
+        assert self.time_window_handler.t_window_step.item().total_seconds() % 3600 == 0, (
+            "t_window_step has to be full hour (currently {self.time_window_handler.t_window_len})"
         )
-        step_hrs = int(self.tw_handler.t_window_step.item().total_seconds()) // 3600
+        step_hrs = int(self.time_window_handler.t_window_step.item().total_seconds()) // 3600
 
         # TODO: move to ctor
         base_yyyymmddhhmm = 197001010000
@@ -141,8 +147,8 @@ class DataReaderObs(DataReaderBase):
         # Derive new index based on hourly backbone index
         format_str = "%Y%m%d%H%M%S"
         base_dt = datetime.datetime.strptime(str(base_yyyymmddhhmm), format_str)
-        self.start_dt = self.tw_handler.t_start.item()
-        self.end_dt = self.tw_handler.t_end.item()
+        self.start_dt = self.time_window_handler.t_start.item()
+        self.end_dt = self.time_window_handler.t_end.item()
 
         # Calculate the number of hours between start of hourly base index and the requested sample index
         diff_in_hours_start = int((self.start_dt - base_dt).total_seconds() / 3600)
@@ -228,9 +234,14 @@ class DataReaderObs(DataReaderBase):
         data = self.data.oindex[start_row:end_row, self.data_offset + channels_idx]
         datetimes = self.dt[start_row:end_row][:, 0]
 
-        return ReaderData(
+        rdata = ReaderData(
             coords=coords,
             geoinfos=geoinfos,
             data=data,
             datetimes=datetimes,
         )
+
+        dtr = self.time_window_handler.window(idx)
+        check_reader_data(rdata, dtr)
+
+        return rdata
