@@ -213,14 +213,16 @@ class ReaderData:
         return len(self.data)
 
 
-def check_reader_data(rdata: ReaderData) -> None:
+def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     """
     Check that ReaderData is valid
 
     Parameters
     ----------
-    rdata : ReaderData
+    rdata :
         ReaderData to check
+    dtr :
+        datetime range of window for which the rdata is valid
 
     Returns
     -------
@@ -251,6 +253,12 @@ def check_reader_data(rdata: ReaderData) -> None:
         f"{rdata.datetimes.shape[0]}"
     )
 
+    assert np.logical_and(
+        rdata.datetimes >= dtr.start,
+        # rdata.datetimes < dtr.end  # TODO: enforce monotonicty also for obs
+        rdata.datetimes <= dtr.end,
+    ).all(), f"datetimes for data points violate window {dtr}."
+
 
 class DataReaderBase(metaclass=ABCMeta):
     """
@@ -261,6 +269,9 @@ class DataReaderBase(metaclass=ABCMeta):
     source_channels: list[str] = abstract_attribute()
     target_channels: list[str] = abstract_attribute()
     geoinfo_channels: list[str] = abstract_attribute()
+    source_idx: list[int] = abstract_attribute()
+    target_idx: list[int] = abstract_attribute()
+    geoinfo_idx: list[int] = abstract_attribute()
 
     def __init__(
         self,
@@ -281,14 +292,19 @@ class DataReaderBase(metaclass=ABCMeta):
 
         self.time_window_handler = tw_handler
 
-        # variables that need to be set / properly initialized by child classes that provide
-        # concrete implementation
-        # TODO: move these fields to abstract fields
+    def init_empty(self) -> None:
+        """
+        Initialize
+        """
 
+        self.source_channels = []
+        self.target_channels = []
+        self.geoinfo_channels = []
         self.source_idx = []
         self.target_idx = []
         self.geoinfo_idx = []
 
+        # TODO: move these fields to abstract fields
         self.mean = np.zeros(0)
         self.stdev = np.ones(0)
         self.mean_geoinfo = np.zeros(0)
@@ -565,10 +581,10 @@ class DataReaderTimestep(DataReaderBase):
     def __init__(
         self,
         tw_handler: TimeWindowHandler,
-        data_start_time: NPDT64 | None,
-        data_end_time: NPDT64 | None,
-        period: NPTDel64,
-        window_subsampling_rate: int | None,
+        data_start_time: NPDT64 | None = None,
+        data_end_time: NPDT64 | None = None,
+        period: NPTDel64 | None = None,
+        window_subsampling_rate: int | None = None,
     ) -> None:
         super().__init__(tw_handler)
         self.data_start_time = data_start_time or tw_handler.t_start
@@ -616,7 +632,7 @@ def get_dataset_indexes_periodic(
     idx: TIndex,
     tw_handler: TimeWindowHandler,
     subsampling_rate: int | None,
-) -> NDArray[np.int32]:
+) -> (NDArray[np.int32], DTRange):
     """
     Get dataset indexes for a given time window index, when the dataset is periodic.
 
@@ -665,4 +681,4 @@ def get_dataset_indexes_periodic(
     assert subsampling_rate > 0, ("Subsampling rate must be positive", subsampling_rate)
 
     # TODO: add subsampling (but not implemented yet in the code anyway)
-    return np.arange(start_didx, end_didx + 1, step=subsampling_rate, dtype=np.int32)
+    return (np.arange(start_didx, end_didx + 1, step=subsampling_rate, dtype=np.int32), dtr)
