@@ -18,7 +18,6 @@ from numpy.typing import NDArray
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
-    # DataReaderTimestep,
     ReaderData,
     TimeWindowHandler,
     TIndex,
@@ -54,6 +53,12 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         # open  dataset to peak that it is compatible with requested parameters
         ds0: Dataset = anemoi_datasets.open_dataset(filename)
+        # If there is no overlap with the time range, the dataset will be empty
+        if tw_handler.t_start >= ds0.dates[-1] or tw_handler.t_end <= ds0.dates[0]:
+            super().__init__(tw_handler)
+            self.init_empty()
+            return
+
         kwargs = {}
         if "frequency" in stream_info:
             kwargs["frequency"] = str(stream_info["frequency"]) + "h"
@@ -77,8 +82,8 @@ class DataReaderAnemoi(DataReaderTimestep):
         )
         # If there is no overlap with the time range, no need to keep the dataset.
         if tw_handler.t_start >= data_end_time or tw_handler.t_end <= data_start_time:
-            self.ds = None
-            self.len = 0
+            self.init_empty()
+            return
         else:
             self.ds = ds
             self.len = len(ds)
@@ -124,15 +129,23 @@ class DataReaderAnemoi(DataReaderTimestep):
         self.source_channels = [ds.variables[i] for i in self.source_idx]
         self.target_channels = [ds.variables[i] for i in self.target_idx]
         self.geoinfo_channels = []
+        self.geoinfo_idx = []
 
-        _logger.info(f"Source channels: {self.source_channels}")
-        _logger.info(f"Target channels: {self.target_channels}")
+        ds_name = stream_info["name"]
+        _logger.info(f"{ds_name}: source channels: {self.source_channels}")
+        _logger.info(f"{ds_name}: target channels: {self.target_channels}")
+        _logger.info(f"{ds_name}: geoinfo channels: {self.geoinfo_channels}")
 
         self.properties = {  # TODO: unused?
             "stream_id": 0,
         }
         self.mean = ds.statistics["mean"]
         self.stdev = ds.statistics["stdev"]
+
+    @override
+    def init_empty(self) -> None:
+        super().init_empty()
+        self.len = 0
 
     @override
     def length(self) -> int:
@@ -158,7 +171,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         # rdata = ReaderData()
 
         # TODO: we will always assume it return a range -> no need to build array
-        t_idxs = self._get_dataset_idxs(idx)
+        (t_idxs, dtr) = self._get_dataset_idxs(idx)
         # TODO: this would not work with sub-sampling
         didx_start = t_idxs[0]
         # End is inclusive
@@ -173,8 +186,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         # ds is a wrapper around zarr with get_coordinate_selection not being exposed since
         # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
         # sampling is required here
-        # TODO: should we convert to float32?
-        data = self.ds[didx_start:didx_end][:, :, 0]
+        data = self.ds[didx_start:didx_end][:, :, 0].astype(np.float32)
 
         # extract channels
         data = (
@@ -204,7 +216,8 @@ class DataReaderAnemoi(DataReaderTimestep):
             data=data,
             datetimes=datetimes,
         )
-        check_reader_data(rd)
+        check_reader_data(rd, dtr)
+
         return rd
 
 
@@ -212,11 +225,11 @@ def _clip_lat(lats: NDArray) -> NDArray[np.float32]:
     """
     Clip latitudes to the range [-90, 90] and ensure periodicity.
     """
-    return (2 * np.clip(lats, -90, 90) - lats).astype(np.float32)
+    return (2 * np.clip(lats, -90.0, 90.0) - lats).astype(np.float32)
 
 
 def _clip_lon(lons: NDArray) -> NDArray[np.float32]:
     """
     Clip longitudes to the range [-180, 180] and ensure periodicity.
     """
-    return ((lons + 180) % 360 - 180).astype(np.float32)
+    return ((lons + 180.0) % 360.0 - 180.0).astype(np.float32)
