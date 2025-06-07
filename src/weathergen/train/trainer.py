@@ -294,11 +294,11 @@ class Trainer(Trainer_Base):
         for epoch in range(epoch_base, cf.num_epochs):
             _logger.info(f"Epoch {epoch} of {cf.num_epochs}: train.")
             self.train(epoch)
+
             _logger.info(f"Epoch {epoch} of {cf.num_epochs}: validate.")
-
             self.validate(epoch)
-            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
 
+            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
             self.save_model(epoch)
 
         # log final model
@@ -314,7 +314,7 @@ class Trainer(Trainer_Base):
         preds,
         losses_all,
         stddev_all,
-        mode="training",
+        stage=TRAIN,
         log_data=False,
     ):
         # merge across batch dimension (and keep streams)
@@ -364,7 +364,7 @@ class Trainer(Trainer_Base):
             ):
                 pred = preds[fstep][i_obs]
 
-                num_channels = len(si["target_channels"])
+                num_channels = len(si[str(stage) + "_target_channels"])
 
                 # set obs_loss_weight = 1. when not specified
                 obs_loss_weight = si["loss_weight"] if "loss_weight" in si else 1.0
@@ -372,10 +372,8 @@ class Trainer(Trainer_Base):
                     si["channel_weight"] if "channel_weight" in si else np.ones(num_channels)
                 )
                 # in validation mode, always unweighted loss is computed
-                obs_loss_weight = 1.0 if mode == "validation" else obs_loss_weight
-                channel_loss_weight = (
-                    np.ones(num_channels) if mode == "validation" else channel_loss_weight
-                )
+                obs_loss_weight = 1.0 if stage == VAL else obs_loss_weight
+                channel_loss_weight = np.ones(num_channels) if stage == VAL else channel_loss_weight
 
                 tok_spacetime = si["tokenize_spacetime"] if "tokenize_spacetime" in si else False
 
@@ -579,7 +577,7 @@ class Trainer(Trainer_Base):
                             preds,
                             losses_all,
                             stddev_all,
-                            mode="validation",
+                            VAL,
                             log_data=True,
                         )
 
