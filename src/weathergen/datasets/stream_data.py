@@ -18,7 +18,7 @@ class StreamData:
     for one stream.
     """
 
-    def __init__(self, forecast_steps: int, nhc_source: int, nhc_target: int) -> None:
+    def __init__(self, idx: int, forecast_steps: int, nhc_source: int, nhc_target: int) -> None:
         """
         Create StreamData object.
 
@@ -45,6 +45,7 @@ class StreamData:
         # TODO add shape of tensors
 
         # initialize empty members
+        self.sample_idx = idx
         self.target_coords = [[] for _ in range(forecast_steps + 1)]
         self.target_coords_raw = [[] for _ in range(forecast_steps + 1)]
         self.target_times_raw = [[] for _ in range(forecast_steps + 1)]
