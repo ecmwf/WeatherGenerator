@@ -21,6 +21,7 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
     str_to_datetime64,
 )
+from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
@@ -107,9 +108,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     case "anemoi":
                         dataset = DataReaderAnemoi
                         datapath = cf.data_path_anemoi
-                    # case "fesom":
-                    #     dataset = FesomDataset
-                    #     datapath = cf.data_path_fesom
+                    case "fesom":
+                        dataset = DataReaderFesom
+                        datapath = cf.data_path_fesom
                     # case "atmorep":
                     #     dataset = AtmorepDataset
                     #     datapath = cf.data_path_anemoi
