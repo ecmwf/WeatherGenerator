@@ -176,19 +176,16 @@ class DataReaderAnemoi(DataReaderTimestep):
         ReaderData providing coords, geoinfos, data, datetimes
         """
 
-        # rdata = ReaderData()
-
-        # TODO: we will always assume it return a range -> no need to build array
         (t_idxs, dtr) = self._get_dataset_idxs(idx)
-        # TODO: this would not work with sub-sampling
-        didx_start = t_idxs[0]
-        # End is inclusive
-        didx_end = t_idxs[-1] + 1
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
             return ReaderData.empty(
-                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_channels)
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
+
+        didx_start = t_idxs[0]
+        # End is inclusive
+        didx_end = t_idxs[-1] + 1
 
         # extract number of time steps and collapse ensemble dimension
         # ds is a wrapper around zarr with get_coordinate_selection not being exposed since
