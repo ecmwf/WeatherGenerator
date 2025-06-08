@@ -575,8 +575,6 @@ class DataReaderTimestep(DataReaderBase):
     # The period of the dataset, i.e. the time interval between two consecutive samples.
     # It is also called 'frequency' in Anemoi.
     period: NPTDel64
-    # The subsampling rate, i.e. the number of samples to skip between two consecutive samples.
-    window_subsampling_rate: int | None = None
 
     def __init__(
         self,
@@ -584,17 +582,11 @@ class DataReaderTimestep(DataReaderBase):
         data_start_time: NPDT64 | None = None,
         data_end_time: NPDT64 | None = None,
         period: NPTDel64 | None = None,
-        window_subsampling_rate: int | None = None,
     ) -> None:
         super().__init__(tw_handler)
         self.data_start_time = data_start_time or tw_handler.t_start
         self.data_end_time = data_end_time
         self.period = period
-        self.window_subsampling_rate = window_subsampling_rate
-
-        assert window_subsampling_rate is None or window_subsampling_rate > 0, (
-            window_subsampling_rate
-        )
 
     def _get_dataset_idxs(self, idx: TIndex) -> NDArray[np.int32]:
         """
@@ -610,13 +602,12 @@ class DataReaderTimestep(DataReaderBase):
         NDArray[np.int32]
             Array of dataset indexes corresponding to the time window.
         """
-        return get_dataset_indexes_periodic(
+        return get_dataset_indexes_timestep(
             self.data_start_time,
             self.data_end_time,
             self.period,
             idx,
             self.time_window_handler,
-            self.window_subsampling_rate,
         )
 
 
@@ -625,13 +616,12 @@ class DataReaderTimestep(DataReaderBase):
 t_epsilon = np.timedelta64(1, "s")
 
 
-def get_dataset_indexes_periodic(
+def get_dataset_indexes_timestep(
     data_start_time: NPDT64,
     data_end_time: NPDT64 | None,
     period: NPTDel64,
     idx: TIndex,
     tw_handler: TimeWindowHandler,
-    subsampling_rate: int | None,
 ) -> (NDArray[np.int32], DTRange):
     """
     Get dataset indexes for a given time window index, when the dataset is periodic.
@@ -649,8 +639,6 @@ def get_dataset_indexes_periodic(
         Index of the time window.
     tw_handler : TimeWindowHandler
         Handler for time windows.
-    subsampling_rate : int | None
-        Subsampling rate. If not or set to 1, then no subsampling is applied.
 
     Returns
     -------
@@ -670,15 +658,12 @@ def get_dataset_indexes_periodic(
     assert dtr.start >= data_start_time, (dtr, data_start_time, data_end_time)
     # relative time in dataset
     delta_t_start = dtr.start - data_start_time
-    assert isinstance(delta_t_start, timedelta64), "delta_t_start must not be None"
+    assert isinstance(delta_t_start, timedelta64), "delta_t_start must be timedelta64"
     start_didx = delta_t_start // period
     if (delta_t_start % period) > np.timedelta64(0, "s"):
         start_didx += 1
 
     end_didx = start_didx + int((dtr.end - dtr.start - t_epsilon) / period)
-    if subsampling_rate is None:
-        subsampling_rate = 1
-    assert subsampling_rate > 0, ("Subsampling rate must be positive", subsampling_rate)
 
     # TODO: add subsampling (but not implemented yet in the code anyway)
-    return (np.arange(start_didx, end_didx + 1, step=subsampling_rate, dtype=np.int32), dtr)
+    return (np.arange(start_didx, end_didx + 1, dtype=np.int32), dtr)

@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import datetime
 import logging
 from pathlib import Path
 from typing import override
@@ -61,7 +62,15 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         kwargs = {}
         if "frequency" in stream_info:
-            kwargs["frequency"] = str(stream_info["frequency"]) + "h"
+            t = datetime.datetime.strptime(stream_info["frequency"], "%H:%M:%S")
+            delta = datetime.timedelta(hours=t.hour, minutes=t.minute, seconds=t.second)
+            kwargs["frequency"] = delta
+        if "subsampling_rate" in stream_info:
+            name = stream_info["name"]
+            _logger.warning(
+                f"subsampling_rate specified for anemoi dataset for stream {name}. "
+                + "Use frequency instead."
+            )
         ds: Dataset = anemoi_datasets.open_dataset(
             ds0, **kwargs, start=tw_handler.t_start, end=tw_handler.t_end
         )
@@ -78,7 +87,6 @@ class DataReaderAnemoi(DataReaderTimestep):
             data_start_time,
             data_end_time,
             period,
-            window_subsampling_rate=None,
         )
         # If there is no overlap with the time range, no need to keep the dataset.
         if tw_handler.t_start >= data_end_time or tw_handler.t_end <= data_start_time:
