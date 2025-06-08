@@ -139,7 +139,7 @@ class Trainer(Trainer_Base):
             cf.samples_per_epoch,
             train_logger=self.train_logger,
             stage=TRAIN,
-            shuffle=True,
+            shuffle=cf.shuffle,
         )
         self.dataset_val = MultiStreamDataSampler(
             cf,
@@ -148,8 +148,8 @@ class Trainer(Trainer_Base):
             cf.batch_size_validation,
             cf.samples_per_validation,
             train_logger=self.train_logger,
-            stage=VAL,  # TODO not sure it should be called VAL. "trainval" or just "train"?
-            shuffle=cf.shuffle,
+            stage=VAL,
+            shuffle=False,
         )
 
         loader_params = {
