@@ -647,23 +647,33 @@ def get_dataset_indexes_timestep(
 
     dataset_start_time and period must be aligned with the time window handler.
     """
+
     # Function is separated from the class to allow testing without instantiating the class.
     dtr = tw_handler.window(idx)
-    # If there is no overlap with the dataset, return empty array
-    # TODO: boundary conditions
-    if dtr.end < data_start_time or (data_end_time is not None and dtr.start > data_end_time):
-        return np.array([], dtype=np.int32)
+    # If there is no or only marginal overlap with the dataset, return empty index ranges
+    if (
+        dtr.end < data_start_time
+        or dtr.start > data_end_time
+        or dtr.start < data_start_time
+        or dtr.end > data_end_time
+        or (data_end_time is not None and dtr.start > data_end_time)
+    ):
+        return (np.array([], dtype=np.int32), dtr)
 
-    # For simplicity, assuming the window starts inside the dataset.
-    assert dtr.start >= data_start_time, (dtr, data_start_time, data_end_time)
     # relative time in dataset
     delta_t_start = dtr.start - data_start_time
+    delta_t_end = dtr.end - data_start_time - t_epsilon
     assert isinstance(delta_t_start, timedelta64), "delta_t_start must be timedelta64"
     start_didx = delta_t_start // period
+    end_didx = delta_t_end // period
+
+    # adjust start_idx if not exactly on start time
     if (delta_t_start % period) > np.timedelta64(0, "s"):
+        # empty window in between two timesteps
+        if start_didx == end_didx:
+            return (np.array([], dtype=np.int32), dtr)
         start_didx += 1
 
     end_didx = start_didx + int((dtr.end - dtr.start - t_epsilon) / period)
 
-    # TODO: add subsampling (but not implemented yet in the code anyway)
     return (np.arange(start_didx, end_didx + 1, dtype=np.int32), dtr)
