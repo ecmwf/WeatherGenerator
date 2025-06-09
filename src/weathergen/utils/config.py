@@ -263,7 +263,9 @@ def load_streams(streams_directory: Path) -> list[Config]:
     _logger.info(f"Reading streams from {streams_directory}")
 
     # append streams to existing (only relevant for evaluation)
+    # append stream_names to a list to keep track of them, and check for duplicates
     streams = []
+    stream_names = []
     # exclude temp files starting with "." or "#" (eg. emacs, vim, macos savefiles)
     stream_files = sorted(streams_directory.rglob("[!.#]*.yml"))
     _logger.info(f"discover stream configs: {stream_files}")
@@ -286,6 +288,15 @@ def load_streams(streams_directory: Path) -> list[Config]:
             continue
 
         streams.append(stream_config)
+        stream_names.append(stream_name)
         _logger.info(f"Loaded stream config: {stream_name}")
+
+    # check for duplicates of stream names
+    if len(stream_names) != len(set(stream_names)):
+        duplicates = [name for name in set(stream_names) if stream_names.count(name) > 1]
+        msg = f"Duplicate stream names found: {duplicates}. Please ensure all stream names are unique."
+        raise ValueError(msg)
+
+    _logger.info(f"Loaded {len(streams)} streams from {streams_directory}")
 
     return streams
