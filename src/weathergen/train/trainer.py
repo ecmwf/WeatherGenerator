@@ -30,10 +30,9 @@ from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TrainLogger
 from weathergen.utils.validation_io import write_validation
+from weathergen.train.loss import stat_loss_fcts
 
 _logger = logging.getLogger(__name__)
-
-_stat_loss_fcts = ["stats", "kcrps"]  # Names of loss functions that need std computed
 
 
 class Trainer(Trainer_Base):
@@ -351,7 +350,7 @@ class Trainer(Trainer_Base):
             for st in self.cf.streams  # No nan here as later it's divided so any remaining 0s become nans
         }  # Create tensor for each stream
         stddev_all = {
-            st.name: torch.zeros(len(_stat_loss_fcts)) for st in self.cf.streams
+            st.name: torch.zeros(len(stat_loss_fcts)) for st in self.cf.streams
         }  # Create tensor for each stream
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):
@@ -429,8 +428,8 @@ class Trainer(Trainer_Base):
                                     ctr_chs += 1
                         val = val / ctr_chs if (ctr_chs > 0) else val
 
-                        if loss_fct.__name__ in _stat_loss_fcts:
-                            indx = _stat_loss_fcts.index(loss_fct.__name__)
+                        if loss_fct.__name__ in stat_loss_fcts:
+                            indx = stat_loss_fcts.index(loss_fct.__name__)
                             stddev_all[si.name][indx] += pred[:, mask_nan].std(0).mean().item()
                         # ignore NaNs so that training can continue even if one pred-net diverges
                         loss = loss + (
@@ -484,7 +483,7 @@ class Trainer(Trainer_Base):
         self.optimizer.zero_grad()
 
         # Unweighted loss, real weighted loss, std for losses that need it
-        self.losses_hist, self.real_losses_hist, self.stddev_hist = [], [], []
+        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
         # training loop
         self.t_start = time.time()
@@ -521,9 +520,9 @@ class Trainer(Trainer_Base):
             # update learning rate
             self.lr_scheduler.step()
 
-            self.losses_hist += [losses_all]
-            self.real_losses_hist += [loss.item()]
-            self.stddev_hist += [stddev_all]
+            self.loss_unweighted_hist += [losses_all]
+            self.loss_model_hist += [loss.item()]
+            self.stdev_unweighted_hist += [stddev_all]
 
             perf_gpu, perf_mem = self.get_perf()
             self.perf_gpu = self.ddp_average(torch.tensor([perf_gpu])).item()
@@ -555,14 +554,14 @@ class Trainer(Trainer_Base):
         losses_all = {}
         stddev_all = {}
 
-        real_loss = self.ddp_average(torch.tensor(self.real_losses_hist)).nanmean().item()
+        real_loss = self.ddp_average(torch.tensor(self.loss_model_hist)).nanmean().item()
 
         for stream in self.cf.streams:  # Loop over all steams
-            stream_hist = [losses_all[stream.name] for losses_all in self.losses_hist]
+            stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
             stream_all = self.ddp_average(torch.stack(stream_hist).to(torch.float64).nanmean(0))
             losses_all[stream.name] = stream_all  # Individual losses for each channel and
 
-            stream_hist = [stddev_all[stream.name] for stddev_all in self.stddev_hist]
+            stream_hist = [stddev_all[stream.name] for stddev_all in self.stdev_unweighted_hist]
             stream_std = self.ddp_average(torch.stack(stream_hist).to(torch.float64).nanmean(0))
             stddev_all[stream.name] = stream_std
 
@@ -574,7 +573,7 @@ class Trainer(Trainer_Base):
         self.ddp_model.eval()
 
         dataset_val_iter = iter(self.data_loader_validation)
-        self.losses_hist, self.real_losses_hist, self.stddev_hist = [], [], []
+        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
@@ -636,9 +635,9 @@ class Trainer(Trainer_Base):
                             mode="validation",
                         )
 
-                    self.losses_hist += [losses_all]
-                    self.real_losses_hist += [loss.item()]
-                    self.stddev_hist += [stddev_all]
+                    self.loss_unweighted_hist += [losses_all]
+                    self.loss_model_hist += [loss.item()]
+                    self.stdev_unweighted_hist += [stddev_all]
 
                     pbar.update(self.cf.batch_size_validation)
 
@@ -724,7 +723,7 @@ class Trainer(Trainer_Base):
                     self.perf_mem,
                 )
 
-            self.losses_hist, self.real_losses_hist, self.stddev_hist = [], [], []
+            self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
     ###########################################
     def log_terminal(self, bidx: int, epoch: int, val: bool = False):
