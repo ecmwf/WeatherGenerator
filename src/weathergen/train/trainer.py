@@ -404,7 +404,11 @@ class Trainer(Trainer_Base):
                                             target[mask, i],
                                             pred[:, mask, i],
                                             pred[:, mask, i].mean(0),
-                                            (pred[:, mask, i].std(0) if ens else torch.zeros(1)),
+                                            (
+                                                pred[:, mask, i].std(0)
+                                                if ens
+                                                else torch.zeros(1, device=pred.device)
+                                            ),
                                         )
                                         val = val + channel_loss_weight[i] * temp
                                         losses_all[si.name][i, j] += temp.item()
@@ -503,6 +507,12 @@ class Trainer(Trainer_Base):
                     forecast_steps,
                     batch[0],
                     preds,
+                )
+
+            if loss == 0.0:
+                # batch[0] is stream data; batch[0][0] is stream 0; sample_idx are identical
+                _logger.warning(
+                    f"Loss is 0.0 for sample(s): {[sd.sample_idx for sd in batch[0][0]]}."
                 )
 
             # backward pass
