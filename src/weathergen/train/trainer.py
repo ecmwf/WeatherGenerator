@@ -24,13 +24,13 @@ import weathergen.train.loss as losses
 import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
+from weathergen.train.loss import stat_loss_fcts
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
 from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TrainLogger
 from weathergen.utils.validation_io import write_validation
-from weathergen.train.loss import stat_loss_fcts
 
 _logger = logging.getLogger(__name__)
 
