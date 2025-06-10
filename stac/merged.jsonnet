@@ -21,9 +21,7 @@ local datasets = [era5v8, opera, cerra, seviri, imerg, nppatms, synop];
 local check = fn.check_unique_ids(datasets);
 
 local files = [ds.filename + '.json' for ds in datasets];
-{
-  check: fn.check_unique_ids(datasets),
-}
+fn.check_unique_ids(datasets)
 +
 {
   'catalogue.json':
