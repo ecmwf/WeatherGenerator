@@ -325,7 +325,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # for all streams
                 for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
                     stream_data = StreamData(
-                        forecast_dt + self.forecast_offset, nhc_source, nhc_target
+                        idx, forecast_dt + self.forecast_offset, nhc_source, nhc_target
                     )
                     name = stream_info["name"]
 

@@ -512,6 +512,12 @@ class Trainer(Trainer_Base):
                     stddev_all,
                 )
 
+            if loss == 0.0:
+                # batch[0] is stream data; batch[0][0] is stream 0; sample_idx are identical
+                _logger.warning(
+                    f"Loss is 0.0 for sample(s): {[sd.sample_idx for sd in batch[0][0]]}."
+                )
+
             # backward pass
             self.grad_scaler.scale(loss).backward()
 
