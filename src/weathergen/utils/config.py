@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import io
 import json
 import logging
 import os
@@ -14,7 +15,7 @@ import subprocess
 from pathlib import Path
 
 import yaml
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from weathergen.train.utils import get_run_id
 
@@ -25,18 +26,22 @@ _DEFAULT_MODEL_PATH = "./models"
 _logger = logging.getLogger(__name__)
 
 
-Config = OmegaConf
+Config = DictConfig
 
 
-def print_cf(config: Config):
-    """Print formatted the contents of the configuration."""
+def format_cf(config: Config) -> str:
+    stream = io.StringIO()
     for key, value in config.items():
-        if key != "streams":
-            print(f"{key} : {value}")
-        else:
-            for rt in value:
-                for k, v in rt.items():
-                    print("{}{} : {}".format("" if k == "reportypes" else "  ", k, v))
+        match key:
+            case "streams":
+                for rt in value:
+                    for k, v in rt.items():
+                        whitespace = "" if k == "reportypes" else "  "
+                        stream.write(f"{whitespace}{k} : {v}")
+            case _:
+                stream.write(f"{key} : {value}\n")
+
+    return stream.getvalue()
 
 
 def save(config: Config, epoch: int | None):
@@ -46,20 +51,14 @@ def save(config: Config, epoch: int | None):
     dirname = path_models / config.run_id
     dirname.mkdir(exist_ok=True, parents=True)
 
-    if epoch is None:
-        epoch_str = ""
-    elif epoch == -1:
-        epoch_str = "_latest"
-    else:
-        epoch_str = f"_epoch{epoch:05d}"
-    fname = dirname / f"model_{config.run_id}{epoch_str}.json"
+    fname = dirname / _get_model_config_file_name(config.run_id, epoch)
 
     json_str = json.dumps(OmegaConf.to_container(config))
     with fname.open("w") as f:
         f.write(json_str)
 
 
-def load_model_config(run_id: str, epoch: int | None, model_path: str | None) -> OmegaConf:
+def load_model_config(run_id: str, epoch: int | None, model_path: str | None) -> Config:
     """
     Load a configuration file from a given run_id and epoch.
     If run_id is a full path, loads it from the full path.
@@ -70,10 +69,7 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
         _logger.info(f"Loading config from provided full run_id path: {fname}")
     else:
         path_models = Path(model_path or _DEFAULT_MODEL_PATH)
-        epoch_str = ""
-        if epoch is not None:
-            epoch_str = "_latest" if epoch == -1 else f"_epoch{epoch:05d}"
-        fname = path_models / run_id / f"model_{run_id}{epoch_str}.json"
+        fname = path_models / run_id / _get_model_config_file_name(run_id, epoch)
 
     _logger.info(f"Loading config from specified run_id and epoch: {fname}")
 
@@ -83,37 +79,123 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
     return OmegaConf.create(json.loads(json_str))
 
 
+def _get_model_config_file_name(run_id: str, epoch: int | None):
+    if epoch is None:
+        epoch_str = ""
+    elif epoch == -1:
+        epoch_str = "_latest"
+    else:
+        epoch_str = f"_epoch{epoch:05d}"
+    return f"model_{run_id}{epoch_str}.json"
+
+
 def load_config(
     private_home: Path | None,
-    run_id: str | None,
+    from_run_id: str | None,
     epoch: int | None,
-    overwrite_path: Path | None,
+    *overwrites: Path | dict | Config,
 ) -> Config:
-    private_config = _load_private_conf(private_home)
-    overwrite_config = _load_overwrite_conf(overwrite_path)
+    """
+    Merge config information from multiple sources into one run_config. Anything in the
+    private configs "secrets" section will be discarted.
 
-    if run_id is None:
+    Args:
+        private_home: Configuration file containing platform dependent information and secretes
+        from_run_id: Run id of the pretrained WeatherGenerator model to continue training or evaluate
+        epoch: epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        *overwrites: Additional overwrites from different sources
+
+    Note: The order of precendence for merging the final config is in ascending order:
+        - base config (either default config or loaded from previous run)
+        - private config
+        - overwrites (also in ascending order)
+    """
+    private_config = _load_private_conf(private_home)
+    overwrite_configs = [_load_overwrite_conf(overwrite) for overwrite in overwrites]
+
+    if from_run_id is None:
         base_config = _load_default_conf()
-        base_config.run_id = get_run_id()
     else:
-        base_config = load_model_config(run_id, epoch, private_config["model_path"])
+        base_config = load_model_config(from_run_id, epoch, private_config["model_path"])
 
     # use OmegaConf.unsafe_merge if too slow
-    return OmegaConf.merge(base_config, private_config, overwrite_config)
+    return OmegaConf.merge(base_config, private_config, *overwrite_configs)
 
 
-def _load_overwrite_conf(overwrite_path: Path | None) -> OmegaConf:
-    "Return the overwrite configuration."
+def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config:
+    """
+    Determine and set run_id of current run.
 
-    "If path is None, return an empty dictionary."
-    if overwrite_path is None:
-        return {}
+    Determining the run id should follow the following logic:
+
+    1. (default case): run train, train_continue or evaluate without any flags => generate a new run_id for this run.
+    2. (assign run_id): run train, train_continue or evaluate with --run_id <RUNID> flag => assign a run_id manually to this run. This is intend for outside tooling and should not be used manually.
+    3. (reuse run_id -> only for train_continue and evaluate): reuse the run_id from the run specified by --from_run_id <RUNID>. Since the run_id correct run_id is already loaded in the config nothing has to be assigned. This case will happen if --reuse_run_id is specified.
+
+
+    Args:
+        config: Base configuration loaded from previous run or default.
+        run_id: Id assigned to this run. If None a new one will be generated.
+        reuse_run_id: Reuse run_id from base configuration instead.
+
+    Returns:
+        config object with the run_id attribute properly set.
+    """
+    config = config.copy()
+    if reuse_run_id:
+        assert config.run_id is not None, "run_id loaded from previous run should not be None."
+        _logger.info(f"reusing run_id from previous run: {config.run_id}")
     else:
-        _logger.info(f"Loading overwrite config from {overwrite_path}.")
-        return OmegaConf.load(overwrite_path)
+        if run_id is None:
+            # generate new id if run_id is None
+            config.run_id = run_id or get_run_id()
+            _logger.info(f"using generated run_id: {config.run_id}")
+        else:
+            config.run_id = run_id
+            _logger.info(
+                f"using assigned run_id: {config.run_id}. If you manually selected this run_id, this is an error."
+            )
+
+    return config
 
 
-def _load_private_conf(private_home: Path | None) -> OmegaConf:
+def from_cli_arglist(arg_list: list[str]) -> Config:
+    """
+    Parse a Config instance from cli arguments.
+
+    This enables convenient collecting of arguments into an overwrite.
+
+    Args:
+        arg_list: items in this list should be of the form: parent_obj.nested_obj=value
+    """
+    return OmegaConf.from_cli(arg_list)
+
+
+def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
+    """
+    Convert different sources into configs that can be used as overwrites.
+
+    raises: ValueError if argument cannot be turned into DictConfig.
+    """
+
+    match overwrite:  # match the type
+        case Path():
+            _logger.info(f"Loading overwrite config from file: {overwrite}.")
+            overwrite_config = OmegaConf.load(overwrite)
+        case dict():
+            _logger.info(f"Loading overwrite config from dict: {overwrite}.")
+            overwrite_config = OmegaConf.create(overwrite)
+        case DictConfig():
+            _logger.info(f"Using existing config as overwrite: {overwrite}.")
+            overwrite_config = overwrite
+        case _:
+            msg = f"Cannot build config from overwrite: {overwrite}, with type {type(overwrite)}"
+            raise ValueError(msg)
+
+    return overwrite_config
+
+
+def _load_private_conf(private_home: Path | None) -> DictConfig:
     "Return the private configuration."
     "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
 
@@ -159,10 +241,14 @@ def _load_private_conf(private_home: Path | None) -> OmegaConf:
     private_cf["model_path"] = (
         private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
     )
+
+    if "secrets" in private_cf:
+        del private_cf["secrets"]
+
     return private_cf
 
 
-def _load_default_conf() -> OmegaConf:
+def _load_default_conf() -> Config:
     """Deserialize default configuration."""
     return OmegaConf.load(_DEFAULT_CONFIG_PTH)
 
@@ -179,13 +265,19 @@ def load_streams(streams_directory: Path) -> list[Config]:
     # append streams to existing (only relevant for evaluation)
     streams = []
     # exclude temp files starting with "." or "#" (eg. emacs, vim, macos savefiles)
-    for config_file in sorted(streams_directory.rglob("[!.#]*.yml")):
+    stream_files = sorted(streams_directory.rglob("[!.#]*.yml"))
+    _logger.info(f"discover stream configs: {stream_files}")
+    for config_file in stream_files:
         try:
             # Stream config schema is {stream_name: stream_config} where stream_config
             # itself is a dict containing the actual options. stream_name needs to be
             # added to this dict since only stream_config will be further processed.
             stream_name, stream_config = [*OmegaConf.load(config_file).items()][0]
+            stream_config.name = stream_name
         except yaml.scanner.ScannerError as e:
+            msg = f"Invalid yaml file while parsing stream configs: {config_file}"
+            raise RuntimeError(msg) from e
+        except AttributeError as e:
             msg = f"Invalid yaml file while parsing stream configs: {config_file}"
             raise RuntimeError(msg) from e
         except IndexError:
@@ -193,7 +285,6 @@ def load_streams(streams_directory: Path) -> list[Config]:
             _logger.warning(f"Parsed stream configuration file is empty: {config_file}")
             continue
 
-        stream_config.name = stream_name
         streams.append(stream_config)
         _logger.info(f"Loaded stream config: {stream_name}")
 

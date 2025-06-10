@@ -224,6 +224,9 @@ class Model(torch.nn.Module):
 
         ###############
         # forecasting engine
+        if cf.forecast_steps > 0 and cf.fe_num_blocks == 0:
+            raise ValueError("Empty forecast engine (fe_num_blocks = 0), but forecast_steps > 0")
+
         self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells).create()
 
         ###############
@@ -688,18 +691,19 @@ class Model(torch.nn.Module):
 
             # embed token coords, concatenating along batch dimension (which is taking care of through
             # the varlen attention)
-            tc_tokens = torch.cat(
-                [
-                    checkpoint(
-                        tc_embed,
-                        streams_data[i_b][ii].target_coords[fstep],
-                        use_reentrant=False,
-                    )
-                    if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
-                    else streams_data[i_b][ii].target_coords[fstep]
-                    for i_b in range(len(streams_data))
-                ]
-            )
+            with torch.amp.autocast("cuda", dtype=torch.float32, enabled=False):
+                tc_tokens = torch.cat(
+                    [
+                        checkpoint(
+                            tc_embed,
+                            streams_data[i_b][ii].target_coords[fstep],
+                            use_reentrant=False,
+                        )
+                        if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
+                        else streams_data[i_b][ii].target_coords[fstep]
+                        for i_b in range(len(streams_data))
+                    ]
+                )
 
             if torch.isnan(tc_tokens).any():
                 nn = si["name"]
