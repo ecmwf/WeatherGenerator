@@ -54,7 +54,7 @@ class Trainer(Trainer_Base):
 
         self.devices = self.init_torch()
 
-        # Get num_ranks of previous run which is to be continued before
+        # Get num_ranks of previous, to be continued run before
         # num_ranks gets overwritten by current setting during init_ddp()
         self.num_ranks_original = cf.num_ranks if "num_ranks" in cf.keys() else None
 
