@@ -652,7 +652,9 @@ def get_dataset_indexes_timestep(
     dtr = tw_handler.window(idx)
     # If there is no or only marginal overlap with the dataset, return empty index ranges
     if (
-        dtr.end < data_start_time
+        not data_start_time
+        or not data_end_time
+        or dtr.end < data_start_time
         or dtr.start > data_end_time
         or dtr.start < data_start_time
         or dtr.end > data_end_time
