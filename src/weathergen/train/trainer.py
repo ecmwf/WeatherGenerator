@@ -116,7 +116,7 @@ class Trainer(Trainer_Base):
             self.loss_fcts_val += [[getattr(losses, name), w]]
 
         if self.cf.rank == 0:
-            config.save(self.cf, epoch=None)
+            config.save(self.cf, epoch=0)
 
         _logger.info(f"Starting evaluation with id={self.cf.run_id}.")
 
