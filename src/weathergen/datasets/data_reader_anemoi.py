@@ -56,6 +56,8 @@ class DataReaderAnemoi(DataReaderTimestep):
         ds0: Dataset = anemoi_datasets.open_dataset(filename)
         # If there is no overlap with the time range, the dataset will be empty
         if tw_handler.t_start >= ds0.dates[-1] or tw_handler.t_end <= ds0.dates[0]:
+            name = stream_info["name"]
+            _logger.warning(f"{name} is not supported over data loader window. Stream is skipped.")
             super().__init__(tw_handler)
             self.init_empty()
             return
