@@ -93,7 +93,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         datapath = cf.data_path_anemoi
                     case "icon":
                         dataset = IconDataset
-                        datapath = cf.data_path_icon                        
+                        datapath = cf.data_path_icon
                     case _:
                         msg = f"Unsupported stream type {stream_info['type']}"
                         raise ValueError(msg)

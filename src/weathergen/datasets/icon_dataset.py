@@ -7,13 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import json
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import torch
 import zarr
-import json
+
 
 class IconDataset:
     """
@@ -80,11 +81,13 @@ class IconDataset:
         self.mesh_size = self.ds.attrs["ncells"]
 
         # Loading stat file
-        stats_filename = Path(filename).with_suffix('.json')
-        with open(stats_filename, 'r') as stats_file:
+        stats_filename = Path(filename).with_suffix(".json")
+        with open(stats_filename) as stats_file:
             self.stats = json.load(stats_file)
 
-        time_as_in_data_file = np.array(self.ds['time'], dtype='timedelta64[D]')+np.datetime64(self.ds['time'].attrs['units'].split('since ')[-1])
+        time_as_in_data_file = np.array(self.ds["time"], dtype="timedelta64[D]") + np.datetime64(
+            self.ds["time"].attrs["units"].split("since ")[-1]
+        )
 
         start_ds = time_as_in_data_file[0]
         end_ds = time_as_in_data_file[-1]
@@ -112,28 +115,28 @@ class IconDataset:
             f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
         )
 
-        len_data_entries = len(self.ds['time']) * self.mesh_size
+        len_data_entries = len(self.ds["time"]) * self.mesh_size
 
         assert self.end_idx + len_hrs <= len_data_entries, (
             f"Abort: end_date must be set at least {len_hrs} before the last date in the dataset"
         )
 
-        # variables 
+        # variables
         self.colnames = list(self.ds)
         self.cols_idx = np.array(list(np.arange(len(self.colnames))))
-    
+
         # Ignore step_hrs, idk how it supposed to work
         # TODO, TODO, TODO:
         self.step_hrs = 1
 
         # time
         repeated_times = np.repeat(time_as_in_data_file, self.mesh_size).reshape(-1, 1)
-        self.time = repeated_times 
+        self.time = repeated_times
 
         # coordinates
-        coords_units = self.ds['clat'].attrs['units']
+        coords_units = self.ds["clat"].attrs["units"]
 
-        if coords_units == 'radian':
+        if coords_units == "radian":
             lat_as_in_data_file = np.rad2deg(self.ds["clat"][:].astype("f"))
             lon_as_in_data_file = np.rad2deg(self.ds["clon"][:].astype("f"))
 
@@ -144,18 +147,16 @@ class IconDataset:
         self.lat = np.tile(lat_as_in_data_file, len(time_as_in_data_file))
         self.lon = np.tile(lon_as_in_data_file, len(time_as_in_data_file))
 
-        self.properties = {
-            "stream_id":  0 
-        }
+        self.properties = {"stream_id": 0}
 
         # stats
-        stats_vars = self.stats['metadata']['variables']
+        stats_vars = self.stats["metadata"]["variables"]
         assert stats_vars == self.colnames, (
             f"Variables in normalization file {stats_vars} do not match dataset columns {self.colnames}"
         )
 
-        self.mean = np.array(self.stats["statistics"]["mean"], dtype='d') 
-        self.stdev = np.array(self.stats["statistics"]["std"], dtype='d') 
+        self.mean = np.array(self.stats["statistics"]["mean"], dtype="d")
+        self.stdev = np.array(self.stats["statistics"]["std"], dtype="d")
 
         # Channel selection and indexing
         source_channels = stream_info["source"] if "source" in stream_info else None
@@ -180,7 +181,6 @@ class IconDataset:
         )
         # TODO: define in base class
         self.geoinfo_idx = []
-
 
     def select(self, ch_filters: list[str]) -> tuple[list[str], np.array]:
         """
@@ -239,13 +239,12 @@ class IconDataset:
 
         # data
         data_reshaped = [
-            np.asarray(self.ds[ch_]).reshape(-1, 1)[start_row:end_row]
-            for ch_ in channels
+            np.asarray(self.ds[ch_]).reshape(-1, 1)[start_row:end_row] for ch_ in channels
         ]
-        data = np.concatenate(data_reshaped, axis=1) 
+        data = np.concatenate(data_reshaped, axis=1)
 
-        lat = np.expand_dims(self.lat[start_row:end_row],1)
-        lon = np.expand_dims(self.lon[start_row:end_row],1)
+        lat = np.expand_dims(self.lat[start_row:end_row], 1)
+        lon = np.expand_dims(self.lon[start_row:end_row], 1)
 
         latlon = np.concatenate([lat, lon], 1)
 
@@ -398,7 +397,7 @@ class IconDataset:
         """
         start_row = self.start_idx + idx * self.mesh_size
         end_row = start_row + self.len_hrs * self.mesh_size
-        
+
         return (self.time[start_row, 0], self.time[end_row, 0])
 
     def denormalize_target_channels(self, data: torch.tensor) -> torch.tensor:
