@@ -263,7 +263,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
     _logger.info(f"Reading streams from {streams_directory}")
 
     # append streams to existing (only relevant for evaluation)
-    streams = []
+    streams = {}
     # exclude temp files starting with "." or "#" (eg. emacs, vim, macos savefiles)
     stream_files = sorted(streams_directory.rglob("[!.#]*.yml"))
     _logger.info(f"discover stream configs: {', '.join(map(str, stream_files))}")
@@ -276,18 +276,22 @@ def load_streams(streams_directory: Path) -> list[Config]:
                 # stream_name needs to be added to this dict since only stream_config
                 # will be further processed.
                 stream_config.name = stream_name
-                streams.append(stream_config)
-                _logger.info(f"Loaded stream config: {stream_name} from file {config_file}")
+                if stream_name in streams:
+                    msg = f"Duplicate stream name found: {stream_name}. Please ensure all stream names are unique."
+                    raise ValueError(msg)
+                else:
+                    streams[stream_name] = stream_config
+                    _logger.info(f"Loaded stream config: {stream_name} from file {config_file}")
 
-        except yaml.scanner.ScannerError as e:
+        except (yaml.scanner.ScannerError, yaml.constructor.ConstructorError) as e:
             msg = f"Invalid yaml file while parsing stream configs: {config_file}"
-            raise RuntimeError(msg) from e
+            raise ValueError(msg) from e
         except AttributeError as e:
             msg = f"Invalid yaml file while parsing stream configs: {config_file}"
-            raise RuntimeError(msg) from e
+            raise ValueError(msg) from e
         except IndexError:
             # support commenting out entire stream files to avoid loading them.
             _logger.warning(f"Parsed stream configuration file is empty: {config_file}")
             continue
 
-    return streams
+    return list(streams.values())
