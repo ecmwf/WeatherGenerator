@@ -31,7 +31,7 @@ class IconDataset:
         (Currently unused) Intended step size between windows in hours
     filename : Path
         Path to Zarr dataset containing ICON output
-    stream_info : dict
+    stream_info : dict[str, list[str]]
         Dictionary with "source" and "target" keys specifying channel subsets to use
         (e.g., {"source": ["temp_00"], "target": ["TRCH4_chemtr_00"]})
 
@@ -42,14 +42,14 @@ class IconDataset:
     mesh_size : int
         Number of nodes in the ICON mesh
     source_channels : list[str]
-        Names of selected source channels
+        Patterns of selected source channels
     target_channels : list[str]
-        Names of selected target channels
+        Patterns of selected target channels
     mean : np.ndarray
         Per-channel means for normalization (includes coordinates)
     stdev : np.ndarray
         Per-channel standard deviations for normalization (includes coordinates)
-    properties : dict
+    properties : dict[str, list[str]]
         Dataset metadata including 'stream_id' from Zarr attributes
 
     """
@@ -112,30 +112,19 @@ class IconDataset:
             f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
         )
 
-        # variables
-        self.colnames_as_in_file = list(self.ds)
-        excluded = {"time", "clat", "clon", "w_00"}  # set lookup is faster
-        self.colnames = [name for name in self.ds if name not in excluded]
+        len_data_entries = len(self.ds['time']) * self.mesh_size
+
+        assert self.end_idx + len_hrs <= len_data_entries, (
+            f"Abort: end_date must be set at least {len_hrs} before the last date in the dataset"
+        )
+
+        # variables 
+        self.colnames = list(self.ds)
         self.cols_idx = np.array(list(np.arange(len(self.colnames))))
     
         # Ignore step_hrs, idk how it supposed to work
         # TODO, TODO, TODO:
         self.step_hrs = 1
-
-        # data
-        icon_data_content = self.ds
-
-        icon_data_content_reshaped = [icon_data_content[col_][:].reshape(-1, 1) for col_ in self.colnames]
-        icon_data_content_stacked = np.concatenate(icon_data_content_reshaped, axis=1)  # shape (N, 34)
-
-        temp_store = zarr.MemoryStore()
-        temp_root = zarr.group(store=temp_store)
-        temp_root.create_dataset('data', data=icon_data_content_stacked, dtype='float32')
-        self.data = temp_root['data']
-
-        assert self.end_idx + len_hrs <= len(self.data), (
-            f"Abort: end_date must be set at least {len_hrs} before the last date in the dataset"
-        )
 
         # time
         repeated_times = np.repeat(time_as_in_data_file, self.mesh_size).reshape(-1, 1)
@@ -161,14 +150,12 @@ class IconDataset:
 
         # stats
         stats_vars = self.stats['metadata']['variables']
-        assert stats_vars == self.colnames_as_in_file, (
+        assert stats_vars == self.colnames, (
             f"Variables in normalization file {stats_vars} do not match dataset columns {self.colnames}"
         )
 
-        cols_idx_for_stats = [idx_ for idx_, col_ in enumerate(self.colnames_as_in_file) if col_ in self.colnames]
-
-        self.mean = np.array(self.stats["statistics"]["mean"], dtype='d')[cols_idx_for_stats]
-        self.stdev = np.array(self.stats["statistics"]["std"], dtype='d')[cols_idx_for_stats]
+        self.mean = np.array(self.stats["statistics"]["mean"], dtype='d') 
+        self.stdev = np.array(self.stats["statistics"]["std"], dtype='d') 
 
         # Channel selection and indexing
         source_channels = stream_info["source"] if "source" in stream_info else None
@@ -194,7 +181,8 @@ class IconDataset:
         # TODO: define in base class
         self.geoinfo_idx = []
 
-    def select(self, ch_filters: list[str]) -> None:
+
+    def select(self, ch_filters: list[str]) -> tuple[list[str], np.array]:
         """
         Allow user to specify which columns they want to access.
         Get functions only returned for these specified columns.
@@ -221,7 +209,7 @@ class IconDataset:
         """
         return self.len
 
-    def _get(self, idx: int, idx_channels: np.array) -> tuple:
+    def _get(self, idx: int, channels: np.array) -> tuple:
         """
         Get data for window
 
@@ -245,9 +233,16 @@ class IconDataset:
                 np.array([], dtype=fp32),
             )
 
+        # indexing
         start_row = self.start_idx + idx * self.mesh_size
         end_row = start_row + self.len_hrs * self.mesh_size
-        data = self.data.oindex[start_row:end_row, idx_channels]
+
+        # data
+        data_reshaped = [
+            np.asarray(self.ds[ch_]).reshape(-1, 1)[start_row:end_row]
+            for ch_ in channels
+        ]
+        data = np.concatenate(data_reshaped, axis=1) 
 
         lat = np.expand_dims(self.lat[start_row:end_row],1)
         lon = np.expand_dims(self.lon[start_row:end_row],1)
@@ -273,7 +268,7 @@ class IconDataset:
         -------
         source data (coords, geoinfos, data, datetimes)
         """
-        return self._get(idx, self.source_idx)
+        return self._get(idx, self.source_channels)
 
     def get_target(self, idx: int) -> tuple[np.array, np.array, np.array, np.array]:
         """
@@ -288,7 +283,7 @@ class IconDataset:
         -------
         target data (coords, geoinfos, data, datetimes)
         """
-        return self._get(idx, self.target_idx)
+        return self._get(idx, self.target_channels)
 
     def get_source_size(self) -> int:
         """
