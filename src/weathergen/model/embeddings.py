@@ -11,13 +11,14 @@ import numpy as np
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from weathergen.model.attention import MultiSelfAttentionHead, MultiCrossAttentionHead_Varlen
+from weathergen.model.attention import MultiSelfAttentionHead, MultiCrossAttentionHead_Varlen, MultiCrossAttentionHead
 from weathergen.model.layers import MLP
 
 # from weathergen.model.mlp import MLP
 from weathergen.model.norms import RMSNorm
 from weathergen.model.positional_encoding import positional_encoding_harmonic
 
+from weathergen.utils.logger import logger
 
 class StreamEmbedTransformer(torch.nn.Module):
     def __init__(
@@ -119,7 +120,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                     torch.randn(1, num_queries, self.dim_embed) 
                 )
                     
-                    self.perceiver_io = MultiCrossAttentionHead_Varlen(
+                    self.perceiver_io = MultiCrossAttentionHead(
                             self.dim_embed,
                             self.dim_embed,
                             self.cross_attn_num_heads,
@@ -174,21 +175,26 @@ class StreamEmbedTransformer(torch.nn.Module):
 
         # embed provided input data
         x = peh(checkpoint(self.embed, x_in.transpose(-2, -1), use_reentrant=False))
+        
+        logger.info("x_shape_after_peh",x.shape)
 
         if self.is_cross_attn:
             # cross-attention with queries
             x = checkpoint(self.perceiver_io, 
-                self.queries.expand(x.shape[0], -1, -1),
+                self.queries.repeat(x.shape[0],1,1),
                 x,
-                x_kv_lens = torch.ones(x.shape[0], dtype=torch.int32, device=x.device) * x.shape[1],
                 # dim_embed=self.dim_embed,
                 use_reentrant=False,
             )
-        # _logger.info("x.shape: %s", x.shape)
+        
+        
+        logger.info("x.shape after cross_atttention:", x.shape)
+
 
         for layer in self.layers:
             x = checkpoint(layer, x, use_reentrant=False)
 
+        logger.info("x shape after self attention", x.shape)
         # read out
         if self.unembed_mode == "full":
             out = checkpoint(self.unembed, self.ln_final(x.flatten(-2, -1)), use_reentrant=False)
