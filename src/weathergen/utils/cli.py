@@ -50,7 +50,10 @@ def get_evaluate_parser() -> argparse.ArgumentParser:
         "--samples", type=int, default=10000000, help="Number of evaluation samples."
     )
     parser.add_argument(  # behaviour changed => implies default=False
-        "--save_samples", action="store_true", help="Save samples from evaluation."
+        "--save_samples",
+        type=bool,
+        default=True,
+        help="Toggle saving of samples from evaluation. Default True",
     )
     parser.add_argument(
         "--analysis_streams_output",
