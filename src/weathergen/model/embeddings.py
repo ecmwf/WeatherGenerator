@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from weathergen.model.attention import MultiSelfAttentionHead
+from weathergen.model.attention import MultiSelfAttentionHead, MultiCrossAttentionHead_Varlen
 from weathergen.model.layers import MLP
 
 # from weathergen.model.mlp import MLP
@@ -29,6 +29,9 @@ class StreamEmbedTransformer(torch.nn.Module):
         dim_embed,
         dim_out,
         num_blocks,
+        num_queries,
+        cross_attn_num_blocks,
+        cross_attn_num_heads,
         num_heads,
         norm_type="LayerNorm",
         embed_size_centroids=64,
@@ -51,6 +54,12 @@ class StreamEmbedTransformer(torch.nn.Module):
         self.dim_embed = dim_embed
         self.dim_out = dim_out
         self.num_blocks = num_blocks
+        if num_queries:
+            assert mode == "channels", "cross-attention is only supported in channels mode"
+        self.num_queries = num_queries
+        self.is_cross_attn = num_queries > 0 
+        self.cross_attn_num_blocks = cross_attn_num_blocks
+        self.cross_attn_num_heads = cross_attn_num_heads
         self.num_heads = num_heads
         self.embed_size_centroids = embed_size_centroids
         self.unembed_mode = unembed_mode
@@ -103,6 +112,30 @@ class StreamEmbedTransformer(torch.nn.Module):
                 )
                 self.ln_final = torch.nn.ModuleList([norm(dim_embed) for _ in range(num_channels)])
 
+                # Multi-Cross Attention Head
+                
+                if num_queries:
+                    self.queries = torch.nn.Parameter(
+                    torch.randn(1, num_queries, self.dim_embed) 
+                )
+                    
+                    self.perceiver_io = MultiCrossAttentionHead_Varlen(
+                            self.dim_embed,
+                            self.dim_embed,
+                            self.cross_attn_num_heads,
+                            # dim_head_proj=self.tr_dim_head_proj,
+                            with_residual=True,
+                            with_qk_lnorm=True,
+                            dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                            # with_flash=self.cf.with_flash_attention,
+                            # norm_type=self.cf.norm_type,
+                            # softcap=self.softcap,
+                            # dim_aux=self.dim_coord_in,
+                        )
+                    
+                else:
+                    self.perceiver_io = torch.nn.Identity()
+
             else:
                 assert False
 
@@ -141,6 +174,17 @@ class StreamEmbedTransformer(torch.nn.Module):
 
         # embed provided input data
         x = peh(checkpoint(self.embed, x_in.transpose(-2, -1), use_reentrant=False))
+
+        if self.is_cross_attn:
+            # cross-attention with queries
+            x = checkpoint(self.perceiver_io, 
+                self.queries.expand(x.shape[0], -1, -1),
+                x,
+                x_kv_lens = torch.ones(x.shape[0], dtype=torch.int32, device=x.device) * x.shape[1],
+                # dim_embed=self.dim_embed,
+                use_reentrant=False,
+            )
+        # _logger.info("x.shape: %s", x.shape)
 
         for layer in self.layers:
             x = checkpoint(layer, x, use_reentrant=False)
