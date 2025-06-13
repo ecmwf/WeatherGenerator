@@ -1,4 +1,4 @@
-streams_directory: "./config/streams/streams_big/" # TODO restore default
+streams_directory: "./config/streams/streams_anemoi/"
 
 embed_orientation: "channels"
 embed_local_coords: True
@@ -109,7 +109,7 @@ input_window_steps: 1
 
 val_initial: False
 
-loader_num_workers: 0 # TODO restore default
+loader_num_workers: 8
 log_validation: 0
 
 istep: 0
