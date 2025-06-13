@@ -12,9 +12,11 @@ from pathlib import Path
 from typing import override
 
 import numpy as np
+from numpy.typing import NDArray
 import zarr
 
 from weathergen.datasets.data_reader_base import (
+    TIndex,
     DataReaderTimestep,
     ReaderData,
     TimeWindowHandler,
@@ -82,6 +84,7 @@ class DataReaderFesom(DataReaderTimestep):
 
         self.time = self.ds["dates"]
 
+        # TODO: time conversion to datetime64 should happen here.
         start_ds = self.time[0][0]
         end_ds = self.time[-1][0]
 
@@ -114,7 +117,8 @@ class DataReaderFesom(DataReaderTimestep):
             end_ds,
             period,
         )
-        self.colnames = list(self.ds.data.attrs["colnames"])
+
+        self.colnames: list[str] = list(self.ds.data.attrs["colnames"])
         self.cols_idx = list(np.arange(len(self.colnames)))
         self.lat_index = list(self.colnames).index("lat")
         self.lon_index = list(self.colnames).index("lon")
@@ -139,14 +143,14 @@ class DataReaderFesom(DataReaderTimestep):
             np.concatenate((np.array([1, 1]), np.array(self.ds.data.attrs["vars"])))
         )
 
-        source_channels = stream_info["source"] if "source" in stream_info else None
+        source_channels = stream_info.get("source", None)
         if source_channels:
             self.source_channels, self.source_idx = self.select(source_channels)
         else:
             self.source_channels = self.colnames
             self.source_idx = self.cols_idx
 
-        target_channels = stream_info["target"] if "target" in stream_info else None
+        target_channels = stream_info.get("target", None)
         if target_channels:
             self.target_channels, self.target_idx = self.select(target_channels)
         else:
@@ -189,7 +193,7 @@ class DataReaderFesom(DataReaderTimestep):
         return self.len
 
     @override
-    def _get(self, idx: int, channels_idx: np.array) -> ReaderData:
+    def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
         """
         Get data for window
 
