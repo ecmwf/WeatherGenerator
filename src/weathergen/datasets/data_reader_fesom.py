@@ -12,14 +12,13 @@ from pathlib import Path
 from typing import override
 
 import numpy as np
-from numpy.typing import NDArray
 import zarr
 
 from weathergen.datasets.data_reader_base import (
-    TIndex,
     DataReaderTimestep,
     ReaderData,
     TimeWindowHandler,
+    TIndex,
     check_reader_data,
 )
 
@@ -143,14 +142,14 @@ class DataReaderFesom(DataReaderTimestep):
             np.concatenate((np.array([1, 1]), np.array(self.ds.data.attrs["vars"])))
         )
 
-        source_channels = stream_info.get("source", None)
+        source_channels = stream_info.get("source")
         if source_channels:
             self.source_channels, self.source_idx = self.select(source_channels)
         else:
             self.source_channels = self.colnames
             self.source_idx = self.cols_idx
 
-        target_channels = stream_info.get("target", None)
+        target_channels = stream_info.get("target")
         if target_channels:
             self.target_channels, self.target_idx = self.select(target_channels)
         else:

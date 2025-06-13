@@ -90,6 +90,7 @@ def str_to_timedelta(s: str | datetime.timedelta) -> datetime.timedelta:
     t = datetime.datetime.strptime(s, format_str)
     return datetime.timedelta(hours=t.hour, minutes=t.minute, seconds=t.second)
 
+
 class TimeWindowHandler:
     """
     Handler for time windows and translation of indices to times
@@ -143,7 +144,6 @@ class TimeWindowHandler:
         assert idx_start <= idx_end, f"time window idxs invalid: {idx_start} <= {idx_end}"
 
         return TimeIndexRange(idx_start, idx_end)
-
 
     def window(self, idx: TIndex) -> DTRange:
         """

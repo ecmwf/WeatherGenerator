@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datetime
 import logging
 from pathlib import Path
 from typing import override
@@ -22,7 +21,8 @@ from weathergen.datasets.data_reader_base import (
     ReaderData,
     TimeWindowHandler,
     TIndex,
-    check_reader_data,str_to_timedelta
+    check_reader_data,
+    str_to_timedelta,
 )
 
 _logger = logging.getLogger(__name__)
