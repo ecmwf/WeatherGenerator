@@ -10,33 +10,31 @@
 import datetime
 import logging
 from pathlib import Path
+from typing import override
 
 import numpy as np
 import zarr
 
-from weathergen.datasets.data_reader_base import DataReaderBase, ReaderData
+from weathergen.datasets.data_reader_base import (
+    DataReaderBase,
+    ReaderData,
+    TimeWindowHandler,
+    check_reader_data,
+)
 
 _logger = logging.getLogger(__name__)
 
 
 class DataReaderObs(DataReaderBase):
-    def __init__(
-        self,
-        start: int,
-        end: int,
-        t_window_len: int,
-        t_window_step: int,
-        filename: Path,
-        stream_info: dict,
-    ) -> None:
+    def __init__(self, tw_handler: TimeWindowHandler, filename: Path, stream_info: dict) -> None:
+        super().__init__(tw_handler)
+
         self.filename = filename
         self.z = zarr.open(filename, mode="r")
         self.data = self.z["data"]
         self.dt = self.z["dates"]  # datetime only
         self.hrly_index = self.z["idx_197001010000_1"]
         self.colnames = self.data.attrs["colnames"]
-        self.len_hrs = t_window_len
-        self.step_hrs = t_window_step if t_window_step else t_window_len
 
         # self.selected_colnames = self.colnames
         # self.selected_cols_idx = np.arange(len(self.colnames))
@@ -50,12 +48,13 @@ class DataReaderObs(DataReaderBase):
         self.selected_cols_idx = np.arange(len(self.colnames))[: len(self.colnames) - idx]
 
         # Create index for samples
-        self._setup_sample_index(start, end, self.len_hrs, self.step_hrs)
+        self._setup_sample_index()
         # assert len(self.indices_start) == len(self.indices_end)
 
         self._load_properties()
 
         # TODO: re-implement selection of source and target channels
+        # TODO: factorize with anemoi reader
 
         channels_idx = [i for i, col in enumerate(self.selected_colnames) if "obsvalue" in col]
         self.data_offset = channels_idx[0]
@@ -74,6 +73,7 @@ class DataReaderObs(DataReaderBase):
                 break
         self.coords_idx = [i, i + 1]
         self.geoinfo_idx = list(range(i + 2, channels_idx[0]))
+        self.geoinfo_channels = [self.selected_colnames[i] for i in self.geoinfo_idx]
 
         self.mean = np.array(self.properties["means"])[channels_idx]
         self.stdev = np.sqrt(np.array(self.properties["vars"])[channels_idx])
@@ -81,6 +81,10 @@ class DataReaderObs(DataReaderBase):
         self.stdev_geoinfo = np.sqrt(np.array(self.properties["vars"])[self.geoinfo_idx])
 
         self.len = min(len(self.indices_start), len(self.indices_end))
+
+    @override
+    def length(self) -> int:
+        return self.len
 
     def select(self, cols_list: list[str]) -> None:
         """
@@ -113,7 +117,7 @@ class DataReaderObs(DataReaderBase):
 
         return last_sample
 
-    def _setup_sample_index(self, start: int, end: int, len_hrs: int, step_hrs: int) -> None:
+    def _setup_sample_index(self) -> None:
         """
         Dataset is divided into samples;
            - each n_hours long
@@ -122,18 +126,29 @@ class DataReaderObs(DataReaderBase):
            containing data for that sample
         """
 
+        # TODO: generalize this
+        assert self.time_window_handler.t_window_len.item().total_seconds() % 3600 == 0, (
+            "t_window_len has to be full hour (currently {self.time_window_handler.t_window_len})"
+        )
+        len_hrs = int(self.time_window_handler.t_window_len.item().total_seconds()) // 3600
+        assert self.time_window_handler.t_window_step.item().total_seconds() % 3600 == 0, (
+            "t_window_step has to be full hour (currently {self.time_window_handler.t_window_len})"
+        )
+        step_hrs = int(self.time_window_handler.t_window_step.item().total_seconds()) // 3600
+
+        # TODO: move to ctor
         base_yyyymmddhhmm = 197001010000
 
-        assert start > base_yyyymmddhhmm, (
-            f"Abort: ObsDataset sample start (yyyymmddhhmm) must be greater than {base_yyyymmddhhmm}\n"
-            f"       Current value: {start}"
-        )
+        # assert start > base_yyyymmddhhmm, (
+        #     f"Abort: ObsDataset sample start (yyyymmddhhmm) must be greater than {base_yyyymmddhhmm}\n"
+        #     f"       Current value: {start}"
+        # )
 
         # Derive new index based on hourly backbone index
         format_str = "%Y%m%d%H%M%S"
         base_dt = datetime.datetime.strptime(str(base_yyyymmddhhmm), format_str)
-        self.start_dt = datetime.datetime.strptime(str(start), format_str)
-        self.end_dt = datetime.datetime.strptime(str(end), format_str)
+        self.start_dt = self.time_window_handler.t_start.item()
+        self.end_dt = self.time_window_handler.t_end.item()
 
         # Calculate the number of hours between start of hourly base index and the requested sample index
         diff_in_hours_start = int((self.start_dt - base_dt).total_seconds() / 3600)
@@ -188,7 +203,8 @@ class DataReaderObs(DataReaderBase):
         # self.properties["data_idxs"] = self.data.attrs["data_idxs"]
         self.properties["obs_id"] = self.data.attrs["obs_id"]
 
-    def _get(self, idx: int, channels_idx: np.array) -> ReaderData:
+    @override
+    def _get(self, idx: int, channels_idx: list[int]) -> ReaderData:
         """
         Get data for window
 
@@ -204,20 +220,28 @@ class DataReaderObs(DataReaderBase):
         ReaderDatas (coords, geoinfos, data, datetimes)
         """
 
-        rdata = ReaderData()
-
         start_row = self.indices_start[idx]
         end_row = self.indices_end[idx]
 
-        rdata.coords = self.data.oindex[start_row:end_row, self.coords_idx]
-        rdata.geoinfos = (
+        coords = self.data.oindex[start_row:end_row, self.coords_idx]
+        geoinfos = (
             self.data.oindex[start_row:end_row, self.geoinfo_idx]
             if len(self.geoinfo_idx) > 0
-            else np.zeros((rdata.coords.shape[0], 0), np.float32)
+            else np.zeros((coords.shape[0], 0), np.float32)
         )
 
         channels_idx = np.array(channels_idx)
-        rdata.data = self.data.oindex[start_row:end_row, self.data_offset + channels_idx]
-        rdata.datetimes = self.dt[start_row:end_row][:, 0]
+        data = self.data.oindex[start_row:end_row, self.data_offset + channels_idx]
+        datetimes = self.dt[start_row:end_row][:, 0]
+
+        rdata = ReaderData(
+            coords=coords,
+            geoinfos=geoinfos,
+            data=data,
+            datetimes=datetimes,
+        )
+
+        dtr = self.time_window_handler.window(idx)
+        check_reader_data(rdata, dtr)
 
         return rdata

@@ -26,10 +26,9 @@ from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
-from weathergen.train.utils import get_run_id
 from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.train_logger import TrainLogger
+from weathergen.utils.train_logger import TRAIN, VAL, TrainLogger
 from weathergen.utils.validation_io import write_validation
 
 _logger = logging.getLogger(__name__)
@@ -47,20 +46,8 @@ class Trainer(Trainer_Base):
     def init(
         self,
         cf: Config,
-        run_id_contd=None,
-        epoch_contd=None,  # unused
-        run_id_new: bool | str | None = False,
-        run_mode="training",  # unused
     ):
         self.cf = cf
-
-        if run_id_new is not None and isinstance(run_id_new, str):
-            cf.run_id = run_id_new
-        elif run_id_new or cf.run_id is None:
-            cf.run_id = get_run_id()
-        elif run_id_contd is not None and not run_id_new:
-            cf.run_id = run_id_contd
-        assert cf.run_id is not None
 
         assert cf.samples_per_epoch % cf.batch_size == 0
         assert cf.samples_per_validation % cf.batch_size_validation == 0
@@ -82,13 +69,13 @@ class Trainer(Trainer_Base):
             path_model.mkdir(exist_ok=True, parents=True)
         self.path_run = path_run
 
-        self.init_perf_monitoring()
+        # self.init_perf_monitoring() # TODO restore default
         self.train_logger = TrainLogger(cf, self.path_run)
 
     ###########################################
-    def evaluate(self, cf, run_id_trained, epoch, run_id_new=False):
+    def evaluate(self, cf, run_id_trained, epoch):
         # general initalization
-        self.init(cf, run_id_trained, epoch, run_id_new, run_mode="evaluate")
+        self.init(cf)
 
         self.dataset_val = MultiStreamDataSampler(
             cf,
@@ -96,6 +83,8 @@ class Trainer(Trainer_Base):
             cf.end_date_val,
             cf.batch_size_validation,
             cf.samples_per_validation,
+            train_logger=self.train_logger,
+            stage=VAL,
             shuffle=cf.shuffle,
         )
 
@@ -138,12 +127,19 @@ class Trainer(Trainer_Base):
         _logger.info(f"Finished evaluation run with id: {cf.run_id}")
 
     ###########################################
-    def run(self, cf, run_id_contd=None, epoch_contd=None, run_id_new: bool | str = False):
+    def run(self, cf, run_id_contd=None, epoch_contd=None):
         # general initalization
-        self.init(cf, run_id_contd, epoch_contd, run_id_new)
+        self.init(cf)
 
         self.dataset = MultiStreamDataSampler(
-            cf, cf.start_date, cf.end_date, cf.batch_size, cf.samples_per_epoch, shuffle=True
+            cf,
+            cf.start_date,
+            cf.end_date,
+            cf.batch_size,
+            cf.samples_per_epoch,
+            train_logger=self.train_logger,
+            stage=TRAIN,
+            shuffle=cf.shuffle,
         )
         self.dataset_val = MultiStreamDataSampler(
             cf,
@@ -151,7 +147,9 @@ class Trainer(Trainer_Base):
             cf.end_date_val,
             cf.batch_size_validation,
             cf.samples_per_validation,
-            shuffle=cf.shuffle,
+            train_logger=self.train_logger,
+            stage=VAL,
+            shuffle=False,
         )
 
         loader_params = {
@@ -296,11 +294,11 @@ class Trainer(Trainer_Base):
         for epoch in range(epoch_base, cf.num_epochs):
             _logger.info(f"Epoch {epoch} of {cf.num_epochs}: train.")
             self.train(epoch)
+
             _logger.info(f"Epoch {epoch} of {cf.num_epochs}: validate.")
-
             self.validate(epoch)
-            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
 
+            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
             self.save_model(epoch)
 
         # log final model
@@ -316,7 +314,7 @@ class Trainer(Trainer_Base):
         preds,
         losses_all,
         stddev_all,
-        mode="training",
+        stage=TRAIN,
         log_data=False,
     ):
         # merge across batch dimension (and keep streams)
@@ -366,7 +364,7 @@ class Trainer(Trainer_Base):
             ):
                 pred = preds[fstep][i_obs]
 
-                num_channels = len(si["target_channels"])
+                num_channels = len(si[str(stage) + "_target_channels"])
 
                 # set obs_loss_weight = 1. when not specified
                 obs_loss_weight = si["loss_weight"] if "loss_weight" in si else 1.0
@@ -374,10 +372,8 @@ class Trainer(Trainer_Base):
                     si["channel_weight"] if "channel_weight" in si else np.ones(num_channels)
                 )
                 # in validation mode, always unweighted loss is computed
-                obs_loss_weight = 1.0 if mode == "validation" else obs_loss_weight
-                channel_loss_weight = (
-                    np.ones(num_channels) if mode == "validation" else channel_loss_weight
-                )
+                obs_loss_weight = 1.0 if stage == VAL else obs_loss_weight
+                channel_loss_weight = np.ones(num_channels) if stage == VAL else channel_loss_weight
 
                 tok_spacetime = si["tokenize_spacetime"] if "tokenize_spacetime" in si else False
 
@@ -413,7 +409,11 @@ class Trainer(Trainer_Base):
                                             target[mask, i],
                                             pred[:, mask, i],
                                             pred[:, mask, i].mean(0),
-                                            (pred[:, mask, i].std(0) if ens else torch.zeros(1)),
+                                            (
+                                                pred[:, mask, i].std(0)
+                                                if ens
+                                                else torch.zeros(1, device=pred.device)
+                                            ),
                                         )
                                         val_uw += temp.item()
                                         val = val + channel_loss_weight[i] * temp
@@ -429,7 +429,7 @@ class Trainer(Trainer_Base):
                                         (
                                             pred[:, mask_nan[:, i], i].std(0)
                                             if ens
-                                            else torch.zeros(1)
+                                            else torch.zeros(1, device=pred.device)
                                         ),
                                     )
                                     val_uw += temp.item()
@@ -464,15 +464,17 @@ class Trainer(Trainer_Base):
 
         return (
             loss,
-            None
-            if not log_data
-            else [
-                preds_all,
-                targets_all,
-                targets_coords_raw_rt,
-                targets_times_raw_rt,
-                targets_lens,
-            ],
+            (
+                None
+                if not log_data
+                else [
+                    preds_all,
+                    targets_all,
+                    targets_coords_raw_rt,
+                    targets_times_raw_rt,
+                    targets_lens,
+                ]
+            ),
         )
 
     ###########################################
@@ -508,6 +510,12 @@ class Trainer(Trainer_Base):
                     preds,
                     losses_all,
                     stddev_all,
+                )
+
+            if loss == 0.0:
+                # batch[0] is stream data; batch[0][0] is stream 0; sample_idx are identical
+                _logger.warning(
+                    f"Loss is 0.0 for sample(s): {[sd.sample_idx for sd in batch[0][0]]}."
                 )
 
             # backward pass
@@ -581,7 +589,7 @@ class Trainer(Trainer_Base):
                             preds,
                             losses_all,
                             stddev_all,
-                            mode="validation",
+                            VAL,
                             log_data=True,
                         )
 

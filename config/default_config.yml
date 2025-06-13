@@ -1,4 +1,4 @@
-streams_directory: "./config/streams/streams_anemoi/"
+streams_directory: "./config/streams/streams_big/" # TODO restore default
 
 embed_orientation: "channels"
 embed_local_coords: True
@@ -8,7 +8,7 @@ embed_unembed_mode: "block"
 
 target_cell_local_prediction: True
 
-ae_local_dim_embed: 1024
+ae_local_dim_embed: 2048
 ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
@@ -23,7 +23,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 8
+ae_global_num_blocks: 10
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -38,7 +38,7 @@ pred_mlp_adaln: True
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-forecast_offset : 1
+forecast_offset : 0
 forecast_delta_hrs: 0
 forecast_steps: 0
 forecast_policy: null
@@ -70,9 +70,9 @@ batch_size_validation: 1
 
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "forecast"
+training_mode: "masking"
 # masking rate when training mode is "masking"; ignored in foreacast mode
-masking_rate: 0.0
+masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
 masking_rate_sampling: True
 # sample a subset of all target points, useful e.g. to reduce memory requirements
@@ -99,7 +99,7 @@ weight_decay: 0.1
 norm_type: "LayerNorm"
 nn_module: "te"
 
-start_date: 201301010000
+start_date: 197901010000
 end_date: 202012310000
 start_date_val: 202101010000
 end_date_val: 202201010000
@@ -109,7 +109,7 @@ input_window_steps: 1
 
 val_initial: False
 
-loader_num_workers: 8
+loader_num_workers: 0 # TODO restore default
 log_validation: 0
 
 istep: 0

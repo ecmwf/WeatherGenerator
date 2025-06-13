@@ -9,12 +9,70 @@
 
 import datetime
 import logging
+from abc import abstractmethod
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TypeAlias
 
 import numpy as np
+from numpy import datetime64, timedelta64
+from numpy.typing import NDArray
+
+from weathergen.utils.better_abc import ABCMeta, abstract_attribute
 
 _logger = logging.getLogger(__name__)
+
+# The numpy date time 64 time (nanosecond precision)
+NPDT64: TypeAlias = datetime64
+# The numpy delta time 64 time (nanosecond precision)
+NPTDel64: TypeAlias = timedelta64
+
+DType: TypeAlias = np.float32  # The type for the data in the datasets.
+
+"""
+The type for indexing into datasets. It is a multiple of hours.
+"""
+TIndex: TypeAlias = np.int32
+
+
+_DT_ZERO = np.datetime64("1850-01-01T00:00")
+
+
+@dataclass
+class TimeIndexRange:
+    """
+    Defines a time window for indexing into datasets.
+
+    It is defined as number of hours since the start of the dataset.
+    """
+
+    start: TIndex
+    end: TIndex
+
+
+@dataclass
+class DTRange:
+    """
+    Defines a time window for indexing into datasets.
+
+    It is defined as numpy datetime64 objects.
+    """
+
+    start: NPDT64
+    end: NPDT64
+
+    def __post_init__(self):
+        assert self.start < self.end, "start time must be before end time"
+        assert self.start > _DT_ZERO, "start time must be after 1850-01-01T00:00"
+
+
+def str_to_datetime64(s: str | int | NPDT64) -> NPDT64:
+    """
+    Convert a string to a numpy datetime64 object.
+    """
+    if isinstance(s, datetime64):
+        return s
+    format_str = "%Y%m%d%H%M%S"
+    return np.datetime64(datetime.datetime.strptime(str(s), format_str))
 
 
 class TimeWindowHandler:
@@ -22,19 +80,36 @@ class TimeWindowHandler:
     Handler for time windows and translation of indices to times
     """
 
-    def __init__(self, t_start, t_end, t_window_len, t_window_step):
-        self.zero_time = np.datetime64("1850-01-01T00:00")
+    def __init__(
+        self,
+        t_start: str | int | NPDT64,
+        t_end: str | int | NPDT64,
+        t_window_len_hours: int,
+        t_window_step_hours: int,
+    ):
+        """
+        Parameters
+        ----------
+        start :
+            start time
+        end :
+            end time
+        t_window_len :
+            length of data window
+        t_window_step :
+            delta hours between start times of windows
 
-        format_str = "%Y%m%d%H%M%S"
-        self.t_start = np.datetime64(datetime.datetime.strptime(str(t_start), format_str))
-        self.t_end = np.datetime64(datetime.datetime.strptime(str(t_end), format_str))
-        self.t_window_len = np.timedelta64(t_window_len, "h")
-        self.t_window_step = np.timedelta64(t_window_step, "h")
+        """
+        self.t_start: NPDT64 = str_to_datetime64(t_start)
+        self.t_end: NPDT64 = str_to_datetime64(t_end)
+        self.t_window_len: NPTDel64 = np.timedelta64(t_window_len_hours, "h")
+        self.t_window_step: NPTDel64 = np.timedelta64(t_window_step_hours, "h")
 
         assert self.t_start < self.t_end, "end datetime has to be in the past of start datetime"
-        assert self.t_start > self.zero_time, "start datetime has to be >= 1850-01-01T00:00."
+        assert self.t_start > _DT_ZERO, "start datetime has to be >= 1850-01-01T00:00."
+        # TODO: check t_start and t_end are aligned with t_window_step and in hours
 
-    def get_index_range(self) -> tuple[np.int64, np.int64]:
+    def get_index_range(self) -> TimeIndexRange:
         """
         Temporal window corresponding to index
 
@@ -48,33 +123,34 @@ class TimeWindowHandler:
             start and end of temporal window
         """
 
-        idx_start = 0
-        idx_end = (self.t_end - self.t_start) // self.t_window_step
-        assert idx_start <= idx_end, "time window idxs invalid"
+        idx_start: TIndex = np.int32(0)
+        idx_end = np.int32((self.t_end - self.t_start) // self.t_window_step)
+        assert idx_start <= idx_end, f"time window idxs invalid: {idx_start} <= {idx_end}"
 
-        return (idx_start, idx_end)
+        return TimeIndexRange(idx_start, idx_end)
 
-    def get_absolute_index(self, idx: int) -> tuple[np.int64, np.int64]:
-        """
-        Absolute index (in sec) with respect to reference base time
+    # TODO: unused
+    # def get_absolute_index(self, idx: int) -> tuple[np.int64, np.int64]:
+    #     """
+    #     Absolute index (in sec) with respect to reference base time
 
-        Parameters
-        ----------
-        idx :
-            index of temporal window
+    #     Parameters
+    #     ----------
+    #     idx :
+    #         index of temporal window
 
-        Returns
-        -------
-            start and end of absolute indices
-        """
+    #     Returns
+    #     -------
+    #         start and end of absolute indices
+    #     """
 
-        idx_start = (self.t_start + self.t_window_step * idx - self.zero_time).seconds
-        idx_end = (idx_start + self.t_window_len - self.zero_time).seconds
-        assert idx_start <= idx_end, "time window idxs invalid"
+    #     idx_start = (self.t_start + self.t_window_step * idx - self.zero_time).seconds
+    #     idx_end = (idx_start + self.t_window_len - self.zero_time).seconds
+    #     assert idx_start <= idx_end, "time window idxs invalid"
 
-        return idx_start, idx_end
+    #     return idx_start, idx_end
 
-    def window(self, idx: int) -> tuple[np.datetime64, np.datetime64]:
+    def window(self, idx: TIndex) -> DTRange:
         """
         Temporal window corresponding to index
 
@@ -91,7 +167,7 @@ class TimeWindowHandler:
         t_start_win = self.t_start + self.t_window_step * idx
         t_end_win = t_start_win + self.t_window_len
 
-        return (t_start_win, t_end_win)
+        return DTRange(t_start_win, t_end_win)
 
 
 @dataclass
@@ -100,45 +176,110 @@ class ReaderData:
     Wrapper for return values from DataReader.get_source and DataReader.get_target
     """
 
-    coords: np.array  # [np.float32]
-    geoinfos: np.array  # [np.float32]
-    data: np.array  # [np.float32]
-    datetimes: np.array  # [np.datetime64]
+    coords: NDArray[DType]
+    geoinfos: NDArray[DType]
+    data: NDArray[DType]
+    datetimes: NDArray[NPDT64]
 
-    def __init__(self):
-        self.coords = np.zeros([0, 0], dtype=np.float32)
-        self.geoinfos = np.zeros([0, 0], dtype=np.float32)
-        self.data = np.zeros([0, 0], dtype=np.float32)
-        self.datetimes = np.zeros([0], dtype=np.datetime64)
+    @staticmethod
+    def empty(num_data_fields: int, num_geo_fields: int) -> "ReaderData":
+        """
+        Create an empty ReaderData object
+
+        Returns
+        -------
+        ReaderData
+            Empty ReaderData object
+        """
+        # TODO: it should also get the right shapes for data and geoinfos
+        return ReaderData(
+            coords=np.zeros((0, 2), dtype=np.float32),
+            geoinfos=np.zeros((0, num_geo_fields), dtype=np.float32),
+            data=np.zeros((0, num_data_fields), dtype=np.float32),
+            datetimes=np.zeros((0,), dtype=np.datetime64),
+        )
 
     def is_empty(self):
-        return self.data.shape[0] == 0
+        return self.len() == 0
+
+    def len(self):
+        """
+        Length of data
+
+        Returns
+        -------
+        length of data
+        """
+        return len(self.data)
 
 
-class DataReaderBase:
-    "Base class for data readers"
+def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
+    """
+    Check that ReaderData is valid
 
-    # @abstractmethod
+    Parameters
+    ----------
+    rdata :
+        ReaderData to check
+    dtr :
+        datetime range of window for which the rdata is valid
+
+    Returns
+    -------
+    None
+    """
+
+    assert rdata.coords.ndim == 2, f"coords must be 2D {rdata.coords.shape}"
+    assert rdata.coords.shape[1] == 2, (
+        f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
+    )
+    assert rdata.geoinfos.ndim == 2, f"geoinfos must be 2D, got {rdata.geoinfos.shape}"
+    assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
+    assert rdata.data.shape[1] > 0, f"data must have at least one channel {rdata.data.shape}"
+    assert rdata.datetimes.ndim == 1, f"datetimes must be 1D {rdata.datetimes.shape}"
+
+    assert rdata.coords.shape[0] == rdata.data.shape[0], "coords and data must have same length"
+    assert rdata.geoinfos.shape[0] == rdata.data.shape[0], "geoinfos and data must have same length"
+
+    # Check that all fields have the same length
+    assert (
+        rdata.coords.shape[0]
+        == rdata.geoinfos.shape[0]
+        == rdata.data.shape[0]
+        == rdata.datetimes.shape[0]
+    ), (
+        f"coords, geoinfos, data and datetimes must have the same length "
+        f"{rdata.coords.shape[0]}, {rdata.geoinfos.shape[0]}, {rdata.data.shape[0]}, "
+        f"{rdata.datetimes.shape[0]}"
+    )
+
+    assert np.logical_and(
+        rdata.datetimes >= dtr.start,
+        # rdata.datetimes < dtr.end  # TODO: enforce monotonicty also for obs
+        rdata.datetimes <= dtr.end,
+    ).all(), f"datetimes for data points violate window {dtr}."
+
+
+class DataReaderBase(metaclass=ABCMeta):
+    """
+    Base class for data readers.
+    """
+
+    # The fields that need to be set by the child classes
+    source_channels: list[str] = abstract_attribute()
+    target_channels: list[str] = abstract_attribute()
+    geoinfo_channels: list[str] = abstract_attribute()
+    source_idx: list[int] = abstract_attribute()
+    target_idx: list[int] = abstract_attribute()
+    geoinfo_idx: list[int] = abstract_attribute()
+
     def __init__(
         self,
-        start: int,
-        end: int,
-        t_window_len: int,
-        t_window_step: int,
-        filename: Path,
-        stream_info: dict,
+        tw_handler: TimeWindowHandler,
     ) -> None:
         """
         Parameters
         ----------
-        start : int
-            start time
-        end : int
-            end time
-        t_window_len : int
-            length of data window
-        t_window_step :
-            delta hours between start times of windows
         filename :
             filename (and path) of dataset
         stream_info :
@@ -149,27 +290,30 @@ class DataReaderBase:
         None
         """
 
-        self.t_eps = np.timedelta64(1, "ms")
+        self.time_window_handler = tw_handler
 
-        self.t_window_len = np.timedelta64(t_window_len, "h")
-        self.t_window_step = np.timedelta64(t_window_step, "h")
+    def init_empty(self) -> None:
+        """
+        Initialize
+        """
 
-        self.time_window_handler = TimeWindowHandler(start, end, t_window_len, t_window_step)
-
-        # variables that need to be set / properly initialized by child classes that provide
-        # concrete implementation
-
-        self.len = 0
+        self.source_channels = []
+        self.target_channels = []
+        self.geoinfo_channels = []
         self.source_idx = []
         self.target_idx = []
         self.geoinfo_idx = []
-        self.source_channels = []
-        self.target_channels = []
 
+        # TODO: move these fields to abstract fields
         self.mean = np.zeros(0)
         self.stdev = np.ones(0)
         self.mean_geoinfo = np.zeros(0)
         self.stdev_geoinfo = np.ones(0)
+
+    @abstractmethod
+    def length(self) -> int:
+        """The length of this dataset. Must be constant."""
+        pass
 
     def __len__(self) -> int:
         """
@@ -184,9 +328,9 @@ class DataReaderBase:
         length of dataset
         """
 
-        return self.len
+        return self.length()
 
-    def get_source(self, idx: int) -> ReaderData:
+    def get_source(self, idx: TIndex) -> ReaderData:
         """
         Get source data for idx
 
@@ -206,7 +350,7 @@ class DataReaderBase:
 
         return rdata
 
-    def get_target(self, idx: int) -> ReaderData:
+    def get_target(self, idx: TIndex) -> ReaderData:
         """
         Get target data for idx
 
@@ -226,7 +370,8 @@ class DataReaderBase:
 
         return rdata
 
-    def _get(self, idx: int, channels_idx: np.array) -> ReaderData:
+    @abstractmethod
+    def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
         """
         Get data for window
 
@@ -242,7 +387,7 @@ class DataReaderBase:
         data (coords, geoinfos, data, datetimes)
         """
 
-        return ReaderData()
+        raise NotImplementedError()
 
     def get_source_num_channels(self) -> int:
         """
@@ -300,7 +445,7 @@ class DataReaderBase:
         """
         return len(self.geoinfo_idx)
 
-    def normalize_coords(self, coords: np.array) -> np.array:
+    def normalize_coords(self, coords: NDArray[DType]) -> NDArray[DType]:
         """
         Normalize coordinates
 
@@ -318,7 +463,7 @@ class DataReaderBase:
 
         return coords
 
-    def normalize_geoinfos(self, geoinfos: np.array) -> np.array:
+    def normalize_geoinfos(self, geoinfos: NDArray[DType]) -> NDArray[DType]:
         """
         Normalize geoinfos
 
@@ -338,7 +483,7 @@ class DataReaderBase:
 
         return geoinfos
 
-    def normalize_source_channels(self, source: np.array) -> np.array:
+    def normalize_source_channels(self, source: NDArray[DType]) -> NDArray[DType]:
         """
         Normalize source channels
 
@@ -357,7 +502,7 @@ class DataReaderBase:
 
         return source
 
-    def normalize_target_channels(self, target: np.array) -> np.array:
+    def normalize_target_channels(self, target: NDArray[DType]) -> NDArray[DType]:
         """
         Normalize target channels
 
@@ -376,7 +521,7 @@ class DataReaderBase:
 
         return target
 
-    def denormalize_source_channels(self, source: np.array) -> np.array:
+    def denormalize_source_channels(self, source: NDArray[DType]) -> NDArray[DType]:
         """
         Denormalize source channels
 
@@ -395,7 +540,7 @@ class DataReaderBase:
 
         return source
 
-    def denormalize_target_channels(self, data: np.array) -> np.array:
+    def denormalize_target_channels(self, data: NDArray[DType]) -> NDArray[DType]:
         """
         Denormalize target channels
 
@@ -416,82 +561,121 @@ class DataReaderBase:
 
 
 class DataReaderTimestep(DataReaderBase):
-    "Base class for data readers with regular time step"
+    """
+    An abstract class for data readers that provide data at fixed time intervals.
 
-    # @abstractmethod
+    On top of all the fields to be defined in DataReaderBase, they must define the following fields:
+
+    """
+
+    # The start time of the dataset.
+    data_start_time: NPDT64
+    # The end time of the dataset (possibly none).
+    data_end_time: NPDT64 | None = None
+    # The period of the dataset, i.e. the time interval between two consecutive samples.
+    # It is also called 'frequency' in Anemoi.
+    period: NPTDel64
+
     def __init__(
         self,
-        start: int,
-        end: int,
-        t_window_len: int,
-        t_window_step: int,
-        filename: Path,
-        stream_info: dict,
+        tw_handler: TimeWindowHandler,
+        data_start_time: NPDT64 | None = None,
+        data_end_time: NPDT64 | None = None,
+        period: NPTDel64 | None = None,
     ) -> None:
+        super().__init__(tw_handler)
+        self.data_start_time = data_start_time or tw_handler.t_start
+        self.data_end_time = data_end_time
+        self.period = period
+
+    def _get_dataset_idxs(self, idx: TIndex) -> NDArray[np.int32]:
         """
-        Parameters
-        ----------
-        start : int
-            start time
-        end : int
-            end time
-        t_window_len : int
-            length of data window
-        t_window_step :
-            delta hours between start times of windows
-        filename :
-            filename (and path) of dataset
-        stream_info :
-            information about stream
-
-        Returns
-        -------
-        None
-        """
-
-        super().__init__(start, end, t_window_len, t_window_step, filename, stream_info)
-
-        # variables need to be set by child classes
-
-        self.frequency = np.datetime64(0, "s")
-        self.ds_start_time = self.time_window_handler.zero_time
-        self.ds_end_time = self.time_window_handler.zero_time
-
-    def _get_dataset_idxs(self, idx) -> np.array:
-        """
-        Translate idx for time window to idxs into dataset
+        Get dataset indexes for a given time window index.
 
         Parameters
         ----------
-        idx :
-            index of temporal window
+        idx : TIndex
+            Index of the time window.
 
         Returns
         -------
-            indices for dataset corresponding to idx
+        NDArray[np.int32]
+            Array of dataset indexes corresponding to the time window.
         """
+        return get_dataset_indexes_timestep(
+            self.data_start_time,
+            self.data_end_time,
+            self.period,
+            idx,
+            self.time_window_handler,
+        )
 
-        win_start, win_end = self.time_window_handler.window(idx)
-        if win_start < self.ds_start_time or win_end > self.ds_end_time:
-            return np.array([], dtype=np.int32)
 
-        # relative time in dataset
-        delta_t_start = win_start - self.ds_start_time
+# to avoid rounding issues
+# The basic time precision is 1 second.
+t_epsilon = np.timedelta64(1, "s")
 
-        # index to first step, taking potential misalignment of windows and steps into account
 
-        s_idx = delta_t_start // self.frequency
-        s_idx += 0 if (delta_t_start % self.frequency).seconds == 0 else 1
-        # delta between first step and start of window
-        delta_win_start = (s_idx * self.frequency) - delta_t_start
-        # self.t_eps implements that windows are excluding the boundary time at the end
-        e_idx = s_idx + ((self.t_window_len - delta_win_start - self.t_eps) // self.frequency)
+def get_dataset_indexes_timestep(
+    data_start_time: NPDT64,
+    data_end_time: NPDT64 | None,
+    period: NPTDel64,
+    idx: TIndex,
+    tw_handler: TimeWindowHandler,
+) -> (NDArray[np.int32], DTRange):
+    """
+    Get dataset indexes for a given time window index, when the dataset is periodic.
 
-        assert s_idx > 0 and s_idx < len(self.ds), "Invalid start index for dataset."
-        assert e_idx > 0 and e_idx < len(self.ds), "Invalid end index for dataset."
-        assert np.logical_and(
-            self.dates[s_idx : e_idx + 1 : self.sub_sampling_per_window] >= win_start,
-            self.dates[s_idx : e_idx + 1 : self.sub_sampling_per_window] < win_end,
-        ).all(), "Incorrect indices for window."
+    Keeping this function separate for testing purposes.
 
-        return np.arange(s_idx, e_idx + 1, self.sub_sampling_per_window)
+    Parameters
+    ----------
+    data_start_time : NPDT64
+        Start time of the dataset.
+    data_end_time : NPDT64
+        End time of the dataset (possibly none).
+    period : NPTDel64
+    idx : TIndex
+        Index of the time window.
+    tw_handler : TimeWindowHandler
+        Handler for time windows.
+
+    Returns
+    -------
+    NDArray[np.int32]
+        Array of dataset indexes corresponding to the time window.
+
+    dataset_start_time and period must be aligned with the time window handler.
+    """
+
+    # Function is separated from the class to allow testing without instantiating the class.
+    dtr = tw_handler.window(idx)
+    # If there is no or only marginal overlap with the dataset, return empty index ranges
+    if (
+        not data_start_time
+        or not data_end_time
+        or dtr.end < data_start_time
+        or dtr.start > data_end_time
+        or dtr.start < data_start_time
+        or dtr.end > data_end_time
+        or (data_end_time is not None and dtr.start > data_end_time)
+    ):
+        return (np.array([], dtype=np.int32), dtr)
+
+    # relative time in dataset
+    delta_t_start = dtr.start - data_start_time
+    delta_t_end = dtr.end - data_start_time - t_epsilon
+    assert isinstance(delta_t_start, timedelta64), "delta_t_start must be timedelta64"
+    start_didx = delta_t_start // period
+    end_didx = delta_t_end // period
+
+    # adjust start_idx if not exactly on start time
+    if (delta_t_start % period) > np.timedelta64(0, "s"):
+        # empty window in between two timesteps
+        if start_didx == end_didx:
+            return (np.array([], dtype=np.int32), dtr)
+        start_didx += 1
+
+    end_didx = start_didx + int((dtr.end - dtr.start - t_epsilon) / period)
+
+    return (np.arange(start_didx, end_didx + 1, dtype=np.int32), dtr)
