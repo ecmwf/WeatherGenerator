@@ -2,6 +2,8 @@
   <img src="assets/weathergenerator_logo.png" alt="WeatherGenerator" width="400px">
 </p>
 
+
+
 <div align="center">
   <h1>The WeatherGenerator <br> Machine Learning Earth System Model</h1>
 </div>
