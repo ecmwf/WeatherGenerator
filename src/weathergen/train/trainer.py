@@ -69,7 +69,7 @@ class Trainer(Trainer_Base):
             path_model.mkdir(exist_ok=True, parents=True)
         self.path_run = path_run
 
-        # self.init_perf_monitoring() # TODO restore default
+        self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, self.path_run)
 
     ###########################################
