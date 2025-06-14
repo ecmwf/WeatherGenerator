@@ -328,10 +328,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         # TODO: Kacper is using this -- cannot so easily remove
                         rdata: ReaderData = ds.get_source(idx)
 
-                        self._train_logger.log_metrics(
-                            self._stage, {f"stream.{name}.source_len": rdata.len()}
-                        )
-
                         if rdata.is_empty():
                             stream_data.add_empty_source()
                         else:
