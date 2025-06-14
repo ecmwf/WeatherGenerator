@@ -458,9 +458,17 @@ class Trainer(Trainer_Base):
                         preds_all[fstep][i_obs] += [dn_data(i_obs, pred.to(f32)).detach().cpu()]
                         targets_all[fstep][i_obs] += [dn_data(i_obs, target.to(f32)).detach().cpu()]
 
+        if loss == 0.0:
+            # streams_data[i] are samples in batch
+            # streams_data[i][0] is stream 0 (sample_idx is identical for all streams per sample)
+            _logger.warning(
+                f"Loss is 0.0 for sample(s): {[sd[0].sample_idx.item() for sd in streams_data]}."
+                + "This will likely lead to errors in the optimization step."
+            )
+
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)
-        loss /= ctr_ftarget
+        loss = loss / ctr_ftarget
 
         return (
             loss,
@@ -510,12 +518,6 @@ class Trainer(Trainer_Base):
                     preds,
                     losses_all,
                     stddev_all,
-                )
-
-            if loss == 0.0:
-                # batch[0] is stream data; batch[0][0] is stream 0; sample_idx are identical
-                _logger.warning(
-                    f"Loss is 0.0 for sample(s): {[sd.sample_idx for sd in batch[0][0]]}."
                 )
 
             # backward pass
