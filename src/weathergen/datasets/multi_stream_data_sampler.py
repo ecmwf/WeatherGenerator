@@ -301,12 +301,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # since there are empty batches
         idx_raw = iter_start
         for i, _bidx in enumerate(range(iter_start, iter_end, self.batch_size)):
-            _logger.info(
-                f"Batch {i} idx_raw={idx_raw}, batch_size={self.batch_size} iter_start={iter_start}, iter_end={iter_end}"
-            )
             # forecast_dt needs to be constant per batch (amortized through data parallel training)
             forecast_dt = self.perms_forecast_dt[i]
-            _logger.info(f"forecast_dt={forecast_dt}")
 
             # use while loop due to the scattered nature of the data in time and to
             # ensure batches are not empty
@@ -316,9 +312,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 idx_raw += 1
 
                 time_win1 = self.time_window_handler.window(idx)
-                _logger.info(
-                    f"idx={idx} idx_raw={idx_raw} len(batch)={len(batch)} time_win1={time_win1}"
-                )
 
                 streams_data: list[StreamData] = []
 
