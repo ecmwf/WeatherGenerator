@@ -13,6 +13,7 @@ import pathlib
 import numpy as np
 import torch
 
+from weathergen.datasets.atmorep_dataset import AtmorepDataset
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
@@ -23,6 +24,7 @@ from weathergen.datasets.data_reader_base import (
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
+from weathergen.datasets.icon_dataset import IconDataset
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
@@ -111,9 +113,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     case "fesom":
                         dataset = DataReaderFesom
                         datapath = cf.data_path_fesom
-                    # case "atmorep":
-                    #     dataset = AtmorepDataset
-                    #     datapath = cf.data_path_anemoi
+                    case "atmorep":
+                        dataset = AtmorepDataset
+                        datapath = cf.data_path_anemoi
+                    case "icon":
+                        dataset = IconDataset
+                        datapath = cf.data_path_icon
                     case _:
                         msg = f"Unsupported stream type {stream_info['type']} for stream name '{stream_info['name']}'."
                         raise ValueError(msg)

@@ -75,6 +75,22 @@ def str_to_datetime64(s: str | int | NPDT64) -> NPDT64:
     return np.datetime64(datetime.datetime.strptime(str(s), format_str))
 
 
+def str_to_timedelta(s: str | datetime.timedelta) -> datetime.timedelta:
+    """
+    Convert a string to a numpy timedelta64 object.
+    The format is expected to be "HH:MM:SS".
+
+    TODO: convert to numpy timedelta64
+    """
+
+    if isinstance(s, datetime.timedelta):
+        return s
+    format_str = "%H:%M:%S"
+    assert isinstance(s, str), type(s)
+    t = datetime.datetime.strptime(s, format_str)
+    return datetime.timedelta(hours=t.hour, minutes=t.minute, seconds=t.second)
+
+
 class TimeWindowHandler:
     """
     Handler for time windows and translation of indices to times
@@ -128,27 +144,6 @@ class TimeWindowHandler:
         assert idx_start <= idx_end, f"time window idxs invalid: {idx_start} <= {idx_end}"
 
         return TimeIndexRange(idx_start, idx_end)
-
-    # TODO: unused
-    # def get_absolute_index(self, idx: int) -> tuple[np.int64, np.int64]:
-    #     """
-    #     Absolute index (in sec) with respect to reference base time
-
-    #     Parameters
-    #     ----------
-    #     idx :
-    #         index of temporal window
-
-    #     Returns
-    #     -------
-    #         start and end of absolute indices
-    #     """
-
-    #     idx_start = (self.t_start + self.t_window_step * idx - self.zero_time).seconds
-    #     idx_end = (idx_start + self.t_window_len - self.zero_time).seconds
-    #     assert idx_start <= idx_end, "time window idxs invalid"
-
-    #     return idx_start, idx_end
 
     def window(self, idx: TIndex) -> DTRange:
         """
@@ -586,9 +581,11 @@ class DataReaderTimestep(DataReaderBase):
         super().__init__(tw_handler)
         self.data_start_time = data_start_time or tw_handler.t_start
         self.data_end_time = data_end_time
+        assert period is not None
+        assert period > 0, period
         self.period = period
 
-    def _get_dataset_idxs(self, idx: TIndex) -> NDArray[np.int32]:
+    def _get_dataset_idxs(self, idx: TIndex) -> tuple[NDArray[np.int32], DTRange]:
         """
         Get dataset indexes for a given time window index.
 
@@ -612,8 +609,9 @@ class DataReaderTimestep(DataReaderBase):
 
 
 # to avoid rounding issues
-# The basic time precision is 1 second.
-t_epsilon = np.timedelta64(1, "s")
+# The basic time precision is 1 millisecond.
+# This should support all datasets (the small period expected is 1 second)
+t_epsilon = np.timedelta64(1, "ms")
 
 
 def get_dataset_indexes_timestep(
@@ -622,7 +620,7 @@ def get_dataset_indexes_timestep(
     period: NPTDel64,
     idx: TIndex,
     tw_handler: TimeWindowHandler,
-) -> (NDArray[np.int32], DTRange):
+) -> tuple[NDArray[np.int32], DTRange]:
     """
     Get dataset indexes for a given time window index, when the dataset is periodic.
 
@@ -644,8 +642,6 @@ def get_dataset_indexes_timestep(
     -------
     NDArray[np.int32]
         Array of dataset indexes corresponding to the time window.
-
-    dataset_start_time and period must be aligned with the time window handler.
     """
 
     # Function is separated from the class to allow testing without instantiating the class.

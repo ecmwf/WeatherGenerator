@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datetime
 import logging
 from pathlib import Path
 from typing import override
@@ -23,6 +22,7 @@ from weathergen.datasets.data_reader_base import (
     TimeWindowHandler,
     TIndex,
     check_reader_data,
+    str_to_timedelta,
 )
 
 _logger = logging.getLogger(__name__)
@@ -64,9 +64,7 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         kwargs = {}
         if "frequency" in stream_info:
-            t = datetime.datetime.strptime(stream_info["frequency"], "%H:%M:%S")
-            delta = datetime.timedelta(hours=t.hour, minutes=t.minute, seconds=t.second)
-            kwargs["frequency"] = delta
+            kwargs["frequency"] = str_to_timedelta(stream_info["frequency"])
         if "subsampling_rate" in stream_info:
             name = stream_info["name"]
             _logger.warning(
