@@ -28,7 +28,7 @@ from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
 from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.train_logger import TrainLogger
+from weathergen.utils.train_logger import TRAIN, VAL, TrainLogger
 from weathergen.utils.validation_io import write_validation
 
 _logger = logging.getLogger(__name__)
@@ -83,6 +83,8 @@ class Trainer(Trainer_Base):
             cf.end_date_val,
             cf.batch_size_validation,
             cf.samples_per_validation,
+            train_logger=self.train_logger,
+            stage=VAL,
             shuffle=cf.shuffle,
         )
 
@@ -130,7 +132,14 @@ class Trainer(Trainer_Base):
         self.init(cf)
 
         self.dataset = MultiStreamDataSampler(
-            cf, cf.start_date, cf.end_date, cf.batch_size, cf.samples_per_epoch, shuffle=True
+            cf,
+            cf.start_date,
+            cf.end_date,
+            cf.batch_size,
+            cf.samples_per_epoch,
+            train_logger=self.train_logger,
+            stage=TRAIN,
+            shuffle=cf.shuffle,
         )
         self.dataset_val = MultiStreamDataSampler(
             cf,
@@ -138,7 +147,9 @@ class Trainer(Trainer_Base):
             cf.end_date_val,
             cf.batch_size_validation,
             cf.samples_per_validation,
-            shuffle=True,
+            train_logger=self.train_logger,
+            stage=VAL,
+            shuffle=False,
         )
 
         loader_params = {
@@ -283,11 +294,11 @@ class Trainer(Trainer_Base):
         for epoch in range(epoch_base, cf.num_epochs):
             _logger.info(f"Epoch {epoch} of {cf.num_epochs}: train.")
             self.train(epoch)
+
             _logger.info(f"Epoch {epoch} of {cf.num_epochs}: validate.")
-
             self.validate(epoch)
-            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
 
+            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
             self.save_model(epoch)
 
         # log final model
@@ -303,7 +314,7 @@ class Trainer(Trainer_Base):
         preds,
         losses_all,
         stddev_all,
-        mode="training",
+        stage=TRAIN,
         log_data=False,
     ):
         # merge across batch dimension (and keep streams)
@@ -353,7 +364,7 @@ class Trainer(Trainer_Base):
             ):
                 pred = preds[fstep][i_obs]
 
-                num_channels = len(si["target_channels"])
+                num_channels = len(si[str(stage) + "_target_channels"])
 
                 # set obs_loss_weight = 1. when not specified
                 obs_loss_weight = si["loss_weight"] if "loss_weight" in si else 1.0
@@ -361,10 +372,8 @@ class Trainer(Trainer_Base):
                     si["channel_weight"] if "channel_weight" in si else np.ones(num_channels)
                 )
                 # in validation mode, always unweighted loss is computed
-                obs_loss_weight = 1.0 if mode == "validation" else obs_loss_weight
-                channel_loss_weight = (
-                    np.ones(num_channels) if mode == "validation" else channel_loss_weight
-                )
+                obs_loss_weight = 1.0 if stage == VAL else obs_loss_weight
+                channel_loss_weight = np.ones(num_channels) if stage == VAL else channel_loss_weight
 
                 tok_spacetime = si["tokenize_spacetime"] if "tokenize_spacetime" in si else False
 
@@ -449,9 +458,17 @@ class Trainer(Trainer_Base):
                         preds_all[fstep][i_obs] += [dn_data(i_obs, pred.to(f32)).detach().cpu()]
                         targets_all[fstep][i_obs] += [dn_data(i_obs, target.to(f32)).detach().cpu()]
 
+        if loss == 0.0:
+            # streams_data[i] are samples in batch
+            # streams_data[i][0] is stream 0 (sample_idx is identical for all streams per sample)
+            _logger.warning(
+                f"Loss is 0.0 for sample(s): {[sd[0].sample_idx.item() for sd in streams_data]}."
+                + "This will likely lead to errors in the optimization step."
+            )
+
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)
-        loss /= ctr_ftarget
+        loss = loss / ctr_ftarget
 
         return (
             loss,
@@ -501,12 +518,6 @@ class Trainer(Trainer_Base):
                     preds,
                     losses_all,
                     stddev_all,
-                )
-
-            if loss == 0.0:
-                # batch[0] is stream data; batch[0][0] is stream 0; sample_idx are identical
-                _logger.warning(
-                    f"Loss is 0.0 for sample(s): {[sd.sample_idx for sd in batch[0][0]]}."
                 )
 
             # backward pass
@@ -580,7 +591,7 @@ class Trainer(Trainer_Base):
                             preds,
                             losses_all,
                             stddev_all,
-                            mode="validation",
+                            VAL,
                             log_data=True,
                         )
 
@@ -614,7 +625,7 @@ class Trainer(Trainer_Base):
                             preds,
                             losses_all,
                             stddev_all,
-                            mode="validation",
+                            VAL,
                         )
 
                     self.losses_hist += [losses_all]
