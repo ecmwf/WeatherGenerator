@@ -27,7 +27,7 @@ _logger = logging.getLogger(__name__)
 
 class DataReaderObs(DataReaderBase):
     def __init__(self, tw_handler: TimeWindowHandler, filename: Path, stream_info: dict) -> None:
-        super().__init__(tw_handler)
+        super().__init__(tw_handler, stream_info)
 
         self.filename = filename
         self.z = zarr.open(filename, mode="r")

@@ -90,7 +90,7 @@ class DataReaderFesom(DataReaderTimestep):
         if start_ds > tw_handler.t_end or end_ds < tw_handler.t_start:
             name = stream_info["name"]
             _logger.warning(f"{name} is not supported over data loader window. Stream is skipped.")
-            super().__init__(tw_handler)
+            super().__init__(tw_handler, stream_info)
             self.init_empty()
             return
 
@@ -112,6 +112,7 @@ class DataReaderFesom(DataReaderTimestep):
 
         super().__init__(
             tw_handler,
+            stream_info,
             start_ds,
             end_ds,
             period,

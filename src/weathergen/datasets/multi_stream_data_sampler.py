@@ -13,7 +13,6 @@ import pathlib
 import numpy as np
 import torch
 
-from weathergen.datasets.atmorep_dataset import AtmorepDataset
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
@@ -61,7 +60,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         start_date = str_to_datetime64(start_date_)
         end_date = str_to_datetime64(end_date_)
-        # TODO: why do we need to pad for AnemoiReaderObs? This is not consistent with other streams.
 
         assert end_date > start_date, (end_date, start_date)
 
@@ -69,7 +67,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self._train_logger = train_logger
         self._stage = stage
 
-        # TODO: replace with arbitrary length
         self.len_hrs: int = cf.len_hrs
         self.step_hrs: int = cf.step_hrs
         self.time_window_handler = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
@@ -113,9 +110,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     case "fesom":
                         dataset = DataReaderFesom
                         datapath = cf.data_path_fesom
-                    case "atmorep":
-                        dataset = AtmorepDataset
-                        datapath = cf.data_path_anemoi
                     case "icon":
                         dataset = IconDataset
                         datapath = cf.data_path_icon
@@ -150,13 +144,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
 
                 self.streams_datasets[-1] += [ds]
-
-        # # TODO: fix
-        # # determine start and end-time for all datasets, determine then the
-        # # by construction, this is identical for all datasets
-        # temp = np.array([len(ds) for dss in self.streams_datasets for ds in dss if len(ds) > 0])
-        # assert len(temp) > 0, f"No dataset in time window for dataloader: {start_date}-{end_date}."
-        # self.len_native = temp.min()
 
         index_range = self.time_window_handler.get_index_range()
         self.len = int(index_range.end - index_range.start)

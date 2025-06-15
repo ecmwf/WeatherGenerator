@@ -77,10 +77,8 @@ def str_to_datetime64(s: str | int | NPDT64) -> NPDT64:
 
 def str_to_timedelta(s: str | datetime.timedelta) -> datetime.timedelta:
     """
-    Convert a string to a numpy timedelta64 object.
+    Convert a string to a timedelta object.
     The format is expected to be "HH:MM:SS".
-
-    TODO: convert to numpy timedelta64
     """
 
     if isinstance(s, datetime.timedelta):
@@ -123,7 +121,6 @@ class TimeWindowHandler:
 
         assert self.t_start < self.t_end, "end datetime has to be in the past of start datetime"
         assert self.t_start > _DT_ZERO, "start datetime has to be >= 1850-01-01T00:00."
-        # TODO: check t_start and t_end are aligned with t_window_step and in hours
 
     def get_index_range(self) -> TimeIndexRange:
         """
@@ -186,7 +183,6 @@ class ReaderData:
         ReaderData
             Empty ReaderData object
         """
-        # TODO: it should also get the right shapes for data and geoinfos
         return ReaderData(
             coords=np.zeros((0, 2), dtype=np.float32),
             geoinfos=np.zeros((0, num_geo_fields), dtype=np.float32),
@@ -271,12 +267,13 @@ class DataReaderBase(metaclass=ABCMeta):
     def __init__(
         self,
         tw_handler: TimeWindowHandler,
+        stream_info: dict,
     ) -> None:
         """
         Parameters
         ----------
-        filename :
-            filename (and path) of dataset
+        tw_handler :
+            time window handler
         stream_info :
             information about stream
 
@@ -286,6 +283,7 @@ class DataReaderBase(metaclass=ABCMeta):
         """
 
         self.time_window_handler = tw_handler
+        self.stream_info = stream_info
 
     def init_empty(self) -> None:
         """
@@ -299,7 +297,6 @@ class DataReaderBase(metaclass=ABCMeta):
         self.target_idx = []
         self.geoinfo_idx = []
 
-        # TODO: move these fields to abstract fields
         self.mean = np.zeros(0)
         self.stdev = np.ones(0)
         self.mean_geoinfo = np.zeros(0)
@@ -341,8 +338,6 @@ class DataReaderBase(metaclass=ABCMeta):
 
         rdata = self._get(idx, self.source_idx)
 
-        # TODO: check that geocoords adhere to conventions in debug mode
-
         return rdata
 
     def get_target(self, idx: TIndex) -> ReaderData:
@@ -360,8 +355,6 @@ class DataReaderBase(metaclass=ABCMeta):
         """
 
         rdata = self._get(idx, self.target_idx)
-
-        # TODO: check that geocoords adhere to conventions in debug mode
 
         return rdata
 
@@ -574,11 +567,31 @@ class DataReaderTimestep(DataReaderBase):
     def __init__(
         self,
         tw_handler: TimeWindowHandler,
+        stream_info: dict,
         data_start_time: NPDT64 | None = None,
         data_end_time: NPDT64 | None = None,
         period: NPTDel64 | None = None,
     ) -> None:
-        super().__init__(tw_handler)
+        """
+        Parameters
+        ----------
+        tw_handler :
+            time window handler
+        stream_info :
+            information about stream
+        data_start_time :
+            start time of dataset
+        end_start_time :
+            end time of dataset
+        period :
+            period / frequency of dataset
+
+        Returns
+        -------
+        None
+        """
+
+        super().__init__(tw_handler, stream_info)
         self.data_start_time = data_start_time or tw_handler.t_start
         self.data_end_time = data_end_time
         assert period is not None

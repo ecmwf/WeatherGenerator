@@ -58,7 +58,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         if tw_handler.t_start >= ds0.dates[-1] or tw_handler.t_end <= ds0.dates[0]:
             name = stream_info["name"]
             _logger.warning(f"{name} is not supported over data loader window. Stream is skipped.")
-            super().__init__(tw_handler)
+            super().__init__(tw_handler, stream_info)
             self.init_empty()
             return
 
@@ -84,6 +84,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         )
         super().__init__(
             tw_handler,
+            stream_info,
             data_start_time,
             data_end_time,
             period,
@@ -144,7 +145,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         _logger.info(f"{ds_name}: target channels: {self.target_channels}")
         _logger.info(f"{ds_name}: geoinfo channels: {self.geoinfo_channels}")
 
-        self.properties = {  # TODO: unused?
+        self.properties = {
             "stream_id": 0,
         }
         self.mean = ds.statistics["mean"]
