@@ -625,7 +625,7 @@ class Trainer(Trainer_Base):
                             preds,
                             losses_all,
                             stddev_all,
-                            mode="validation",
+                            VAL,
                         )
 
                     self.losses_hist += [losses_all]
