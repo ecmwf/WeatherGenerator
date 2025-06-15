@@ -4,13 +4,15 @@ Utilities related to reading and writing metrics.
 We use our own simple json-based format to abstract away various backends (our own pipeline, mlflow, wandb, etc.).
 """
 
+from pathlib import Path
+
 import polars as pl
 
 # Known columns that are not scalar metrics:
 _known_cols = {"weathergen.timestamp": pl.Int64, "weathergen.time": pl.Int64, "stage": pl.String}
 
 
-def read_metrics_file(f: str) -> pl.DataFrame:
+def read_metrics_file(f: str | Path) -> pl.DataFrame:
     """
     Loads a file of metrics.
 
