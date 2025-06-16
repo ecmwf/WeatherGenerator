@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -15,9 +16,9 @@ import torch
 import zarr
 
 
-class FesomDataset:
+class IconDataset:
     """
-    A dataset class for handling temporal windows of FESOM model output data stored in Zarr format.
+    A data reader for ICON model output stored in zarr.
 
     Parameters
     ----------
@@ -30,35 +31,28 @@ class FesomDataset:
     step_hrs : int
         (Currently unused) Intended step size between windows in hours
     filename : Path
-        Path to Zarr dataset containing FESOM output
-    stream_info : dict
+        Path to Zarr dataset containing ICON output
+    stream_info : dict[str, list[str]]
         Dictionary with "source" and "target" keys specifying channel subsets to use
-        (e.g., {"source": ["temp"], "target": ["salinity"]})
+        (e.g., {"source": ["temp_00"], "target": ["TRCH4_chemtr_00"]})
 
     Attributes
     ----------
     len_hrs : int
         Temporal window length in days
     mesh_size : int
-        Number of nodes in the FESOM mesh
+        Number of nodes in the ICON mesh
     source_channels : list[str]
-        Names of selected source channels
+        Patterns of selected source channels
     target_channels : list[str]
-        Names of selected target channels
+        Patterns of selected target channels
     mean : np.ndarray
         Per-channel means for normalization (includes coordinates)
     stdev : np.ndarray
         Per-channel standard deviations for normalization (includes coordinates)
-    properties : dict
+    properties : dict[str, list[str]]
         Dataset metadata including 'stream_id' from Zarr attributes
 
-    Notes
-    -----
-    - Automatically handles datetime conversion and alignment with dataset time axis
-    - Returns empty data containers if requested period doesn't overlap with dataset
-    - Implements coordinate normalization using sinusoidal projections
-    - Provides channel-wise normalization/denormalization for source/target variables
-    - Uses Zarr's orthogonal indexing for efficient data access
     """
 
     def __init__(
@@ -81,15 +75,24 @@ class FesomDataset:
             end = datetime.strptime(str(end), format_str)
         end = np.datetime64(end).astype("datetime64[D]")
 
+        # loading datafile
         self.filename = filename
         self.ds = zarr.open(filename, mode="r")
-        self.mesh_size = self.ds.data.attrs["nod2"]
+        self.mesh_size = self.ds.attrs["ncells"]
 
-        self.time = self.ds["dates"]
+        # Loading stat file
+        stats_filename = Path(filename).with_suffix(".json")
+        with open(stats_filename) as stats_file:
+            self.stats = json.load(stats_file)
 
-        start_ds = self.time[0][0].astype("datetime64[D]")
-        end_ds = self.time[-1][0].astype("datetime64[D]")
+        time_as_in_data_file = np.array(self.ds["time"], dtype="timedelta64[D]") + np.datetime64(
+            self.ds["time"].attrs["units"].split("since ")[-1]
+        )
 
+        start_ds = time_as_in_data_file[0]
+        end_ds = time_as_in_data_file[-1]
+
+        # asserting start and end times
         if start_ds > end or end_ds < start:
             # TODO: this should be set in the base class
             self.source_channels = []
@@ -112,31 +115,50 @@ class FesomDataset:
             f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
         )
 
-        self.colnames = list(self.ds.data.attrs["colnames"])
-        self.cols_idx = list(np.arange(len(self.colnames)))
-        self.lat_index = list(self.colnames).index("lat")
-        self.lon_index = list(self.colnames).index("lon")
-        self.colnames.remove("lat")
-        self.colnames.remove("lon")
-        self.cols_idx.remove(self.lat_index)
-        self.cols_idx.remove(self.lon_index)
-        self.cols_idx = np.array(self.cols_idx)
+        len_data_entries = len(self.ds["time"]) * self.mesh_size
+
+        assert self.end_idx + len_hrs <= len_data_entries, (
+            f"Abort: end_date must be set at least {len_hrs} before the last date in the dataset"
+        )
+
+        # variables
+        self.colnames = list(self.ds)
+        self.cols_idx = np.array(list(np.arange(len(self.colnames))))
 
         # Ignore step_hrs, idk how it supposed to work
         # TODO, TODO, TODO:
         self.step_hrs = 1
 
-        self.data = self.ds["data"]
+        # time
+        repeated_times = np.repeat(time_as_in_data_file, self.mesh_size).reshape(-1, 1)
+        self.time = repeated_times
 
-        self.properties = {
-            "stream_id": self.ds.data.attrs["obs_id"],
-        }
+        # coordinates
+        coords_units = self.ds["clat"].attrs["units"]
 
-        self.mean = np.concatenate((np.array([0, 0]), np.array(self.ds.data.attrs["means"])))
-        self.stdev = np.sqrt(
-            np.concatenate((np.array([1, 1]), np.array(self.ds.data.attrs["vars"])))
+        if coords_units == "radian":
+            lat_as_in_data_file = np.rad2deg(self.ds["clat"][:].astype("f"))
+            lon_as_in_data_file = np.rad2deg(self.ds["clon"][:].astype("f"))
+
+        else:
+            lat_as_in_data_file = self.ds["clat"][:].astype("f")
+            lon_as_in_data_file = self.ds["clon"][:].astype("f")
+
+        self.lat = np.tile(lat_as_in_data_file, len(time_as_in_data_file))
+        self.lon = np.tile(lon_as_in_data_file, len(time_as_in_data_file))
+
+        self.properties = {"stream_id": 0}
+
+        # stats
+        stats_vars = self.stats["metadata"]["variables"]
+        assert stats_vars == self.colnames, (
+            f"Variables in normalization file {stats_vars} do not match dataset columns {self.colnames}"
         )
 
+        self.mean = np.array(self.stats["statistics"]["mean"], dtype="d")
+        self.stdev = np.array(self.stats["statistics"]["std"], dtype="d")
+
+        # Channel selection and indexing
         source_channels = stream_info["source"] if "source" in stream_info else None
         if source_channels:
             self.source_channels, self.source_idx = self.select(source_channels)
@@ -151,18 +173,25 @@ class FesomDataset:
             self.target_channels = self.colnames
             self.target_idx = self.cols_idx
 
+        # Check if standard deviations are strictly positive for selected channels
+        selected_channel_indices = list(set(self.source_idx).union(set(self.target_idx)))
+        non_positive_stds = np.where(self.stdev[selected_channel_indices] <= 0)[0]
+        assert len(non_positive_stds) == 0, (
+            f"Abort: Encountered non-positive standard deviations for selected columns {[self.colnames[selected_channel_indices][i] for i in non_positive_stds]}."
+        )
         # TODO: define in base class
         self.geoinfo_idx = []
 
-    def select(self, ch_filters: list[str]) -> None:
+    def select(self, ch_filters: list[str]) -> tuple[list[str], np.array]:
         """
         Allow user to specify which columns they want to access.
         Get functions only returned for these specified columns.
         """
+
         mask = [np.array([f in c for f in ch_filters]).any() for c in self.colnames]
 
-        selected_cols_idx = self.cols_idx[np.where(mask)[0]]
-        selected_colnames = [self.colnames[i] for i in np.where(mask)[0]]
+        selected_cols_idx = np.where(mask)[0]
+        selected_colnames = [self.colnames[i] for i in selected_cols_idx]
 
         return selected_colnames, selected_cols_idx
 
@@ -180,7 +209,7 @@ class FesomDataset:
         """
         return self.len
 
-    def _get(self, idx: int, idx_channels: np.array) -> tuple:
+    def _get(self, idx: int, channels: np.array) -> tuple:
         """
         Get data for window
 
@@ -204,14 +233,21 @@ class FesomDataset:
                 np.array([], dtype=fp32),
             )
 
+        # indexing
         start_row = self.start_idx + idx * self.mesh_size
         end_row = start_row + self.len_hrs * self.mesh_size
-        data = self.data.oindex[start_row:end_row, idx_channels]
 
-        lat = np.expand_dims(self.data.oindex[start_row:end_row, self.lat_index], 1)
-        lon = np.expand_dims(self.data.oindex[start_row:end_row, self.lon_index], 1)
+        # data
+        data_reshaped = [
+            np.asarray(self.ds[ch_]).reshape(-1, 1)[start_row:end_row] for ch_ in channels
+        ]
+        data = np.concatenate(data_reshaped, axis=1)
+
+        lat = np.expand_dims(self.lat[start_row:end_row], 1)
+        lon = np.expand_dims(self.lon[start_row:end_row], 1)
 
         latlon = np.concatenate([lat, lon], 1)
+
         # empty geoinfos
         geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
         datetimes = np.squeeze(self.time[start_row:end_row])
@@ -231,7 +267,7 @@ class FesomDataset:
         -------
         source data (coords, geoinfos, data, datetimes)
         """
-        return self._get(idx, self.source_idx)
+        return self._get(idx, self.source_channels)
 
     def get_target(self, idx: int) -> tuple[np.array, np.array, np.array, np.array]:
         """
@@ -246,7 +282,7 @@ class FesomDataset:
         -------
         target data (coords, geoinfos, data, datetimes)
         """
-        return self._get(idx, self.target_idx)
+        return self._get(idx, self.target_channels)
 
     def get_source_size(self) -> int:
         """

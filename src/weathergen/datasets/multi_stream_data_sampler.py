@@ -7,17 +7,23 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datetime
 import logging
 import pathlib
 
 import numpy as np
 import torch
 
-from weathergen.datasets.anemoi_dataset import AnemoiDataset
-from weathergen.datasets.atmorep_dataset import AtmorepDataset
-from weathergen.datasets.fesom_dataset import FesomDataset
-from weathergen.datasets.obs_dataset import ObsDataset
+from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
+from weathergen.datasets.data_reader_base import (
+    DataReaderBase,
+    ReaderData,
+    TimeWindowHandler,
+    TIndex,
+    str_to_datetime64,
+)
+from weathergen.datasets.data_reader_fesom import DataReaderFesom
+from weathergen.datasets.data_reader_obs import DataReaderObs
+from weathergen.datasets.icon_dataset import IconDataset
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
@@ -27,19 +33,46 @@ from weathergen.datasets.utils import (
     compute_source_cell_lens,
 )
 from weathergen.utils.logger import init_loggers, logger
+from weathergen.utils.train_logger import Stage, TrainLogger
+
+_logger = logging.getLogger(__name__)
+
+type AnyDataReader = (
+    DataReaderBase | DataReaderAnemoi | DataReaderObs
+    # | FesomDataset | AtmorepDataset
+)
 
 
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ###################################################
-    def __init__(self, cf, start_date, end_date, batch_size, samples_per_epoch, shuffle=True):
+    def __init__(
+        self,
+        cf,
+        start_date_,
+        end_date_,
+        batch_size,
+        samples_per_epoch,
+        train_logger: TrainLogger,
+        stage: Stage,
+        shuffle=True,
+    ):
         super(MultiStreamDataSampler, self).__init__()
 
-        assert end_date > start_date
+        start_date = str_to_datetime64(start_date_)
+        end_date = str_to_datetime64(end_date_)
+
+        assert end_date > start_date, (end_date, start_date)
 
         self.mask_value = 0.0
+        self._train_logger = train_logger
+        self._stage = stage
 
-        self.len_hrs = cf.len_hrs
-        self.step_hrs = cf.step_hrs
+        self.len_hrs: int = cf.len_hrs
+        self.step_hrs: int = cf.step_hrs
+        self.time_window_handler = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
+        _logger.info(
+            f"Time window handler: start={start_date}, end={end_date}, len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
+        )
 
         self.forecast_offset = cf.forecast_offset
         self.forecast_delta_hrs = (
@@ -54,45 +87,34 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 logger.warning("forecast policy is not None but number of forecast steps is 0.")
         self.forecast_policy = cf.forecast_policy
 
-        # end date needs to be adjusted to account for window length
-        format_str = "%Y%m%d%H%M%S"
-        end_dt = datetime.datetime.strptime(str(end_date), format_str)
-        end_dt = end_dt + datetime.timedelta(hours=cf.len_hrs)
-        end_date_padded = end_dt.strftime(format_str)
-
         self.len = 100000000
 
-        self.streams_datasets = []
-
+        self.streams_datasets: list[list[AnyDataReader]] = []
         for _, stream_info in enumerate(cf.streams):
             self.streams_datasets.append([])
 
             for fname in stream_info["filenames"]:
                 kwargs = {
-                    "start": start_date,
-                    "end": end_date,
-                    "len_hrs": cf.len_hrs,
-                    "step_hrs": cf.step_hrs,
+                    "tw_handler": self.time_window_handler,
                     "stream_info": stream_info,
                 }
-                # TODO: Should we translate the type to the class name and call based on this?
-                # TODO: Put this intialization logic into a factory method (maybe a static method on a potential future baseclass)
+                dataset: type[AnyDataReader] | None = None
                 match stream_info["type"]:
                     case "obs":
-                        dataset = ObsDataset
+                        dataset = DataReaderObs
                         datapath = cf.data_path_obs
-                        kwargs["end"] = end_date_padded
+                        # kwargs["end"] = end_date_padded # TODO: implement the padding
                     case "anemoi":
-                        dataset = AnemoiDataset
+                        dataset = DataReaderAnemoi
                         datapath = cf.data_path_anemoi
                     case "fesom":
-                        dataset = FesomDataset
+                        dataset = DataReaderFesom
                         datapath = cf.data_path_fesom
-                    case "atmorep":
-                        dataset = AtmorepDataset
-                        datapath = cf.data_path_anemoi
+                    case "icon":
+                        dataset = IconDataset
+                        datapath = cf.data_path_icon
                     case _:
-                        msg = f"Unsupported stream type {stream_info['type']}"
+                        msg = f"Unsupported stream type {stream_info['type']} for stream name '{stream_info['name']}'."
                         raise ValueError(msg)
 
                 datapath = pathlib.Path(datapath)
@@ -108,8 +130,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         msg = f"Did not find input data for {stream_info['type']} stream '{stream_info['name']}': {filename}."
                         raise FileNotFoundError(msg)
 
+                ds_type = stream_info["type"]
                 logger.info(
-                    f"Opening dataset with type: {type(dataset)} from stream config {stream_info['name']}."
+                    f"Opening dataset with type: {ds_type} from stream config {stream_info['name']}."
                 )
                 ds = dataset(filename=filename, **kwargs)
 
@@ -117,22 +140,18 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if len(ds) > 0:
                     self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
 
-                stream_info["source_channels"] = ds.source_channels
-                stream_info["target_channels"] = ds.target_channels
+                stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
+                stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
 
                 self.streams_datasets[-1] += [ds]
 
-        # TODO: fix
-        # determine start and end-time for all datasets, determine then the
-        # by construction, this is identical for all datasets
-        temp = np.array([len(ds) for dss in self.streams_datasets for ds in dss if len(ds) > 0])
-        assert len(temp) > 0, f"No dataset in time window for dataloader: {start_date}-{end_date}."
-        self.len_native = temp.min()
-
+        index_range = self.time_window_handler.get_index_range()
+        self.len = int(index_range.end - index_range.start)
         self.len = min(self.len, samples_per_epoch if samples_per_epoch else self.len)
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
-        len_chunk = ((self.len_native // cf.num_ranks) // batch_size) * batch_size
+        len_chunk = ((self.len // cf.num_ranks) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)
+        _logger.info(f"index_range={index_range}, len={self.len}, len_chunk={len_chunk}")
 
         self.rank = cf.rank
         self.num_ranks = cf.num_ranks
@@ -148,10 +167,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.batch_size = batch_size
         self.rng = np.random.default_rng(cf.data_loader_rng_seed)
 
-        self.healpix_level_source = cf.healpix_level
-        self.healpix_level_target = cf.healpix_level
-        self.num_healpix_cells_source = 12 * 4**self.healpix_level_source
-        self.num_healpix_cells_target = 12 * 4**self.healpix_level_target
+        self.healpix_level_source: int = cf.healpix_level
+        self.healpix_level_target: int = cf.healpix_level
+        self.num_healpix_cells_source: int = 12 * 4**self.healpix_level_source
+        self.num_healpix_cells_target: int = 12 * 4**self.healpix_level_target
 
         if cf.training_mode == "forecast":
             self.tokenizer = TokenizerForecast(cf.healpix_level)
@@ -214,12 +233,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             logger.info(f"forecast_steps at epoch={self.epoch} : {fsm}")
 
         # data
+        index_range = self.time_window_handler.get_index_range()
+        idx_end = index_range.end
+        # native length of datasets, independent of epoch length that has potentially been specified
+        forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
+        idx_end -= forecast_len + self.forecast_offset
+        assert idx_end > 0, "dataset size too small for forecast range"
+        self.perms = np.arange(index_range.start, idx_end)
         if self.shuffle:
-            # native length of datasets, independent of epoch length that has potentially been specified
-            forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
-            self.perms = self.rng.permutation(self.len_native - forecast_len - self.forecast_offset)
-        else:
-            self.perms = np.arange(self.len_native - self.forecast_offset)
+            self.perms = self.rng.permutation(self.perms)
 
         # forecast time steps
         len_dt_samples = len(self) // self.batch_size
@@ -258,6 +280,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """
         init_loggers()
         iter_start, iter_end = self.worker_workset()
+        _logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={self.len}")
 
         # create new shuffeling
         self.reset()
@@ -277,18 +300,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # ensure batches are not empty
             batch = []
             while len(batch) < self.batch_size:
-                idx = self.perms[idx_raw % self.perms.shape[0]]
+                idx: TIndex = self.perms[idx_raw % self.perms.shape[0]]
                 idx_raw += 1
 
-                # TODO: this has to be independent of specific datasets
-                time_win1 = self.streams_datasets[-1][0].time_window(idx)
+                time_win1 = self.time_window_handler.window(idx)
 
-                streams_data = []
+                streams_data: list[StreamData] = []
 
                 # for all streams
-                for _, (stream_info, stream_ds) in enumerate(
-                    zip(self.streams, self.streams_datasets, strict=False)
-                ):
+                for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
                     stream_data = StreamData(
                         idx, forecast_dt + self.forecast_offset, nhc_source, nhc_target
                     )
@@ -296,34 +316,27 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # for all sources for current stream
                     for _, ds in enumerate(stream_ds):
                         # source window (of potentially multi-step length)
-                        (coords, geoinfos, source, times) = ds.get_source(idx)
-                        for it in range(1, self.input_window_steps):
-                            (coords0, geoinfos0, source0, times0) = ds.get_source(
-                                idx - it * self.len_hrs
-                            )
-                            coords = np.concatenate([coords0, coords], 0)
-                            geoinfos = np.concatenate([geoinfos0, geoinfos], 0)
-                            source = np.concatenate([source0, source], 0)
-                            times = np.concatenate([times0, times], 0)
+                        # TODO: Kacper is using this -- cannot so easily remove
+                        rdata: ReaderData = ds.get_source(idx)
 
-                        if source.shape[0] == 0:
+                        if rdata.is_empty():
                             stream_data.add_empty_source()
                         else:
                             # TODO: handling of conversion from numpy to torch here and below
                             # TODO: this should only be collected in validation mode
                             source_raw = torch.from_numpy(
-                                np.concatenate((coords, geoinfos, source), 1)
+                                np.concatenate((rdata.coords, rdata.geoinfos, rdata.data), 1)
                             )
 
                             (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                                 stream_info,
                                 self.masking_rate,
                                 self.masking_rate_sampling,
-                                torch.from_numpy(coords),
-                                torch.from_numpy(geoinfos),
-                                torch.from_numpy(source),
-                                times,
-                                time_win1,
+                                torch.from_numpy(rdata.coords),
+                                torch.from_numpy(rdata.geoinfos),
+                                torch.from_numpy(rdata.data),
+                                rdata.datetimes,
+                                (time_win1.start, time_win1.end),
                                 ds,
                             )
 
@@ -338,21 +351,21 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             step_forecast_dt = (
                                 idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
                             )
-                            time_win2 = self.streams_datasets[-1][0].time_window(step_forecast_dt)
+                            time_win2 = self.time_window_handler.window(step_forecast_dt)
 
-                            (coords, geoinfos, target, times) = ds.get_target(step_forecast_dt)
+                            rdata = ds.get_target(step_forecast_dt)
 
-                            if target.shape[0] == 0:
+                            if rdata.is_empty():
                                 stream_data.add_empty_target(fstep)
                             else:
                                 (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
                                     stream_info,
                                     self.sampling_rate_target,
-                                    torch.from_numpy(coords),
-                                    torch.from_numpy(geoinfos),
-                                    torch.from_numpy(target),
-                                    times,
-                                    time_win2,
+                                    torch.from_numpy(rdata.coords),
+                                    torch.from_numpy(rdata.geoinfos),
+                                    torch.from_numpy(rdata.data),
+                                    rdata.datetimes,
+                                    (time_win2.start, time_win2.end),
                                     ds,
                                 )
 
@@ -407,11 +420,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             iter_end = iter_start + per_worker
             if worker_info.id + 1 == worker_info.num_workers:
                 iter_end = local_end
-            logging.getLogger("obslearn").info(
+            _logger.info(
                 f"{self.rank}::{worker_info.id}"
                 + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
             )
         # ensure the tokenizers use different seeds
+        self.tokenizer.reset()
+
+        # ensure the tokenizers use different seeds. TODO: why double??
         self.tokenizer.reset()
 
         return iter_start, iter_end

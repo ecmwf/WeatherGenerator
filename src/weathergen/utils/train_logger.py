@@ -33,6 +33,10 @@ _logger = logging.getLogger(__name__)
 Stage = Literal["train", "val"]
 RunId = str
 
+# All the stages currently implemented:
+TRAIN: Stage = "train"
+VAL: Stage = "val"
+
 
 class TrainLogger:
     #######################################
@@ -255,6 +259,8 @@ class Metrics:
                 return self.val
             case "system":
                 return self.system
+            case _:
+                raise ValueError(f"Unknown mode {s}. Use 'train', 'val' or 'system'.")
 
 
 def read_metrics(
@@ -275,6 +281,7 @@ def read_metrics(
     assert cols is None or cols, "cols must be non empty or None"
     if run_id is None:
         run_id = cf.run_id
+    assert run_id, "run_id must be provided"
 
     # TODO: this should be a config option
     df = read_metrics_file(results_path / run_id / "metrics.json")
@@ -333,8 +340,3 @@ def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
 def _key_stddev(st_name: str) -> str:
     st_name = _clean_name(st_name)
     return f"stream.{st_name}.stddev_avg"
-
-
-if __name__ == "__main__":
-    # uv run python -m weathergen.utils.train_logger
-    TrainLogger.read("e6ev2f14")

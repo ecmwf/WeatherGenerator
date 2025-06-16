@@ -19,6 +19,7 @@ import torch.distributed as dist
 import torch.multiprocessing
 
 from weathergen.train.utils import str_to_tensor, tensor_to_str
+from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
 
 _logger = logging.getLogger(__name__)
@@ -26,9 +27,10 @@ _logger = logging.getLogger(__name__)
 
 class Trainer_Base:
     def __init__(self):
-        pass
+        self.device_handles = []
+        self.device_names = []
+        self.cf: Config | None = None
 
-    ###########################################
     @staticmethod
     def init_torch(use_cuda=True, num_accs_per_task=1, multiprocessing_method="fork"):
         """
@@ -61,7 +63,6 @@ class Trainer_Base:
 
         return devices
 
-    ###########################################
     @staticmethod
     def init_ddp(cf):
         rank = 0
@@ -156,7 +157,6 @@ class Trainer_Base:
             self.device_names += [pynvml.nvmlDeviceGetName(handle)]
             self.device_handles += [handle]
 
-    ###########################################
     def get_perf(self):
         perf_gpu, perf_mem = 0.0, 0.0
         if len(self.device_handles) > 0:
@@ -169,8 +169,8 @@ class Trainer_Base:
 
         return perf_gpu, perf_mem
 
-    ###########################################
     def ddp_average(self, val):
+        assert self.cf is not None, "init() must be called before calling ddp_average."
         if self.cf.with_ddp:
             dist.all_reduce(val.cuda(), op=torch.distributed.ReduceOp.AVG)
         return val.cpu()

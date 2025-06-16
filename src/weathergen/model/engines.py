@@ -252,7 +252,7 @@ class ForecastingEngine:
         if self.cf.forecast_policy is not None:
             for i in range(self.cf.fe_num_blocks):
                 # Alternate between global and local attention
-                if (i % global_rate == 0 and i > 0) or i + 1 == self.cf.ae_global_num_blocks:
+                if (i % global_rate == 0) or i + 1 == self.cf.ae_global_num_blocks:
                     self.fe_blocks.append(
                         MultiSelfAttentionHead(
                             self.cf.ae_global_dim_embed,
