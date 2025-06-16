@@ -82,7 +82,7 @@ class TrainLogger:
         log_vals += [avg_loss]
         log_vals += [lr]
 
-        for _, st in enumerate(self.cf.streams):
+        for st in self.cf.streams:
             st_name = _clean_name(st["name"])
             loss = losses_all[st_name]
             stddev = stddev_all[st_name]
@@ -124,7 +124,7 @@ class TrainLogger:
         log_vals = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
         log_vals += [samples]
 
-        for _, st in enumerate(self.cf.streams):
+        for st in self.cf.streams:
             st_name = _clean_name(st["name"])
             loss = losses_all[st_name]
             stddev = stddev_all[st_name]
@@ -163,7 +163,7 @@ class TrainLogger:
         cols_train = ["dtime", "samples", "mse", "lr"]
         cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_0_mean", "learning_rate"]
         for si in cf.streams:
-            for _j, lf in enumerate(cf.loss_fcts):
+            for lf in cf.loss_fcts:
                 cols1 += [_key_loss(si["name"], lf[0])]
                 cols_train += [
                     si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
@@ -193,7 +193,7 @@ class TrainLogger:
         cols_val = ["dtime", "samples"]
         cols2 = [_weathergen_timestamp, "num_samples"]
         for si in cf.streams:
-            for _, lf in enumerate(cf.loss_fcts_val):
+            for lf in cf.loss_fcts_val:
                 cols_val += [
                     si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
                 ]
