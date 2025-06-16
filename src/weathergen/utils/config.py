@@ -241,7 +241,10 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
     private_cf["model_path"] = (
         private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
     )
-    del private_cf["secrets"]
+
+    if "secrets" in private_cf:
+        del private_cf["secrets"]
+
     return private_cf
 
 
