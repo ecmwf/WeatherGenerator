@@ -15,7 +15,7 @@ from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
 
-from weathergen.utils.logger import logger
+
 ####################################################################################################
 class MultiSelfAttentionHead_Varlen(torch.nn.Module):
     #########################################
@@ -589,15 +589,12 @@ class MultiCrossAttentionHead(torch.nn.Module):
         if self.with_residual:
             x_q_in = x_q
         x_q, x_kv = self.lnorm_in_q(x_q), self.lnorm_in_kv(x_kv)
-        logger.info("x_q and x_kv shape", x_q.shape,x_kv.shape)
         # project onto heads and q,k,v and ensure these are 4D tensors as required for flash attention
         s = [x_q.shape[0], -1, self.num_heads, self.dim_head_proj]
         qs = self.lnorm_q(self.proj_heads_q(x_q).reshape(s)).to(torch.float16).transpose(-3, -2)
-        logger.info("qs_shape",qs.shape)
         s = [x_kv.shape[0], -1, self.num_heads, self.dim_head_proj]
         ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(torch.float16).transpose(-3, -2)
         vs = self.proj_heads_v(x_kv).reshape(s).transpose(-3, -2)
-        logger.info("ks and vs shape",ks.shape, vs.shape)
         # correct ordering of tensors with seq dimension second but last is critical
         with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.FLASH_ATTENTION):
             outs = self.att(qs, ks, vs).transpose(2, 1)
@@ -605,7 +602,6 @@ class MultiCrossAttentionHead(torch.nn.Module):
         outs = self.dropout(self.proj_out(outs.flatten(-2, -1)))
         if self.with_residual:
             outs = x_q_in + outs
-        logger.info("outs", outs.shape)
         return outs
 
     #########################################

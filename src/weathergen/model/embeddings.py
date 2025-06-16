@@ -18,7 +18,7 @@ from weathergen.model.layers import MLP
 from weathergen.model.norms import RMSNorm
 from weathergen.model.positional_encoding import positional_encoding_harmonic
 
-from weathergen.utils.logger import logger
+# from weathergen.utils.logger import logger
 
 class StreamEmbedTransformer(torch.nn.Module):
     def __init__(
@@ -30,10 +30,8 @@ class StreamEmbedTransformer(torch.nn.Module):
         dim_embed,
         dim_out,
         num_blocks,
-        num_queries,
-        cross_attn_num_blocks,
-        cross_attn_num_heads,
         num_heads,
+        cross_attn_params,
         norm_type="LayerNorm",
         embed_size_centroids=64,
         unembed_mode="full",
@@ -55,12 +53,32 @@ class StreamEmbedTransformer(torch.nn.Module):
         self.dim_embed = dim_embed
         self.dim_out = dim_out
         self.num_blocks = num_blocks
-        if num_queries:
+        if cross_attn_params is not None:
             assert mode == "channels", "cross-attention is only supported in channels mode"
-        self.num_queries = num_queries
-        self.is_cross_attn = num_queries > 0 
-        self.cross_attn_num_blocks = cross_attn_num_blocks
-        self.cross_attn_num_heads = cross_attn_num_heads
+            
+            self.num_queries = cross_attn_params.get("num_queries", 0) if cross_attn_params else 0
+            if self.num_queries > 0:
+            # Multi-Cross Attention Head
+                num_channels = self.num_queries
+                self.cross_attn_num_blocks = cross_attn_params.get("num_blocks", 1) if cross_attn_params else 1
+                self.cross_attn_num_heads = cross_attn_params.get("num_heads", 1) if cross_attn_params else 1
+                self.queries = torch.nn.Parameter(
+                torch.randn(1, self.num_queries, self.dim_embed) 
+            )
+                with torch.no_grad():
+                    self.queries.normal_(mean=0.0, std=1.0 / np.sqrt(self.dim_embed))
+                self.perceiver_io = MultiCrossAttentionHead(
+                        self.dim_embed,
+                        self.dim_embed,
+                        self.cross_attn_num_heads,
+                        with_residual=True,
+                        with_qk_lnorm=True,
+                        dropout_rate=0.1,  
+                    )
+            else:
+                self.perceiver_io = torch.nn.Identity()
+
+        
         self.num_heads = num_heads
         self.embed_size_centroids = embed_size_centroids
         self.unembed_mode = unembed_mode
@@ -113,30 +131,6 @@ class StreamEmbedTransformer(torch.nn.Module):
                 )
                 self.ln_final = torch.nn.ModuleList([norm(dim_embed) for _ in range(num_channels)])
 
-                # Multi-Cross Attention Head
-                
-                if num_queries:
-                    self.queries = torch.nn.Parameter(
-                    torch.randn(1, num_queries, self.dim_embed) 
-                )
-                    
-                    self.perceiver_io = MultiCrossAttentionHead(
-                            self.dim_embed,
-                            self.dim_embed,
-                            self.cross_attn_num_heads,
-                            # dim_head_proj=self.tr_dim_head_proj,
-                            with_residual=True,
-                            with_qk_lnorm=True,
-                            dropout_rate=0.1,  # Assuming dropout_rate is 0.1
-                            # with_flash=self.cf.with_flash_attention,
-                            # norm_type=self.cf.norm_type,
-                            # softcap=self.softcap,
-                            # dim_aux=self.dim_coord_in,
-                        )
-                    
-                else:
-                    self.perceiver_io = torch.nn.Identity()
-
             else:
                 assert False
 
@@ -175,26 +169,19 @@ class StreamEmbedTransformer(torch.nn.Module):
 
         # embed provided input data
         x = peh(checkpoint(self.embed, x_in.transpose(-2, -1), use_reentrant=False))
-        
-        logger.info("x_shape_after_peh",x.shape)
 
-        if self.is_cross_attn:
+        if self.num_queries > 0:
             # cross-attention with queries
             x = checkpoint(self.perceiver_io, 
                 self.queries.repeat(x.shape[0],1,1),
                 x,
-                # dim_embed=self.dim_embed,
                 use_reentrant=False,
             )
-        
-        
-        logger.info("x.shape after cross_atttention:", x.shape)
 
 
         for layer in self.layers:
             x = checkpoint(layer, x, use_reentrant=False)
 
-        logger.info("x shape after self attention", x.shape)
         # read out
         if self.unembed_mode == "full":
             out = checkpoint(self.unembed, self.ln_final(x.flatten(-2, -1)), use_reentrant=False)
