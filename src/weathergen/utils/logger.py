@@ -35,7 +35,7 @@ def init_loggers():
     and will be a no-op if called again.
     """
     formatter = RelPathFormatter(
-        "%(asctime)s %(pathname)s:%(lineno)d : %(levelname)-8s : %(message)s"
+        "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
     )
     for package in ["obslearn", "weathergen"]:
         logger = logging.getLogger(package)
