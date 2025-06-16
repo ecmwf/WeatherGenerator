@@ -357,7 +357,7 @@ class Trainer(Trainer_Base):
         loss = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
         # Create list storing losses for each stream
         losses_all = {
-            st.name: torch.zeros((len(st.target_channels), len(loss_fcts)))
+            st.name: torch.zeros((len(st[str(stage) + "_target_channels"]), len(loss_fcts)))
             for st in self.cf.streams  # No nan here as later it's divided so any remaining 0s become nans
         }  # Create tensor for each stream
         stddev_all = {
@@ -405,7 +405,7 @@ class Trainer(Trainer_Base):
                             if tok_spacetime:
                                 # iterate over time steps and compute loss separately for each
                                 t_unique = torch.unique(target_coords[:, 1])
-                                for _jj, t in enumerate(t_unique):
+                                for t in t_unique:
                                     mask_t = t == target_coords[:, 1]
                                     mask = torch.logical_and(mask_t, mask_nan[:, i])
                                     if mask.sum().item() > 0:
@@ -621,8 +621,6 @@ class Trainer(Trainer_Base):
                             forecast_steps,
                             batch[0],
                             preds,
-                            losses_all,
-                            stddev_all,
                             VAL,
                             log_data=True,
                         )

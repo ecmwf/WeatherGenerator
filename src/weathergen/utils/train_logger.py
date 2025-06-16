@@ -95,7 +95,7 @@ class TrainLogger:
                 lf_name = _clean_name(lf_name)
                 metrics[_key_loss(st["name"], lf_name)] = loss[:, j].nanmean()
 
-                for k, ch_n in enumerate(st.target_channels):
+                for k, ch_n in enumerate(st.train_target_channels):
                     metrics[_key_loss_chn(st["name"], lf_name, ch_n)] = loss[k, j]
                 log_vals += [loss[:, j].nanmean(0)]
 
@@ -134,7 +134,7 @@ class TrainLogger:
             stddev = stddev_all[st_name]
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts_val):
                 metrics[_key_loss(st_name, lf_name)] = loss[:, j].nanmean()
-                for k, ch_n in enumerate(st.target_channels):
+                for k, ch_n in enumerate(st.val_target_channels):
                     metrics[_key_loss_chn(st_name, lf_name, ch_n)] = loss[k, j]
                 log_vals += [loss[:, j].nanmean()]
 
