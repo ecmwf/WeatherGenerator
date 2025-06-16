@@ -49,18 +49,17 @@ DUMMY_STREAM_CONF = {
         "pred_head": {"ens_size": 1, "num_layers": 1},
     }
 }
-
-DUMMY_STREAM_CONF_STR = OmegaConf.to_yaml(OmegaConf.create(DUMMY_STREAM_CONF))
+DUMMY_MULTIPLE_STREAM_CONF = DUMMY_STREAM_CONF | {"FOO": DUMMY_STREAM_CONF["ERA5"]}
 
 VALID_STREAMS = [
-    (pathlib.Path("test.yml"), DUMMY_STREAM_CONF_STR),
-    (pathlib.Path("foo/test.yml"), DUMMY_STREAM_CONF_STR),
-    (pathlib.Path("bar/foo/test.yml"), DUMMY_STREAM_CONF_STR),
+    (pathlib.Path("test.yml"), DUMMY_STREAM_CONF),
+    (pathlib.Path("foo/test.yml"), DUMMY_STREAM_CONF),
+    (pathlib.Path("bar/foo/test.yml"), DUMMY_STREAM_CONF),
 ]
 
 EXCLUDED_STREAMS = [
-    (pathlib.Path(".test.yml"), DUMMY_STREAM_CONF_STR),
-    (pathlib.Path("#test.yml"), DUMMY_STREAM_CONF_STR),
+    (pathlib.Path(".test.yml"), DUMMY_STREAM_CONF),
+    (pathlib.Path("#test.yml"), DUMMY_STREAM_CONF),
 ]
 
 
@@ -90,17 +89,23 @@ def models_dir():
         yield temp_dir
 
 
+def write_stream_file(write_path, content: str):
+    write_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(write_path, "a") as stream_file:
+        stream_file.write(content)
+
+
+def get_expected_config(key, config):
+    print(key, config)
+    config = OmegaConf.create(config)
+    config.name = key
+    return config
+
+
 @pytest.fixture
-def streams_dir(request):
+def streams_dir():
     with tempfile.TemporaryDirectory(prefix="streams") as temp_dir:
-        root = pathlib.Path(temp_dir)
-
-        relpath, content = request.param
-        (root / relpath).parent.mkdir(parents=True, exist_ok=True)
-        with open(root / relpath, "w") as stream_file:
-            stream_file.write(content)
-
-        yield root
+        yield pathlib.Path(temp_dir)
 
 
 @pytest.fixture
@@ -116,11 +121,6 @@ def private_config_file(private_conf):
         temp.write(OmegaConf.to_yaml(private_conf))
         temp.flush()
         yield pathlib.Path(temp.name)
-
-
-@pytest.fixture
-def stream_config():
-    return OmegaConf.create(DUMMY_STREAM_CONF)
 
 
 @pytest.fixture
@@ -231,31 +231,73 @@ def test_print_cf_no_secrets(config_fresh):
     assert "53CR3T" not in output and "secrets" not in config_fresh.keys()
 
 
-@pytest.mark.parametrize("streams_dir", VALID_STREAMS, indirect=True)
-def test_load_streams(streams_dir, stream_config):
-    name, expected = [*stream_config.items()][0]
-    expected.name = name
+@pytest.mark.parametrize("rel_path,cf", VALID_STREAMS)
+def test_load_streams(streams_dir, rel_path, cf):
+    expected = get_expected_config(*[*cf.items()][0])
+    write_stream_file(streams_dir / rel_path, OmegaConf.to_yaml(cf))
 
     streams = config.load_streams(streams_dir)
-    print(streams)
+
     assert all(is_equal(stream, expected) for stream in streams)
 
 
-@pytest.mark.parametrize("streams_dir", EXCLUDED_STREAMS, indirect=True)
-def test_load_streams_exclude_files(streams_dir):
+@pytest.mark.parametrize("rel_path,cf", EXCLUDED_STREAMS)
+def test_load_streams_exclude_files(streams_dir, rel_path, cf):
+    write_stream_file(streams_dir / rel_path, OmegaConf.to_yaml(cf))
+
     streams = config.load_streams(streams_dir)
+
     assert streams == []
 
 
-@pytest.mark.parametrize("streams_dir", [(pathlib.Path("empty.yml"), "")], indirect=True)
 def test_load_empty_stream(streams_dir):
+    write_stream_file(streams_dir / "empty.yml", "")
+
     streams = config.load_streams(streams_dir)
     assert streams == []
 
 
-@pytest.mark.parametrize("streams_dir", [(pathlib.Path("error.yml"), "ae:{")], indirect=True)
 def test_load_malformed_stream(streams_dir):
-    with pytest.raises(RuntimeError):
+    write_stream_file(streams_dir / "error.yml", "ae:{")
+
+    with pytest.raises(ValueError):
+        config.load_streams(streams_dir)
+
+
+@pytest.mark.parametrize("rel_path,cf", [("test.yml", DUMMY_MULTIPLE_STREAM_CONF)])
+def test_load_multiple_streams_len(streams_dir, rel_path, cf):
+    write_stream_file(streams_dir / rel_path, OmegaConf.to_yaml(cf))
+
+    streams = config.load_streams(streams_dir)
+
+    assert len(streams) == len(cf)
+
+
+@pytest.mark.parametrize("rel_path,cf", [("test.yml", DUMMY_MULTIPLE_STREAM_CONF)])
+def test_load_multiple_streams_content(streams_dir, rel_path, cf):
+    expected = [get_expected_config(name, conf) for name, conf in cf.items()]
+    write_stream_file(streams_dir / rel_path, OmegaConf.to_yaml(cf))
+
+    streams = config.load_streams(streams_dir)
+
+    assert all(
+        is_equal(stream, stream_e) for stream, stream_e in zip(streams, expected, strict=True)
+    )
+
+
+def test_load_duplicate_streams(streams_dir):
+    write_stream_file(streams_dir / "foo.yml", OmegaConf.to_yaml(DUMMY_STREAM_CONF))
+    write_stream_file(streams_dir / "bar.yml", OmegaConf.to_yaml(DUMMY_STREAM_CONF))
+
+    with pytest.raises(ValueError):
+        config.load_streams(streams_dir)
+
+
+def test_load_duplicate_streams_same_file(streams_dir):
+    write_stream_file(streams_dir / "foo.yml", OmegaConf.to_yaml(DUMMY_STREAM_CONF))
+    write_stream_file(streams_dir / "foo.yml", OmegaConf.to_yaml(DUMMY_STREAM_CONF))
+
+    with pytest.raises(ValueError):
         config.load_streams(streams_dir)
 
 
