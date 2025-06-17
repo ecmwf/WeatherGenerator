@@ -104,6 +104,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         # Determine source and target channels, filtering out forcings etc and using
         # specified source and target channels if specified
         source_channels = stream_info.get("source")
+        exclude_source_channels = stream_info.get("exclude_source")
         self.source_idx = np.sort(
             [
                 ds.name_to_index[k]
@@ -116,10 +117,16 @@ class DataReaderAnemoi(DataReaderTimestep):
                         if source_channels
                         else True
                     )
+                    and (
+                        not np.array([f in k for f in exclude_source_channels]).any()
+                        if exclude_source_channels
+                        else True
+                    )
                 )
             ]
         )
         target_channels = stream_info.get("target")
+        exclude_target_channels = stream_info.get("exclude_target")
         self.target_idx = np.sort(
             [
                 ds.name_to_index[k]
@@ -130,6 +137,11 @@ class DataReaderAnemoi(DataReaderTimestep):
                     and (
                         np.array([f in k for f in target_channels]).any()
                         if target_channels
+                        else True
+                    )
+                    and (
+                        not np.array([f in k for f in exclude_target_channels]).any()
+                        if exclude_target_channels
                         else True
                     )
                 )
