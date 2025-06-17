@@ -176,8 +176,8 @@ class TrainLogger:
             with open(fname_log_train, "rb") as f:
                 log_train = np.loadtxt(f, delimiter=",")
             log_train = log_train.reshape((log_train.shape[0] // len(cols_train), len(cols_train)))
-        except:
-            _logger.warning(f"Warning: no training data loaded for run_id={run_id}")
+        except Exception as e:
+            _logger.warning(f"Warning: no training data loaded for run_id={run_id} due to exception: {e}")
             log_train = np.array([])
 
         log_train_df = read_metrics(cf, run_id, "train", cols1, result_dir_base)
@@ -206,8 +206,8 @@ class TrainLogger:
             with open(fname_log_val, "rb") as f:
                 log_val = np.loadtxt(f, delimiter=",")
             log_val = log_val.reshape((log_val.shape[0] // len(cols_val), len(cols_val)))
-        except:
-            print(f"Warning: no validation data loaded for run_id={run_id}")
+        except Exception as e:
+            print(f"Warning: no validation data loaded for run_id={run_id} due to exception: {e}")
             log_val = np.array([])
         metrics_val_df = read_metrics(cf, run_id, "val", cols2, result_dir_base)
 
@@ -219,8 +219,8 @@ class TrainLogger:
             with open(fname_perf_val, "rb") as f:
                 log_perf = np.loadtxt(f, delimiter=",")
             log_perf = log_perf.reshape((log_perf.shape[0] // len(cols_perf), len(cols_perf)))
-        except:
-            print(f"Warning: no performance data loaded for run_id={run_id}")
+        except Exception as e:
+            print(f"Warning: no validation data loaded for run_id={run_id} due to exception: {e}")
             log_perf = np.array([])
         metrics_system_df = read_metrics(
             cf,

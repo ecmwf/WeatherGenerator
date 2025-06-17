@@ -84,7 +84,8 @@ class Trainer_Base:
         rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
         num_ranks = int(os.environ.get("SLURM_NTASKS"))
         _logger.info(
-            f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, rank={rank}, num_ranks={num_ranks}"
+            f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, "
+            f"rank={rank}, num_ranks={num_ranks}"
         )
 
         if rank == 0:

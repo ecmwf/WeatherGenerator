@@ -129,8 +129,13 @@ def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config
     Determining the run id should follow the following logic:
 
     1. (default case): run train, train_continue or evaluate without any flags => generate a new run_id for this run.
-    2. (assign run_id): run train, train_continue or evaluate with --run_id <RUNID> flag => assign a run_id manually to this run. This is intend for outside tooling and should not be used manually.
-    3. (reuse run_id -> only for train_continue and evaluate): reuse the run_id from the run specified by --from_run_id <RUNID>. Since the run_id correct run_id is already loaded in the config nothing has to be assigned. This case will happen if --reuse_run_id is specified.
+    2. (assign run_id): run train, train_continue or evaluate with --run_id <RUNID> flag 
+        => assign a run_id manually to this run. 
+        This is intend for outside tooling and should not be used manually.
+    3. (reuse run_id -> only for train_continue and evaluate): 
+        reuse the run_id from the run specified by --from_run_id <RUNID>. 
+        Since the run_id correct run_id is already loaded in the config nothing has to be assigned. 
+        This case will happen if --reuse_run_id is specified.
 
 
     Args:
@@ -235,7 +240,8 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
     else:
         _logger.info(f"Could not find platform script at {env_script_path}")
         raise FileNotFoundError(
-            "Could not find private config. Please set the environment variable WEATHERGEN_PRIVATE_CONF or provide a path."
+            "Could not find private config. Please set the environment variable "
+            "WEATHERGEN_PRIVATE_CONF or provide a path."
         )
     private_cf = OmegaConf.load(private_home)
     private_cf["model_path"] = (

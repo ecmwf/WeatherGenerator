@@ -573,14 +573,14 @@ def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
             if not s.source_empty():
                 s.source_idxs_embed = torch.cat(
                     [
-                        torch.arange(o, o + l, dtype=torch.int64)
-                        for o, l in zip(offsets, source_tokens_lens[ib, itype], strict=False)
+                        torch.arange(offset, offset + token_len, dtype=torch.int64)
+                        for offset, token_len in zip(offsets, source_tokens_lens[ib, itype], strict=False)
                     ]
                 )
                 s.source_idxs_embed_pe = torch.cat(
                     [
-                        torch.arange(o, o + l, dtype=torch.int32)
-                        for o, l in zip(offsets_pe, source_tokens_lens[ib][itype], strict=False)
+                        torch.arange(offset, offset + token_len, dtype=torch.int32)
+                        for offset, token_len in zip(offsets_pe, source_tokens_lens[ib][itype], strict=False)
                     ]
                 )
 

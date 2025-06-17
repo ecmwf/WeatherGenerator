@@ -588,7 +588,7 @@ class Model(torch.nn.Module):
 
             # TODO: how to support tte_kv efficiently, generate 1-ring neighborhoods here or on a per
             #       stream basis
-            assert type(tte_kv) == torch.nn.Identity
+            assert isinstance(tte_kv,torch.nn.Identity)
 
             # lens for varlen attention
             tcs_lens = target_coords_idxs[ii][fstep]

@@ -177,7 +177,8 @@ class IconDataset:
         selected_channel_indices = list(set(self.source_idx).union(set(self.target_idx)))
         non_positive_stds = np.where(self.stdev[selected_channel_indices] <= 0)[0]
         assert len(non_positive_stds) == 0, (
-            f"Abort: Encountered non-positive standard deviations for selected columns {[self.colnames[selected_channel_indices][i] for i in non_positive_stds]}."
+            f"Abort: Encountered non-positive standard deviations "
+            f"for selected columns {[self.colnames[selected_channel_indices][i] for i in non_positive_stds]}."
         )
         # TODO: define in base class
         self.geoinfo_idx = []

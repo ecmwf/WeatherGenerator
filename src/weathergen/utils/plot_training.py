@@ -56,7 +56,8 @@ def _check_run_id_dict(run_id_dict: dict) -> bool:
     for k, v in run_id_dict.items():
         if not isinstance(k, str) or not isinstance(v, list) or len(v) != 2:
             raise argparse.ArgumentTypeError(
-                f"Each key must be a string and each value must be a list of [job_id, experiment_name], but got: {k}: {v}"
+                f"Each key must be a string and each value must be a list of [job_id, experiment_name],"
+                f" but got: {k}: {v}"
             )
 
 
@@ -118,8 +119,8 @@ def _read_yaml_config(yaml_file_path):
     # convert to legacy format
     config_dict = {}
     for k, v in config_dict_temp.items():
-        assert type(v["slurm_id"]) == int, "slurm_id has to be int."
-        assert type(v["description"]) == str, "description has to be str."
+        assert isinstance(v["slurm_id"], int), "slurm_id has to be int."
+        assert isinstance(v["description"], str), "description has to be str."
         config_dict[k] = [v["slurm_id"], v["description"]]
 
     # Validate the structure: {run_id: [job_id, experiment_name]}
@@ -655,7 +656,7 @@ if __name__ == "__main__":
     # determine which runs are still alive (as a process, though they might hang internally)
     ret = subprocess.run(["squeue"], capture_output=True)
     lines = str(ret.stdout).split("\\n")
-    runs_active = [np.array([str(v[0]) in l for l in lines[1:]]).any() for v in runs_ids.values()]
+    runs_active = [np.array([str(v[0]) in line for line in lines[1:]]).any() for v in runs_ids.values()]
 
     x_scale_log = False
 

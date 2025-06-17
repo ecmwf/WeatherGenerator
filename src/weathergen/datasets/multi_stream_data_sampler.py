@@ -80,7 +80,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         )
         assert self.forecast_delta_hrs == self.len_hrs, "Only supported option at the moment"
         self.forecast_steps = np.array(
-            [cf.forecast_steps] if type(cf.forecast_steps) == int else cf.forecast_steps
+            [cf.forecast_steps] if isinstance(cf.forecast_steps,int) else cf.forecast_steps
         )
         if cf.forecast_policy is not None:
             if self.forecast_steps.max() == 0:
@@ -127,7 +127,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     filename = pathlib.Path(datapath) / fname
 
                     if not filename.exists():  # see above
-                        msg = f"Did not find input data for {stream_info['type']} stream '{stream_info['name']}': {filename}."
+                        msg = (
+                            f"Did not find input data for {stream_info['type']} "
+                            f"stream '{stream_info['name']}': {filename}."
+                        )
                         raise FileNotFoundError(msg)
 
                 ds_type = stream_info["type"]
