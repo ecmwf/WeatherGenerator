@@ -100,6 +100,12 @@ ignore = [
 # TODO: pytorch does not publish valid release timestamps, so sadly it does not work.
 # exclude-newer = "2025-03-14T00:00:00Z"
 
+# The minimum version of uv required.
+# It is tightly controlled because the format of uv.lock has changed 
+# over revisions, causing reformats to happen without reason.
+# Also, relatively recent versions are required to support workspaces.
+required-version = ">=0.7.0"
+
 # Following the recommendations from https://docs.astral.sh/uv/guides/integration/pytorch
 # The current setup is:
 # linux == GPU + flashattention
