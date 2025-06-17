@@ -140,8 +140,8 @@ class DataReaderObs(DataReaderBase):
         base_yyyymmddhhmm = 197001010000
 
         # assert start > base_yyyymmddhhmm, (
-        #     f"Abort: ObsDataset sample start (yyyymmddhhmm) must be greater than {base_yyyymmddhhmm}\n"
-        #     f"       Current value: {start}"
+        #     f"Abort: ObsDataset sample start (yyyymmddhhmm)" 
+        #     f"must be greater than {base_yyyymmddhhmm}. Current value: {start}"
         # )
 
         # Derive new index based on hourly backbone index
@@ -150,7 +150,8 @@ class DataReaderObs(DataReaderBase):
         self.start_dt = self.time_window_handler.t_start.item()
         self.end_dt = self.time_window_handler.t_end.item()
 
-        # Calculate the number of hours between start of hourly base index and the requested sample index
+        ## Calculate the number of hours between start of hourly base index
+        #  and the requested sample index
         diff_in_hours_start = int((self.start_dt - base_dt).total_seconds() / 3600)
         diff_in_hours_end = int((self.end_dt - base_dt).total_seconds() / 3600)
 
@@ -163,7 +164,8 @@ class DataReaderObs(DataReaderBase):
         self.indices_end = (
             self.hrly_index[diff_in_hours_start + len_hrs : end_range_2 : step_hrs] - 1
         )
-        # Handle situations where the requested dataset span goes beyond the hourly index stored in the zarr
+        ## Handle situations where the requested dataset span
+        #  goes beyond the hourly index stored in the zarr
         if diff_in_hours_end > (self.hrly_index.shape[0] - 1):
             if diff_in_hours_start > (self.hrly_index.shape[0] - 1):
                 n = (diff_in_hours_end - diff_in_hours_start) // step_hrs

@@ -153,7 +153,8 @@ class IconDataset:
         # stats
         stats_vars = self.stats["metadata"]["variables"]
         assert stats_vars == self.colnames, (
-            f"Variables in normalization file {stats_vars} do not match dataset columns {self.colnames}"
+            f"Variables in normalization file {stats_vars}" 
+            f"do not match dataset columns {self.colnames}"
         )
 
         self.mean = np.array(self.stats["statistics"]["mean"], dtype="d")
@@ -179,7 +180,8 @@ class IconDataset:
         non_positive_stds = np.where(self.stdev[selected_channel_indices] <= 0)[0]
         assert len(non_positive_stds) == 0, (
             f"Abort: Encountered non-positive standard deviations "
-            f"for selected columns {[self.colnames[selected_channel_indices][i] for i in non_positive_stds]}."
+            f"for selected columns {[self.colnames[selected_channel_indices][i] 
+                                     for i in non_positive_stds]}."
         )
         # TODO: define in base class
         self.geoinfo_idx = []

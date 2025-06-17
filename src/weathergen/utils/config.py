@@ -101,7 +101,8 @@ def load_config(
 
     Args:
         private_home: Configuration file containing platform dependent information and secretes
-        from_run_id: Run id of the pretrained WeatherGenerator model to continue training or evaluate
+        from_run_id: Run id of the pretrained WeatherGenerator model 
+        to continue training or evaluate
         epoch: epoch of the checkpoint to load. -1 indicates last checkpoint available.
         *overwrites: Additional overwrites from different sources
 
@@ -128,7 +129,8 @@ def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config
 
     Determining the run id should follow the following logic:
 
-    1. (default case): run train, train_continue or evaluate without any flags => generate a new run_id for this run.
+    1. (default case): run train, train_continue or evaluate without any flags 
+        => generate a new run_id for this run.
     2. (assign run_id): run train, train_continue or evaluate with --run_id <RUNID> flag 
         => assign a run_id manually to this run. 
         This is intend for outside tooling and should not be used manually.
@@ -158,7 +160,8 @@ def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config
         else:
             config.run_id = run_id
             _logger.info(
-                f"using assigned run_id: {config.run_id}. If you manually selected this run_id, this is an error."
+                f"using assigned run_id: {config.run_id}."
+                f" If you manually selected this run_id, this is an error."
             )
 
     return config
@@ -284,7 +287,8 @@ def load_streams(streams_directory: Path) -> list[Config]:
                 # will be further processed.
                 stream_config.name = stream_name
                 if stream_name in streams:
-                    msg = f"Duplicate stream name found: {stream_name}. Please ensure all stream names are unique."
+                    msg = f"Duplicate stream name found: {stream_name}." 
+                    "Please ensure all stream names are unique."
                     raise ValueError(msg)
                 else:
                     streams[stream_name] = stream_config
