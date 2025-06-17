@@ -182,7 +182,8 @@ class TrainLogger:
             _logger.warning(
                 (
                     f"Warning: no training data loaded for run_id={run_id}",
-                    "Data loading or reshaping failed — possible format, dimension, or logic issue.",
+                    "Data loading or reshaping failed — "
+                    "possible format, dimension, or logic issue.",
                     f"Due to specific error: {e}",
                 )
             )
@@ -233,7 +234,8 @@ class TrainLogger:
             _logger.warning(
                 (
                     f"Warning: no validation data loaded for run_id={run_id}",
-                    "Data loading or reshaping failed — possible format, dimension, or logic issue.",
+                    "Data loading or reshaping failed — "
+                    "possible format, dimension, or logic issue.",
                     f"Due to specific error: {e}",
                 )
             )
@@ -267,7 +269,8 @@ class TrainLogger:
             _logger.warning(
                 (
                     f"Warning: no validation data loaded for run_id={run_id}",
-                    "Data loading or reshaping failed — possible format, dimension, or logic issue.",
+                    "Data loading or reshaping failed — "
+                    "possible format, dimension, or logic issue.",
                     f"Due to specific error: {e}",
                 )
             )
