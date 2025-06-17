@@ -63,6 +63,10 @@ line-length = 100
 # Wide rows
 line-length = 100
 
+[tool.ruff.format]
+# Use `\n` line endings for all files
+line-ending = "lf"
+
 [tool.ruff.lint]
 # All disabled until the code is formatted.
 select = [
