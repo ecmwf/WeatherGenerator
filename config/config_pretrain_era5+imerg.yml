@@ -1,4 +1,4 @@
-# streams_directory: "./config/streams/streams_anemoi/"
+
 streams_directory: "/p/project/training2528/wang85/WeatherGenerator/config/streams/streams_anemoi/"
 
 embed_orientation: "channels"
@@ -79,6 +79,8 @@ masking_rate_sampling: True
 # sample a subset of all target points, useful e.g. to reduce memory requirements
 sampling_rate_target: 1.0
 
+# num_epochs: 36
+# samples_per_epoch: 512
 num_epochs: 24
 samples_per_epoch: 4096
 samples_per_validation: 512
@@ -100,10 +102,14 @@ weight_decay: 0.1
 norm_type: "LayerNorm"
 nn_module: "te"
 
-start_date: 197901010000
+
+start_date: 199801010000
 end_date: 202012310000
 start_date_val: 202101010000
+# end_date_val: 202112310000
 end_date_val: 202201010000
+# len_hrs: 6
+# step_hrs: 6
 len_hrs: 12
 step_hrs: 1
 input_window_steps: 1
