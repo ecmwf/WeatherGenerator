@@ -573,7 +573,7 @@ class Model(torch.nn.Module):
 
             assert batch_size == 1
 
-            ## embed token coords, concatenating along batch dimension 
+            ## embed token coords, concatenating along batch dimension
             # (which is taking care of through the varlen attention)
             with torch.amp.autocast("cuda", dtype=torch.float32, enabled=False):
                 tc_tokens = torch.cat(
@@ -591,10 +591,12 @@ class Model(torch.nn.Module):
 
             if torch.isnan(tc_tokens).any():
                 nn = si["name"]
-                logger.warning((
-                    f"Skipping prediction for {nn} because",
-                    f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens."
-                ))
+                logger.warning(
+                    (
+                        f"Skipping prediction for {nn} because",
+                        f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
+                    )
+                )
                 preds_tokens += [torch.tensor([], device=tc_tokens.device)]
                 continue
             if tc_tokens.shape[0] == 0:
@@ -603,7 +605,7 @@ class Model(torch.nn.Module):
 
             # TODO: how to support tte_kv efficiently,
             #  generate 1-ring neighborhoods here or on a per stream basis
-            assert isinstance(tte_kv,torch.nn.Identity)
+            assert isinstance(tte_kv, torch.nn.Identity)
 
             # lens for varlen attention
             tcs_lens = target_coords_idxs[ii][fstep]

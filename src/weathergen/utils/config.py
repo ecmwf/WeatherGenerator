@@ -101,7 +101,7 @@ def load_config(
 
     Args:
         private_home: Configuration file containing platform dependent information and secretes
-        from_run_id: Run id of the pretrained WeatherGenerator model 
+        from_run_id: Run id of the pretrained WeatherGenerator model
         to continue training or evaluate
         epoch: epoch of the checkpoint to load. -1 indicates last checkpoint available.
         *overwrites: Additional overwrites from different sources
@@ -129,14 +129,14 @@ def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config
 
     Determining the run id should follow the following logic:
 
-    1. (default case): run train, train_continue or evaluate without any flags 
+    1. (default case): run train, train_continue or evaluate without any flags
         => generate a new run_id for this run.
-    2. (assign run_id): run train, train_continue or evaluate with --run_id <RUNID> flag 
-        => assign a run_id manually to this run. 
+    2. (assign run_id): run train, train_continue or evaluate with --run_id <RUNID> flag
+        => assign a run_id manually to this run.
         This is intend for outside tooling and should not be used manually.
-    3. (reuse run_id -> only for train_continue and evaluate): 
-        reuse the run_id from the run specified by --from_run_id <RUNID>. 
-        Since the run_id correct run_id is already loaded in the config nothing has to be assigned. 
+    3. (reuse run_id -> only for train_continue and evaluate):
+        reuse the run_id from the run specified by --from_run_id <RUNID>.
+        Since the run_id correct run_id is already loaded in the config nothing has to be assigned.
         This case will happen if --reuse_run_id is specified.
 
 
@@ -226,9 +226,11 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
                 [str(env_script_path), "hpc"], capture_output=True, text=True, check=True
             )
         except subprocess.CalledProcessError as e:
-            _logger.error((
+            _logger.error(
+                (
                     "Error while running platform-env.py:",
-                    f" {e} {e.stderr} {e.stdout} {e.output} {e.returncode}")
+                    f" {e} {e.stderr} {e.stdout} {e.output} {e.returncode}",
+                )
             )
             raise
         if result_hpc.returncode != 0:
@@ -287,7 +289,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
                 # will be further processed.
                 stream_config.name = stream_name
                 if stream_name in streams:
-                    msg = f"Duplicate stream name found: {stream_name}." 
+                    msg = f"Duplicate stream name found: {stream_name}."
                     "Please ensure all stream names are unique."
                     raise ValueError(msg)
                 else:

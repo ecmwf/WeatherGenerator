@@ -246,7 +246,8 @@ class Trainer(Trainer_Base):
             steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
             s = (
                 "cf.lr_steps_warmup and cf.lr_steps_cooldown",
-                f" were larger than cf.lr_steps={cf.lr_steps}")
+                f" were larger than cf.lr_steps={cf.lr_steps}",
+            )
             s += f". The value have been adjusted to cf.lr_steps_warmup={cf.lr_steps_warmup} and "
             s += f" cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}."
             _logger.warning(s)

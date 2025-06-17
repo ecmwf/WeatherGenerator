@@ -113,7 +113,7 @@ class IconDataset:
 
         assert self.end_idx > self.start_idx, (
             f"Abort: Final index of {self.end_idx} is the same of larger than",
-            f" start index {self.start_idx}"
+            f" start index {self.start_idx}",
         )
 
         len_data_entries = len(self.ds["time"]) * self.mesh_size
@@ -153,7 +153,7 @@ class IconDataset:
         # stats
         stats_vars = self.stats["metadata"]["variables"]
         assert stats_vars == self.colnames, (
-            f"Variables in normalization file {stats_vars}" 
+            f"Variables in normalization file {stats_vars}"
             f"do not match dataset columns {self.colnames}"
         )
 
@@ -180,8 +180,9 @@ class IconDataset:
         non_positive_stds = np.where(self.stdev[selected_channel_indices] <= 0)[0]
         assert len(non_positive_stds) == 0, (
             f"Abort: Encountered non-positive standard deviations "
-            f"for selected columns {[self.colnames[selected_channel_indices][i] 
-                                     for i in non_positive_stds]}."
+            f"for selected columns {
+                [self.colnames[selected_channel_indices][i] for i in non_positive_stds]
+            }."
         )
         # TODO: define in base class
         self.geoinfo_idx = []

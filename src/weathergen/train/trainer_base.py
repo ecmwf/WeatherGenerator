@@ -43,7 +43,7 @@ class Trainer_Base:
         """
         torch.set_printoptions(linewidth=120)
 
-        # This strategy is required by the nvidia profiles 
+        # This strategy is required by the nvidia profiles
         # to properly trace events in worker processes.
         # This may cause issues with logging. Alternative: "fork"
         torch.multiprocessing.set_start_method(multiprocessing_method, force=True)
@@ -98,10 +98,12 @@ class Trainer_Base:
                     s.bind((master_node, 1345))
                 except OSError as e:
                     if e.errno == errno.EADDRINUSE:
-                        _logger.error((
-                            f"Port 1345 is already in use on {master_node}.",
-                            " Please check your network configuration."
-                        ))
+                        _logger.error(
+                            (
+                                f"Port 1345 is already in use on {master_node}.",
+                                " Please check your network configuration.",
+                            )
+                        )
                         raise
                     else:
                         _logger.error(f"Error while binding to port 1345 on {master_node}: {e}")

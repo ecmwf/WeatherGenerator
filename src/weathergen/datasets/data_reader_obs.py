@@ -140,7 +140,7 @@ class DataReaderObs(DataReaderBase):
         base_yyyymmddhhmm = 197001010000
 
         # assert start > base_yyyymmddhhmm, (
-        #     f"Abort: ObsDataset sample start (yyyymmddhhmm)" 
+        #     f"Abort: ObsDataset sample start (yyyymmddhhmm)"
         #     f"must be greater than {base_yyyymmddhhmm}. Current value: {start}"
         # )
 

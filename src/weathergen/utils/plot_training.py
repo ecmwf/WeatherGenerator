@@ -56,10 +56,11 @@ def _check_run_id_dict(run_id_dict: dict) -> bool:
 
     for k, v in run_id_dict.items():
         if not isinstance(k, str) or not isinstance(v, list) or len(v) != 2:
-            raise argparse.ArgumentTypeError((
-                "Each key must be a string and",
-                " each value must be a list of [job_id, experiment_name],"
-                f" but got: {k}: {v}")
+            raise argparse.ArgumentTypeError(
+                (
+                    "Each key must be a string and",
+                    f" each value must be a list of [job_id, experiment_name], but got: {k}: {v}",
+                )
             )
 
 
@@ -628,7 +629,7 @@ if __name__ == "__main__":
         dest="rs",
         help=(
             "Dictionary-string of form '{run_id: [job_id, experiment_name]}'",
-            " for training runs to plot"
+            " for training runs to plot",
         ),
     )
 
@@ -663,8 +664,7 @@ if __name__ == "__main__":
     ret = subprocess.run(["squeue"], capture_output=True)
     lines = str(ret.stdout).split("\\n")
     runs_active = [
-        np.array([str(v[0]) in line for line in lines[1:]]).any()
-        for v in runs_ids.values()
+        np.array([str(v[0]) in line for line in lines[1:]]).any() for v in runs_ids.values()
     ]
 
     x_scale_log = False

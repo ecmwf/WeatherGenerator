@@ -122,7 +122,7 @@ def locs_to_ctr_coords(ctrs_r3, locs: list) -> list:
 
     ctrs_Rs = vecs_to_rots(ctrs_r3).to(torch.float32)
 
-    ## express each centroid in local coordinates w.r.t to healpix center 
+    ## express each centroid in local coordinates w.r.t to healpix center
     #  by rotating center to origin
     local_locs = [
         torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1)
@@ -581,14 +581,16 @@ def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
                     [
                         torch.arange(offset, offset + token_len, dtype=torch.int64)
                         for offset, token_len in zip(
-                            offsets, source_tokens_lens[ib, itype], strict=False)
+                            offsets, source_tokens_lens[ib, itype], strict=False
+                        )
                     ]
                 )
                 s.source_idxs_embed_pe = torch.cat(
                     [
                         torch.arange(offset, offset + token_len, dtype=torch.int32)
                         for offset, token_len in zip(
-                            offsets_pe, source_tokens_lens[ib][itype], strict=False)
+                            offsets_pe, source_tokens_lens[ib][itype], strict=False
+                        )
                     ]
                 )
 

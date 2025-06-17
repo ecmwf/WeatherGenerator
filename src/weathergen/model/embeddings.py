@@ -39,7 +39,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         unembed_mode : { 'full' , 'block'}
           full : monolithic (and correspondingly large) unembedding network that maps from
                  (num_tokens x dim_embed) to dim_out, allowing for mixing between channels/columns
-          block : per-channel/column unembedding network 
+          block : per-channel/column unembedding network
                 (which is hence a block-sparse form of full)
         """
 

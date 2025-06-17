@@ -71,7 +71,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.step_hrs: int = cf.step_hrs
         self.time_window_handler = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
         _logger.info(
-            f"Time window handler: start={start_date}, end={end_date}," 
+            f"Time window handler: start={start_date}, end={end_date},"
             f"len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
         )
 
@@ -81,7 +81,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         )
         assert self.forecast_delta_hrs == self.len_hrs, "Only supported option at the moment"
         self.forecast_steps = np.array(
-            [cf.forecast_steps] if isinstance(cf.forecast_steps,int) else cf.forecast_steps
+            [cf.forecast_steps] if isinstance(cf.forecast_steps, int) else cf.forecast_steps
         )
         if cf.forecast_policy is not None:
             if self.forecast_steps.max() == 0:
@@ -115,7 +115,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         dataset = IconDataset
                         datapath = cf.data_path_icon
                     case _:
-                        msg = f"Unsupported stream type {stream_info['type']}" 
+                        msg = f"Unsupported stream type {stream_info['type']}"
                         f"for stream name '{stream_info['name']}'."
                         raise ValueError(msg)
 
@@ -138,7 +138,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 ds_type = stream_info["type"]
                 logger.info(
                     f"Opening dataset with type: {ds_type} from",
-                    f" stream config {stream_info['name']}."
+                    f" stream config {stream_info['name']}.",
                 )
                 ds = dataset(filename=filename, **kwargs)
 

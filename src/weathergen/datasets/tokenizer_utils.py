@@ -118,7 +118,7 @@ def hpy_splits(coords: torch.tensor, hl: int, token_size: int, pad_tokens: bool)
 
     Return :
         idxs_ord : flat list of indices (to data points) per healpix cell
-        idxs_ord_lens : lens of lists per cell 
+        idxs_ord_lens : lens of lists per cell
         (so that data[idxs_ord].split( idxs_ord_lens) provides per cell data)
         posr3 : R^3 positions of coords
     """

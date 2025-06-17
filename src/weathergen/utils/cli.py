@@ -21,8 +21,8 @@ def get_continue_parser() -> argparse.ArgumentParser:
         "--finetune_forecast",
         action="store_true",
         help=(
-        "Fine tune for forecasting. It overwrites some of the Config settings. "
-        "Overwrites specified with --config take precedence."
+            "Fine tune for forecasting. It overwrites some of the Config settings. "
+            "Overwrites specified with --config take precedence."
         ),
     )
 
@@ -123,7 +123,7 @@ def _add_model_loading_params(parser: argparse.ArgumentParser):
         required=True,
         help=(
             "Start evaluation or continue training from the WeatherGenerator",
-            " model with the given run id."
+            " model with the given run id.",
         ),
     )
     parser.add_argument(
@@ -139,7 +139,7 @@ def _add_model_loading_params(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--reuse_run_id",
         action="store_true",
-        help="Use the id given via --from_run_id also for the current run. " \
-        "The storage location for artifacts will be reused as well. " \
+        help="Use the id given via --from_run_id also for the current run. "
+        "The storage location for artifacts will be reused as well. "
         "This might overwrite artifacts from previous runs.",
     )
