@@ -93,6 +93,10 @@ ignore = [
   "SIM108" # in case additional norm layer supports are added in future  
 ]
 
+[tool.ruff.format]
+# Use Unix `\n` line endings for all files
+line-ending = "lf"
+
 [tool.uv]
 # This guarantees that the build is deterministic and will not be impacted 
 # by future releases of dependencies or sub-dependencies. 
