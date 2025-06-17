@@ -21,12 +21,12 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           # Install a specific version of uv.
-          version: "0.6.2"
+          version: "0.7.13"
 
       - name: Run ruff (black)
         # Do not attempt to install the default dependencies, this is much faster.
         # Run temporarily on a sub directory before the main restyling.
-        run: uv run --no-project --with "ruff==0.9.7" ruff format --check -n src/
+        run: uv run --no-project --with "ruff==0.9.7" ruff format --target-version py312 --check -n src/
 
       - name: Run ruff (flake8)
         # Do not attempt to install the default dependencies, this is much faster.
