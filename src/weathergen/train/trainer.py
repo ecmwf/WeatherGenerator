@@ -58,6 +58,7 @@ class Trainer(Trainer_Base):
         # num_ranks gets overwritten by current setting during init_ddp()
         self.num_ranks_original = cf.get("num_ranks", None)
 
+        # TODO remove num_ranks, rank, with_with ddp from config
         self.init_ddp(cf)
 
         # create output directory

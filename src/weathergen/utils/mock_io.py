@@ -1,6 +1,6 @@
-import xarray as xr
-import numpy as np
 import dask.array as da
+import numpy as np
+import xarray as xr
 
 
 def _random_datetimes_next_24h(n, seed=None):

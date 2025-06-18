@@ -13,6 +13,7 @@ CHUNK_N_SAMPLES = 16392
 
 # TODO: extract geoinfo metadata, include it in xarray
 
+
 @dataclasses.dataclass
 class ItemMeta:
     sample: str
@@ -99,8 +100,10 @@ class OutputItem:
         datasets = (self.source, self.target, self.prediction)
         return datasets if self._meta.with_source else datasets[1:]
 
+
 class MockIO:
     pass
+
 
 class ZarrIO:
     def __init__(self, store_path: zarr):
@@ -223,13 +226,11 @@ class OutputBatchData:
         sample = meta.sample - self.sample_start
         forecast_step = meta.forecast_step - self.forecast_offset
         stream_idx = self.stream_names.index(meta.stream)  # TODO: assure this is correct
-        
-        start = sum(self.targets_lens[: sample])
+
+        start = sum(self.targets_lens[:sample])
         datapoints = slice(start, self.targets_lens[sample])
 
-        target_data = (
-            self.targets[forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
-        )
+        target_data = self.targets[forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
         preds_data = (
             self.predictions[forecast_step][stream_idx][0]
             .transpose(1, 0)
