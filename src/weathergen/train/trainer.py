@@ -372,7 +372,7 @@ class Trainer(Trainer_Base):
                 obs_loss_weight = 1.0 if mode == "validation" else obs_loss_weight
 
                 if self.cf.tendencies == True:
-                    data_stream = self.dataset.streams_datasets[fstep][i_obs]
+                    data_stream = self.dataset_val.streams_datasets[fstep][i_obs]
                     stdev = np.array([data_stream.stdev[i] for i in data_stream.target_idx])
                     tendency_stdev = np.array([data_stream.tendency_stdev[i] for i in data_stream.target_idx])
                     channel_loss_weight = stdev / tendency_stdev

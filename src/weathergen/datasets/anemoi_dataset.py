@@ -10,6 +10,8 @@
 import datetime
 import logging
 
+import xarray as xr
+import netCDF4
 import numpy as np
 import torch
 from anemoi.datasets import open_dataset
@@ -122,27 +124,24 @@ class AnemoiDataset:
             "stream_id": 0,
         }
 
-        # sigma_t = pd.read_csv("./grouped_standard_deviations.csv")
-        # wg_sigma_t = np.array(
-        #     [
-        #         sigma_t.loc[sigma_t.group == var].SF_temporal.values[0]
-        #         if var in sigma_t.group.values
-        #         else 1.0
-        #         for i, var in enumerate(ds.variables)
-        #     ]
-        # )
+        wgen_data = xr.open_dataset("./tendencies_weights_final.nc", engine = "netcdf4")
+        print("wgen_data[stdev_mean].loc[wgen_data.variable == var].values[0]")
+        tendencies = np.array(
+            [
+                # wgen_data["stdev_mean"].loc[wgen_data.variable == var].values[0]
+                wgen_data["stdev_mean"].loc[wgen_data.variable == var].values[0]
+                if var in wgen_data.variable.values
+                else 1.0
+                for i, var in enumerate(ds.variables)
+            ]
+        )
 
-        # self.tendency_mean = ds.statistics_tendencies()["mean"]
+        # self.tendency_mean  = ds.statistics_tendencies()["mean"]
         # self.tendency_stdev = ds.statistics_tendencies()["stdev"]
-        # self.tendency_stdev = self.tendency_stdev #/self.tendency_stdev.mean()
-        # self.tendency_stdev = np.where(self.tendency_stdev < 5e-4, 5e-4, self.tendency_stdev) #cap very small values
-        # breakpoint()
-        # self.sigma_t = ds.statistics_tendencies()["stdev"]
-        # self.sigma_t[ self.sigma_t  == 0.0] = 1
 
-        self.tendency_mean  = ds.statistics_tendencies()["mean"]
-        self.tendency_stdev = ds.statistics_tendencies()["stdev"]
-
+        self.tendency_mean  = np.zeros(len(ds.variables))
+        self.tendency_stdev = np.array(tendencies)
+        
         for i, var in enumerate(ds.variables):
             if var not in self.source_channels+ self.target_channels:
                 continue

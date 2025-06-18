@@ -25,6 +25,7 @@ dependencies = [
  "flash-attn; sys_platform == 'linux'",
  "polars~=1.25.2",
  "omegaconf~=2.3.0",
+ "netCDF4"
 ]
 
 [project.urls]
