@@ -87,9 +87,6 @@ select = [
 
 # These rules are sensible and should be enabled at a later stage.
 ignore = [
-  "E501",
-  "E721",
-  "E722",
   # "B006",
   "B011",
   "UP008",
@@ -98,8 +95,12 @@ ignore = [
   "SIM102",
   "SIM401",
   # To ignore, not relevant for us
-  "E741",
+  "SIM108" # in case additional norm layer supports are added in future  
 ]
+
+[tool.ruff.format]
+# Use Unix `\n` line endings for all files
+line-ending = "lf"
 
 [tool.uv]
 # This guarantees that the build is deterministic and will not be impacted 
@@ -111,7 +112,7 @@ ignore = [
 # The minimum version of uv required.
 # It is tightly controlled because the format of uv.lock has changed 
 # over revisions, causing reformats to happen without reason.
-# Relatively recent versions are required to support workspaces.
+# Also, relatively recent versions are required to support workspaces.
 required-version = ">=0.7.0"
 
 # Following the recommendations from https://docs.astral.sh/uv/guides/integration/pytorch

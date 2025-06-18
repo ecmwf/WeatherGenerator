@@ -33,7 +33,8 @@ def _ensure_list(value):
     Returns
     -------
     list
-        A list containing the input value if it was not a list, or the input value itself if it was already a list.
+        A list containing the input value if it was not a list,
+          or the input value itself if it was already a list.
     """
     return value if isinstance(value, list) else [value]
 
@@ -56,7 +57,10 @@ def _check_run_id_dict(run_id_dict: dict) -> bool:
     for k, v in run_id_dict.items():
         if not isinstance(k, str) or not isinstance(v, list) or len(v) != 2:
             raise argparse.ArgumentTypeError(
-                f"Each key must be a string and each value must be a list of [job_id, experiment_name], but got: {k}: {v}"
+                (
+                    "Each key must be a string and",
+                    f" each value must be a list of [job_id, experiment_name], but got: {k}: {v}",
+                )
             )
 
 
@@ -118,8 +122,8 @@ def _read_yaml_config(yaml_file_path):
     # convert to legacy format
     config_dict = {}
     for k, v in config_dict_temp.items():
-        assert type(v["slurm_id"]) == int, "slurm_id has to be int."
-        assert type(v["description"]) == str, "description has to be str."
+        assert isinstance(v["slurm_id"], int), "slurm_id has to be int."
+        assert isinstance(v["description"], str), "description has to be str."
         config_dict[k] = [v["slurm_id"], v["description"]]
 
     # Validate the structure: {run_id: [job_id, experiment_name]}
@@ -558,7 +562,8 @@ if __name__ == "__main__":
     # When providing a YAML for configuring the run IDs:
     # python plot_training.py -rf eval_run.yml -m ./trained_models -o ./training_plots
     # When providing a string for configuring the run IDs:
-    # python plot_training.py -rs "{run_id: [job_id, experiment_name]}" -m ./trained_models -o ./training_plots
+    # python plot_training.py -rs "{run_id: [job_id, experiment_name]}"
+    #    -m ./trained_models -o ./training_plots
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     parser = argparse.ArgumentParser(
@@ -622,7 +627,10 @@ if __name__ == "__main__":
         "--run_ids_dict",
         type=_read_str_config,
         dest="rs",
-        help="Dictionary-string of form '{run_id: [job_id, experiment_name]}' for training runs to plot",
+        help=(
+            "Dictionary-string of form '{run_id: [job_id, experiment_name]}'",
+            " for training runs to plot",
+        ),
     )
 
     run_id_group.add_argument(
@@ -655,7 +663,9 @@ if __name__ == "__main__":
     # determine which runs are still alive (as a process, though they might hang internally)
     ret = subprocess.run(["squeue"], capture_output=True)
     lines = str(ret.stdout).split("\\n")
-    runs_active = [np.array([str(v[0]) in l for l in lines[1:]]).any() for v in runs_ids.values()]
+    runs_active = [
+        np.array([str(v[0]) in line for line in lines[1:]]).any() for v in runs_ids.values()
+    ]
 
     x_scale_log = False
 

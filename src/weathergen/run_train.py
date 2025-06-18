@@ -131,8 +131,8 @@ def train() -> None:
     Configurations are set in the function body.
 
     Args:
-      run_id (str, optional): Run/model id of pretrained WeatherGenerator model to continue training. Defaults to None.
-
+      run_id (str, optional): Run/model id of pretrained WeatherGenerator model to
+        continue training. Defaults to None.
     Note: All model configurations are set in the function body.
     """
     train_with_args(sys.argv[1:], None)

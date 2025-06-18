@@ -190,7 +190,8 @@ class GlobalAssimilationEngine:
         """
         global_rate = int(1 / self.cf.ae_global_att_dense_rate)
         for i in range(self.cf.ae_global_num_blocks):
-            # Alternate between local and global attention as controlled by cf.ae_global_att_dense_rate
+            ## Alternate between local and global attention
+            #  as controlled by cf.ae_global_att_dense_rate
             # Last block is always global attention
             if i % global_rate == 0 or i + 1 == self.cf.ae_global_num_blocks:
                 self.ae_global_blocks.append(
