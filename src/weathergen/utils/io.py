@@ -216,7 +216,7 @@ class OutputBatchData:
         self.samples = np.arange(len(self.sources)) + self.sample_start
         self.fsteps = np.arange(len(self.targets)) + self.forecast_offset
 
-    def items(self) -> typing.Generator[OutputItem]:
+    def items(self) -> typing.Generator[OutputItem, None, None]:
         filtered_streams = (stream for stream in self.stream_names if stream != "")
         for args in itertools.product(self.samples, self.fsteps, filtered_streams):
             yield self.extract(ItemMeta(*args))
