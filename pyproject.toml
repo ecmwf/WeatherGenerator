@@ -26,6 +26,7 @@ dependencies = [
  "polars~=1.25.2",
  "omegaconf~=2.3.0",
  "weathergen-common",
+ "dask"
 ]
 
 [project.urls]
