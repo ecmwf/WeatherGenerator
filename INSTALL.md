@@ -4,7 +4,7 @@
 
 # install uv 
 # Suggested solution for HPC systems:
-%>curl -LsSf https://astral.sh/uv/0.7.0/install.sh | sh
+%>curl -LsSf https://astral.sh/uv/install.sh | sh
  
 # git clone / fork WeatherGenerator repo
 %>cd WeatherGenerator
