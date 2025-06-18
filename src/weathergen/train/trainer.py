@@ -29,7 +29,7 @@ from weathergen.train.trainer_base import Trainer_Base
 from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
-from weathergen.utils.validation_io import write_validation
+from weathergen.utils.validation_io import write_validation_new
 
 _logger = logging.getLogger(__name__)
 
@@ -73,6 +73,8 @@ class Trainer(Trainer_Base):
         # general initalization
         self.init(cf)
 
+        # !! modifies config: adds config.streams[i].<stage>_source_channels
+        # and config.streams[i].<stage>_target_channels !!
         self.dataset_val = MultiStreamDataSampler(
             cf,
             cf.start_date_val,
@@ -645,9 +647,10 @@ class Trainer(Trainer_Base):
                             targets_lens,
                         ) = ret
                         sources = [[item.source_raw for item in b] for b in batch[0]]
-                        write_validation(
+                        write_validation_new(
                             self.cf,
                             epoch,
+                            bidx,
                             sources,
                             preds_all,
                             targets_all,
