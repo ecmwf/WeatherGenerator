@@ -101,14 +101,15 @@ class DataReaderAnemoi(DataReaderTimestep):
         self.latitudes = _clip_lat(ds.latitudes)
         self.longitudes = _clip_lon(ds.longitudes)
 
-        # Determine source and target channels, filtering out forcings etc and using
-        # specified source and target channels if specified
+        # Determine source and target channels, filteringsout forcings etc and using
+        # specified source and target channels if specified using pattern matching
+        # and exclude source and target channels using pattern matching
         source_channels = stream_info.get("source")
-        exclude_source_channels = stream_info.get("exclude_source")
+        exclude_source_channels = stream_info.get("exclude_source", [])
         self.source_idx = np.sort(
             [
                 ds.name_to_index[k]
-                for i, (k, v) in enumerate(ds0.typed_variables.items())
+                for (k, v) in ds0.typed_variables.items()
                 if (
                     not v.is_computed_forcing
                     and not v.is_constant_in_time
@@ -117,20 +118,16 @@ class DataReaderAnemoi(DataReaderTimestep):
                         if source_channels
                         else True
                     )
-                    and (
-                        not np.array([f in k for f in exclude_source_channels]).any()
-                        if exclude_source_channels
-                        else True
-                    )
+                    and not np.array([f in k for f in exclude_source_channels]).any()
                 )
             ]
         )
         target_channels = stream_info.get("target")
-        exclude_target_channels = stream_info.get("exclude_target")
+        exclude_target_channels = stream_info.get("exclude_target", [])
         self.target_idx = np.sort(
             [
                 ds.name_to_index[k]
-                for (k, v) in ds0.typed_variables.items()  # Only in ds0, not in Subset?
+                for (k, v) in ds0.typed_variables.items()
                 if (
                     not v.is_computed_forcing
                     and not v.is_constant_in_time
@@ -139,11 +136,7 @@ class DataReaderAnemoi(DataReaderTimestep):
                         if target_channels
                         else True
                     )
-                    and (
-                        not np.array([f in k for f in exclude_target_channels]).any()
-                        if exclude_target_channels
-                        else True
-                    )
+                    and not np.array([f in k for f in exclude_target_channels]).any()
                 )
             ]
         )
