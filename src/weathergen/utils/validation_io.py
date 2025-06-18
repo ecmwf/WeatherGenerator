@@ -8,13 +8,13 @@
 # nor does it submit to any jurisdiction.
 
 from collections import namedtuple
-from pathlib import Path
 
 import numpy as np
 import torch
 import zarr
 
 import weathergen.utils.config as config
+import weathergen.utils.io as io
 
 
 def _sanitize_stream_name(istr):
@@ -75,6 +75,42 @@ def write_validation(
                 _successive_write(group, extracted_data)
 
     store.close()
+
+
+def write_validation_new(
+    cf, epoch, batch_idx, sources, preds_all, targets_all, targets_coords_all, targets_times_all, targets_lens
+):
+    stream_names = [
+        stream.name if stream.name in cf.analysis_streams_output else "" for stream in cf.streams
+    ]  # TODO: how to correctly handle this
+    # => what happens if stream is not in analysis_streams_output?
+    # => what happens if analysis_streams_output is none?
+    # streams anemoi `source`, `target` commented out???
+    
+    # TODO: right way to query config for stream channels?
+    # assumption: datasets in a stream share channels
+    channels = [stream.target for stream in cf.streams]
+    # samples = range(batch_idx * batch_size, (batch_idx + 1) * batch_size)
+    
+    # TODO: is batch size guarnteed and constant?
+    sample_start = batch_idx * cf.batch_size_validation
+
+    data = io.OutputBatchData(
+        sources,
+        preds_all,
+        targets_all,
+        targets_coords_all,
+        targets_times_all,
+        targets_lens,
+        stream_names,
+        channels,
+        sample_start,
+        cf.forecast_offset,
+    )
+
+    with io.ZarrOutput(_get_data_root(cf, epoch)) as writer:
+        for subset in data.items():
+            writer.write_data(subset)
 
 
 def _extract_data(data: Data, fstep, k) -> Data:
