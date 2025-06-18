@@ -14,7 +14,7 @@ import weathergen.utils.config as config
 import weathergen.utils.io as io
 
 
-def write_validation_new(
+def write_output(
     cf,
     epoch,
     batch_idx,

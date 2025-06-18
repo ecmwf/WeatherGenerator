@@ -29,7 +29,7 @@ from weathergen.train.trainer_base import Trainer_Base
 from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
-from weathergen.utils.validation_io import write_validation_new
+from weathergen.utils.validation_io import write_output
 
 _logger = logging.getLogger(__name__)
 
@@ -647,7 +647,7 @@ class Trainer(Trainer_Base):
                             targets_lens,
                         ) = ret
                         sources = [[item.source_raw for item in b] for b in batch[0]]
-                        write_validation_new(
+                        write_output(
                             self.cf,
                             epoch,
                             bidx,
