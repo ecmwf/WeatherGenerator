@@ -21,7 +21,8 @@ def is_root(pg: dist.ProcessGroup | None = None) -> bool:
     Check if the current rank is the root rank (rank 0).
 
     Args:
-        group (ProcessGroup, optional): The process group to work on. If None (default), the default process group will be used.
+        group (ProcessGroup, optional): The process group to work on.
+        If None (default), the default process group will be used.
     """
     if not _is_distributed_initialized():
         # If not initialized, it assumed to be in single process mode.
