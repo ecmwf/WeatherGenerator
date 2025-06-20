@@ -272,7 +272,7 @@ class Trainer(Trainer_Base):
             epoch_base = int(self.cf.istep / len(self.data_loader))
         else:
             len_per_rank = (
-                (len(self.dataset) // self.num_ranks_original) // cf.batch_size
+                (len(self.dataset) // (self.num_ranks_original * cf.batch_size))
             ) * cf.batch_size
             epoch_base = int(
                 self.cf.istep / (min(len_per_rank, cf.samples_per_epoch) * self.num_ranks_original)
