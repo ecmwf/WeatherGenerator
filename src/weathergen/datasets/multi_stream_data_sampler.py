@@ -27,6 +27,7 @@ from weathergen.datasets.icon_dataset import IconDataset
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
+from weathergen.datasets.masking import Masker
 from weathergen.datasets.utils import (
     compute_idxs_predict,
     compute_offsets_scatter_embed,
@@ -181,13 +182,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         if cf.training_mode == "forecast":
             self.tokenizer = TokenizerForecast(cf.healpix_level)
         elif cf.training_mode == "masking":
-            self.tokenizer = TokenizerMasking(cf.healpix_level)
+            masker = Masker(cf.masking_rate, cf.masking_strategy)
+            self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
             msg = "masked token modeling does not support self.input_window_steps > 1; "
             msg += "increase window length"
             assert self.input_window_steps == 1, msg
         else:
             assert False, f"Unsupported training mode: {cf.training_mode}"
+        # NOTE: commented these out...
         self.masking_rate = cf.masking_rate
         self.masking_rate_sampling = cf.masking_rate_sampling
 
@@ -336,6 +339,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                             (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                                 stream_info,
+                                # NOTE: two unused arguments in TokenizerMasking, still used in TokenizerForecast?
                                 self.masking_rate,
                                 self.masking_rate_sampling,
                                 torch.from_numpy(rdata.coords),

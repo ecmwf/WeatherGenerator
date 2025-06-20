@@ -152,12 +152,24 @@ class TokenizerMasking:
         time_win: tuple,
         normalizer,  # dataset
     ):
-        # NOTE: The 'masking_rate_sampling' argument is accepted to maintain API compatibility,
-        # but it is no longer used. The Masker instance now controls this behavior.
         init_loggers()
         token_size = stream_info["token_size"]
         is_diagnostic = stream_info.get("diagnostic", False)
         tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
+
+        # NOTE: include this in the masker?
+        # yes doing this, commented this out
+        #cur_masking_rate = 0.0
+        #if masking_rate > 0.0:
+            # adjust if there's a per-stream masking rate
+        #    cur_masking_rate = stream_info.get("masking_rate", masking_rate)
+            # mask either patches or entire stream
+        #    if masking_rate_sampling:
+        #        cur_masking_rate = np.clip(
+        #            np.abs(self.rng.normal(loc=cur_masking_rate, scale=1.0 / (2.5 * np.pi))),
+        #            0.0,
+        #            1.0,
+        #        )
 
         tokenize_window = partial(
             tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
@@ -171,43 +183,48 @@ class TokenizerMasking:
             enc_time=encode_times_source,
         )
 
+        source_tokens_cells = torch.tensor([])
+        source_centroids = torch.tensor([])
+        source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
         self.perm_sel = []
-        self.token_size = token_size
 
-        # return empty if there is no data or we are in diagnostic mode
-        if is_diagnostic or source.shape[1] == 0 or len(source) < 2:
-            source_tokens_cells = torch.tensor([])
-            source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
-            source_centroids = torch.tensor([])
+        # return empty
+        if is_diagnostic or source.shape[1] == 0 or len(source) < 2 or masking_rate == 1.0:
             return (source_tokens_cells, source_tokens_lens, source_centroids)
-        
-        # tokenize all data first
-        tokenized_data = tokenize_window(
+
+        # TODO: properly set stream_id; don't forget to normalize
+        source_tokens_cells = tokenize_window(
             0,
             coords,
             geoinfos,
             source,
             times,
         )
-        tokenized_data = [
-            torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in tokenized_data
+
+        source_tokens_cells = [
+            torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in source_tokens_cells
         ]
+        source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
 
-        # if masking rate is 1.0, all tokens are masked, so the source is empty
-        # but we must compute perm_sel for the target function
-        if masking_rate == 1.0:
-            token_lens = [len(t) for t in tokenized_data]
-            self.perm_sel = [np.ones(l, dtype=bool) for l in token_lens]
-            source_tokens_cells = [c[~p] for c, p in zip(tokenized_data, self.perm_sel)]
-            source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
-            source_centroids = torch.tensor([])
-            return (source_tokens_cells, source_tokens_lens, source_centroids)
+        # NOTE: replacing this now with the masker        
+        # perform masking globally by forgetting cells temporarily
+        #mask = self.rng.uniform(0, 1, source_tokens_lens.sum().item()) < cur_masking_rate
+        # ensure that masking is not degenerate i.e. it is not all true or false
+        #if not mask.any():
+        #    mask[self.rng.integers(low=0, high=len(mask))] = True
+        #if mask.all():
+        #    mask[self.rng.integers(low=0, high=len(mask))] = False
 
-        # Use the masker to get source tokens and the selection mask for the target
-        source_tokens_cells, self.perm_sel = self.masker.mask(
-            tokenized_data, self.rng, masking_rate=masking_rate
-        )
-        
+        mask = self.masker.mask(source_tokens_lens.sum().item(), self.rng, masking_rate=masking_rate)
+
+        split_lens = np.cumsum(source_tokens_lens)[:-1]
+        self.perm_sel = np.split(mask, split_lens)
+        self.token_size = token_size
+
+        # select unmasked tokens for network input - put into Masker
+        source_tokens_cells = [
+            c[~p] for c, p in zip(source_tokens_cells, self.perm_sel, strict=True)
+        ]
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
 
         if source_tokens_lens.sum() > 0:
@@ -222,13 +239,11 @@ class TokenizerMasking:
             source_means_lens = [len(s) for s in source_means]
             # merge and split to vectorize computations
             source_means = torch.cat(source_means)
+            # TODO: precompute also source_means_r3 and then just cat
             source_centroids = torch.cat(
                 [source_means.to(torch.float32), r3tos2(source_means).to(torch.float32)], -1
             )
             source_centroids = torch.split(source_centroids, source_means_lens)
-        else:
-            source_centroids = torch.tensor([])
-
 
         return (source_tokens_cells, source_tokens_lens, source_centroids)
 
@@ -273,6 +288,7 @@ class TokenizerMasking:
         )
 
         # tokenize
+        # TODO: properly set stream_id; don't forget to normalize
         target_tokens_cells = tokenize_window(
             0,
             coords,
@@ -280,29 +296,17 @@ class TokenizerMasking:
             source,
             times,
         )
-        
-        # --- MODIFICATION START ---
-        # The following block is modified to handle cases where a cell has no target tokens,
-        # which would cause an error in torch.cat with an empty list.
 
-        # Pre-calculate the total feature dimension of a token to create correctly shaped empty tensors.
-        feature_dim = 6 + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
-        
-        processed_target_tokens = []
-        for cc, pp in zip(target_tokens_cells, self.perm_sel, strict=True):
-            # Select the tensors for this cell that are marked as target tokens
-            selected_tensors = [c for c, p in zip(cc, pp, strict=True) if p]
-
-            if selected_tensors:
-                # If there are target tokens, concatenate them
-                processed_target_tokens.append(torch.cat(selected_tensors))
-            else:
-                # Otherwise, append a correctly shaped empty tensor as a placeholder
-                processed_target_tokens.append(torch.empty(0, feature_dim, dtype=coords.dtype, device=coords.device))
-        
-        target_tokens = processed_target_tokens
-        # --- MODIFICATION END ---
-        
+        # select masked tokens for network input
+        # TODO: implement sampling rate target
+        target_tokens = [
+            (
+                torch.cat([c if p else torch.tensor([]) for c, p in zip(cc, pp, strict=True)])
+                if len(cc) > 0
+                else torch.tensor(cc)
+            )
+            for cc, pp in zip(target_tokens_cells, self.perm_sel, strict=True)
+        ]
         target_tokens_lens = [len(t) for t in target_tokens]
         if torch.tensor(target_tokens_lens).sum() == 0:
             return (torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([]))
