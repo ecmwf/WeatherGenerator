@@ -1,6 +1,6 @@
 """
 Small test for the Weather Generator.
-This test must run on a GPU machine. 
+This test must run on a GPU machine.
 It performs a training and evaluation of the Weather Generator model.
 
 Command:
