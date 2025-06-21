@@ -37,6 +37,7 @@ Issues = "https://github.com/ecmwf/WeatherGenerator/issues"
 train = "weathergen:train"
 train_continue = "weathergen:train_continue"
 evaluate = "weathergen:evaluate"
+plot_train = "weathergen.utils.plot_training:plot_train"
 
 [build-system]
 requires = ["hatchling"]
