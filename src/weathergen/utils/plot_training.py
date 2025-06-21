@@ -551,8 +551,8 @@ def plot_loss_per_run(
     plt.savefig(plt_fname)
     plt.close()
 
-def plot_train() :
 
+def plot_train():
     # Example usage:
     # When providing a YAML for configuring the run IDs:
     # python plot_training.py -rf eval_run.yml -m ./trained_models -o ./training_plots
@@ -715,6 +715,7 @@ def plot_train() :
         get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
         plot_dir=out_dir,
     )
+
 
 if __name__ == "__main__":
     plot_train()
