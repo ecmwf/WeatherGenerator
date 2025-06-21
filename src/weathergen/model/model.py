@@ -436,14 +436,21 @@ class Model(torch.nn.Module):
                     idxs = s.source_idxs_embed
                     idxs_pe = s.source_idxs_embed_pe
 
-                    # create full scatter index (there's no broadcasting which is likely highly inefficient)
+                    # create full scatter index
+                    # (there's no broadcasting which is likely highly inefficient)
                     idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
                     x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
                     # there's undocumented limitation in flash_attn that will make embed fail if
                     # #tokens is too large; code below is a work around
-                    # x_embed = torch.cat( [embed( s_c, c_c).flatten(0,1)
-                    #                 for s_c,c_c in zip( torch.split( s.source_tokens_cells, 49152),
-                    #                                     torch.split( s.source_centroids, 49152))])
+                    # x_embed = torch.cat(
+                    #     [
+                    #         embed(s_c, c_c).flatten(0, 1)
+                    #         for s_c, c_c in zip(
+                    #             torch.split(s.source_tokens_cells, 49152),
+                    #             torch.split(s.source_centroids, 49152),
+                    #         )
+                    #     ]
+                    # )
 
                     # scatter write to reorder from per stream to per cell ordering
                     tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
@@ -473,8 +480,15 @@ class Model(torch.nn.Module):
         # for block in self.ae_local_blocks :
         #   tokens = checkpoint( block, tokens, cell_lens, use_reentrant=False)
 
-        # for block in self.ae_adapter :
-        #   tokens_global = checkpoint( block, tokens_global, tokens, q_cells_lens, cell_lens, use_reentrant=False)
+        # for block in self.ae_adapter:
+        #     tokens_global = checkpoint(
+        #         block,
+        #         tokens_global,
+        #         tokens,
+        #         q_cells_lens,
+        #         cell_lens,
+        #         use_reentrant=False,
+        #     )
 
         # work around to bug in flash attention for hl>=5
 
@@ -559,8 +573,8 @@ class Model(torch.nn.Module):
 
             assert batch_size == 1
 
-            # embed token coords, concatenating along batch dimension (which is taking care of through
-            # the varlen attention)
+            ## embed token coords, concatenating along batch dimension
+            # (which is taking care of through the varlen attention)
             with torch.amp.autocast("cuda", dtype=torch.float32, enabled=False):
                 tc_tokens = torch.cat(
                     [
@@ -578,7 +592,10 @@ class Model(torch.nn.Module):
             if torch.isnan(tc_tokens).any():
                 nn = si["name"]
                 logger.warning(
-                    f"Skipping prediction for {nn} because of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens."
+                    (
+                        f"Skipping prediction for {nn} because",
+                        f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
+                    )
                 )
                 preds_tokens += [torch.tensor([], device=tc_tokens.device)]
                 continue
@@ -586,9 +603,9 @@ class Model(torch.nn.Module):
                 preds_tokens += [torch.tensor([], device=tc_tokens.device)]
                 continue
 
-            # TODO: how to support tte_kv efficiently, generate 1-ring neighborhoods here or on a per
-            #       stream basis
-            assert type(tte_kv) == torch.nn.Identity
+            # TODO: how to support tte_kv efficiently,
+            #  generate 1-ring neighborhoods here or on a per stream basis
+            assert isinstance(tte_kv, torch.nn.Identity)
 
             # lens for varlen attention
             tcs_lens = target_coords_idxs[ii][fstep]
