@@ -69,7 +69,8 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
         x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
 
-        # project onto heads and q,k,v and ensure these are 4D tensors as required for flash attention
+        ## project onto heads and q,k,v and
+        #  ensure these are 4D tensors as required for flash attention
         s = [x.shape[0], self.num_heads, -1]
         qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(torch.float16)
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(torch.float16)
@@ -150,7 +151,8 @@ class MultiSelfAttentionHead_Varlen_Flex(torch.nn.Module):
         x_in = x
         x = self.lnorm(x)
 
-        # project onto heads and q,k,v and ensure these are 4D tensors as required for flash attention
+        ## project onto heads and q,k,v and
+        #  ensure these are 4D tensors as required for flash attention
         s = [x.shape[0], 1, self.num_heads, -1]
         qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(torch.float16).permute([1, 2, 0, 3])
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(torch.float16).permute([1, 2, 0, 3])
@@ -302,7 +304,8 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
         x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
         x_kv = self.lnorm_in_kv(x_kv)
 
-        # project onto heads and q,k,v and ensure these are 4D tensors as required for flash attention
+        ## project onto heads and q,k,v and
+        #  ensure these are 4D tensors as required for flash attention
         s = [x_q.shape[0], self.num_heads, self.dim_head_proj]
         qs = self.lnorm_q(self.proj_heads_q(x_q).reshape(s)).to(torch.float16)
         s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
@@ -417,7 +420,8 @@ class MultiCrossAttentionHead_Varlen_SlicedQ(torch.nn.Module):
         x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
         x_kv = self.lnorm_in_kv(x_kv)
 
-        # project onto heads and q,k,v and ensure these are 4D tensors as required for flash attention
+        ## project onto heads and q,k,v and
+        #  ensure these are 4D tensors as required for flash attention
         s = [x_q.shape[0], self.num_heads, self.dim_head_proj]
         qs = [
             self.lnorm_q(head_proj(x_q_i).reshape(s)).to(torch.float16)
@@ -509,7 +513,8 @@ class MultiSelfAttentionHead(torch.nn.Module):
         # x = self.lnorm( x)
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
 
-        # project onto heads and q,k,v and ensure these are 4D tensors as required for flash attention
+        ## project onto heads and q,k,v and
+        #  ensure these are 4D tensors as required for flash attention
         s = [*([x.shape[0], 1] if len(x.shape) == 2 else x.shape[:-1]), self.num_heads, -1]
         qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(torch.float16)
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(torch.float16)
@@ -589,7 +594,8 @@ class MultiCrossAttentionHead(torch.nn.Module):
             x_q_in = x_q
         x_q, x_kv = self.lnorm_in_q(x_q), self.lnorm_in_kv(x_kv)
 
-        # project onto heads and q,k,v and ensure these are 4D tensors as required for flash attention
+        ## project onto heads and q,k,v and
+        #  ensure these are 4D tensors as required for flash attention
         s = [x_q.shape[0], -1, self.num_heads, self.dim_head_proj]
         qs = self.lnorm_q(self.proj_heads_q(x_q).reshape(s)).to(torch.float16).transpose(-3, -2)
         s = [x_kv.shape[0], -1, self.num_heads, self.dim_head_proj]
