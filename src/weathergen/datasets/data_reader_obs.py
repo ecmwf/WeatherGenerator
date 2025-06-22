@@ -53,9 +53,6 @@ class DataReaderObs(DataReaderBase):
 
         self._load_properties()
 
-        # TODO: re-implement selection of source and target channels
-        # TODO: factorize with anemoi reader
-
         channels_idx = [i for i, col in enumerate(self.selected_colnames) if "obsvalue" in col]
         self.data_offset = channels_idx[0]
 
@@ -86,13 +83,25 @@ class DataReaderObs(DataReaderBase):
     def length(self) -> int:
         return self.len
 
-    def select(self, cols_list: list[str]) -> None:
+    def select(self, cols: list[str] | None, cols_exclude: list[str] | None) -> None:
         """
         Allow user to specify which columns they want to access.
         Get functions only returned for these specified columns.
         """
-        self.selected_colnames = cols_list
-        self.selected_cols_idx = np.array([self.colnames.index(item) for item in cols_list])
+
+        if cols is not None:
+            self.selected_colnames = [
+                c
+                for c in self.colnames
+                if (
+                    np.array([c_sel in c for c_sel in cols]).any()
+                    and not np.array([c_nsel in c for c_sel in cols_exclude]).any()
+                )
+            ]
+        else:
+            self.selected_colnames = self.colnames
+
+        self.selected_cols_idx = np.array([self.colnames.index(c) for c in self.selected_colnames])
 
     def first_sample_with_data(self) -> int:
         """
