@@ -321,7 +321,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
     return list(streams.values())
 
 
-def set_pathes(config: Config) -> Config:
+def set_paths(config: Config) -> Config:
     config = config.copy()
     config.run_path = Path(config.get("run_path", None) or _DEFAULT_RESULT_PATH)
     config.model_path = Path(config.get("model_path", None) or _DEFAULT_MODEL_PATH)
