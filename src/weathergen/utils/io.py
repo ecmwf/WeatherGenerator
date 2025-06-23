@@ -4,12 +4,14 @@ import typing
 
 import dask as da
 import numpy as np
+from numpy.typing import NDArray
 import torch
 import xarray as xr
 import zarr
 
 # experimental value, should be inferred more intelligently
 CHUNK_N_SAMPLES = 16392
+DType: typing.TypeAlias = np.float32
 
 # TODO: extract geoinfo metadata, include it in xarray
 
@@ -35,21 +37,21 @@ class OutputDataset:
     item: ItemMeta
 
     # (datapoints, channels, ens)
-    data: np.ndarray
+    data: NDArray[DType]
 
     # (datapoints,)
-    times: np.ndarray
+    times: NDArray  # TODO: what is the dtype here => datetime64?
 
     # (datapoints, 2) => maybe more??
-    coords: np.ndarray
+    coords: NDArray[DType]
 
     # (datapoints, ???)
-    geoinfo: np.ndarray | None
+    geoinfo: NDArray[DType] | None
 
     channels: list
 
     @property
-    def datapoints(self) -> np.ndarray:
+    def datapoints(self) -> NDArray[np.int_]:
         return np.arange(self.data.shape[0])
 
     def as_xarray(self, chunk_nsamples=CHUNK_N_SAMPLES) -> xr.Dataset:  #
@@ -160,7 +162,7 @@ class ZarrIO:
         for array_name, array in dataset:  # suffix is eg. data or coords
             self._create_dataset(dataset_group, array_name, array)
 
-    def _create_dataset(self, group: zarr.Group, name: str, array: np.ndarray | None):
+    def _create_dataset(self, group: zarr.Group, name: str, array: NDArray | None):
         if array:  # TODO guard against geoinfo = None
             chunks = (CHUNK_N_SAMPLES, array.shape[1:])
             group.create_dataset(name, data=array, chunks=chunks)
@@ -198,7 +200,7 @@ class OutputBatchData:
     targets_coords: list[list[torch.Tensor]]
 
     # fstep, stream, (sample x datapoint)
-    targets_times: list[list[np.ndarray]]
+    targets_times: list[list[NDArray]]
 
     # fstep, stream, redundant dim (size 1)
     targets_lens: list[list[list[int]]]
