@@ -53,9 +53,6 @@ class DataReaderObs(DataReaderBase):
 
         self._load_properties()
 
-        # TODO: re-implement selection of source and target channels
-        # TODO: factorize with anemoi reader
-
         channels_idx = [i for i, col in enumerate(self.selected_colnames) if "obsvalue" in col]
         self.data_offset = channels_idx[0]
 
@@ -86,13 +83,25 @@ class DataReaderObs(DataReaderBase):
     def length(self) -> int:
         return self.len
 
-    def select(self, cols_list: list[str]) -> None:
+    def select(self, cols: list[str] | None, cols_exclude: list[str] | None) -> None:
         """
         Allow user to specify which columns they want to access.
         Get functions only returned for these specified columns.
         """
-        self.selected_colnames = cols_list
-        self.selected_cols_idx = np.array([self.colnames.index(item) for item in cols_list])
+
+        if cols is not None:
+            self.selected_colnames = [
+                c
+                for c in self.colnames
+                if (
+                    np.array([c_sel in c for c_sel in cols]).any()
+                    and not np.array([c_nsel in c for c_nsel in cols_exclude]).any()
+                )
+            ]
+        else:
+            self.selected_colnames = self.colnames
+
+        self.selected_cols_idx = np.array([self.colnames.index(c) for c in self.selected_colnames])
 
     def first_sample_with_data(self) -> int:
         """
@@ -140,8 +149,8 @@ class DataReaderObs(DataReaderBase):
         base_yyyymmddhhmm = 197001010000
 
         # assert start > base_yyyymmddhhmm, (
-        #     f"Abort: ObsDataset sample start (yyyymmddhhmm) must be greater than {base_yyyymmddhhmm}\n"
-        #     f"       Current value: {start}"
+        #     f"Abort: ObsDataset sample start (yyyymmddhhmm)"
+        #     f"must be greater than {base_yyyymmddhhmm}. Current value: {start}"
         # )
 
         # Derive new index based on hourly backbone index
@@ -150,7 +159,8 @@ class DataReaderObs(DataReaderBase):
         self.start_dt = self.time_window_handler.t_start.item()
         self.end_dt = self.time_window_handler.t_end.item()
 
-        # Calculate the number of hours between start of hourly base index and the requested sample index
+        ## Calculate the number of hours between start of hourly base index
+        #  and the requested sample index
         diff_in_hours_start = int((self.start_dt - base_dt).total_seconds() / 3600)
         diff_in_hours_end = int((self.end_dt - base_dt).total_seconds() / 3600)
 
@@ -163,7 +173,8 @@ class DataReaderObs(DataReaderBase):
         self.indices_end = (
             self.hrly_index[diff_in_hours_start + len_hrs : end_range_2 : step_hrs] - 1
         )
-        # Handle situations where the requested dataset span goes beyond the hourly index stored in the zarr
+        ## Handle situations where the requested dataset span
+        #  goes beyond the hourly index stored in the zarr
         if diff_in_hours_end > (self.hrly_index.shape[0] - 1):
             if diff_in_hours_start > (self.hrly_index.shape[0] - 1):
                 n = (diff_in_hours_end - diff_in_hours_start) // step_hrs
