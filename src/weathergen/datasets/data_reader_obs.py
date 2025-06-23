@@ -101,7 +101,6 @@ class DataReaderObs(DataReaderBase):
             self.selected_colnames = self.colnames
 
         self.selected_cols_idx = np.array([self.colnames.index(c) for c in self.selected_colnames])
- 
 
     def first_sample_with_data(self) -> int:
         """

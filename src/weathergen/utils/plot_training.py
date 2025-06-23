@@ -556,8 +556,7 @@ def plot_loss_per_run(
     plt.close()
 
 
-####################################################################################################
-if __name__ == "__main__":
+def plot_train():
     # Example usage:
     # When providing a YAML for configuring the run IDs:
     # python plot_training.py -rf eval_run.yml -m ./trained_models -o ./training_plots
@@ -621,7 +620,7 @@ if __name__ == "__main__":
         help="Type of x-axis used in plots. Options: 'step' or 'reltime'",
     )
 
-    run_id_group = parser.add_mutually_exclusive_group(required=True)
+    run_id_group = parser.add_mutually_exclusive_group()
     run_id_group.add_argument(
         "-rs",
         "--run_ids_dict",
@@ -637,8 +636,9 @@ if __name__ == "__main__":
         "-rf",
         "--run_ids_file",
         dest="rf",
+        default="./config/runs_plot_train.yml",
         type=_read_yaml_config,
-        help="YAML file configuring the training run IDS to plot",
+        help="YAML file configuring the training run ids to plot",
     )
 
     # parse the command line arguments
