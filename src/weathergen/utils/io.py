@@ -80,25 +80,24 @@ class OutputDataset:
         )
 
 
-@dataclasses.dataclass
 class OutputItem:
-    target: OutputDataset
-    prediction: OutputDataset
-    source: OutputDataset | None = None
+    def __init__(
+        self, target: OutputDataset, prediction: OutputDataset, source: OutputDataset | None = None
+    ):
+        self.target = target
+        self.prediction = prediction
+        self.source = source
 
-    # pseudo-field (init-only variable) => kept out of most dataclasses logic
-    _meta: dataclasses.InitVar[ItemMeta | None] = None
+        self._meta = self.target.item
 
-    def __post_init__(self):
-        self._meta = self.target.meta
-        if self._meta.with_source and not self.source:
-            msg = f"Missing source dataset for item: {self._meta.key}"
-            raise ValueError(msg)
+        self.datasets = [self.target, self.prediction]
 
-    @property
-    def datasets(self):
-        datasets = (self.source, self.target, self.prediction)
-        return datasets if self._meta.with_source else datasets[1:]
+        if self._meta.with_source:
+            if self.source:
+                self.datasets += self.source
+            else:
+                msg = f"Missing source dataset for item: {self._meta.key}"
+                raise ValueError(msg)
 
 
 class MockIO:
