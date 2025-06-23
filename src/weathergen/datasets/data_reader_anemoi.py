@@ -207,6 +207,7 @@ class DataReaderAnemoi(DataReaderTimestep):
             ],
             axis=0,
         ).transpose()
+        # repeat latlon len(t_idxs) times
         coords = np.vstack((latlon,) * len(t_idxs))
 
         # empty geoinfos for anemoi
