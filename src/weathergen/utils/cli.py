@@ -29,7 +29,7 @@ def get_continue_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def get_evaluate_parser() -> argparse.ArgumentParser:
+def get_inference_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
 
     _add_model_loading_params(parser)

@@ -77,7 +77,7 @@ class Trainer(Trainer_Base):
         self.train_logger = TrainLogger(cf, self.path_run)
 
     ###########################################
-    def evaluate(self, cf, run_id_trained, epoch):
+    def inference(self, cf, run_id_trained, epoch):
         # general initalization
         self.init(cf)
 
