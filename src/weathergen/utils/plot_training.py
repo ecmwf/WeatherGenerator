@@ -725,7 +725,3 @@ def plot_train():
         get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
         plot_dir=out_dir,
     )
-
-
-if __name__ == "__main__":
-    plot_train()
