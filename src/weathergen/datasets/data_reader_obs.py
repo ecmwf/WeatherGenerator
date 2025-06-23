@@ -95,7 +95,7 @@ class DataReaderObs(DataReaderBase):
                 for c in self.colnames
                 if (
                     np.array([c_sel in c for c_sel in cols]).any()
-                    and not np.array([c_nsel in c for c_sel in cols_exclude]).any()
+                    and not np.array([c_nsel in c for c_nsel in cols_exclude]).any()
                 )
             ]
         else:
