@@ -84,6 +84,8 @@ select = [
     "SIM",
     # isort
     "I",
+    # Banned imports
+    "TID"
 ]
 
 # These rules are sensible and should be enabled at a later stage.
@@ -99,9 +101,13 @@ ignore = [
   "SIM108" # in case additional norm layer supports are added in future  
 ]
 
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"numpy.ndarray".msg = "Do not use 'ndarray' to describe a numpy array type, it is a function. Use numpy.typing.NDArray or numpy.typing.NDArray[np.float32] for example"
+
 [tool.ruff.format]
 # Use Unix `\n` line endings for all files
 line-ending = "lf"
+
 
 [tool.uv]
 # This guarantees that the build is deterministic and will not be impacted 
