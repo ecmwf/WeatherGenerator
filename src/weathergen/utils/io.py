@@ -45,16 +45,16 @@ class OutputDataset:
     item: ItemMeta
 
     # (datapoints, channels, ens)
-    data: zarr.Array[DType]
+    data: zarr.Array
 
     # (datapoints,)
-    times: zarr.Array[typing.Any]  # TODO: what is the dtype here => datetime64?
+    times: zarr.Array
 
     # (datapoints, 2) => maybe more??
-    coords: zarr.Array[DType]
+    coords: zarr.Array
 
     # (datapoints, ???)
-    geoinfo: zarr.Array[DType] | None
+    geoinfo: zarr.Array | None
 
     channels: list[str]
 
