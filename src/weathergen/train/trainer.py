@@ -54,6 +54,10 @@ class Trainer(Trainer_Base):
 
         self.devices = self.init_torch()
 
+        # Get num_ranks of previous, to be continued run before
+        # num_ranks gets overwritten by current setting during init_ddp()
+        self.num_ranks_original = cf.get("num_ranks", None)
+
         self.init_ddp(cf)
 
         # read configuration of data streams
@@ -278,7 +282,15 @@ class Trainer(Trainer_Base):
         self.loss_fcts_val = [[getattr(losses, name), w] for name, w in cf.loss_fcts_val]
 
         # recover epoch when continuing run
-        epoch_base = int(self.cf.istep / len(self.data_loader))
+        if self.num_ranks_original is None:
+            epoch_base = int(self.cf.istep / len(self.data_loader))
+        else:
+            len_per_rank = (
+                len(self.dataset) // (self.num_ranks_original * cf.batch_size)
+            ) * cf.batch_size
+            epoch_base = int(
+                self.cf.istep / (min(len_per_rank, cf.samples_per_epoch) * self.num_ranks_original)
+            )
 
         # torch.autograd.set_detect_anomaly(True)
         if cf.forecast_policy is not None:
