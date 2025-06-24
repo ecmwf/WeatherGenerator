@@ -1,0 +1,4 @@
+forecast_steps: 1
+fe_num_blocks: 4
+forecast_policy: "fixed"
+training_mode: "forecast"
