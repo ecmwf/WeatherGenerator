@@ -38,7 +38,7 @@ pred_mlp_adaln: True
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-forecast_offset : 0
+forecast_offset : 1
 forecast_delta_hrs: 0
 forecast_steps: 0
 forecast_policy: null
@@ -70,7 +70,7 @@ batch_size_validation: 1
 
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "masking"
+training_mode: "forecast"
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
@@ -79,13 +79,13 @@ masking_rate_sampling: True
 sampling_rate_target: 1.0
 
 num_epochs: 24
-samples_per_epoch: 4096
+samples_per_epoch: 32768
 samples_per_validation: 512
 shuffle: True
 
 lr_scaling_policy: "sqrt"
 lr_start: 0.000001
-lr_max: 0.00003
+lr_max: 0.00001
 lr_final_decay: 0.000001
 lr_final: 0.0
 lr_steps_warmup: 256
@@ -103,8 +103,8 @@ start_date: 197901010000
 end_date: 202012310000
 start_date_val: 202101010000
 end_date_val: 202201010000
-len_hrs: 12
-step_hrs: 1
+len_hrs: 6
+step_hrs: 6
 input_window_steps: 1
 
 val_initial: False

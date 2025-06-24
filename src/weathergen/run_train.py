@@ -66,9 +66,9 @@ def inference_from_args(argl: list[str]):
 
 
 ####################################################################################################
-def train_continue() -> None:
+def train_continue_with_args(argl: list[str], stream_dir: str | None):
     parser = cli.get_continue_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argl)
 
     init_loggers()
 
@@ -135,7 +135,10 @@ def train() -> None:
         continue training. Defaults to None.
     Note: All model configurations are set in the function body.
     """
-    train_with_args(sys.argv[1:], None)
+    if sys.argv[-1].lower() == "true":
+        train_continue_with_args(["--from_run_id", sys.argv[2]], None)
+    else:
+        train_with_args(sys.argv[1:], None)
 
 
 def train_with_args(argl: list[str], stream_dir: str | None):
@@ -166,4 +169,3 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
 if __name__ == "__main__":
     train()
-    # train_continue()
