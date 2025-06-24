@@ -29,7 +29,7 @@ def get_continue_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def get_evaluate_parser() -> argparse.ArgumentParser:
+def get_inference_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
 
     _add_model_loading_params(parser)
@@ -40,29 +40,29 @@ def get_evaluate_parser() -> argparse.ArgumentParser:
         "-start",
         type=_format_date,
         default="2022-10-01",
-        help="Start date for evaluation. Format must be parsable with pd.to_datetime.",
+        help="Start date for inference. Format must be parsable with pd.to_datetime.",
     )
     parser.add_argument(
         "--end_date",
         "-end",
         type=_format_date,
         default="2022-12-01",
-        help="End date for evaluation. Format must be parsable with pd.to_datetime.",
+        help="End date for inference. Format must be parsable with pd.to_datetime.",
     )
     parser.add_argument(
-        "--samples", type=int, default=10000000, help="Number of evaluation samples."
+        "--samples", type=int, default=10000000, help="Number of inference samples."
     )
     parser.add_argument(  # behaviour changed => implies default=False
         "--save_samples",
         type=bool,
         default=True,
-        help="Toggle saving of samples from evaluation. Default True",
+        help="Toggle saving of samples from inference. Default True",
     )
     parser.add_argument(
         "--analysis_streams_output",
         nargs="+",
         default=["ERA5"],
-        help="Analysis output streams during evaluation.",
+        help="Analysis output streams during inference.",
     )
 
     return parser
@@ -122,7 +122,7 @@ def _add_model_loading_params(parser: argparse.ArgumentParser):
         "--from_run_id",
         required=True,
         help=(
-            "Start evaluation or continue training from the WeatherGenerator",
+            "Start inference or continue training from the WeatherGenerator",
             " model with the given run id.",
         ),
     )
