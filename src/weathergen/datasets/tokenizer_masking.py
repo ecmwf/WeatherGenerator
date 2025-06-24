@@ -151,8 +151,9 @@ class TokenizerMasking:
         time_win: tuple,
         normalizer,  # dataset
     ):
-        # NOTE: The 'masking_rate_sampling' argument is accepted to maintain API compatibility,
+        # NOTE: The 'masking_rate_sampling' argument is accepted to maintain compatibility for now,
         # but it is no longer used. The Masker instance now controls this behavior.
+
         init_loggers()
         token_size = stream_info["token_size"]
         is_diagnostic = stream_info.get("diagnostic", False)
@@ -193,6 +194,9 @@ class TokenizerMasking:
             torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in tokenized_data
         ]
 
+        # NOTE: Can we handle this case below in the masker?
+        # NOTE: Is it already handled in the masker?
+
         # if masking rate is 1.0, all tokens are masked, so the source is empty
         # but we must compute perm_sel for the target function
         if masking_rate == 1.0:
@@ -206,7 +210,7 @@ class TokenizerMasking:
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
         # Use the masker to get source tokens and the selection mask for the target
-        source_tokens_cells, self.perm_sel = self.masker.mask(
+        source_tokens_cells, self.perm_sel = self.masker.mask_source(
             tokenized_data, self.rng, masking_rate=masking_rate
         )
 
@@ -282,6 +286,11 @@ class TokenizerMasking:
             times,
         )
 
+
+        ######################
+        # Commented out and moved to mask_target in Masker
+        ######################
+
         # --- MODIFICATION START ---
         # The following block is modified to handle cases
         # where a cell has no target tokens,
@@ -289,24 +298,32 @@ class TokenizerMasking:
 
         # Pre-calculate the total feature dimension of a token to create
         # correctly shaped empty tensors.
-        feature_dim = 6 + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
+        #feature_dim = 6 + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
 
-        processed_target_tokens = []
-        for cc, pp in zip(target_tokens_cells, self.perm_sel, strict=True):
-            # Select the tensors for this cell that are marked as target tokens
-            selected_tensors = [c for c, p in zip(cc, pp, strict=True) if p]
+        #processed_target_tokens = []
+        #for cc, pp in zip(target_tokens_cells, self.perm_sel, strict=True):
+        #    # Select the tensors for this cell that are marked as target tokens
+        #    selected_tensors = [c for c, p in zip(cc, pp, strict=True) if p]
 
-            if selected_tensors:
-                # If there are target tokens, concatenate them
-                processed_target_tokens.append(torch.cat(selected_tensors))
-            else:
-                # Otherwise, append a correctly shaped empty tensor as a placeholder
-                processed_target_tokens.append(
-                    torch.empty(0, feature_dim, dtype=coords.dtype, device=coords.device)
-                )
+        #    if selected_tensors:
+        #        # If there are target tokens, concatenate them
+        #        processed_target_tokens.append(torch.cat(selected_tensors))
+        #    else:
+        #        # Otherwise, append a correctly shaped empty tensor as a placeholder
+        #        processed_target_tokens.append(
+        #            torch.empty(0, feature_dim, dtype=coords.dtype, device=coords.device)
+        #        )
 
-        target_tokens = processed_target_tokens
+        #target_tokens = processed_target_tokens
         # --- MODIFICATION END ---
+
+        target_tokens = self.masker.mask_target(
+            target_tokens_cells,
+            self.perm_sel,
+            coords,
+            geoinfos,
+            source
+        )
 
         target_tokens_lens = [len(t) for t in target_tokens]
         if torch.tensor(target_tokens_lens).sum() == 0:
