@@ -286,7 +286,6 @@ class TokenizerMasking:
             times,
         )
 
-
         ######################
         # Commented out and moved to mask_target in Masker
         ######################
@@ -298,10 +297,10 @@ class TokenizerMasking:
 
         # Pre-calculate the total feature dimension of a token to create
         # correctly shaped empty tensors.
-        #feature_dim = 6 + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
+        # feature_dim = 6 + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
 
-        #processed_target_tokens = []
-        #for cc, pp in zip(target_tokens_cells, self.perm_sel, strict=True):
+        # processed_target_tokens = []
+        # for cc, pp in zip(target_tokens_cells, self.perm_sel, strict=True):
         #    # Select the tensors for this cell that are marked as target tokens
         #    selected_tensors = [c for c, p in zip(cc, pp, strict=True) if p]
 
@@ -314,15 +313,11 @@ class TokenizerMasking:
         #            torch.empty(0, feature_dim, dtype=coords.dtype, device=coords.device)
         #        )
 
-        #target_tokens = processed_target_tokens
+        # target_tokens = processed_target_tokens
         # --- MODIFICATION END ---
 
         target_tokens = self.masker.mask_target(
-            target_tokens_cells,
-            self.perm_sel,
-            coords,
-            geoinfos,
-            source
+            target_tokens_cells, self.perm_sel, coords, geoinfos, source
         )
 
         target_tokens_lens = [len(t) for t in target_tokens]

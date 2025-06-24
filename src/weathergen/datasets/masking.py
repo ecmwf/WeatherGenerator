@@ -18,12 +18,12 @@ class Masker:
         self,
         masking_rate: float,
         masking_strategy: str,
-        #masking_combination: str,
+        # masking_combination: str,
         masking_rate_sampling: bool,
     ):
         self.masking_rate = masking_rate
         self.masking_strategy = masking_strategy
-        #self.masking_combination = masking_combination
+        # self.masking_combination = masking_combination
         self.masking_rate_sampling = masking_rate_sampling
 
     def mask_source(
@@ -96,7 +96,7 @@ class Masker:
         source_data = [data[~p] for data, p in zip(tokenized_data, perm_sel, strict=True)]
 
         return source_data, perm_sel
-    
+
     def mask_target(
         self,
         target_tokenized_data: list[list[torch.Tensor]],
@@ -138,8 +138,9 @@ class Masker:
                 processed_target_tokens.append(
                     torch.empty(0, feature_dim, dtype=coords.dtype, device=coords.device)
                 )
-        
+
         return processed_target_tokens
+
 
 class MaskerArchived:
     """Class to generate boolean masks for token sequences and apply them.
@@ -235,5 +236,3 @@ class MaskerArchived:
         source_data = [data[~p] for data, p in zip(tokenized_data, perm_sel, strict=True)]
 
         return source_data, perm_sel
-
-
