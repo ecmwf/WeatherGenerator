@@ -72,7 +72,7 @@ class Masker:
                 start_index = rng.integers(0, max(1, num_tokens - block_size + 1))
                 flat_mask[start_index:start_index + block_size] = True
         else:
-            raise ValueError(f"Unknown masking strategy: {self.masking_strategy}")
+            assert False, f"Unknown masking strategy: {self.masking_strategy}"
 
         # Ensure the mask is not degenerate (all True or all False) if there's more than one token.
         if num_tokens > 1:
@@ -144,7 +144,8 @@ class Masker_archived:
 
         # Change to asserts as we do not catch errors atm
         else:
-            raise ValueError(f"Unknown masking strategy: {self.masking_strategy}")
+            assert False, f"Unknown masking strategy: {self.masking_strategy}"
+
 
         # Ensure not all True or all False
         if not mask.any():
