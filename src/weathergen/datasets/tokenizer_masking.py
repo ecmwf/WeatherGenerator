@@ -189,6 +189,7 @@ class TokenizerMasking:
             source,
             times,
         )
+        
         tokenized_data = [
             torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in tokenized_data
         ]
