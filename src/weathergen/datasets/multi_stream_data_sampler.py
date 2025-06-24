@@ -339,7 +339,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                             (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                                 stream_info,
-                                # NOTE: two unused arguments in TokenizerMasking, still used in TokenizerForecast?
+                                # NOTE: two unused arguments in TokenizerMasking,
+                                # still used in TokenizerForecast?
                                 self.masking_rate,
                                 self.masking_rate_sampling,
                                 torch.from_numpy(rdata.coords),

@@ -7,8 +7,10 @@ class Masker:
     This class supports different masking strategies and combinations.
     Attributes:
         masking_rate (float): The base rate at which tokens are masked.
-        masking_strategy (str): The strategy used for masking (e.g., "random", "block", MORE TO BE IMPLEMENTED...).
-        TO BE IMPLEMENTED: masking_combination (str): The strategy for combining masking strategies through training (e.g., "sequential").
+        masking_strategy (str): The strategy used for masking (e.g., "random",
+        "block", MORE TO BE IMPLEMENTED...).
+        TO BE IMPLEMENTED: masking_combination (str): The strategy for combining masking
+        strategies through training (e.g., "sequential").
         masking_rate_sampling (bool): Whether to sample the masking rate from a distribution.
     """
 

@@ -198,7 +198,9 @@ class TokenizerMasking:
         if masking_rate == 1.0:
             token_lens = [len(t) for t in tokenized_data]
             self.perm_sel = [np.ones(l, dtype=bool) for l in token_lens]
-            source_tokens_cells = [c[~p] for c, p in zip(tokenized_data, self.perm_sel, strict=False)]
+            source_tokens_cells = [
+                c[~p] for c, p in zip(tokenized_data, self.perm_sel, strict=False)
+            ]
             source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
             source_centroids = torch.tensor([])
             return (source_tokens_cells, source_tokens_lens, source_centroids)
@@ -281,10 +283,12 @@ class TokenizerMasking:
         )
 
         # --- MODIFICATION START ---
-        # The following block is modified to handle cases where a cell has no target tokens,
+        # The following block is modified to handle cases
+        # where a cell has no target tokens,
         # which would cause an error in torch.cat with an empty list.
 
-        # Pre-calculate the total feature dimension of a token to create correctly shaped empty tensors.
+        # Pre-calculate the total feature dimension of a token to create
+        # correctly shaped empty tensors.
         feature_dim = 6 + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
 
         processed_target_tokens = []
