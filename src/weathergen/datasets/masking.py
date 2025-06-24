@@ -3,7 +3,6 @@ import torch
 
 
 class Masker:
-    
     """Class to generate boolean masks for token sequences and apply them.
     This class supports different masking strategies and combinations.
     Attributes:
@@ -25,7 +24,12 @@ class Masker:
         self.masking_combination = masking_combination
         self.masking_rate_sampling = masking_rate_sampling
 
-    def mask(self, tokenized_data: list[torch.Tensor], rng: np.random.Generator, masking_rate: float = None) -> tuple[list[torch.Tensor], list[np.ndarray]]:
+    def mask(
+        self,
+        tokenized_data: list[torch.Tensor],
+        rng: np.random.Generator,
+        masking_rate: float = None,
+    ) -> tuple[list[torch.Tensor], list[np.ndarray]]:
         """
         Receives tokenized data, generates a mask, and returns the source data (unmasked)
         and the permutation selection mask (perm_sel) to be used for the target.
@@ -64,13 +68,13 @@ class Masker:
         # Generate a flat boolean mask based on the strategy
         if self.masking_strategy == "random":
             flat_mask = rng.uniform(0, 1, num_tokens) < rate
-        
+
         elif self.masking_strategy == "block":
             flat_mask = np.zeros(num_tokens, dtype=bool)
             block_size = int(np.round(rate * num_tokens))
             if block_size > 0 and num_tokens > 0:
                 start_index = rng.integers(0, max(1, num_tokens - block_size + 1))
-                flat_mask[start_index:start_index + block_size] = True
+                flat_mask[start_index : start_index + block_size] = True
         else:
             assert False, f"Unknown masking strategy: {self.masking_strategy}"
 
@@ -80,22 +84,19 @@ class Masker:
                 flat_mask[rng.integers(low=0, high=num_tokens)] = False
             elif not flat_mask.any():
                 flat_mask[rng.integers(low=0, high=num_tokens)] = True
-        
+
         # Split the flat mask to match the structure of the tokenized data (list of lists)
         # This will be our perm_sel
         split_indices = np.cumsum(token_lens)[:-1]
         perm_sel = np.split(flat_mask, split_indices)
 
         # Apply the mask to get the source data (where mask is False)
-        source_data = [
-            data[~p] for data, p in zip(tokenized_data, perm_sel, strict=True)
-        ]
+        source_data = [data[~p] for data, p in zip(tokenized_data, perm_sel, strict=True)]
 
         return source_data, perm_sel
-    
+
 
 class Masker_archived:
-    
     """Class to generate boolean masks for token sequences.
     This class supports different masking strategies and combinations.
     Attributes:
@@ -116,7 +117,9 @@ class Masker_archived:
         self.masking_combination = masking_combination
         self.masking_rate_sampling = masking_rate_sampling
 
-    def mask(self, num_tokens: int, rng: np.random.Generator, masking_rate: float = None) -> np.ndarray:
+    def mask(
+        self, num_tokens: int, rng: np.random.Generator, masking_rate: float = None
+    ) -> np.ndarray:
         """Return a boolean mask array of length num_tokens."""
         # Use the provided masking_rate if given, else the default
         rate = self.masking_rate if masking_rate is None else masking_rate
@@ -134,24 +137,22 @@ class Masker_archived:
 
         if self.masking_strategy == "random":
             mask = rng.uniform(0, 1, num_tokens) < rate
-        
+
         elif self.masking_strategy == "block":
             mask = np.zeros(num_tokens, dtype=bool)
             block_size = int(np.round(rate * num_tokens))
             if block_size > 0 and num_tokens > 0:
                 start = rng.integers(0, num_tokens - block_size + 1)
-                mask[start:start + block_size] = True
+                mask[start : start + block_size] = True
 
         # Change to asserts as we do not catch errors atm
         else:
             assert False, f"Unknown masking strategy: {self.masking_strategy}"
-
 
         # Ensure not all True or all False
         if not mask.any():
             mask[rng.integers(low=0, high=len(mask))] = True
         if mask.all():
             mask[rng.integers(low=0, high=len(mask))] = False
-        
+
         return mask
-    

@@ -24,10 +24,10 @@ from weathergen.datasets.data_reader_base import (
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.icon_dataset import IconDataset
+from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
-from weathergen.datasets.masking import Masker
 from weathergen.datasets.utils import (
     compute_idxs_predict,
     compute_offsets_scatter_embed,

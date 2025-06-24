@@ -16,7 +16,6 @@ import numpy as np
 import torch
 
 from weathergen.datasets.masking import Masker
-
 from weathergen.datasets.tokenizer_utils import (
     arc_alpha,
     encode_times_source,
@@ -180,7 +179,7 @@ class TokenizerMasking:
             source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
             source_centroids = torch.tensor([])
             return (source_tokens_cells, source_tokens_lens, source_centroids)
-        
+
         # tokenize all data first
         tokenized_data = tokenize_window(
             0,
@@ -189,7 +188,7 @@ class TokenizerMasking:
             source,
             times,
         )
-        
+
         tokenized_data = [
             torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in tokenized_data
         ]
@@ -199,7 +198,7 @@ class TokenizerMasking:
         if masking_rate == 1.0:
             token_lens = [len(t) for t in tokenized_data]
             self.perm_sel = [np.ones(l, dtype=bool) for l in token_lens]
-            source_tokens_cells = [c[~p] for c, p in zip(tokenized_data, self.perm_sel)]
+            source_tokens_cells = [c[~p] for c, p in zip(tokenized_data, self.perm_sel, strict=False)]
             source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
             source_centroids = torch.tensor([])
             return (source_tokens_cells, source_tokens_lens, source_centroids)
@@ -208,7 +207,7 @@ class TokenizerMasking:
         source_tokens_cells, self.perm_sel = self.masker.mask(
             tokenized_data, self.rng, masking_rate=masking_rate
         )
-        
+
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
 
         if source_tokens_lens.sum() > 0:
@@ -229,7 +228,6 @@ class TokenizerMasking:
             source_centroids = torch.split(source_centroids, source_means_lens)
         else:
             source_centroids = torch.tensor([])
-
 
         return (source_tokens_cells, source_tokens_lens, source_centroids)
 
@@ -281,14 +279,14 @@ class TokenizerMasking:
             source,
             times,
         )
-        
+
         # --- MODIFICATION START ---
         # The following block is modified to handle cases where a cell has no target tokens,
         # which would cause an error in torch.cat with an empty list.
 
         # Pre-calculate the total feature dimension of a token to create correctly shaped empty tensors.
         feature_dim = 6 + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
-        
+
         processed_target_tokens = []
         for cc, pp in zip(target_tokens_cells, self.perm_sel, strict=True):
             # Select the tensors for this cell that are marked as target tokens
@@ -299,11 +297,13 @@ class TokenizerMasking:
                 processed_target_tokens.append(torch.cat(selected_tensors))
             else:
                 # Otherwise, append a correctly shaped empty tensor as a placeholder
-                processed_target_tokens.append(torch.empty(0, feature_dim, dtype=coords.dtype, device=coords.device))
-        
+                processed_target_tokens.append(
+                    torch.empty(0, feature_dim, dtype=coords.dtype, device=coords.device)
+                )
+
         target_tokens = processed_target_tokens
         # --- MODIFICATION END ---
-        
+
         target_tokens_lens = [len(t) for t in target_tokens]
         if torch.tensor(target_tokens_lens).sum() == 0:
             return (torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([]))
