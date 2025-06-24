@@ -8,7 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 """
-The entry point for training and evaluating weathergen-atmo
+The entry point for training and inference weathergen-atmo
 """
 
 import pdb
@@ -29,8 +29,8 @@ def inference():
 
 def inference_from_args(argl: list[str]):
     """
-    Evaluation function for WeatherGenerator model.
-    Entry point for calling the evaluation code from the command line.
+    Inference function for WeatherGenerator model.
+    Entry point for calling the inference code from the command line.
 
     When running integration tests, the arguments are directly provided.
     """

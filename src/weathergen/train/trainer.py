@@ -124,11 +124,11 @@ class Trainer(Trainer_Base):
         if self.cf.rank == 0:
             config.save(self.cf, epoch=0)
 
-        _logger.info(f"Starting evaluation with id={self.cf.run_id}.")
+        _logger.info(f"Starting inference with id={self.cf.run_id}.")
 
-        # evaluate validation set
+        # inference validation set
         self.validate(epoch=0)
-        _logger.info(f"Finished evaluation run with id: {cf.run_id}")
+        _logger.info(f"Finished inference run with id: {cf.run_id}")
 
     ###########################################
     def run(self, cf, run_id_contd=None, epoch_contd=None):
