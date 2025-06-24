@@ -204,6 +204,7 @@ class ZarrIO:
 @dataclasses.dataclass
 class OutputBatchData:
     """Provide convenient access to adapt existing output data structures."""
+
     # sample, stream, (datapoint, channel) => datapoints is accross all datasets per stream
     sources: list[list[torch.Tensor]]
 

@@ -1,14 +1,14 @@
+import json
+
 import dask.array as da
+import numpy as np
 import pandas as pd
 import xarray as xr
-import numpy as np
-from typing import List
-import json
 
 try:
     import xskillscore
     from xhistogram.xarray import histogram
-except Exception as err:
+except Exception:
     print(
         "Could not import xskillscore and xhistogram. Thus, CRPS and rank histogram-calculations are not supported."
     )
@@ -44,7 +44,7 @@ class Scores:
         sample: int,
         stream: str,
         forecast_step: int,
-        avg_dims: str | List[str] = "all",
+        avg_dims: str | list[str] = "all",
     ):
         """
         :param avg_dims: dimension or list of dimensions over which scores shall be averaged.
@@ -254,7 +254,7 @@ class Scores:
         return rmse
 
     @to_json
-    def calc_acc(self, clim_mean: xr.DataArray, spatial_dims: List = ["lat", "lon"]):
+    def calc_acc(self, clim_mean: xr.DataArray, spatial_dims: list = ["lat", "lon"]):
         """
         Calculate anomaly correlation coefficient (ACC).
         :param clim_mean: climatological mean of the data
@@ -321,7 +321,7 @@ class Scores:
         :return: the ratio between spatial variabilty in the forecast and reference data field
         """
         order = kwargs.get("order", 1)
-        avg_dims = kwargs.get("non_spatial_avg_dims", None)
+        avg_dims = kwargs.get("non_spatial_avg_dims")
 
         fcst_grad = self.calc_geo_spatial_diff(self.prediction, order=order)
         ref_grd = self.calc_geo_spatial_diff(self.ground_truth, order=order)
@@ -334,7 +334,7 @@ class Scores:
 
     @to_json
     def calc_seeps(
-        self, seeps_weights: xr.DataArray, t1: xr.DataArray, t3: xr.DataArray, spatial_dims: List
+        self, seeps_weights: xr.DataArray, t1: xr.DataArray, t3: xr.DataArray, spatial_dims: list
     ):
         """
         Calculates stable equitable error in probabiliyt space (SEEPS), see Rodwell et al., 2011
@@ -358,12 +358,13 @@ class Scores:
             return 1.0 - seeps_val
 
         if self.prediction.ndim == 3:
-            assert (
-                len(spatial_dims) == 2
-            ), "Provide two spatial dimensions for three-dimensional data."
-            prediction, ground_truth = self.prediction.stack(
-                {"xy": spatial_dims}
-            ), self.ground_truth.stack({"xy": spatial_dims})
+            assert len(spatial_dims) == 2, (
+                "Provide two spatial dimensions for three-dimensional data."
+            )
+            prediction, ground_truth = (
+                self.prediction.stack({"xy": spatial_dims}),
+                self.ground_truth.stack({"xy": spatial_dims}),
+            )
             seeps_weights = seeps_weights.stack({"xy": spatial_dims})
             t3 = t3.stack({"xy": spatial_dims})
             lstack = True
@@ -374,15 +375,16 @@ class Scores:
             raise ValueError("Data must be a two-or-three-dimensional array.")
 
         # check dimensioning of data
-        assert (
-            prediction.ndim <= 2
-        ), f"Data must be one- or two-dimensional, but has {prediction.ndim} dimensions. Check if stacking with spatial_dims may help."
+        assert prediction.ndim <= 2, (
+            f"Data must be one- or two-dimensional, but has {prediction.ndim} dimensions. Check if stacking with spatial_dims may help."
+        )
 
         if prediction.ndim == 1:
             seeps_values_all = seeps(ground_truth, prediction, t1.values, t3, seeps_weights)
         else:
-            prediction, ground_truth = prediction.transpose(..., "xy"), ground_truth.transpose(
-                ..., "xy"
+            prediction, ground_truth = (
+                prediction.transpose(..., "xy"),
+                ground_truth.transpose(..., "xy"),
             )
             seeps_values_all = xr.full_like(prediction, np.nan)
             seeps_values_all.name = "seeps"
@@ -444,9 +446,9 @@ class Scores:
         """
         crps_methods = ["ensemble", "gaussian"]
 
-        assert (
-            self.ens_dim in self.prediction.dims
-        ), "Forecast data array must have an 'ens'-dimension."
+        assert self.ens_dim in self.prediction.dims, (
+            "Forecast data array must have an 'ens'-dimension."
+        )
 
         if method == "ensemble":
             func_kwargs = {
@@ -558,9 +560,9 @@ class Scores:
         """
         method = Scores.calc_geo_spatial_diff.__name__
         # sanity checks
-        assert isinstance(
-            scalar_field, xr.DataArray
-        ), f"Scalar_field of {method} must be a xarray DataArray."
+        assert isinstance(scalar_field, xr.DataArray), (
+            f"Scalar_field of {method} must be a xarray DataArray."
+        )
         assert order in [1, 2], f"Order for {method} must be either 1 or 2."
 
         dims = list(scalar_field.dims)
