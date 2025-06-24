@@ -1,13 +1,14 @@
 import dataclasses
 import itertools
+import pathlib
 import typing
 
 import dask as da
 import numpy as np
-from numpy.typing import NDArray
 import torch
 import xarray as xr
 import zarr
+from numpy.typing import NDArray
 
 # experimental value, should be inferred more intelligently
 CHUNK_N_SAMPLES = 16392
@@ -18,44 +19,51 @@ DType: typing.TypeAlias = np.float32
 
 @dataclasses.dataclass
 class ItemMeta:
+    """Metadata to identify one output item."""
+
     sample: str
     forecast_step: int
     stream: str
 
     @property
     def key(self):
+        """Unique identifyier for one output item."""
         return f"{self.sample}/{self.stream}/{self.forecast_step}"
 
     @property
     def with_source(self):
+        """Decide if output item should contain source dataset."""
+        # TODO: is this valid for the adjusted (offsetted) forecast steps?
         return self.forecast_step == 0
 
 
 @dataclasses.dataclass
 class OutputDataset:
+    """Access source/target/prediction zarr data contained in one output item."""
+
     name: str
     item: ItemMeta
 
     # (datapoints, channels, ens)
-    data: NDArray[DType]
+    data: zarr.Array[DType]
 
     # (datapoints,)
-    times: NDArray  # TODO: what is the dtype here => datetime64?
+    times: zarr.Array[typing.Any]  # TODO: what is the dtype here => datetime64?
 
     # (datapoints, 2) => maybe more??
-    coords: NDArray[DType]
+    coords: zarr.Array[DType]
 
     # (datapoints, ???)
-    geoinfo: NDArray[DType] | None
+    geoinfo: zarr.Array[DType] | None
 
-    channels: list
+    channels: list[str]
 
     @property
     def datapoints(self) -> NDArray[np.int_]:
         return np.arange(self.data.shape[0])
 
-    def as_xarray(self, chunk_nsamples=CHUNK_N_SAMPLES) -> xr.Dataset:  #
-        """"""
+    def as_xarray(self, chunk_nsamples=CHUNK_N_SAMPLES) -> xr.Dataset:
+        """Convert raw dask arrays into chunked dask-aware xarray dataset."""
         chunks = (chunk_nsamples, *self.data.shape[1:])
 
         # maybe do dask conversion earlier? => usefull for parallel writing?
@@ -86,6 +94,7 @@ class OutputItem:
     def __init__(
         self, target: OutputDataset, prediction: OutputDataset, source: OutputDataset | None = None
     ):
+        """Collection of possible datasets for one output item."""
         self.target = target
         self.prediction = prediction
         self.source = source
@@ -107,7 +116,9 @@ class MockIO:
 
 
 class ZarrIO:
-    def __init__(self, store_path: zarr):
+    """Manage zarr storage hierarchy."""
+
+    def __init__(self, store_path: pathlib.Path):
         self._store_path = store_path
         self.data_root = None
 
@@ -119,16 +130,19 @@ class ZarrIO:
         self._store.close()
 
     def write_zarr(self, item: OutputItem):
+        """Write one output item to the zarr store."""
         group = self._get_group(item._meta, create=True)
         for dataset in item.datasets:
             self._write_dataset(group, dataset)
 
     def get_data(self, sample: int, stream: str, forecast_step: int) -> OutputItem:
+        """Get datasets for the output item matching the arguments."""
         meta = ItemMeta(sample, forecast_step, stream)
 
         return self.load_zarr(meta, self.data_root)
 
     def load_zarr(self, meta: ItemMeta) -> OutputItem:
+        """Get datasets for a output item."""
         group = self._get_group(meta)
         datasets = {
             OutputDataset(key, meta, **dataset.arrays(), **dataset.args)
@@ -169,16 +183,19 @@ class ZarrIO:
 
     @property
     def samples(self) -> list[int]:
+        """Query available samples in this zarr store."""
         return list(self.data_root.groups_keys())
 
     @property
     def streams(self) -> list[str]:
+        """Query available streams in this zarr store."""
         # assume stream/samples are orthogonal => use first sample
         _, example_sample = next(self.data_root.groups())
         return list(example_sample.group_keys())
 
     @property
     def forecast_steps(self) -> list[int]:
+        """Query available forecast steps in this zarr store."""
         # assume stream/samples/forecast_steps are orthogonal
         _, example_stream = next(next(self.data_root.groups()).groups())
         return list(example_stream.group_keys())
@@ -186,6 +203,7 @@ class ZarrIO:
 
 @dataclasses.dataclass
 class OutputBatchData:
+    """Provide convenient access to adapt existing output data structures."""
     # sample, stream, (datapoint, channel) => datapoints is accross all datasets per stream
     sources: list[list[torch.Tensor]]
 
@@ -217,12 +235,15 @@ class OutputBatchData:
         self.samples = np.arange(len(self.sources)) + self.sample_start
         self.fsteps = np.arange(len(self.targets)) + self.forecast_offset
 
-    def items(self) -> typing.Generator[OutputItem, None, None]:
+    def items(self) -> typing.Generator[ItemMeta, None, None]:
+        """Iterate over possible output items"""
         filtered_streams = (stream for stream in self.stream_names if stream != "")
+        # TODO: filter for empty items?
         for args in itertools.product(self.samples, self.fsteps, filtered_streams):
             yield self.extract(ItemMeta(*args))
 
     def extract(self, meta: ItemMeta) -> OutputItem:
+        """Extract datasets from lists for one output item."""
         # adjust shifted values in ItemMeta
         sample = meta.sample - self.sample_start
         forecast_step = meta.forecast_step - self.forecast_offset
