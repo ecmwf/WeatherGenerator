@@ -37,7 +37,7 @@ Issues = "https://github.com/ecmwf/WeatherGenerator/issues"
 [project.scripts]
 train = "weathergen.run_train:train"
 train_continue = "weathergen.run_train:train_continue"
-evaluate = "weathergen.run_train:evaluate"
+inference = "weathergen.run_train:inference"
 plot = "weathergen.evaluate.plot:plot"
 plot_train = "weathergen.utils.plot_training:plot_train"
 
