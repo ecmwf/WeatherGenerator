@@ -137,10 +137,12 @@ class LearningRateScheduler:
             )
         # TODO: this overwrites the cosine scheduler for warmup (seems there are some global vars )
         # elif policy_cooldown == 'cosine' :
-        #   self.scheduler_cooldown = torch.optim.lr_scheduler.OneCycleLR( optimizer,
-        #                                                                  max_lr=lr_final_decay,
-        #                                                                  total_steps=n_steps_cooldown,
-        #                                                                  pct_start=0.0)
+        # self.scheduler_cooldown = torch.optim.lr_scheduler.OneCycleLR(
+        #     optimizer,
+        #     max_lr=lr_final_decay,
+        #     total_steps=n_steps_cooldown,
+        #     pct_start=0.0,
+        # )
         else:
             if n_steps_cooldown > 0:
                 assert "Unsupported cooldown policy for learning rate scheduler"
@@ -154,8 +156,8 @@ class LearningRateScheduler:
 
         # advance manually to step_contd (last_epoch parameter for schedulers is not working and
         # this is also more brittle with the different phases)
-        # optimizer.step() as required by torch; won't have a material effect since grads are zero at
-        # this point
+        # optimizer.step() as required by torch;
+        # won't have a material effect since grads are zero at this point
         if self.step_contd > 0:
             optimizer.step()
             for _ in range(step_contd):

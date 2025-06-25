@@ -31,7 +31,7 @@
         "domain": "WeatherGen",
         "module": "weathergen.train.trainer",
         "functions": [
-            "Trainer.evaluate",
+            "Trainer.inference",
             "Trainer.train",
             "Trainer.validate",
             "Trainer.compute_loss",

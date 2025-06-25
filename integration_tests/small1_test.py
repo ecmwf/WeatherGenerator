@@ -1,6 +1,7 @@
 """
 Small test for the Weather Generator.
-This test must run on a GPU machine. It performs a training and evaluation of the Weather Generator model.
+This test must run on a GPU machine.
+It performs a training and inference of the Weather Generator model.
 
 Command:
 uv run pytest  ./integration_tests/small1.py
@@ -14,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from weathergen import evaluate_from_args, train_with_args
+from weathergen import inference_from_args, train_with_args
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ def test_train(setup, test_run_id):
         f"{weathergen_home}/config/streams/streams_test/",
     )
 
-    evaluate_from_args(
+    inference_from_args(
         ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--epoch", "0"]
         + [
             "--from_run_id",

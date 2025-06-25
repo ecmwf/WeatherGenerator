@@ -101,7 +101,8 @@ def load_config(
 
     Args:
         private_home: Configuration file containing platform dependent information and secretes
-        from_run_id: Run id of the pretrained WeatherGenerator model to continue training or evaluate
+        from_run_id: Run id of the pretrained WeatherGenerator model
+        to continue training or inference
         epoch: epoch of the checkpoint to load. -1 indicates last checkpoint available.
         *overwrites: Additional overwrites from different sources
 
@@ -128,9 +129,15 @@ def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config
 
     Determining the run id should follow the following logic:
 
-    1. (default case): run train, train_continue or evaluate without any flags => generate a new run_id for this run.
-    2. (assign run_id): run train, train_continue or evaluate with --run_id <RUNID> flag => assign a run_id manually to this run. This is intend for outside tooling and should not be used manually.
-    3. (reuse run_id -> only for train_continue and evaluate): reuse the run_id from the run specified by --from_run_id <RUNID>. Since the run_id correct run_id is already loaded in the config nothing has to be assigned. This case will happen if --reuse_run_id is specified.
+    1. (default case): run train, train_continue or inference without any flags
+        => generate a new run_id for this run.
+    2. (assign run_id): run train, train_continue or inference with --run_id <RUNID> flag
+        => assign a run_id manually to this run.
+        This is intend for outside tooling and should not be used manually.
+    3. (reuse run_id -> only for train_continue and inference):
+        reuse the run_id from the run specified by --from_run_id <RUNID>.
+        Since the run_id correct run_id is already loaded in the config nothing has to be assigned.
+        This case will happen if --reuse_run_id is specified.
 
 
     Args:
@@ -153,7 +160,8 @@ def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config
         else:
             config.run_id = run_id
             _logger.info(
-                f"using assigned run_id: {config.run_id}. If you manually selected this run_id, this is an error."
+                f"using assigned run_id: {config.run_id}."
+                f" If you manually selected this run_id, this is an error."
             )
 
     return config
@@ -210,8 +218,8 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
 
     elif env_script_path.is_file():
         _logger.info(f"Loading private config from platform-env.py: {env_script_path}.")
-        # This code does many checks to ensure that any error message is surfaced. Since it is a process call,
-        # it can be hard to diagnose the error.
+        # This code does many checks to ensure that any error message is surfaced.
+        # Since it is a process call, it can be hard to diagnose the error.
         # TODO: eventually, put all this wrapper code in a separate function
         try:
             result_hpc = subprocess.run(
@@ -219,7 +227,10 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
             )
         except subprocess.CalledProcessError as e:
             _logger.error(
-                f"Error while running platform-env.py: {e} {e.stderr} {e.stdout} {e.output} {e.returncode}"
+                (
+                    "Error while running platform-env.py:",
+                    f" {e} {e.stderr} {e.stdout} {e.output} {e.returncode}",
+                )
             )
             raise
         if result_hpc.returncode != 0:
@@ -235,7 +246,8 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
     else:
         _logger.info(f"Could not find platform script at {env_script_path}")
         raise FileNotFoundError(
-            "Could not find private config. Please set the environment variable WEATHERGEN_PRIVATE_CONF or provide a path."
+            "Could not find private config. Please set the environment variable "
+            "WEATHERGEN_PRIVATE_CONF or provide a path."
         )
     private_cf = OmegaConf.load(private_home)
     private_cf["model_path"] = (
@@ -277,7 +289,8 @@ def load_streams(streams_directory: Path) -> list[Config]:
                 # will be further processed.
                 stream_config.name = stream_name
                 if stream_name in streams:
-                    msg = f"Duplicate stream name found: {stream_name}. Please ensure all stream names are unique."
+                    msg = f"Duplicate stream name found: {stream_name}."
+                    "Please ensure all stream names are unique."
                     raise ValueError(msg)
                 else:
                     streams[stream_name] = stream_config
