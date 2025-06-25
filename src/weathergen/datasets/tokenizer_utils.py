@@ -178,7 +178,7 @@ def tokenize_window_space(
     if len(source) < 2:
         return
 
-    # idx_ord_lens is length...
+    # idx_ord_lens is length is number of tokens per healpix cell
     idxs_ord, idxs_ord_lens, posr3 = hpy_splits(coords, hl, token_size, pad_tokens)
 
     # pad with zero at the beggining for token size padding
