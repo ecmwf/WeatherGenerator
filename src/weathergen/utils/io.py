@@ -1,4 +1,5 @@
 import dataclasses
+import functools
 import itertools
 import pathlib
 import typing
@@ -57,7 +58,7 @@ class OutputDataset:
 
     channels: list[str]
 
-    @property
+    @functools.cached_property
     def datapoints(self) -> NDArray[np.int_]:
         return np.arange(self.data.shape[0])
 
@@ -180,19 +181,19 @@ class ZarrIO:
             chunks = (CHUNK_N_SAMPLES, array.shape[1:])
             group.create_dataset(name, data=array, chunks=chunks)
 
-    @property
+    @functools.cached_property
     def samples(self) -> list[int]:
         """Query available samples in this zarr store."""
         return list(self.data_root.groups_keys())
 
-    @property
+    @functools.cached_property
     def streams(self) -> list[str]:
         """Query available streams in this zarr store."""
         # assume stream/samples are orthogonal => use first sample
         _, example_sample = next(self.data_root.groups())
         return list(example_sample.group_keys())
 
-    @property
+    @functools.cached_propertyself.datapoints
     def forecast_steps(self) -> list[int]:
         """Query available forecast steps in this zarr store."""
         # assume stream/samples/forecast_steps are orthogonal
@@ -230,15 +231,21 @@ class OutputBatchData:
     sample_start: int
     forecast_offset: int
 
-    def __post_init__(self):
-        self.samples = np.arange(len(self.sources)) + self.sample_start
-        self.fsteps = np.arange(len(self.targets)) + self.forecast_offset
+    @functools.cached_property
+    def samples(self):
+        """Continous indices of all samples accross all batches."""
+        return np.arange(len(self.sources)) + self.sample_start
+
+    @functools.cached_property
+    def forecast_steps(self):
+        """Indices of all forecast steps adjusted by the forecast offset"""
+        return np.arange(len(self.targets)) + self.forecast_offset
 
     def items(self) -> typing.Generator[ItemKey, None, None]:
         """Iterate over possible output items"""
         filtered_streams = (stream for stream in self.stream_names if stream != "")
         # TODO: filter for empty items?
-        for args in itertools.product(self.samples, self.fsteps, filtered_streams):
+        for args in itertools.product(self.samples, self.forecast_steps, filtered_streams):
             yield self.extract(ItemKey(*args))
 
     def extract(self, meta: ItemKey) -> OutputItem:
