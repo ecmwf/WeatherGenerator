@@ -36,46 +36,42 @@ class DataReaderObs(DataReaderBase):
         self.hrly_index = self.z["idx_197001010000_1"]
         self.colnames = self.data.attrs["colnames"]
 
-        # self.selected_colnames = self.colnames
-        # self.selected_cols_idx = np.arange(len(self.colnames))
-        idx = 0
-        for i, col in enumerate(reversed(self.colnames)):
-            idx = i
-            # if col[:9] == 'obsvalue_' :
-            if not (col[:4] == "sin_" or col[:4] == "cos_"):
-                break
-        self.selected_colnames = self.colnames[: len(self.colnames) - idx]
-        self.selected_cols_idx = np.arange(len(self.colnames))[: len(self.colnames) - idx]
+        data_colnames = [col for col in self.colnames if "obsvalue" in col]
+        data_idx = [i for i, col in enumerate(self.colnames) if "obsvalue" in col]
+
+        # determine source / target channels and corresponding idx using include and exclude lists
+
+        s_chs = stream_info.get("source")
+        s_chs_exclude = stream_info.get("source_exclude", [])
+
+        t_chs = stream_info.get("target")
+        t_chs_exclude = stream_info.get("target_exclude", [])
+
+        source_n_empty = len(s_chs) > 0 if s_chs is not None else True
+        assert source_n_empty, "source is empty; at least one channels must be present."
+        target_n_empty = len(t_chs) > 0 if t_chs is not None else True
+        assert target_n_empty, "target is empty; at least one channels must be present."
+
+        self.source_channels = self.select_channels(data_colnames, s_chs, s_chs_exclude)
+        self.source_idx = np.array([self.colnames.index(c) for c in self.source_channels])
+
+        self.target_channels = self.select_channels(data_colnames, t_chs, t_chs_exclude)
+        self.target_idx = np.array([self.colnames.index(c) for c in self.target_channels])
+
+        # determine idx for coords and geoinfos
+        self.coords_idx = [self.colnames.index("lat"), self.colnames.index("lon")]
+        self.geoinfo_idx = list(range(self.coords_idx[-1] + 1, data_idx[0]))
+        self.geoinfo_channels = [self.colnames[i] for i in self.geoinfo_idx]
+
+        # load additional properties (mean, var, obs_id)
+        self._load_properties()
+        self.mean = np.array(self.properties["means"])  # [data_idx]
+        self.stdev = np.sqrt(np.array(self.properties["vars"]))  # [data_idx])
+        self.mean_geoinfo = np.array(self.properties["means"])[self.geoinfo_idx]
+        self.stdev_geoinfo = np.sqrt(np.array(self.properties["vars"])[self.geoinfo_idx])
 
         # Create index for samples
         self._setup_sample_index()
-        # assert len(self.indices_start) == len(self.indices_end)
-
-        self._load_properties()
-
-        channels_idx = [i for i, col in enumerate(self.selected_colnames) if "obsvalue" in col]
-        self.data_offset = channels_idx[0]
-
-        self.source_idx = [i for i, col in enumerate(self.selected_colnames) if "obsvalue" in col]
-        self.source_idx = (np.array(self.source_idx) - channels_idx[0]).tolist()
-        self.source_channels = [self.selected_colnames[i] for i in self.source_idx]
-
-        self.target_idx = [i for i, col in enumerate(self.selected_colnames) if "obsvalue" in col]
-        self.target_idx = (np.array(self.target_idx) - channels_idx[0]).tolist()
-        self.target_channels = [self.selected_colnames[i] for i in self.target_idx]
-
-        for i, _ in enumerate(self.colnames):
-            idx = i
-            if self.colnames[i] == "lat" and self.colnames[i + 1] == "lon":
-                break
-        self.coords_idx = [i, i + 1]
-        self.geoinfo_idx = list(range(i + 2, channels_idx[0]))
-        self.geoinfo_channels = [self.selected_colnames[i] for i in self.geoinfo_idx]
-
-        self.mean = np.array(self.properties["means"])[channels_idx]
-        self.stdev = np.sqrt(np.array(self.properties["vars"])[channels_idx])
-        self.mean_geoinfo = np.array(self.properties["means"])[self.geoinfo_idx]
-        self.stdev_geoinfo = np.sqrt(np.array(self.properties["vars"])[self.geoinfo_idx])
 
         self.len = min(len(self.indices_start), len(self.indices_end))
 
@@ -83,24 +79,24 @@ class DataReaderObs(DataReaderBase):
     def length(self) -> int:
         return self.len
 
-    def select(self, cols: list[str] | None, cols_exclude: list[str] | None) -> None:
+    def select_channels(
+        self, colnames: list[str], cols_select: list[str] | None, cols_exclude: list[str] | None
+    ) -> None:
         """
         Allow user to specify which columns they want to access.
         Get functions only returned for these specified columns.
         """
-        if cols is not None:
-            self.selected_colnames = [
-                c
-                for c in self.colnames
-                if (
-                    np.array([c_sel in c for c_sel in cols]).any()
-                    and not np.array([c_nsel in c for c_nsel in cols_exclude]).any()
-                )
-            ]
-        else:
-            self.selected_colnames = self.colnames
+        selected_colnames = [
+            c
+            for c in colnames
+            if (
+                np.array([c_sel in c for c_sel in cols_select]).any()
+                if cols_select is not None
+                else True and not np.array([c_nsel in c for c_nsel in cols_exclude]).any()
+            )
+        ]
 
-        self.selected_cols_idx = np.array([self.colnames.index(c) for c in self.selected_colnames])
+        return selected_colnames
 
     def first_sample_with_data(self) -> int:
         """
@@ -146,11 +142,6 @@ class DataReaderObs(DataReaderBase):
 
         # TODO: move to ctor
         base_yyyymmddhhmm = 197001010000
-
-        # assert start > base_yyyymmddhhmm, (
-        #     f"Abort: ObsDataset sample start (yyyymmddhhmm)"
-        #     f"must be greater than {base_yyyymmddhhmm}. Current value: {start}"
-        # )
 
         # Derive new index based on hourly backbone index
         format_str = "%Y%m%d%H%M%S"
@@ -210,7 +201,6 @@ class DataReaderObs(DataReaderBase):
 
         self.properties["means"] = self.data.attrs["means"]
         self.properties["vars"] = self.data.attrs["vars"]
-        # self.properties["data_idxs"] = self.data.attrs["data_idxs"]
         self.properties["obs_id"] = self.data.attrs["obs_id"]
 
     @override
@@ -240,8 +230,7 @@ class DataReaderObs(DataReaderBase):
             else np.zeros((coords.shape[0], 0), np.float32)
         )
 
-        channels_idx = np.array(channels_idx)
-        data = self.data.oindex[start_row:end_row, self.data_offset + channels_idx]
+        data = self.data.oindex[start_row:end_row, channels_idx]
         datetimes = self.dt[start_row:end_row][:, 0]
 
         rdata = ReaderData(
