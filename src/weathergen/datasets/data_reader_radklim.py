@@ -35,22 +35,11 @@ class RadklimKerchunkReader(DataReaderTimestep):
     The reader handles temporal subsetting, lazy loading, and normalization.
     """
 
-    # Channels used for source and target data
-    source_channels: list[str] = ["RR"]
-    target_channels: list[str] = ["RR"]
-    geoinfo_channels: list[str] = []
-
-    # Channel indices
-    source_idx: list[int] = [0]
-    target_idx: list[int] = [0]
-    geoinfo_idx: list[int] = []
 
     def __init__(
         self,
         tw_handler: TimeWindowHandler,
         stream_info: dict,
-        *,
-        chunks: dict[str, Any] | None = None,
     ) -> None:
         """
         Construct RADKLIM data reader from Kerchunk reference and stats JSON.
@@ -69,23 +58,17 @@ class RadklimKerchunkReader(DataReaderTimestep):
         None
         """
         self._empty: bool = False
-
+        
+        # Load source and target channels from config
+        self.source_channels = stream_info.get("source")
+        self.target_channels = stream_info.get("target")
+        self.geoinfo_channels = stream_info.get("geoinfo")
+        
+        self.source_idx = list(range(len(self.source_channels)))
+        self.target_idx = list(range(len(self.target_channels)))
+        self.geoinfo_idx = list(range(len(self.geoinfo_channels)))
+        
         ref_path = Path(stream_info["referece_path"])
-        norm_path = Path(stream_info["stats_path"])
-
-        # Load normalization statistics
-        if not norm_path.exists():
-            raise FileNotFoundError(f"normalisation JSON not found: {norm_path}")
-
-        stats = json.loads(norm_path.read_text())
-        self.mean = np.asarray(stats.get("mean", []), dtype=np.float32)
-        self.stdev = np.asarray(stats.get("std", []), dtype=np.float32)
-        self.mean_geoinfo = np.asarray(stats.get("mean_geoinfo", []), dtype=np.float32)
-        self.stdev_geoinfo = np.asarray(stats.get("std_geoinfo", []), dtype=np.float32)
-
-        if len(self.mean) != len(self.source_channels):
-            raise ValueError("normalisation stats length does not match number of variables")
-
         # Load Kerchunk reference
         if not ref_path.exists():
             raise FileNotFoundError(f"Kerchunk reference JSON not found: {ref_path}")
@@ -114,7 +97,6 @@ class RadklimKerchunkReader(DataReaderTimestep):
 
         data_start = times_full[0]
         data_end = times_full[-1]
-
         super().__init__(tw_handler, stream_info, data_start, data_end, period)
 
         # If there is no overlap with the time window, exit early
@@ -128,10 +110,21 @@ class RadklimKerchunkReader(DataReaderTimestep):
 
         # Subset and optionally rechunk the dataset
         subset = ds_full[self.source_channels].isel(time=slice(self.start_idx, self.end_idx))
-        if chunks is not None:
-            subset = subset.chunk(chunks)
-        self.ds = subset
+        self.ds =  subset.chunk(stream_info.get("chunks", {})) if "chunks" in stream_info else subset
+     
+        norm_path = Path(stream_info["stats_path"])
+        if not norm_path.exists():
+            raise FileNotFoundError(f"normalisation JSON not found: {norm_path}")
 
+        stats = json.loads(norm_path.read_text())
+        self.mean = np.asarray(stats.get("mean", []), dtype=np.float32)
+        self.stdev = np.asarray(stats.get("std", []), dtype=np.float32)
+        self.mean_geoinfo = np.asarray(stats.get("mean_geoinfo", []), dtype=np.float32)
+        self.stdev_geoinfo = np.asarray(stats.get("std_geoinfo", []), dtype=np.float32)
+
+        if len(self.mean) != len(self.source_channels):
+            raise ValueError("normalisation stats length does not match number of variables")
+        
         # Load and flatten coordinate grid
         y1d = self.ds["y"].values.astype(np.float32)
         x1d = self.ds["x"].values.astype(np.float32)
@@ -151,6 +144,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
         ).astype(DType)
 
         self.num_steps_per_window = int(tw_handler.t_window_len / period)
+
 
     @override
     def init_empty(self) -> None:
@@ -192,6 +186,9 @@ class RadklimKerchunkReader(DataReaderTimestep):
         ReaderData
             Data window including coordinates, values, and timestamps
         """
+        if not channels_idx:
+            raise ValueError("channels_idx cannot be empty")
+        
         t_idxs_abs, dtr = self._get_dataset_idxs(idx)
 
         # Early return for empty or invalid request
@@ -201,7 +198,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
                 num_geo_fields=len(self.geoinfo_idx),
             )
 
-        # Convert global indices to local indices in dataset
+        # Shift from global to local time indices
         t_idxs_rel = t_idxs_abs - self.start_idx
         if np.any(t_idxs_rel < 0) or np.any(t_idxs_rel >= self.ds.sizes["time"]):
             return ReaderData.empty(
@@ -209,55 +206,44 @@ class RadklimKerchunkReader(DataReaderTimestep):
                 num_geo_fields=len(self.geoinfo_idx),
             )
 
-        # Slice window
+        # 2. Slice time window
         start, stop = int(t_idxs_rel[0]), int(t_idxs_rel[-1]) + 1
-        ds_win = self.ds.isel(time=slice(start, stop))
+        ds_win = self.ds.isel(time=slice(start, stop))  # (time, y, x, var)
 
-        # Stack into (time, y, x, var) format
-        arr4 = (
-            ds_win.to_array(dim="var")
-            .transpose("time", "y", "x", "var")
-            .values.astype(np.float32, copy=False)
-        )
-        nt, ny, nx, nvars = arr4.shape
+        # 3. Stack variables into one array: (t, y, x, var)
+        da = ds_win.to_array(dim="var").transpose("time", "y", "x", "var")
+        nt, ny, nx, nvars = da.shape
 
-        # Validate channel indices
-        if not channels_idx:
-            raise ValueError("channels_idx cannot be empty")
+        # 4. Validate channel indices
         if min(channels_idx) < 0 or max(channels_idx) >= nvars:
             raise IndexError("channels_idx out of bounds")
         if len(set(channels_idx)) != len(channels_idx):
             raise ValueError("channels_idx must be unique")
 
-        # Flatten spatial/temporal dimensions
-        flat_vars = arr4.reshape(-1, nvars)
+        # 5. Flatten spatial/temporal and select channels
+        flat_data = (
+            da.values.astype(np.float32, copy=False)  # (t, y, x, var)
+            .reshape(-1, nvars)[:, channels_idx]      # → (nt * ny * nx, len(channels_idx))
+        )
+
+        # 6. Expand coordinates and time axis
         coords = np.tile(self._base_coords, (nt, 1))
-        time_vals = ds_win["time"].values.astype("datetime64[ns]")
-        times = np.repeat(time_vals, self.points_per_slice)
-
-        # Apply nan filtering
-        valid = ~np.any(np.isnan(flat_vars[:, channels_idx]), axis=1)
-        if not np.any(valid):
-            return ReaderData.empty(
-                num_data_fields=len(channels_idx),
-                num_geo_fields=len(self.geoinfo_idx),
-            )
-
-        coords_sel = coords[valid]
-        data_sel = flat_vars[valid][:, channels_idx].astype(DType, copy=False)
-        times_sel = times[valid]
+        times = np.repeat(
+            ds_win["time"].values.astype("datetime64[ns]"),
+            self.points_per_slice,
+        )
 
         rdata = ReaderData(
-            coords=coords_sel,
-            geoinfos=np.zeros((coords_sel.shape[0], 0), dtype=DType),
-            data=data_sel,
-            datetimes=times_sel,
+            coords=coords,
+            geoinfos=np.zeros((coords.shape[0], 0), dtype=DType),  # RADKLIM has no geoinfo
+            data=flat_data,
+            datetimes=times,
         )
         check_reader_data(rdata, dtr)
         return rdata
-
-
+    
 def _clip_lat(lats: NDArray[np.floating]) -> NDArray[np.float32]:
+    
     """
     Clip latitudes to the range [-90, 90] and ensure periodicity.
     """
