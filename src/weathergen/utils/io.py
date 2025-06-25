@@ -18,7 +18,7 @@ DType: typing.TypeAlias = np.float32
 
 
 @dataclasses.dataclass
-class ItemMeta:
+class ItemKey:
     """Metadata to identify one output item."""
 
     sample: str
@@ -26,8 +26,8 @@ class ItemMeta:
     stream: str
 
     @property
-    def key(self):
-        """Unique identifyier for one output item."""
+    def path(self):
+        """Unique path within a hierarchy for one output item."""
         return f"{self.sample}/{self.stream}/{self.forecast_step}"
 
     @property
@@ -42,7 +42,7 @@ class OutputDataset:
     """Access source/target/prediction zarr data contained in one output item."""
 
     name: str
-    item: ItemMeta
+    item_key: ItemKey
 
     # (datapoints, channels, ens)
     data: zarr.Array
@@ -77,9 +77,9 @@ class OutputDataset:
             da.expand_dims(data, axis=(0, 1, 2)),
             dims=["sample", "stream", "forecast_step", "ipoint", "channel", "ens"],
             coords={
-                "sample": [self.item.sample],
-                "stream": [self.item.stream],
-                "forecast_step": [self.item.forecast_step],
+                "sample": [self.item_key.sample],
+                "stream": [self.item_key.stream],
+                "forecast_step": [self.item_key.forecast_step],
                 "ipoint": self.datapoints,
                 "channel": self.channels,
                 "valid_time": ("ipoint", times.astype("datetime64[ns]")),
@@ -99,15 +99,15 @@ class OutputItem:
         self.prediction = prediction
         self.source = source
 
-        self._meta = self.target.item
+        self._key = self.target.item_key
 
         self.datasets = [self.target, self.prediction]
 
-        if self._meta.with_source:
+        if self._key.with_source:
             if self.source:
                 self.datasets += self.source
             else:
-                msg = f"Missing source dataset for item: {self._meta.key}"
+                msg = f"Missing source dataset for item: {self._key.path}"
                 raise ValueError(msg)
 
 
@@ -131,17 +131,17 @@ class ZarrIO:
 
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
-        group = self._get_group(item._meta, create=True)
+        group = self._get_group(item._key, create=True)
         for dataset in item.datasets:
             self._write_dataset(group, dataset)
 
     def get_data(self, sample: int, stream: str, forecast_step: int) -> OutputItem:
         """Get datasets for the output item matching the arguments."""
-        meta = ItemMeta(sample, forecast_step, stream)
+        meta = ItemKey(sample, forecast_step, stream)
 
         return self.load_zarr(meta, self.data_root)
 
-    def load_zarr(self, meta: ItemMeta) -> OutputItem:
+    def load_zarr(self, meta: ItemKey) -> OutputItem:
         """Get datasets for a output item."""
         group = self._get_group(meta)
         datasets = {
@@ -151,14 +151,14 @@ class ZarrIO:
 
         return OutputItem(**datasets)
 
-    def _get_group(self, item: ItemMeta, create: bool = False) -> zarr.Group:
+    def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Group:
         if create:
-            group = self.data_root.create_group(item.key)
+            group = self.data_root.create_group(item.path)
         else:
             try:
-                group = self.data_root.get(item.key)
+                group = self.data_root.get(item.path)
             except KeyError as e:
-                msg = f"Zarr group: {item.key} has not been created."
+                msg = f"Zarr group: {item.path} has not been created."
                 raise FileNotFoundError(msg) from e
 
         return group
@@ -169,7 +169,7 @@ class ZarrIO:
         self._write_arrays(dataset_group, dataset)
 
     def _write_metadata(self, dataset_group: zarr.Group, dataset: OutputDataset):
-        dataset_group.attrs["item"] = dataclasses.asdict(dataset.item)
+        dataset_group.attrs["item"] = dataclasses.asdict(dataset.item_key)
         dataset_group.attrs["channels"] = dataset.channels
 
     def _write_arrays(self, dataset_group, dataset):
@@ -236,14 +236,14 @@ class OutputBatchData:
         self.samples = np.arange(len(self.sources)) + self.sample_start
         self.fsteps = np.arange(len(self.targets)) + self.forecast_offset
 
-    def items(self) -> typing.Generator[ItemMeta, None, None]:
+    def items(self) -> typing.Generator[ItemKey, None, None]:
         """Iterate over possible output items"""
         filtered_streams = (stream for stream in self.stream_names if stream != "")
         # TODO: filter for empty items?
         for args in itertools.product(self.samples, self.fsteps, filtered_streams):
-            yield self.extract(ItemMeta(*args))
+            yield self.extract(ItemKey(*args))
 
-    def extract(self, meta: ItemMeta) -> OutputItem:
+    def extract(self, meta: ItemKey) -> OutputItem:
         """Extract datasets from lists for one output item."""
         # adjust shifted values in ItemMeta
         sample = meta.sample - self.sample_start
