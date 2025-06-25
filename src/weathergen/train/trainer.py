@@ -13,8 +13,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.utils.data.distributed
 import tqdm
+from torch import Tensor
 from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import MixedPrecision, ShardingStrategy
@@ -29,7 +29,7 @@ from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
 from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.train_logger import TRAIN, VAL, TrainLogger
+from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.validation_io import write_validation
 
 _logger = logging.getLogger(__name__)
@@ -371,11 +371,11 @@ class Trainer(Trainer_Base):
         ctr_ftarget = 0
         loss = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
         # Create list storing losses for each stream
-        losses_all = {
+        losses_all: dict[str, Tensor] = {
             st.name: torch.zeros((len(st[str(stage) + "_target_channels"]), len(loss_fcts)))
             for st in self.cf.streams  # No nan here as later it's divided so any remaining 0s become nans
         }  # Create tensor for each stream
-        stddev_all = {
+        stddev_all: dict[str, Tensor] = {
             st.name: torch.zeros(len(stat_loss_fcts)) for st in self.cf.streams
         }  # Create tensor for each stream
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
@@ -488,8 +488,8 @@ class Trainer(Trainer_Base):
         # (with each having an expected loss of 1 for an uninitalized neural net)
         loss = loss / ctr_ftarget
 
-        losses_all.update((k, v / ctr_ftarget) for k, v in losses_all.items())
-        stddev_all.update((k, v / ctr_ftarget) for k, v in stddev_all.items())
+        losses_all = {k: v / ctr_ftarget for k, v in losses_all.items()}
+        stddev_all = {k: v / ctr_ftarget for k, v in stddev_all.items()}
 
         return (
             loss,
@@ -566,7 +566,7 @@ class Trainer(Trainer_Base):
 
             self.log_terminal(bidx, epoch)
             if bidx % log_interval == 0:
-                self.log()
+                self.log(TRAIN)
 
             # model checkpoint
             if bidx % self.checkpoint_freq == 0:
@@ -576,7 +576,7 @@ class Trainer(Trainer_Base):
 
         self.dataset.advance()
 
-    def _prepare_losses_for_logging(self):
+    def _prepare_losses_for_logging(self) -> tuple[float, float, float]:
         """
         Aggregates and prepares loss and standard deviation data for logging.
 
@@ -587,8 +587,8 @@ class Trainer(Trainer_Base):
             stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its averaged
                 per-channel standard deviation tensor.
         """
-        losses_all = {}
-        stddev_all = {}
+        losses_all: dict[str, Tensor] = {}
+        stddev_all: dict[str, Tensor] = {}
 
         real_loss = self.ddp_average(torch.tensor(self.loss_model_hist)).nanmean().item()
 
@@ -677,7 +677,7 @@ class Trainer(Trainer_Base):
 
                     pbar.update(self.cf.batch_size_validation)
 
-                self.log(val=True)
+                self.log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
@@ -728,13 +728,13 @@ class Trainer(Trainer_Base):
             config.save(self.cf, epoch)
 
     ###########################################
-    def log(self, val: bool = False):
+    def log(self, stage: Stage):
         """
         Logs training or validation metrics.
 
         Args:
-            val (bool, optional): If True, logs are treated as validation logs.
-                                If False (default), logs are treated as training logs.
+            stage: Stage Is it's VAL, logs are treated as validation logs.
+                        If TRAIN, logs are treated as training logs.
 
         Notes:
             - This method only executes logging on the main process (rank 0).
@@ -743,9 +743,9 @@ class Trainer(Trainer_Base):
         avg_loss, losses_all, stddev_all = self._prepare_losses_for_logging()
         samples = self.cf.istep * self.cf.batch_size * self.cf.num_ranks
 
-        if self.cf.rank == 0:
+        if is_root():
             # plain logger
-            if val:
+            if stage == VAL:
                 self.train_logger.add_val(samples, losses_all, stddev_all)
 
             elif self.cf.istep >= 0:
@@ -762,12 +762,12 @@ class Trainer(Trainer_Base):
             self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
     ###########################################
-    def log_terminal(self, bidx: int, epoch: int, val: bool = False):
+    def log_terminal(self, bidx: int, epoch: int):
         if bidx % self.print_freq == 0 and bidx > 0:
             # compute from last iteration
             avg_loss, losses_all, _ = self._prepare_losses_for_logging()
 
-            if self.cf.rank == 0:
+            if is_root():
                 # samples per sec
                 dt = time.time() - self.t_start
                 pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
