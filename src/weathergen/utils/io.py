@@ -5,7 +5,6 @@ import typing
 
 import dask as da
 import numpy as np
-import torch
 import xarray as xr
 import zarr
 from numpy.typing import NDArray
@@ -50,10 +49,10 @@ class OutputDataset:
     # (datapoints,)
     times: zarr.Array
 
-    # (datapoints, 2) => maybe more??
+    # (datapoints, 2)
     coords: zarr.Array
 
-    # (datapoints, ???)
+    # (datapoints, geoinfos) geoinfos are stream dependent => 0 for most gridded data
     geoinfo: zarr.Array | None
 
     channels: list[str]
@@ -205,18 +204,17 @@ class ZarrIO:
 class OutputBatchData:
     """Provide convenient access to adapt existing output data structures."""
 
-    # sample, stream, (datapoint, channel) => datapoints is accross all datasets per stream
-    sources: list[list[torch.Tensor]]
+    # sample, stream, tensor(datapoint, channel) => datapoints is accross all datasets per stream
+    sources: list[list]
 
-    # fstep, stream, redundant dim (size 1), (sample x datapoint, channel)
-    targets: list[list[list[torch.Tensor]]]
+    # fstep, stream, redundant dim (size 1), tensor(sample x datapoint, channel)
+    targets: list[list[list]]
 
-    # fstep, stream, redundant dim (size 1), (ens, sample x datapoint, channel)
-    predictions: list[list[list[torch.Tensor]]]
+    # fstep, stream, redundant dim (size 1), tensor(ens, sample x datapoint, channel)
+    predictions: list[list[list]]
 
-    # fstep, stream, (sample x datapoint, 105)
-    # => 105 (documentation StreamDatat.add_target) ???
-    targets_coords: list[list[torch.Tensor]]
+    # fstep, stream, tensor(sample x datapoint, 2 + geoinfos)
+    targets_coords: list[list]
 
     # fstep, stream, (sample x datapoint)
     targets_times: list[list[NDArray]]
