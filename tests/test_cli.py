@@ -8,13 +8,13 @@ DATE_FORMATS = ["2022-12-01T00:00:00", "20221201", "2022-12-01", "12.01.2022"]
 EXPECTED_DATE_STR = "202212010000"
 MODEL_LOADING_ARGS = ["from_run_id", "epoch", "reuse_run_id"]
 GENERAL_ARGS = ["config", "private_config", "options", "run_id"]
-MODEL_LOADING_PARSERS = [cli.get_continue_parser(), cli.get_evaluate_parser()]
+MODEL_LOADING_PARSERS = [cli.get_continue_parser(), cli.get_inference_parser()]
 BASIC_ARGLIST = ["--from_run_id", "test123"]
 
 
 @pytest.fixture
-def evaluate_parser():
-    return cli.get_evaluate_parser()
+def inference_parser():
+    return cli.get_inference_parser()
 
 
 def test_private_config_is_path():
@@ -60,21 +60,21 @@ def test_model_loading_has_params(parser):
 
 
 @pytest.mark.parametrize("streams", [["ERA5", "FOO"], ["BAR"]])
-def test_evaluate_analysis_streams_output(evaluate_parser, streams):
+def test_inference_analysis_streams_output(inference_parser, streams):
     arglist = BASIC_ARGLIST + ["--analysis_streams_output", *streams]
-    args = evaluate_parser.parse_args(arglist)
+    args = inference_parser.parse_args(arglist)
 
     assert args.analysis_streams_output == streams
 
 
-def test_evaluate_analysis_streams_output_empty(evaluate_parser):
+def test_inference_analysis_streams_output_empty(inference_parser):
     arglist = BASIC_ARGLIST + ["--analysis_streams_output", *[]]
 
     with pytest.raises(SystemExit):
-        evaluate_parser.parse_args(arglist)
+        inference_parser.parse_args(arglist)
 
 
-def test_evaluate_defaults(evaluate_parser):
+def test_inference_defaults(inference_parser):
     default_args = [
         "start_date",
         "end_date",
@@ -83,11 +83,11 @@ def test_evaluate_defaults(evaluate_parser):
         "epoch",
         "private_config",
     ]
-    default_values = [evaluate_parser.get_default(arg) for arg in default_args]
+    default_values = [inference_parser.get_default(arg) for arg in default_args]
     # apply custom type
     default_values[:2] = [cli._format_date(date) for date in default_values[:2]]
 
-    args = evaluate_parser.parse_args(BASIC_ARGLIST)
+    args = inference_parser.parse_args(BASIC_ARGLIST)
 
     assert all(
         [
@@ -98,24 +98,24 @@ def test_evaluate_defaults(evaluate_parser):
 
 
 @pytest.mark.parametrize("date", DATE_FORMATS)
-def test_evaluate_start_date(evaluate_parser, date):
-    args = evaluate_parser.parse_args(BASIC_ARGLIST + ["--start_date", date])
+def test_inference_start_date(inference_parser, date):
+    args = inference_parser.parse_args(BASIC_ARGLIST + ["--start_date", date])
 
     assert args.start_date == EXPECTED_DATE_STR
 
 
-def test_evaluate_start_date_invalid(evaluate_parser):
+def test_inference_start_date_invalid(inference_parser):
     with pytest.raises(SystemExit):
-        evaluate_parser.parse_args(BASIC_ARGLIST + ["--start_date", "foobar"])
+        inference_parser.parse_args(BASIC_ARGLIST + ["--start_date", "foobar"])
 
 
 @pytest.mark.parametrize("date", DATE_FORMATS)
-def test_evaluate_end_date(evaluate_parser, date):
-    args = evaluate_parser.parse_args(BASIC_ARGLIST + ["--end_date", date])
+def test_inference_end_date(inference_parser, date):
+    args = inference_parser.parse_args(BASIC_ARGLIST + ["--end_date", date])
 
     assert args.end_date == EXPECTED_DATE_STR
 
 
-def test_evaluate_end_date_invalid(evaluate_parser):
+def test_inference_end_date_invalid(inference_parser):
     with pytest.raises(SystemExit):
-        evaluate_parser.parse_args(BASIC_ARGLIST + ["--end_date", "foobar"])
+        inference_parser.parse_args(BASIC_ARGLIST + ["--end_date", "foobar"])

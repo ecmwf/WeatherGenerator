@@ -8,7 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 """
-The entry point for training and evaluating weathergen-atmo
+The entry point for training and inference weathergen-atmo
 """
 
 import pdb
@@ -22,24 +22,24 @@ from weathergen.train.trainer import Trainer
 from weathergen.utils.logger import init_loggers
 
 
-def evaluate():
+def inference():
     # By default, arguments from the command line are read.
-    evaluate_from_args(sys.argv[1:])
+    inference_from_args(sys.argv[1:])
 
 
-def evaluate_from_args(argl: list[str]):
+def inference_from_args(argl: list[str]):
     """
-    Evaluation function for WeatherGenerator model.
-    Entry point for calling the evaluation code from the command line.
+    Inference function for WeatherGenerator model.
+    Entry point for calling the inference code from the command line.
 
     When running integration tests, the arguments are directly provided.
     """
-    parser = cli.get_evaluate_parser()
+    parser = cli.get_inference_parser()
     args = parser.parse_args(argl)
 
     init_loggers()
 
-    evaluate_overwrite = dict(
+    inference_overwrite = dict(
         shuffle=False,
         start_date_val=args.start_date,
         end_date_val=args.end_date,
@@ -54,7 +54,7 @@ def evaluate_from_args(argl: list[str]):
         args.from_run_id,
         args.epoch,
         *args.config,
-        evaluate_overwrite,
+        inference_overwrite,
         cli_overwrite,
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
@@ -62,7 +62,7 @@ def evaluate_from_args(argl: list[str]):
     cf.run_history += [(args.from_run_id, cf.istep)]
 
     trainer = Trainer()
-    trainer.evaluate(cf, args.from_run_id, args.epoch)
+    trainer.inference(cf, args.from_run_id, args.epoch)
 
 
 ####################################################################################################
