@@ -46,14 +46,14 @@ class ModelParams(torch.nn.Module):
         len_token_seq = 1024
         position = torch.arange(0, len_token_seq).unsqueeze(1)
         div = torch.exp(torch.arange(0, dim_embed, 2) * -(math.log(len_token_seq) / dim_embed))
-        pe_embed = torch.zeros(len_token_seq, dim_embed, dtype=torch.float16)
+        pe_embed = torch.zeros(len_token_seq, dim_embed, dtype=torch.bfloat16)
         pe_embed[:, 0::2] = torch.sin(position * div[: pe_embed[:, 0::2].shape[1]])
         pe_embed[:, 1::2] = torch.cos(position * div[: pe_embed[:, 1::2].shape[1]])
         self.pe_embed = torch.nn.Parameter(pe_embed, requires_grad=False)
 
         dim_embed = cf.ae_global_dim_embed
         pe = torch.zeros(
-            self.num_healpix_cells, cf.ae_local_num_queries, dim_embed, dtype=torch.float16
+            self.num_healpix_cells, cf.ae_local_num_queries, dim_embed, dtype=torch.bfloat16
         )
         xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2) / dim_embed
         pe[..., 0::2] = 0.5 * torch.sin(torch.outer(8 * torch.arange(cf.ae_local_num_queries), xs))
@@ -223,7 +223,7 @@ class Model(torch.nn.Module):
 
             # embedding network for coordinates
             if etc["net"] == "linear":
-                self.embed_target_coords.append(torch.nn.Linear(dim_coord_in, dims_embed[0]))
+                self.embed_target_coords.append(torch.nn.Linear(dim_coord_in, dims_embed[0], bias=False))
             elif etc["net"] == "mlp":
                 self.embed_target_coords.append(
                     MLP(
@@ -427,7 +427,7 @@ class Model(torch.nn.Module):
         )
         offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
         tokens_all = torch.empty(
-            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=torch.float16, device="cuda"
+            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=torch.bfloat16, device="cuda"
         )
 
         for _, sb in enumerate(streams_data):

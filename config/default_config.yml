@@ -1,4 +1,7 @@
 streams_directory: "./config/streams/streams_anemoi/"
+# streams_directory: "./config/streams/streams_umsciwro/"
+# streams_directory: "./config/streams/streams_era5_split/"
+# streams_directory: "./config/streams/streams_mixed/"
 
 embed_orientation: "channels"
 embed_local_coords: True
@@ -8,13 +11,13 @@ embed_unembed_mode: "block"
 
 target_cell_local_prediction: True
 
-ae_local_dim_embed: 2048
+ae_local_dim_embed: 1024
 ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
 
-ae_local_num_queries: 2
+ae_local_num_queries: 1
 ae_local_queries_per_cell: False
 ae_adapter_num_heads: 16
 ae_adapter_embed: 128
@@ -23,7 +26,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 10
+ae_global_num_blocks: 8
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -85,7 +88,7 @@ shuffle: True
 
 lr_scaling_policy: "sqrt"
 lr_start: 0.000001
-lr_max: 0.00003
+lr_max: 0.00005
 lr_final_decay: 0.000001
 lr_final: 0.0
 lr_steps_warmup: 256

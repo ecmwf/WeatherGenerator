@@ -79,7 +79,7 @@ def encode_times_target(times, time_win) -> torch.tensor:
     time_tensor[..., 3] = np.cos(time_tensor[..., 3] / (12.0 * 3600.0) * 2.0 * np.pi)
     time_tensor[..., 4] = np.sin(time_tensor[..., 4] / (12.0 * 3600.0) * 2.0 * np.pi)
 
-    return time_tensor
+    return time_tensor + 0.5
 
 
 def hpy_cell_splits(coords: torch.tensor, hl: int):

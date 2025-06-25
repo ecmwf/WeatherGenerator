@@ -83,7 +83,7 @@ class StreamEmbedTransformer(torch.nn.Module):
             self.embed = torch.nn.Linear(self.dim_in, self.dim_embed)
 
             if self.unembed_mode == "full":
-                self.ln_final = norm(num_channels * self.dim_embed)
+                self.ln_final = norm(num_channels * self.dim_embed, eps=1e-03)
                 self.unembed = torch.nn.Linear(
                     num_channels * self.dim_embed,
                     self.num_tokens * self.dim_out - embed_size_centroids,
@@ -104,7 +104,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                     #     ) for _ in range(num_channels)
                     # ]
                 )
-                self.ln_final = torch.nn.ModuleList([norm(dim_embed) for _ in range(num_channels)])
+                self.ln_final = torch.nn.ModuleList([norm(dim_embed, eps=1e-03) for _ in range(num_channels)])
 
             else:
                 assert False
@@ -123,7 +123,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                 self.dim_embed,
                 self.num_tokens * ((self.dim_out - embed_size_centroids) // token_size),
             )
-            self.ln_final = norm(dim_out)
+            self.ln_final = norm(dim_out, eps=1e-03)
             self.forward = self.forward_columns
 
             # TODO: factorization when sqrt is not int
