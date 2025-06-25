@@ -126,6 +126,7 @@ class DataReaderAnemoi(DataReaderTimestep):
     @override
     def init_empty(self) -> None:
         super().init_empty()
+        self.ds = None
         self.len = 0
 
     @override
