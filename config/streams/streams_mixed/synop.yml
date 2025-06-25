@@ -6,11 +6,7 @@
 Surface Combined :
   type : obs
   filenames : ['observations-ea-ofb-0001-1979-2023-combined-surface-v2.zarr']
-  loss_weight : 1.0 #0.550954
-  # channel_weight : [2.2208, 1.98572, 0.117425, 0.108154, 0.191999, 14.0987]
-  source_obsvalues : [null]
-  target_obsvalues : [null]
-  diagnostic : False
+  loss_weight : 1.0
   masking_rate : 0.6
   masking_rate_none : 0.05
   token_size : 64
