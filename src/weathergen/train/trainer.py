@@ -578,7 +578,7 @@ class Trainer(Trainer_Base):
 
                     # evaluate model
                     with torch.autocast(
-                        device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
+                        device_type="cuda", dtype=torch.bfloat16, enabled=cf.with_mixed_precision
                     ):
                         preds = self.ddp_model(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
