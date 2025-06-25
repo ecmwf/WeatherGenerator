@@ -373,7 +373,7 @@ class Trainer(Trainer_Base):
         # Create list storing losses for each stream
         losses_all: dict[str, Tensor] = {
             st.name: torch.zeros((len(st[str(stage) + "_target_channels"]), len(loss_fcts)))
-            for st in self.cf.streams  # No nan here as later it's divided so any remaining 0s become nans
+            for st in self.cf.streams  # No nan here as it's divided so any remaining 0 become nan
         }  # Create tensor for each stream
         stddev_all: dict[str, Tensor] = {
             st.name: torch.zeros(len(stat_loss_fcts)) for st in self.cf.streams
@@ -582,10 +582,10 @@ class Trainer(Trainer_Base):
 
         Returns:
             real_loss (float): The averaged scalar loss used for backpropagation.
-            losses_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its averaged
-                per-channel loss tensor.
-            stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its averaged
-                per-channel standard deviation tensor.
+            losses_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
+                averaged per-channel loss tensor.
+            stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
+                averaged per-channel standard deviation tensor.
         """
         losses_all: dict[str, Tensor] = {}
         stddev_all: dict[str, Tensor] = {}
