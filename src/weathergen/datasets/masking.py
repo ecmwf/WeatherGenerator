@@ -97,14 +97,6 @@ class Masker:
         else:
             assert False, f"Unknown masking strategy: {self.masking_strategy}"
 
-        # NOTE: might get rid of this!
-        # Ensure the mask is not degenerate (all True or all False) if there's more than one token.
-        #if num_tokens > 1:
-        #    if flat_mask.all():
-        #        flat_mask[self.rng.integers(low=0, high=num_tokens)] = False
-        #    elif not flat_mask.any():
-        #        flat_mask[self.rng.integers(low=0, high=num_tokens)] = True
-
         # Split the flat mask to match the structure of the tokenized data (list of lists)
         # This will be perm_sel, as a class attribute, used to mask the target data.
         split_indices = np.cumsum(token_lens)[:-1]
