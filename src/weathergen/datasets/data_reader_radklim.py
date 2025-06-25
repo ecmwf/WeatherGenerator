@@ -268,7 +268,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
             return ReaderData.empty(len(channels_idx), len(self.geoinfo_idx))
 
         start, stop = int(t_idxs_rel[0]), int(t_idxs_rel[-1]) + 1
-        ds_win = self.ds.isel(time=slice(start, stop))
+        ds_win = self.ds.isel(time=slice(start, stop))  # (time, y, x, var)
 
         # DATA & COORD PREP
         nt = ds_win.sizes["time"]
