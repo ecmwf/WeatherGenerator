@@ -190,9 +190,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             assert self.input_window_steps == 1, msg
         else:
             assert False, f"Unsupported training mode: {cf.training_mode}"
-        # NOTE: commented these out...
-        self.masking_rate = cf.masking_rate
-        self.masking_rate_sampling = cf.masking_rate_sampling
 
         self.epoch = 0
 
@@ -339,10 +336,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                             (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                                 stream_info,
-                                # NOTE: two unused arguments in TokenizerMasking,
-                                # still used in TokenizerForecast?
-                                self.masking_rate,
-                                self.masking_rate_sampling,
                                 torch.from_numpy(rdata.coords),
                                 torch.from_numpy(rdata.geoinfos),
                                 torch.from_numpy(rdata.data),
