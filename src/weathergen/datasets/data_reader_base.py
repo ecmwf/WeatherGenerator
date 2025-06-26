@@ -594,6 +594,8 @@ class DataReaderTimestep(DataReaderBase):
         super().__init__(tw_handler, stream_info)
         self.data_start_time = data_start_time or tw_handler.t_start
         self.data_end_time = data_end_time
+        assert period is not None
+        assert period > 0, period
         self.period = period
 
     def _get_dataset_idxs(self, idx: TIndex) -> tuple[NDArray[np.int32], DTRange]:
