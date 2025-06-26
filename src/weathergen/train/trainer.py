@@ -197,9 +197,13 @@ class Trainer(Trainer_Base):
             mp = (
                 None
                 if not cf.with_mixed_precision
+<<<<<<< HEAD
                 else MixedPrecision(
                     param_dtype=self.mixed_precision_dtype, cast_forward_inputs=True
                 )
+=======
+                else MixedPrecision(param_dtype=self.mixed_precision_dtype, cast_forward_inputs=True)
+>>>>>>> d1ed02e (Make the attention dtype and norm eps configurable)
             )
             mp = None
             self.ddp_model = FSDP(
@@ -523,9 +527,13 @@ class Trainer(Trainer_Base):
 
             # evaluate model
             with torch.autocast(
+<<<<<<< HEAD
                 device_type="cuda",
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
+=======
+                device_type="cuda", dtype=self.mixed_precision_dtype, enabled=cf.with_mixed_precision
+>>>>>>> d1ed02e (Make the attention dtype and norm eps configurable)
             ):
                 preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
 

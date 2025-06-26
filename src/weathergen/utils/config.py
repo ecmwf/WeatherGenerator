@@ -18,6 +18,8 @@ import torch
 import yaml
 from omegaconf import DictConfig, OmegaConf
 
+import torch
+
 from weathergen.train.utils import get_run_id
 
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent  # TODO use importlib for resources
