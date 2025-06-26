@@ -101,7 +101,7 @@ lr_policy_warmup: "cosine"
 lr_policy_decay: "linear"
 lr_policy_cooldown: "linear"
 
-grad_clip: 5.0
+grad_clip: 1.0
 weight_decay: 0.1
 norm_type: "LayerNorm"
 nn_module: "te"
