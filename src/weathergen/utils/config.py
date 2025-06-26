@@ -114,7 +114,7 @@ def load_config(
     private_config = _load_private_conf(private_home)
     overwrite_configs: list[Config] = []
     for overwrite in overwrites:
-        if isinstance(overwrite, (str, Path)):
+        if isinstance(overwrite, (str | Path)):
             # Because of the way we pass extra configs through slurm,
             # all the paths may be concatenated with ":"
             p = str(overwrite).split(":")
