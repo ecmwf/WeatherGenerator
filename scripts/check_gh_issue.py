@@ -32,7 +32,8 @@ if __name__ == "__main__":
     parser.add_argument("pr", type=str, help="Pull request number")
     args = parser.parse_args()
     
-    pr = args.pr
+    pr: str = args.pr
+    pr = pr.split('/')[0]
     r = requests.get(f"https://github.com/{repo}/pull/{pr}")
     soup = BeautifulSoup(r.text, 'html.parser')
     issueForm = soup.find_all("form", { "aria-label": re.compile('Link issues')})
