@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+<<<<<<< HEAD
 RADKLIM:
   type: radklim
   name: RADKLIM
@@ -44,3 +45,36 @@ RADKLIM:
   pred_head:
     ens_size: 1
     num_layers: 1
+=======
+RADKLIM :
+  type : netcdf
+  referece_path : "/p/scratch/weatherai/data/npp-atms-unpacked/temp_radklim/radklim_output_kerchunk/radklim_full_dataset.json"
+  stats_path : "/p/scratch/weatherai/data/npp-atms-unpacked/temp_radklim/radklim_output_kerchunk/dummy_radklim_stats.json" 
+  filenames:
+    - "/p/data1/slmet/met_data/dwd/radklim-rw/netcdf/orig_grid"
+  source : ['RR']
+  target : ['RR']
+  geoinfo: [] 
+  loss_weight : 1.
+  diagnostic : False
+  masking_rate : 0.6
+  masking_rate_none : 0.05
+  token_size : 32
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 8
+    dim_embed : 512
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 512
+  target_readout :
+    type : 'obs_value'  # token or obs_value
+    num_layers : 2
+    num_heads : 4
+    # sampling_rate : 0.2
+  pred_head :
+    ens_size : 1
+    num_layers : 1
+>>>>>>> c810978 (Changes)
