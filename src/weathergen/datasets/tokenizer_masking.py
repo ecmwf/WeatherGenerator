@@ -149,7 +149,6 @@ class TokenizerMasking:
         time_win: tuple,
         normalizer,  # dataset
     ):
-
         init_loggers()
         token_size = stream_info["token_size"]
         is_diagnostic = stream_info.get("diagnostic", False)
@@ -189,11 +188,8 @@ class TokenizerMasking:
             torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in tokenized_data
         ]
 
-
         # Use the masker to get source tokens and the selection mask for the target
-        source_tokens_cells = self.masker.mask_source(
-            tokenized_data
-        )
+        source_tokens_cells = self.masker.mask_source(tokenized_data)
 
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
 
@@ -229,7 +225,6 @@ class TokenizerMasking:
         time_win: tuple,
         normalizer,  # dataset
     ):
-        
         token_size = stream_info["token_size"]
         tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
 
@@ -268,9 +263,7 @@ class TokenizerMasking:
             times,
         )
 
-        target_tokens = self.masker.mask_target(
-            target_tokens_cells, coords, geoinfos, source
-        )
+        target_tokens = self.masker.mask_target(target_tokens_cells, coords, geoinfos, source)
 
         target_tokens_lens = [len(t) for t in target_tokens]
         if torch.tensor(target_tokens_lens).sum() == 0:

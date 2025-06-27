@@ -12,8 +12,6 @@ class Masker:
         masking_rate (float): The base rate at which tokens are masked.
         masking_strategy (str): The strategy used for masking (e.g., "random",
         "block", MORE TO BE IMPLEMENTED...).
-        TO BE IMPLEMENTED: masking_combination (str): The strategy for combining masking
-        strategies through training (e.g., "sequential").
         masking_rate_sampling (bool): Whether to sample the masking rate from a distribution.
         rng (np.random.Generator): A random number generator.
 
@@ -23,7 +21,6 @@ class Masker:
         self,
         masking_rate: float,
         masking_strategy: str,
-        # masking_combination: str,
         masking_rate_sampling: bool,
         # NOTE: adding strategy_kwargs to allow for strategy-specific configurations
         # e.g., for healpix strategy, we might need hl_data and hl_mask parameters
@@ -33,18 +30,17 @@ class Masker:
     ):
         self.masking_rate = masking_rate
         self.masking_strategy = masking_strategy
-        # self.masking_combination = masking_combination
         self.masking_rate_sampling = masking_rate_sampling
 
         # NOTE: strategy_kwargs is a dictionary that can hold any additional parameters
         self.strategy_kwargs = strategy_kwargs or {}
-        
+
         # Initialize the random number generator.
         worker_info = torch.utils.data.get_worker_info()
-        div_factor = (worker_info.id + 1) if worker_info is not None else 1        
+        div_factor = (worker_info.id + 1) if worker_info is not None else 1
         self.rng = np.random.default_rng(int(time.time() / div_factor))
 
-        # Initialize the mask, set to None initially, 
+        # Initialize the mask, set to None initially,
         # until it is generated in mask_source.
         self.perm_sel: list[np.typing.NDArray] = None
 
@@ -72,7 +68,7 @@ class Masker:
         # If there are no tokens, return empty lists.
         if num_tokens == 0:
             return tokenized_data, []
-        
+
         # Set the masking rate.
         # Use a local variable rate, so we keep the instance variable intact.
         rate = self.masking_rate
@@ -86,7 +82,6 @@ class Masker:
             )
 
         # Handle the special case where all tokens are masked
-        # NOTE: not going to handle different streams correctly.
         if rate == 1.0:
             token_lens = [len(t) for t in tokenized_data]
             self.perm_sel = [np.ones(l, dtype=bool) for l in token_lens]
@@ -143,8 +138,8 @@ class Masker:
             list[torch.Tensor]: The target data with masked tokens, one tensor per cell.
         """
 
-        # check that self.perm_sel is set with an assert statement
-        assert hasattr(self, 'perm_sel'), "Masker.perm_sel must be set (in mask_source) before calling mask_target."
+        # check that self.perm_sel is set, and not None with an assert statement
+        assert self.perm_sel is not None, "Masker.perm_sel must be set before calling mask_target."
 
         # The following block handles cases
         # where a cell has no target tokens,
