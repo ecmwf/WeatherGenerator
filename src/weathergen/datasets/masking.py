@@ -26,13 +26,13 @@ class Masker:
         self.masking_rate = masking_rate
         self.masking_strategy = masking_strategy
         self.masking_rate_sampling = masking_rate_sampling
-        
+
         # Initialize the random number generator.
         worker_info = torch.utils.data.get_worker_info()
-        div_factor = (worker_info.id + 1) if worker_info is not None else 1        
+        div_factor = (worker_info.id + 1) if worker_info is not None else 1
         self.rng = np.random.default_rng(int(time.time() / div_factor))
 
-        # Initialize the mask, set to None initially, 
+        # Initialize the mask, set to None initially,
         # until it is generated in mask_source.
         self.perm_sel: list[np.typing.NDArray] = None
 
@@ -57,7 +57,7 @@ class Masker:
         # If there are no tokens, return empty lists.
         if num_tokens == 0:
             return tokenized_data, []
-        
+
         # Set the masking rate.
         # Use a local variable rate, so we keep the instance variable intact.
         rate = self.masking_rate
