@@ -27,7 +27,8 @@ class Masker:
         masking_rate_sampling: bool,
         # NOTE: adding strategy_kwargs to allow for strategy-specific configurations
         # e.g., for healpix strategy, we might need hl_data and hl_mask parameters
-        strategy_kwargs: dict = None, # ### IMPROVEMENT: Added for strategy-specific config ###
+        # or for different strategies, we might need different parameters?
+        strategy_kwargs: dict = None, 
 
     ):
         self.masking_rate = masking_rate
@@ -106,7 +107,7 @@ class Masker:
                 flat_mask[start_index : start_index + block_size] = True
 
         elif self.masking_strategy == "healpix":
-            flat_mask = self._generate_healpix_mask(token_lens, rate)          
+            flat_mask = self._generate_healpix_mask(token_lens, rate)           
 
         else:
             assert False, f"Unknown masking strategy: {self.masking_strategy}"
@@ -182,15 +183,16 @@ class Masker:
         Returns:
             np.ndarray: A flat boolean array (the token-level mask).
         """
-        print("\n--- Generating HEALPix Mask ---")
         
+        print("Generating HEALPix mask...")
+
         # NOTE: hl_data and hl_mask are expected to be provided in strategy_kwargs
         #hl_data = self.strategy_kwargs.get("hl_data")
         #hl_mask = self.strategy_kwargs.get("hl_mask")
 
         # NOTE: just for demonstration purposes, using hardcoded values
         hl_data = 5
-        hl_mask = 0
+        hl_mask = 1
 
         if hl_data is None or hl_mask is None:
             assert False, "HEALPix levels hl_data and hl_mask must be provided in strategy_kwargs."
