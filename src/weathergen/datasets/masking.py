@@ -181,7 +181,7 @@ class Masker:
         
         print("Generating HEALPix mask...")
 
-        # NOTE: hl_data and hl_mask are expected to be provided in strategy_kwargs
+        # NOTE: hl_data and hl_mask are expected to be provided in strategy_kwargs?
         #hl_data = self.strategy_kwargs.get("hl_data")
         #hl_mask = self.strategy_kwargs.get("hl_mask")
 
