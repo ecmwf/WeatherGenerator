@@ -12,8 +12,6 @@ class Masker:
         masking_rate (float): The base rate at which tokens are masked.
         masking_strategy (str): The strategy used for masking (e.g., "random",
         "block", MORE TO BE IMPLEMENTED...).
-        TO BE IMPLEMENTED: masking_combination (str): The strategy for combining masking
-        strategies through training (e.g., "sequential").
         masking_rate_sampling (bool): Whether to sample the masking rate from a distribution.
         rng (np.random.Generator): A random number generator.
 
@@ -23,12 +21,10 @@ class Masker:
         self,
         masking_rate: float,
         masking_strategy: str,
-        # masking_combination: str,
         masking_rate_sampling: bool,
     ):
         self.masking_rate = masking_rate
         self.masking_strategy = masking_strategy
-        # self.masking_combination = masking_combination
         self.masking_rate_sampling = masking_rate_sampling
         
         # Initialize the random number generator.
