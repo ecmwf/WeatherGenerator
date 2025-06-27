@@ -46,4 +46,4 @@ jobs:
 
       - name: Check PR is linked to an issue
       # Send the PR number to the script, which will check if it is linked to an issue.
-        run: ./scripts/check_pr_issue_link.sh $GITHUB_REF_NAME
+        run: scripts/check_gh_issue.py $GITHUB_REF_NAME
