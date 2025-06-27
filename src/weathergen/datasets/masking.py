@@ -71,7 +71,6 @@ class Masker:
             )
 
         # Handle the special case where all tokens are masked
-        # NOTE: not going to handle different streams correctly.
         if rate == 1.0:
             token_lens = [len(t) for t in tokenized_data]
             self.perm_sel = [np.ones(l, dtype=bool) for l in token_lens]
