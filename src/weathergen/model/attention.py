@@ -437,7 +437,7 @@ class MultiCrossAttentionHead_Varlen_SlicedQ(torch.nn.Module):
         #  ensure these are 4D tensors as required for flash attention
         s = [x_q.shape[0], self.num_heads, self.dim_head_proj]
         qs = [
-            self.lnorm_q(head_proj(x_q_i).reshape(s)).to(torch.bfloat16)
+            self.lnorm_q(head_proj(x_q_i).reshape(s)).to(self.dtype)
             for head_proj, x_q_i in zip(self.proj_heads_q, x_q.transpose(1, 0), strict=False)
         ]
         s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
