@@ -209,40 +209,40 @@ class Masker:
         level_diff = hl_data - hl_mask
         num_children_per_parent = 4**level_diff
 
-        print(f"[HEALPix Setup] Data Level (hl_data): {hl_data} ({num_data_cells} cells)")
-        print(f"[HEALPix Setup] Mask Level (hl_mask): {hl_mask} ({num_parent_cells} parent cells)")
-        print(f"[HEALPix Setup] Each parent cell at L{hl_mask} contains {num_children_per_parent} child cells at L{hl_data}.")
+        #print(f"[HEALPix Setup] Data Level (hl_data): {hl_data} ({num_data_cells} cells)")
+        #print(f"[HEALPix Setup] Mask Level (hl_mask): {hl_mask} ({num_parent_cells} parent cells)")
+        #print(f"[HEALPix Setup] Each parent cell at L{hl_mask} contains {num_children_per_parent} child cells at L{hl_data}.")
 
         # Choose parent cells to mask based on the specified rate.
         num_parents_to_mask = int(np.round(rate * num_parent_cells))
         if num_parents_to_mask == 0:
-            print("[HEALPix Masking] Masking rate is too low. No parent cells were selected to be masked.")
+            #print("[HEALPix Masking] Masking rate is too low. No parent cells were selected to be masked.")
             return np.zeros(sum(token_lens), dtype=bool)
 
         # Mask, and print about what we are doing.
         parent_ids_to_mask = self.rng.choice(num_parent_cells, num_parents_to_mask, replace=False)
-        print(f"[HEALPix Masking] Based on rate {rate:.2f}, selected {num_parents_to_mask}/{num_parent_cells} parent cells to mask.")
-        print(f"[HEALPix Masking] Parent IDs selected: {parent_ids_to_mask}")
+        #print(f"[HEALPix Masking] Based on rate {rate:.2f}, selected {num_parents_to_mask}/{num_parent_cells} parent cells to mask.")
+        #print(f"[HEALPix Masking] Parent IDs selected: {parent_ids_to_mask}")
 
         # Now determine which child cells (and their tokens) are masked.
-        # This is a crucial step: we first determine which *cells* are masked.
+        # This is cells.
         cell_mask = np.zeros(num_data_cells, dtype=bool)
-        print("[HEALPix Masking] Mapping parent cells to child cell indices:")
+        #print("[HEALPix Masking] Mapping parent cells to child cell indices:")
         for parent_id in parent_ids_to_mask:
             start_child_idx = parent_id * num_children_per_parent
             end_child_idx = start_child_idx + num_children_per_parent
-            print(f"  - Parent {parent_id} (L{hl_mask}) -> Child indices {start_child_idx}-{end_child_idx-1} (L{hl_data})")
+            #print(f"  - Parent {parent_id} (L{hl_mask}) -> Child indices {start_child_idx}-{end_child_idx-1} (L{hl_data})")
             cell_mask[start_child_idx:end_child_idx] = True
 
         # Make the cell-level mask flat and apply it to the token lengths.
         # np.repeat. It repeats each element of `cell_mask`
         # a number of times specified by `token_lens`.
-        print("[HEALPix Masking] Expanding cell-level mask to token-level mask.")
+        #print("[HEALPix Masking] Expanding cell-level mask to token-level mask.")
         flat_mask = np.repeat(cell_mask, token_lens)
         
         # Print the number of masked tokens and the total number of tokens.
         num_masked_tokens = np.sum(flat_mask)
         total_tokens = len(flat_mask)
-        print(f"[HEALPix Masking] Complete. Masked {num_masked_tokens}/{total_tokens} tokens ({num_masked_tokens/total_tokens:.2%}).\n")
+        #print(f"[HEALPix Masking] Complete. Masked {num_masked_tokens}/{total_tokens} tokens ({num_masked_tokens/total_tokens:.2%}).\n")
 
         return flat_mask
