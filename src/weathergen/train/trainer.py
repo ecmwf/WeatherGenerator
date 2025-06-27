@@ -15,8 +15,6 @@ import numpy as np
 import torch
 import torch.utils.data.distributed
 import tqdm
-import weathergen.train.loss as losses
-import weathergen.utils.config as config
 from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
@@ -26,6 +24,9 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 from torch.distributed.fsdp.wrap import (
     size_based_auto_wrap_policy,  # default_auto_wrap_policy,
 )
+
+import weathergen.train.loss as losses
+import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.train.lr_scheduler import LearningRateScheduler
@@ -113,9 +114,7 @@ class Trainer(Trainer_Base):
         targets_num_channels = self.dataset_val.get_targets_num_channels()
         targets_coords_size = self.dataset_val.get_targets_coords_size()
 
-        self.model = Model(
-            cf, sources_size, targets_num_channels, targets_coords_size
-        ).create()
+        self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         self.model = self.model.to(self.devices[0])
         self.model.load(run_id_trained, epoch)
         _logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
@@ -169,9 +168,7 @@ class Trainer(Trainer_Base):
             "num_workers": cf.loader_num_workers,
             "pin_memory": True,
         }
-        self.data_loader = torch.utils.data.DataLoader(
-            self.dataset, **loader_params, sampler=None
-        )
+        self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset_val, **loader_params, sampler=None
         )
@@ -180,14 +177,10 @@ class Trainer(Trainer_Base):
         targets_num_channels = self.dataset.get_targets_num_channels()
         targets_coords_size = self.dataset.get_targets_coords_size()
 
-        self.model = Model(
-            cf, sources_size, targets_num_channels, targets_coords_size
-        ).create()
+        self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         # load model if specified
         if run_id_contd is not None:
-            _logger.info(
-                f"Continuing run with id={run_id_contd} at epoch {epoch_contd}."
-            )
+            _logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
             self.model.load(run_id_contd, epoch_contd)
             _logger.info(f"Loaded model id={run_id_contd}.")
 
@@ -295,9 +288,7 @@ class Trainer(Trainer_Base):
 
         # get function handles for loss function terms
         self.loss_fcts = [[getattr(losses, name), w] for name, w in cf.loss_fcts]
-        self.loss_fcts_val = [
-            [getattr(losses, name), w] for name, w in cf.loss_fcts_val
-        ]
+        self.loss_fcts_val = [[getattr(losses, name), w] for name, w in cf.loss_fcts_val]
 
         # recover epoch when continuing run
         if self.num_ranks_original is None:
@@ -307,8 +298,7 @@ class Trainer(Trainer_Base):
                 len(self.dataset) // (self.num_ranks_original * cf.batch_size)
             ) * cf.batch_size
             epoch_base = int(
-                self.cf.istep
-                / (min(len_per_rank, cf.samples_per_epoch) * self.num_ranks_original)
+                self.cf.istep / (min(len_per_rank, cf.samples_per_epoch) * self.num_ranks_original)
             )
 
         # torch.autograd.set_detect_anomaly(True)
@@ -378,18 +368,14 @@ class Trainer(Trainer_Base):
                     torch.cat([t[i].target_coords_raw[fstep] for t in streams_data])
                     for i in range(len(self.cf.streams))
                 ]
-                for fstep in range(
-                    forecast_offset, forecast_offset + forecast_steps + 1
-                )
+                for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
             ]
             targets_times_raw_rt = [
                 [
                     np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
                     for i in range(len(self.cf.streams))
                 ]
-                for fstep in range(
-                    forecast_offset, forecast_offset + forecast_steps + 1
-                )
+                for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
             ]
 
         ctr_ftarget = 0
@@ -412,19 +398,13 @@ class Trainer(Trainer_Base):
                 # set obs_loss_weight = 1. when not specified
                 obs_loss_weight = si["loss_weight"] if "loss_weight" in si else 1.0
                 channel_loss_weight = (
-                    si["channel_weight"]
-                    if "channel_weight" in si
-                    else np.ones(num_channels)
+                    si["channel_weight"] if "channel_weight" in si else np.ones(num_channels)
                 )
                 # in validation mode, always unweighted loss is computed
                 obs_loss_weight = 1.0 if stage == VAL else obs_loss_weight
-                channel_loss_weight = (
-                    np.ones(num_channels) if stage == VAL else channel_loss_weight
-                )
+                channel_loss_weight = np.ones(num_channels) if stage == VAL else channel_loss_weight
 
-                tok_spacetime = (
-                    si["tokenize_spacetime"] if "tokenize_spacetime" in si else False
-                )
+                tok_spacetime = si["tokenize_spacetime"] if "tokenize_spacetime" in si else False
 
                 if target.shape[0] > 0 and pred.shape[0] > 0:
                     # extract data/coords and remove token dimension if it exists
@@ -440,9 +420,7 @@ class Trainer(Trainer_Base):
                     for j, (loss_fct, w) in enumerate(loss_fcts):
                         # compute per channel loss
                         # val_uw is unweighted loss for logging
-                        val = torch.tensor(
-                            0.0, device=self.devices[0], requires_grad=True
-                        )
+                        val = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
                         val_uw = 0.0
                         ctr_chs = 0.0
 
@@ -490,10 +468,7 @@ class Trainer(Trainer_Base):
                         val_uw = val_uw / ctr_chs if (ctr_chs > 0) else val_uw
 
                         losses_all[j, i_obs] = val_uw
-                        if (
-                            self.cf.loss_fcts[j][0] == "stats"
-                            or self.cf.loss_fcts[j][0] == "kcrps"
-                        ):
+                        if self.cf.loss_fcts[j][0] == "stats" or self.cf.loss_fcts[j][0] == "kcrps":
                             stddev_all[i_obs] = pred[:, mask_nan].std(0).mean().item()
                         # ignore NaNs so that training can continue even if one pred-net diverges
                         loss = loss + (
@@ -509,12 +484,8 @@ class Trainer(Trainer_Base):
                         dn_data = self.dataset_val.denormalize_target_channels
 
                         f32 = torch.float32
-                        preds_all[fstep][i_obs] += [
-                            dn_data(i_obs, pred.to(f32)).detach().cpu()
-                        ]
-                        targets_all[fstep][i_obs] += [
-                            dn_data(i_obs, target.to(f32)).detach().cpu()
-                        ]
+                        preds_all[fstep][i_obs] += [dn_data(i_obs, pred.to(f32)).detach().cpu()]
+                        targets_all[fstep][i_obs] += [dn_data(i_obs, target.to(f32)).detach().cpu()]
 
         if loss == 0.0:
             # streams_data[i] are samples in batch
@@ -559,18 +530,14 @@ class Trainer(Trainer_Base):
             forecast_steps = batch[-1]
             batch = self.batch_to_device(batch)
 
-            losses_all = (
-                torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
-            )
+            losses_all = torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
             stddev_all = torch.zeros(len(cf.streams)) * torch.nan
 
             # evaluate model
             with torch.autocast(
                 device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
             ):
-                preds = self.ddp_model(
-                    self.model_params, batch, cf.forecast_offset, forecast_steps
-                )
+                preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
 
                 loss, _ = self.compute_loss(
                     self.loss_fcts,
@@ -587,9 +554,7 @@ class Trainer(Trainer_Base):
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(
-                self.ddp_model.parameters(), max_norm=cf.grad_clip
-            )
+            torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), max_norm=cf.grad_clip)
 
             # optimizer step
             self.grad_scaler.step(self.optimizer)
@@ -634,10 +599,7 @@ class Trainer(Trainer_Base):
                     forecast_steps = batch[-1]
                     batch = self.batch_to_device(batch)
 
-                    losses_all = (
-                        torch.ones((len(self.loss_fcts_val), len(cf.streams)))
-                        * torch.nan
-                    )
+                    losses_all = torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
                     stddev_all = torch.zeros(len(cf.streams)) * torch.nan
 
                     # evaluate model
@@ -712,16 +674,12 @@ class Trainer(Trainer_Base):
                 if self.cf.rank == 0 and self.cf.istep >= 0:
                     loss_dict = {}
                     for j, (lname, _) in enumerate(cf.loss_fcts_val):
-                        loss_dict[f"validation {lname}"] = torch.nanmean(
-                            losses_all[j]
-                        ).item()
-                    loss_dict["validation std_dev"] = torch.nanmean(
-                        stddev_all.mean()
-                    ).item()
+                        loss_dict[f"validation {lname}"] = torch.nanmean(losses_all[j]).item()
+                    loss_dict["validation std_dev"] = torch.nanmean(stddev_all.mean()).item()
                     for i_obs, rt in enumerate(cf.streams):
-                        loss_dict[
-                            "validation {}".format(rt["name"].replace(",", ""))
-                        ] = float(losses_all[0, i_obs])
+                        loss_dict["validation {}".format(rt["name"].replace(",", ""))] = float(
+                            losses_all[0, i_obs]
+                        )
 
                     # add data to plain logger
                     samples = cf.istep * cf.batch_size * cf.num_ranks
@@ -734,9 +692,7 @@ class Trainer(Trainer_Base):
                         flush=True,
                     )
                     for i_obs, rt in enumerate(cf.streams):
-                        print(
-                            "{}".format(rt["name"]) + f" : {losses_all[0, i_obs]:0.4E}"
-                        )
+                        print("{}".format(rt["name"]) + f" : {losses_all[0, i_obs]:0.4E}")
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
@@ -790,12 +746,8 @@ class Trainer(Trainer_Base):
     def log(self, bidx):
         log_interval = self.cf.train_log.log_interval
         if bidx % log_interval == 0:
-            l_avg = self.ddp_average(
-                torch.nanmean(torch.stack(self.losses_hist), axis=0)
-            )
-            stddev_avg = self.ddp_average(
-                torch.nanmean(torch.stack(self.stddev_hist), axis=0)
-            )
+            l_avg = self.ddp_average(torch.nanmean(torch.stack(self.losses_hist), axis=0))
+            stddev_avg = self.ddp_average(torch.nanmean(torch.stack(self.stddev_hist), axis=0))
             samples = self.cf.istep * self.cf.batch_size * self.cf.num_ranks
 
             if self.cf.rank == 0:
@@ -805,8 +757,8 @@ class Trainer(Trainer_Base):
                     "lr": self.lr_scheduler.get_lr(),
                 }
                 for i_obs, rt in enumerate(self.cf.streams):
-                    loss_dict["training {}".format(rt["name"].replace(",", ""))] = (
-                        float(l_avg[0, i_obs])
+                    loss_dict["training {}".format(rt["name"].replace(",", ""))] = float(
+                        l_avg[0, i_obs]
                     )
 
                 # plain logger
