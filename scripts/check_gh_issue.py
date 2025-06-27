@@ -47,6 +47,6 @@ if __name__ == "__main__":
     print(f"Found {len(issues)} linked issues.")
     print("\n".join(issues))
     if not issues:
-        print(f"No linked issues found for PR {pr}.")
+        print(msg)
         exit(1)
 
