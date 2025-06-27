@@ -12,6 +12,7 @@ Through this, it can be used for a wide-range of applications.
 
 More details coming soon. Please open an issue if you are interested in using the model.
 
+
 <hr>
 
 <p align="center">
