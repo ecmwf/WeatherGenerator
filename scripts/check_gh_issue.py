@@ -19,11 +19,17 @@ import re
 
 repo = "ecmwf/WeatherGenerator"
 
-msg_template = """"This pull request {pr} does not have a linked issue.
+msg_template = """This pull request {pr} does not have a linked issue.
 Please link it to an issue in the repository {repo} before merging.
 The easiest way to do this is to add a comment with the issue number, like this:
 Fixes #1234
-This will automatically link the issue to the pull request."""
+This will automatically link the issue to the pull request.
+
+If you just want to reference an issue without closing it, you can use:
+Refs #1234
+
+See https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue
+"""
 
 
 if __name__ == "__main__":
