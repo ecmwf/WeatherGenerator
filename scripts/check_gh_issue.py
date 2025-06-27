@@ -28,15 +28,16 @@ This will automatically link the issue to the pull request."""
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Check GitHub PR for linked issues.")
     parser.add_argument("pr", type=str, help="Pull request number")
     args = parser.parse_args()
-    
+
     pr: str = args.pr
-    pr = pr.split('/')[0]
+    pr = pr.split("/")[0]
     r = requests.get(f"https://github.com/{repo}/pull/{pr}")
-    soup = BeautifulSoup(r.text, 'html.parser')
-    issueForm = soup.find_all("form", { "aria-label": re.compile('Link issues')})
+    soup = BeautifulSoup(r.text, "html.parser")
+    issueForm = soup.find_all("form", {"aria-label": re.compile("Link issues")})
     msg = msg_template.format(pr=pr, repo=repo)
 
     if not issueForm:
@@ -50,4 +51,3 @@ if __name__ == "__main__":
     if not issues:
         print(msg)
         exit(1)
-
