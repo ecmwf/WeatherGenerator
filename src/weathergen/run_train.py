@@ -169,9 +169,8 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
 if __name__ == "__main__":
     # Entry point for slurm script.
-    # Check whether --from_run_id is "None".
-    if sys.argv[-1] == "None":
-        sys.argv = sys.argv[:3]
-        train()
-    else:
+    # Check whether --from_run_id is in arguments.
+    if "--from_run_id" in sys.argv:
         train_continue()
+    else:
+        train()
