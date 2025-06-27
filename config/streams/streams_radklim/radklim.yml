@@ -11,6 +11,8 @@ RADKLIM :
   type : netcdf
   referece_path : "/p/scratch/weatherai/data/npp-atms-unpacked/temp_radklim/radklim_output_kerchunk/radklim_full_dataset.json"
   stats_path : "/p/scratch/weatherai/data/npp-atms-unpacked/temp_radklim/radklim_output_kerchunk/dummy_radklim_stats.json" 
+  filenames:
+    - "/p/data1/slmet/met_data/dwd/radklim-rw/netcdf/orig_grid"
   source : ['RR']
   target : ['RR']
   geoinfo: [] 
