@@ -123,8 +123,8 @@ class Masker:
             list[torch.Tensor]: The target data with masked tokens, one tensor per cell.
         """
 
-        # check that self.perm_sel is set with an assert statement
-        assert hasattr(self, 'perm_sel'), "Masker.perm_sel must be set (in mask_source) before calling mask_target."
+        # check that self.perm_sel is set, and not None with an assert statement
+        assert self.perm_sel is not None, "Masker.perm_sel must be set before calling mask_target."
 
         # The following block handles cases
         # where a cell has no target tokens,
