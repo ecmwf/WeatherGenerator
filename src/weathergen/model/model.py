@@ -181,7 +181,7 @@ class Model(torch.nn.Module):
         ###############
 
         # embed coordinates yielding one query token for each target token
-        dropout_rate = 0.1
+        dropout_rate = cf.embed_dropout_rate
         self.embed_target_coords = torch.nn.ModuleList()
         self.target_token_engines = torch.nn.ModuleList()
         self.pred_adapter_kv = torch.nn.ModuleList()

@@ -8,6 +8,7 @@ embed_local_coords: True
 embed_centroids_local_coords: False
 embed_size_centroids: 0
 embed_unembed_mode: "block"
+embed_dropout_rate: 0.1
 
 target_cell_local_prediction: True
 
