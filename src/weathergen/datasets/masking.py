@@ -25,7 +25,7 @@ class Masker:
         # NOTE: adding strategy_kwargs to allow for strategy-specific configurations
         # e.g., for healpix strategy, we might need hl_data and hl_mask parameters
         # or for different strategies, we might need different parameters?
-        strategy_kwargs: dict = None, 
+        strategy_kwargs: dict, 
 
     ):
         self.masking_rate = masking_rate
