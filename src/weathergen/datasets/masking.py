@@ -73,7 +73,7 @@ class Masker:
         # Handle the special case where all tokens are masked
         if rate == 1.0:
             token_lens = [len(t) for t in tokenized_data]
-            self.perm_sel = [np.ones(l, dtype=bool) for l in token_lens]
+            self.perm_sel = [np.ones(tl, dtype=bool) for tl in token_lens]
             source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
             return source_data
 
@@ -111,7 +111,8 @@ class Masker:
     ) -> list[torch.Tensor]:
         """
         Applies the permutation selection mask to the tokenized data to create the target data.
-        Handles cases where a cell has no target tokens by returning an empty tensor of the correct shape.
+        Handles cases where a cell has no target tokens by returning an empty tensor of the correct
+        shape.
 
         Args:
             target_tokens_cells (list[list[torch.Tensor]]): List of lists of tensors for each cell.
