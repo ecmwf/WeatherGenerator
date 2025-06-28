@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import time
 import warnings
 from functools import partial
 
@@ -15,6 +14,7 @@ import astropy_healpix as hp
 import numpy as np
 import torch
 
+from weathergen.datasets.masking import Masker
 from weathergen.datasets.tokenizer_utils import (
     arc_alpha,
     encode_times_source,
@@ -32,11 +32,13 @@ from weathergen.utils.logger import init_loggers
 
 
 class TokenizerMasking:
-    def __init__(self, healpix_level: int):
+    def __init__(self, healpix_level: int, seed: int, masker: Masker):
         ref = torch.tensor([1.0, 0.0, 0.0])
 
         self.hl_source = healpix_level
         self.hl_target = healpix_level
+
+        self.masker = masker
 
         self.num_healpix_cells_source = 12 * 4**self.hl_source
         self.num_healpix_cells_target = 12 * 4**self.hl_target
@@ -121,26 +123,37 @@ class TokenizerMasking:
             .to(torch.float32)
         )
 
-        worker_info = torch.utils.data.get_worker_info()
-        div_factor = (worker_info.id + 1) if worker_info is not None else 1
-        self.rng = np.random.default_rng(int(time.time() / div_factor))
+        # ensure that the seed is sufficiently large so that the div below does not lead to
+        # aliasing
+        self.rng_seed = seed if seed > 16384 else seed * 16384
+        self._reinit_rng()
 
         self.size_time_embedding = 6
 
+    def _reinit_rng(self) -> None:
+        """
+        Reinitialize rng
+        """
+        worker_info = torch.utils.data.get_worker_info()
+        div_factor = (worker_info.id + 1) if worker_info is not None else 1
+        self.rng = np.random.default_rng(int(self.rng_seed / div_factor))
+
     def get_size_time_embedding(self) -> int:
-        """Get size of time embedding"""
+        """
+        Get size of time embedding
+        """
         return self.size_time_embedding
 
     def reset(self) -> None:
-        worker_info = torch.utils.data.get_worker_info()
-        div_factor = (worker_info.id + 1) if worker_info is not None else 1
-        self.rng = np.random.default_rng(int(time.time() / div_factor))
+        """
+        Reset state after epoch
+        """
+        self.rng_seed *= 2
+        self._reinit_rng()
 
     def batchify_source(
         self,
         stream_info: dict,
-        masking_rate: float,
-        masking_rate_sampling: bool,
         coords: np.array,
         geoinfos: np.array,
         source: np.array,
@@ -152,18 +165,6 @@ class TokenizerMasking:
         token_size = stream_info["token_size"]
         is_diagnostic = stream_info.get("diagnostic", False)
         tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
-
-        cur_masking_rate = 0.0
-        if masking_rate > 0.0:
-            # adjust if there's a per-stream masking rate
-            cur_masking_rate = stream_info.get("masking_rate", masking_rate)
-            # mask either patches or entire stream
-            if masking_rate_sampling:
-                cur_masking_rate = np.clip(
-                    np.abs(self.rng.normal(loc=cur_masking_rate, scale=1.0 / (2.5 * np.pi))),
-                    0.0,
-                    1.0,
-                )
 
         tokenize_window = partial(
             tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
@@ -177,17 +178,17 @@ class TokenizerMasking:
             enc_time=encode_times_source,
         )
 
-        source_tokens_cells = torch.tensor([])
-        source_centroids = torch.tensor([])
-        source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
-        self.perm_sel = []
+        self.token_size = token_size
 
-        # return empty
-        if is_diagnostic or source.shape[1] == 0 or len(source) < 2 or cur_masking_rate == 1.0:
+        # return empty if there is no data or we are in diagnostic mode
+        if is_diagnostic or source.shape[1] == 0 or len(source) < 2:
+            source_tokens_cells = torch.tensor([])
+            source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
+            source_centroids = torch.tensor([])
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
-        # TODO: properly set stream_id; don't forget to normalize
-        source_tokens_cells = tokenize_window(
+        # tokenize all data first
+        tokenized_data = tokenize_window(
             0,
             coords,
             geoinfos,
@@ -195,28 +196,13 @@ class TokenizerMasking:
             times,
         )
 
-        source_tokens_cells = [
-            torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in source_tokens_cells
+        tokenized_data = [
+            torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in tokenized_data
         ]
-        source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
 
-        # perform masking globally by forgetting cells temporarily
-        mask = self.rng.uniform(0, 1, source_tokens_lens.sum().item()) < cur_masking_rate
+        # Use the masker to get source tokens and the selection mask for the target
+        source_tokens_cells = self.masker.mask_source(tokenized_data)
 
-        # ensure that masking is not degenerate i.e. it is not all true or false
-        if not mask.any():
-            mask[self.rng.integers(low=0, high=len(mask))] = True
-        if mask.all():
-            mask[self.rng.integers(low=0, high=len(mask))] = False
-
-        split_lens = np.cumsum(source_tokens_lens)[:-1]
-        self.perm_sel = np.split(mask, split_lens)
-        self.token_size = token_size
-
-        # select unmasked tokens for network input
-        source_tokens_cells = [
-            c[~p] for c, p in zip(source_tokens_cells, self.perm_sel, strict=True)
-        ]
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
 
         if source_tokens_lens.sum() > 0:
@@ -231,11 +217,12 @@ class TokenizerMasking:
             source_means_lens = [len(s) for s in source_means]
             # merge and split to vectorize computations
             source_means = torch.cat(source_means)
-            # TODO: precompute also source_means_r3 and then just cat
             source_centroids = torch.cat(
                 [source_means.to(torch.float32), r3tos2(source_means).to(torch.float32)], -1
             )
             source_centroids = torch.split(source_centroids, source_means_lens)
+        else:
+            source_centroids = torch.tensor([])
 
         return (source_tokens_cells, source_tokens_lens, source_centroids)
 
@@ -257,7 +244,7 @@ class TokenizerMasking:
         target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
 
         # target is empty
-        if len(self.perm_sel) == 0:
+        if len(self.masker.perm_sel) == 0:
             return (target_tokens, target_coords, torch.tensor([]), torch.tensor([]))
 
         # identity function
@@ -280,7 +267,6 @@ class TokenizerMasking:
         )
 
         # tokenize
-        # TODO: properly set stream_id; don't forget to normalize
         target_tokens_cells = tokenize_window(
             0,
             coords,
@@ -289,16 +275,8 @@ class TokenizerMasking:
             times,
         )
 
-        # select masked tokens for network input
-        # TODO: implement sampling rate target
-        target_tokens = [
-            (
-                torch.cat([c if p else torch.tensor([]) for c, p in zip(cc, pp, strict=True)])
-                if len(cc) > 0
-                else torch.tensor(cc)
-            )
-            for cc, pp in zip(target_tokens_cells, self.perm_sel, strict=True)
-        ]
+        target_tokens = self.masker.mask_target(target_tokens_cells, coords, geoinfos, source)
+
         target_tokens_lens = [len(t) for t in target_tokens]
         if torch.tensor(target_tokens_lens).sum() == 0:
             return (torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([]))
