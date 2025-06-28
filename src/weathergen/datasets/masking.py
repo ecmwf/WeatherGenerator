@@ -73,10 +73,11 @@ class Masker:
                 1.0,
             )
 
-        _logger.warning(
-            "masking_rate is 0. This will result in an empty target. The sample will be skipped."
-            + "If this occurs repeatedtly the masking settings likely need to be revised."
-        )
+        if rate == 0.0:
+            _logger.warning(
+                "masking_rate is 0. This will result in empty target. The sample will be skipped. "
+                + "If this occurs repeatedtly the masking settings likely need to be revised."
+            )
 
         # Handle the special case where all tokens are masked
         if rate == 1.0:
