@@ -322,7 +322,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # for all sources for current stream
                     for _, ds in enumerate(stream_ds):
                         # source window (of potentially multi-step length)
-                        # TODO: Kacper is using this -- cannot so easily remove
                         rdata: ReaderData = ds.get_source(idx)
 
                         if rdata.is_empty():
@@ -429,9 +428,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
             )
         # ensure the tokenizers use different seeds
-        self.tokenizer.reset()
-
-        # ensure the tokenizers use different seeds. TODO: why double??
         self.tokenizer.reset()
 
         return iter_start, iter_end
