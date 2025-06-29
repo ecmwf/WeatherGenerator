@@ -580,7 +580,9 @@ class Trainer(Trainer_Base):
 
         self.dataset.advance()
 
-    def _prepare_losses_for_logging(self) -> tuple[float, float, float]:
+    def _prepare_losses_for_logging(
+        self,
+    ) -> tuple[float, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         """
         Aggregates and prepares loss and standard deviation data for logging.
 
