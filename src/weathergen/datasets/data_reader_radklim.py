@@ -17,6 +17,8 @@ import fsspec
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
+import logging
+_logger = logging.getLogger(__name__)
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
