@@ -1,7 +1,10 @@
+import logging
 import time
 
 import numpy as np
 import torch
+
+_logger = logging.getLogger(__name__)
 
 
 class Masker:
@@ -78,6 +81,12 @@ class Masker:
                 np.abs(self.rng.normal(loc=rate, scale=1.0 / (2.5 * np.pi))),
                 0.0,
                 1.0,
+            )
+
+        if rate == 0.0:
+            _logger.warning(
+                "masking_rate is 0. This will result in empty target. The sample will be skipped. "
+                + "If this occurs repeatedtly the masking settings likely need to be revised."
             )
 
         # Handle the special case where all tokens are masked

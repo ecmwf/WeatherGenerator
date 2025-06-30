@@ -79,12 +79,7 @@ masking_rate_sampling: False
 # sample a subset of all target points, useful e.g. to reduce memory requirements
 sampling_rate_target: 1.0
 # include a masking strategy here, currently only supporting "random" and "block"
-masking_strategy: "healpix"
-
-# this strategy_kwargs is a dictionary that can hold any additional parameters
-# for the masking strategy, e.g. for healpix strategy, we might need hl_data
-# and hl_mask parameters, or for different strategies, we might need different parameters
-strategy_kwargs: {"hl_data": 5, "hl_mask": 0}
+masking_strategy: "random"
 
 num_epochs: 24
 samples_per_epoch: 4096

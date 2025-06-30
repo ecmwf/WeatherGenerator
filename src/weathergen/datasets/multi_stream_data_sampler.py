@@ -180,12 +180,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.num_healpix_cells_target: int = 12 * 4**self.healpix_level_target
 
         if cf.training_mode == "forecast":
-            self.tokenizer = TokenizerForecast(cf.healpix_level)
+            self.tokenizer = TokenizerForecast(cf.healpix_level, cf.data_loader_rng_seed)
         elif cf.training_mode == "masking":
+<<<<<<< HEAD
             masker = Masker(
                 cf.masking_rate, cf.masking_strategy, cf.masking_rate_sampling, cf.strategy_kwargs
             )
             self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
+=======
+            masker = Masker(cf.masking_rate, cf.masking_strategy, cf.masking_rate_sampling)
+            self.tokenizer = TokenizerMasking(cf.healpix_level, cf.data_loader_rng_seed, masker)
+>>>>>>> origin/develop
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
             msg = "masked token modeling does not support self.input_window_steps > 1; "
             msg += "increase window length"
@@ -324,7 +329,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # for all sources for current stream
                     for _, ds in enumerate(stream_ds):
                         # source window (of potentially multi-step length)
-                        # TODO: Kacper is using this -- cannot so easily remove
                         rdata: ReaderData = ds.get_source(idx)
 
                         if rdata.is_empty():
@@ -431,9 +435,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
             )
         # ensure the tokenizers use different seeds
-        self.tokenizer.reset()
-
-        # ensure the tokenizers use different seeds. TODO: why double??
         self.tokenizer.reset()
 
         return iter_start, iter_end
