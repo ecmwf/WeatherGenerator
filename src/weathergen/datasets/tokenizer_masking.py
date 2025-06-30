@@ -183,7 +183,7 @@ class TokenizerMasking:
         # return empty if there is no data or we are in diagnostic mode
         if is_diagnostic or source.shape[1] == 0 or len(source) < 2:
             source_tokens_cells = torch.tensor([])
-            source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
+            source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int64)
             source_centroids = torch.tensor([])
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
@@ -203,7 +203,7 @@ class TokenizerMasking:
         # Use the masker to get source tokens and the selection mask for the target
         source_tokens_cells = self.masker.mask_source(tokenized_data)
 
-        source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
+        source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int64)
 
         if source_tokens_lens.sum() > 0:
             source_means = [
@@ -241,7 +241,7 @@ class TokenizerMasking:
         tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
 
         target_tokens, target_coords = torch.tensor([]), torch.tensor([])
-        target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
+        target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int64)
 
         # target is empty
         if len(self.masker.perm_sel) == 0:

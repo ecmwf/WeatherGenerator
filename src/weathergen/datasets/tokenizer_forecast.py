@@ -177,7 +177,7 @@ class TokenizerForecast:
 
         source_tokens_cells = torch.tensor([])
         source_centroids = torch.tensor([])
-        source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
+        source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int64)
 
         if is_diagnostic or source.shape[1] == 0 or len(source) < 2:
             return (source_tokens_cells, source_tokens_lens, source_centroids)
@@ -194,7 +194,7 @@ class TokenizerForecast:
         source_tokens_cells = [
             torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in source_tokens_cells
         ]
-        source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
+        source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int64)
 
         if source_tokens_lens.sum() > 0:
             source_means = [
@@ -227,9 +227,9 @@ class TokenizerForecast:
         time_win: tuple,
         normalizer,  # dataset
     ):
-        target_tokens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
-        target_coords = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
-        target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
+        target_tokens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int64)
+        target_coords = torch.zeros([self.num_healpix_cells_target], dtype=torch.int64)
+        target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int64)
 
         # TODO: currently treated as empty to avoid special case handling
         if len(source) < 2:
@@ -263,7 +263,7 @@ class TokenizerForecast:
         target_times_raw = np.split(times_reordered, ll)
         target_times = np.split(times_reordered_enc, ll)
 
-        target_tokens_lens = torch.tensor([len(s) for s in target_tokens], dtype=torch.int32)
+        target_tokens_lens = torch.tensor([len(s) for s in target_tokens], dtype=torch.int64)
 
         # compute encoding of target coordinates used in prediction network
         if target_tokens_lens.sum() > 0:

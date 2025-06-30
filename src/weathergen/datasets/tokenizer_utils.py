@@ -136,13 +136,13 @@ def hpy_splits(coords: torch.tensor, hl: int, token_size: int, pad_tokens: bool)
             for idxs in hpy_idxs_ord_split
         ]
     else:
-        rem = np.zeros(len(hpy_idxs_ord_split), dtype=np.int32)
+        rem = np.zeros(len(hpy_idxs_ord_split), dtype=np.int64)
 
     # helper variables to split according to cells
     # pad to token size *and* offset by +1 to account for the index 0 that is added for the padding
     idxs_ord = [
         torch.split(
-            torch.cat((torch.from_numpy(np.take(idxs, ts) + 1), torch.zeros(r, dtype=torch.int32))),
+            torch.cat((torch.from_numpy(np.take(idxs, ts) + 1), torch.zeros(r, dtype=torch.int64))),
             token_size,
         )
         for idxs, ts, r in zip(hpy_idxs_ord_split, thetas_sorted, rem, strict=True)
@@ -204,23 +204,25 @@ def tokenize_window_space(
     # reorder based on cells (except for coords_local) and then cat along
     # (time,coords,geoinfos,source) dimension and then split based on cells
     tokens_cells = [
-        list(
-            torch.split(
-                torch.cat(
-                    (
-                        torch.full([len(idxs), 1], stream_id, dtype=torch.float32),
-                        times_enc_padded[idxs],
-                        coords_local[i],
-                        geoinfos_padded[idxs],
-                        source_padded[idxs],
+        (
+            list(
+                torch.split(
+                    torch.cat(
+                        (
+                            torch.full([len(idxs), 1], stream_id, dtype=torch.float32),
+                            times_enc_padded[idxs],
+                            coords_local[i],
+                            geoinfos_padded[idxs],
+                            source_padded[idxs],
+                        ),
+                        1,
                     ),
-                    1,
-                ),
-                idxs_lens,
+                    idxs_lens,
+                )
             )
+            if idxs_lens[0] > 0
+            else []
         )
-        if idxs_lens[0] > 0
-        else []
         for i, (idxs, idxs_lens) in enumerate(zip(idxs_ord, idxs_ord_lens, strict=True))
     ]
 

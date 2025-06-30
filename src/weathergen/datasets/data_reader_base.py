@@ -31,7 +31,7 @@ DType: TypeAlias = np.float32  # The type for the data in the datasets.
 """
 The type for indexing into datasets. It is a multiple of hours.
 """
-TIndex: TypeAlias = np.int32
+TIndex: TypeAlias = np.int64
 
 
 _DT_ZERO = np.datetime64("1850-01-01T00:00")
@@ -136,8 +136,8 @@ class TimeWindowHandler:
             start and end of temporal window
         """
 
-        idx_start: TIndex = np.int32(0)
-        idx_end = np.int32((self.t_end - self.t_start) // self.t_window_step)
+        idx_start: TIndex = np.int64(0)
+        idx_end = np.int64((self.t_end - self.t_start) // self.t_window_step)
         assert idx_start <= idx_end, f"time window idxs invalid: {idx_start} <= {idx_end}"
 
         return TimeIndexRange(idx_start, idx_end)
@@ -221,9 +221,9 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     """
 
     assert rdata.coords.ndim == 2, f"coords must be 2D {rdata.coords.shape}"
-    assert rdata.coords.shape[1] == 2, (
-        f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
-    )
+    assert (
+        rdata.coords.shape[1] == 2
+    ), f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
     assert rdata.geoinfos.ndim == 2, f"geoinfos must be 2D, got {rdata.geoinfos.shape}"
     assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
     assert rdata.data.shape[1] > 0, f"data must have at least one channel {rdata.data.shape}"
@@ -596,7 +596,7 @@ class DataReaderTimestep(DataReaderBase):
         self.data_end_time = data_end_time
         self.period = period
 
-    def _get_dataset_idxs(self, idx: TIndex) -> tuple[NDArray[np.int32], DTRange]:
+    def _get_dataset_idxs(self, idx: TIndex) -> tuple[NDArray[np.int64], DTRange]:
         """
         Get dataset indexes for a given time window index.
 
@@ -607,7 +607,7 @@ class DataReaderTimestep(DataReaderBase):
 
         Returns
         -------
-        NDArray[np.int32]
+        NDArray[np.int64]
             Array of dataset indexes corresponding to the time window.
         """
         return get_dataset_indexes_timestep(
@@ -631,7 +631,7 @@ def get_dataset_indexes_timestep(
     period: NPTDel64,
     idx: TIndex,
     tw_handler: TimeWindowHandler,
-) -> tuple[NDArray[np.int32], DTRange]:
+) -> tuple[NDArray[np.int64], DTRange]:
     """
     Get dataset indexes for a given time window index, when the dataset is periodic.
 
@@ -651,7 +651,7 @@ def get_dataset_indexes_timestep(
 
     Returns
     -------
-    NDArray[np.int32]
+    NDArray[np.int64]
         Array of dataset indexes corresponding to the time window.
     """
 
@@ -667,7 +667,7 @@ def get_dataset_indexes_timestep(
         or dtr.end > data_end_time
         or (data_end_time is not None and dtr.start > data_end_time)
     ):
-        return (np.array([], dtype=np.int32), dtr)
+        return (np.array([], dtype=np.int64), dtr)
 
     # relative time in dataset
     delta_t_start = dtr.start - data_start_time
@@ -680,9 +680,9 @@ def get_dataset_indexes_timestep(
     if (delta_t_start % period) > np.timedelta64(0, "s"):
         # empty window in between two timesteps
         if start_didx == end_didx:
-            return (np.array([], dtype=np.int32), dtr)
+            return (np.array([], dtype=np.int64), dtr)
         start_didx += 1
 
     end_didx = start_didx + int((dtr.end - dtr.start - t_epsilon) / period)
 
-    return (np.arange(start_didx, end_didx + 1, dtype=np.int32), dtr)
+    return (np.arange(start_didx, end_didx + 1, dtype=np.int64), dtr)
