@@ -182,15 +182,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         if cf.training_mode == "forecast":
             self.tokenizer = TokenizerForecast(cf.healpix_level, cf.data_loader_rng_seed)
         elif cf.training_mode == "masking":
-<<<<<<< HEAD
-            masker = Masker(
-                cf.masking_rate, cf.masking_strategy, cf.masking_rate_sampling, cf.strategy_kwargs
-            )
-            self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
-=======
-            masker = Masker(cf.masking_rate, cf.masking_strategy, cf.masking_rate_sampling)
+            masker = Masker(cf.masking_rate, cf.masking_strategy, cf.masking_rate_sampling, cf.strategy_kwargs)
             self.tokenizer = TokenizerMasking(cf.healpix_level, cf.data_loader_rng_seed, masker)
->>>>>>> origin/develop
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
             msg = "masked token modeling does not support self.input_window_steps > 1; "
             msg += "increase window length"
