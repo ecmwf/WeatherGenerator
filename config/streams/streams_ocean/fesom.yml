@@ -9,7 +9,7 @@
 
 FESOM :
   type : fesom
-  filenames : ['fesom_ifs_awi']
+  filenames : ['test4.zarr']
   loss_weight : 1.
   source : null
   target : ['sst']
