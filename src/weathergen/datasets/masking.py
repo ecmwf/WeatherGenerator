@@ -127,8 +127,10 @@ class Masker:
         source: torch.Tensor,
     ) -> list[torch.Tensor]:
         """
-        Applies the permutation selection mask to the tokenized data to create the target data.
-        Handles cases where a cell has no target tokens by returning an empty tensor of the correct shape.
+        Applies the permutation selection mask to
+        the tokenized data to create the target data.
+        Handles cases where a cell has no target
+        tokens by returning an empty tensor of the correct shape.
 
         Args:
             target_tokens_cells (list[list[torch.Tensor]]): List of lists of tensors for each cell.
@@ -164,7 +166,7 @@ class Masker:
 
         return processed_target_tokens
 
-    def _generate_healpix_mask(self, token_lens: list[int], rate: float) -> np.ndarray:
+    def _generate_healpix_mask(self, token_lens: list[int], rate: float) -> np.typing.NDArray:
         """
         Generates a token-level mask based on hierarchical HEALPix cell selection.
 
@@ -185,7 +187,9 @@ class Masker:
         hl_mask = self.strategy_kwargs.get("hl_mask")
 
         if hl_data is None or hl_mask is None:
-            assert False, "If masking with HEALPix, levels hl_data and hl_mask must be provided in strategy_kwargs."
+            assert False, (
+                "If masking with HEALPix, hl_data and hl_mask must be provided in strategy_kwargs."
+            )
 
         if hl_mask >= hl_data:
             assert False, "hl_mask must be less than hl_data for HEALPix masking."
@@ -193,7 +197,7 @@ class Masker:
         num_data_cells = 12 * (4**hl_data)
         if len(token_lens) != num_data_cells:
             assert False, (
-                f"Expected {num_data_cells} data cells at level {hl_data}, but got {len(token_lens)}."
+                f"Expected {num_data_cells} cells at level {hl_data}, got {len(token_lens)}."
             )
 
         # Calculate the number of parent cells at the mask level (hl_mask)
@@ -211,13 +215,13 @@ class Masker:
 
         # Choose parent cells to mask based on the specified rate.
         num_parents_to_mask = int(np.round(rate * num_parent_cells))
-        
+
         if num_parents_to_mask == 0:
             return np.zeros(sum(token_lens), dtype=bool)
 
         # Mask, and print about what we are doing.
         parent_ids_to_mask = self.rng.choice(num_parent_cells, num_parents_to_mask, replace=False)
-        
+
         # Now determine which child cells (and their tokens) are masked.
         cell_mask = np.zeros(num_data_cells, dtype=bool)
 
