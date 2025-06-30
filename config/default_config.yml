@@ -1,7 +1,5 @@
-# streams_directory: "./config/streams/streams_anemoi/"
-# streams_directory: "./config/streams/streams_umsciwro/"
-streams_directory: "./config/streams/streams_anemoi_era5_split/"
-# streams_directory: "./config/streams/streams_mixed/"
+streams_directory: "./config/streams/streams_anemoi/"
+# streams_directory: "./config/streams/streams_anemoi_era5_split/"
 
 embed_orientation: "channels"
 embed_local_coords: True
