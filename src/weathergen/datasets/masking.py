@@ -32,7 +32,7 @@ class Masker:
         self.masking_rate_sampling = masking_rate_sampling
 
         # strategy_kwargs is a dictionary that can hold any additional parameters
-        self.strategy_kwargs = strategy_kwargs or {}
+        self.strategy_kwargs = strategy_kwargs
 
         # Initialize the random number generator.
         worker_info = torch.utils.data.get_worker_info()
