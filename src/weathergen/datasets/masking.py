@@ -184,10 +184,6 @@ class Masker:
         hl_data = self.strategy_kwargs.get("hl_data")
         hl_mask = self.strategy_kwargs.get("hl_mask")
 
-        # NOTE: just for demonstration purposes, using hardcoded values
-        # hl_data = 5
-        # hl_mask = 1
-
         if hl_data is None or hl_mask is None:
             assert False, "If masking with HEALPix, levels hl_data and hl_mask must be provided in strategy_kwargs."
 
@@ -217,15 +213,11 @@ class Masker:
         num_parents_to_mask = int(np.round(rate * num_parent_cells))
         
         if num_parents_to_mask == 0:
-            # print("[HEALPix Masking] Masking rate is too low. No parent cells were selected to be masked.")
             return np.zeros(sum(token_lens), dtype=bool)
 
         # Mask, and print about what we are doing.
         parent_ids_to_mask = self.rng.choice(num_parent_cells, num_parents_to_mask, replace=False)
         
-        print(f"[HEALPix Masking] Based on rate {rate:.2f}, selected {num_parents_to_mask}/{num_parent_cells} parent cells to mask.")
-        #print(f"[HEALPix Masking] Parent IDs selected: {parent_ids_to_mask}")
-
         # Now determine which child cells (and their tokens) are masked.
         cell_mask = np.zeros(num_data_cells, dtype=bool)
 
@@ -239,12 +231,6 @@ class Masker:
         # Make the cell-level mask flat and apply it to the token lengths.
         # np.repeat. It repeats each element of `cell_mask`
         # a number of times specified by `token_lens`.
-        # print("[HEALPix Masking] Expanding cell-level mask to token-level mask.")
         flat_mask = np.repeat(cell_mask, token_lens)
-
-        # Print the number of masked tokens and the total number of tokens.
-        num_masked_tokens = np.sum(flat_mask)
-        total_tokens = len(flat_mask)
-        # print(f"[HEALPix Masking] Complete. Masked {num_masked_tokens}/{total_tokens} tokens ({num_masked_tokens/total_tokens:.2%}).\n")
 
         return flat_mask
