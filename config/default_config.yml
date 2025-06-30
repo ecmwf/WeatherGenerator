@@ -80,8 +80,7 @@ masking_rate_sampling: True
 sampling_rate_target: 1.0
 # include a masking strategy here, currently only supporting "random" and "block"
 masking_strategy: "random"
-# include strategy kwargs for masking strategies
-strategy_kwargs: {}
+
 
 num_epochs: 24
 samples_per_epoch: 4096
