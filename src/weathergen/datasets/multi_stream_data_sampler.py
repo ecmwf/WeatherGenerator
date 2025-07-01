@@ -112,7 +112,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         datapath = cf.data_path_anemoi
                     case "radklim":
                         dataset = RadklimKerchunkReader
-                        datapath = None # TODO 
+                        datapath = "." # TODO 
                     case "fesom":
                         dataset = DataReaderFesom
                         datapath = cf.data_path_fesom
