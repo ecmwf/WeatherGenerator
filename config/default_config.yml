@@ -1,6 +1,6 @@
-streams_directory: "./config/streams/streams_anemoi/"
+# streams_directory: "./config/streams/streams_anemoi/"
 # streams_directory: "./config/streams/streams_umsciwro/"
-# streams_directory: "./config/streams/streams_era5_split/"
+streams_directory: "./config/streams/streams_anemoi_era5_split/"
 # streams_directory: "./config/streams/streams_mixed/"
 
 embed_orientation: "channels"
@@ -103,7 +103,7 @@ lr_policy_warmup: "cosine"
 lr_policy_decay: "linear"
 lr_policy_cooldown: "linear"
 
-grad_clip: 1.0
+grad_clip: 5.0
 weight_decay: 0.1
 norm_type: "LayerNorm"
 nn_module: "te"
