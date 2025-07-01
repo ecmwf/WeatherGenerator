@@ -22,8 +22,8 @@ from weathergen.datasets.data_reader_base import (
     str_to_datetime64,
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
-from weathergen.datasets.data_reader_radklim import RadklimKerchunkReader 
 from weathergen.datasets.data_reader_obs import DataReaderObs
+from weathergen.datasets.data_reader_radklim import RadklimKerchunkReader
 from weathergen.datasets.icon_dataset import IconDataset
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
@@ -111,7 +111,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         datapath = cf.data_path_anemoi
                     case "radklim":
                         dataset = RadklimKerchunkReader
-                        datapath = cf.data_path_radklim
+                        datapath = cf.reference
                     case "fesom":
                         dataset = DataReaderFesom
                         datapath = cf.data_path_fesom

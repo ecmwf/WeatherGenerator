@@ -9,6 +9,7 @@
 
 import contextlib
 import json
+import logging
 from pathlib import Path
 from typing import override
 
@@ -17,7 +18,7 @@ import numpy as np
 import xarray as xr
 import zarr
 from numpy.typing import NDArray
-import logging
+
 _logger = logging.getLogger(__name__)
 
 from weathergen.datasets.data_reader_base import (
