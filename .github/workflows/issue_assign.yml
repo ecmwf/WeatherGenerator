@@ -16,22 +16,29 @@ jobs:
       - name: Comment
         # Print the username and issue number
         run: echo "Adding comment to issue ${{ github.event.issue.number }} by ${{ github.event.comment.user.login }}"
-        # run: gh issue comment "$NUMBER" --body "$BODY"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          NUMBER: ${{ github.event.issue.number }}
-          BODY: >
-            This issue is available for anyone to work on.
-            **Make sure to reference this issue in your pull request.**
-            :sparkles: Thank you for your contribution! :sparkles:
+        # env:
+        #   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        #   GH_REPO: ${{ github.repository }}
+        #   NUMBER: ${{ github.event.issue.number }}
+        #   BODY: >
+        #     This issue is available for anyone to work on.
+        #     **Make sure to reference this issue in your pull request.**
+        #     :sparkles: Thank you for your contribution! :sparkles:
       - name: Assign issue
         # Assign the issue to the user who made the comment
-        run: gh issue edit "$NUMBER" --add-assignee "${{ github.event.comment.user.login }}"
+        # Workaround based on https://github.com/cli/cli/issues/9620
+        run: gh api -X PATCH "/repos/ecmwf/WeatherGenerator/issues/$NUMBER" -f assignee="${{ github.event.comment.user.login }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           NUMBER: ${{ github.event.issue.number }}
+      # - name: Assign issue
+      #   # Assign the issue to the user who made the comment
+      #   run: gh issue edit "$NUMBER" --add-assignee "${{ github.event.comment.user.login }}"
+      #   env:
+      #     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #     GH_REPO: ${{ github.repository }}
+      #     NUMBER: ${{ github.event.issue.number }}
       - name: Put message on issue
         # Put a message on the issue:
         run: gh issue comment "$NUMBER" --body "$BODY"
