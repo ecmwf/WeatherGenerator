@@ -221,9 +221,9 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     """
 
     assert rdata.coords.ndim == 2, f"coords must be 2D {rdata.coords.shape}"
-    assert (
-        rdata.coords.shape[1] == 2
-    ), f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
+    assert rdata.coords.shape[1] == 2, (
+        f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
+    )
     assert rdata.geoinfos.ndim == 2, f"geoinfos must be 2D, got {rdata.geoinfos.shape}"
     assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
     assert rdata.data.shape[1] > 0, f"data must have at least one channel {rdata.data.shape}"
