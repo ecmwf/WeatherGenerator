@@ -32,7 +32,7 @@ class Trainer_Base:
         self.cf: Config | None = None
 
     @staticmethod
-    def init_torch(use_cuda=True, num_accs_per_task=1, multiprocessing_method="fork"):
+    def init_torch(use_cuda=True, num_accs_per_task=1, multiprocessing_method="spawn"):
         """
         Initialize torch, set device and multiprocessing method.
 
