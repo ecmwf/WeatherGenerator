@@ -77,6 +77,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
         
         #ref_path_str = "/p/scratch/weatherai/data/npp-atms-unpacked/temp_radklim/radklim_output_kerchunk/radklim_full_dataset.json"
         ref_path = Path(stream_info.get("reference", filename))
+        _logger.info("Loading RADKLIM Kerchunk reference from: %s", ref_path)
         # Load Kerchunk reference
         if not ref_path.exists():
             raise FileNotFoundError(f"Kerchunk reference JSON not found: {ref_path}")
