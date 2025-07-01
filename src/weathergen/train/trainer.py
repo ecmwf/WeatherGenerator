@@ -153,7 +153,7 @@ class Trainer(Trainer_Base):
             cf.samples_per_validation,
             train_logger=self.train_logger,
             stage=VAL,
-            shuffle=False,
+            shuffle=True,
         )
 
         loader_params = {
