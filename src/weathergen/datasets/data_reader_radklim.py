@@ -17,6 +17,11 @@ import fsspec
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
+<<<<<<< HEAD
+=======
+
+_logger = logging.getLogger(__name__)
+>>>>>>> 413ff71 (changes)
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
