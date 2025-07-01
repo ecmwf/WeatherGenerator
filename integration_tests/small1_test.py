@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from weathergen import inference_from_args, train_with_args
+from weathergen.run_train import inference_from_args, train_with_args
 
 logger = logging.getLogger(__name__)
 
