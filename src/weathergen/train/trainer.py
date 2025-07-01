@@ -67,7 +67,7 @@ class Trainer(Trainer_Base):
             config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
         self.init_perf_monitoring()
-        self.train_logger = TrainLogger(cf, self.config.get_path_run(cf))
+        self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
     ###########################################
     def inference(self, cf, run_id_trained, epoch):

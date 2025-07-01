@@ -1,10 +1,11 @@
 import dataclasses
 import functools
 import itertools
+import logging
 import pathlib
 import typing
 
-import dask as da
+import dask.array as da
 import numpy as np
 import xarray as xr
 import zarr
@@ -14,7 +15,7 @@ from numpy.typing import NDArray
 CHUNK_N_SAMPLES = 16392
 DType: typing.TypeAlias = np.float32
 
-# TODO: extract geoinfo metadata, include it in xarray
+_logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -45,7 +46,7 @@ class OutputDataset:
     item_key: ItemKey
 
     # (datapoints, channels, ens)
-    data: zarr.Array
+    data: zarr.Array # wrong type => arary like
 
     # (datapoints,)
     times: zarr.Array
@@ -54,9 +55,20 @@ class OutputDataset:
     coords: zarr.Array
 
     # (datapoints, geoinfos) geoinfos are stream dependent => 0 for most gridded data
-    geoinfo: zarr.Array | None
+    geoinfo: zarr.Array
 
     channels: list[str]
+    geoinfo_channels: list[str] # TODO
+    
+    @functools.cached_property
+    def arrays(self) -> typing.Iterator[tuple[str, zarr.Array]]:
+        """Iterate over the arrays and their names."""
+        return {
+            "data": self.data,
+            "times": self.times,
+            "coords": self.coords,
+            "geoinfo": self.geoinfo
+        }.items()
 
     @functools.cached_property
     def datapoints(self) -> NDArray[np.int_]:
@@ -67,12 +79,18 @@ class OutputDataset:
         chunks = (chunk_nsamples, *self.data.shape[1:])
 
         # maybe do dask conversion earlier? => usefull for parallel writing?
+        _logger.debug(self.name)
         data = da.from_zarr(self.data, chunks=chunks)  # dont call compute to lazy load
+        _logger.debug(data.shape)
         coords = da.from_zarr(self.coords).compute()
+        _logger.debug(coords.shape)
         times = da.from_zarr(self.times).compute()
+        _logger.debug(times.shape)
+        geoinfo = da.from_zarr(self.geoinfo).compute()
+        _logger.debug(geoinfo.shape)
 
-        # TODO include geoinfo
 
+        geoinfo = {name: ("ipoint", geoinfo[:, i]) for i, name in enumerate(self.geoinfo_channels)}
         return xr.DataArray(
             da.expand_dims(data, axis=(0, 1, 2)),
             dims=["sample", "stream", "forecast_step", "ipoint", "channel", "ens"],
@@ -81,14 +99,14 @@ class OutputDataset:
                 "stream": [self.item_key.stream],
                 "forecast_step": [self.item_key.forecast_step],
                 "ipoint": self.datapoints,
-                "channel": self.channels,
+                "channel": self.channels, # TODO: make sure channel names align with data
                 "valid_time": ("ipoint", times.astype("datetime64[ns]")),
                 "lat": ("ipoint", coords[:, 0]),
                 "lon": ("ipoint", coords[:, 1]),
+                **geoinfo              
             },
             name=self.name,
         )
-
 
 class OutputItem:
     def __init__(
@@ -99,15 +117,15 @@ class OutputItem:
         self.prediction = prediction
         self.source = source
 
-        self._key = self.target.item_key
+        self.key = self.target.item_key
 
         self.datasets = [self.target, self.prediction]
 
-        if self._key.with_source:
+        if self.key.with_source:
             if self.source:
-                self.datasets += self.source
+                self.datasets.append(self.source)
             else:
-                msg = f"Missing source dataset for item: {self._key.path}"
+                msg = f"Missing source dataset for item: {self.key.path}"
                 raise ValueError(msg)
 
 
@@ -125,28 +143,30 @@ class ZarrIO:
     def __enter__(self) -> typing.Self:
         self._store = zarr.DirectoryStore(self._store_path)
         self.data_root = zarr.group(store=self._store)
+        
+        return self
 
     def __exit__(self, exc_type, exc_value, exc_tb):
         self._store.close()
 
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
-        group = self._get_group(item._key, create=True)
+        group = self._get_group(item.key, create=True)
         for dataset in item.datasets:
             self._write_dataset(group, dataset)
 
     def get_data(self, sample: int, stream: str, forecast_step: int) -> OutputItem:
         """Get datasets for the output item matching the arguments."""
-        meta = ItemKey(sample, forecast_step, stream)
+        key = ItemKey(sample, forecast_step, stream)
 
-        return self.load_zarr(meta, self.data_root)
+        return self.load_zarr(key)
 
-    def load_zarr(self, meta: ItemKey) -> OutputItem:
+    def load_zarr(self, key: ItemKey) -> OutputItem:
         """Get datasets for a output item."""
-        group = self._get_group(meta)
+        group = self._get_group(key)
         datasets = {
-            OutputDataset(key, meta, **dataset.arrays(), **dataset.args)
-            for key, dataset in group.groups()
+            name: OutputDataset(name, key, **dict(dataset.arrays()), **dataset.attrs)
+            for name, dataset in group.groups()
         }
 
         return OutputItem(**datasets)
@@ -163,28 +183,31 @@ class ZarrIO:
 
         return group
 
-    def _write_dataset(self, item_group, dataset):
+    def _write_dataset(self, item_group: zarr.Group, dataset: OutputDataset):
         dataset_group = item_group.require_group(dataset.name)
         self._write_metadata(dataset_group, dataset)
         self._write_arrays(dataset_group, dataset)
 
     def _write_metadata(self, dataset_group: zarr.Group, dataset: OutputDataset):
-        dataset_group.attrs["item"] = dataclasses.asdict(dataset.item_key)
         dataset_group.attrs["channels"] = dataset.channels
+        dataset_group.attrs["geoinfo_channels"] = dataset.geoinfo_channels
 
-    def _write_arrays(self, dataset_group, dataset):
-        for array_name, array in dataset:  # suffix is eg. data or coords
+    def _write_arrays(self, dataset_group: zarr.Group, dataset: OutputDataset):
+        for array_name, array in dataset.arrays:  # suffix is eg. data or coords
             self._create_dataset(dataset_group, array_name, array)
 
-    def _create_dataset(self, group: zarr.Group, name: str, array: NDArray | None):
-        if array:  # TODO guard against geoinfo = None
-            chunks = (CHUNK_N_SAMPLES, array.shape[1:])
-            group.create_dataset(name, data=array, chunks=chunks)
+    def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
+        if array.size == 0: # sometimes for geoinfo
+            chunks = None
+        else:
+            chunks = (CHUNK_N_SAMPLES, *array.shape[1:])
+        _logger.debug(f"writing array: {name} with shape: {array.shape}, chunks: {chunks} into group: {group}.")
+        group.create_dataset(name, data=array, chunks=chunks)
 
     @functools.cached_property
     def samples(self) -> list[int]:
         """Query available samples in this zarr store."""
-        return list(self.data_root.groups_keys())
+        return list(self.data_root.group_keys())
 
     @functools.cached_property
     def streams(self) -> list[str]:
@@ -193,11 +216,12 @@ class ZarrIO:
         _, example_sample = next(self.data_root.groups())
         return list(example_sample.group_keys())
 
-    @functools.cached_propertyself.datapoints
+    @functools.cached_property
     def forecast_steps(self) -> list[int]:
         """Query available forecast steps in this zarr store."""
         # assume stream/samples/forecast_steps are orthogonal
-        _, example_stream = next(next(self.data_root.groups()).groups())
+        _, example_sample = next(self.data_root.groups())
+        _, example_stream = next(example_sample.groups())
         return list(example_stream.group_keys())
 
 
@@ -227,6 +251,7 @@ class OutputBatchData:
 
     # stream, channel name
     channels: list[list[str]]
+    geoinfo_channels: list[list[str]]
 
     sample_start: int
     forecast_offset: int
@@ -248,15 +273,19 @@ class OutputBatchData:
         for args in itertools.product(self.samples, self.forecast_steps, filtered_streams):
             yield self.extract(ItemKey(*args))
 
-    def extract(self, meta: ItemKey) -> OutputItem:
+    def extract(self, key: ItemKey) -> OutputItem:
         """Extract datasets from lists for one output item."""
         # adjust shifted values in ItemMeta
-        sample = meta.sample - self.sample_start
-        forecast_step = meta.forecast_step - self.forecast_offset
-        stream_idx = self.stream_names.index(meta.stream)  # TODO: assure this is correct
-
-        start = sum(self.targets_lens[:sample])
-        datapoints = slice(start, self.targets_lens[sample])
+        sample = key.sample - self.sample_start
+        forecast_step = key.forecast_step - self.forecast_offset
+        stream_idx = self.stream_names.index(key.stream)  # TODO: assure this is correct
+        _logger.debug(f"target_lens:{self.targets_lens}")
+        lens = self.targets_lens[forecast_step][stream_idx]
+        _logger.debug(f"lens: {lens}, {len(lens)}")
+        start = sum(lens[:sample])
+        n_samples = lens[sample]
+        _logger.info(f"extracting sample {self.sample_start}+{sample}: {start}-{start+n_samples}.")
+        datapoints = slice(start, start+n_samples)
 
         target_data = self.targets[forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
         preds_data = (
@@ -268,19 +297,27 @@ class OutputBatchData:
             .numpy()
         )
 
-        coords = self.target_coords[forecast_step][stream_idx][datapoints].numpy()
-        times = self.target_times[forecast_step][stream_idx][
+        _coords = self.targets_coords[forecast_step][stream_idx][datapoints].numpy()
+        coords = _coords[:, :2] # first two columns are lat,lon
+        geoinfo = _coords[:, 2:] # the rest is geoinfo => potentially empty
+        if geoinfo.size > 0: # TODO: set geoinfo to be empty for now
+            geoinfo = np.empty((geoinfo.shape[0], 0))
+            _logger.warning("geoinformation channels are not implemented yet. will be truncated to be of size 0.")
+        _logger.info(f"shape coords: {coords.shape}, geoinfo: {geoinfo.shape}")
+        times = self.targets_times[forecast_step][stream_idx][
             datapoints
         ]  # make conversion to datetime64[ns] here?
+        channels = self.channels[stream_idx]
+        geoinfo_channels = self.geoinfo_channels[stream_idx]
 
-        if meta.with_source:
-            source_data = self.sources[sample][stream_idx].cpu().detach.numpy()
-            OutputDataset("source", meta, source_data, times, coords, None, self.channels)
+        if key.with_source:
+            source_data = self.sources[sample][stream_idx].cpu().detach().numpy()
+            source_dataset = OutputDataset("source", key, source_data, times, coords, geoinfo, channels, geoinfo_channels)
         else:
             source_dataset = None
 
         return OutputItem(
             source_dataset,
-            OutputDataset("target", meta, target_data, coords, times, None, self.channels),
-            OutputDataset("prediction", meta, preds_data, coords, times, None, self.channels),
+            OutputDataset("target", key, target_data, times, coords, geoinfo, channels, geoinfo_channels),
+            OutputDataset("prediction", key, preds_data, times, coords, geoinfo, channels, geoinfo_channels),
         )

@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+import weathergen.utils.config as config
+import weathergen.utils.io as io
 from weathergen.run_train import inference_from_args, train_with_args
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,7 @@ def test_train(setup, test_run_id):
         f"{weathergen_home}/config/streams/streams_test/",
     )
 
+    logger.info("run inference")
     inference_from_args(
         ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--epoch", "0"]
         + [
@@ -66,11 +69,30 @@ def test_train(setup, test_run_id):
             f"{weathergen_home}/integration_tests/small1.yaml",
         ]
     )
+    logger.info("run evaluation")
+    evaluate_results(test_run_id)
     assert_missing_metrics_file(test_run_id)
     assert_train_loss_below_threshold(test_run_id)
     assert_val_loss_below_threshold(test_run_id)
     logger.info("end test_train")
 
+def evaluate_results(run_id):
+    cf = config.load_model_config(run_id, None, None)
+    data_root = config.get_path_output(cf, 0)
+    
+    with io.ZarrIO(data_root) as reader:
+        samples = reader.samples
+        fsteps = reader.forecast_steps
+        streams = reader.streams
+        
+        item = reader.get_data(samples[0], streams[0], fsteps[0])
+        ds = item.prediction.as_xarray()
+        logger.info(ds)
+        item.target.as_xarray()
+        logger.info(ds)
+        if item.key.with_source:
+            ds = item.source.as_xarray()
+            logger.info(ds)
 
 def load_metrics(run_id):
     """Helper function to load metrics"""

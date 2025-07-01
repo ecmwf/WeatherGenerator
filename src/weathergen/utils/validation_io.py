@@ -7,12 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
-import zarr
+import logging
 
 import weathergen.utils.config as config
 import weathergen.utils.io as io
 
+_logger = logging.getLogger(__name__)
 
 def write_output(
     cf,
@@ -25,42 +25,37 @@ def write_output(
     targets_times_all,
     targets_lens,
 ):
+    is_output_stream = [stream.name in cf.analysis_streams_output for stream in cf.streams]
     stream_names = [
-        stream.name if stream.name in cf.analysis_streams_output else "" for stream in cf.streams
-    ]  # TODO: how to correctly handle this
+        stream.name if condition else "" for condition, stream in zip(is_output_stream, cf.streams)
+    ]  # TODO: how to correctly handle this => set analysis_streams_output in default config = []
     # => what happens if stream is not in analysis_streams_output?
     # => what happens if analysis_streams_output is none?
     # streams anemoi `source`, `target` commented out???
 
-    # TODO: right way to query config for stream channels?
     # assumption: datasets in a stream share channels
-    channels = [stream.target for stream in cf.streams]
+    channels = [list(stream.val_target_channels) for condition, stream in zip(is_output_stream, cf.streams) if condition] # target_channels ??
+    geoinfo_channels = [[] for _ in cf.streams] # TODO obtain channels
     # samples = range(batch_idx * batch_size, (batch_idx + 1) * batch_size)
 
-    # TODO: is batch size guarnteed and constant?
+    # assume: is batch size guarnteed and constant?
     sample_start = batch_idx * cf.batch_size_validation
+    _logger.info("called valiadation_io")
 
     data = io.OutputBatchData(
         sources,
-        preds_all,
         targets_all,
+        preds_all,
         targets_coords_all,
         targets_times_all,
         targets_lens,
         stream_names,
         channels,
+        geoinfo_channels,
         sample_start,
         cf.forecast_offset,
     )
 
-    with io.ZarrOutput(_get_data_root(cf, epoch)) as writer:
+    with io.ZarrIO(config.get_path_output(cf, epoch)) as writer:
         for subset in data.items():
-            writer.write_data(subset)
-
-
-def _get_data_root(cf, epoch):
-    base_path = config.get_path_run(cf)
-    fname = f"validation_epoch{epoch:05d}_rank{cf.rank:04d}.zarr"
-
-    store = zarr.DirectoryStore(base_path / fname)
-    return zarr.group(store=store), store
+            writer.write_zarr(subset)

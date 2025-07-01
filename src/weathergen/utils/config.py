@@ -324,17 +324,24 @@ def load_streams(streams_directory: Path) -> list[Config]:
 def set_paths(config: Config) -> Config:
     """Set the configs run_path model_path attributes to default values if not present."""
     config = config.copy()
-    config.run_path = Path(config.get("run_path", None) or _DEFAULT_RESULT_PATH)
-    config.model_path = Path(config.get("model_path", None) or _DEFAULT_MODEL_PATH)
+    config.run_path = config.get("run_path", None) or _DEFAULT_RESULT_PATH
+    config.model_path = config.get("model_path", None) or _DEFAULT_MODEL_PATH
 
     return config
 
 
 def get_path_run(config: Config) -> Path:
     """Get the current runs run_path for storing run results and logs."""
-    return config.run_path / config.run_id
+    return Path(config.run_path) / config.run_id
 
 
 def get_path_model(config: Config) -> Path:
     """Get the current runs model_path for storing model checkpoints."""
-    return config.model_path / config.run_id
+    return Path(config.model_path) / config.run_id
+
+
+def get_path_output(config: Config, epoch: int) -> Path:
+    base_path = get_path_run(config)
+    fname = f"validation_epoch{epoch:05d}_rank{config.rank:04d}.zarr"
+
+    return base_path / fname
