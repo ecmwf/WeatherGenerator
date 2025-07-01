@@ -35,35 +35,35 @@ def get_inference_parser() -> argparse.ArgumentParser:
     # _add_model_loading_params(parser)
     # _add_general_arguments(parser)
 
-    # parser.add_argument(
-    #     "--start_date",
-    #     "-start",
-    #     type=_format_date,
-    #     default="2022-10-01",
-    #     help="Start date for inference. Format must be parsable with pd.to_datetime.",
-    # )
-    # parser.add_argument(
-    #     "--end_date",
-    #     "-end",
-    #     type=_format_date,
-    #     default="2022-12-01",
-    #     help="End date for inference. Format must be parsable with pd.to_datetime.",
-    # )
-    # parser.add_argument(
-    #     "--samples", type=int, default=10000000, help="Number of inference samples."
-    # )
-    # parser.add_argument(  # behaviour changed => implies default=False
-    #     "--save_samples",
-    #     type=bool,
-    #     default=True,
-    #     help="Toggle saving of samples from inference. Default True",
-    # )
-    # parser.add_argument(
-    #     "--analysis_streams_output",
-    #     nargs="+",
-    #     default=["ERA5"],
-    #     help="Analysis output streams during inference.",
-    # )
+    parser.add_argument(
+        "--start_date",
+        "-start",
+        type=_format_date,
+        default="2022-10-01",
+        help="Start date for inference. Format must be parsable with pd.to_datetime.",
+    )
+    parser.add_argument(
+        "--end_date",
+        "-end",
+        type=_format_date,
+        default="2022-12-01",
+        help="End date for inference. Format must be parsable with pd.to_datetime.",
+    )
+    parser.add_argument(
+        "--samples", type=int, default=10000000, help="Number of inference samples."
+    )
+    parser.add_argument(  # behaviour changed => implies default=False
+        "--save_samples",
+        type=bool,
+        default=True,
+        help="Toggle saving of samples from inference. Default True",
+    )
+    parser.add_argument(
+        "--analysis_streams_output",
+        nargs="+",
+        default=["ERA5"],
+        help="Analysis output streams during inference.",
+    )
 
     return parser
 
