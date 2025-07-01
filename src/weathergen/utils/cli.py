@@ -32,7 +32,7 @@ def get_continue_parser() -> argparse.ArgumentParser:
 def get_inference_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
 
-    # _add_model_loading_params(parser)
+    _add_model_loading_params(parser)
     # _add_general_arguments(parser)
 
     parser.add_argument(
