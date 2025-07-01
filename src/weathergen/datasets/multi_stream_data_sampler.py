@@ -111,7 +111,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         datapath = cf.data_path_anemoi
                     case "radklim":
                         dataset = RadklimKerchunkReader
-                        datapath = "." # TODO 
+                        datapath = "/p/scratch/weatherai/data/npp-atms-unpacked/temp_radklim/radklim_output_kerchunk/" # TODO 
                     case "fesom":
                         dataset = DataReaderFesom
                         datapath = cf.data_path_fesom
