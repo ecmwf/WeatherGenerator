@@ -33,7 +33,7 @@ def get_inference_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
 
     _add_model_loading_params(parser)
-    # _add_general_arguments(parser)
+    _add_general_arguments(parser)
 
     parser.add_argument(
         "--start_date",
@@ -122,8 +122,8 @@ def _add_model_loading_params(parser: argparse.ArgumentParser):
         "--from_run_id",
         required=True,
         help=(
-            "Start inference or continue training from the WeatherGenerator",
-            " model with the given run id.",
+            "Start inference or continue training from the WeatherGenerator"
+            " model with the given run id."
         ),
     )
     parser.add_argument(
