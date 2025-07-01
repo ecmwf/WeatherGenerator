@@ -1,0 +1,27 @@
+name: Add comment
+on:
+  issue_comment:
+    types:
+      - created
+jobs:
+  add-comment:
+    # If a comment has the text "Assign me" or "assign me":
+    if: |
+      startsWith(github.event.comment.body, 'Assign me') ||
+      startsWith(github.event.comment.body, 'assign me')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Add comment
+        # Print the username and issue number
+        run: echo "Adding comment to issue ${{ github.event.issue.number }} by ${{ github.event.comment.user.login }}"
+        # run: gh issue comment "$NUMBER" --body "$BODY"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+          BODY: >
+            This issue is available for anyone to work on.
+            **Make sure to reference this issue in your pull request.**
+            :sparkles: Thank you for your contribution! :sparkles:
