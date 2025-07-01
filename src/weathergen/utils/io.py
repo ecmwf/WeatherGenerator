@@ -81,6 +81,10 @@ class OutputDataset:
         # maybe do dask conversion earlier? => usefull for parallel writing?
         _logger.debug(self.name)
         data = da.from_zarr(self.data, chunks=chunks)  # dont call compute to lazy load
+        # include pseudo ens dim so all data arrays have same dimensionality
+        # TODO: does it make sense for target and soruce to have ens dim?
+        additional_dims = (0, 1, 2) if len(data.shape) == 3 else (0, 1, 2, 5)
+        expanded_data = da.expand_dims(data, axis=additional_dims)
         _logger.debug(data.shape)
         coords = da.from_zarr(self.coords).compute()
         _logger.debug(coords.shape)
@@ -92,7 +96,7 @@ class OutputDataset:
 
         geoinfo = {name: ("ipoint", geoinfo[:, i]) for i, name in enumerate(self.geoinfo_channels)}
         return xr.DataArray(
-            da.expand_dims(data, axis=(0, 1, 2)),
+            expanded_data,
             dims=["sample", "stream", "forecast_step", "ipoint", "channel", "ens"],
             coords={
                 "sample": [self.item_key.sample],
