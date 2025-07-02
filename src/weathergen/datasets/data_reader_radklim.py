@@ -282,6 +282,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
 
         # Stack the data into a 4D array (time, y, x, var)
         da = ds_win.to_array(dim="var").transpose("time", "y", "x", "var")
+        _logger.info(f"fetch data: {da.shape}{da}")
         nt, ny, nx, nvars = da.shape
 
         # Validate channels_idx
