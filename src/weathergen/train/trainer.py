@@ -27,7 +27,7 @@ from weathergen.model.model import Model, ModelParams
 from weathergen.train.loss import stat_loss_fcts
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
-from weathergen.utils.config import Config
+from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.validation_io import write_validation
@@ -52,6 +52,8 @@ class Trainer(Trainer_Base):
 
         assert cf.samples_per_epoch % cf.batch_size == 0
         assert cf.samples_per_validation % cf.batch_size_validation == 0
+
+        self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
         self.devices = self.init_torch()
 
@@ -202,7 +204,9 @@ class Trainer(Trainer_Base):
             mp = (
                 None
                 if not cf.with_mixed_precision
-                else MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=True)
+                else MixedPrecision(
+                    param_dtype=self.mixed_precision_dtype, cast_forward_inputs=True
+                )
             )
             mp = None
             self.ddp_model = FSDP(
@@ -533,7 +537,9 @@ class Trainer(Trainer_Base):
 
             # evaluate model
             with torch.autocast(
-                device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
+                device_type="cuda",
+                dtype=self.mixed_precision_dtype,
+                enabled=cf.with_mixed_precision,
             ):
                 preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
 
@@ -628,7 +634,9 @@ class Trainer(Trainer_Base):
 
                     # evaluate model
                     with torch.autocast(
-                        device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
+                        device_type="cuda",
+                        dtype=self.mixed_precision_dtype,
+                        enabled=cf.with_mixed_precision,
                     ):
                         preds = self.ddp_model(
                             self.model_params, batch, cf.forecast_offset, forecast_steps

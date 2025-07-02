@@ -65,7 +65,7 @@ class AdaLayerNorm(torch.nn.Module):
     """
 
     def __init__(
-        self, dim_embed_x, dim_aux, norm_elementwise_affine: bool = False, norm_eps: float = 1e-5
+        self, dim_embed_x, dim_aux, norm_elementwise_affine: bool = False, norm_eps: float = 1e-3
     ):
         super().__init__()
 
