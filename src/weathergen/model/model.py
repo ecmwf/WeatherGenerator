@@ -430,11 +430,7 @@ class Model(torch.nn.Module):
         )
         offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
         tokens_all = torch.empty(
-<<<<<<< HEAD
             (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=self.dtype, device="cuda"
-=======
-            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=torch.bfloat16, device="cuda"
->>>>>>> d5914e1 (- Avoid time encoding is 0)
         )
 
         for _, sb in enumerate(streams_data):
