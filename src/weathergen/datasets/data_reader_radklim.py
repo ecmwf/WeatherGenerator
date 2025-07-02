@@ -17,8 +17,6 @@ import fsspec
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
-import logging
-_logger = logging.getLogger(__name__)
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
@@ -38,7 +36,6 @@ class RadklimKerchunkReader(DataReaderTimestep):
 
     The reader handles temporal subsetting, lazy loading, and normalization.
     """
-
     def __init__(
         self,
         tw_handler: TimeWindowHandler,
@@ -140,7 +137,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
         data_start = times_full[0]
         data_end = times_full[-1]
         super().__init__(tw_handler, stream_info, data_start, data_end, period)
-
+        
         # If there is no overlap with the time window, exit early
         if tw_handler.t_start >= data_end or tw_handler.t_end <= data_start:
             self.init_empty()
@@ -270,7 +267,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
             return ReaderData.empty(len(channels_idx), len(self.geoinfo_idx))
 
         start, stop = int(t_idxs_rel[0]), int(t_idxs_rel[-1]) + 1
-        ds_win = self.ds.isel(time=slice(start, stop))  # (time, y, x, var)
+        ds_win = self.ds.isel(time=slice(start, stop))
 
         # DATA & COORD PREP
         nt = ds_win.sizes["time"]
