@@ -305,7 +305,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
         # Check no NaNs in the data
         if np.isnan(da.values).any():
             raise ValueError("NaN values found in the dataset")
-        nt, ny, nx, nvars = da.shape
+        nt, _, _, nvars = da.shape
 
         # Validate channels_idx
         if min(channels_idx) < 0 or max(channels_idx) >= nvars:
