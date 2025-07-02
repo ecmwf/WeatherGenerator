@@ -15,6 +15,8 @@ https://stackoverflow.com/questions/60717142/getting-linked-issues-and-projects-
 
 import re
 
+import logging
+
 import requests
 from bs4 import BeautifulSoup
 
@@ -32,6 +34,7 @@ Refs #1234
 See https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue
 """
 
+_logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
     import argparse
@@ -48,13 +51,13 @@ if __name__ == "__main__":
     msg = msg_template.format(pr=pr, repo=repo)
 
     if not issueForm:
-        print(msg)
+        _logger.warning(msg)
         exit(1)
     issues = [i["href"] for i in issueForm[0].find_all("a")]
     issues = [i for i in issues if i is not None and repo in i]
-    print(f"Linked issues for PR {pr}:")
-    print(f"Found {len(issues)} linked issues.")
-    print("\n".join(issues))
+    _logger.info(f"Linked issues for PR {pr}:")
+    _logger.warning(f"Found {len(issues)} linked issues.")
+    _logger.info("\n".join(issues))
     if not issues:
-        print(msg)
+        _logger.warning(msg)
         exit(1)

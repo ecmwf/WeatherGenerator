@@ -6,8 +6,11 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+import logging
 
 from weathergen.train.utils import get_run_id
 
+_logger = logging.getLogger(__name__)
+
 if __name__ == "__main__":
-    print(get_run_id())
+    _logger.info(f"Run ID: {get_run_id()}")

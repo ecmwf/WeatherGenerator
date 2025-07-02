@@ -1,3 +1,4 @@
+# ruff: noqa: T201
 # (C) Copyright 2025 WeatherGenerator contributors.
 
 #
@@ -32,6 +33,7 @@ from weathergen.model.layers import MLP
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.config import get_dtype
 from weathergen.utils.logger import logger
+
 
 
 class ModelParams(torch.nn.Module):
@@ -319,20 +321,19 @@ class Model(torch.nn.Module):
         num_params_tte = [get_num_parameters(tte) for tte in self.target_token_engines]
         num_params_preds = [get_num_parameters(head) for head in self.pred_heads]
 
-        print("-----------------")
-        print(f"Total number of trainable parameters: {num_params_total:,}")
-        print("Number of parameters:")
-        print("  Embedding networks:")
-        [
-            print("    {} : {:,}".format(si["name"], np))
-            for si, np in zip(cf.streams, num_params_embed, strict=False)
-        ]
-        print(f" Local assimilation engine: {num_params_ae_local:,}")
-        print(f" Local-global adapter: {num_params_ae_adapater:,}")
-        print(f" Learnable queries: {num_params_q_cells:,}")
-        print(f" Global assimilation engine: {num_params_ae_global:,}")
-        print(f" Forecast engine: {num_params_fe:,}")
-        print(" kv-adapter, coordinate embedding, prediction networks and prediction heads:")
+        logger.info("-----------------")
+        logger.info(f"Total number of trainable parameters: {num_params_total:,}")
+        logger.info("Number of parameters:")
+        logger.info("  Embedding networks:")
+        log_data = zip(cf.streams, num_params_embed, strict=False)
+        for si, nump in log_data:
+            logger.info("    {} : {:,}".format(si["name"], nump))
+        logger.info(f" Local assimilation engine: {num_params_ae_local:,}")
+        logger.info(f" Local-global adapter: {num_params_ae_adapater:,}")
+        logger.info(f" Learnable queries: {num_params_q_cells:,}")
+        logger.info(f" Global assimilation engine: {num_params_ae_global:,}")
+        logger.info(f" Forecast engine: {num_params_fe:,}")
+        logger.info(" kv-adapter, coordinate embedding, prediction networks and prediction heads:")
         zps = zip(
             cf.streams,
             num_params_pred_adapter,
@@ -341,11 +342,9 @@ class Model(torch.nn.Module):
             num_params_preds,
             strict=False,
         )
-        [
-            print("    {} : {:,} / {:,} / {:,} / {:,}".format(si["name"], np0, np1, np2, np3))
-            for si, np0, np1, np2, np3 in zps
-        ]
-        print("-----------------")
+        for si, np0, np1, np2, np3 in zps:
+            logger.info("    {} : {:,} / {:,} / {:,} / {:,}".format(si["name"], np0, np1, np2, np3))
+        logger.info("-----------------")
 
     #########################################
     def load(self, run_id, epoch=-1):

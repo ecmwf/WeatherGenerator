@@ -1,4 +1,3 @@
-# ruff: noqa: T20
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0

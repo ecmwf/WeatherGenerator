@@ -8,9 +8,14 @@
 # nor does it submit to any jurisdiction.
 
 import argparse
+import logging
 
 import dictdiffer
 from obslearn.utils.config import Config
+
+
+_logger = logging.getLogger(__name__)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -31,4 +36,4 @@ if __name__ == "__main__":
         #   name = cf1.streams[item[1][1]]['name']
         #   item[1][1] = name
 
-        print(f"{item[1]} :: {item[2]}")
+        _logger.info(f"Difference {item[1]} :: {item[2]}")

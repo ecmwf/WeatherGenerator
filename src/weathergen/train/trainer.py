@@ -787,7 +787,7 @@ class Trainer(Trainer_Base):
                 pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
                 pstr += "(lr={:.2E}, s/sec={:.3f})"
                 len_dataset = len(self.data_loader) // self.cf.batch_size
-                print(
+                _logger.info(
                     pstr.format(
                         epoch,
                         bidx,
@@ -796,15 +796,12 @@ class Trainer(Trainer_Base):
                         avg_loss,
                         self.lr_scheduler.get_lr(),
                         (self.print_freq * self.cf.batch_size) / dt,
-                    ),
-                    flush=True,
-                )
-                print("\t", end="")
-                for _, st in enumerate(self.cf.streams):
-                    print(
-                        "{}".format(st["name"]) + f" : {losses_all[st['name']].nanmean():0.4E} \t",
-                        end="",
                     )
-                print("\n", flush=True)
+                )
+                stream_string = ''
+                for _, st in enumerate(self.cf.streams):
+                    stream_string += "{}".format(st["name"])
+                    stream_string += f" : {losses_all[st['name']].nanmean():0.4E} \t"
+                _logger.info("\t" + stream_string)
 
             self.t_start = time.time()
