@@ -100,13 +100,8 @@ class DataReaderIconCmip6(DataReaderTimestep):
         kerchunk_ref = json.loads(ref_path.read_text())
         fs = fsspec.filesystem("reference", fo=kerchunk_ref)
         mapper = fs.get_mapper("")
-        # consolidate metadata – if the reference already has a .zmetadata this
-        # is a no‑op; otherwise it creates an in‑memory view.
-        # try:
-        #     zarr.consolidate_metadata(mapper)
-        # except Exception:
-        #     pass
         zarr.consolidate_metadata(mapper)
+
         self.ds = xr.open_dataset(mapper, engine="zarr", consolidated=True)
         self.mesh_size = len(self.ds[mesh_attribute])
 
@@ -294,29 +289,19 @@ class DataReaderIconCmip6(DataReaderTimestep):
 
         # datetime
         datetimes = self.time[t_idxs_start:t_idxs_end]
-        # print("Before")
-        # print(f"datetimes.shape = {datetimes.shape}", flush = True)
 
         # lat/lon coordinates + tiling to match time steps
         lat = self.lat.values[:, np.newaxis]
         lon = self.lon.values[:, np.newaxis]
-        # print(f"lat.shape = {lat.shape}", flush = True)
-        # print(f"lon.shape = {lon.shape}", flush = True)
 
         lat = np.tile(lat, len(datetimes))
         lon = np.tile(lon, len(datetimes))
-        # print("\n\n")
-        # print("After")
-        # print(f"lat.shape = {lat.shape}", flush = True)
-        # print(f"lon.shape = {lon.shape}", flush = True)
 
         coords = np.concatenate([lat, lon], axis=1)
-        # print(f"coords.shape = {coords.shape}", flush = True)
 
         # time coordinate repeated to match grid points
         datetimes = np.repeat(datetimes, self.mesh_size).reshape(-1, 1)
         datetimes = np.squeeze(datetimes)
-        # print(f"datetimes.shape = {datetimes.shape}", flush = True)
 
         # expanding indexes for data
         start_row = t_idxs_start * self.mesh_size
@@ -328,9 +313,6 @@ class DataReaderIconCmip6(DataReaderTimestep):
             np.asarray(self.ds[ch_]).reshape(-1, 1)[start_row:end_row] for ch_ in channels
         ]
         data = np.concatenate(data_reshaped, axis=1)
-        # print(f"len(data_reshaped) = {len(data_reshaped)}", flush = True)
-        # print(f"data_reshaped.[0]shape = {data_reshaped[0].shape}", flush = True)
-        # print("\n\n")
 
         # empty geoinfos
         geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
