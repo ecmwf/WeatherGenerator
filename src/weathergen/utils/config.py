@@ -14,10 +14,9 @@ import os
 import subprocess
 from pathlib import Path
 
+import torch
 import yaml
 from omegaconf import DictConfig, OmegaConf
-
-import torch
 
 from weathergen.train.utils import get_run_id
 

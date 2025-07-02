@@ -29,8 +29,8 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP
 from weathergen.model.utils import get_num_parameters
-from weathergen.utils.logger import logger
 from weathergen.utils.config import get_dtype
+from weathergen.utils.logger import logger
 
 
 class ModelParams(torch.nn.Module):
