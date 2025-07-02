@@ -18,7 +18,30 @@ from weathergen.model.layers import MLP
 from weathergen.model.norms import RMSNorm
 from weathergen.model.positional_encoding import positional_encoding_harmonic
 
-# from weathergen.utils.logger import logger
+
+class PerceiverBlock(torch.nn.Module):
+    def __init__(self, dim_embed, num_heads):
+        super().__init__()
+        self.cross_attn = MultiCrossAttentionHead(
+            dim_embed,
+            dim_embed,
+            num_heads,
+            with_residual=True,
+            with_qk_lnorm=True,
+            dropout_rate=0.1,
+        )
+        self.mlp = MLP(
+            dim_embed,
+            dim_embed,
+            hidden_factor=2,
+            dropout_rate=0.1,
+            with_residual=True,
+        )
+
+    def forward(self, q, k):
+        x = self.cross_attn(q, k)
+        x = self.mlp(x)
+        return x
 
 class StreamEmbedTransformer(torch.nn.Module):
     def __init__(
@@ -57,6 +80,7 @@ class StreamEmbedTransformer(torch.nn.Module):
             assert mode == "channels", "cross-attention is only supported in channels mode"
             
             self.num_queries = cross_attn_params.get("num_queries", 0) if cross_attn_params else 0
+            self.selu = torch.nn.SELU(inplace=True)
             if self.num_queries > 0:
             # Multi-Cross Attention Head
                 num_channels = self.num_queries
@@ -67,14 +91,7 @@ class StreamEmbedTransformer(torch.nn.Module):
             )
                 with torch.no_grad():
                     self.queries.normal_(mean=0.0, std=1.0 / np.sqrt(self.dim_embed))
-                self.perceiver_io = MultiCrossAttentionHead(
-                        self.dim_embed,
-                        self.dim_embed,
-                        self.cross_attn_num_heads,
-                        with_residual=True,
-                        with_qk_lnorm=True,
-                        dropout_rate=0.1,  
-                    )
+                self.perceiver_io = PerceiverBlock(self.dim_embed, self.cross_attn_num_heads)
             else:
                 self.perceiver_io = torch.nn.Identity()
 
@@ -168,7 +185,8 @@ class StreamEmbedTransformer(torch.nn.Module):
         peh = positional_encoding_harmonic
 
         # embed provided input data
-        x = peh(checkpoint(self.embed, x_in.transpose(-2, -1), use_reentrant=False))
+        x = peh(self.selu(checkpoint(self.embed, x_in.transpose(-2, -1), use_reentrant=False)))
+
 
         if self.num_queries > 0:
             # cross-attention with queries
