@@ -12,8 +12,8 @@ ICONCMIP6 :
   # filenames : ['tos_day_ICON-ESM-LR_1pctCO2_r1i1p1f1_gn_18500101-18591231.nc']
   filenames : ['1pctCO2_r1i1p1f1_day.json']
   stats : ['1pctCO2_r1i1p1f1_day_stats.json']
-  source_channels : ['clt',   'hfss'] # ,  'mrso',   'pr' 
-  target_channels : ['clt',   'hfss'] # ,  'mrso',   'pr' 
+  source_channels : ['clt', 'hfss',  'mrsos',   'pr'] 
+  target_channels : ['clt', 'hfss',  'mrsos',   'pr'] 
   attributes:
     lon: 'longitude'
     lat: 'latitude'
