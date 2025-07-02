@@ -22,7 +22,7 @@ from weathergen.datasets.data_reader_base import (
     str_to_datetime64,
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
-from weathergen.datasets.data_reader_radklim import RadklimKerchunkReader 
+from weathergen.datasets.data_reader_radklim import RadklimKerchunkReader
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.data_reader_radklim import RadklimKerchunkReader
 from weathergen.datasets.icon_dataset import IconDataset

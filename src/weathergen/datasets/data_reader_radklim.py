@@ -36,6 +36,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
 
     The reader handles temporal subsetting, lazy loading, and normalization.
     """
+
     def __init__(
         self,
         tw_handler: TimeWindowHandler,
@@ -137,7 +138,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
         data_start = times_full[0]
         data_end = times_full[-1]
         super().__init__(tw_handler, stream_info, data_start, data_end, period)
-        
+
         # If there is no overlap with the time window, exit early
         if tw_handler.t_start >= data_end or tw_handler.t_end <= data_start:
             self.init_empty()
