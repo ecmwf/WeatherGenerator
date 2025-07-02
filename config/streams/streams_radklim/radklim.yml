@@ -10,9 +10,9 @@
 RADKLIM:
   type: radklim
   name: RADKLIM
-  filenames: ['radklim_full_dataset.json'] 
-  reference: "/p/scratch/weatherai/data/npp-atms-unpacked/temp_radklim/radklim_output_kerchunk/radklim_full_dataset.json"
-  stats_path: "/p/scratch/weatherai/data/npp-atms-unpacked/temp_radklim/radklim_output_kerchunk/dummy_radklim_stats.json"
+  filenames: ['ref_2010.json'] 
+  reference: "/p/scratch/weatherai/data/radklim/temp_radklim/ref_2010.json"
+  stats_path: "/p/scratch/weatherai/data/radklim/temp_radklim/dummy_radklim_stats.json"
 
   source_channels: ['RR']
   target_channels: ['RR']
