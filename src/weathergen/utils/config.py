@@ -14,6 +14,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import torch
 import yaml
 from omegaconf import DictConfig, OmegaConf
 
@@ -318,3 +319,19 @@ def load_streams(streams_directory: Path) -> list[Config]:
             continue
 
     return list(streams.values())
+
+
+def get_dtype(value: str) -> torch.dtype:
+    """
+    changes the conf value to a torch dtype
+    """
+    if value == "bf16":
+        return torch.bfloat16
+    elif value == "fp16":
+        return torch.float16
+    elif value == "fp32":
+        return torch.float32
+    else:
+        raise NotImplementedError(
+            f"Dtype {value} is not recognized, choose either, bf16, fp16, or fp32"
+        )
