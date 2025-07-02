@@ -104,7 +104,9 @@ class StreamEmbedTransformer(torch.nn.Module):
                     #     ) for _ in range(num_channels)
                     # ]
                 )
-                self.ln_final = torch.nn.ModuleList([norm(dim_embed, eps=1e-03) for _ in range(num_channels)])
+                self.ln_final = torch.nn.ModuleList(
+                    [norm(dim_embed, eps=1e-03) for _ in range(num_channels)]
+                )
 
             else:
                 assert False

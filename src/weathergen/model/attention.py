@@ -128,7 +128,6 @@ class MultiSelfAttentionHead_Varlen_Flex(torch.nn.Module):
         else:
             norm = RMSNorm
 
-
         self.lnorm = norm(dim_embed, eps=norm_eps)
         self.proj_heads_q = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_k = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)

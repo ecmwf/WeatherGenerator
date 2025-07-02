@@ -226,7 +226,9 @@ class Model(torch.nn.Module):
 
             # embedding network for coordinates
             if etc["net"] == "linear":
-                self.embed_target_coords.append(torch.nn.Linear(dim_coord_in, dims_embed[0], bias=False))
+                self.embed_target_coords.append(
+                    torch.nn.Linear(dim_coord_in, dims_embed[0], bias=False)
+                )
             elif etc["net"] == "mlp":
                 self.embed_target_coords.append(
                     MLP(
