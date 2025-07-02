@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-METEOSAT-X, SEVIRI :
+SEVIRI :
   type : obs
   filenames : ['observations-od-ai-0001-2018-2023-meteosat-11-seviri-v1.zarr']
   loss_weight : 1.0
