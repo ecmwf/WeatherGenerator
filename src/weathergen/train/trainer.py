@@ -28,6 +28,12 @@ from weathergen.train.loss import stat_loss_fcts
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
 from weathergen.utils.config import Config
+from weathergen.utils.deepspeed_utils import (
+    get_deepspeed_config,
+    initialize_deepspeed,
+    save_deepspeed_checkpoint,
+    setup_deepspeed_environment,
+)
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.validation_io import write_validation
@@ -214,26 +220,61 @@ class Trainer(Trainer_Base):
                 mixed_precision=mp,
             )
 
+        if cf.with_deepspeed:
+            # Set up DeepSpeed environment for Slurm
+            setup_deepspeed_environment()
+
+            # Get DeepSpeed configuration
+            ds_config = get_deepspeed_config(
+                batch_size=cf.batch_size,
+                gradient_accumulation_steps=cf.get("gradient_accumulation_steps", 1),
+                zero_stage=cf.get("deepspeed_zero_stage", 3),
+                fp16_enabled=cf.with_mixed_precision,
+                gradient_clipping=cf.grad_clip,
+                zero_optimization_cpu_offload=cf.get("deepspeed_cpu_offload", False),
+                zero_optimization_cpu_offload_params=cf.get("deepspeed_cpu_offload_params", False),
+            )
+            # TODO: learning rate schedule
+            # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
+            kappa = cf.batch_size * cf.num_ranks
+            beta1 = max(0.5, 1.0 - kappa * (1.0 - 0.9))
+            beta2 = 1.0 - kappa * (1.0 - 0.999)
+            eps = 1e-08 / np.sqrt(kappa)
+            # beta1, beta2, eps = 0.125, 0.125, 1e-08
+            self.optimizer = torch.optim.AdamW(
+                self.model.parameters(),
+                lr=cf.lr_start,
+                weight_decay=cf.weight_decay,
+                betas=(beta1, beta2),
+                eps=eps,
+            )
+            self.ddp_model, self.optimizer, _ = initialize_deepspeed(
+                model=self.model,
+                optimizer=self.optimizer,
+                lr_scheduler=None,  # We'll handle LR scheduling separately
+                config=ds_config,
+            )
+
         self.model_params = ModelParams().create(cf).to("cuda")
+
+        if not (cf.with_ddp and cf.with_deepspeed):
+            kappa = cf.batch_size * cf.num_ranks
+            beta1 = max(0.5, 1.0 - kappa * (1.0 - 0.9))
+            beta2 = 1.0 - kappa * (1.0 - 0.999)
+            eps = 1e-08 / np.sqrt(kappa)
+            # beta1, beta2, eps = 0.125, 0.125, 1e-08
+            self.optimizer = torch.optim.AdamW(
+                self.ddp_model.parameters(),
+                lr=cf.lr_start,
+                weight_decay=cf.weight_decay,
+                betas=(beta1, beta2),
+                eps=eps,
+            )
 
         # if with_fsdp then parameter count is unreliable
         if (self.cf.rank == 0 and not cf.with_fsdp) or not cf.with_ddp:
             self.model.print_num_parameters()
 
-        # TODO: learning rate schedule
-        # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
-        kappa = cf.batch_size * cf.num_ranks
-        beta1 = max(0.5, 1.0 - kappa * (1.0 - 0.9))
-        beta2 = 1.0 - kappa * (1.0 - 0.999)
-        eps = 1e-08 / np.sqrt(kappa)
-        # beta1, beta2, eps = 0.125, 0.125, 1e-08
-        self.optimizer = torch.optim.AdamW(
-            self.ddp_model.parameters(),
-            lr=cf.lr_start,
-            weight_decay=cf.weight_decay,
-            betas=(beta1, beta2),
-            eps=eps,
-        )
         self.grad_scaler = torch.amp.GradScaler("cuda")
 
         assert len(self.dataset) > 0, f"No data found in {self.dataset}"
@@ -546,16 +587,20 @@ class Trainer(Trainer_Base):
                 )
 
             # backward pass
-            self.grad_scaler.scale(loss).backward()
+            if cf.with_deepspeed:
+                # DeepSpeed handles mixed precision internally
+                self.ddp_model.backward(loss)
+                self.ddp_model.step()
+            else:
+                self.grad_scaler.scale(loss).backward()
+                # gradient clipping
+                self.grad_scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), max_norm=cf.grad_clip)
 
-            # gradient clipping
-            self.grad_scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), max_norm=cf.grad_clip)
-
-            # optimizer step
-            self.grad_scaler.step(self.optimizer)
-            self.grad_scaler.update()
-            self.optimizer.zero_grad()
+                # optimizer step
+                self.grad_scaler.step(self.optimizer)
+                self.grad_scaler.update()
+                self.optimizer.zero_grad()
 
             # update learning rate
             self.lr_scheduler.step()
@@ -709,6 +754,13 @@ class Trainer(Trainer_Base):
                 FullStateDictConfig(rank0_only=True, offload_to_cpu=True),
             ):
                 state = self.ddp_model.state_dict()
+        elif cf.with_deepspeed:
+            state = {
+                "epoch": epoch,
+                "istep": self.cf.istep,
+                "config": self.cf,
+            }
+
         else:
             state = self.ddp_model.state_dict()
 
@@ -724,10 +776,20 @@ class Trainer(Trainer_Base):
             base_path = Path(self.cf.model_path) / self.cf.run_id
             file_out: Path = base_path / (filename + ".chkpt")
             file_tmp: Path = base_path / (filename + "_tmp.chkpt")
-            # save temp file (slow)
-            torch.save(state, file_tmp)
-            # move file (which is changing the link in the file system and very fast)
-            file_tmp.replace(file_out)
+
+            if cf.with_deepspeed:
+                save_deepspeed_checkpoint(
+                    self.ddp_model,
+                    base_path,
+                    epoch,
+                    global_step=self.cf.istep,
+                    client_state=state,
+                )
+            else:
+                # save temp file (slow)
+                torch.save(state, file_tmp)
+                # move file (which is changing the link in the file system and very fast)
+                file_tmp.replace(file_out)
             _logger.info(f"Saved model to {file_out}")
 
             # save config

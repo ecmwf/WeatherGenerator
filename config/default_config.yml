@@ -82,8 +82,8 @@ sampling_rate_target: 1.0
 masking_strategy: "random"
 
 num_epochs: 24
-samples_per_epoch: 4096
-samples_per_validation: 512
+samples_per_epoch: 40
+samples_per_validation: 10
 shuffle: True
 
 lr_scaling_policy: "sqrt"
@@ -126,4 +126,12 @@ run_id: ???
 train_log:
   # The period to log metrics (in number of batch steps)
   log_interval: 20
+
+
+################################
+with_deepspeed: True
+deepspeed_zero_stage: 3
+deepspeed_cpu_offload: False
+deepspeed_cpu_offload_params: False
+gradient_accumulation_steps: 1
 

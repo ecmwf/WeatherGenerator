@@ -36,7 +36,7 @@ class ModelParams(torch.nn.Module):
     def __init__(self):
         super(ModelParams, self).__init__()
 
-    def create(self, cf):
+    def create(self, cf) -> torch.nn.Module:
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**cf.healpix_level
 
@@ -124,7 +124,7 @@ class Model(torch.nn.Module):
         self.targets_coords_size = targets_coords_size
 
     #########################################
-    def create(self):
+    def create(self) -> torch.nn.Module:
         cf = self.cf
 
         # separate embedding networks for differnt observation types
@@ -578,13 +578,15 @@ class Model(torch.nn.Module):
             with torch.amp.autocast("cuda", dtype=torch.float32, enabled=False):
                 tc_tokens = torch.cat(
                     [
-                        checkpoint(
-                            tc_embed,
-                            streams_data[i_b][ii].target_coords[fstep],
-                            use_reentrant=False,
+                        (
+                            checkpoint(
+                                tc_embed,
+                                streams_data[i_b][ii].target_coords[fstep],
+                                use_reentrant=False,
+                            )
+                            if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
+                            else streams_data[i_b][ii].target_coords[fstep]
                         )
-                        if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
-                        else streams_data[i_b][ii].target_coords[fstep]
                         for i_b in range(len(streams_data))
                     ]
                 )
