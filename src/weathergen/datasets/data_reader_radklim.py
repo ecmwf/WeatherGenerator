@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import contextlib
+
 import json
 import logging
 from pathlib import Path
@@ -16,10 +16,7 @@ from typing import override
 import fsspec
 import numpy as np
 import xarray as xr
-import zarr
 from numpy.typing import NDArray
-
-_logger = logging.getLogger(__name__)
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
@@ -29,6 +26,8 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
     check_reader_data,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 class RadklimKerchunkReader(DataReaderTimestep):
@@ -46,7 +45,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
     ) -> None:
         """
         Construct RADKLIM data reader from Kerchunk reference and stats JSON.
-
+        NOTE: This __init__ method is designed to be fork-safe.
         Parameters
         ----------
         tw_handler : TimeWindowHandler
@@ -59,40 +58,75 @@ class RadklimKerchunkReader(DataReaderTimestep):
         Returns
         -------
         None
+
         """
         self._empty: bool = False
+        self.ds: xr.Dataset | None = None
+
+        # Read Kerchunk reference and normalization stats paths from stream_info
+        self.ref_path = Path(stream_info.get("reference", filename))
+        self.norm_path = Path(stream_info.get("stats_path"))
+        self.stream_info = stream_info
 
         # Load source and target channels from config
-        self.source_channels = ["RR"] # Hrad coded due to unkown error in config
-        self.target_channels = ["RR"] # Hrad coded due to unkown error in config
-        self.geoinfo_channels = [] # Hrad coded due to unkown error in config
+        self.source_channels = ["RR"]  # Hrad coded due to unkown error in config
+        self.target_channels = ["RR"]  # Hrad coded due to unkown error in config
+        self.geoinfo_channels = []  # Hrad coded due to unkown error in config
 
-        
         _logger.info("source_channels: %s", self.source_channels)
         _logger.info("target_channels: %s", self.target_channels)
 
         self.source_idx = list(range(len(self.source_channels)))
         self.target_idx = list(range(len(self.target_channels)))
         self.geoinfo_idx = list(range(len(self.geoinfo_channels)))
+<<<<<<< HEAD
         
         #ref_path_str = "/p/scratch/weatherai/data/npp-atms-unpacked/temp_radklim/radklim_output_kerchunk/radklim_full_dataset.json"
         ref_path = Path(stream_info.get("reference", filename))
         _logger.info("Loading RADKLIM Kerchunk reference from: %s", ref_path)
+=======
+
+>>>>>>> wael-mika/wm/dev/radklim
         # Load Kerchunk reference
-        if not ref_path.exists():
-            raise FileNotFoundError(f"Kerchunk reference JSON not found: {ref_path}")
+        if not self.ref_path.exists():
+            raise FileNotFoundError(f"Kerchunk reference JSON not found: {self.ref_path}")
 
-        kerchunk_ref = json.loads(ref_path.read_text())
-        fs = fsspec.filesystem("reference", fo=kerchunk_ref)
-        mapper = fs.get_mapper("")
+        # Load normalization stats
+        if not self.norm_path.exists():
+            raise FileNotFoundError(f"Normalisation JSON not found: {self.norm_path}")
 
-        # Consolidate metadata (may be a no-op depending on upstream)
-        with contextlib.suppress(Exception):
-            zarr.consolidate_metadata(mapper)
-        assert all(isinstance(c, str) for c in self.source_channels), f"source_channels malformed: {self.source_channels}"
+        _logger.info("Reading time metadata from: %s", self.ref_path)
 
-        ds_full = xr.open_dataset(mapper, engine="zarr", consolidated=True)
-        times_full: NDArray[np.datetime64] = ds_full["time"].values
+        times_full: NDArray[np.datetime64]
+
+        with fsspec.open(self.ref_path, "rt") as f:
+            kerchunk_ref = json.load(f)
+
+        fs_meta = fsspec.filesystem("reference", fo=kerchunk_ref)
+        mapper_meta = fs_meta.get_mapper("")
+
+        # MODIFICATION: Changed consolidated=True to consolidated=False
+        # This is more robust if consolidated metadata is not available.
+        try:
+            with xr.open_dataset(
+                mapper_meta, engine="zarr", consolidated=False, chunks={}
+            ) as ds_meta:
+                times_full = ds_meta["time"].values
+        except Exception:
+            _logger.error(
+                "Failed to open Kerchunk reference even with consolidated=False. "
+                "The reference file may be corrupt. "
+            )
+            raise
+
+        # Ensure times_full is a datetime64 array
+        if not np.issubdtype(times_full.dtype, np.datetime64):
+            raise TypeError(
+                f"Time coordinate from {self.ref_path} was not decoded to datetime64. "
+                f"Actual dtype: {times_full.dtype}. Check 'units' and 'calendar' attributes."
+            )
+
+        # Check if times_full is empty
         if times_full.size == 0:
             super().__init__(tw_handler, stream_info, None, None, None)
             self.init_empty()
@@ -117,27 +151,43 @@ class RadklimKerchunkReader(DataReaderTimestep):
         # Determine time index window for slicing
         self.start_idx = int(np.searchsorted(times_full, tw_handler.t_start, side="left"))
         self.end_idx = int(np.searchsorted(times_full, tw_handler.t_end, side="right"))
+        self.num_steps_per_window = int(tw_handler.t_window_len / period)
 
-        # Subset and optionally rechunk the dataset
-        if len(self.source_channels) == 1 and isinstance(self.source_channels[0], list):
-            self.source_channels = self.source_channels[0]
-        subset = ds_full.isel(time=slice(self.start_idx, self.end_idx))[self.source_channels]
-        self.ds = subset.chunk(stream_info.get("chunks", {})) if "chunks" in stream_info else subset
-        #norm_path_str = "/p/scratch/weatherai/data/npp-atms-unpacked/temp_radklim/radklim_output_kerchunk/dummy_radklim_stats.json"
-        norm_path = Path(stream_info.get("stats_path"))
-        if not norm_path.exists():
-            raise FileNotFoundError(f"normalisation JSON not found: {norm_path}")
-
-        stats = json.loads(norm_path.read_text())
+        stats = json.loads(self.norm_path.read_text())
         self.mean = np.asarray(stats.get("mean", []), dtype=np.float32)
         self.stdev = np.asarray(stats.get("std", []), dtype=np.float32)
         self.mean_geoinfo = np.asarray(stats.get("mean_geoinfo", []), dtype=np.float32)
         self.stdev_geoinfo = np.asarray(stats.get("std_geoinfo", []), dtype=np.float32)
 
         if len(self.mean) != len(self.source_channels):
-            raise ValueError("normalisation stats length does not match number of variables")
+            raise ValueError("Normalisation stats length does not match number of variables")
 
-        # Load and flatten coordinate grid
+    def _lazy_open(self):
+        """
+        Opens the Kerchunk reference and initializes the xarray.Dataset.
+        This method is called on the first data access within a DataLoader worker.
+        """
+        if self.ds is not None:
+            return
+
+        _logger.info("Lazy loading RADKLIM Kerchunk dataset inside worker...")
+
+        kerchunk_ref = json.loads(self.ref_path.read_text())
+        fs = fsspec.filesystem("reference", fo=kerchunk_ref)
+        mapper = fs.get_mapper("")
+
+        # Set up consolidated=False as the default for robustness.
+        # can be changed to True if metadata is consolidated.
+        ds_full = xr.open_dataset(mapper, engine="zarr", consolidated=False)
+
+        subset = ds_full.isel(time=slice(self.start_idx, self.end_idx))[self.source_channels]
+
+        if "chunks" in self.stream_info:
+            self.ds = subset.chunk(self.stream_info.get("chunks", {}))
+        else:
+            self.ds = subset
+
+        # Extract dimensions and coordinates
         y1d = self.ds["y"].values.astype(np.float32)
         x1d = self.ds["x"].values.astype(np.float32)
         self.ny = len(y1d)
@@ -154,28 +204,6 @@ class RadklimKerchunkReader(DataReaderTimestep):
         self._base_coords = np.column_stack(
             (self.latitudes.reshape(-1), self.longitudes.reshape(-1))
         ).astype(DType)
-
-        self.num_steps_per_window = int(tw_handler.t_window_len / period)
-        
-    # developed only for tackling the fork issue/ stil not working    
-    def _lazy_open(self):
-        if hasattr(self, "ds"):
-            return  # Already opened
-
-        _logger.info("Lazy loading RADKLIM Kerchunk dataset inside worker...")
-
-        kerchunk_ref = json.loads(Path(self.stream_info["reference"]).read_text())
-        fs = fsspec.filesystem("reference", fo=kerchunk_ref)
-        mapper = fs.get_mapper("")
-
-        # Optional: consolidate
-        with contextlib.suppress(Exception):
-            zarr.consolidate_metadata(mapper)
-
-        ds_full = xr.open_dataset(mapper, engine="zarr", consolidated=True)
-
-        # Store dataset
-        self.ds = ds_full.isel(time=slice(self.start_idx, self.end_idx))[self.source_channels]
 
     @override
     def init_empty(self) -> None:
@@ -197,78 +225,74 @@ class RadklimKerchunkReader(DataReaderTimestep):
         """
         if self._empty:
             return 0
-        nt = int(self.ds.sizes["time"])
+        # The number of available time steps is determined by start_idx and end_idx
+        nt = self.end_idx - self.start_idx
         return max(0, nt - self.num_steps_per_window + 1)
 
     @override
     def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
         """
-        Extract a window of data, filtered by channels and validity.
+        Fetch data for a specific time index and channels.
 
         Parameters
         ----------
-        idx : int
-            Window index
-        channels_idx : list of int
-            Channel indices to extract
-
+        idx : TIndex
+            Time index to fetch data for, can be a single integer or a slice.
+        channels_idx : list[int]
+            List of channel indices to fetch data for.
         Returns
         -------
         ReaderData
-            Data window including coordinates, values, and timestamps
+            ReaderData object containing the requested data, coordinates, and metadata.
+        Raises
+        ------
+        ValueError
+            If channels_idx is empty or contains invalid indices.
+        IndexError
+            If channels_idx contains indices out of bounds for the dataset.
         """
+        # Crucial step: ensure dataset is open in the current process
         self._lazy_open()
+
+        # Safety check for empty channels_idx
         if not channels_idx:
             raise ValueError("channels_idx cannot be empty")
 
         t_idxs_abs, dtr = self._get_dataset_idxs(idx)
 
-        # Early return for empty or invalid request
-        if self._empty or t_idxs_abs.size == 0:
-            return ReaderData.empty(
-                num_data_fields=len(channels_idx),
-                num_geo_fields=len(self.geoinfo_idx),
-            )
+        # If the dataset is empty or t_idxs_abs is empty, return empty ReaderData
+        if self._empty or t_idxs_abs.size == 0 or self.ds is None:  # Added self.ds check
+            return ReaderData.empty(len(channels_idx), len(self.geoinfo_idx))
 
         # Shift from global to local time indices
         t_idxs_rel = t_idxs_abs - self.start_idx
         if np.any(t_idxs_rel < 0) or np.any(t_idxs_rel >= self.ds.sizes["time"]):
-            return ReaderData.empty(
-                num_data_fields=len(channels_idx),
-                num_geo_fields=len(self.geoinfo_idx),
-            )
+            return ReaderData.empty(len(channels_idx), len(self.geoinfo_idx))
 
-        # 2. Slice time window
+        # Slice the dataset to get the relevant time window
         start, stop = int(t_idxs_rel[0]), int(t_idxs_rel[-1]) + 1
-        ds_win = self.ds.isel(time=slice(start, stop))  # (time, y, x, var)
+        ds_win = self.ds.isel(time=slice(start, stop))
 
-        # 3. Stack variables into one array: (t, y, x, var)
+        # Stack the data into a 4D array (time, y, x, var)
         da = ds_win.to_array(dim="var").transpose("time", "y", "x", "var")
         nt, ny, nx, nvars = da.shape
 
-        # 4. Validate channel indices
+        # Validate channels_idx
         if min(channels_idx) < 0 or max(channels_idx) >= nvars:
             raise IndexError("channels_idx out of bounds")
         if len(set(channels_idx)) != len(channels_idx):
             raise ValueError("channels_idx must be unique")
 
-        # 5. Flatten spatial/temporal and select channels
-        flat_data = (
-            da.values.astype(np.float32, copy=False).reshape(-1, nvars)[  # (t, y, x, var)
-                :, channels_idx
-            ]  # → (nt * ny * nx, len(channels_idx))
-        )
+        # Flatten spatial/temporal and select channels
+        flat_data = da.values.astype(np.float32, copy=False).reshape(-1, nvars)[:, channels_idx]
 
-        # 6. Expand coordinates and time axis
+        # Expand coordinates and time axis
         coords = np.tile(self._base_coords, (nt, 1))
-        times = np.repeat(
-            ds_win["time"].values.astype("datetime64[ns]"),
-            self.points_per_slice,
-        )
+        times = np.repeat(ds_win["time"].values.astype("datetime64[ns]"), self.points_per_slice)
 
         rdata = ReaderData(
             coords=coords,
-            geoinfos=np.zeros((coords.shape[0], 0), dtype=DType),  # RADKLIM has no geoinfo
+            geoinfos=np.zeros((coords.shape[0], 0), dtype=DType),
             data=flat_data,
             datetimes=times,
         )
