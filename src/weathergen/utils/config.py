@@ -321,7 +321,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
     return list(streams.values())
 
 
-def get_dtype(value: str):
+def get_dtype(value: str) -> torch.dtype:
     """
     changes the conf value to a torch dtype
     """
