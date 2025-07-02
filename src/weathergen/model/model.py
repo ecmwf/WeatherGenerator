@@ -1,4 +1,5 @@
 # (C) Copyright 2025 WeatherGenerator contributors.
+
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -237,6 +238,7 @@ class Model(torch.nn.Module):
                         hidden_factor=8,
                         with_residual=False,
                         dropout_rate=dropout_rate,
+                        norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
             else:
@@ -252,6 +254,7 @@ class Model(torch.nn.Module):
                         with_residual=True,
                         dropout_rate=dropout_rate,
                         norm_type=cf.norm_type,
+                        norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
             else:
