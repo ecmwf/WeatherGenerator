@@ -94,8 +94,9 @@ def evaluate_results(run_id):
         if item.key.with_source:
             ds = item.source.as_xarray()
             logger.info(ds)
-    
+
     # TODO: test concat multiple samples
+
 
 def load_metrics(run_id):
     """Helper function to load metrics"""

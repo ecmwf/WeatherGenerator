@@ -67,7 +67,7 @@ class OutputDataset:
             "data": self.data,
             "times": self.times,
             "coords": self.coords,
-            "geoinfo": self.geoinfo
+            "geoinfo": self.geoinfo,
         }
 
     @functools.cached_property
@@ -111,6 +111,7 @@ class OutputDataset:
             },
             name=self.name,
         )
+
 
 class OutputItem:
     def __init__(
@@ -210,7 +211,8 @@ class ZarrIO:
         else:
             chunks = (CHUNK_N_SAMPLES, *array.shape[1:])
         _logger.debug(
-            f"writing array: {name} with shape: {array.shape}, chunks: {chunks} into group: {group}."
+            f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
+            + "into group: {group}."
         )
         group.create_dataset(name, data=array, chunks=chunks)
 
@@ -280,7 +282,7 @@ class OutputBatchData:
         """Iterate over possible output items"""
         filtered_streams = (stream for stream in self.stream_names if stream != "")
         # TODO: filter for empty items?
-        for (s, fo_s, fi_s) in itertools.product(self.samples, self.forecast_steps, filtered_streams):
+        for s, fo_s, fi_s in itertools.product(self.samples, self.forecast_steps, filtered_streams):
             yield self.extract(ItemKey(int(s), int(fo_s), fi_s))
 
     def extract(self, key: ItemKey) -> OutputItem:
@@ -294,8 +296,11 @@ class OutputBatchData:
         _logger.debug(f"lens: {lens}, {len(lens)}")
         start = sum(lens[:sample])
         n_samples = lens[sample]
-        _logger.info(f"extracting sample: start:{self.sample_start} rel_idx:{sample} range:{start}-{start+n_samples}.")
-        datapoints = slice(start, start+n_samples)
+        _logger.info(
+            f"extracting sample: start:{self.sample_start} rel_idx:{sample}"
+            + "range:{start}-{start + n_samples}."
+        )
+        datapoints = slice(start, start + n_samples)
 
         target_data = self.targets[forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
         preds_data = (
@@ -313,7 +318,8 @@ class OutputBatchData:
         if geoinfo.size > 0:  # TODO: set geoinfo to be empty for now
             geoinfo = np.empty((geoinfo.shape[0], 0))
             _logger.warning(
-                "geoinformation channels are not implemented yet. will be truncated to be of size 0."
+                "geoinformation channels are not implemented yet."
+                + "will be truncated to be of size 0."
             )
         _logger.info(f"shape coords: {coords.shape}, geoinfo: {geoinfo.shape}")
         times = self.targets_times[forecast_step][stream_idx][
@@ -332,6 +338,10 @@ class OutputBatchData:
 
         return OutputItem(
             source=source_dataset,
-            target=OutputDataset("target", key, target_data, times, coords, geoinfo, channels, geoinfo_channels),
-            prediction=OutputDataset("prediction", key, preds_data, times, coords, geoinfo, channels, geoinfo_channels),
+            target=OutputDataset(
+                "target", key, target_data, times, coords, geoinfo, channels, geoinfo_channels
+            ),
+            prediction=OutputDataset(
+                "prediction", key, preds_data, times, coords, geoinfo, channels, geoinfo_channels
+            ),
         )

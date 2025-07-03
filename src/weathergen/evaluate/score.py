@@ -1,20 +1,25 @@
 import json
+import logging
 
 import dask.array as da
 import numpy as np
 import pandas as pd
 import xarray as xr
 
+from weathergen.utils.io import MockIO
+
+_logger = logging.getLogger(__name__)
+
+
 try:
     import xskillscore
     from xhistogram.xarray import histogram
 except Exception:
-    print(
-        "Could not import xskillscore and xhistogram. Thus, CRPS and rank histogram-calculations are not supported."
+    _logger.warning(
+        "Could not import xskillscore and xhistogram. Thus, CRPS and"
+        + "rank histogram-calculations are not supported."
     )
-
-
-from weathergen.utils.io import MockIO
+    print()
 
 
 # helper function to calculate skill score
@@ -49,7 +54,8 @@ class Scores:
         """
         :param avg_dims: dimension or list of dimensions over which scores shall be averaged.
                          Parse 'all' to average over all data dimensions.
-        :param ens_dim: name of ensemble meber dimension in prediction. Ignored if determinsitic forecast is processed.
+        :param ens_dim: name of ensemble meber dimension in prediction. Ignored if
+                        determinsitic forecast is processed.
         """
         self.det_metrics_dict = {
             "ets": self.calc_ets,
@@ -89,12 +95,14 @@ class Scores:
     def __call__(self, score_name, **kwargs):
         try:
             score_func = self.metrics_dict[score_name]
-        except:
+        except Exception as e:
             score_family = "probablistic" if self.prob_fcst else "deterministic"
-            raise ValueError(
+            metrics = ", ".join(self.metrics_dict.keys())
+            msg = (
                 f"{score_name} is not an implemented {score_family} score."
-                + "Choose one of the following: {}".format(", ".join(self.metrics_dict.keys()))
+                + f"Choose one of the following: {metrics}"
             )
+            raise ValueError(msg) from e
 
         return score_func(**kwargs)
 
@@ -172,7 +180,8 @@ class Scores:
         """
         Calculate the L1 error norm of forecast data w.r.t. reference data.
         L1 will be divided by the number of samples along the average dimensions.
-        Similar to MAE, but provides just a number divided by number of samples along average dimensions.
+        Similar to MAE, but provides just a number divided by number of samples along
+        average dimensions.
         :return: L1-error
         """
         sum_dims = kwargs.get("sum_dims", [])
@@ -189,7 +198,8 @@ class Scores:
     def calc_l2(self, **kwargs):
         """
         Calculate the L2 error norm of forecast data w.r.t. reference data.
-        Similar to RMSE, but provides just a number divided by number of samples along average dimensions.
+        Similar to RMSE, but provides just a number divided by number of samples along
+        average dimensions.
         :return: L2-error
         """
         sum_dims = kwargs.get("sum_dims", [])
@@ -244,9 +254,11 @@ class Scores:
         :return: RMSE averaged over provided dimensions
         """
         if self.avg_dims is None:
-            raise ValueError(
-                "Cannot calculate root mean squared error without average dimensions (avg_dims=None)."
+            msg = (
+                "Cannot calculate root mean squared error without average dimensions"
+                + "(avg_dims=None)."
             )
+            raise ValueError(msg)
 
         rmse = np.sqrt(self.calc_mse(**kwargs))
 
@@ -315,10 +327,12 @@ class Scores:
     @to_json
     def calc_spatial_variability(self, **kwargs):
         """
-        Calculates the ratio between the spatial variability of differental operator with order 1 (or 2) forecast and
+        Calculates the ratio between the spatial variability of differental operator
+        with order 1 (or 2) forecast and
         reference data using the calc_geo_spatial-method.
         :param kwargs: 'order' to control the order of spatial differential operator
-                       'non_spatial_avg_dims' to add averaging in addition to spatial averaging performed with calc_geo_spatial
+                       'non_spatial_avg_dims' to add averaging in addition to spatial
+                       averaging performed with calc_geo_spatial
         :return: the ratio between spatial variabilty in the forecast and reference data field
         """
         order = kwargs.get("order", 1)
@@ -377,7 +391,8 @@ class Scores:
 
         # check dimensioning of data
         assert prediction.ndim <= 2, (
-            f"Data must be one- or two-dimensional, but has {prediction.ndim} dimensions. Check if stacking with spatial_dims may help."
+            f"Data must be one- or two-dimensional, but has {prediction.ndim} dimensions."
+            + "Check if stacking with spatial_dims may help."
         )
 
         if prediction.ndim == 1:
@@ -468,7 +483,10 @@ class Scores:
             }
             crps_func = xskillscore.crps_gaussian
         else:
-            f"Unsupported CRPS-calculation method {method} chosen. Supported methods: {', '.join(crps_methods)}"
+            (
+                f"Unsupported CRPS-calculation method {method} chosen."
+                + f"Supported methods: {', '.join(crps_methods)}"
+            )
 
         crps = crps_func(self.ground_truth, **func_kwargs)
 
@@ -477,11 +495,13 @@ class Scores:
     def calc_rank_histogram(self, norm: bool = True, add_noise: bool = True, noise_fac=1.0e-03):
         """
         :param norm: Flag if normalized counts should be returned
-        :param add_noise: Add unsignificant amount of random noise to data for fair computations, cf. Sec. 4.2.2 in Harris et al. 2022
+        a:param add_noise: Add unsignificant amount of random noise to data for fair
+                           computations, cf. Sec. 4.2.2 in Harris et al. 2022
         :param noise_fac: magnitude of random noise (only relevant if add_noise == True)
         """
 
-        # unstack stacked time-dimension beforehand if required (time may be stacked for forecast data)
+        # unstack stacked time-dimension beforehand if required
+        # (time may be stacked for forecast data)
         ground_truth = self.ground_truth
         if "time" in self.ground_truth.indexes:
             if isinstance(self.ground_truth.indexes["time"], pd.MultiIndex):
@@ -552,12 +572,14 @@ class Scores:
         scalar_field: xr.DataArray, order: int = 1, r_e: float = 6371.0e3, dom_avg: bool = True
     ):
         """
-        Calculates the amplitude of the gradient (order=1) or the Laplacian (order=2) of a scalar field given on a regular,
-        geographical grid (i.e. dlambda = const. and dphi=const.)
+        Calculates the amplitude of the gradient (order=1) or the Laplacian (order=2)
+        of a scalar field given on a regular, geographical grid
+        (i.e. dlambda = const. and dphi=const.)
         :param scalar_field: scalar field as data array with latitude and longitude as coordinates
         :param order: order of spatial differential operator
         :param r_e: radius of the sphere
-        :return: the amplitude of the gradient/laplacian at each grid point or over the whole domain (see avg_dom)
+        :return: the amplitude of the gradient/laplacian at each grid point
+                 or over the whole domain (see avg_dom)
         """
         method = Scores.calc_geo_spatial_diff.__name__
         # sanity checks
@@ -571,20 +593,16 @@ class Scores:
         lon_dims = ["rlon", "lon", "longitude"]
 
         def check_for_coords(coord_names_data, coord_names_expected):
-            stat = False
-            for i, coord in enumerate(coord_names_expected):
-                if coord in coord_names_data:
-                    stat = True
-                    break
-
-            if stat:
-                return i, coord_names_expected[i]  # just take the first value
-            else:
+            try:
+                i = coord_names_expected.index()
+            except ValueError as e:
+                expected_names = ",".join(coord_names_expected)
                 raise ValueError(
-                    "Could not find one of the following coordinates in the passed dictionary: {}".format(
-                        ",".join(coord_names_expected)
-                    )
-                )
+                    "Could not find one of the following coordinates in the"
+                    + f"passed dictionary: {expected_names}"
+                ) from e
+
+            return i, coord_names_expected[i]  # just take the first value
 
         lat_ind, lat_name = check_for_coords(dims, lat_dims)
         lon_ind, lon_name = check_for_coords(dims, lon_dims)
