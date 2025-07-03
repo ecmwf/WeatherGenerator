@@ -96,7 +96,7 @@ class TrainLogger:
         self,
         samples: int,
         lr: float,
-        avg_loss: float,
+        avg_loss: Tensor,
         losses_all: dict[str, Tensor],
         stddev_all: dict[str, Tensor],
         perf_gpu: float = 0.0,
@@ -110,10 +110,10 @@ class TrainLogger:
         log_vals: list[float] = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
         log_vals += [samples]
 
-        metrics["loss_avg_mean"] = avg_loss
+        metrics["loss_avg_mean"] = avg_loss.nanmean().item()
         metrics["learning_rate"] = lr
         metrics["num_samples"] = int(samples)
-        log_vals += [avg_loss]
+        log_vals += [avg_loss.nanmean().item()]
         log_vals += [lr]
 
         for st in self.cf.streams:
@@ -123,11 +123,13 @@ class TrainLogger:
 
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts):
                 lf_name = _clean_name(lf_name)
-                metrics[_key_loss(st["name"], lf_name)] = loss[:, j].nanmean().item()
+                metrics[_key_loss(st["name"], lf_name)] = loss[:, :, j].nanmean().item()
 
                 for k, ch_n in enumerate(st.train_target_channels):
-                    metrics[_key_loss_chn(st["name"], lf_name, ch_n)] = loss[k, j].item()
-                log_vals += [loss[:, j].nanmean(0).item()]
+                    metrics[_key_loss_chn(st["name"], lf_name, ch_n)] = (
+                        loss[:, k, j].nanmean().item()
+                    )
+                log_vals += [loss[:, :, j].nanmean().item()]
 
             metrics[_key_stddev(st_name)] = stddev.nanmean().item()
 
@@ -165,10 +167,10 @@ class TrainLogger:
             loss = losses_all[st_name]
             stddev = stddev_all[st_name]
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts_val):
-                metrics[_key_loss(st_name, lf_name)] = loss[:, j].nanmean().item()
+                metrics[_key_loss(st_name, lf_name)] = loss[:, :, j].nanmean().item()
                 for k, ch_n in enumerate(st.val_target_channels):
-                    metrics[_key_loss_chn(st_name, lf_name, ch_n)] = loss[k, j].item()
-                log_vals += [loss[:, j].nanmean().item()]
+                    metrics[_key_loss_chn(st_name, lf_name, ch_n)] = loss[:, k, j].nanmean().item()
+                log_vals += [loss[:, :, j].nanmean().item()]
 
             metrics[_key_stddev(st_name)] = stddev.nanmean().item()
             log_vals += [stddev.nanmean().item()]

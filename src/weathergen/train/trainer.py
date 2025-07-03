@@ -28,7 +28,7 @@ from weathergen.train.loss import stat_loss_fcts
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
 from weathergen.utils.config import Config
-from weathergen.utils.distributed import is_root
+from weathergen.utils.distributed import is_root, all_gather
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.validation_io import write_validation
 
@@ -373,14 +373,18 @@ class Trainer(Trainer_Base):
             ]
 
         ctr_ftarget = 0
-        loss = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
+        device = self.devices[0]
+
+        loss = torch.tensor(0.0, device=device, requires_grad=True)
         # Create list storing losses for each stream
         losses_all: dict[str, Tensor] = {
-            st.name: torch.zeros((len(st[str(stage) + "_target_channels"]), len(loss_fcts)))
+            st.name: torch.zeros(
+                (len(st[str(stage) + "_target_channels"]), len(loss_fcts)), device=device
+            )
             for st in self.cf.streams  # No nan here as it's divided so any remaining 0 become nan
         }  # Create tensor for each stream
         stddev_all: dict[str, Tensor] = {
-            st.name: torch.zeros(len(stat_loss_fcts)) for st in self.cf.streams
+            st.name: torch.zeros(len(stat_loss_fcts), device=device) for st in self.cf.streams
         }  # Create tensor for each stream
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):
@@ -415,7 +419,7 @@ class Trainer(Trainer_Base):
                     # accumulate loss from different loss functions and channels
                     for j, (loss_fct, w) in enumerate(loss_fcts):
                         # compute per channel loss
-                        val = torch.tensor(0.0, device=self.devices[0], requires_grad=True)
+                        val = torch.tensor(0.0, device=device, requires_grad=True)
                         ctr_chs = 0.0
 
                         # loop over all channels
@@ -582,30 +586,32 @@ class Trainer(Trainer_Base):
 
     def _prepare_losses_for_logging(
         self,
-    ) -> tuple[float, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         """
-        Aggregates and prepares loss and standard deviation data for logging.
+        Aggregates across ranks loss and standard deviation data for logging.
 
         Returns:
-            real_loss (float): The averaged scalar loss used for backpropagation.
+            real_loss (torch.Tensor): The scalar loss used for backpropagation.
             losses_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
-                averaged per-channel loss tensor.
+                per-channel loss tensor.
             stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
-                averaged per-channel standard deviation tensor.
+                per-channel standard deviation tensor.
         """
         losses_all: dict[str, Tensor] = {}
         stddev_all: dict[str, Tensor] = {}
 
-        real_loss = self.ddp_average(torch.tensor(self.loss_model_hist)).nanmean().item()
+        # Make list of losses into a tensor. This is individual tensor per rank
+        real_loss = torch.tensor(self.loss_model_hist, device=self.devices[0])
+        # Gather all tensors from all ranks into a list and stack them into one tensor again
+        real_loss = torch.cat(all_gather(real_loss))
 
         for stream in self.cf.streams:  # Loop over all steams
             stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
-            stream_all = self.ddp_average(torch.stack(stream_hist).to(torch.float64).nanmean(0))
-            losses_all[stream.name] = stream_all  # Individual losses for each channel and
-
+            stream_all = torch.stack(stream_hist).to(torch.float64)
+            losses_all[stream.name] = torch.cat(all_gather(stream_all))
             stream_hist = [stddev_all[stream.name] for stddev_all in self.stdev_unweighted_hist]
-            stream_std = self.ddp_average(torch.stack(stream_hist).to(torch.float64).nanmean(0))
-            stddev_all[stream.name] = stream_std
+            stream_all = torch.stack(stream_hist).to(torch.float64)
+            stddev_all[stream.name] = torch.cat(all_gather(stream_all))
 
         return real_loss, losses_all, stddev_all
 
@@ -785,7 +791,7 @@ class Trainer(Trainer_Base):
                         bidx,
                         len_dataset,
                         self.cf.istep,
-                        avg_loss,
+                        avg_loss.nanmean().item(),
                         self.lr_scheduler.get_lr(),
                         (self.print_freq * self.cf.batch_size) / dt,
                     ),
