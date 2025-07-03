@@ -22,7 +22,7 @@ _logger = logging.getLogger(__name__)
 class ItemKey:
     """Metadata to identify one output item."""
 
-    sample: str
+    sample: int
     forecast_step: int
     stream: str
 
@@ -251,7 +251,7 @@ class OutputBatchData:
     targets_coords: list[list]
 
     # fstep, stream, (sample x datapoint)
-    targets_times: list[list[NDArray]]
+    targets_times: list[list[NDArray[DType]]]
 
     # fstep, stream, redundant dim (size 1)
     targets_lens: list[list[list[int]]]
@@ -280,7 +280,7 @@ class OutputBatchData:
         filtered_streams = (stream for stream in self.stream_names if stream != "")
         # TODO: filter for empty items?
         for (s, fo_s, fi_s) in itertools.product(self.samples, self.forecast_steps, filtered_streams):
-            yield self.extract(ItemKey(s, fo_s, fi_s))
+            yield self.extract(ItemKey(int(s), int(fo_s), fi_s))
 
     def extract(self, key: ItemKey) -> OutputItem:
         """Extract datasets from lists for one output item."""
@@ -326,7 +326,7 @@ class OutputBatchData:
             source_dataset = None
 
         return OutputItem(
-            source_dataset,
-            OutputDataset("target", key, target_data, times, coords, geoinfo, channels, geoinfo_channels),
-            OutputDataset("prediction", key, preds_data, times, coords, geoinfo, channels, geoinfo_channels),
+            source=source_dataset,
+            target=OutputDataset("target", key, target_data, times, coords, geoinfo, channels, geoinfo_channels),
+            prediction=OutputDataset("prediction", key, preds_data, times, coords, geoinfo, channels, geoinfo_channels),
         )
