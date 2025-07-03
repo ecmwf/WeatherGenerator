@@ -40,7 +40,7 @@ def write_output(
 
     # assume: is batch size guarnteed and constant?
     sample_start = batch_idx * cf.batch_size_validation
-    _logger.info("called valiadation_io")
+    _logger.info("called validation_io")
 
     data = io.OutputBatchData(
         sources,

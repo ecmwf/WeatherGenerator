@@ -177,15 +177,19 @@ class ZarrIO:
         return OutputItem(**datasets)
 
     def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Group:
+        assert self.data_root is not None, "ZarrIO must be opened before accessing data."
+        group: zarr.Group | None
         if create:
             group = self.data_root.create_group(item.path)
         else:
             try:
                 group = self.data_root.get(item.path)
+                assert group is not None, f"Zarr group: {item.path} does not exist."
             except KeyError as e:
                 msg = f"Zarr group: {item.path} has not been created."
                 raise FileNotFoundError(msg) from e
 
+        assert group is not None, f"Zarr group: {item.path} does not exist."
         return group
 
     def _write_dataset(self, item_group: zarr.Group, dataset: OutputDataset):
