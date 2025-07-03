@@ -64,7 +64,8 @@ class StreamEmbedTransformer(torch.nn.Module):
         unembed_mode : { 'full' , 'block'}
           full : monolithic (and correspondingly large) unembedding network that maps from
                  (num_tokens x dim_embed) to dim_out, allowing for mixing between channels/columns
-          block : per-channel/column unembedding network (which is hence a block-sparse form of full)
+          block : per-channel/column unembedding network
+                (which is hence a block-sparse form of full)
         """
 
         super(StreamEmbedTransformer, self).__init__()
@@ -94,6 +95,9 @@ class StreamEmbedTransformer(torch.nn.Module):
                 self.perceiver_io = PerceiverBlock(self.dim_embed, self.cross_attn_num_heads)
             else:
                 self.perceiver_io = torch.nn.Identity()
+        else:
+            self.num_queries = 0
+            self.selu = torch.nn.Identity()
 
         
         self.num_heads = num_heads
@@ -127,7 +131,7 @@ class StreamEmbedTransformer(torch.nn.Module):
             self.embed = torch.nn.Linear(self.dim_in, self.dim_embed)
 
             if self.unembed_mode == "full":
-                self.ln_final = norm(num_channels * self.dim_embed)
+                self.ln_final = norm(num_channels * self.dim_embed, eps=1e-03)
                 self.unembed = torch.nn.Linear(
                     num_channels * self.dim_embed,
                     self.num_tokens * self.dim_out - embed_size_centroids,
@@ -141,12 +145,16 @@ class StreamEmbedTransformer(torch.nn.Module):
                 self.unembed = torch.nn.ModuleList(
                     [torch.nn.Linear(dim_embed, dim_out) for _ in range(num_channels)]
                     # [
-                    #     torch.nn.Sequential(torch.nn.Linear(dim_embed, max(dim_embed//2,4*dim_out)),
-                    #     torch.nn.GELU(),
-                    #     torch.nn.Linear(max(dim_embed//2,4*dim_out), dim_out)) for _ in range(num_channels)
+                    #     torch.nn.Sequential(
+                    #         torch.nn.Linear(dim_embed, max(dim_embed//2,4*dim_out)),
+                    #         torch.nn.GELU(),
+                    #         torch.nn.Linear(max(dim_embed//2,4*dim_out), dim_out)
+                    #     ) for _ in range(num_channels)
                     # ]
                 )
-                self.ln_final = torch.nn.ModuleList([norm(dim_embed) for _ in range(num_channels)])
+                self.ln_final = torch.nn.ModuleList(
+                    [norm(dim_embed, eps=1e-03) for _ in range(num_channels)]
+                )
 
             else:
                 assert False
@@ -165,7 +173,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                 self.dim_embed,
                 self.num_tokens * ((self.dim_out - embed_size_centroids) // token_size),
             )
-            self.ln_final = norm(dim_out)
+            self.ln_final = norm(dim_out, eps=1e-03)
             self.forward = self.forward_columns
 
             # TODO: factorization when sqrt is not int

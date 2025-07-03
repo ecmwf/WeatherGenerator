@@ -25,6 +25,7 @@ dependencies = [
  "flash-attn; sys_platform == 'linux'",
  "polars~=1.25.2",
  "omegaconf~=2.3.0",
+ "weathergen-common",
 ]
 
 [project.urls]
@@ -34,13 +35,18 @@ Repository = "https://github.com/ecmwf/WeatherGenerator.git"
 Issues = "https://github.com/ecmwf/WeatherGenerator/issues"
 
 [project.scripts]
-train = "weathergen:train"
-train_continue = "weathergen:train_continue"
-evaluate = "weathergen:evaluate"
+train = "weathergen.run_train:train"
+train_continue = "weathergen.run_train:train_continue"
+inference = "weathergen.run_train:inference"
+plot = "weathergen.evaluate.plot:plot"
+plot_train = "weathergen.utils.plot_training:plot_train"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/weathergen"]
 
 [dependency-groups]
 # The development dependencies
@@ -78,13 +84,12 @@ select = [
     "SIM",
     # isort
     "I",
+    # Banned imports
+    "TID"
 ]
 
 # These rules are sensible and should be enabled at a later stage.
 ignore = [
-  "E501",
-  "E721",
-  "E722",
   # "B006",
   "B011",
   "UP008",
@@ -93,8 +98,16 @@ ignore = [
   "SIM102",
   "SIM401",
   # To ignore, not relevant for us
-  "E741",
+  "SIM108" # in case additional norm layer supports are added in future  
 ]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"numpy.ndarray".msg = "Do not use 'ndarray' to describe a numpy array type, it is a function. Use numpy.typing.NDArray or numpy.typing.NDArray[np.float32] for example"
+
+[tool.ruff.format]
+# Use Unix `\n` line endings for all files
+line-ending = "lf"
+
 
 [tool.uv]
 # This guarantees that the build is deterministic and will not be impacted 
@@ -102,6 +115,12 @@ ignore = [
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer
 # TODO: pytorch does not publish valid release timestamps, so sadly it does not work.
 # exclude-newer = "2025-03-14T00:00:00Z"
+
+# The minimum version of uv required.
+# It is tightly controlled because the format of uv.lock has changed 
+# over revisions, causing reformats to happen without reason.
+# Also, relatively recent versions are required to support workspaces.
+required-version = ">=0.7.0"
 
 # Following the recommendations from https://docs.astral.sh/uv/guides/integration/pytorch
 # The current setup is:
@@ -120,6 +139,8 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [tool.uv.sources]
+weathergen-common = { workspace = true }
+weathergen-evaluate = { workspace = true }
 torch = [
   { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
   { index = "pytorch-cpu", marker = "sys_platform == 'macosx'"},
@@ -135,3 +156,10 @@ log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
 log_cli_date_format = "%Y-%m-%d %H:%M:%S"
+
+
+[tool.uv.workspace]
+members = [
+   "packages/evaluate",
+   "packages/common"
+]

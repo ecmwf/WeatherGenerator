@@ -5,7 +5,7 @@ local fn = import 'functions.libsonnet';
 local branch_name = std.extVar("branch_name");
 
 // URL for hrefs
-local href_link = 'https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/'+branch_name+'/database/jsons/';
+local href_link = 'https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/'+branch_name+'/stac/jsons/';
 
 // TODO: improve this
 local era5v8 = import 'era5_v8.jsonnet';
@@ -21,9 +21,7 @@ local datasets = [era5v8, opera, cerra, seviri, imerg, nppatms, synop];
 local check = fn.check_unique_ids(datasets);
 
 local files = [ds.filename + '.json' for ds in datasets];
-{
-  check: fn.check_unique_ids(datasets),
-}
+fn.check_unique_ids(datasets)
 +
 {
   'catalogue.json':

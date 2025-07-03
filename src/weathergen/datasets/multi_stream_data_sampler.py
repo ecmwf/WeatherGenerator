@@ -24,6 +24,7 @@ from weathergen.datasets.data_reader_base import (
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.icon_dataset import IconDataset
+from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
@@ -71,7 +72,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.step_hrs: int = cf.step_hrs
         self.time_window_handler = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
         _logger.info(
-            f"Time window handler: start={start_date}, end={end_date}, len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
+            f"Time window handler: start={start_date}, end={end_date},"
+            f"len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
         )
 
         self.forecast_offset = cf.forecast_offset
@@ -80,7 +82,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         )
         assert self.forecast_delta_hrs == self.len_hrs, "Only supported option at the moment"
         self.forecast_steps = np.array(
-            [cf.forecast_steps] if type(cf.forecast_steps) == int else cf.forecast_steps
+            [cf.forecast_steps] if isinstance(cf.forecast_steps, int) else cf.forecast_steps
         )
         if cf.forecast_policy is not None:
             if self.forecast_steps.max() == 0:
@@ -114,7 +116,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         dataset = IconDataset
                         datapath = cf.data_path_icon
                     case _:
-                        msg = f"Unsupported stream type {stream_info['type']} for stream name '{stream_info['name']}'."
+                        msg = f"Unsupported stream type {stream_info['type']}"
+                        f"for stream name '{stream_info['name']}'."
                         raise ValueError(msg)
 
                 datapath = pathlib.Path(datapath)
@@ -127,12 +130,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     filename = pathlib.Path(datapath) / fname
 
                     if not filename.exists():  # see above
-                        msg = f"Did not find input data for {stream_info['type']} stream '{stream_info['name']}': {filename}."
+                        msg = (
+                            f"Did not find input data for {stream_info['type']} "
+                            f"stream '{stream_info['name']}': {filename}."
+                        )
                         raise FileNotFoundError(msg)
 
                 ds_type = stream_info["type"]
                 logger.info(
-                    f"Opening dataset with type: {ds_type} from stream config {stream_info['name']}."
+                    f"Opening dataset with type: {ds_type} from"
+                    + f" stream config {stream_info['name']}."
                 )
                 ds = dataset(filename=filename, **kwargs)
 
@@ -173,17 +180,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.num_healpix_cells_target: int = 12 * 4**self.healpix_level_target
 
         if cf.training_mode == "forecast":
-            self.tokenizer = TokenizerForecast(cf.healpix_level)
+            self.tokenizer = TokenizerForecast(cf.healpix_level, cf.data_loader_rng_seed)
         elif cf.training_mode == "masking":
-            self.tokenizer = TokenizerMasking(cf.healpix_level)
+            masker = Masker(cf.masking_rate, cf.masking_strategy, cf.masking_rate_sampling)
+            self.tokenizer = TokenizerMasking(cf.healpix_level, cf.data_loader_rng_seed, masker)
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
             msg = "masked token modeling does not support self.input_window_steps > 1; "
             msg += "increase window length"
             assert self.input_window_steps == 1, msg
         else:
             assert False, f"Unsupported training mode: {cf.training_mode}"
-        self.masking_rate = cf.masking_rate
-        self.masking_rate_sampling = cf.masking_rate_sampling
 
         self.epoch = 0
 
@@ -316,7 +322,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # for all sources for current stream
                     for _, ds in enumerate(stream_ds):
                         # source window (of potentially multi-step length)
-                        # TODO: Kacper is using this -- cannot so easily remove
                         rdata: ReaderData = ds.get_source(idx)
 
                         if rdata.is_empty():
@@ -330,8 +335,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                             (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                                 stream_info,
-                                self.masking_rate,
-                                self.masking_rate_sampling,
                                 torch.from_numpy(rdata.coords),
                                 torch.from_numpy(rdata.geoinfos),
                                 torch.from_numpy(rdata.data),
@@ -425,9 +428,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
             )
         # ensure the tokenizers use different seeds
-        self.tokenizer.reset()
-
-        # ensure the tokenizers use different seeds. TODO: why double??
         self.tokenizer.reset()
 
         return iter_start, iter_end

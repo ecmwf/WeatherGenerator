@@ -26,7 +26,7 @@ from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import Trainer_Base
-from weathergen.utils.config import Config
+from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TRAIN, VAL, TrainLogger
 from weathergen.utils.validation_io import write_validation
@@ -52,7 +52,13 @@ class Trainer(Trainer_Base):
         assert cf.samples_per_epoch % cf.batch_size == 0
         assert cf.samples_per_validation % cf.batch_size_validation == 0
 
+        self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
+
         self.devices = self.init_torch()
+
+        # Get num_ranks of previous, to be continued run before
+        # num_ranks gets overwritten by current setting during init_ddp()
+        self.num_ranks_original = cf.get("num_ranks", None)
 
         self.init_ddp(cf)
 
@@ -73,7 +79,7 @@ class Trainer(Trainer_Base):
         self.train_logger = TrainLogger(cf, self.path_run)
 
     ###########################################
-    def evaluate(self, cf, run_id_trained, epoch):
+    def inference(self, cf, run_id_trained, epoch):
         # general initalization
         self.init(cf)
 
@@ -120,11 +126,11 @@ class Trainer(Trainer_Base):
         if self.cf.rank == 0:
             config.save(self.cf, epoch=0)
 
-        _logger.info(f"Starting evaluation with id={self.cf.run_id}.")
+        _logger.info(f"Starting inference with id={self.cf.run_id}.")
 
-        # evaluate validation set
+        # inference validation set
         self.validate(epoch=0)
-        _logger.info(f"Finished evaluation run with id: {cf.run_id}")
+        _logger.info(f"Finished inference run with id: {cf.run_id}")
 
     ###########################################
     def run(self, cf, run_id_contd=None, epoch_contd=None):
@@ -149,7 +155,7 @@ class Trainer(Trainer_Base):
             cf.samples_per_validation,
             train_logger=self.train_logger,
             stage=VAL,
-            shuffle=False,
+            shuffle=True,
         )
 
         loader_params = {
@@ -197,7 +203,9 @@ class Trainer(Trainer_Base):
             mp = (
                 None
                 if not cf.with_mixed_precision
-                else MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=True)
+                else MixedPrecision(
+                    param_dtype=self.mixed_precision_dtype, cast_forward_inputs=True
+                )
             )
             mp = None
             self.ddp_model = FSDP(
@@ -244,9 +252,16 @@ class Trainer(Trainer_Base):
             cf.lr_steps_warmup = int(0.1 * cf.lr_steps)
             cf.lr_steps_cooldown = int(0.05 * cf.lr_steps)
             steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
-            s = f"cf.lr_steps_warmup and cf.lr_steps_cooldown were larger than cf.lr_steps={cf.lr_steps}"
-            s += f". The value have been adjusted to cf.lr_steps_warmup={cf.lr_steps_warmup} and "
-            s += f" cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}."
+            s = (
+                "cf.lr_steps_warmup and cf.lr_steps_cooldown",
+                f" were larger than cf.lr_steps={cf.lr_steps}",
+            )
+            s += (
+                f". The value have been adjusted to cf.lr_steps_warmup={cf.lr_steps_warmup} and ",
+            )
+            s += (
+                f" cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}.",
+            )
             _logger.warning(s)
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
@@ -275,7 +290,15 @@ class Trainer(Trainer_Base):
         self.loss_fcts_val = [[getattr(losses, name), w] for name, w in cf.loss_fcts_val]
 
         # recover epoch when continuing run
-        epoch_base = int(self.cf.istep / len(self.data_loader))
+        if self.num_ranks_original is None:
+            epoch_base = int(self.cf.istep / len(self.data_loader))
+        else:
+            len_per_rank = (
+                len(self.dataset) // (self.num_ranks_original * cf.batch_size)
+            ) * cf.batch_size
+            epoch_base = int(
+                self.cf.istep / (min(len_per_rank, cf.samples_per_epoch) * self.num_ranks_original)
+            )
 
         # torch.autograd.set_detect_anomaly(True)
         if cf.forecast_policy is not None:
@@ -506,7 +529,9 @@ class Trainer(Trainer_Base):
 
             # evaluate model
             with torch.autocast(
-                device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
+                device_type="cuda",
+                dtype=self.mixed_precision_dtype,
+                enabled=cf.with_mixed_precision,
             ):
                 preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
 
@@ -575,7 +600,9 @@ class Trainer(Trainer_Base):
 
                     # evaluate model
                     with torch.autocast(
-                        device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision
+                        device_type="cuda",
+                        dtype=self.mixed_precision_dtype,
+                        enabled=cf.with_mixed_precision,
                     ):
                         preds = self.ddp_model(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
@@ -656,7 +683,8 @@ class Trainer(Trainer_Base):
 
                 if self.cf.rank == 0:
                     print(
-                        f"validation ({cf.run_id}) : {epoch:03d} : loss = {torch.nanmean(losses_all[0]):.4E}",
+                        f"validation ({cf.run_id}) : {epoch:03d} :",
+                        f" loss = {torch.nanmean(losses_all[0]):.4E}",
                         flush=True,
                     )
                     for i_obs, rt in enumerate(cf.streams):

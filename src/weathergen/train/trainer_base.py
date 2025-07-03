@@ -36,12 +36,15 @@ class Trainer_Base:
         """
         Initialize torch, set device and multiprocessing method.
 
-        NOTE: If using the Nvidia profiler, the multiprocessing method must be set to "spawn".
-        The default for linux systems is "fork", which prevents traces from being generated with DDP.
+        NOTE: If using the Nvidia profiler,
+        the multiprocessing method must be set to "spawn".
+        The default for linux systems is "fork",
+        which prevents traces from being generated with DDP.
         """
         torch.set_printoptions(linewidth=120)
 
-        # This strategy is required by the nvidia profiles to properly trace events in worker processes.
+        # This strategy is required by the nvidia profiles
+        # to properly trace events in worker processes.
         # This may cause issues with logging. Alternative: "fork"
         torch.multiprocessing.set_start_method(multiprocessing_method, force=True)
 
@@ -84,7 +87,8 @@ class Trainer_Base:
         rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
         num_ranks = int(os.environ.get("SLURM_NTASKS"))
         _logger.info(
-            f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, rank={rank}, num_ranks={num_ranks}"
+            f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, "
+            f"rank={rank}, num_ranks={num_ranks}"
         )
 
         if rank == 0:
@@ -95,7 +99,10 @@ class Trainer_Base:
                 except OSError as e:
                     if e.errno == errno.EADDRINUSE:
                         _logger.error(
-                            f"Port 1345 is already in use on {master_node}. Please check your network configuration."
+                            (
+                                f"Port 1345 is already in use on {master_node}.",
+                                " Please check your network configuration.",
+                            )
                         )
                         raise
                     else:

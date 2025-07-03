@@ -53,7 +53,7 @@
    "properties": {
       "description": "SYNOP (surface synoptic observation) data consist of standardized meteorological observations collected from land-based weather stations worldwide, typically at 6-hourly or hourly intervals. These observations include key atmospheric variables such as temperature, wind speed and direction, pressure, humidity, cloud cover, and precipitation. ",
       "end_datetime": "2023-05-31T21:00:0",
-      "fixed_timesteps": "False",
+      "fixed_timesteps": "True",
       "frequency": "3h",
       "keywords": [
          "atmosphere",

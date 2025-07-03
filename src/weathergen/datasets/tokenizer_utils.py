@@ -79,7 +79,9 @@ def encode_times_target(times, time_win) -> torch.tensor:
     time_tensor[..., 3] = np.cos(time_tensor[..., 3] / (12.0 * 3600.0) * 2.0 * np.pi)
     time_tensor[..., 4] = np.sin(time_tensor[..., 4] / (12.0 * 3600.0) * 2.0 * np.pi)
 
-    return time_tensor
+    # We add + 0.5 as in ERA5 very often we otherwise get 0 as the first time and to prevent too
+    # many zeros in the input, where we cannot learn anything we add an offset
+    return time_tensor + 0.5
 
 
 def hpy_cell_splits(coords: torch.tensor, hl: int):
@@ -118,7 +120,8 @@ def hpy_splits(coords: torch.tensor, hl: int, token_size: int, pad_tokens: bool)
 
     Return :
         idxs_ord : flat list of indices (to data points) per healpix cell
-        idxs_ord_lens : lens of lists per cell (so that data[idxs_ord].split( idxs_ord_lens) provides per cell data)
+        idxs_ord_lens : lens of lists per cell
+        (so that data[idxs_ord].split( idxs_ord_lens) provides per cell data)
         posr3 : R^3 positions of coords
     """
 
@@ -177,6 +180,7 @@ def tokenize_window_space(
     if len(source) < 2:
         return
 
+    # idx_ord_lens is length is number of tokens per healpix cell
     idxs_ord, idxs_ord_lens, posr3 = hpy_splits(coords, hl, token_size, pad_tokens)
 
     # pad with zero at the beggining for token size padding

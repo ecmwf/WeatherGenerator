@@ -101,42 +101,14 @@ class DataReaderAnemoi(DataReaderTimestep):
         self.latitudes = _clip_lat(ds.latitudes)
         self.longitudes = _clip_lon(ds.longitudes)
 
-        # Determine source and target channels, filtering out forcings etc and using
-        # specified source and target channels if specified
-        source_channels = stream_info.get("source")
-        self.source_idx = np.sort(
-            [
-                ds.name_to_index[k]
-                for i, (k, v) in enumerate(ds0.typed_variables.items())
-                if (
-                    not v.is_computed_forcing
-                    and not v.is_constant_in_time
-                    and (
-                        np.array([f in k for f in source_channels]).any()
-                        if source_channels
-                        else True
-                    )
-                )
-            ]
-        )
-        target_channels = stream_info.get("target")
-        self.target_idx = np.sort(
-            [
-                ds.name_to_index[k]
-                for (k, v) in ds0.typed_variables.items()  # Only in ds0, not in Subset?
-                if (
-                    not v.is_computed_forcing
-                    and not v.is_constant_in_time
-                    and (
-                        np.array([f in k for f in target_channels]).any()
-                        if target_channels
-                        else True
-                    )
-                )
-            ]
-        )
+        # select/filter requested source channels
+        self.source_idx = self.select_channels(ds0, "source")
         self.source_channels = [ds.variables[i] for i in self.source_idx]
+
+        # select/filter requested target channels
+        self.target_idx = self.select_channels(ds0, "target")
         self.target_channels = [ds.variables[i] for i in self.target_idx]
+
         self.geoinfo_channels = []
         self.geoinfo_idx = []
 
@@ -154,6 +126,7 @@ class DataReaderAnemoi(DataReaderTimestep):
     @override
     def init_empty(self) -> None:
         super().init_empty()
+        self.ds = None
         self.len = 0
 
     @override
@@ -196,7 +169,9 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         # extract channels
         data = (
-            data[:, channels_idx].transpose([0, 2, 1]).reshape((data.shape[0] * data.shape[2], -1))
+            data[:, list(channels_idx)]
+            .transpose([0, 2, 1])
+            .reshape((data.shape[0] * data.shape[2], -1))
         )
 
         # construct lat/lon coords
@@ -207,7 +182,8 @@ class DataReaderAnemoi(DataReaderTimestep):
             ],
             axis=0,
         ).transpose()
-        coords = np.repeat(latlon, len(t_idxs), axis=0).reshape((-1, latlon.shape[1]))
+        # repeat latlon len(t_idxs) times
+        coords = np.vstack((latlon,) * len(t_idxs))
 
         # empty geoinfos for anemoi
         geoinfos = np.zeros((len(data), 0), dtype=data.dtype)
@@ -225,6 +201,46 @@ class DataReaderAnemoi(DataReaderTimestep):
         check_reader_data(rd, dtr)
 
         return rd
+
+    def select_channels(self, ds0: anemoi_datasets, ch_type: str) -> NDArray[np.int32]:
+        """
+        Select source or target channels
+
+        Parameters
+        ----------
+        ds0 :
+            raw anemoi dataset with available channels
+        ch_type :
+            "source" or "target", i.e channel type to select
+
+        Returns
+        -------
+        ReaderData providing coords, geoinfos, data, datetimes
+
+        """
+
+        channels = self.stream_info.get(ch_type)
+        channels_exclude = self.stream_info.get(ch_type + "_exclude", [])
+        # sanity check
+        not_empty = len(channels) > 0 if channels is not None else True
+        assert not_empty, "channels are empty; at least one channels must be present."
+
+        chs_idx = np.sort(
+            [
+                ds0.name_to_index[k]
+                for (k, v) in ds0.typed_variables.items()
+                if (
+                    not v.is_computed_forcing
+                    and not v.is_constant_in_time
+                    and (
+                        np.array([f in k for f in channels]).any() if channels is not None else True
+                    )
+                    and not np.array([f in k for f in channels_exclude]).any()
+                )
+            ]
+        )
+
+        return chs_idx
 
 
 def _clip_lat(lats: NDArray) -> NDArray[np.float32]:

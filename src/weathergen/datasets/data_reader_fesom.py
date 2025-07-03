@@ -105,7 +105,8 @@ class DataReaderFesom(DataReaderTimestep):
         self.len = (self.end_idx - self.start_idx) // self.mesh_size
 
         assert self.end_idx > self.start_idx, (
-            f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
+            f"Abort: Final index of {self.end_idx} is the same"
+            f"of larger than start index {self.start_idx}"
         )
 
         period = self.time[self.mesh_size][0] - self.time[0][0]

@@ -112,7 +112,8 @@ class IconDataset:
         self.len = (self.end_idx - self.start_idx) // self.mesh_size
 
         assert self.end_idx > self.start_idx, (
-            f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
+            f"Abort: Final index of {self.end_idx} is the same of larger than",
+            f" start index {self.start_idx}",
         )
 
         len_data_entries = len(self.ds["time"]) * self.mesh_size
@@ -152,7 +153,8 @@ class IconDataset:
         # stats
         stats_vars = self.stats["metadata"]["variables"]
         assert stats_vars == self.colnames, (
-            f"Variables in normalization file {stats_vars} do not match dataset columns {self.colnames}"
+            f"Variables in normalization file {stats_vars}"
+            f"do not match dataset columns {self.colnames}"
         )
 
         self.mean = np.array(self.stats["statistics"]["mean"], dtype="d")
@@ -177,7 +179,10 @@ class IconDataset:
         selected_channel_indices = list(set(self.source_idx).union(set(self.target_idx)))
         non_positive_stds = np.where(self.stdev[selected_channel_indices] <= 0)[0]
         assert len(non_positive_stds) == 0, (
-            f"Abort: Encountered non-positive standard deviations for selected columns {[self.colnames[selected_channel_indices][i] for i in non_positive_stds]}."
+            f"Abort: Encountered non-positive standard deviations "
+            f"for selected columns {
+                [self.colnames[selected_channel_indices][i] for i in non_positive_stds]
+            }."
         )
         # TODO: define in base class
         self.geoinfo_idx = []

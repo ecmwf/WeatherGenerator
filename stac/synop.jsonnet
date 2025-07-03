@@ -9,7 +9,7 @@ local common = import 'common.jsonnet';
   start_datetime: '1979-01-01T00:00:00',
   end_datetime: '2023-05-31T21:00:0',
   frequency: '3h',
-  fixed_timesteps: 'False',
+  fixed_timesteps: 'True',
   keywords: [
     'atmosphere',
     'observation',

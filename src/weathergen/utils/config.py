@@ -14,6 +14,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import torch
 import yaml
 from omegaconf import DictConfig, OmegaConf
 
@@ -101,7 +102,8 @@ def load_config(
 
     Args:
         private_home: Configuration file containing platform dependent information and secretes
-        from_run_id: Run id of the pretrained WeatherGenerator model to continue training or evaluate
+        from_run_id: Run id of the pretrained WeatherGenerator model
+        to continue training or inference
         epoch: epoch of the checkpoint to load. -1 indicates last checkpoint available.
         *overwrites: Additional overwrites from different sources
 
@@ -111,7 +113,17 @@ def load_config(
         - overwrites (also in ascending order)
     """
     private_config = _load_private_conf(private_home)
-    overwrite_configs = [_load_overwrite_conf(overwrite) for overwrite in overwrites]
+    overwrite_configs: list[Config] = []
+    for overwrite in overwrites:
+        if isinstance(overwrite, (str | Path)):
+            # Because of the way we pass extra configs through slurm,
+            # all the paths may be concatenated with ":"
+            p = str(overwrite).split(":")
+            for path in p:
+                overwrite_configs.append(_load_overwrite_conf(Path(path)))
+        else:
+            # If it is a dict or DictConfig, we can directly use it
+            overwrite_configs.append(_load_overwrite_conf(overwrite))
 
     if from_run_id is None:
         base_config = _load_default_conf()
@@ -128,9 +140,15 @@ def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config
 
     Determining the run id should follow the following logic:
 
-    1. (default case): run train, train_continue or evaluate without any flags => generate a new run_id for this run.
-    2. (assign run_id): run train, train_continue or evaluate with --run_id <RUNID> flag => assign a run_id manually to this run. This is intend for outside tooling and should not be used manually.
-    3. (reuse run_id -> only for train_continue and evaluate): reuse the run_id from the run specified by --from_run_id <RUNID>. Since the run_id correct run_id is already loaded in the config nothing has to be assigned. This case will happen if --reuse_run_id is specified.
+    1. (default case): run train, train_continue or inference without any flags
+        => generate a new run_id for this run.
+    2. (assign run_id): run train, train_continue or inference with --run_id <RUNID> flag
+        => assign a run_id manually to this run.
+        This is intend for outside tooling and should not be used manually.
+    3. (reuse run_id -> only for train_continue and inference):
+        reuse the run_id from the run specified by --from_run_id <RUNID>.
+        Since the run_id correct run_id is already loaded in the config nothing has to be assigned.
+        This case will happen if --reuse_run_id is specified.
 
 
     Args:
@@ -153,7 +171,8 @@ def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config
         else:
             config.run_id = run_id
             _logger.info(
-                f"using assigned run_id: {config.run_id}. If you manually selected this run_id, this is an error."
+                f"using assigned run_id: {config.run_id}."
+                f" If you manually selected this run_id, this is an error."
             )
 
     return config
@@ -210,8 +229,8 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
 
     elif env_script_path.is_file():
         _logger.info(f"Loading private config from platform-env.py: {env_script_path}.")
-        # This code does many checks to ensure that any error message is surfaced. Since it is a process call,
-        # it can be hard to diagnose the error.
+        # This code does many checks to ensure that any error message is surfaced.
+        # Since it is a process call, it can be hard to diagnose the error.
         # TODO: eventually, put all this wrapper code in a separate function
         try:
             result_hpc = subprocess.run(
@@ -219,7 +238,10 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
             )
         except subprocess.CalledProcessError as e:
             _logger.error(
-                f"Error while running platform-env.py: {e} {e.stderr} {e.stdout} {e.output} {e.returncode}"
+                (
+                    "Error while running platform-env.py:",
+                    f" {e} {e.stderr} {e.stdout} {e.output} {e.returncode}",
+                )
             )
             raise
         if result_hpc.returncode != 0:
@@ -235,7 +257,8 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
     else:
         _logger.info(f"Could not find platform script at {env_script_path}")
         raise FileNotFoundError(
-            "Could not find private config. Please set the environment variable WEATHERGEN_PRIVATE_CONF or provide a path."
+            "Could not find private config. Please set the environment variable "
+            "WEATHERGEN_PRIVATE_CONF or provide a path."
         )
     private_cf = OmegaConf.load(private_home)
     private_cf["model_path"] = (
@@ -263,29 +286,52 @@ def load_streams(streams_directory: Path) -> list[Config]:
     _logger.info(f"Reading streams from {streams_directory}")
 
     # append streams to existing (only relevant for evaluation)
-    streams = []
+    streams = {}
     # exclude temp files starting with "." or "#" (eg. emacs, vim, macos savefiles)
     stream_files = sorted(streams_directory.rglob("[!.#]*.yml"))
-    _logger.info(f"discover stream configs: {stream_files}")
+    _logger.info(f"discover stream configs: {', '.join(map(str, stream_files))}")
     for config_file in stream_files:
         try:
-            # Stream config schema is {stream_name: stream_config} where stream_config
-            # itself is a dict containing the actual options. stream_name needs to be
-            # added to this dict since only stream_config will be further processed.
-            stream_name, stream_config = [*OmegaConf.load(config_file).items()][0]
-            stream_config.name = stream_name
-        except yaml.scanner.ScannerError as e:
+            config = OmegaConf.load(config_file)
+            for stream_name, stream_config in config.items():
+                # Stream config schema is {stream_name: stream_config}
+                # where stream_config itself is a dict containing the actual options.
+                # stream_name needs to be added to this dict since only stream_config
+                # will be further processed.
+                stream_config.name = stream_name
+                if stream_name in streams:
+                    msg = f"Duplicate stream name found: {stream_name}."
+                    "Please ensure all stream names are unique."
+                    raise ValueError(msg)
+                else:
+                    streams[stream_name] = stream_config
+                    _logger.info(f"Loaded stream config: {stream_name} from file {config_file}")
+
+        except (yaml.scanner.ScannerError, yaml.constructor.ConstructorError) as e:
             msg = f"Invalid yaml file while parsing stream configs: {config_file}"
-            raise RuntimeError(msg) from e
+            raise ValueError(msg) from e
         except AttributeError as e:
             msg = f"Invalid yaml file while parsing stream configs: {config_file}"
-            raise RuntimeError(msg) from e
+            raise ValueError(msg) from e
         except IndexError:
             # support commenting out entire stream files to avoid loading them.
             _logger.warning(f"Parsed stream configuration file is empty: {config_file}")
             continue
 
-        streams.append(stream_config)
-        _logger.info(f"Loaded stream config: {stream_name}")
+    return list(streams.values())
 
-    return streams
+
+def get_dtype(value: str) -> torch.dtype:
+    """
+    changes the conf value to a torch dtype
+    """
+    if value == "bf16":
+        return torch.bfloat16
+    elif value == "fp16":
+        return torch.float16
+    elif value == "fp32":
+        return torch.float32
+    else:
+        raise NotImplementedError(
+            f"Dtype {value} is not recognized, choose either, bf16, fp16, or fp32"
+        )
