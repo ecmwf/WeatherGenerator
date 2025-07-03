@@ -35,6 +35,7 @@ class ItemKey:
     def with_source(self):
         """Decide if output item should contain source dataset."""
         # TODO: is this valid for the adjusted (offsetted) forecast steps?
+        # => if config.forecast_offset > 0 source will be never written
         return self.forecast_step == 0
 
 
@@ -58,7 +59,7 @@ class OutputDataset:
     geoinfo: zarr.Array
 
     channels: list[str]
-    geoinfo_channels: list[str]  # TODO
+    geoinfo_channels: list[str]
 
     @functools.cached_property
     def arrays(self) -> dict[str, zarr.Array]:
@@ -79,29 +80,25 @@ class OutputDataset:
         chunks = (chunk_nsamples, *self.data.shape[1:])
 
         # maybe do dask conversion earlier? => usefull for parallel writing?
-        _logger.debug(self.name)
         data = da.from_zarr(self.data, chunks=chunks)  # dont call compute to lazy load
         # include pseudo ens dim so all data arrays have same dimensionality
-        # TODO: does it make sense for target and soruce to have ens dim?
+        # TODO: does it make sense for target and source to have ens dim?
         additional_dims = (0, 1, 2) if len(data.shape) == 3 else (0, 1, 2, 5)
         expanded_data = da.expand_dims(data, axis=additional_dims)
-        _logger.debug(data.shape)
         coords = da.from_zarr(self.coords).compute()
-        _logger.debug(coords.shape)
         times = da.from_zarr(self.times).compute()
-        _logger.debug(times.shape)
         geoinfo = da.from_zarr(self.geoinfo).compute()
-        _logger.debug(geoinfo.shape)
 
         geoinfo = {name: ("ipoint", geoinfo[:, i]) for i, name in enumerate(self.geoinfo_channels)}
+        # TODO: make sample, stream, forecast_step DataArray attribute, test how it
+        # interacts with concatenating
         return xr.DataArray(
             expanded_data,
             dims=["sample", "stream", "forecast_step", "ipoint", "channel", "ens"],
             coords={
-                # TODO should not be dimension rather coordinate or metadata
-                "sample": [self.item_key.sample],  # TODO: put in array metadata
-                "stream": [self.item_key.stream],  # TODO: put in array metadata
-                "forecast_step": [self.item_key.forecast_step],  # TODO: put in array metadata
+                "sample": [self.item_key.sample],
+                "stream": [self.item_key.stream],
+                "forecast_step": [self.item_key.forecast_step],
                 "ipoint": self.datapoints,
                 "channel": self.channels,  # TODO: make sure channel names align with data
                 "valid_time": ("ipoint", times.astype("datetime64[ns]")),
@@ -132,10 +129,6 @@ class OutputItem:
             else:
                 msg = f"Missing source dataset for item: {self.key.path}"
                 raise ValueError(msg)
-
-
-class MockIO:
-    pass
 
 
 class ZarrIO:
@@ -291,15 +284,20 @@ class OutputBatchData:
         sample = key.sample - self.sample_start
         forecast_step = key.forecast_step - self.forecast_offset
         stream_idx = self.stream_names.index(key.stream)  # TODO: assure this is correct
-        _logger.debug(f"target_lens:{self.targets_lens}")
         lens = self.targets_lens[forecast_step][stream_idx]
-        _logger.debug(f"lens: {lens}, {len(lens)}")
         start = sum(lens[:sample])
         n_samples = lens[sample]
+
+        _logger.info("extracting subset")
         _logger.info(
-            f"extracting sample: start:{self.sample_start} rel_idx:{sample}"
-            + "range:{start}-{start + n_samples}."
+            f"sample: start:{self.sample_start} rel_idx:{sample} range:{start}-{start + n_samples}"
         )
+        _logger.info(
+            f"forecast_step: {key.forecast_step} = {forecast_step} (rel_step) + "
+            + f"{self.forecast_offset} (forecast_offset)"
+        )
+        _logger.info(f"stream: {key.stream} with index: {stream_idx}")
+
         datapoints = slice(start, start + n_samples)
 
         target_data = self.targets[forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
@@ -321,7 +319,6 @@ class OutputBatchData:
                 "geoinformation channels are not implemented yet."
                 + "will be truncated to be of size 0."
             )
-        _logger.info(f"shape coords: {coords.shape}, geoinfo: {geoinfo.shape}")
         times = self.targets_times[forecast_step][stream_idx][
             datapoints
         ]  # make conversion to datetime64[ns] here?

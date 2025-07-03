@@ -6,7 +6,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from weathergen.utils.io import MockIO
+# TODO: adjust to use utils.io.ZarrIO
+from weathergen.utils.mock_io import MockIO
 
 _logger = logging.getLogger(__name__)
 
