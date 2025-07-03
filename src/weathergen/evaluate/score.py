@@ -62,7 +62,6 @@ class Scores:
             "rmse": self.calc_rmse,
             "bias": self.calc_bias,
             "acc": self.calc_acc,
-            "bias": self.calc_bias,
             "ssr": self.calc_ssr,
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
@@ -79,7 +78,7 @@ class Scores:
         self.prediction = data.prediction.as_xarray()
         self.ens_dim = self.prediction.shape[-1]
 
-        self.prob_fcst = True if self.ens_dim in self.prediction.dims else False
+        self.prob_fcst = self.ens_dim in self.prediction.dims
         self.joint_data_dims = [
             dim for dim in self.prediction.dims if dim != self.ens_dim
         ]  # excludes ensemble-dimension for probablistic forecasts
@@ -94,7 +93,7 @@ class Scores:
             score_family = "probablistic" if self.prob_fcst else "deterministic"
             raise ValueError(
                 f"{score_name} is not an implemented {score_family} score."
-                + "Choose one of the following: {0}".format(", ".join(self.metrics_dict.keys()))
+                + "Choose one of the following: {}".format(", ".join(self.metrics_dict.keys()))
             )
 
         return score_func(**kwargs)
@@ -116,7 +115,7 @@ class Scores:
                 ind_bad = [i for i, x in enumerate(dim_stat) if not x]
                 raise ValueError(
                     "The following dimensions for score-averaging are not "
-                    + "part of the data: {0}".format(", ".join(np.array(dims)[ind_bad]))
+                    + "part of the data: {}".format(", ".join(np.array(dims)[ind_bad]))
                 )
 
             self._avg_dims = dims
@@ -254,7 +253,7 @@ class Scores:
         return rmse
 
     @to_json
-    def calc_acc(self, clim_mean: xr.DataArray, spatial_dims: list = ["lat", "lon"]):
+    def calc_acc(self, clim_mean: xr.DataArray, spatial_dims: list = None):
         """
         Calculate anomaly correlation coefficient (ACC).
         :param clim_mean: climatological mean of the data
@@ -263,6 +262,8 @@ class Scores:
         :return acc: Averaged ACC (except over spatial_dims)
         """
 
+        if spatial_dims is None:
+            spatial_dims = ["lat", "lon"]
         fcst_ano, obs_ano = self.prediction - clim_mean, self.ground_truth - clim_mean
 
         acc = (fcst_ano * obs_ano).sum(spatial_dims) / np.sqrt(
@@ -580,7 +581,7 @@ class Scores:
                 return i, coord_names_expected[i]  # just take the first value
             else:
                 raise ValueError(
-                    "Could not find one of the following coordinates in the passed dictionary: {0}".format(
+                    "Could not find one of the following coordinates in the passed dictionary: {}".format(
                         ",".join(coord_names_expected)
                     )
                 )

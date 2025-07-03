@@ -46,7 +46,7 @@ class OutputDataset:
     item_key: ItemKey
 
     # (datapoints, channels, ens)
-    data: zarr.Array # wrong type => arary like
+    data: zarr.Array  # wrong type => arary like
 
     # (datapoints,)
     times: zarr.Array
@@ -58,8 +58,8 @@ class OutputDataset:
     geoinfo: zarr.Array
 
     channels: list[str]
-    geoinfo_channels: list[str] # TODO
-    
+    geoinfo_channels: list[str]  # TODO
+
     @functools.cached_property
     def arrays(self) -> typing.Iterator[tuple[str, zarr.Array]]:
         """Iterate over the arrays and their names."""
@@ -67,7 +67,7 @@ class OutputDataset:
             "data": self.data,
             "times": self.times,
             "coords": self.coords,
-            "geoinfo": self.geoinfo
+            "geoinfo": self.geoinfo,
         }.items()
 
     @functools.cached_property
@@ -93,21 +93,21 @@ class OutputDataset:
         geoinfo = da.from_zarr(self.geoinfo).compute()
         _logger.debug(geoinfo.shape)
 
-
         geoinfo = {name: ("ipoint", geoinfo[:, i]) for i, name in enumerate(self.geoinfo_channels)}
         return xr.DataArray(
             expanded_data,
             dims=["sample", "stream", "forecast_step", "ipoint", "channel", "ens"],
             coords={
-                "sample": [self.item_key.sample],
-                "stream": [self.item_key.stream],
-                "forecast_step": [self.item_key.forecast_step],
+                # TODO should not be dimension rather coordinate or metadata
+                "sample": [self.item_key.sample],  # TODO: put in array metadata
+                "stream": [self.item_key.stream],  # TODO: put in array metadata
+                "forecast_step": [self.item_key.forecast_step],  # TODO: put in array metadata
                 "ipoint": self.datapoints,
-                "channel": self.channels, # TODO: make sure channel names align with data
+                "channel": self.channels,  # TODO: make sure channel names align with data
                 "valid_time": ("ipoint", times.astype("datetime64[ns]")),
                 "lat": ("ipoint", coords[:, 0]),
                 "lon": ("ipoint", coords[:, 1]),
-                **geoinfo              
+                **geoinfo,
             },
             name=self.name,
         )
@@ -147,7 +147,7 @@ class ZarrIO:
     def __enter__(self) -> typing.Self:
         self._store = zarr.DirectoryStore(self._store_path)
         self.data_root = zarr.group(store=self._store)
-        
+
         return self
 
     def __exit__(self, exc_type, exc_value, exc_tb):
@@ -201,11 +201,13 @@ class ZarrIO:
             self._create_dataset(dataset_group, array_name, array)
 
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
-        if array.size == 0: # sometimes for geoinfo
+        if array.size == 0:  # sometimes for geoinfo
             chunks = None
         else:
             chunks = (CHUNK_N_SAMPLES, *array.shape[1:])
-        _logger.debug(f"writing array: {name} with shape: {array.shape}, chunks: {chunks} into group: {group}.")
+        _logger.debug(
+            f"writing array: {name} with shape: {array.shape}, chunks: {chunks} into group: {group}."
+        )
         group.create_dataset(name, data=array, chunks=chunks)
 
     @functools.cached_property
@@ -288,8 +290,10 @@ class OutputBatchData:
         _logger.debug(f"lens: {lens}, {len(lens)}")
         start = sum(lens[:sample])
         n_samples = lens[sample]
-        _logger.info(f"extracting sample {self.sample_start}+{sample}: {start}-{start+n_samples}.")
-        datapoints = slice(start, start+n_samples)
+        _logger.info(
+            f"extracting sample {self.sample_start}+{sample}: {start}-{start + n_samples}."
+        )
+        datapoints = slice(start, start + n_samples)
 
         target_data = self.targets[forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
         preds_data = (
@@ -302,11 +306,13 @@ class OutputBatchData:
         )
 
         _coords = self.targets_coords[forecast_step][stream_idx][datapoints].numpy()
-        coords = _coords[:, :2] # first two columns are lat,lon
-        geoinfo = _coords[:, 2:] # the rest is geoinfo => potentially empty
-        if geoinfo.size > 0: # TODO: set geoinfo to be empty for now
+        coords = _coords[:, :2]  # first two columns are lat,lon
+        geoinfo = _coords[:, 2:]  # the rest is geoinfo => potentially empty
+        if geoinfo.size > 0:  # TODO: set geoinfo to be empty for now
             geoinfo = np.empty((geoinfo.shape[0], 0))
-            _logger.warning("geoinformation channels are not implemented yet. will be truncated to be of size 0.")
+            _logger.warning(
+                "geoinformation channels are not implemented yet. will be truncated to be of size 0."
+            )
         _logger.info(f"shape coords: {coords.shape}, geoinfo: {geoinfo.shape}")
         times = self.targets_times[forecast_step][stream_idx][
             datapoints
@@ -316,12 +322,18 @@ class OutputBatchData:
 
         if key.with_source:
             source_data = self.sources[sample][stream_idx].cpu().detach().numpy()
-            source_dataset = OutputDataset("source", key, source_data, times, coords, geoinfo, channels, geoinfo_channels)
+            source_dataset = OutputDataset(
+                "source", key, source_data, times, coords, geoinfo, channels, geoinfo_channels
+            )
         else:
             source_dataset = None
 
         return OutputItem(
             source_dataset,
-            OutputDataset("target", key, target_data, times, coords, geoinfo, channels, geoinfo_channels),
-            OutputDataset("prediction", key, preds_data, times, coords, geoinfo, channels, geoinfo_channels),
+            OutputDataset(
+                "target", key, target_data, times, coords, geoinfo, channels, geoinfo_channels
+            ),
+            OutputDataset(
+                "prediction", key, preds_data, times, coords, geoinfo, channels, geoinfo_channels
+            ),
         )

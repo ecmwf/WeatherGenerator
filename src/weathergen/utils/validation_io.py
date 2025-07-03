@@ -14,6 +14,7 @@ import weathergen.utils.io as io
 
 _logger = logging.getLogger(__name__)
 
+
 def write_output(
     cf,
     epoch,
@@ -27,20 +28,24 @@ def write_output(
 ):
     is_output_stream = [stream.name in cf.analysis_streams_output for stream in cf.streams]
     stream_names = [
-        stream.name if condition else "" for condition, stream in zip(is_output_stream, cf.streams)
+        stream.name if condition else ""
+        for condition, stream in zip(is_output_stream, cf.streams, strict=False)
     ]  # TODO: how to correctly handle this => set analysis_streams_output in default config = []
     # => what happens if stream is not in analysis_streams_output?
     # => what happens if analysis_streams_output is none?
     # streams anemoi `source`, `target` commented out???
 
     # assumption: datasets in a stream share channels
-    channels = [list(stream.val_target_channels) for condition, stream in zip(is_output_stream, cf.streams) if condition] # target_channels ??
-    geoinfo_channels = [[] for _ in cf.streams] # TODO obtain channels
-    # samples = range(batch_idx * batch_size, (batch_idx + 1) * batch_size)
+    channels = [
+        list(stream.val_target_channels)
+        for condition, stream in zip(is_output_stream, cf.streams, strict=False)
+        if condition
+    ]
+    geoinfo_channels = [[] for _ in cf.streams]  # TODO obtain channels
 
-    # assume: is batch size guarnteed and constant?
+    # assume: is batch size guarnteed and constant:
+    # => calculate global sample indices for this batch by offsetting by sample_start
     sample_start = batch_idx * cf.batch_size_validation
-    _logger.info("called valiadation_io")
 
     data = io.OutputBatchData(
         sources,
