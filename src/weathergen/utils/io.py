@@ -22,7 +22,7 @@ _logger = logging.getLogger(__name__)
 class ItemKey:
     """Metadata to identify one output item."""
 
-    sample: str
+    sample: int
     forecast_step: int
     stream: str
 
@@ -61,14 +61,14 @@ class OutputDataset:
     geoinfo_channels: list[str]  # TODO
 
     @functools.cached_property
-    def arrays(self) -> typing.Iterator[tuple[str, zarr.Array]]:
+    def arrays(self) -> dict[str, zarr.Array]:
         """Iterate over the arrays and their names."""
         return {
             "data": self.data,
             "times": self.times,
             "coords": self.coords,
-            "geoinfo": self.geoinfo,
-        }.items()
+            "geoinfo": self.geoinfo
+        }
 
     @functools.cached_property
     def datapoints(self) -> NDArray[np.int_]:
@@ -176,15 +176,19 @@ class ZarrIO:
         return OutputItem(**datasets)
 
     def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Group:
+        assert self.data_root is not None, "ZarrIO must be opened before accessing data."
+        group: zarr.Group | None
         if create:
             group = self.data_root.create_group(item.path)
         else:
             try:
                 group = self.data_root.get(item.path)
+                assert group is not None, f"Zarr group: {item.path} does not exist."
             except KeyError as e:
                 msg = f"Zarr group: {item.path} has not been created."
                 raise FileNotFoundError(msg) from e
 
+        assert group is not None, f"Zarr group: {item.path} does not exist."
         return group
 
     def _write_dataset(self, item_group: zarr.Group, dataset: OutputDataset):
@@ -197,7 +201,7 @@ class ZarrIO:
         dataset_group.attrs["geoinfo_channels"] = dataset.geoinfo_channels
 
     def _write_arrays(self, dataset_group: zarr.Group, dataset: OutputDataset):
-        for array_name, array in dataset.arrays:  # suffix is eg. data or coords
+        for array_name, array in dataset.arrays.items():  # suffix is eg. data or coords
             self._create_dataset(dataset_group, array_name, array)
 
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
@@ -248,7 +252,7 @@ class OutputBatchData:
     targets_coords: list[list]
 
     # fstep, stream, (sample x datapoint)
-    targets_times: list[list[NDArray]]
+    targets_times: list[list[NDArray[DType]]]
 
     # fstep, stream, redundant dim (size 1)
     targets_lens: list[list[list[int]]]
@@ -272,12 +276,12 @@ class OutputBatchData:
         """Indices of all forecast steps adjusted by the forecast offset"""
         return np.arange(len(self.targets)) + self.forecast_offset
 
-    def items(self) -> typing.Generator[ItemKey, None, None]:
+    def items(self) -> typing.Generator[OutputItem, None, None]:
         """Iterate over possible output items"""
         filtered_streams = (stream for stream in self.stream_names if stream != "")
         # TODO: filter for empty items?
-        for args in itertools.product(self.samples, self.forecast_steps, filtered_streams):
-            yield self.extract(ItemKey(*args))
+        for (s, fo_s, fi_s) in itertools.product(self.samples, self.forecast_steps, filtered_streams):
+            yield self.extract(ItemKey(int(s), int(fo_s), fi_s))
 
     def extract(self, key: ItemKey) -> OutputItem:
         """Extract datasets from lists for one output item."""
@@ -290,10 +294,8 @@ class OutputBatchData:
         _logger.debug(f"lens: {lens}, {len(lens)}")
         start = sum(lens[:sample])
         n_samples = lens[sample]
-        _logger.info(
-            f"extracting sample {self.sample_start}+{sample}: {start}-{start + n_samples}."
-        )
-        datapoints = slice(start, start + n_samples)
+        _logger.info(f"extracting sample: start:{self.sample_start} rel_idx:{sample} range:{start}-{start+n_samples}.")
+        datapoints = slice(start, start+n_samples)
 
         target_data = self.targets[forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
         preds_data = (
@@ -329,11 +331,7 @@ class OutputBatchData:
             source_dataset = None
 
         return OutputItem(
-            source_dataset,
-            OutputDataset(
-                "target", key, target_data, times, coords, geoinfo, channels, geoinfo_channels
-            ),
-            OutputDataset(
-                "prediction", key, preds_data, times, coords, geoinfo, channels, geoinfo_channels
-            ),
+            source=source_dataset,
+            target=OutputDataset("target", key, target_data, times, coords, geoinfo, channels, geoinfo_channels),
+            prediction=OutputDataset("prediction", key, preds_data, times, coords, geoinfo, channels, geoinfo_channels),
         )
