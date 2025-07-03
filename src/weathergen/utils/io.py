@@ -155,7 +155,6 @@ class ZarrIO:
 
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
-        print(zarr.__version__, "VERSION    ")
         group = self._get_group(item.key, create=True)
         for dataset in item.datasets:
             self._write_dataset(group, dataset)
@@ -293,7 +292,7 @@ class OutputBatchData:
         _logger.debug(f"lens: {lens}, {len(lens)}")
         start = sum(lens[:sample])
         n_samples = lens[sample]
-        _logger.info(f"extracting sample {self.sample_start}+{sample}: {start}-{start+n_samples}.")
+        _logger.info(f"extracting sample: start:{self.sample_start} rel_idx:{sample} range:{start}-{start+n_samples}.")
         datapoints = slice(start, start+n_samples)
 
         target_data = self.targets[forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
