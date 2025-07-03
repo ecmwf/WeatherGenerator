@@ -61,14 +61,14 @@ class OutputDataset:
     geoinfo_channels: list[str] # TODO
     
     @functools.cached_property
-    def arrays(self) -> typing.Iterator[tuple[str, zarr.Array]]:
+    def arrays(self) -> dict[str, zarr.Array]:
         """Iterate over the arrays and their names."""
         return {
             "data": self.data,
             "times": self.times,
             "coords": self.coords,
             "geoinfo": self.geoinfo
-        }.items()
+        }
 
     @functools.cached_property
     def datapoints(self) -> NDArray[np.int_]:
@@ -155,6 +155,7 @@ class ZarrIO:
 
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
+        print(zarr.__version__, "VERSION    ")
         group = self._get_group(item.key, create=True)
         for dataset in item.datasets:
             self._write_dataset(group, dataset)
@@ -197,7 +198,7 @@ class ZarrIO:
         dataset_group.attrs["geoinfo_channels"] = dataset.geoinfo_channels
 
     def _write_arrays(self, dataset_group: zarr.Group, dataset: OutputDataset):
-        for array_name, array in dataset.arrays:  # suffix is eg. data or coords
+        for array_name, array in dataset.arrays.items():  # suffix is eg. data or coords
             self._create_dataset(dataset_group, array_name, array)
 
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
@@ -270,12 +271,12 @@ class OutputBatchData:
         """Indices of all forecast steps adjusted by the forecast offset"""
         return np.arange(len(self.targets)) + self.forecast_offset
 
-    def items(self) -> typing.Generator[ItemKey, None, None]:
+    def items(self) -> typing.Generator[OutputItem, None, None]:
         """Iterate over possible output items"""
         filtered_streams = (stream for stream in self.stream_names if stream != "")
         # TODO: filter for empty items?
-        for args in itertools.product(self.samples, self.forecast_steps, filtered_streams):
-            yield self.extract(ItemKey(*args))
+        for (s, fo_s, fi_s) in itertools.product(self.samples, self.forecast_steps, filtered_streams):
+            yield self.extract(ItemKey(s, fo_s, fi_s))
 
     def extract(self, key: ItemKey) -> OutputItem:
         """Extract datasets from lists for one output item."""
