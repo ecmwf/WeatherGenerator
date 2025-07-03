@@ -682,7 +682,9 @@ class Trainer(Trainer_Base):
                     self.train_logger.add_val(samples, losses_all, stddev_all)
 
                 if self.cf.rank == 0:
-                    _logger.info(f"validation ({cf.run_id}) : {epoch:03d} : loss = {torch.nanmean(losses_all[0]):.4E}"),
+                    _logger.info(f"validation ({cf.run_id}) : {epoch:03d}")
+                    _logger.info(f": loss = {torch.nanmean(losses_all[0]):.4E}")
+                    # creating a string with all stream losses
                     stream_string = ''
                     for i_obs, rt in enumerate(cf.streams):
                         stream_string += f" {rt["name"]} : {losses_all[0, i_obs]:0.4E} \t"
@@ -790,9 +792,10 @@ class Trainer(Trainer_Base):
                         np.nanmean(l_avg[0]),
                         self.lr_scheduler.get_lr(),
                         (self.print_freq * self.cf.batch_size) / dt,
-                    )
+                    ))
                 stream_string = ''
                 for i_obs, rt in enumerate(self.cf.streams):
+                    # creating a string with all stream losses
                     stream_string += f"{rt["name"]} : {l_avg[0, i_obs]:0.4E} \t"
                 _logger.info("\t" + stream_string)
             self.t_start = time.time()
