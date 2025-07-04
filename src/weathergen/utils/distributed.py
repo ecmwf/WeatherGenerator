@@ -11,9 +11,9 @@ Copyright (c) 2025, Sebastian Hoffmann
 # TODO: copy other utilities from dmlcloud such as root_wrap etc.
 # TODO: move the DDP code from trainer.py to this file
 import pickle
-from typing import List
-import torch.distributed as dist
+
 import torch
+import torch.distributed as dist
 from torch import Tensor
 
 SYNC_TIMEOUT_SEC = 60 * 60  # 1 hour
@@ -66,7 +66,7 @@ def get_rank() -> int:
     return dist.get_rank()
 
 
-def all_gather(data: Tensor) -> List[Tensor]:
+def all_gather(data: Tensor) -> list[Tensor]:
     """
     Run all_gather on arbitrary picklable data (not necessarily tensors)
 
@@ -107,7 +107,7 @@ def all_gather(data: Tensor) -> List[Tensor]:
     dist.all_gather(tensor_list, tensor)
 
     data_list = []
-    for size, tensor in zip(size_list, tensor_list):
+    for size, tensor in zip(size_list, tensor_list, strict=False):
         buffer = tensor.cpu().numpy().tobytes()[:size]
         data_list.append(pickle.loads(buffer).cpu())
 
