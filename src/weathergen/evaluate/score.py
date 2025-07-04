@@ -136,7 +136,7 @@ class Scores:
         Returns
         -------
         """
-        self._agg_dims = agg_dims
+        self._agg_dims_in = agg_dims
         self._ens_dim = ens_dim
 
         self.det_metrics_dict = {
@@ -209,16 +209,17 @@ class Scores:
                 }"
             )
 
-        # Check if _agg_dims is in prediction data
-        if self._agg_dims == "all":
-            self._agg_dims_applied = list(data.prediction.dims)
+        if self._agg_dims_in == "all":
+            # Aggregate over all dimensions of the prediction data
+            self._agg_dims = list(data.prediction.dims)
         else:
+            # Check if _agg_dims is in prediction data
             for dim in self._agg_dims:
                 if dim not in data.prediction.dims:
                     raise ValueError(
                         f"Average dimension '{dim}' not found in prediction data dimensions: {data.prediction.dims}"
                     )
-            self._agg_dims_applied = self._agg_dims
+            self._agg_dims = self._agg_dims_in
 
         arg_names: list[str] = inspect.getfullargspec(f).args[1:]
 
@@ -233,22 +234,20 @@ class Scores:
         return result
 
     @property
-    def agg_dims(self):
-        return self._agg_dims
+    def agg_dims_in(self):
+        return self._agg_dims_in
 
-    @agg_dims.setter
+    @agg_dims_in.setter
     def agg_dims(self, dims):
-        if dims is None:
-            self._agg_dims = None
-        elif dims == "all":
-            self._agg_dims = dims
+        if dims == "all":
+            self._agg_dims_in = dims
         else:
             agg_dims = to_list(dims)
             assert all([isinstance(dim) for dim in dims]), (
                 "All elements of the agg_dims must be strings."
             )
 
-            self._agg_dims = agg_dims
+            self._agg_dims_in = agg_dims
 
     @property
     def ens_dim(self):
@@ -845,9 +844,23 @@ class Scores:
 if __name__ == "__main__":
     io = MockIO(config={"dummy": True})
 
-    sc = Scores(io, 1, "ERA5", 6)
+    # get some mocked data
+    data = io.get_data(1, "ERA5", 0)
+    gt = data.target.as_xarray()
+    p = data.prediction.as_xarray() * 1.1
 
-    a = sc.calc_l1()
-    print(a)
-    a = sc.calc_mae()
-    print(a)
+    data = VerifiedData(p * 1.1, gt)
+
+    sc = Scores("all")
+
+    # calculate single score
+    rmse = sc(data, "rmse").compute()
+    print(rmse.compute())
+
+    # calculate several scores at once
+    score_names = ["mse", "mae", "bias"]
+    score_list = [sc(data, score_name) for score_name in score_names]
+    combined_scores = xr.concat(score_list, dim="score_name")
+    combined_scores["score_name"] = score_names
+
+    print(combined_scores.compute())
