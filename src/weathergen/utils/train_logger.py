@@ -11,6 +11,7 @@ import datetime
 import json
 import logging
 import math
+import re
 import time
 import traceback
 from dataclasses import dataclass
@@ -19,7 +20,7 @@ from typing import Literal
 
 import numpy as np
 import polars as pl
-import re
+
 import weathergen.utils.config as config
 from weathergen.utils.metrics import read_metrics_file
 
@@ -377,9 +378,9 @@ def clean_df(df, columns: list[str] | None):
 
 def clean_name(s, regex=r"[a-zA-Z0-9]+"):
     """
-    Convert a string to camelCase. 
+    Convert a string to camelCase.
     Characters to omit are all not in given regular expression.
-    
+
     :param s: Input string
     :param regex: Regular expression defining valid characters in words
     (defaults to alpha-numeric)
@@ -390,10 +391,11 @@ def clean_name(s, regex=r"[a-zA-Z0-9]+"):
 
     if not words:
         return ""
-    
-    camel_cased = ''.join(word.capitalize() for word in words)
-    
+
+    camel_cased = "".join(word.capitalize() for word in words)
+
     return camel_cased
+
 
 def _key_loss(st_name: str, lf_name: str) -> str:
     st_name = clean_name(st_name)
