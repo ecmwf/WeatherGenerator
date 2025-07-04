@@ -13,12 +13,11 @@ Source:
 https://stackoverflow.com/questions/60717142/getting-linked-issues-and-projects-associated-with-a-pull-request-form-github-ap
 """
 
+import logging
+import re
 
 import requests
 from bs4 import BeautifulSoup
-import re
-
-import logging
 
 repo = "ecmwf/WeatherGenerator"
 

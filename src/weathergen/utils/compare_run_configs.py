@@ -13,7 +13,6 @@ import logging
 import dictdiffer
 from obslearn.utils.config import Config
 
-
 _logger = logging.getLogger(__name__)
 
 
