@@ -1,4 +1,5 @@
 streams_directory: "./config/streams/streams_anemoi/"
+# streams_directory: "./config/streams/streams_anemoi_era5_split/"
 
 embed_orientation: "channels"
 embed_local_coords: True
@@ -9,13 +10,13 @@ embed_dropout_rate: 0.1
 
 target_cell_local_prediction: True
 
-ae_local_dim_embed: 2048
+ae_local_dim_embed: 1024
 ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
 
-ae_local_num_queries: 2
+ae_local_num_queries: 1
 ae_local_queries_per_cell: False
 ae_adapter_num_heads: 16
 ae_adapter_embed: 128
@@ -24,7 +25,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 10
+ae_global_num_blocks: 8
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -56,6 +57,9 @@ with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
 with_fsdp: True
+attention_dtype: bf16
+mlp_norm_eps: 1e-5
+norm_eps: 1e-4
 
 loss_fcts:
   -
@@ -78,6 +82,8 @@ masking_rate: 0.6
 masking_rate_sampling: True
 # sample a subset of all target points, useful e.g. to reduce memory requirements
 sampling_rate_target: 1.0
+# include a masking strategy here, currently only supporting "random" and "block"
+masking_strategy: "random"
 
 num_epochs: 24
 samples_per_epoch: 4096
@@ -86,7 +92,7 @@ shuffle: True
 
 lr_scaling_policy: "sqrt"
 lr_start: 0.000001
-lr_max: 0.00003
+lr_max: 0.00005
 lr_final_decay: 0.000001
 lr_final: 0.0
 lr_steps_warmup: 256
@@ -95,7 +101,7 @@ lr_policy_warmup: "cosine"
 lr_policy_decay: "linear"
 lr_policy_cooldown: "linear"
 
-grad_clip: 5.0
+grad_clip: 1.0
 weight_decay: 0.1
 norm_type: "LayerNorm"
 nn_module: "te"
@@ -104,8 +110,8 @@ start_date: 197901010000
 end_date: 202012310000
 start_date_val: 202101010000
 end_date_val: 202201010000
-len_hrs: 12
-step_hrs: 1
+len_hrs: 6
+step_hrs: 6
 input_window_steps: 1
 
 val_initial: False

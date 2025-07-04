@@ -14,6 +14,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import torch
 import yaml
 from omegaconf import DictConfig, OmegaConf
 
@@ -112,7 +113,17 @@ def load_config(
         - overwrites (also in ascending order)
     """
     private_config = _load_private_conf(private_home)
-    overwrite_configs = [_load_overwrite_conf(overwrite) for overwrite in overwrites]
+    overwrite_configs: list[Config] = []
+    for overwrite in overwrites:
+        if isinstance(overwrite, (str | Path)):
+            # Because of the way we pass extra configs through slurm,
+            # all the paths may be concatenated with ":"
+            p = str(overwrite).split(":")
+            for path in p:
+                overwrite_configs.append(_load_overwrite_conf(Path(path)))
+        else:
+            # If it is a dict or DictConfig, we can directly use it
+            overwrite_configs.append(_load_overwrite_conf(overwrite))
 
     if from_run_id is None:
         base_config = _load_default_conf()
@@ -308,3 +319,19 @@ def load_streams(streams_directory: Path) -> list[Config]:
             continue
 
     return list(streams.values())
+
+
+def get_dtype(value: str) -> torch.dtype:
+    """
+    changes the conf value to a torch dtype
+    """
+    if value == "bf16":
+        return torch.bfloat16
+    elif value == "fp16":
+        return torch.float16
+    elif value == "fp32":
+        return torch.float32
+    else:
+        raise NotImplementedError(
+            f"Dtype {value} is not recognized, choose either, bf16, fp16, or fp32"
+        )
