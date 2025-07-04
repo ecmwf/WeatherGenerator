@@ -18,6 +18,8 @@ import inspect
 import xarray as xr
 import numpy as np
 
+from weathergen.io import MockIO
+
 _logger = logging.getLogger(__name__)
 
 try:
