@@ -19,7 +19,7 @@ from typing import Literal
 
 import numpy as np
 import polars as pl
-
+import re
 import weathergen.utils.config as config
 from weathergen.utils.metrics import read_metrics_file
 
@@ -88,12 +88,10 @@ class TrainLogger:
         log_vals += [lr]
 
         for i_obs, st in enumerate(self.cf.streams):
-            st_name = _clean_name(st["name"])
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts):
-                lf_name = _clean_name(lf_name)
-                metrics[_key_loss(st_name, lf_name)] = loss_avg[j, i_obs]
+                metrics[_key_loss(st["name"], lf_name)] = loss_avg[j, i_obs]
                 if len(stddev_avg) > 0:
-                    metrics[_key_stddev(st_name)] = stddev_avg[i_obs]
+                    metrics[_key_stddev(st["name"])] = stddev_avg[i_obs]
                 log_vals += [loss_avg[j, i_obs]]
         if len(stddev_avg) > 0:
             for i_obs, _rt in enumerate(self.cf.streams):
@@ -377,17 +375,32 @@ def clean_df(df, columns: list[str] | None):
     return df
 
 
-def _clean_name(n: str) -> str:
-    """Cleans the stream name to only retain alphanumeric characters"""
-    return "".join([c for c in n if c.isalnum()])
+def clean_name(s, regex=r"[a-zA-Z0-9]+"):
+    """
+    Convert a string to camelCase. 
+    Characters to omit are all not in given regular expression.
+    
+    :param s: Input string
+    :param regex: Regular expression defining valid characters in words
+    (defaults to alpha-numeric)
+    :return: CamelCase version of the input string
+    """
+    re_pattern = re.compile(regex)
+    words = re_pattern.findall(s)
 
+    if not words:
+        return ""
+    
+    camel_cased = ''.join(word.capitalize() for word in words)
+    
+    return camel_cased
 
 def _key_loss(st_name: str, lf_name: str) -> str:
-    st_name = _clean_name(st_name)
-    lf_name = _clean_name(lf_name)
+    st_name = clean_name(st_name)
+    lf_name = clean_name(lf_name)
     return f"stream.{st_name}.loss_{lf_name}.loss_avg"
 
 
 def _key_stddev(st_name: str) -> str:
-    st_name = _clean_name(st_name)
+    st_name = clean_name(st_name)
     return f"stream.{st_name}.stddev_avg"
