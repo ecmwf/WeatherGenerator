@@ -627,8 +627,8 @@ def plot_train(args=None):
         "--run_ids_dict",
         type=_read_str_config,
         dest="rs",
-        help="Dictionary-string of form '{run_id: [job_id, experiment_name]}'" + \
-              "for training runs to plot",
+        help="Dictionary-string of form '{run_id: [job_id, experiment_name]}'"
+        + "for training runs to plot",
     )
 
     run_id_group.add_argument(
@@ -726,7 +726,6 @@ def plot_train(args=None):
 
 
 if __name__ == "__main__":
-
     args = sys.argv[1:]  # get CLI args
 
     plot_train(args)
