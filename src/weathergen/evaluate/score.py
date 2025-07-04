@@ -10,12 +10,15 @@
 from dataclasses import dataclass
 from typing import List, Any
 import json
+import logging
 import dask.array as da
 import numpy as np
 import pandas as pd
 import inspect
 import xarray as xr
 import numpy as np
+
+_logger = logging.getLogger(__name__)
 
 try:
     import xskillscore
@@ -161,6 +164,36 @@ class Scores:
         }
 
     def __call__(self, data: VerifiedData, score_name: str, **kwargs):
+        """
+        Calculate the score for the given data and score name.
+
+        If data is a dask array, the score will be calculated lazily.
+        This allows for efficient graph construction and execution when calculating several scores.
+        Example usage:
+        >>> # Initialize Scores object with aggregation dimensions
+        >>> sc = Scores(agg_dims=["ipoints"])
+        >>> # Collect list of scores for a given VerifiedData object
+        >>> score_list = [sc(data, score_name) for score_name in ["ets", "pss", "fbi"]]
+        >>> combined_metrics = xr.concat(score_list, dim="score_name")
+        >>> combined_metrics["score_name"] = score_list
+        >>> # Do the computation with a joint graph
+        >>> combined_metrics = combined_metrics.compute()
+
+        Parameters
+        ----------
+        data : VerifiedData
+            VerifiedData object containing prediction and ground truth data.
+        score_name : str
+            Name of the score to calculate.
+        kwargs : dict
+            Additional keyword arguments to pass to the score function.
+
+        Returns
+        -------
+        xr.DataArray
+            Calculated score as an xarray DataArray.
+
+        """
         if score_name in self.det_metrics_dict.keys:
             f = self.det_metrics_dict[score_name]
         elif score_name in self.prob_metrics_dict.keys:
@@ -189,14 +222,13 @@ class Scores:
             self._agg_dims_applied = self._agg_dims
 
         arg_names: list[str] = inspect.getfullargspec(f).args[1:]
-        # Shortcut names, convenient but not really necessary.
+
         args = {"p": data.prediction, "gt": data.ground_truth}
         for an in arg_names:
             if an in kwargs:
                 args[an] = kwargs[an]
-        # Arguments to pass to the function
-        print(f"{f} -> {args}")
-        # Call:
+
+        # Call lazy evaluation function
         result = f(**args)
 
         return result
