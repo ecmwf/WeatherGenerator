@@ -7,10 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import sys
 import argparse
 import logging
 import subprocess
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
