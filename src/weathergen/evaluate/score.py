@@ -29,7 +29,9 @@ except Exception:
 
 
 # helper function to calculate skill score
-def _get_skill_score(score_fcst: xr.DataArray, score_ref: xr.DataArray, score_perf: float) -> xr.DataArray:  
+def _get_skill_score(
+    score_fcst: xr.DataArray, score_ref: xr.DataArray, score_perf: float
+) -> xr.DataArray:
     """
     Calculate the skill score of a forecast data array w.r.t. a reference and a perfect score.
     Definition follows Wilks, Statistical Methods in the Atmospheric Sciences (2006), Chapter 7.1.4, Equation 7.4
@@ -48,7 +50,7 @@ def _get_skill_score(score_fcst: xr.DataArray, score_ref: xr.DataArray, score_pe
     skiil_score : xr.DataArray
         Skill score data array
     """
-    
+
     skill_score = (score_fcst - score_ref) / (score_perf - score_ref)
 
     return skill_score
@@ -70,10 +72,10 @@ def to_list(obj: Any) -> List:
     ----------
     obj : Any
         Object to convert to list
-    
+
     Returns
     ----------
-    list 
+    list
         List containing obj, or obj itself if obj was already a list
     """
     if isinstance(obj, (set, tuple)):
@@ -97,7 +99,9 @@ class VerifiedData:
         # Ensure all dimensions in truth are in forecast (or equal)
         missing_dims = set(self.ground_truth.dims) - set(self.prediction.dims)
         if missing_dims:
-            raise ValueError(f"Truth data has extra dimensions not found in forecast: {missing_dims}")
+            raise ValueError(
+                f"Truth data has extra dimensions not found in forecast: {missing_dims}"
+            )
 
     def _validate_broadcastability(self):
         try:
@@ -156,28 +160,34 @@ class Scores:
             "spread": self.calc_spread,
         }
 
-
     def __call__(self, data: VerifiedData, score_name: str, **kwargs):
-
         if score_name in self.det_metrics_dict.keys:
             f = self.det_metrics_dict[score_name]
         elif score_name in self.prob_metrics_dict.keys:
-            assert self.ens_dim in data.prediction.dims, \
-                f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} not found in prediction data" 
+            assert self.ens_dim in data.prediction.dims, (
+                f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} not found in prediction data"
+            )
             f = self.prob_metrics_dict[score_name]
-        else: 
-            raise ValueError(f"Unknown score chosen. Supported scores: {', '.join(self.det_metrics_dict.keys()) 
-                                                                        + ', ' + ', '.join(self.prob_metrics_dict.keys())}")
-        
-        # Check if avg_dims is in prediction data
+        else:
+            raise ValueError(
+                f"Unknown score chosen. Supported scores: {
+                    ', '.join(self.det_metrics_dict.keys())
+                    + ', '
+                    + ', '.join(self.prob_metrics_dict.keys())
+                }"
+            )
+
+        # Check if _agg_dims is in prediction data
         if self._agg_dims == "all":
             self._agg_dims_applied = list(data.prediction.dims)
         else:
             for dim in self._agg_dims:
                 if dim not in data.prediction.dims:
-                    raise ValueError(f"Average dimension '{dim}' not found in prediction data dimensions: {data.prediction.dims}")
+                    raise ValueError(
+                        f"Average dimension '{dim}' not found in prediction data dimensions: {data.prediction.dims}"
+                    )
             self._agg_dims_applied = self._agg_dims
-            
+
         arg_names: list[str] = inspect.getfullargspec(f).args[1:]
         # Shortcut names, convenient but not really necessary.
         args = {"p": data.prediction, "gt": data.ground_truth}
@@ -188,7 +198,7 @@ class Scores:
         print(f"{f} -> {args}")
         # Call:
         result = f(**args)
-        
+
         return result
 
     @property
@@ -197,19 +207,22 @@ class Scores:
 
     @agg_dims.setter
     def agg_dims(self, dims):
-        if 
-        if dims == "all":
-            self._agg_dims = dims 
+        if dims is None:
+            self._agg_dims = None
+        elif dims == "all":
+            self._agg_dims = dims
         else:
             agg_dims = to_list(dims)
-            assert all([isinstance(dim) for dim in dims]), "All elements of the avg_dims must be strings."
+            assert all([isinstance(dim) for dim in dims]), (
+                "All elements of the agg_dims must be strings."
+            )
 
             self._agg_dims = agg_dims
 
     @property
     def ens_dim(self):
         return self._ens_dim
-    
+
     @ens_dim.setter
     def ens_dim(self, ens_dim):
         assert isinstance(ens_dim, str), "ens_dim must be a string."
@@ -223,14 +236,14 @@ class Scores:
         ----------
         data : xr.DataArray
             xarray DataArray to sum over aggregation dimensions
-        
+
         Returns
         -------
         xr.DataArray
             Summed data
         """
         return data.sum(dim=self._agg_dims)
-    
+
     def _mean(self, data: xr.DataArray) -> xr.DataArray:
         """
         Average data over aggregation dimensions.
@@ -239,16 +252,17 @@ class Scores:
         ----------
         data : xr.DataArray
             xarray DataArray to average over aggregation dimensions
-        
+
         Returns
         -------
         xr.DataArray
             Averaged data
         """
-        return data.mean(dim=self._agg_dims)    
+        return data.mean(dim=self._agg_dims)
 
-
-    def get_2x2_event_counts(self, p: xr.DataArray, gt: xr.DataArray, thresh: float) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]:
+    def get_2x2_event_counts(
+        self, p: xr.DataArray, gt: xr.DataArray, thresh: float
+    ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]:
         """
         Get counts of 2x2 contingency tables
         """
@@ -260,7 +274,7 @@ class Scores:
         return a, b, c, d
 
     ### Deterministic scores
-    
+
     def calc_ets(self, p: xr.DataArray, gt: xr.DataArray, thresh=0.1):
         a, b, c, d = self.get_2x2_event_counts(p, gt, thresh)
         n = a + b + c + d
@@ -273,7 +287,6 @@ class Scores:
 
         return ets
 
-    
     def calc_fbi(self, p: xr.DataArray, gt: xr.DataArray, thresh=0.1):
         a, b, c, _ = self.get_2x2_event_counts(p, gt, thresh)
 
@@ -284,7 +297,6 @@ class Scores:
 
         return fbi
 
-    
     def calc_pss(self, p: xr.DataArray, gt: xr.DataArray, thresh=0.1):
         a, b, c, d = self.get_2x2_event_counts(p, gt, thresh)
 
@@ -295,7 +307,6 @@ class Scores:
 
         return pss
 
-    
     def calc_l1(self, p: xr.DataArray, gt: xr.DataArray, scale_dims: List = None):
         """
         Calculate the L1 error norm of forecast data w.r.t. reference data.
@@ -307,15 +318,15 @@ class Scores:
         if _scale_dims:
             _scale_dims = to_list(scale_dims)
 
-            assert all([dim in p.dims for dim in _scale_dims]), \
+            assert all([dim in p.dims for dim in _scale_dims]), (
                 f"Provided scale dimensions {_scale_dims} are not all present in the prediction data dimensions {p.dims}."
-            
+            )
+
             len_dims = np.array([p.sizes[dim] for dim in _scale_dims])
             l1 /= np.prod(len_dims)
 
         return l1
 
-    
     def calc_l2(self, p: xr.DataArray, gt: xr.DataArray, scale_dims: List = None):
         """
         Calculate the L2 error norm of forecast data w.r.t. reference data.
@@ -327,22 +338,22 @@ class Scores:
         if _scale_dims:
             _scale_dims = to_list(scale_dims)
 
-            assert all([dim in p.dims for dim in _scale_dims]), \
+            assert all([dim in p.dims for dim in _scale_dims]), (
                 f"Provided scale dimensions {_scale_dims} are not all present in the prediction data dimensions {p.dims}."
-            
+            )
+
             len_dims = np.array([p.sizes[dim] for dim in _scale_dims])
             l2 /= np.prod(len_dims)
 
         return l2
 
-    
     def calc_mae(self, p: xr.DataArray, gt: xr.DataArray):
         """
         Calculate mean absolute error (MAE) of forecast data w.r.t. reference data
         """
         if self._agg_dims is None:
             raise ValueError(
-                "Cannot calculate mean absolute error without average dimensions (avg_dims=None)."
+                "Cannot calculate mean absolute error without aggregation dimensions (agg_dims=None)."
             )
         mae = self._mean(np.abs(p - gt))
 
@@ -355,7 +366,7 @@ class Scores:
         """
         if self._agg_dims is None:
             raise ValueError(
-                "Cannot calculate mean squared error without average dimensions (avg_dims=None)."
+                "Cannot calculate mean squared error without aggregation dimensions (agg_dims=None)."
             )
 
         mse = self._mean(np.square(self.prediction - self.ground_truth))
@@ -369,7 +380,7 @@ class Scores:
         """
         if self._agg_dims is None:
             raise ValueError(
-                "Cannot calculate root mean squared error without average dimensions (avg_dims=None)."
+                "Cannot calculate root mean squared error without aggregation dimensions (agg_dims=None)."
             )
             raise ValueError(msg)
 
@@ -377,8 +388,13 @@ class Scores:
 
         return rmse
 
-    
-    def calc_acc(self, p: xr.DataArray, gt: xr.DataArray, clim_mean: xr.DataArray, spatial_dims: List = ["lat", "lon"]):
+    def calc_acc(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        clim_mean: xr.DataArray,
+        spatial_dims: List = ["lat", "lon"],
+    ):
         """
         Calculate anomaly correlation coefficient (ACC).
 
@@ -403,7 +419,9 @@ class Scores:
         spatial_dims = to_list(spatial_dims)
         for dim in spatial_dims:
             if dim not in p.dims:
-                raise ValueError(f"Spatial dimension '{dim}' not found in prediction data dimensions: {p.dims}")
+                raise ValueError(
+                    f"Spatial dimension '{dim}' not found in prediction data dimensions: {p.dims}"
+                )
 
         fcst_ano, obs_ano = p - clim_mean, gt - clim_mean
 
@@ -419,7 +437,6 @@ class Scores:
 
         return acc
 
-    
     def calc_bias(self, p: xr.DataArray, gt: xr.DataArray):
         """
         Calculate mean bias of forecast data w.r.t. reference data
@@ -429,7 +446,6 @@ class Scores:
 
         return bias
 
-    
     def calc_psnr(self, p: xr.DataArray, gt: xr.DataArray, pixel_max: float = 1.0):
         """
         Calculate PSNR of forecast data w.r.t. reference data
@@ -446,12 +462,17 @@ class Scores:
 
         return psnr
 
-    
-    def calc_spatial_variability(self, p: xr.DataArray, gt: xr.DataArray, order: int = 1, non_spatial_avg_dims: List[str] = None):
+    def calc_spatial_variability(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        order: int = 1,
+        non_spatial_avg_dims: List[str] = None,
+    ):
         """
-        Calculates the ratio between the spatial variability of differental operator with order 1 (highher values unsupported yest) 
+        Calculates the ratio between the spatial variability of differental operator with order 1 (highher values unsupported yest)
         forecast and ground truth data using the calc_geo_spatial-method.
-        
+
         NOTE:
         Requires that data is provided on a regular lat/lon-grid!
 
@@ -464,7 +485,7 @@ class Scores:
         order: int
             Order of the spatial differential operator to be applied. Supported orders: 1
         non_spatial_avg_dims: List[str]
-            List of dimensions over which the spatial variability ratio should be averaged. 
+            List of dimensions over which the spatial variability ratio should be averaged.
             It must be non-spatial dimensions, i.e. not latitude or longitude.
         """
 
@@ -477,16 +498,20 @@ class Scores:
 
         return ratio_spat_variability
 
-    
     def calc_seeps(
-        self, p: xr.DataArray, gt: xr.DataArray, seeps_weights: xr.DataArray, t1: xr.DataArray, 
-        t3: xr.DataArray, spatial_dims: List
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        seeps_weights: xr.DataArray,
+        t1: xr.DataArray,
+        t3: xr.DataArray,
+        spatial_dims: List,
     ):
         """
         Calculates stable equitable error in probabiliyt space (SEEPS), see Rodwell et al., 2011
 
         NOTE:
-        Threshold arrays t1 and t3 (derived from space-time dependant climatology) 
+        Threshold arrays t1 and t3 (derived from space-time dependant climatology)
         must fit to the forecast and ground truth data.
 
         Parameters
@@ -502,7 +527,7 @@ class Scores:
         t3: xr.DataArray
             Threshold for strong precipitation events
         spatial_dims: List[str]
-            List of spatial dimensions of the data, e.g. ["lat", "lon"] 
+            List of spatial dimensions of the data, e.g. ["lat", "lon"]
 
         Returns
         -------
@@ -523,12 +548,10 @@ class Scores:
             return 1.0 - seeps_val
 
         if p.ndim == 3:
-            assert (
-                len(spatial_dims) == 2
-            ), "Provide two spatial dimensions for three-dimensional data."
-            prediction, ground_truth = p.stack(
-                {"xy": spatial_dims}
-            ), gt.stack({"xy": spatial_dims})
+            assert len(spatial_dims) == 2, (
+                "Provide two spatial dimensions for three-dimensional data."
+            )
+            prediction, ground_truth = p.stack({"xy": spatial_dims}), gt.stack({"xy": spatial_dims})
             seeps_weights = seeps_weights.stack({"xy": spatial_dims})
             t3 = t3.stack({"xy": spatial_dims})
             lstack = True
@@ -540,8 +563,7 @@ class Scores:
 
         # check dimensioning of data
         assert prediction.ndim <= 2, (
-            f"Data must be one- or two-dimensional, but has {prediction.ndim} dimensions."
-            + "Check if stacking with spatial_dims may help."
+            f"Data must be one- or two-dimensional, but has {prediction.ndim} dimensions. Check if stacking with spatial_dims may help."
         )
 
         if prediction.ndim == 1:
@@ -566,7 +588,7 @@ class Scores:
         if lstack:
             seeps_values_all = seeps_values_all.unstack()
 
-        if self.avg_dims is not None:
+        if self._agg_dims is not None:
             seeps_values = self._mean(seeps_values_all)
         else:
             seeps_values = seeps_values_all
@@ -574,7 +596,7 @@ class Scores:
         return seeps_values
 
     ### Probablistic scores
-    
+
     def calc_spread(self, p: xr.DataArray, gt: xr.DataArray):
         """
         Calculate the spread of the forecast ensemble
@@ -584,17 +606,15 @@ class Scores:
 
         return self._mean(np.sqrt((ens_std**2)))
 
-    
     def calc_ssr(self, p: xr.DataArray, gt: xr.DataArray):
         """
         Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data
         :return: the SSR averaged over provided dimensions
         """
-        ssr = self.calc_spread(p) / self.calc_rmse(p, gt)     # spread/rmse
+        ssr = self.calc_spread(p) / self.calc_rmse(p, gt)  # spread/rmse
 
-        return ssr  
+        return ssr
 
-    
     def calc_crps(self, p: xr.DataArray, gt: xr.DataArray, method: str = "ensemble", **kwargs):
         """
         Wrapper around CRPS-methods provided by xskillscore-package.
@@ -611,7 +631,7 @@ class Scores:
         kwargs: dict
             Other keyword parameters supported by respective CRPS-method from the xskillscore package
 
-         
+
         :param method: Method to calculate CRPS. Supported methods: ["ensemble", "gaussian"]
         :param kwargs: Other keyword parameters supported by respective CRPS-method
         :return: calculated CRPS
@@ -636,15 +656,21 @@ class Scores:
             crps_func = xskillscore.crps_gaussian
         else:
             raise ValueError(
-            f"Unsupported CRPS-calculation method {method} chosen. Supported methods: {', '.join(crps_methods)}"
-            )   
+                f"Unsupported CRPS-calculation method {method} chosen. Supported methods: {', '.join(crps_methods)}"
+            )
 
         crps = crps_func(gt, **func_kwargs)
 
         return crps
 
-    def calc_rank_histogram(self, p: xr.DataArray, gt: xr.DataArray, norm: bool = True,
-                            add_noise: bool = True, noise_fac=1.0e-03):
+    def calc_rank_histogram(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        norm: bool = True,
+        add_noise: bool = True,
+        noise_fac=1.0e-03,
+    ):
         """
         Calculate the rank histogram of the forecast data w.r.t. reference data.
 
@@ -716,15 +742,13 @@ class Scores:
 
         return rank_counts
 
-    def calc_rank_histogram_xskillscore(self, p: xr.DataArray, gt: xr.DataArray):   
+    def calc_rank_histogram_xskillscore(self, p: xr.DataArray, gt: xr.DataArray):
         """
         Wrapper around rank_histogram-method by xskillscore-package.
         See https://xskillscore.readthedocs.io/en/stable/api
         Note: this version is found to be very slow. Use calc_rank_histogram alternatively.
         """
-        rank_hist = xskillscore.rank_histogram(
-            gt, p, member_dim=self.ens_dim, dim=self._agg_dims
-        )
+        rank_hist = xskillscore.rank_histogram(gt, p, member_dim=self.ens_dim, dim=self._agg_dims)
 
         return rank_hist
 
@@ -739,8 +763,7 @@ class Scores:
         :param scalar_field: scalar field as data array with latitude and longitude as coordinates
         :param order: order of spatial differential operator
         :param r_e: radius of the sphere
-        :return: the amplitude of the gradient/laplacian at each grid point
-                 or over the whole domain (see avg_dom)
+        :return: the amplitude of the gradient/laplacian at each grid point or over the whole domain (see dom_avg)
         """
         method = Scores.calc_geo_spatial_diff.__name__
         # sanity checks
