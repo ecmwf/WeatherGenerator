@@ -69,9 +69,6 @@ def inference_from_args(argl: list[str]):
 def train_continue() -> None:
     parser = cli.get_continue_parser()
     args = parser.parse_args()
-    if args.run_id:
-        if args.run_id == args.from_run_id:
-            args.reuse_run_id = True
 
     init_loggers()
 
