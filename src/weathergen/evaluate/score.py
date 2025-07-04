@@ -1,16 +1,12 @@
+from dataclasses import dataclass
+from typing import List, Any
 import json
-import logging
-
 import dask.array as da
 import numpy as np
 import pandas as pd
+import inspect
 import xarray as xr
-
-# TODO: adjust to use utils.io.ZarrIO
-from weathergen.utils.mock_io import MockIO
-
-_logger = logging.getLogger(__name__)
-
+import numpy as np
 
 try:
     import xskillscore
@@ -24,8 +20,27 @@ except Exception:
 
 
 # helper function to calculate skill score
-def _get_skill_score(score_model, score_ref, score_perf):
-    skill_score = (score_model - score_ref) / (score_perf - score_ref)
+def _get_skill_score(score_fcst: xr.DataArray, score_ref: xr.DataArray, score_perf: float) -> xr.DataArray:  
+    """
+    Calculate the skill score of a forecast data array w.r.t. a reference and a perfect score.
+    Definition follows Wilks, Statistical Methods in the Atmospheric Sciences (2006), Chapter 7.1.4, Equation 7.4
+
+    Parameters
+    ----------
+    score_fcst : xr.DataArray
+        Forecast score data array
+    score_ref : xr.DataArray
+        Score data array of a reference forecast, e.g. a climatological mean
+    score_perf : float
+        Score data array of a perfect forecast, e.g. 0 for the RMSE-score
+
+    Returns
+    ----------
+    skiil_score : xr.DataArray
+        Skill score data array
+    """
+    
+    skill_score = (score_fcst - score_ref) / (score_perf - score_ref)
 
     return skill_score
 
@@ -38,6 +53,51 @@ def to_json(func):
     return wrapper
 
 
+def to_list(obj: Any) -> List:
+    """
+    Converts given object to list if obj is not already a list. Sets are also transformed to a list.
+
+    Parameters
+    ----------
+    obj : Any
+        Object to convert to list
+    
+    Returns
+    ----------
+    list 
+        List containing obj, or obj itself if obj was already a list
+    """
+    if isinstance(obj, (set, tuple)):
+        obj = list(obj)
+    elif not isinstance(obj, list):
+        obj = [obj]
+    return obj
+
+
+@dataclass(frozen=True)
+class VerifiedData:
+    prediction: xr.DataArray
+    ground_truth: xr.DataArray
+
+    def __post_init__(self):
+        # Perform checks on initialization
+        self._validate_dimensions()
+        self._validate_broadcastability()
+
+    def _validate_dimensions(self):
+        # Ensure all dimensions in truth are in forecast (or equal)
+        missing_dims = set(self.ground_truth.dims) - set(self.prediction.dims)
+        if missing_dims:
+            raise ValueError(f"Truth data has extra dimensions not found in forecast: {missing_dims}")
+
+    def _validate_broadcastability(self):
+        try:
+            # Attempt broadcast
+            xr.broadcast(self.prediction, self.ground_truth)
+        except ValueError as e:
+            raise ValueError(f"Forecast and truth are not broadcastable: {e}")
+
+
 # scores class
 class Scores:
     """
@@ -46,18 +106,24 @@ class Scores:
 
     def __init__(
         self,
-        io: MockIO,
-        sample: int,
-        stream: str,
-        forecast_step: int,
-        avg_dims: str | list[str] = "all",
+        agg_dims: str | List[str] = "all",
+        ens_dim: str = "ens",
     ):
         """
-        :param avg_dims: dimension or list of dimensions over which scores shall be averaged.
-                         Parse 'all' to average over all data dimensions.
-        :param ens_dim: name of ensemble meber dimension in prediction. Ignored if
-                        determinsitic forecast is processed.
+        Parameters
+        ----------
+        agg_dims : str | List[str]
+            List of dimension names over which the score will be aggregated (most often averaged).
+            If set to 'all', aggregation will be performed over all dimensions of the forecast data.
+        ens_dim: str
+            Name of the ensemble dimension in the forecast data. Only used for probablistic scores.
+
+        Returns
+        -------
         """
+        self._agg_dims = agg_dims
+        self._ens_dim = ens_dim
+
         self.det_metrics_dict = {
             "ets": self.calc_ets,
             "pss": self.calc_pss,
@@ -69,81 +135,125 @@ class Scores:
             "rmse": self.calc_rmse,
             "bias": self.calc_bias,
             "acc": self.calc_acc,
-            "ssr": self.calc_ssr,
+            "bias": self.calc_bias,
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
         }
         self.prob_metrics_dict = {
+            "ssr": self.calc_ssr,
             "crps": self.calc_crps,
             "rank_histogram": self.calc_rank_histogram,
             "spread": self.calc_spread,
         }
 
-        data = io.get_data(sample, stream, forecast_step)
-        self.ground_truth = data.target.as_xarray()
-        self.prediction = data.prediction.as_xarray()
-        self.ens_dim = self.prediction.shape[-1]
 
-        self.prob_fcst = self.ens_dim in self.prediction.dims
-        self.joint_data_dims = [
-            dim for dim in self.prediction.dims if dim != self.ens_dim
-        ]  # excludes ensemble-dimension for probablistic forecasts
-        self.avg_dims = avg_dims
+    def __call__(self, data: VerifiedData, score_name: str, **kwargs):
 
-        self.metrics_dict = self.prob_metrics_dict if self.prob_fcst else self.det_metrics_dict
-
-    def __call__(self, score_name, **kwargs):
-        try:
-            score_func = self.metrics_dict[score_name]
-        except Exception as e:
-            score_family = "probablistic" if self.prob_fcst else "deterministic"
-            metrics = ", ".join(self.metrics_dict.keys())
-            msg = (
-                f"{score_name} is not an implemented {score_family} score."
-                + f"Choose one of the following: {metrics}"
-            )
-            raise ValueError(msg) from e
-
-        return score_func(**kwargs)
+        if score_name in self.det_metrics_dict.keys:
+            f = self.det_metrics_dict[score_name]
+        elif score_name in self.prob_metrics_dict.keys:
+            assert self.ens_dim in data.prediction.dims, \
+                f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} not found in prediction data" 
+            f = self.prob_metrics_dict[score_name]
+        else: 
+            raise ValueError(f"Unknown score chosen. Supported scores: {', '.join(self.det_metrics_dict.keys()) 
+                                                                        + ', ' + ', '.join(self.prob_metrics_dict.keys())}")
+        
+        # Check if avg_dims is in prediction data
+        if self._agg_dims == "all":
+            self._agg_dims_applied = list(data.prediction.dims)
+        else:
+            for dim in self._agg_dims:
+                if dim not in data.prediction.dims:
+                    raise ValueError(f"Average dimension '{dim}' not found in prediction data dimensions: {data.prediction.dims}")
+            self._agg_dims_applied = self._agg_dims
+            
+        arg_names: list[str] = inspect.getfullargspec(f).args[1:]
+        # Shortcut names, convenient but not really necessary.
+        args = {"p": data.prediction, "gt": data.ground_truth}
+        for an in arg_names:
+            if an in kwargs:
+                args[an] = kwargs[an]
+        # Arguments to pass to the function
+        print(f"{f} -> {args}")
+        # Call:
+        result = f(**args)
+        
+        return result
 
     @property
-    def avg_dims(self):
-        return self._avg_dims
+    def agg_dims(self):
+        return self._agg_dims
 
-    @avg_dims.setter
-    def avg_dims(self, dims):
-        if dims is None:
-            self._avg_dims = None
-        elif dims == "all":
-            self._avg_dims = self.joint_data_dims
-            # print("Scores will be averaged across all data dimensions.")
+    @agg_dims.setter
+    def agg_dims(self, dims):
+        if 
+        if dims == "all":
+            self._agg_dims = dims 
         else:
-            dim_stat = [avg_dim in self.joint_data_dims for avg_dim in dims]
-            if not all(dim_stat):
-                ind_bad = [i for i, x in enumerate(dim_stat) if not x]
-                raise ValueError(
-                    "The following dimensions for score-averaging are not "
-                    + "part of the data: {}".format(", ".join(np.array(dims)[ind_bad]))
-                )
+            agg_dims = to_list(dims)
+            assert all([isinstance(dim) for dim in dims]), "All elements of the avg_dims must be strings."
 
-            self._avg_dims = dims
+            self._agg_dims = agg_dims
 
-    def get_2x2_event_counts(self, thresh):
+    @property
+    def ens_dim(self):
+        return self._ens_dim
+    
+    @ens_dim.setter
+    def ens_dim(self, ens_dim):
+        assert isinstance(ens_dim, str), "ens_dim must be a string."
+        self._ens_dim = ens_dim
+
+    def _sum(self, data: xr.DataArray) -> xr.DataArray:
+        """
+        Sum data over aggregation dimensions.
+
+        Parameters
+        ----------
+        data : xr.DataArray
+            xarray DataArray to sum over aggregation dimensions
+        
+        Returns
+        -------
+        xr.DataArray
+            Summed data
+        """
+        return data.sum(dim=self._agg_dims)
+    
+    def _mean(self, data: xr.DataArray) -> xr.DataArray:
+        """
+        Average data over aggregation dimensions.
+
+        Parameters
+        ----------
+        data : xr.DataArray
+            xarray DataArray to average over aggregation dimensions
+        
+        Returns
+        -------
+        xr.DataArray
+            Averaged data
+        """
+        return data.mean(dim=self._agg_dims)    
+
+
+    def get_2x2_event_counts(self, p: xr.DataArray, gt: xr.DataArray, thresh: float) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]:
         """
         Get counts of 2x2 contingency tables
         """
-        a = ((self.prediction >= thresh) & (self.ground_truth >= thresh)).sum(dim=self.avg_dims)
-        b = ((self.prediction >= thresh) & (self.ground_truth < thresh)).sum(dim=self.avg_dims)
-        c = ((self.prediction < thresh) & (self.ground_truth >= thresh)).sum(dim=self.avg_dims)
-        d = ((self.prediction < thresh) & (self.ground_truth < thresh)).sum(dim=self.avg_dims)
+        a = self._sum((p >= thresh) & (gt >= thresh))
+        b = self._sum((p >= thresh) & (gt >= thresh))
+        c = self._sum((p < thresh) & (gt >= thresh))
+        d = self._sum((p < thresh) & (gt < thresh))
 
         return a, b, c, d
 
     ### Deterministic scores
-    @to_json
-    def calc_ets(self, thresh=0.1):
-        a, b, c, d = self.get_2x2_event_counts(thresh)
+    
+    def calc_ets(self, p: xr.DataArray, gt: xr.DataArray, thresh=0.1):
+        a, b, c, d = self.get_2x2_event_counts(p, gt, thresh)
         n = a + b + c + d
         ar = (a + b) * (a + c) / n  # random reference forecast
 
@@ -154,9 +264,9 @@ class Scores:
 
         return ets
 
-    @to_json
-    def calc_fbi(self, thresh=0.1):
-        a, b, c, d = self.get_2x2_event_counts(thresh)
+    
+    def calc_fbi(self, p: xr.DataArray, gt: xr.DataArray, thresh=0.1):
+        a, b, c, _ = self.get_2x2_event_counts(p, gt, thresh)
 
         denom = a + c
         fbi = (a + b) / denom
@@ -165,9 +275,9 @@ class Scores:
 
         return fbi
 
-    @to_json
-    def calc_pss(self, thresh=0.1):
-        a, b, c, d = self.get_2x2_event_counts(thresh)
+    
+    def calc_pss(self, p: xr.DataArray, gt: xr.DataArray, thresh=0.1):
+        a, b, c, d = self.get_2x2_event_counts(p, gt, thresh)
 
         denom = (a + c) * (b + d)
         pss = (a * d - b * c) / denom
@@ -176,147 +286,149 @@ class Scores:
 
         return pss
 
-    @to_json
-    def calc_l1(self, **kwargs):
+    
+    def calc_l1(self, p: xr.DataArray, gt: xr.DataArray, scale_dims: List = None):
         """
         Calculate the L1 error norm of forecast data w.r.t. reference data.
-        L1 will be divided by the number of samples along the average dimensions.
-        Similar to MAE, but provides just a number divided by number of samples along
-        average dimensions.
-        :return: L1-error
+        Note that the L1 error norm is calculated as the sum of absolute differences.
+        If scale_dims is not None, the L1 will scaled by the number of elements in the average dimensions.
         """
-        sum_dims = kwargs.get("sum_dims", [])
+        l1 = self._sum(np.abs(p - gt))
 
-        l1 = (np.abs(self.prediction - self.ground_truth)).sum(dim=sum_dims)
+        if _scale_dims:
+            _scale_dims = to_list(scale_dims)
 
-        if self.avg_dims is not None:
-            len_dims = np.array([self.prediction.sizes[dim] for dim in self.avg_dims])
+            assert all([dim in p.dims for dim in _scale_dims]), \
+                f"Provided scale dimensions {_scale_dims} are not all present in the prediction data dimensions {p.dims}."
+            
+            len_dims = np.array([p.sizes[dim] for dim in _scale_dims])
             l1 /= np.prod(len_dims)
 
         return l1
 
-    @to_json
-    def calc_l2(self, **kwargs):
+    
+    def calc_l2(self, p: xr.DataArray, gt: xr.DataArray, scale_dims: List = None):
         """
         Calculate the L2 error norm of forecast data w.r.t. reference data.
-        Similar to RMSE, but provides just a number divided by number of samples along
-        average dimensions.
-        :return: L2-error
+        Note that the L2 error norm is calculated as the sum of absolute differences.
+        If scale_dims is not None, the L2 will scaled by the number of elements in the average dimensions.
         """
-        sum_dims = kwargs.get("sum_dims", [])
+        l2 = self._sum(np.sqrt((np.square(p - gt))))
 
-        l2 = np.sqrt((np.square(self.prediction - self.ground_truth)).sum(dim=sum_dims))
+        if _scale_dims:
+            _scale_dims = to_list(scale_dims)
 
-        if self.avg_dims is not None:
-            len_dims = np.array([self.prediction.sizes[dim] for dim in self.avg_dims])
+            assert all([dim in p.dims for dim in _scale_dims]), \
+                f"Provided scale dimensions {_scale_dims} are not all present in the prediction data dimensions {p.dims}."
+            
+            len_dims = np.array([p.sizes[dim] for dim in _scale_dims])
             l2 /= np.prod(len_dims)
 
         return l2
 
-    @to_json
-    def calc_mae(self, **kwargs):
+    
+    def calc_mae(self, p: xr.DataArray, gt: xr.DataArray):
         """
         Calculate mean absolute error (MAE) of forecast data w.r.t. reference data
-        :return: MAE averaged over provided dimensions
         """
-        if kwargs:
-            print("Passed keyword arguments to calc_mae are without effect.")
-
-        if self.avg_dims is None:
+        if self._agg_dims is None:
             raise ValueError(
                 "Cannot calculate mean absolute error without average dimensions (avg_dims=None)."
             )
-        mae = np.abs(self.prediction - self.ground_truth).mean(dim=self.avg_dims)
+        mae = self._mean(np.abs(p - gt))
 
         return mae
 
-    @to_json
-    def calc_mse(self, **kwargs):
+    def calc_mse(self, p: xr.DataArray, gt: xr.DataArray):
         """
         Calculate mean squared error (MSE) of forecast data w.r.t. reference data
         :return: MSE averaged over provided dimensions
         """
-        if kwargs:
-            print("Passed keyword arguments to calc_mse are without effect.")
-
-        if self.avg_dims is None:
+        if self._agg_dims is None:
             raise ValueError(
                 "Cannot calculate mean squared error without average dimensions (avg_dims=None)."
             )
 
-        mse = np.square(self.prediction - self.ground_truth).mean(dim=self.avg_dims)
+        mse = self._mean(np.square(self.prediction - self.ground_truth))
 
         return mse
 
-    @to_json
-    def calc_rmse(self, **kwargs):
+    def calc_rmse(self, p: xr.DataArray, gt: xr.DataArray):
         """
         Calculate root mean squared error (RMSE) of forecast data w.r.t. reference data
         :return: RMSE averaged over provided dimensions
         """
-        if self.avg_dims is None:
-            msg = (
-                "Cannot calculate root mean squared error without average dimensions"
-                + "(avg_dims=None)."
+        if self._agg_dims is None:
+            raise ValueError(
+                "Cannot calculate root mean squared error without average dimensions (avg_dims=None)."
             )
             raise ValueError(msg)
 
-        rmse = np.sqrt(self.calc_mse(**kwargs))
+        rmse = np.sqrt(self.calc_mse(p, gt))
 
         return rmse
 
-    @to_json
-    def calc_acc(self, clim_mean: xr.DataArray, spatial_dims: list = None):
+    
+    def calc_acc(self, p: xr.DataArray, gt: xr.DataArray, clim_mean: xr.DataArray, spatial_dims: List = ["lat", "lon"]):
         """
         Calculate anomaly correlation coefficient (ACC).
-        :param clim_mean: climatological mean of the data
-        :param spatial_dims: names of spatial dimensions over which ACC are calculated.
-                             Note: No averaging is possible over these dimensions.
-        :return acc: Averaged ACC (except over spatial_dims)
+
+        NOTE:
+        The climatlogical mean data clim_mean must fit to the forecast and ground truth data.
+        By definition, the ACC is always aggregated over the spatial dimensions.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        clim_mean: xr.DataArray
+            Climatological mean data array, which is used to calculate anomalies
+        spatial_dims: List[str]
+            Names of spatial dimensions over which ACC is calculated.
+            Note: No averaging is possible over these dimensions.
         """
 
-        if spatial_dims is None:
-            spatial_dims = ["lat", "lon"]
-        fcst_ano, obs_ano = self.prediction - clim_mean, self.ground_truth - clim_mean
+        # Check if spatial_dims are in the data
+        spatial_dims = to_list(spatial_dims)
+        for dim in spatial_dims:
+            if dim not in p.dims:
+                raise ValueError(f"Spatial dimension '{dim}' not found in prediction data dimensions: {p.dims}")
+
+        fcst_ano, obs_ano = p - clim_mean, gt - clim_mean
 
         acc = (fcst_ano * obs_ano).sum(spatial_dims) / np.sqrt(
             fcst_ano.sum(spatial_dims) * obs_ano.sum(spatial_dims)
         )
 
-        if self.avg_dims is not None:
-            mean_dims = [x for x in self.avg_dims if x not in spatial_dims]
+        # Exclude spatial dimensions from averaging since ACC is always calculated over them
+        if self._agg_dims is not None:
+            mean_dims = [x for x in self._agg_dims if x not in spatial_dims]
             if len(mean_dims) > 0:
                 acc = acc.mean(mean_dims)
 
         return acc
 
-    @to_json
-    def calc_bias(self, **kwargs):
+    
+    def calc_bias(self, p: xr.DataArray, gt: xr.DataArray):
         """
         Calculate mean bias of forecast data w.r.t. reference data
-        :return: bias averaged over provided dimensions
         """
 
-        if kwargs:
-            print("Passed keyword arguments to calc_bias are without effect.")
-
-        bias = self.prediction - self.ground_truth
-
-        if self.avg_dims is not None:
-            bias = bias.mean(dim=self.avg_dims)
+        bias = self._mean(p - gt)
 
         return bias
 
-    @to_json
-    def calc_psnr(self, **kwargs):
+    
+    def calc_psnr(self, p: xr.DataArray, gt: xr.DataArray, pixel_max: float = 1.0):
         """
         Calculate PSNR of forecast data w.r.t. reference data
         :param kwargs: known keyword argument 'pixel_max' for maximum value of data
         :return: averaged PSNR
         """
-        pixel_max = kwargs.get("pixel_max", 1.0)
 
-        mse = self.calc_mse()
+        mse = self.calc_mse(p, gt)
         if np.count_nonzero(mse) == 0:
             psnr = mse
             psnr[...] = 100.0
@@ -325,40 +437,68 @@ class Scores:
 
         return psnr
 
-    @to_json
-    def calc_spatial_variability(self, **kwargs):
+    
+    def calc_spatial_variability(self, p: xr.DataArray, gt: xr.DataArray, order: int = 1, non_spatial_avg_dims: List[str] = None):
         """
-        Calculates the ratio between the spatial variability of differental operator
-        with order 1 (or 2) forecast and
-        reference data using the calc_geo_spatial-method.
-        :param kwargs: 'order' to control the order of spatial differential operator
-                       'non_spatial_avg_dims' to add averaging in addition to spatial
-                       averaging performed with calc_geo_spatial
-        :return: the ratio between spatial variabilty in the forecast and reference data field
-        """
-        order = kwargs.get("order", 1)
-        avg_dims = kwargs.get("non_spatial_avg_dims")
+        Calculates the ratio between the spatial variability of differental operator with order 1 (highher values unsupported yest) 
+        forecast and ground truth data using the calc_geo_spatial-method.
+        
+        NOTE:
+        Requires that data is provided on a regular lat/lon-grid!
 
-        fcst_grad = self.calc_geo_spatial_diff(self.prediction, order=order)
-        ref_grd = self.calc_geo_spatial_diff(self.ground_truth, order=order)
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        order: int
+            Order of the spatial differential operator to be applied. Supported orders: 1
+        non_spatial_avg_dims: List[str]
+            List of dimensions over which the spatial variability ratio should be averaged. 
+            It must be non-spatial dimensions, i.e. not latitude or longitude.
+        """
+
+        fcst_grad = self.calc_geo_spatial_diff(p, order=order)
+        ref_grd = self.calc_geo_spatial_diff(gt, order=order)
 
         ratio_spat_variability = fcst_grad / ref_grd
-        if avg_dims is not None:
-            ratio_spat_variability = ratio_spat_variability.mean(dim=avg_dims)
+        if non_spatial_avg_dims is not None:
+            ratio_spat_variability = ratio_spat_variability.mean(dim=non_spatial_avg_dims)
 
         return ratio_spat_variability
 
-    @to_json
+    
     def calc_seeps(
-        self, seeps_weights: xr.DataArray, t1: xr.DataArray, t3: xr.DataArray, spatial_dims: list
+        self, p: xr.DataArray, gt: xr.DataArray, seeps_weights: xr.DataArray, t1: xr.DataArray, 
+        t3: xr.DataArray, spatial_dims: List
     ):
         """
         Calculates stable equitable error in probabiliyt space (SEEPS), see Rodwell et al., 2011
-        :param seeps_weights: SEEPS-parameter matrix to weight contingency table elements
-        :param t1: threshold for light precipitation events
-        :param t3: threshold for strong precipitation events
-        :param spatial_dims: list/name of spatial dimensions of the data
-        :return seeps skill score (i.e. 1-SEEPS)
+
+        NOTE:
+        Threshold arrays t1 and t3 (derived from space-time dependant climatology) 
+        must fit to the forecast and ground truth data.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        seeps_weights: xr.DataArray
+            SEEPS-parameter matrix to weight contingency table elements
+        t1: xr.DataArray
+            Threshold for light precipitation events
+        t3: xr.DataArray
+            Threshold for strong precipitation events
+        spatial_dims: List[str]
+            List of spatial dimensions of the data, e.g. ["lat", "lon"] 
+
+        Returns
+        -------
+        xr.DataArray
+            SEEPS skill score (i.e. 1-SEEPS)
         """
 
         def seeps(ground_truth, prediction, thr_light, thr_heavy, seeps_weights):
@@ -373,19 +513,18 @@ class Scores:
 
             return 1.0 - seeps_val
 
-        if self.prediction.ndim == 3:
-            assert len(spatial_dims) == 2, (
-                "Provide two spatial dimensions for three-dimensional data."
-            )
-            prediction, ground_truth = (
-                self.prediction.stack({"xy": spatial_dims}),
-                self.ground_truth.stack({"xy": spatial_dims}),
-            )
+        if p.ndim == 3:
+            assert (
+                len(spatial_dims) == 2
+            ), "Provide two spatial dimensions for three-dimensional data."
+            prediction, ground_truth = p.stack(
+                {"xy": spatial_dims}
+            ), gt.stack({"xy": spatial_dims})
             seeps_weights = seeps_weights.stack({"xy": spatial_dims})
             t3 = t3.stack({"xy": spatial_dims})
             lstack = True
         elif self.prediction.ndim == 2:
-            prediction, ground_truth = self.prediction, self.ground_truth
+            prediction, ground_truth = p, gt
             lstack = False
         else:
             raise ValueError("Data must be a two-or-three-dimensional array.")
@@ -419,103 +558,118 @@ class Scores:
             seeps_values_all = seeps_values_all.unstack()
 
         if self.avg_dims is not None:
-            seeps_values = seeps_values_all.mean(dim=self.avg_dims)
+            seeps_values = self._mean(seeps_values_all)
         else:
             seeps_values = seeps_values_all
 
         return seeps_values
 
     ### Probablistic scores
-    @to_json
-    def calc_spread(self, **kwargs):
+    
+    def calc_spread(self, p: xr.DataArray, gt: xr.DataArray):
         """
         Calculate the spread of the forecast ensemble
         :return: spread averaged over the provided dimensions
         """
-        if kwargs:
-            print("Passed keyword arguments to calc_spread are without effect.")
+        ens_std = p.std(dim=self.ens_dim)
 
-        ens_std = self.prediction.std(dim=self.ens_dim)
-        return np.sqrt((ens_std**2).mean(dim=self.avg_dims))
+        return self._mean(np.sqrt((ens_std**2)))
 
-    @to_json
-    def calc_ssr(self, **kwargs):
+    
+    def calc_ssr(self, p: xr.DataArray, gt: xr.DataArray):
         """
         Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data
         :return: the SSR averaged over provided dimensions
         """
-        # ens_std = data_ens.std(dim = "ensemble")
-        # spread = np.sqrt((ens_std**2).mean(dim = avg_dims))
+        ssr = self.calc_spread(p) / self.calc_rmse(p, gt)     # spread/rmse
 
-        # spread = self.calc_spread(**kwargs)
-        # mse = np.square(self.prediction - self.ground_truth).mean(dim = self.avg_dims)
-        # rmse = np.sqrt(mse)
-        return self.calc_spread(**kwargs) / self.calc_rmse(**kwargs)  # spread/rmse
+        return ssr  
 
-    @to_json
-    def calc_crps(self, method: str = "ensemble", **kwargs):
+    
+    def calc_crps(self, p: xr.DataArray, gt: xr.DataArray, method: str = "ensemble", **kwargs):
         """
         Wrapper around CRPS-methods provided by xskillscore-package.
         See https://xskillscore.readthedocs.io/en/stable/api
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array with ensemble dimension
+        gt: xr.DataArray
+            Ground truth data array
+        method: str
+            Method to calculate CRPS. Supported methods: ["ensemble", "gaussian"]
+        kwargs: dict
+            Other keyword parameters supported by respective CRPS-method from the xskillscore package
+
+         
         :param method: Method to calculate CRPS. Supported methods: ["ensemble", "gaussian"]
         :param kwargs: Other keyword parameters supported by respective CRPS-method
         :return: calculated CRPS
         """
         crps_methods = ["ensemble", "gaussian"]
 
-        assert self.ens_dim in self.prediction.dims, (
-            "Forecast data array must have an 'ens'-dimension."
-        )
-
         if method == "ensemble":
             func_kwargs = {
-                "forecasts": self.prediction,
+                "forecasts": p,
                 "member_dim": self.ens_dim,
-                "dim": self.avg_dims,
+                "dim": self._agg_dims,
                 **kwargs,
             }
             crps_func = xskillscore.crps_ensemble
         elif method == "gaussian":
             func_kwargs = {
-                "mu": self.prediction.mean(dim=self.ens_dim),
-                "sig": self.prediction.std(dim=self.ens_dim),
-                "dim": self.avg_dims,
+                "mu": p.mean(dim=self.ens_dim),
+                "sig": p.std(dim=self.ens_dim),
+                "dim": self._agg_dims,
                 **kwargs,
             }
             crps_func = xskillscore.crps_gaussian
         else:
-            (
-                f"Unsupported CRPS-calculation method {method} chosen."
-                + f"Supported methods: {', '.join(crps_methods)}"
-            )
+            raise ValueError(
+            f"Unsupported CRPS-calculation method {method} chosen. Supported methods: {', '.join(crps_methods)}"
+            )   
 
-        crps = crps_func(self.ground_truth, **func_kwargs)
+        crps = crps_func(gt, **func_kwargs)
 
         return crps
 
-    def calc_rank_histogram(self, norm: bool = True, add_noise: bool = True, noise_fac=1.0e-03):
+    def calc_rank_histogram(self, p: xr.DataArray, gt: xr.DataArray, norm: bool = True,
+                            add_noise: bool = True, noise_fac=1.0e-03):
         """
-        :param norm: Flag if normalized counts should be returned
-        a:param add_noise: Add unsignificant amount of random noise to data for fair
-                           computations, cf. Sec. 4.2.2 in Harris et al. 2022
-        :param noise_fac: magnitude of random noise (only relevant if add_noise == True)
+        Calculate the rank histogram of the forecast data w.r.t. reference data.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array with ensemble dimension
+        gt: xr.DataArray
+            Ground truth data array
+        norm: bool
+            Flag if normalized counts should be returned. If True, the rank histogram will be normalized by
+            the number of ensemble members in the forecast data.
+        add_noise: bool
+            Flag if a small amount of random noise should be added to the data to avoid ties in the rank histogram.
+            This is recommended for fair computations, cf. Sec. 4.2.2 in Harris et al. 2022
+        noise_fac: float
+            Magnitude of random noise to be added to the data if add_noise is True. Default is 1.0e-03.
+            This value is only relevant if add_noise is True
         """
 
-        # unstack stacked time-dimension beforehand if required
-        # (time may be stacked for forecast data)
-        ground_truth = self.ground_truth
-        if "time" in self.ground_truth.indexes:
-            if isinstance(self.ground_truth.indexes["time"], pd.MultiIndex):
-                ground_truth = self.ground_truth.reset_index("time")
+        # unstack stacked time-dimension beforehand if required (time may be stacked for forecast data)
+        ground_truth = gt
+        if "time" in ground_truth.indexes:
+            if isinstance(ground_truth.indexes["time"], pd.MultiIndex):
+                ground_truth = ground_truth.reset_index("time")
 
-        prediction = self.prediction
-        if "time" in self.prediction.indexes:
-            if isinstance(self.prediction.indexes["time"], pd.MultiIndex):
-                prediction = self.prediction.reset_index("time")
+        prediction = p
+        if "time" in prediction.indexes:
+            if isinstance(prediction.indexes["time"], pd.MultiIndex):
+                prediction = prediction.reset_index("time")
 
         # perform the stacking
-        obs_stacked = ground_truth.stack({"npoints": self.avg_dims})
-        fcst_stacked = prediction.stack({"npoints": self.avg_dims})
+        obs_stacked = ground_truth.stack({"npoints": self._agg_dims})
+        fcst_stacked = prediction.stack({"npoints": self._agg_dims})
 
         # add noise to data if desired
         if add_noise:
@@ -553,17 +707,14 @@ class Scores:
 
         return rank_counts
 
-    def calc_rank_histogram_xskillscore(self, **kwargs):
+    def calc_rank_histogram_xskillscore(self, p: xr.DataArray, gt: xr.DataArray):   
         """
         Wrapper around rank_histogram-method by xskillscore-package.
         See https://xskillscore.readthedocs.io/en/stable/api
         Note: this version is found to be very slow. Use calc_rank_histogram alternatively.
         """
-        if kwargs:
-            print("Passed keyword arguments to calc_rank_historam are without effect.")
-
         rank_hist = xskillscore.rank_histogram(
-            self.ground_truth, self.prediction, member_dim=self.ens_dim, dim=self.avg_dims
+            gt, p, member_dim=self.ens_dim, dim=self._agg_dims
         )
 
         return rank_hist
@@ -605,8 +756,8 @@ class Scores:
 
             return i, coord_names_expected[i]  # just take the first value
 
-        lat_ind, lat_name = check_for_coords(dims, lat_dims)
-        lon_ind, lon_name = check_for_coords(dims, lon_dims)
+        _, lat_name = check_for_coords(dims, lat_dims)
+        _, lon_name = check_for_coords(dims, lon_dims)
 
         lat, lon = np.deg2rad(scalar_field[lat_name]), np.deg2rad(scalar_field[lon_name])
         dphi, dlambda = lat[1].values - lat[0].values, lon[1].values - lon[0].values
