@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import sys
 import argparse
 import logging
 import subprocess
@@ -556,7 +557,7 @@ def plot_loss_per_run(
     plt.close()
 
 
-def plot_train():
+def plot_train(args=None):
     # Example usage:
     # When providing a YAML for configuring the run IDs:
     # python plot_training.py -rf eval_run.yml -m ./trained_models -o ./training_plots
@@ -626,23 +627,20 @@ def plot_train():
         "--run_ids_dict",
         type=_read_str_config,
         dest="rs",
-        help=(
-            "Dictionary-string of form '{run_id: [job_id, experiment_name]}'",
-            " for training runs to plot",
-        ),
+        help="Dictionary-string of form '{run_id: [job_id, experiment_name]}'" + \
+              "for training runs to plot",
     )
 
     run_id_group.add_argument(
         "-rf",
         "--run_ids_file",
         dest="rf",
-        default="./config/runs_plot_train.yml",
         type=_read_yaml_config,
         help="YAML file configuring the training run ids to plot",
     )
 
     # parse the command line arguments
-    args = parser.parse_args()
+    args = parser.parse_args(args)
 
     model_base_dir = Path(args.model_base_dir)
     out_dir = Path(args.output_dir)
@@ -725,3 +723,10 @@ def plot_train():
         get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
         plot_dir=out_dir,
     )
+
+
+if __name__ == "__main__":
+
+    args = sys.argv[1:]  # get CLI args
+
+    plot_train(args)
