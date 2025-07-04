@@ -68,7 +68,7 @@ def get_rank() -> int:
 
 def all_gather(data: Tensor) -> list[Tensor]:
     """
-    Run all_gather on arbitrary shape tensor
+    Run all_gather on arbitrary shape Tensor
 
     Source: https://github.com/facebookresearch/maskrcnn-benchmark/blob/57eec25b75144d9fb1a6857f32553e1574177daf/maskrcnn_benchmark/utils/comm.py#L48
 
