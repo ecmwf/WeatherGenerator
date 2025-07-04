@@ -138,13 +138,13 @@ def hpy_splits(coords: torch.tensor, hl: int, token_size: int, pad_tokens: bool)
             for idxs in hpy_idxs_ord_split
         ]
     else:
-        rem = np.zeros(len(hpy_idxs_ord_split), dtype=np.int64)
+        rem = np.zeros(len(hpy_idxs_ord_split), dtype=np.int32)
 
     # helper variables to split according to cells
     # pad to token size *and* offset by +1 to account for the index 0 that is added for the padding
     idxs_ord = [
         torch.split(
-            torch.cat((torch.from_numpy(np.take(idxs, ts) + 1), torch.zeros(r, dtype=torch.int64))),
+            torch.cat((torch.from_numpy(np.take(idxs, ts) + 1), torch.zeros(r, dtype=torch.int32))),
             token_size,
         )
         for idxs, ts, r in zip(hpy_idxs_ord_split, thetas_sorted, rem, strict=True)

@@ -487,7 +487,7 @@ def get_target_coords_local_ffast(
 
     ref = torch.tensor([1.0, 0.0, 0.0])
 
-    tcs_lens = torch.tensor([tt.shape[0] for tt in tcs], dtype=torch.int64)
+    tcs_lens = torch.tensor([tt.shape[0] for tt in tcs], dtype=torch.int32)
     tcs_lens_mask = tcs_lens > 0
     tcs_lens = tcs_lens[tcs_lens_mask]
 
@@ -579,7 +579,7 @@ def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
 
     # precompute index sets for scatter operation after embed
     offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
-    offsets = torch.cat([torch.zeros(1, dtype=torch.int64), offsets_base[:-1]])
+    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets_base[:-1]])
     offsets_pe = torch.zeros_like(offsets)
 
     for ib, sb in enumerate(batch):
@@ -595,7 +595,7 @@ def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
                 )
                 s.source_idxs_embed_pe = torch.cat(
                     [
-                        torch.arange(offset, offset + token_len, dtype=torch.int64)
+                        torch.arange(offset, offset + token_len, dtype=torch.int32)
                         for offset, token_len in zip(
                             offsets_pe, source_tokens_lens[ib][itype], strict=False
                         )
@@ -630,7 +630,7 @@ def compute_idxs_predict(forecast_dt: int, batch: StreamData) -> list:
 
     # target coords idxs
     tcs_lens_merged = []
-    pad = torch.zeros(1, dtype=torch.int64)
+    pad = torch.zeros(1, dtype=torch.int32)
     for ii in range(len(batch[0])):
         # generate len lists for varlen attention (per batch list for local, per-cell attention and
         # global
@@ -646,7 +646,7 @@ def compute_idxs_predict(forecast_dt: int, batch: StreamData) -> list:
                             ]
                         ),
                     ]
-                ).to(torch.int64)
+                ).to(torch.int32)
                 for fstep in range(forecast_dt + 1)
             ]
         ]
@@ -681,7 +681,7 @@ def compute_source_cell_lens(batch: StreamData) -> torch.tensor:
             for stl_b in batch
         ]
     )
-    source_cell_lens = torch.sum(source_cell_lens_raw, 1).flatten().to(torch.int64)
-    source_cell_lens = torch.cat([torch.zeros(1, dtype=torch.int64), source_cell_lens])
+    source_cell_lens = torch.sum(source_cell_lens_raw, 1).flatten().to(torch.int32)
+    source_cell_lens = torch.cat([torch.zeros(1, dtype=torch.int32), source_cell_lens])
 
     return source_cell_lens
