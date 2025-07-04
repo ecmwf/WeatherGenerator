@@ -28,7 +28,6 @@ except Exception:
         "Could not import xskillscore and xhistogram. Thus, CRPS and"
         + "rank histogram-calculations are not supported."
     )
-    print()
 
 
 # helper function to calculate skill score
@@ -194,9 +193,9 @@ class Scores:
             Calculated score as an xarray DataArray.
 
         """
-        if score_name in self.det_metrics_dict.keys:
+        if score_name in self.det_metrics_dict.keys():
             f = self.det_metrics_dict[score_name]
-        elif score_name in self.prob_metrics_dict.keys:
+        elif score_name in self.prob_metrics_dict.keys():
             assert self.ens_dim in data.prediction.dims, (
                 f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} not found in prediction data"
             )
@@ -401,7 +400,7 @@ class Scores:
                 "Cannot calculate mean squared error without aggregation dimensions (agg_dims=None)."
             )
 
-        mse = self._mean(np.square(self.prediction - self.ground_truth))
+        mse = self._mean(np.square(p - gt))
 
         return mse
 
