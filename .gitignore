@@ -204,5 +204,10 @@ output/
 logs/
 models/
 results/
+models
+results
+playground/
 plots/
+.config/
+
 
