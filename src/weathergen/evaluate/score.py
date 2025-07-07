@@ -7,16 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from dataclasses import dataclass
-from typing import List, Any
+import inspect
 import json
 import logging
+from dataclasses import dataclass
+from typing import Any
+
 import dask.array as da
 import numpy as np
 import pandas as pd
-import inspect
 import xarray as xr
-import numpy as np
 
 from weathergen.io import MockIO
 
@@ -68,7 +68,7 @@ def to_json(func):
     return wrapper
 
 
-def to_list(obj: Any) -> List:
+def to_list(obj: Any) -> list:
     """
     Converts given object to list if obj is not already a list. Sets are also transformed to a list.
 
@@ -123,7 +123,7 @@ class Scores:
 
     def __init__(
         self,
-        agg_dims: str | List[str] = "all",
+        agg_dims: str | list[str] = "all",
         ens_dim: str = "ens",
     ):
         """
@@ -339,7 +339,7 @@ class Scores:
 
         return pss
 
-    def calc_l1(self, p: xr.DataArray, gt: xr.DataArray, scale_dims: List = None):
+    def calc_l1(self, p: xr.DataArray, gt: xr.DataArray, scale_dims: list = None):
         """
         Calculate the L1 error norm of forecast data w.r.t. reference data.
         Note that the L1 error norm is calculated as the sum of absolute differences.
@@ -359,13 +359,13 @@ class Scores:
 
         return l1
 
-    def calc_l2(self, p: xr.DataArray, gt: xr.DataArray, scale_dims: List = None):
+    def calc_l2(self, p: xr.DataArray, gt: xr.DataArray, scale_dims: list = None):
         """
         Calculate the L2 error norm of forecast data w.r.t. reference data.
         Note that the L2 error norm is calculated as the sum of absolute differences.
         If scale_dims is not None, the L2 will scaled by the number of elements in the average dimensions.
         """
-        l2 = self._sum(np.sqrt((np.square(p - gt))))
+        l2 = self._sum(np.sqrt(np.square(p - gt)))
 
         if _scale_dims:
             _scale_dims = to_list(scale_dims)
@@ -425,7 +425,7 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         clim_mean: xr.DataArray,
-        spatial_dims: List = ["lat", "lon"],
+        spatial_dims: list = ["lat", "lon"],
     ):
         """
         Calculate anomaly correlation coefficient (ACC).
@@ -499,7 +499,7 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         order: int = 1,
-        non_spatial_avg_dims: List[str] = None,
+        non_spatial_avg_dims: list[str] = None,
     ):
         """
         Calculates the ratio between the spatial variability of differental operator with order 1 (highher values unsupported yest)
@@ -537,7 +537,7 @@ class Scores:
         seeps_weights: xr.DataArray,
         t1: xr.DataArray,
         t3: xr.DataArray,
-        spatial_dims: List,
+        spatial_dims: list,
     ):
         """
         Calculates stable equitable error in probabiliyt space (SEEPS), see Rodwell et al., 2011
@@ -636,7 +636,7 @@ class Scores:
         """
         ens_std = p.std(dim=self.ens_dim)
 
-        return self._mean(np.sqrt((ens_std**2)))
+        return self._mean(np.sqrt(ens_std**2))
 
     def calc_ssr(self, p: xr.DataArray, gt: xr.DataArray):
         """
