@@ -682,13 +682,14 @@ class Trainer(Trainer_Base):
                     self.train_logger.add_val(samples, losses_all, stddev_all)
 
                 if self.cf.rank == 0:
-                    _logger.info(f"validation ({cf.run_id}) : {epoch:03d}")
-                    _logger.info(f": loss = {torch.nanmean(losses_all[0]):.4E}")
-                    # creating a string with all stream losses
-                    stream_string = ""
+                    print(
+                        f"validation ({cf.run_id}) : {epoch:03d} :",
+                        f" loss = {torch.nanmean(losses_all[0]):.4E}",
+                        flush=True,
+                    )
                     for i_obs, rt in enumerate(cf.streams):
-                        stream_string += f" {rt['name']} : {losses_all[0, i_obs]:0.4E} \t"
-                    _logger.info(stream_string)
+                        print("{}".format(rt["name"]) + f" : {losses_all[0, i_obs]:0.4E}")
+
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
 
@@ -783,7 +784,7 @@ class Trainer(Trainer_Base):
                 pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
                 pstr += "(lr={:.2E}, s/sec={:.3f})"
                 len_dataset = len(self.data_loader) // self.cf.batch_size
-                _logger.info(
+                print(
                     pstr.format(
                         epoch,
                         bidx,
@@ -792,11 +793,15 @@ class Trainer(Trainer_Base):
                         np.nanmean(l_avg[0]),
                         self.lr_scheduler.get_lr(),
                         (self.print_freq * self.cf.batch_size) / dt,
-                    )
+                    ),
+                    flush=True,
                 )
-                stream_string = ""
+                print("\t", end="")
                 for i_obs, rt in enumerate(self.cf.streams):
-                    # creating a string with all stream losses
-                    stream_string += f"{rt['name']} : {l_avg[0, i_obs]:0.4E} \t"
-                _logger.info("\t" + stream_string)
+                    print(
+                        "{}".format(rt["name"]) + f" : {l_avg[0, i_obs]:0.4E} \t",
+                        end="",
+                    )
+                print("\n", flush=True)
+
             self.t_start = time.time()
