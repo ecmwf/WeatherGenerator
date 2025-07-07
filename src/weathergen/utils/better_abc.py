@@ -10,16 +10,14 @@ in classes that use the `ABCMeta` metaclass.
 
 from abc import ABCMeta as NativeABCMeta
 from collections.abc import Callable
-from typing import Any, TypeVar, cast
-
-R = TypeVar("R")
+from typing import Any, cast
 
 
 class DummyAttribute:
     pass
 
 
-def abstract_attribute(obj: Callable[[Any], R] | None = None) -> R:
+def abstract_attribute[R](obj: Callable[[Any], R] | None = None) -> R:
     _obj = cast(Any, obj)
     if obj is None:
         _obj = DummyAttribute()
