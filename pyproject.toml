@@ -25,8 +25,8 @@ dependencies = [
  "flash-attn; sys_platform == 'linux'",
  "polars~=1.25.2",
  "omegaconf~=2.3.0",
+ "dask~=2025.5.1",
  "weathergen-common",
- "dask"
 ]
 
 [project.urls]
