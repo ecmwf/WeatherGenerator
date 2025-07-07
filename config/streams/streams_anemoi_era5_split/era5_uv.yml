@@ -7,20 +7,22 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-FESOM :
-  type : fesom
-  filenames : ['fesom_ifs_awi']
+ERA5_uv :
+  type : anemoi
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr']
+  source : ['u_', 'v_', '10u', '10v']
+  target : ['u_', 'v_', '10u', '10v']
   loss_weight : 1.
-  source : null
-  target : ['sst']
+  diagnostic : False
   masking_rate : 0.6
   masking_rate_none : 0.05
-  token_size : 128
+  token_size : 32
+  tokenize_spacetime : True
   embed : 
     net : transformer
     num_tokens : 1
-    num_heads : 2
-    dim_embed : 256
+    num_heads : 8
+    dim_embed : 512
     num_blocks : 2
   embed_target_coords :
     net : linear

@@ -11,8 +11,6 @@
 import numpy as np
 import torch
 
-stat_loss_fcts = ["stats", "kernel_crps"]  # Names of loss functions that need std computed
-
 
 ####################################################################################################
 def Gaussian(x, mu=0.0, std_dev=1.0):
