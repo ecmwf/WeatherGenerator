@@ -42,8 +42,8 @@ pred_mlp_adaln: True
 # one is training an auto-encoder
 forecast_offset : 1
 forecast_delta_hrs: 0
-forecast_steps: 1
-forecast_policy: fixed
+forecast_steps: 2
+forecast_policy: random #fixed
 forecast_freeze_model: False
 forecast_att_dense_rate: 1.0 # 0.25
 fe_num_blocks: 2
