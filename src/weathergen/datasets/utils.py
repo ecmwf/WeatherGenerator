@@ -81,6 +81,25 @@ def r3tos2(pos):
     out = torch.stack([lats, lons])
     return out.permute([*list(torch.arange(len(out.shape))[:-1] + 1), 0])
 
+def r3tos2_optimized(pos):
+    """
+    Convert from Cartesian R^3 coordinates to spherical coordinates (lat, lon).
+    Assumes last dimension of `pos` is 3: [x, y, z]
+    """
+    pos.cuda()
+    x = pos[..., 0]
+    y = pos[..., 1]
+    z = pos[..., 2]
+
+    norm_xy = torch.sqrt(x * x + y * y)
+    lat = torch.atan2(z, norm_xy)
+    lon = torch.atan2(y, x)
+
+    result = torch.empty((*lat.shape, 2), dtype=pos.dtype, device=pos.device)
+    result[..., 0] = lat
+    result[..., 1] = lon
+    return result.cpu
+
 
 ####################################################################################################
 def locs_to_cell_coords(hl: int, locs: list, dx=0.5, dy=0.5) -> list:

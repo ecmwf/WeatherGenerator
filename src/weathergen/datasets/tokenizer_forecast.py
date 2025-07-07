@@ -14,6 +14,7 @@ from functools import partial
 import astropy_healpix as hp
 import numpy as np
 import torch
+import weathergen.utils.profiler as profiler
 
 from weathergen.datasets.tokenizer_utils import (
     encode_times_source,
@@ -27,6 +28,7 @@ from weathergen.datasets.utils import (
     healpix_verts_rots,
     locs_to_cell_coords_ctrs,
     r3tos2,
+    r3tos2_optimized,
 )
 from weathergen.utils.logger import init_loggers
 
@@ -149,17 +151,18 @@ class TokenizerForecast:
         is_diagnostic = stream_info.get("diagnostic", False)
         tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
 
-        tokenize_window = partial(
-            tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
-            time_win=time_win,
-            token_size=token_size,
-            hl=self.hl_source,
-            hpy_verts_Rs=self.hpy_verts_Rs_source[-1],
-            n_coords=normalizer.normalize_coords,
-            n_geoinfos=normalizer.normalize_geoinfos,
-            n_data=normalizer.normalize_source_channels,
-            enc_time=encode_times_source,
-        )
+        with profiler.ProfilerSection("partial tokenize_window", profile=True):
+            tokenize_window = partial(
+                tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
+                time_win=time_win,
+                token_size=token_size,
+                hl=self.hl_source,
+                hpy_verts_Rs=self.hpy_verts_Rs_source[-1],
+                n_coords=normalizer.normalize_coords,
+                n_geoinfos=normalizer.normalize_geoinfos,
+                n_data=normalizer.normalize_source_channels,
+                enc_time=encode_times_source,
+            )
 
         source_tokens_cells = torch.tensor([])
         source_centroids = torch.tensor([])
@@ -168,37 +171,40 @@ class TokenizerForecast:
         if is_diagnostic or source.shape[1] == 0 or len(source) < 2:
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
-        # TODO: properly set stream_id; don't forget to normalize
-        source_tokens_cells = tokenize_window(
-            0,
-            coords,
-            geoinfos,
-            source,
-            times,
-        )
-
-        source_tokens_cells = [
-            torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in source_tokens_cells
-        ]
-        source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
-
-        if source_tokens_lens.sum() > 0:
-            source_means = [
-                (
-                    self.hpy_verts[-1][i].unsqueeze(0).repeat(len(s), 1)
-                    if len(s) > 0
-                    else torch.tensor([])
-                )
-                for i, s in enumerate(source_tokens_cells)
-            ]
-            source_means_lens = [len(s) for s in source_means]
-            # merge and split to vectorize computations
-            source_means = torch.cat(source_means)
-            # TODO: precompute also source_means_r3 and then just cat
-            source_centroids = torch.cat(
-                [source_means.to(torch.float32), r3tos2(source_means).to(torch.float32)], -1
+        with profiler.ProfilerSection("tokenize_window", profile=True):
+            # TODO: properly set stream_id; don't forget to normalize
+            source_tokens_cells = tokenize_window(
+                0,
+                coords,
+                geoinfos,
+                source,
+                times,
             )
-            source_centroids = torch.split(source_centroids, source_means_lens)
+
+        with profiler.ProfilerSection("source_tokens_cells", profile=True):
+            source_tokens_cells = [
+                torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in source_tokens_cells
+            ]
+            source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
+
+        with profiler.ProfilerSection("source_tokens_lens.sum()", profile=True):
+            if source_tokens_lens.sum() > 0:
+                source_means = [
+                    (
+                        self.hpy_verts[-1][i].unsqueeze(0).repeat(len(s), 1)
+                        if len(s) > 0
+                        else torch.tensor([])
+                    )
+                    for i, s in enumerate(source_tokens_cells)
+                ]
+                source_means_lens = [len(s) for s in source_means]
+                # merge and split to vectorize computations
+                source_means = torch.cat(source_means)
+                # TODO: precompute also source_means_r3 and then just cat
+                source_centroids = torch.cat(
+                    [source_means.to(torch.float32), r3tos2_optimized(source_means).to(torch.float32)], -1
+                )
+                source_centroids = torch.split(source_centroids, source_means_lens)
 
         return (source_tokens_cells, source_tokens_lens, source_centroids)
 
@@ -252,17 +258,18 @@ class TokenizerForecast:
         target_tokens_lens = torch.tensor([len(s) for s in target_tokens], dtype=torch.int32)
 
         # compute encoding of target coordinates used in prediction network
-        if target_tokens_lens.sum() > 0:
-            target_coords = get_target_coords_local_ffast(
-                self.hl_target,
-                target_coords,
-                target_geoinfos,
-                target_times,
-                self.hpy_verts_Rs_target,
-                self.hpy_verts_local_target,
-                self.hpy_nctrs_target,
-            )
-            target_coords.requires_grad = False
-            target_coords = list(target_coords.split(target_tokens_lens.tolist()))
+        with profiler.ProfilerSection("get_target_coords_local_ffast", profile=True):
+            if target_tokens_lens.sum() > 0:
+                target_coords = get_target_coords_local_ffast(
+                    self.hl_target,
+                    target_coords,
+                    target_geoinfos,
+                    target_times,
+                    self.hpy_verts_Rs_target,
+                    self.hpy_verts_local_target,
+                    self.hpy_nctrs_target,
+                )
+                target_coords.requires_grad = False
+                target_coords = list(target_coords.split(target_tokens_lens.tolist()))
 
         return (target_tokens, target_coords, target_coords_raw, target_times_raw)
