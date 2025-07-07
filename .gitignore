@@ -204,5 +204,6 @@ output/
 logs/
 models/
 results/
-
+*.sh
+src/weathergen/train/juwels.code-workspace
 
