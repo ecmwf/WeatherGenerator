@@ -7,7 +7,7 @@ local common = import 'common.jsonnet';
   title: 'MHS METOP-A',
   unique_id: '9',
   start_datetime: '2006-10-31T21:24:14',
-  end_datetime: '2018-12-31T23:58:08',
+  end_datetime: '2018-12-31T23:46:05',
   frequency: 'NA',
   fixed_timesteps: 'False',
   keywords: [
@@ -51,8 +51,8 @@ local common = import 'common.jsonnet';
     type: 'application/vnd+netcdf',
     description: 'Observation dataset',
     locations: [common.hpc.hpc2020],
-    size: '0.5 TB',
-    inodes: '10',
+    size: '1.3 TB',
+    inodes: '64637',
     roles: ['data'],
   },
 }

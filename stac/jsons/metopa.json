@@ -3,14 +3,14 @@
       "MICROWAVE_FCDR_V1.1-20200512/METOPA/*/*.nc": {
          "description": "Observation dataset",
          "href": "MICROWAVE_FCDR_V1.1-20200512/METOPA/*/*.nc",
-         "inodes": "10",
+         "inodes": "64637",
          "locations": [
             "hpc2020"
          ],
          "roles": [
             "data"
          ],
-         "size": "0.5 TB",
+         "size": "1.3 TB",
          "title": "MICROWAVE_FCDR_V1.1-20200512/METOPA/*/*.nc",
          "type": "application/vnd+netcdf"
       }
@@ -51,7 +51,7 @@
    "id": "weathergen.atmo.MHS METOP-A",
    "properties": {
       "description": "The MHS METOP-A dataset is derived from the Microwave Humidity Sounder instrument onboard the Meteorological Operational A satellite.",
-      "end_datetime": "2018-12-31T23:58:08",
+      "end_datetime": "2018-12-31T23:46:05",
       "fixed_timesteps": "False",
       "frequency": "NA",
       "keywords": [
