@@ -58,19 +58,19 @@
       {
          "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/shmh40/dev/stac_test/stac/jsons/metopa.json",
          "rel": "child",
-         "title": "METOP-A",
+         "title": "MHS METOP-A",
          "type": "application/json"
       },
       {
          "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/shmh40/dev/stac_test/stac/jsons/metopb.json",
          "rel": "child",
-         "title": "METOP-B",
+         "title": "MHS METOP-B",
          "type": "application/json"
       },
       {
          "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/shmh40/dev/stac_test/stac/jsons/fy3.json",
          "rel": "child",
-         "title": "FY-3",
+         "title": "MWHS FY-3",
          "type": "application/json"
       }
    ],

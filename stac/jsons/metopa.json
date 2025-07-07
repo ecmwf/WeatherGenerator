@@ -48,9 +48,9 @@
       ],
       "type": "Polygon"
    },
-   "id": "weathergen.atmo.METOP-A",
+   "id": "weathergen.atmo.MHS METOP-A",
    "properties": {
-      "description": "The METOP-A dataset is derived from the MHS instrument onboard the Meteorological Operational A satellite. MetOp-A, launched on 19 October 2006",
+      "description": "The MHS METOP-A dataset is derived from the Microwave Humidity Sounder instrument onboard the Meteorological Operational A satellite.",
       "end_datetime": "2018-12-31T23:58:08",
       "fixed_timesteps": "False",
       "frequency": "NA",
@@ -60,7 +60,7 @@
          "polar-orbiter",
          "satellite"
       ],
-      "name": "METOP-A",
+      "name": "MHS METOP-A",
       "providers": [
          {
             "name": "ECMWF",
@@ -78,7 +78,7 @@
          }
       ],
       "start_datetime": "2006-10-31T21:24:14",
-      "title": "METOP-A",
+      "title": "MHS METOP-A",
       "unique_id": "9",
       "variables": {
          "btemps": {

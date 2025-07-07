@@ -1,10 +1,10 @@
 local common = import 'common.jsonnet';
 
 {
-  name: 'fy3',
+  name: 'MWHS FY-3',
   filename: 'fy3.json',
-  description: "The FY-3 data come from the MWHS microwave radiometer on China's Fengyun satellites. Data is available for three FY-3 satellites, FY-3A, FY-3B and FY-3C",
-  title: 'FY-3',
+  description: "The FY-3 data come from the MWHS microwave radiometer on China's Fengyun satellites. Data is available for three FY-3 satellites, FY-3A, FY-3B and FY-3C.",
+  title: 'MWHS FY-3',
   unique_id: '10',
   start_datetime: '2008-07-01T00:19:46',
   end_datetime: '2018-12-31T23:58:08',
