@@ -17,7 +17,7 @@ import astropy_healpix.healpy
 import numpy as np
 import torch
 from astropy_healpix import healpy
-from torch.utils.checkpoint import checkpoint
+from deepspeed.runtime.activation_checkpointing.checkpointing import checkpoint
 
 from weathergen.model.engines import (
     EmbeddingEngine,
@@ -32,6 +32,19 @@ from weathergen.model.layers import MLP
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.config import get_dtype
 from weathergen.utils.logger import logger
+
+
+def run_checkpointed(module, *args):
+    # This is the key: cast inputs to the same dtype as the module's weights.
+    casted_args = [
+        (
+            arg.to(module.weight.dtype)
+            if isinstance(arg, torch.Tensor) and arg.is_floating_point()
+            else arg
+        )
+        for arg in args
+    ]
+    return checkpoint(module, *casted_args)
 
 
 class ModelParams(torch.nn.Module):
@@ -281,7 +294,7 @@ class Model(torch.nn.Module):
                     si["pred_head"]["num_layers"],
                     si["pred_head"]["ens_size"],
                     norm_type=cf.norm_type,
-                )
+                ).to(torch.float32)
             )
 
         return self
@@ -522,7 +535,7 @@ class Model(torch.nn.Module):
                 continue
 
             for block in self.ae_local_blocks:
-                tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=False)
+                tokens_c = checkpoint(block, tokens_c, cell_lens_c)
 
             for block in self.ae_adapter:
                 tokens_global_c = checkpoint(
@@ -531,7 +544,6 @@ class Model(torch.nn.Module):
                     tokens_c,
                     q_cells_lens_c,
                     cell_lens_c,
-                    use_reentrant=False,
                 )
 
             tokens_global_all += [tokens_global_c]
@@ -550,7 +562,7 @@ class Model(torch.nn.Module):
     def assimilate_global(self, model_params, tokens):
         # global assimilation engine and adapter
         for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=False)
+            tokens = checkpoint(block, tokens)
 
         return tokens
 
@@ -558,7 +570,7 @@ class Model(torch.nn.Module):
     def forecast(self, model_params, tokens):
         for it, block in enumerate(self.fe_blocks):
             aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
-            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+            tokens = checkpoint(block, tokens, aux_info)
 
         return tokens
 
@@ -583,63 +595,56 @@ class Model(torch.nn.Module):
 
             ## embed token coords, concatenating along batch dimension
             # (which is taking care of through the varlen attention)
-            with torch.amp.autocast("cuda", dtype=torch.float32, enabled=False):
-                tc_tokens = torch.cat(
-                    [
+            with torch.amp.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16):
+                chunks = []
+                for i_b in range(len(streams_data)):
+                    if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1:
+                        chunks += [checkpoint(tc_embed, streams_data[i_b][ii].target_coords[fstep])]
+                    else:
+                        chunks += [streams_data[i_b][ii].target_coords[fstep]]
+
+                tc_tokens = torch.cat(chunks)
+
+                if torch.isnan(tc_tokens).any():
+                    nn = si["name"]
+                    logger.warning(
                         (
-                            checkpoint(
-                                tc_embed,
-                                streams_data[i_b][ii].target_coords[fstep],
-                                use_reentrant=False,
-                            )
-                            if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
-                            else streams_data[i_b][ii].target_coords[fstep]
+                            f"Skipping prediction for {nn} because",
+                            f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
                         )
-                        for i_b in range(len(streams_data))
-                    ]
+                    )
+                    preds_tokens += [torch.tensor([], device=tc_tokens.device)]
+                    continue
+                if tc_tokens.shape[0] == 0:
+                    preds_tokens += [torch.tensor([], device=tc_tokens.device)]
+                    continue
+
+                # TODO: how to support tte_kv efficiently,
+                #  generate 1-ring neighborhoods here or on a per stream basis
+                assert isinstance(tte_kv, torch.nn.Identity)
+
+                # lens for varlen attention
+                tcs_lens = target_coords_idxs[ii][fstep]
+                # coord information for learnable layer norm
+                tcs_aux = torch.cat(
+                    [streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))]
                 )
 
-            if torch.isnan(tc_tokens).any():
-                nn = si["name"]
-                logger.warning(
-                    (
-                        f"Skipping prediction for {nn} because",
-                        f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
-                    )
-                )
-                preds_tokens += [torch.tensor([], device=tc_tokens.device)]
-                continue
-            if tc_tokens.shape[0] == 0:
-                preds_tokens += [torch.tensor([], device=tc_tokens.device)]
-                continue
-
-            # TODO: how to support tte_kv efficiently,
-            #  generate 1-ring neighborhoods here or on a per stream basis
-            assert isinstance(tte_kv, torch.nn.Identity)
-
-            # lens for varlen attention
-            tcs_lens = target_coords_idxs[ii][fstep]
-            # coord information for learnable layer norm
-            tcs_aux = torch.cat(
-                [streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))]
-            )
-
-            # apply prediction engine
-            for ib, block in enumerate(tte):
-                if self.cf.pred_self_attention and ib % 3 == 1:
-                    tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
-                else:
-                    tc_tokens = checkpoint(
-                        block,
-                        tc_tokens,
-                        tokens_stream,
-                        tcs_lens,
-                        model_params.tokens_lens,
-                        tcs_aux,
-                        use_reentrant=False,
-                    )
+                # apply prediction engine
+                for ib, block in enumerate(tte):
+                    if self.cf.pred_self_attention and ib % 3 == 1:
+                        tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux)
+                    else:
+                        tc_tokens = checkpoint(
+                            block,
+                            tc_tokens,
+                            tokens_stream,
+                            tcs_lens,
+                            model_params.tokens_lens,
+                            tcs_aux,
+                        )
 
             # final prediction head to map back to physical space
-            preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
+            preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens)]
 
         return preds_tokens

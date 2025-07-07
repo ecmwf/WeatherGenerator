@@ -1,6 +1,9 @@
-import os
 import logging
+import os
+
 import deepspeed
+import torch
+import torch.distributed as dist
 
 _logger = logging.getLogger(__name__)
 
@@ -15,6 +18,7 @@ def setup_deepspeed_environment():
         # This is a Slurm job, set up for torch.distributed
         os.environ["RANK"] = os.environ["SLURM_PROCID"]
         os.environ["WORLD_SIZE"] = os.environ["SLURM_NTASKS"]
+        os.environ["LOCAL_RANK"] = os.environ["SLURM_LOCALID"]
 
         # Get master address from the first node in the Slurm nodelist
         try:
@@ -36,12 +40,26 @@ def setup_deepspeed_environment():
         if "MASTER_PORT" not in os.environ:
             os.environ["MASTER_PORT"] = "29500"  # Default port
 
+    # Initialize the process group if it's not already initialized
+    if not dist.is_initialized():
+        dist.init_process_group(backend="nccl")
+        _logger.info(
+            f"Initialized process group with backend 'nccl'. "
+            f"Rank: {dist.get_rank()}, World Size: {dist.get_world_size()}"
+        )
+
+    # Set the CUDA device for the current process. This is crucial for multi-GPU nodes.
+    if "LOCAL_RANK" in os.environ:
+        local_rank = int(os.environ["LOCAL_RANK"])
+        torch.cuda.set_device(local_rank)
+        _logger.info(f"Rank {dist.get_rank()} set to use CUDA device {local_rank}")
+
 
 def get_deepspeed_config(
     batch_size: int,
     gradient_accumulation_steps: int,
     zero_stage: int,
-    fp16_enabled: bool,
+    bf16_enabled: bool,
     gradient_clipping: float,
     zero_optimization_cpu_offload: bool,
     zero_optimization_cpu_offload_params: bool,
@@ -56,7 +74,9 @@ def get_deepspeed_config(
             "type": "AdamW",
             "params": {},  # Params are controlled by the optimizer passed to initialize
         },
-        "fp16": {"enabled": fp16_enabled},
+        "bf16": {
+            "enabled": bf16_enabled,
+        },
         "gradient_clipping": gradient_clipping,
         "zero_optimization": {
             "stage": zero_stage,

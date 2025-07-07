@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 import torch
 
 from weathergen.model.attention import (
@@ -22,6 +23,8 @@ from weathergen.model.embeddings import (
 )
 from weathergen.model.layers import MLP
 from weathergen.utils.config import Config, get_dtype
+
+_logger = logging.getLogger(__name__)
 
 
 class EmbeddingEngine:
@@ -342,14 +345,19 @@ class EnsPredictionHead(torch.nn.Module):
     #########################################
     @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
     def forward(self, toks):
-        preds = []
-        for pred_head in self.pred_heads:
-            cpred = toks
-            for block in pred_head:
-                cpred = block(cpred)
-            preds.append(cpred)
-        preds = torch.stack(preds, 0)
+        with torch.autocast(device_type="cuda", enabled=False):
+            preds = []
+            # toks = toks.to(torch.float32)
+            _logger.debug(f"tokens dtype: {toks.dtype}")
 
+            for pred_head in self.pred_heads:
+                cpred = toks
+                for block in pred_head:
+                    _logger.debug(f"block dtype: {block.weight.dtype}")
+                    cpred = block(cpred)
+                preds.append(cpred)
+            preds = torch.stack(preds, 0)
+            _logger.debug(f"preds dtype: {preds.dtype}")
         return preds
 
 

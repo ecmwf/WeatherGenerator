@@ -112,17 +112,17 @@ class Trainer_Base:
         _logger.info(
             f"Initializing DDP with rank {rank} out of {num_ranks} on master_node:{master_node}."
         )
-
-        dist.init_process_group(
-            backend="nccl",
-            init_method="tcp://" + master_node + ":1345",
-            timeout=datetime.timedelta(seconds=240),
-            world_size=num_ranks,
-            rank=rank,
-            device_id=torch.device("cuda", local_rank),
-        )
-        if is_root():
-            _logger.info("DDP initialized: root.")
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="nccl",
+                init_method="tcp://" + master_node + ":1345",
+                timeout=datetime.timedelta(seconds=240),
+                world_size=num_ranks,
+                rank=rank,
+                device_id=torch.device("cuda", local_rank),
+            )
+            if is_root():
+                _logger.info("DDP initialized: root.")
         # Wait for all ranks to reach this point
         dist.barrier()
 
