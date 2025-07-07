@@ -3,14 +3,14 @@
       "MICROWAVE_FCDR_V1.1-20200512/METOPB/*/*.nc": {
          "description": "Observation dataset",
          "href": "MICROWAVE_FCDR_V1.1-20200512/METOPB/*/*.nc",
-         "inodes": "10",
+         "inodes": "31708",
          "locations": [
             "hpc2020"
          ],
          "roles": [
             "data"
          ],
-         "size": "0.8 TB",
+         "size": "634.1 GB",
          "title": "MICROWAVE_FCDR_V1.1-20200512/METOPB/*/*.nc",
          "type": "application/vnd+netcdf"
       }
@@ -51,7 +51,7 @@
    "id": "weathergen.atmo.METOP-B",
    "properties": {
       "description": "The METOP-B dataset is derived from the MHS instrument onboard the Meteorological Operational B satellite. MetOp-B, launched on 19 October 2006",
-      "end_datetime": "2018-12-31T23:58:08",
+      "end_datetime": "2018-12-31T23:11:48",
       "fixed_timesteps": "False",
       "frequency": "NA",
       "keywords": [

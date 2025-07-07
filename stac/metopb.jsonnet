@@ -7,7 +7,7 @@ local common = import 'common.jsonnet';
   title: 'METOP-B',
   unique_id: '8',
   start_datetime: '2013-04-01T02:06:10',
-  end_datetime: '2018-12-31T23:58:08',
+  end_datetime: '2018-12-31T23:11:48',
   frequency: 'NA',
   fixed_timesteps: 'False',
   keywords: [
@@ -51,8 +51,8 @@ local common = import 'common.jsonnet';
     type: 'application/vnd+netcdf',
     description: 'Observation dataset',
     locations: [common.hpc.hpc2020],
-    size: '0.8 TB',
-    inodes: '10',
+    size: '634.1 GB',
+    inodes: '31708',
     roles: ['data'],
   },
 }
