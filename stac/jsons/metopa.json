@@ -48,7 +48,7 @@
       ],
       "type": "Polygon"
    },
-   "id": "weathergen.atmo.metopa",
+   "id": "weathergen.atmo.METOP-A",
    "properties": {
       "description": "The METOP-A dataset is derived from the MHS instrument onboard the Meteorological Operational A satellite. MetOp-A, launched on 19 October 2006",
       "end_datetime": "2018-12-31T23:58:08",
@@ -60,7 +60,7 @@
          "polar-orbiter",
          "satellite"
       ],
-      "name": "metopa",
+      "name": "METOP-A",
       "providers": [
          {
             "name": "ECMWF",

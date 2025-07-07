@@ -1,7 +1,7 @@
 local common = import 'common.jsonnet';
 
 {
-  name: 'metopb',
+  name: 'METOP-B',
   filename: 'metopb.json',
   description: 'The METOP-B dataset is derived from the MHS instrument onboard the Meteorological Operational B satellite. MetOp-B, launched on 19 October 2006',
   title: 'METOP-B',

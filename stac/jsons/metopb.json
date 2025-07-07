@@ -48,7 +48,7 @@
       ],
       "type": "Polygon"
    },
-   "id": "weathergen.atmo.metopb",
+   "id": "weathergen.atmo.METOP-B",
    "properties": {
       "description": "The METOP-B dataset is derived from the MHS instrument onboard the Meteorological Operational B satellite. MetOp-B, launched on 19 October 2006",
       "end_datetime": "2018-12-31T23:58:08",
@@ -60,7 +60,7 @@
          "polar-orbiter",
          "satellite"
       ],
-      "name": "metopb",
+      "name": "METOP-B",
       "providers": [
          {
             "name": "ECMWF",
