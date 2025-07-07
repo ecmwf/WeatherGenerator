@@ -202,7 +202,7 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         return rd
 
-    def select_channels(self, ds0: anemoi_datasets, ch_type: str) -> NDArray[np.int32]:
+    def select_channels(self, ds0: anemoi_datasets, ch_type: str) -> NDArray[np.int64]:
         """
         Select source or target channels
 
