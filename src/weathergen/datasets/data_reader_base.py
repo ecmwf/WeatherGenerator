@@ -662,8 +662,8 @@ def get_dataset_indexes_timestep(
         or not data_end_time
         or dtr.end < data_start_time
         or dtr.start > data_end_time
-        or dtr.start < data_start_time
-        or dtr.end > data_end_time
+        or (dtr.start + period) < data_start_time
+        or (dtr.end - period) > data_end_time
         or (data_end_time is not None and dtr.start > data_end_time)
     ):
         return (np.array([], dtype=np.int64), dtr)
