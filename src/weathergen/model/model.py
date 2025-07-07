@@ -269,14 +269,15 @@ class Model(torch.nn.Module):
                 tr_mlp_hidden_factor,
                 softcap,
                 tro_type,
-            ).create()
+            )
+            tte = torch.compile(tte, dynamic=True)
 
             self.target_token_engines.append(tte)
 
             # ensemble prediction heads to provide probabilistic prediction
             self.pred_heads.append(
                 EnsPredictionHead(
-                    dims_embed[-1],
+                    dims_embed[0],
                     self.targets_num_channels[i_obs],
                     si["pred_head"]["num_layers"],
                     si["pred_head"]["ens_size"],
@@ -569,7 +570,14 @@ class Model(torch.nn.Module):
 
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
         tokens_stream = (tokens.reshape(s) + model_params.pe_global).flatten(0, 1)
-        tokens_stream = tokens_stream[model_params.hp_nbours.flatten()].flatten(0, 1)
+        tokens_stream = (
+            tokens_stream[model_params.hp_nbours.flatten()]
+            .flatten(0, 1)
+            .reshape(self.num_healpix_cells, 9, -1)
+        )
+        tokens_stream = tokens_stream[
+            torch.repeat_interleave(streams_data[0][0].target_coords_lens[0])
+        ]  # .flatten(0, 1)
 
         # pair with tokens from assimilation engine to obtain target tokens
         preds_tokens = []
@@ -617,25 +625,24 @@ class Model(torch.nn.Module):
 
             # lens for varlen attention
             tcs_lens = target_coords_idxs[ii][fstep]
-            # coord information for learnable layer norm
-            tcs_aux = torch.cat(
-                [streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))]
-            )
 
-            # apply prediction engine
-            for ib, block in enumerate(tte):
-                if self.cf.pred_self_attention and ib % 3 == 1:
-                    tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
-                else:
-                    tc_tokens = checkpoint(
-                        block,
-                        tc_tokens,
-                        tokens_stream,
-                        tcs_lens,
-                        model_params.tokens_lens,
-                        tcs_aux,
-                        use_reentrant=False,
-                    )
+            tc_tokens = (
+                tte(
+                    tokens_stream,
+                    tc_tokens,
+                    torch.cat(
+                        [
+                            model_params.tokens_lens[0:1],
+                            model_params.tokens_lens[
+                                torch.repeat_interleave(streams_data[0][0].target_coords_lens[0])
+                                + 1
+                            ],
+                        ]
+                    ),
+                    tcs_lens,
+                ).sum(dim=1)
+                / 8
+            )
 
             # final prediction head to map back to physical space
             preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]

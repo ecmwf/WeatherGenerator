@@ -25,6 +25,7 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
         num_heads,
         dim_head_proj=None,
         dropout_rate=0.0,
+        with_residual=True,
         with_qk_lnorm=True,
         with_flash=True,
         norm_type="LayerNorm",
@@ -38,6 +39,7 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
         self.num_heads = num_heads
         self.dropout_rate = dropout_rate
         self.with_flash = with_flash
+        self.with_residual = with_residual
         self.softcap = softcap
 
         assert dim_embed % num_heads == 0
@@ -71,7 +73,6 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
     #########################################
     def forward(self, x, x_lens, ada_ln_aux=None):
         x_in = x
-        x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
 
         ## project onto heads and q,k,v and
         #  ensure these are 4D tensors as required for flash attention
@@ -94,8 +95,12 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
             dropout_p=self.dropout_rate,
         )
 
-        # return x_in + self.dropout( self.proj_out( outs.flatten( -2, -1)) )
-        return x_in + self.proj_out(outs.flatten(-2, -1))
+        if self.dropout_rate > 0.0:
+            x = self.dropout(self.proj_out(outs.flatten(-2, -1)))
+        if self.with_residual:
+            x = x_in + x
+
+        return x
 
 
 ####################################################################################################
@@ -107,6 +112,7 @@ class MultiSelfAttentionHead_Varlen_Flex(torch.nn.Module):
         num_heads,
         dim_head_proj=None,
         dropout_rate=0.0,
+        with_residual=True,
         with_qk_lnorm=True,
         with_flash=True,
         norm_type="LayerNorm",
@@ -151,7 +157,8 @@ class MultiSelfAttentionHead_Varlen_Flex(torch.nn.Module):
 
             return flex_attention(qs, ks, vs, score_mod=sparsity_mask)
 
-        self.compiled_flex_attention = torch.compile(att, dynamic=False)
+        self.compiled_flex_attention = torch.compile(att, dynamic=False, mode="max-autotune")
+        # self.compiled_flex_attention = flex_attention
 
     #########################################
     def forward(self, x, x_lens=None):
@@ -167,7 +174,12 @@ class MultiSelfAttentionHead_Varlen_Flex(torch.nn.Module):
 
         outs = self.compiled_flex_attention(qs, ks, vs).transpose(1, 2).squeeze()
 
-        return x_in + self.dropout(self.proj_out(outs.flatten(-2, -1)))
+        if self.dropout_rate > 0.0:
+            x = self.dropout(self.proj_out(outs.flatten(-2, -1)))
+        if self.with_residual:
+            x = x_in + x
+
+        return x
 
 
 ####################################################################################################
@@ -230,7 +242,8 @@ class MultiSelfAttentionHead_Local(torch.nn.Module):
             mask_block_local, B=None, H=None, Q_LEN=qkv_len, KV_LEN=qkv_len
         )
         # compile for efficiency
-        self.flex_attention = torch.compile(flex_attention, dynamic=False)
+        self.flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune")
+        # self.flex_attention = flex_attention
 
     #########################################
     def forward(self, x, ada_ln_aux=None):
@@ -312,8 +325,8 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
     def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
         if self.with_residual:
             x_q_in = x_q
-        x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
-        x_kv = self.lnorm_in_kv(x_kv)
+        # x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
+        # x_kv = self.lnorm_in_kv(x_kv)
 
         ## project onto heads and q,k,v and
         #  ensure these are 4D tensors as required for flash attention
@@ -479,7 +492,9 @@ class MultiSelfAttentionHead(torch.nn.Module):
         dim_head_proj=None,
         dropout_rate=0.0,
         with_qk_lnorm=True,
+        with_residual=True,
         with_flash=True,
+        softcap=0.0,
         norm_type="LayerNorm",
         dim_aux=None,
         norm_eps=1e-5,
@@ -490,7 +505,10 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.num_heads = num_heads
         self.with_flash = with_flash
         self.dropout_rate = dropout_rate
+        self.with_residual = with_residual
+        self.softcap = softcap
 
+        assert with_flash, "You have to use flash attention"
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
 
@@ -504,51 +522,46 @@ class MultiSelfAttentionHead(torch.nn.Module):
         else:
             self.lnorm = norm(dim_embed, eps=norm_eps)
         self.proj_heads_q = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
-        self.proj_heads_k = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
-        self.proj_heads_v = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
-        self.proj_out = torch.nn.Linear(dim_embed, dim_embed, bias=False)
-        self.dropout = (
-            torch.nn.Dropout(p=dropout_rate) if dropout_rate > 0.0 else torch.nn.Identity()
+        self.proj_heads_k = torch.nn.Linear(
+            dim_embed, (num_heads // 2) * self.dim_head_proj, bias=False
         )
+        self.proj_heads_v = torch.nn.Linear(
+            dim_embed, (num_heads // 2) * self.dim_head_proj, bias=False
+        )
+        self.proj_out = torch.nn.Linear(dim_embed, dim_embed, bias=False)
 
         lnorm = norm if with_qk_lnorm else torch.nn.Identity
         self.lnorm_q = lnorm(self.dim_head_proj, eps=norm_eps)
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
-        if with_flash:
-            self.att = torch.nn.functional.scaled_dot_product_attention
-        else:
-            self.att = self.attention
-            self.softmax = torch.nn.Softmax(dim=-1)
 
     #########################################
     def forward(self, x, ada_ln_aux=None):
         x_in = x
-        # x = self.lnorm( x)
-        x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+        # x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
 
         ## project onto heads and q,k,v and
         #  ensure these are 4D tensors as required for flash attention
-        s = [*([x.shape[0], 1] if len(x.shape) == 2 else x.shape[:-1]), self.num_heads, -1]
-        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype)
-        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
-        vs = self.proj_heads_v(x).reshape(s).to(self.dtype)
+        q_shape = [*([x.shape[0], 1] if len(x.shape) == 2 else x.shape[:-1]), self.num_heads, -1]
+        kv_shape = [
+            *([x.shape[0], 1] if len(x.shape) == 2 else x.shape[:-1]),
+            self.num_heads // 2,
+            -1,
+        ]
+        qs = self.lnorm_q(self.proj_heads_q(x).reshape(q_shape)).to(self.dtype)
+        ks = self.lnorm_k(self.proj_heads_k(x).reshape(kv_shape)).to(self.dtype)
+        vs = self.proj_heads_v(x).reshape(kv_shape).to(self.dtype)
 
         # ordering of tensors (seq, heads, embed) (which differs from torch's flash attention implt)
-        outs = flash_attn_func(qs, ks, vs, dropout_p=self.dropout_rate)
+        outs = flash_attn_func(qs, ks, vs, softcap=self.softcap, dropout_p=self.dropout_rate)
 
-        # return x_in + self.dropout( self.proj_out( outs.flatten( -2, -1)) )
-        return x_in + self.proj_out(outs.flatten(-2, -1))
+        if self.with_residual:
+            x = x_in + self.proj_out(outs.flatten(-2, -1))
+        else:
+            x = self.proj_out(outs.flatten(-2, -1))
 
-    #########################################
-    def attention(self, q, k, v):
-        scaling = 1.0 / torch.sqrt(torch.tensor(q.shape[-1]))
-        return torch.matmul(self.softmax(scaling * self.score(q, k)), v)
-
-    #########################################
-    def score(self, q, k):
-        return torch.matmul(q, torch.transpose(k, -2, -1))
+        return x
 
 
 ####################################################################################################

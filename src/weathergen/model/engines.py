@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import torch
+import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 from weathergen.model.attention import (
     MultiCrossAttentionHead_Varlen,
@@ -15,6 +17,11 @@ from weathergen.model.attention import (
     MultiSelfAttentionHead,
     MultiSelfAttentionHead_Local,
     MultiSelfAttentionHead_Varlen,
+)
+
+from weathergen.model.blocks import (
+    SelfAttentionBlock,
+    CrossAttentionBlock,
 )
 from weathergen.model.embeddings import (
     StreamEmbedLinear,
@@ -353,7 +360,7 @@ class EnsPredictionHead(torch.nn.Module):
         return preds
 
 
-class TargetPredictionEngine:
+class TargetPredictionEngine(nn.Module):
     def __init__(
         self,
         cf,
@@ -375,6 +382,8 @@ class TargetPredictionEngine:
         :param softcap: Softcap value for the attention layers.
         :param tro_type: Type of target readout (e.g., "obs_value").
         """
+        super(TargetPredictionEngine, self).__init__()
+
         self.cf = cf
         self.dims_embed = dims_embed
         self.dim_coord_in = dim_coord_in
@@ -382,61 +391,78 @@ class TargetPredictionEngine:
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
         self.softcap = softcap
         self.tro_type = tro_type
-        self.tte = torch.nn.ModuleList()
 
-    def create(self):
-        """
-        Creates and returns the module list (tte).
-
-        :return: torch.nn.ModuleList containing the target prediction blocks.
-        """
-        for i in range(len(self.dims_embed) - 1):
-            # Multi-Cross Attention Head
-            self.tte.append(
-                MultiCrossAttentionHead_Varlen(
-                    self.dims_embed[i],
-                    self.cf.ae_global_dim_embed,
-                    self.cf.streams[0]["target_readout"]["num_heads"],
-                    dim_head_proj=self.tr_dim_head_proj,
-                    with_residual=True,
-                    with_qk_lnorm=True,
-                    dropout_rate=0.1,  # Assuming dropout_rate is 0.1
-                    with_flash=self.cf.with_flash_attention,
-                    norm_type=self.cf.norm_type,
-                    softcap=self.softcap,
-                    dim_aux=self.dim_coord_in,
-                    norm_eps=self.cf.norm_eps,
-                    attention_dtype=get_dtype(self.cf.attention_dtype),
+        attention_kwargs = {
+            "with_qk_lnorm": True,
+            "dropout_rate": 0.1,  # Assuming dropout_rate is 0.1
+            "with_flash": self.cf.with_flash_attention,
+            "norm_type": self.cf.norm_type,
+            "softcap": self.softcap,
+            "dim_aux": self.dim_coord_in,
+            "norm_eps": self.cf.norm_eps,
+            "attention_dtype": get_dtype(self.cf.attention_dtype),
+        }
+        self.dim_adapter = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(self.cf.ae_global_dim_embed, self.dims_embed[0]),
+            nn.LayerNorm(self.dims_embed[0]),
+        )
+        self.tte = nn.ModuleList()
+        for ith, dim in enumerate(self.dims_embed[:-1]):
+            next_dim = self.dims_embed[ith+1]
+            if self.cf.decoder_type == "PerceiverIO":
+                # a single cross attention layer as per https://arxiv.org/pdf/2107.14795
+                self.tte.append(CrossAttentionBlock(
+                    dim=dim,
+                    dim_aux=next_dim,
+                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                    with_self_attn=True,
+                    with_adanorm=False,
+                    with_mlp=False,
+                    attention_kwargs=attention_kwargs,
+                ))
+            elif self.cf.decoder_type == "AdaLayerNormConditioning":
+                self.tte.append(SelfAttentionBlock(
+                    dim=dim,
+                    dim_aux=dim,
+                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                    attention_kwargs=attention_kwargs,
+                    with_adanorm=True,
+                ))
+            elif self.cf.decoder_type == "CrossAttentionConditioning":
+                self.tte.append(CrossAttentionBlock(
+                    dim=dim,
+                    dim_aux=dim,
+                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                    with_self_attn=True,
+                    with_adanorm=False,
+                    with_mlp=True,
+                    attention_kwargs=attention_kwargs,
+                ))
+            elif self.cf.decoder_type == "CrossAttentionAdaNormConditioning":
+                self.tte.append(CrossAttentionBlock(
+                    dim=dim,
+                    dim_aux=dim,
+                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                    with_self_attn=True,
+                    with_adanorm=True,
+                    with_mlp=True,
+                    attention_kwargs=attention_kwargs,
+                ))
+            else:
+                raise NotImplementedError(
+                    f"{self.cf.decoder_type} is not implemented for prediction heads"
                 )
+
+    def forward(self, latent, output_cond, latent_lens, output_cond_lens):
+        latent = self.dim_adapter(latent)
+        for layer in self.tte:
+            latent = checkpoint(
+                layer,
+                x=latent,
+                x_lens=latent_lens,
+                aux=output_cond,
+                aux_lens=output_cond_lens,
+                use_reentrant=False,
             )
-
-            # Optional Self-Attention Head
-            if self.cf.pred_self_attention:
-                self.tte.append(
-                    MultiSelfAttentionHead_Varlen(
-                        self.dims_embed[i],
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
-                        dropout_rate=0.1,  # Assuming dropout_rate is 0.1
-                        with_qk_lnorm=True,
-                        with_flash=self.cf.with_flash_attention,
-                        norm_type=self.cf.norm_type,
-                        dim_aux=self.dim_coord_in,
-                        norm_eps=self.cf.norm_eps,
-                        attention_dtype=get_dtype(self.cf.attention_dtype),
-                    )
-                )
-
-            # MLP Block
-            self.tte.append(
-                MLP(
-                    self.dims_embed[i],
-                    self.dims_embed[i + 1],
-                    with_residual=(self.cf.pred_dyadic_dims or self.tro_type == "obs_value"),
-                    hidden_factor=self.tr_mlp_hidden_factor,
-                    dropout_rate=0.1,  # Assuming dropout_rate is 0.1
-                    norm_type=self.cf.norm_type,
-                    dim_aux=(self.dim_coord_in if self.cf.pred_mlp_adaln else None),
-                    norm_eps=self.cf.mlp_norm_eps,
-                )
-            )
-        return self.tte
+        return latent

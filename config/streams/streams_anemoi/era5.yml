@@ -23,15 +23,15 @@ ERA5 :
     net : transformer
     num_tokens : 1
     num_heads : 8
-    dim_embed : 512
+    dim_embed : 256
     num_blocks : 2
   embed_target_coords :
     net : linear
-    dim_embed : 512
+    dim_embed : 256
   target_readout :
     type : 'obs_value'  # token or obs_value
     num_layers : 2
-    num_heads : 4
+    num_heads : 8
     # sampling_rate : 0.2
   pred_head :
     ens_size : 1

@@ -9,6 +9,7 @@
 
 
 import torch
+import torch.nn as nn
 
 
 # from https://github.com/meta-llama/llama/blob/main/llama/model.py
@@ -65,7 +66,7 @@ class AdaLayerNorm(torch.nn.Module):
     """
 
     def __init__(
-        self, dim_embed_x, dim_aux, norm_elementwise_affine: bool = False, norm_eps: float = 1e-3
+        self, dim_embed_x, dim_aux, norm_elementwise_affine: bool = False, norm_eps: float = 1e-5
     ):
         super().__init__()
 
@@ -85,3 +86,59 @@ class AdaLayerNorm(torch.nn.Module):
         x = self.norm(x) * (1 + scale) + shift
 
         return x
+
+
+def modulate(x, shift, scale, num_tokens=9, hidden_dim=2048):
+    return (
+        x.view(-1, num_tokens, hidden_dim) * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+    )
+
+
+def apply_gate(x, gate, num_tokens=9, hidden_dim=2048):
+    return (x.view(-1, num_tokens, hidden_dim) * gate.unsqueeze(1))
+
+
+class AdaLayerNormLayer(torch.nn.Module):
+    """
+    AdaLayerNorm for embedding auxiliary information as done in DiT (Peebles & Xie) with zero initialisation
+    https://arxiv.org/pdf/2212.09748
+
+    This module thus wraps a layer (e.g. self-attention or feedforward nn) and applies LayerNorm followed by scale and
+    shift before the layer and a final scaling after the layer as well as the final residual layer.
+
+    layer is a function that takes 2 arguments the first the latent and the second is the conditioning signal
+    """
+
+    def __init__(
+        self,
+        dim,
+        dim_aux,
+        layer,
+        norm_eps: float = 1e-6,
+        dropout_rate: float = 0.0,
+    ):
+        super().__init__()
+
+        self.dim = dim
+        self.adaLN_modulation = nn.Sequential(nn.SiLU(), nn.Linear(dim_aux, 3 * dim, bias=True))
+
+        self.ln = nn.LayerNorm(dim, elementwise_affine=False, eps=norm_eps)
+        self.layer = layer
+
+        # Initialize weights to zero for modulation and gating layers
+        self.initialise_weights()
+
+    def initialise_weights(self):
+        nn.init.zeros_(self.adaLN_modulation[-1].weight)
+        nn.init.zeros_(self.adaLN_modulation[-1].bias)
+
+    def forward(self, x: torch.Tensor, c: torch.Tensor, **kwargs) -> torch.Tensor:
+        shift, scale, gate = self.adaLN_modulation(c).chunk(3, dim=1)
+        return (
+            apply_gate(
+                self.layer(modulate(self.ln(x), shift, scale, 9, self.dim), c, **kwargs),
+                gate,
+                9,
+                self.dim,
+            )
+        ) + x
