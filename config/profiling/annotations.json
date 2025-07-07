@@ -8,14 +8,15 @@
     },
     {
         "domain": "WeatherGen",
-        "module": "weathergen.datasets.batchifyer",
+        "module": "weathergen.datasets.tokenizer_forecast", 
         "functions": [
             "encode_times_source",
             "encode_times_target",
             "tokenize_window_space",
             "tokenize_window_spacetime",
-            "Batchifyer.batchify_source",
-            "Batchifyer.batchify_target"
+            "TokenizerForecast.batchify_source",
+            "TokenizerForecast.batchify_target",
+            "TokenizerForecast.reset"
         ]
     },
     {
