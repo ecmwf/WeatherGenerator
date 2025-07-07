@@ -1,8 +1,8 @@
 {
    "assets": {
-      "MICROWAVE_FCDR_V1.1-20200512/METOPB/*/*.nc": {
+      "MICROWAVE_FCDR_V1.1-20200512/FY3/*/*.nc": {
          "description": "Observation dataset",
-         "href": "MICROWAVE_FCDR_V1.1-20200512/METOPB/*/*.nc",
+         "href": "MICROWAVE_FCDR_V1.1-20200512/FY3/*/*.nc",
          "inodes": "10",
          "locations": [
             "hpc2020"
@@ -10,8 +10,8 @@
          "roles": [
             "data"
          ],
-         "size": "0.8 TB",
-         "title": "MICROWAVE_FCDR_V1.1-20200512/METOPB/*/*.nc",
+         "size": "0.5 TB",
+         "title": "MICROWAVE_FCDR_V1.1-20200512/FY3/*/*.nc",
          "type": "application/vnd+netcdf"
       }
    },
@@ -48,9 +48,9 @@
       ],
       "type": "Polygon"
    },
-   "id": "weathergen.atmo.metopb",
+   "id": "weathergen.atmo.fy3",
    "properties": {
-      "description": "The METOP-B dataset is derived from the MHS instrument onboard the Meteorological Operational B satellite. MetOp-B, launched on 19 October 2006",
+      "description": "The FY-3 data come from the MWHS microwave radiometer on China's Fengyun satellites. Data is available for three FY-3 satellites, FY-3A, FY-3B and FY-3C",
       "end_datetime": "2018-12-31T23:58:08",
       "fixed_timesteps": "False",
       "frequency": "NA",
@@ -60,7 +60,7 @@
          "polar-orbiter",
          "satellite"
       ],
-      "name": "metopb",
+      "name": "fy3",
       "providers": [
          {
             "name": "ECMWF",
@@ -77,9 +77,9 @@
             "url": "https://eumetsat.int"
          }
       ],
-      "start_datetime": "2013-04-01T02:06:10",
-      "title": "METOP-B",
-      "unique_id": "8",
+      "start_datetime": "2008-07-01T00:19:46",
+      "title": "FY-3",
+      "unique_id": "10",
       "variables": {
          "btemps": {
             "max": "NA",

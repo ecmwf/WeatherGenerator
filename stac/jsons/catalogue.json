@@ -66,6 +66,12 @@
          "rel": "child",
          "title": "METOP-B",
          "type": "application/json"
+      },
+      {
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/shmh40/dev/stac_test/stac/jsons/fy3.json",
+         "rel": "child",
+         "title": "FY-3",
+         "type": "application/json"
       }
    ],
    "stac_extensions": [

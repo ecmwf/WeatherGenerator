@@ -1,12 +1,12 @@
 local common = import 'common.jsonnet';
 
 {
-  name: 'metopa',
-  filename: 'metopa.json',
-  description: 'The METOP-A dataset is derived from the MHS instrument onboard the Meteorological Operational A satellite. MetOp-A, launched on 19 October 2006',
-  title: 'METOP-A',
-  unique_id: '9',
-  start_datetime: '2006-10-31T21:24:14',
+  name: 'fy3',
+  filename: 'fy3.json',
+  description: "The FY-3 data come from the MWHS microwave radiometer on China's Fengyun satellites. Data is available for three FY-3 satellites, FY-3A, FY-3B and FY-3C",
+  title: 'FY-3',
+  unique_id: '10',
+  start_datetime: '2008-07-01T00:19:46',
   end_datetime: '2018-12-31T23:58:08',
   frequency: 'NA',
   fixed_timesteps: 'False',
@@ -24,22 +24,22 @@ local common = import 'common.jsonnet';
   variables: {
     names: [
       'quality_pixel_bitmask',
-      'btemps',
       'instrtemp',
       'scnlin',
       'satellite_azimuth_angle',
       'satellite_zenith_angle',
       'solar_azimuth_angle',
       'solar_zenith_angle',
-      'u_independent_btemps',
-      'u_structured_btemps',
-      'quality_issue_pixel_bitmask',
       'data_quality_bitmask',
       'quality_scanline_bitmask',
-      'u_common_btemps',
+      'time',
       'warmnedt',
       'coldnedt',
-      'time',
+      'btemps',
+      'u_independent_btemps',
+      'u_structured_btemps',
+      'u_common_btemps',
+      'quality_issue_pixel_bitmask',
     ],
 
   },
@@ -47,7 +47,7 @@ local common = import 'common.jsonnet';
   geometry: [-180, 180, -90, 90],
 
   dataset: {
-    dataset_name: 'MICROWAVE_FCDR_V1.1-20200512/METOPA/*/*.nc',
+    dataset_name: 'MICROWAVE_FCDR_V1.1-20200512/FY3/*/*.nc',
     type: 'application/vnd+netcdf',
     description: 'Observation dataset',
     locations: [common.hpc.hpc2020],
