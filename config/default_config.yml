@@ -119,6 +119,7 @@ val_initial: False
 
 loader_num_workers: 8
 log_validation: 0
+analysis_streams_output: ["ERA5"]
 
 istep: 0
 run_history: []
