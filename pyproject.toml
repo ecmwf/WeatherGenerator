@@ -97,7 +97,7 @@ ignore = [
   "SIM118",
   "SIM102",
   "SIM401",
-  "UP040", # TODO: enable later
+  #"UP040", # TODO: enable later
   # To ignore, not relevant for us
   "SIM108" # in case additional norm layer supports are added in future  
 ]

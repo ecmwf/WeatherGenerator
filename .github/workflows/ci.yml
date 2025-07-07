@@ -30,7 +30,7 @@ jobs:
 
       - name: Run ruff (flake8)
         # Do not attempt to install the default dependencies, this is much faster.
-        run: uv run --no-project --with "ruff==0.9.7" ruff check src/ 
+        run: uv run --no-project --verbose --with "ruff==0.9.7" ruff check src/ 
   pr:
     name: PR checks
     runs-on: ubuntu-latest
