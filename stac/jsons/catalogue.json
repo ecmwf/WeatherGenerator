@@ -58,13 +58,13 @@
       {
          "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/shmh40/dev/stac_test/stac/jsons/metopa.json",
          "rel": "child",
-         "title": "metopa",
+         "title": "METOP-A",
          "type": "application/json"
       },
       {
          "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/shmh40/dev/stac_test/stac/jsons/metopb.json",
          "rel": "child",
-         "title": "metopb",
+         "title": "METOP-B",
          "type": "application/json"
       }
    ],

@@ -4,7 +4,7 @@ local common = import 'common.jsonnet';
   name: 'metopb',
   filename: 'metopb.json',
   description: 'The METOP-B dataset is derived from the MHS instrument onboard the Meteorological Operational B satellite. MetOp-B, launched on 19 October 2006',
-  title: 'metopb',
+  title: 'METOP-B',
   unique_id: '8',
   start_datetime: '2011-12-11T00:36:13',
   end_datetime: '2018-12-31T23:58:08',
