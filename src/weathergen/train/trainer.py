@@ -9,7 +9,6 @@
 
 import logging
 import time
-from pathlib import Path
 
 import numpy as np
 import torch
@@ -29,7 +28,7 @@ from weathergen.train.trainer_base import Trainer_Base
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TRAIN, VAL, TrainLogger
-from weathergen.utils.validation_io import write_validation
+from weathergen.utils.validation_io import write_output
 
 _logger = logging.getLogger(__name__)
 
@@ -60,29 +59,24 @@ class Trainer(Trainer_Base):
         # num_ranks gets overwritten by current setting during init_ddp()
         self.num_ranks_original = cf.get("num_ranks", None)
 
+        # TODO remove num_ranks, rank, with_with ddp from config
         self.init_ddp(cf)
 
-        # read configuration of data streams
-        cf.streams = config.load_streams(Path(cf.streams_directory))
-
         # create output directory
-        cf.run_path = cf.run_path if hasattr(cf, "run_path") else "./results"
-        cf.model_path = cf.model_path if hasattr(cf, "model_path") else "./models"
-        path_run = Path(cf.run_path) / cf.run_id
-        path_model = Path(cf.model_path) / cf.run_id
         if self.cf.rank == 0:
-            path_run.mkdir(exist_ok=True, parents=True)
-            path_model.mkdir(exist_ok=True, parents=True)
-        self.path_run = path_run
+            config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
+            config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
         self.init_perf_monitoring()
-        self.train_logger = TrainLogger(cf, self.path_run)
+        self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
     ###########################################
     def inference(self, cf, run_id_trained, epoch):
         # general initalization
         self.init(cf)
 
+        # !! modifies config: adds config.streams[i].<stage>_source_channels
+        # and config.streams[i].<stage>_target_channels !!
         self.dataset_val = MultiStreamDataSampler(
             cf,
             cf.start_date_val,
@@ -630,11 +624,10 @@ class Trainer(Trainer_Base):
                             targets_lens,
                         ) = ret
                         sources = [[item.source_raw for item in b] for b in batch[0]]
-                        write_validation(
+                        write_output(
                             self.cf,
-                            self.path_run,
-                            self.cf.rank,
                             epoch,
+                            bidx,
                             sources,
                             preds_all,
                             targets_all,
@@ -726,9 +719,9 @@ class Trainer(Trainer_Base):
                     ("_" + name) if name is not None else "",
                 ]
             )
-            base_path = Path(self.cf.model_path) / self.cf.run_id
-            file_out: Path = base_path / (filename + ".chkpt")
-            file_tmp: Path = base_path / (filename + "_tmp.chkpt")
+            base_path = config.get_path_model(self.cf)
+            file_out = base_path / (filename + ".chkpt")
+            file_tmp = base_path / (filename + "_tmp.chkpt")
             # save temp file (slow)
             torch.save(state, file_tmp)
             # move file (which is changing the link in the file system and very fast)
