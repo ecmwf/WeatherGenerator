@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 import pathlib
+import pdb
 import typing
 
 import dask.array as da
@@ -10,7 +11,6 @@ import numpy as np
 import xarray as xr
 import zarr
 from numpy.typing import NDArray
-import pdb
 
 # experimental value, should be inferred more intelligently
 CHUNK_N_SAMPLES = 16392

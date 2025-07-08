@@ -30,14 +30,16 @@ def write_output(
         output_stream_names = [stream.name for stream in cf.streams]
         _logger.info(f"Using all streams as output streams: {output_stream_names}")
     else:
-        output_stream_names = [stream.name for stream in cf.streams if stream.name in cf.analysis_streams_output]
+        output_stream_names = [
+            stream.name for stream in cf.streams if stream.name in cf.analysis_streams_output
+        ]
     _logger.info(f"Using output streams: {output_stream_names}")
-    # streams anemoi `source`, `target` commented out???
+    # TODO: streams anemoi `source`, `target` commented out???
 
     channels: list[list[str]] = [
         stream.val_target_channels
         for stream in cf.streams
-        if (cf.analyis_streams_output is None or stream.name in output_stream_names)
+        if (cf.analysis_streams_output is None or stream.name in output_stream_names)
     ]
 
     # # assumption: datasets in a stream share channels
