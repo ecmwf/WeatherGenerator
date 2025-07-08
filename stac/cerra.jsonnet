@@ -20,6 +20,7 @@ local common = import 'common.jsonnet';
     common.providers.copernicus,
   ],
   processing_level: 'NA',
+  provenance: 'NA',
 
 
   // retrieved from anemoi dataset with:

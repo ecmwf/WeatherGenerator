@@ -21,6 +21,8 @@ local common = import 'common.jsonnet';
     common.providers.eumetsat,
   ],
   processing_level: '1C',
+  provenance: 'EUMETSAT',
+
 
 
   variables: {

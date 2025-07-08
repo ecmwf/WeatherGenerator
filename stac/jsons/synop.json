@@ -61,7 +61,7 @@
          "synoptic data"
       ],
       "name": "SYNOP",
-      "processing_level": "1C",
+      "processing_level": "NA",
       "providers": [
          {
             "name": "ECMWF",

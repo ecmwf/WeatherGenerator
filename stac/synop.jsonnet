@@ -19,6 +19,8 @@ local common = import 'common.jsonnet';
     common.providers.ecmwf_host,
   ],
   processing_level: 'NA',
+  provenance: 'NA',
+
 
   // Retrieved with: root.data.attrs["colnames"],
   // root.data.attrs["mins"], root.data.attrs["maxs"],
