@@ -3,7 +3,6 @@ import functools
 import itertools
 import logging
 import pathlib
-import pdb
 import typing
 
 import dask.array as da
@@ -329,7 +328,6 @@ class OutputBatchData:
         times = self.targets_times[forecast_step][stream_idx][
             datapoints
         ]  # make conversion to datetime64[ns] here?
-        pdb.set_trace()
         channels = self.channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
 
