@@ -26,6 +26,7 @@ dependencies = [
  "polars~=1.25.2",
  "omegaconf~=2.3.0",
  "dask~=2025.5.1",
+ "hatchling",
  "weathergen-common",
 ]
 
