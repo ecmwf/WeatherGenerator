@@ -62,7 +62,6 @@
       ],
       "name": "FY-3A, MWHS",
       "processing_level": "1C",
-      "provenance": "EUMETSAT",
       "providers": [
          {
             "name": "ECMWF",
@@ -72,9 +71,16 @@
             "url": "https://ecmwf.int"
          },
          {
-            "name": "EUMETSAT",
+            "name": "CMA",
             "roles": [
                "provider"
+            ],
+            "url": "https://www.cma.gov.cn/"
+         },
+         {
+            "name": "EUMETSAT",
+            "roles": [
+               "processor"
             ],
             "url": "https://eumetsat.int"
          }

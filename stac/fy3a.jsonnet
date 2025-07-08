@@ -18,10 +18,10 @@ local common = import 'common.jsonnet';
   ],
   providers: [
     common.providers.ecmwf_host,
-    common.providers.eumetsat,
+    common.providers.cma,
+    common.providers.eumetsat_processor,
   ],
   processing_level: '1C',
-  provenance: 'EUMETSAT',
 
 
 

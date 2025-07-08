@@ -67,7 +67,6 @@ local fill_properties(ds) = {
   frequency: ds.frequency,
   fixed_timesteps: ds.fixed_timesteps,
   processing_level: ds.processing_level,
-  provenance: ds.provenance
 };
 
 local fill_geometry(vars) = {

@@ -65,7 +65,6 @@
       ],
       "name": "OPERA",
       "processing_level": "NA",
-      "provenance": "NA",
       "providers": [
          {
             "name": "ECMWF",

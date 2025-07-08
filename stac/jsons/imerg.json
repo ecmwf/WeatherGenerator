@@ -64,7 +64,6 @@
       ],
       "name": "IMERG",
       "processing_level": "NA",
-      "provenance": "NA",
       "providers": [
          {
             "name": "ECMWF",

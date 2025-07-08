@@ -20,7 +20,6 @@ local common = import 'common.jsonnet';
     common.providers.ecmwf_provider,
   ],
   processing_level: 'NA',
-  provenance: 'NA',
 
 
   // retrieved from anemoi dataset with:
