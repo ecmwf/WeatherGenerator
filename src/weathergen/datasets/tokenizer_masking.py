@@ -278,6 +278,14 @@ class TokenizerMasking:
         target_tokens = self.masker.mask_target(target_tokens_cells, coords, geoinfos, source)
 
         target_tokens_lens = [len(t) for t in target_tokens]
+        total_target = sum(target_tokens_lens)
+        samples = (
+            (torch.empty(total_target).uniform_() < sampling_rate_target)
+            .split(target_tokens_lens)
+        )
+        target_tokens = [(tokens[samples]) for tokens, samples in zip(target_tokens, samples)]
+        target_tokens_lens = [len(t) for t in target_tokens]
+
         if torch.tensor(target_tokens_lens).sum() == 0:
             return (torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([]))
 
