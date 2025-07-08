@@ -776,36 +776,35 @@ class Trainer(Trainer_Base):
                 "istep": self.cf.istep,
                 "config": self.cf,
             }
-
         else:
             state = self.ddp_model.state_dict()
 
-        if is_root():
-            filename = "".join(
-                [
-                    self.cf.run_id,
-                    "_",
-                    "latest" if epoch == -1 else f"epoch{epoch:05d}",
-                    ("_" + name) if name is not None else "",
-                ]
-            )
-            base_path = Path(self.cf.model_path) / self.cf.run_id
-            file_out: Path = base_path / (filename + ".chkpt")
-            file_tmp: Path = base_path / (filename + "_tmp.chkpt")
+        filename = "".join(
+            [
+                self.cf.run_id,
+                "_",
+                "latest" if epoch == -1 else f"epoch{epoch:05d}",
+                ("_" + name) if name is not None else "",
+            ]
+        )
+        base_path = Path(self.cf.model_path) / self.cf.run_id
+        file_out: Path = base_path / (filename + ".chkpt")
+        file_tmp: Path = base_path / (filename + "_tmp.chkpt")
 
-            if self.cf.with_deepspeed:
-                save_deepspeed_checkpoint(
-                    self.ddp_model,
-                    base_path,
-                    epoch,
-                    global_step=self.cf.istep,
-                    client_state=state,
-                )
-            else:
-                # save temp file (slow)
-                torch.save(state, file_tmp)
-                # move file (which is changing the link in the file system and very fast)
-                file_tmp.replace(file_out)
+        if self.cf.with_deepspeed:
+            # This needs to be called from each rank
+            save_deepspeed_checkpoint(
+                self.ddp_model,
+                base_path,
+                epoch,
+                global_step=self.cf.istep,
+                client_state=state,
+            )
+        elif is_root():
+            # save temp file (slow)
+            torch.save(state, file_tmp)
+            # move file (which is changing the link in the file system and very fast)
+            file_tmp.replace(file_out)
             _logger.info(f"Saved model to {file_out}")
 
             # save config
@@ -851,7 +850,7 @@ class Trainer(Trainer_Base):
                 nanmean(torch.stack(self.losses_hist[-self.print_freq :]), axis=0)
             )
 
-            if self.cf.rank == 0:
+            if is_root():
                 # samples per sec
                 dt = time.time() - self.t_start
                 pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "

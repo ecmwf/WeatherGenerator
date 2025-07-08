@@ -91,7 +91,11 @@ def get_deepspeed_config(
                 "device": "cpu" if zero_optimization_cpu_offload_params else "none",
                 "pin_memory": True,
             },
-            "stage3_gather_16bit_weights_on_model_save": False,
+            "stage3_gather_16bit_weights_on_model_save": True,
+        },
+        "checkpoint": {
+            "consolidate_checkpoint_files": False,
+            "use_node_local_storage": True,
         },
         "steps_per_print": 2000,  # Suppress verbose logging from deepspeed
         "wall_clock_breakdown": False,
@@ -118,7 +122,11 @@ def save_deepspeed_checkpoint(deepspeed_engine, base_path, epoch, global_step, c
     """
     tag = f"epoch{epoch:05d}"
     _logger.info(f"Saving DeepSpeed checkpoint for epoch {epoch} (tag: {tag}) to {base_path}")
-    deepspeed_engine.save_checkpoint(save_dir=base_path, tag=tag, client_state=client_state)
+    deepspeed_engine.save_checkpoint(
+        save_dir=base_path,
+        tag=tag,
+        client_state=client_state,
+    )
 
 
 def load_deepspeed_checkpoint(
