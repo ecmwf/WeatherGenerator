@@ -20,6 +20,7 @@ local common = import 'common.jsonnet';
     common.providers.ecmwf_host,
     common.providers.nasa,
   ],
+  processing_level: '1C',
 
   variables: {
     names: ['tp'],

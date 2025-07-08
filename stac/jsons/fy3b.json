@@ -61,6 +61,7 @@
          "satellite"
       ],
       "name": "FY-3B, MWHS",
+      "processing_level": "1C",
       "providers": [
          {
             "name": "ECMWF",

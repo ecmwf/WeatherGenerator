@@ -8,7 +8,6 @@ local common = import 'common.jsonnet';
   unique_id: '8',
   start_datetime: '2006-10-31T21:24:14',
   end_datetime: '2018-12-31T23:46:05',
-  processing_level: '1C',
   frequency: 'NA',
   fixed_timesteps: 'False',
   keywords: [
@@ -21,6 +20,8 @@ local common = import 'common.jsonnet';
     common.providers.ecmwf_host,
     common.providers.eumetsat,
   ],
+  processing_level: '1C',
+
 
   variables: {
     names: [

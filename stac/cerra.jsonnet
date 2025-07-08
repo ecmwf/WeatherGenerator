@@ -19,6 +19,8 @@ local common = import 'common.jsonnet';
   providers: [
     common.providers.copernicus,
   ],
+  processing_level: '1C',
+
 
   // retrieved from anemoi dataset with:
   // ds.variables, ds.statistics["minimum"], ds.statistics["maximum"],

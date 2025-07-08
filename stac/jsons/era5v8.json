@@ -65,6 +65,7 @@
          "reanalysis"
       ],
       "name": "ERA5v8",
+      "processing_level": "1C",
       "providers": [
          {
             "name": "ECMWF",

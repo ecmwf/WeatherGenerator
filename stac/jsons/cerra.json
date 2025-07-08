@@ -64,6 +64,7 @@
          "reanalysis"
       ],
       "name": "CERRA",
+      "processing_level": "1C",
       "providers": [
          {
             "name": "Copernicus",

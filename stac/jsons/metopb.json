@@ -61,6 +61,7 @@
          "satellite"
       ],
       "name": "Metop-B, MHS",
+      "processing_level": "1C",
       "providers": [
          {
             "name": "ECMWF",

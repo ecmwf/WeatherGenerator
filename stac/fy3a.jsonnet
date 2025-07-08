@@ -20,6 +20,8 @@ local common = import 'common.jsonnet';
     common.providers.ecmwf_host,
     common.providers.eumetsat,
   ],
+  processing_level: '1C',
+
 
   variables: {
     names: [

@@ -19,6 +19,8 @@ local common = import 'common.jsonnet';
   providers: [
     common.providers.ecmwf_host,
   ],
+  processing_level: '1C',
+  
   variables: {
     names: ['mask', 'quality', 'tp'],
     mins: [0, 0, 0],
