@@ -1,13 +1,13 @@
 local common = import 'common.jsonnet';
 
 {
-  name: 'MWHS FY-3',
-  filename: 'fy3.json',
-  description: "The FY-3 data come from the MWHS microwave radiometer on China's Fengyun satellites. Data is available for three FY-3 satellites, FY-3A, FY-3B and FY-3C.",
-  title: 'MWHS FY-3',
-  unique_id: '10',
-  start_datetime: '2008-07-01T00:19:46',
-  end_datetime: '2018-12-31T23:58:08',
+  name: 'FY-3C, MWHS',
+  filename: 'fy3c.json',
+  description: "The data from the MWHS microwave radiometer onboard FY-3C, a Fengyun satellite. Data is available for three FY-3 satellites, FY-3A, FY-3B and FY-3C.",
+  title: 'FY-3C, MWHS',
+  unique_id: '12',
+  start_datetime: '2013-09-30T21:05:22',
+  end_datetime: '2018-12-31T19:58:58',
   frequency: 'NA',
   fixed_timesteps: 'False',
   keywords: [
@@ -47,7 +47,7 @@ local common = import 'common.jsonnet';
   geometry: [-180, 180, -90, 90],
 
   dataset: {
-    dataset_name: 'MICROWAVE_FCDR_V1.1-20200512/FY3/*/*.nc',
+    dataset_name: 'MICROWAVE_FCDR_V1.1-20200512/FY3C/*/*.nc',
     type: 'application/vnd+netcdf',
     description: 'Observation dataset',
     locations: [common.hpc.hpc2020],

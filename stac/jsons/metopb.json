@@ -48,9 +48,9 @@
       ],
       "type": "Polygon"
    },
-   "id": "weathergen.atmo.MHS METOP-B",
+   "id": "weathergen.atmo.Metop-B, MHS",
    "properties": {
-      "description": "The MHS METOP-B dataset is derived from the Microwave Humidity Sounder instrument onboard the Meteorological Operational B satellite.",
+      "description": "The MHS Metop-B dataset is derived from the Microwave Humidity Sounder instrument onboard the Meteorological Operational B satellite.",
       "end_datetime": "2018-12-31T23:11:48",
       "fixed_timesteps": "False",
       "frequency": "NA",
@@ -60,7 +60,7 @@
          "polar-orbiter",
          "satellite"
       ],
-      "name": "MHS METOP-B",
+      "name": "Metop-B, MHS",
       "providers": [
          {
             "name": "ECMWF",
@@ -78,7 +78,7 @@
          }
       ],
       "start_datetime": "2013-04-01T02:06:10",
-      "title": "MHS METOP-B",
+      "title": "Metop-B, MHS",
       "unique_id": "8",
       "variables": {
          "btemps": {

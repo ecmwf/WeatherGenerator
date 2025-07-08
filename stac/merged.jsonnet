@@ -17,10 +17,12 @@ local nppatms = import 'nppatms.jsonnet';
 local synop = import 'synop.jsonnet';
 local metopa = import 'metopa.jsonnet';
 local metopb = import 'metopb.jsonnet';
-local fy3 = import 'fy3.jsonnet';
+local fy3a = import 'fy3a.jsonnet';
+local fy3b = import 'fy3b.jsonnet';
+local fy3c = import 'fy3c.jsonnet';
 
 
-local datasets = [era5v8, opera, cerra, seviri, imerg, nppatms, synop, metopa, metopb, fy3];
+local datasets = [era5v8, opera, cerra, seviri, imerg, nppatms, synop, metopa, metopb, fy3a, fy3b, fy3c];
 
 local check = fn.check_unique_ids(datasets);
 
