@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
+import packages.common.src.weathergen.common.io as io
 import weathergen.utils.config as config
-import weathergen.utils.io as io
 from weathergen.run_train import inference_from_args, train_with_args
 
 logger = logging.getLogger(__name__)

@@ -18,6 +18,9 @@ DType: typing.TypeAlias = np.float32
 _logger = logging.getLogger(__name__)
 
 
+np.ndarray(3)
+
+
 @dataclasses.dataclass
 class ItemKey:
     """Metadata to identify one output item."""
@@ -112,7 +115,10 @@ class OutputDataset:
 
 class OutputItem:
     def __init__(
-        self, target: OutputDataset, prediction: OutputDataset, source: OutputDataset | None = None
+        self,
+        target: OutputDataset,
+        prediction: OutputDataset,
+        source: OutputDataset | None = None,
     ):
         """Collection of possible datasets for one output item."""
         self.target = target
@@ -328,7 +334,14 @@ class OutputBatchData:
         if key.with_source:
             source_data = self.sources[sample][stream_idx].cpu().detach().numpy()
             source_dataset = OutputDataset(
-                "source", key, source_data, times, coords, geoinfo, channels, geoinfo_channels
+                "source",
+                key,
+                source_data,
+                times,
+                coords,
+                geoinfo,
+                channels,
+                geoinfo_channels,
             )
         else:
             source_dataset = None
@@ -336,9 +349,23 @@ class OutputBatchData:
         return OutputItem(
             source=source_dataset,
             target=OutputDataset(
-                "target", key, target_data, times, coords, geoinfo, channels, geoinfo_channels
+                "target",
+                key,
+                target_data,
+                times,
+                coords,
+                geoinfo,
+                channels,
+                geoinfo_channels,
             ),
             prediction=OutputDataset(
-                "prediction", key, preds_data, times, coords, geoinfo, channels, geoinfo_channels
+                "prediction",
+                key,
+                preds_data,
+                times,
+                coords,
+                geoinfo,
+                channels,
+                geoinfo_channels,
             ),
         )
