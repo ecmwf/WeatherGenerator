@@ -25,14 +25,14 @@ class Masker:
         masking_rate: float,
         masking_strategy: str,
         masking_rate_sampling: bool,
-        strategy_kwargs: dict,
+        masking_strategy_config: dict,
     ):
         self.masking_rate = masking_rate
         self.masking_strategy = masking_strategy
         self.masking_rate_sampling = masking_rate_sampling
 
-        # strategy_kwargs is a dictionary that can hold any additional parameters
-        self.strategy_kwargs = strategy_kwargs
+        # masking_strategy_config is a dictionary that can hold any additional parameters
+        self.masking_strategy_config = masking_strategy_config
 
         # Initialize the random number generator.
         worker_info = torch.utils.data.get_worker_info()
@@ -42,6 +42,15 @@ class Masker:
         # Initialize the mask, set to None initially,
         # until it is generated in mask_source.
         self.perm_sel: list[np.typing.NDArray] = None
+
+        # Check for required masking_strategy_config at construction time
+        if self.masking_strategy == "healpix":
+            hl_data = self.masking_strategy_config.get("hl_data")
+            hl_mask = self.masking_strategy_config.get("hl_mask")
+            assert hl_data is not None and hl_mask is not None, (
+                "If HEALPix masking, hl_data and hl_mask must be given in masking_strategy_config."
+            )
+            assert hl_mask < hl_data, "hl_mask must be less than hl_data for HEALPix masking."
 
     def mask_source(
         self,
@@ -182,23 +191,14 @@ class Masker:
             np.ndarray: A flat boolean array (the token-level mask).
         """
 
-        # hl_data and hl_mask should be provided in strategy_kwargs
-        hl_data = self.strategy_kwargs.get("hl_data")
-        hl_mask = self.strategy_kwargs.get("hl_mask")
-
-        if hl_data is None or hl_mask is None:
-            assert False, (
-                "If masking with HEALPix, hl_data and hl_mask must be provided in strategy_kwargs."
-            )
-
-        if hl_mask >= hl_data:
-            assert False, "hl_mask must be less than hl_data for HEALPix masking."
+        # hl_data and hl_mask should be provided in masking_strategy_config
+        hl_data = self.masking_strategy_config.get("hl_data")
+        hl_mask = self.masking_strategy_config.get("hl_mask")
 
         num_data_cells = 12 * (4**hl_data)
-        if len(token_lens) != num_data_cells:
-            assert False, (
-                f"Expected {num_data_cells} cells at level {hl_data}, got {len(token_lens)}."
-            )
+        assert len(token_lens) == num_data_cells, (
+            f"Expected {num_data_cells} cells at level {hl_data}, got {len(token_lens)}."
+        )
 
         # Calculate the number of parent cells at the mask level (hl_mask)
         num_parent_cells = 12 * (4**hl_mask)
