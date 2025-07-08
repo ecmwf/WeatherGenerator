@@ -37,7 +37,7 @@ def write_output(
     # TODO: streams anemoi `source`, `target` commented out???
 
     channels: list[list[str]] = [
-        stream.val_target_channels for stream in cf.streams if stream.name in output_stream_names
+        list(stream.val_target_channels) for stream in cf.streams if stream.name in output_stream_names
     ]
 
     # # assumption: datasets in a stream share channels
