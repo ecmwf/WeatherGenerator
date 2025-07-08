@@ -76,7 +76,7 @@ batch_size_validation: 1
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
 training_mode: "masking"
 # masking rate when training mode is "masking"; ignored in foreacast mode
-masking_rate: 0.5
+masking_rate: 0.1
 # sample the masking rate (with normal distribution centered at masking_rate)
 masking_rate_sampling: False
 # sample a subset of all target points, useful e.g. to reduce memory requirements
