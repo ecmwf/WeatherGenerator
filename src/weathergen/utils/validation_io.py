@@ -37,15 +37,11 @@ def write_output(
     # TODO: streams anemoi `source`, `target` commented out???
 
     channels: list[list[str]] = [
-        list(stream.val_target_channels) for stream in cf.streams if stream.name in output_stream_names
+        list(stream.val_target_channels)
+        for stream in cf.streams
+        if stream.name in output_stream_names
     ]
 
-    # # assumption: datasets in a stream share channels
-    # channels = [
-    #     list(stream.val_target_channels)
-    #     for condition, stream in zip(is_output_stream, cf.streams, strict=False)
-    #     if condition
-    # ]
     geoinfo_channels = [[] for _ in cf.streams]  # TODO obtain channels
 
     # assume: is batch size guarnteed and constant:
