@@ -237,6 +237,27 @@ class ZarrIO:
         return list(example_stream.group_keys())
 
 
+# @dataclasses.dataclass
+# class StreamBlock:
+#     """Output for one stream in a batch"""
+#     # TODO: add the source corresponding to the stream
+#     # tensor(sample x datapoint, channel)
+#     targets: list[NDArray[DType]]
+#     # redundant dim (size 1), tensor(ens, sample x datapoint, channel)
+#     predictions: list[NDArray[DType]]
+#     # tensor(sample x datapoint, 2 + geoinfos)
+#     targets_coords: NDArray[DType]
+#     # (sample x datapoint)
+#     targets_times: NDArray[DType]
+#     # redundant dim (size 1)
+#     targets_lens: list[int]
+
+#     # channel names
+#     channel_names: list[str]
+#     # geoinfo channel names
+#     geoinfo_channel_names: list[str]
+
+
 @dataclasses.dataclass
 class OutputBatchData:
     """Provide convenient access to adapt existing output data structures."""
@@ -264,6 +285,9 @@ class OutputBatchData:
     # stream, channel name
     channels: list[list[str]]
     geoinfo_channels: list[list[str]]
+
+    # # fstep, output stream -> data
+    # output_streams: list[dict[str, StreamBlock]]
 
     sample_start: int
     forecast_offset: int

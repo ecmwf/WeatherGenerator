@@ -26,21 +26,26 @@ def write_output(
     targets_times_all,
     targets_lens,
 ):
-    is_output_stream = [stream.name in cf.analysis_streams_output for stream in cf.streams]
-    stream_names = [
-        stream.name if condition else ""
-        for condition, stream in zip(is_output_stream, cf.streams, strict=False)
-    ]  # TODO: how to correctly handle this => set analysis_streams_output in default config = []
-    # => what happens if stream is not in analysis_streams_output?
-    # => what happens if analysis_streams_output is none?
+    if cf.analysis_streams_output is None:
+        output_stream_names = [stream.name for stream in cf.streams]
+        _logger.info(f"Using all streams as output streams: {output_stream_names}")
+    else:
+        output_stream_names = [stream.name for stream in cf.streams if stream.name in cf.analysis_streams_output]
+    _logger.info(f"Using output streams: {output_stream_names}")
     # streams anemoi `source`, `target` commented out???
 
-    # assumption: datasets in a stream share channels
-    channels = [
-        list(stream.val_target_channels)
-        for condition, stream in zip(is_output_stream, cf.streams, strict=False)
-        if condition
+    channels: list[list[str]] = [
+        stream.val_target_channels
+        for stream in cf.streams
+        if (cf.analyis_streams_output is None or stream.name in output_stream_names)
     ]
+
+    # # assumption: datasets in a stream share channels
+    # channels = [
+    #     list(stream.val_target_channels)
+    #     for condition, stream in zip(is_output_stream, cf.streams, strict=False)
+    #     if condition
+    # ]
     geoinfo_channels = [[] for _ in cf.streams]  # TODO obtain channels
 
     # assume: is batch size guarnteed and constant:
@@ -54,7 +59,7 @@ def write_output(
         targets_coords_all,
         targets_times_all,
         targets_lens,
-        stream_names,
+        output_stream_names,
         channels,
         geoinfo_channels,
         sample_start,
