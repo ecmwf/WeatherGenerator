@@ -10,6 +10,7 @@ import numpy as np
 import xarray as xr
 import zarr
 from numpy.typing import NDArray
+import pdb
 
 # experimental value, should be inferred more intelligently
 CHUNK_N_SAMPLES = 16392
@@ -328,6 +329,7 @@ class OutputBatchData:
         times = self.targets_times[forecast_step][stream_idx][
             datapoints
         ]  # make conversion to datetime64[ns] here?
+        pdb.set_trace()
         channels = self.channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
 
