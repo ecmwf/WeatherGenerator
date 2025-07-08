@@ -5,7 +5,7 @@ local common = import 'common.jsonnet';
   filename: 'metopb.json',
   description: 'The MHS Metop-B dataset is derived from the Microwave Humidity Sounder instrument onboard the Meteorological Operational B satellite.',
   title: 'Metop-B, MHS',
-  unique_id: '8',
+  unique_id: '9',
   start_datetime: '2013-04-01T02:06:10',
   end_datetime: '2018-12-31T23:11:48',
   frequency: 'NA',

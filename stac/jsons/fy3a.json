@@ -1,0 +1,229 @@
+{
+   "assets": {
+      "MICROWAVE_FCDR_V1.1-20200512/FY3A/*/*.nc": {
+         "description": "Observation dataset",
+         "href": "MICROWAVE_FCDR_V1.1-20200512/FY3A/*/*.nc",
+         "inodes": "31039",
+         "locations": [
+            "hpc2020"
+         ],
+         "roles": [
+            "data"
+         ],
+         "size": "664.9 GB",
+         "title": "MICROWAVE_FCDR_V1.1-20200512/FY3A/*/*.nc",
+         "type": "application/vnd+netcdf"
+      }
+   },
+   "bbox": [
+      -180,
+      -90,
+      180,
+      90
+   ],
+   "geometry": {
+      "coordinates": [
+         [
+            [
+               -180,
+               -90
+            ],
+            [
+               -180,
+               90
+            ],
+            [
+               180,
+               90
+            ],
+            [
+               180,
+               -90
+            ],
+            [
+               -180,
+               -90
+            ]
+         ]
+      ],
+      "type": "Polygon"
+   },
+   "id": "weathergen.atmo.FY-3A, MWHS",
+   "properties": {
+      "description": "The data from the MWHS microwave radiometer onboard FY-3A, a Fengyun satellite. Data is available for three FY-3 satellites, FY-3A, FY-3B and FY-3C.",
+      "end_datetime": "2014-05-05T00:33:45",
+      "fixed_timesteps": "False",
+      "frequency": "NA",
+      "keywords": [
+         "atmosphere",
+         "observation",
+         "polar-orbiter",
+         "satellite"
+      ],
+      "name": "FY-3A, MWHS",
+      "providers": [
+         {
+            "name": "ECMWF",
+            "roles": [
+               "host"
+            ],
+            "url": "https://ecmwf.int"
+         },
+         {
+            "name": "EUMETSAT",
+            "roles": [
+               "provider"
+            ],
+            "url": "https://eumetsat.int"
+         }
+      ],
+      "start_datetime": "2008-07-01T00:19:46",
+      "title": "FY-3A, MWHS",
+      "unique_id": "10",
+      "variables": {
+         "btemps": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "coldnedt": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "data_quality_bitmask": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "instrtemp": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "quality_issue_pixel_bitmask": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "quality_pixel_bitmask": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "quality_scanline_bitmask": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "satellite_azimuth_angle": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "satellite_zenith_angle": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "scnlin": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "solar_azimuth_angle": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "solar_zenith_angle": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "time": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "u_common_btemps": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "u_independent_btemps": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "u_structured_btemps": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "warmnedt": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         }
+      }
+   },
+   "stac_extensions": [
+      "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
+      "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json",
+      "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
+   ],
+   "stac_version": "1.0.0",
+   "type": "Feature"
+}
