@@ -12,6 +12,8 @@ Copyright (c) 2025, Sebastian Hoffmann
 # TODO: move the DDP code from trainer.py to this file
 
 import torch.distributed as dist
+import json
+import os
 
 SYNC_TIMEOUT_SEC = 60 * 60  # 1 hour
 
@@ -33,3 +35,38 @@ def is_root(pg: dist.ProcessGroup | None = None) -> bool:
 
 def _is_distributed_initialized():
     return dist.is_available() and dist.is_initialized()
+
+def get_rank_from_config(config_path, default=0):
+    # TODO read the json file
+    # with open(config_path) as f:
+    #     var_list = json.load(f)
+    var_list = [
+        "SLURM_PROCID",
+        "PMI_RANK",
+        "OMPI_COMM_WORLD_RANK",
+        "MP_CHILD"
+        "RANK",
+    ]
+    for var in var_list:
+        value = os.getenv(var)
+        if value is not None:
+            return int(value)
+    return int(default)
+
+def get_size_from_config(config_path, default=1):
+    # TODO read the json file
+    # with open(config_path) as f:
+    #    var_list = json.load(f)
+    var_list = [
+        "SLURM_NTASKS",
+        "PMI_SIZE",
+        "OMPI_COMM_WORLD_SIZE",
+        "MP_PROCS"
+        "SIZE",
+        "WORLD_SIZE",
+    ]
+    for var in var_list:
+        value = os.getenv(var)
+        if value is not None:
+            return int(value)
+    return int(default)

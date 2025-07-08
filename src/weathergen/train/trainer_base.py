@@ -20,7 +20,7 @@ import torch.multiprocessing
 
 from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.config import Config
-from weathergen.utils.distributed import is_root
+from weathergen.utils.distributed import is_root, get_rank_from_config, get_size_from_config
 
 _logger = logging.getLogger(__name__)
 
@@ -54,15 +54,15 @@ class Trainer_Base:
         if not use_cuda:
             return torch.device("cpu")
 
-        local_id_node = os.environ.get("SLURM_LOCALID", "-1")
-        if local_id_node == "-1":
+        # local_id_node = os.environ.get("SLURM_LOCALID", "-1")
+        rank = get_rank_from_config("path/to/config/file", default="-1")
+        if rank == "-1":
             devices = ["cuda"]
         else:
             devices = [
-                f"cuda:{int(local_id_node) * num_accs_per_task + i}"
-                for i in range(num_accs_per_task)
+                f"cuda:{int(rank)}"
             ]
-        torch.cuda.set_device(int(local_id_node) * num_accs_per_task)
+        torch.cuda.set_device(int(rank)) # local or global rank?
 
         return devices
 
@@ -82,12 +82,14 @@ class Trainer_Base:
             _logger.info(f"rank: {rank} has run_id: {cf.run_id}")
             return
 
-        local_rank = int(os.environ.get("SLURM_LOCALID"))
-        ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
-        rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
-        num_ranks = int(os.environ.get("SLURM_NTASKS"))
+        # local_rank = int(os.environ.get("SLURM_LOCALID"))
+        # ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
+        # rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
+        rank = get_rank_from_config("path/to/config/file", default=0)
+        # num_ranks = int(os.environ.get("SLURM_NTASKS"))
+        size = get_size_from_config("path/to/config/file", default=1)
         _logger.info(
-            f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, "
+            # f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, "
             f"rank={rank}, num_ranks={num_ranks}"
         )
 
@@ -119,7 +121,7 @@ class Trainer_Base:
             timeout=datetime.timedelta(seconds=240),
             world_size=num_ranks,
             rank=rank,
-            device_id=torch.device("cuda", local_rank),
+            # device_id=torch.device("cuda", local_rank),
         )
         if is_root():
             _logger.info("DDP initialized: root.")
