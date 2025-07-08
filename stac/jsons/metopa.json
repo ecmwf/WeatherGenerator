@@ -62,6 +62,7 @@
       ],
       "name": "Metop-A, MHS",
       "processing_level": "1C",
+      "provenance": "EUMETSAT",
       "providers": [
          {
             "name": "ECMWF",

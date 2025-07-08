@@ -65,6 +65,7 @@
       ],
       "name": "CERRA",
       "processing_level": "NA",
+      "provenance": "NA",
       "providers": [
          {
             "name": "Copernicus",

@@ -63,6 +63,7 @@
       ],
       "name": "NPP-ATMS",
       "processing_level": "1C",
+      "provenance": "NASA",
       "providers": [
          {
             "name": "ECMWF",

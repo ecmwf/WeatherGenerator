@@ -21,6 +21,7 @@ local common = import 'common.jsonnet';
     common.providers.nasa,
   ],
   processing_level: 'NA',
+  provenance: 'NA',
 
   variables: {
     names: ['tp'],

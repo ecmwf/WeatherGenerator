@@ -62,6 +62,7 @@
       ],
       "name": "FY-3C, MWHS",
       "processing_level": "1C",
+      "provenance": "EUMETSAT",
       "providers": [
          {
             "name": "ECMWF",
