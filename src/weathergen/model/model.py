@@ -13,11 +13,9 @@ import warnings
 from pathlib import Path
 
 import astropy_healpix as hp
-import astropy_healpix.healpy
 import numpy as np
 import torch
 from astropy_healpix import healpy
-from deepspeed.runtime.activation_checkpointing.checkpointing import checkpoint
 
 from weathergen.model.engines import (
     EmbeddingEngine,
@@ -32,19 +30,6 @@ from weathergen.model.layers import MLP
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.config import get_dtype
 from weathergen.utils.logger import logger
-
-
-def run_checkpointed(module, *args):
-    # This is the key: cast inputs to the same dtype as the module's weights.
-    casted_args = [
-        (
-            arg.to(module.weight.dtype)
-            if isinstance(arg, torch.Tensor) and arg.is_floating_point()
-            else arg
-        )
-        for arg in args
-    ]
-    return checkpoint(module, *casted_args)
 
 
 class ModelParams(torch.nn.Module):
@@ -535,11 +520,10 @@ class Model(torch.nn.Module):
                 continue
 
             for block in self.ae_local_blocks:
-                tokens_c = checkpoint(block, tokens_c, cell_lens_c)
+                tokens_c = block(tokens_c, cell_lens_c)
 
             for block in self.ae_adapter:
-                tokens_global_c = checkpoint(
-                    block,
+                tokens_global_c = block(
                     tokens_global_c,
                     tokens_c,
                     q_cells_lens_c,
@@ -562,7 +546,7 @@ class Model(torch.nn.Module):
     def assimilate_global(self, model_params, tokens):
         # global assimilation engine and adapter
         for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens)
+            tokens = block(tokens)
 
         return tokens
 
@@ -570,7 +554,7 @@ class Model(torch.nn.Module):
     def forecast(self, model_params, tokens):
         for it, block in enumerate(self.fe_blocks):
             aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
-            tokens = checkpoint(block, tokens, aux_info)
+            tokens = block(tokens, aux_info)
 
         return tokens
 
@@ -599,7 +583,7 @@ class Model(torch.nn.Module):
                 chunks = []
                 for i_b in range(len(streams_data)):
                     if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1:
-                        chunks += [checkpoint(tc_embed, streams_data[i_b][ii].target_coords[fstep])]
+                        chunks += [tc_embed(streams_data[i_b][ii].target_coords[fstep])]
                     else:
                         chunks += [streams_data[i_b][ii].target_coords[fstep]]
 
@@ -633,10 +617,9 @@ class Model(torch.nn.Module):
                 # apply prediction engine
                 for ib, block in enumerate(tte):
                     if self.cf.pred_self_attention and ib % 3 == 1:
-                        tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux)
+                        tc_tokens = block(tc_tokens, tcs_lens, tcs_aux)
                     else:
-                        tc_tokens = checkpoint(
-                            block,
+                        tc_tokens = block(
                             tc_tokens,
                             tokens_stream,
                             tcs_lens,
@@ -645,6 +628,6 @@ class Model(torch.nn.Module):
                         )
 
             # final prediction head to map back to physical space
-            preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens)]
+            preds_tokens += [self.pred_heads[ii](tc_tokens)]
 
         return preds_tokens

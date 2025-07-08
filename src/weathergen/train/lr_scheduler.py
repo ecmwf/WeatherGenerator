@@ -209,6 +209,58 @@ class LearningRateScheduler:
     def get_lr(self):
         return self.lr
 
+    def state_dict(self):
+        """
+        Saves the state of the learning rate scheduler.
+        It saves the state of all internal schedulers and the custom step counter.
+        """
+        # Note: self.scheduler_decay can be None if policy_decay is 'sqrt'
+        decay_state = (
+            self.scheduler_decay.state_dict() if self.scheduler_decay is not None else None
+        )
+
+        # Note: If warmup and decay policy are 'cosine', they share the same scheduler object.
+        # Calling state_dict() on both is fine, but we only need to load it once.
+        warmup_state = (
+            self.scheduler_warmup.state_dict() if hasattr(self, "scheduler_warmup") else None
+        )
+        cooldown_state = (
+            self.scheduler_cooldown.state_dict() if hasattr(self, "scheduler_cooldown") else None
+        )
+
+        return {
+            "i_step": self.i_step,
+            "scheduler_warmup": warmup_state,
+            "scheduler_decay": decay_state,
+            "scheduler_cooldown": cooldown_state,
+        }
+
+    def load_state_dict(self, state_dict):
+        """
+        Loads the learning rate scheduler's state.
+        """
+        self.i_step = state_dict["i_step"]
+
+        # Restore the state of each internal scheduler if it exists
+        if hasattr(self, "scheduler_warmup") and state_dict["scheduler_warmup"] is not None:
+            self.scheduler_warmup.load_state_dict(state_dict["scheduler_warmup"])
+
+        if self.scheduler_decay is not None and state_dict["scheduler_decay"] is not None:
+            # Avoid loading the state twice if it's the same object as the warmup scheduler
+            if self.scheduler_decay is not self.scheduler_warmup:
+                self.scheduler_decay.load_state_dict(state_dict["scheduler_decay"])
+
+        if hasattr(self, "scheduler_cooldown") and state_dict["scheduler_cooldown"] is not None:
+            self.scheduler_cooldown.load_state_dict(state_dict["scheduler_cooldown"])
+
+        # After loading state, we need to determine which scheduler should be 'cur_scheduler'
+        if self.i_step < self.n_steps_warmup:
+            self.cur_scheduler = self.scheduler_warmup
+        elif self.i_step < self.n_steps_warmup + self.n_steps_decay:
+            self.cur_scheduler = self.scheduler_decay
+        else:
+            self.cur_scheduler = self.scheduler_cooldown
+
     #######################################
     @staticmethod
     def plot():

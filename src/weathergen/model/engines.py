@@ -9,6 +9,7 @@
 
 import logging
 import torch
+import torch.nn.functional as F
 
 from weathergen.model.attention import (
     MultiCrossAttentionHead_Varlen,
@@ -343,21 +344,31 @@ class EnsPredictionHead(torch.nn.Module):
                 )
 
     #########################################
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
+    # @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
     def forward(self, toks):
-        with torch.autocast(device_type="cuda", enabled=False):
-            preds = []
-            # toks = toks.to(torch.float32)
-            _logger.debug(f"tokens dtype: {toks.dtype}")
+        preds = []
+        toks = toks.to(torch.float32)
+        # _logger.debug(f"tokens dtype: {toks.dtype}")
 
-            for pred_head in self.pred_heads:
-                cpred = toks
-                for block in pred_head:
-                    _logger.debug(f"block dtype: {block.weight.dtype}")
+        for pred_head in self.pred_heads:
+            cpred = toks
+            for block in pred_head:
+                if isinstance(block, torch.nn.Linear):
+                    # Manually cast the layer's bfloat16 weight and bias to
+                    # float32 to match the float32 input 'cpred'.
+                    weight_fp32 = block.weight.to(torch.float32)
+                    bias_fp32 = block.bias.to(torch.float32) if block.bias is not None else None
+                    # _logger.debug(f"block dtype: {weight_fp32.dtype}")
+
+                    cpred = F.linear(cpred, weight_fp32, bias_fp32)
+                else:
+                    # For non-Linear layers like GELU, just call them normally.
                     cpred = block(cpred)
-                preds.append(cpred)
-            preds = torch.stack(preds, 0)
-            _logger.debug(f"preds dtype: {preds.dtype}")
+                # _logger.debug(f"cpred dtype: {cpred.dtype}")
+            preds.append(cpred)
+        preds = torch.stack(preds, 0)
+        # _logger.debug(f"preds dtype: {preds.dtype}")
+
         return preds
 
 

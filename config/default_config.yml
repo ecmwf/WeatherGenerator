@@ -56,7 +56,7 @@ healpix_level: 5
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
-with_fsdp: True
+with_fsdp: False
 attention_dtype: bf16
 mlp_norm_eps: 1e-5
 norm_eps: 1e-4
@@ -86,8 +86,8 @@ sampling_rate_target: 1.0
 masking_strategy: "random"
 
 num_epochs: 24
-samples_per_epoch: 40
-samples_per_validation: 10
+samples_per_epoch: 4096
+samples_per_validation: 512
 shuffle: True
 
 lr_scaling_policy: "sqrt"

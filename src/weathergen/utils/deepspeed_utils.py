@@ -77,6 +77,9 @@ def get_deepspeed_config(
         "bf16": {
             "enabled": bf16_enabled,
         },
+        "fp16": {
+            "enabled": False,
+        },
         "gradient_clipping": gradient_clipping,
         "zero_optimization": {
             "stage": zero_stage,
@@ -88,6 +91,7 @@ def get_deepspeed_config(
                 "device": "cpu" if zero_optimization_cpu_offload_params else "none",
                 "pin_memory": True,
             },
+            "stage3_gather_16bit_weights_on_model_save": False,
         },
         "steps_per_print": 2000,  # Suppress verbose logging from deepspeed
         "wall_clock_breakdown": False,

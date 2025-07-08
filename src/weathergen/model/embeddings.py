@@ -9,7 +9,6 @@
 
 import numpy as np
 import torch
-from deepspeed.runtime.activation_checkpointing.checkpointing import checkpoint
 
 from weathergen.model.attention import MultiSelfAttentionHead
 from weathergen.model.layers import MLP
@@ -146,17 +145,17 @@ class StreamEmbedTransformer(torch.nn.Module):
 
         with torch.amp.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16):
             # embed provided input data
-            x = peh(checkpoint(self.embed, x_in.transpose(-2, -1)))
+            x = peh(self.embed(x_in.transpose(-2, -1)))
 
             for layer in self.layers:
-                x = checkpoint(layer, x)
+                x = layer(x)
 
             # read out
             if self.unembed_mode == "full":
-                out = checkpoint(self.unembed, self.ln_final(x.flatten(-2, -1)))
+                out = self.unembed(self.ln_final(x.flatten(-2, -1)))
             elif self.unembed_mode == "block":
                 out = [
-                    checkpoint(ue, ln(x[:, i]))
+                    ue(ln(x[:, i]))
                     for i, (ue, ln) in enumerate(zip(self.unembed, self.ln_final, strict=True))
                 ]
                 out = torch.stack(out, dim=1).flatten(-2, -1)
@@ -178,14 +177,14 @@ class StreamEmbedTransformer(torch.nn.Module):
     def forward_columns(self, x_in, centroids):
         # embed provided input data
         with torch.amp.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16):
-            x = positional_encoding_harmonic(checkpoint(self.embed, x_in))
+            x = positional_encoding_harmonic(self.embed(x_in))
 
             for layer in self.layers:
-                x = checkpoint(layer, x)
+                x = layer(x)
 
-            out = checkpoint(self.unembed1, x)
+            out = self.unembed1(x)
             out = self.unembed_nonlin(out)
-            out = checkpoint(self.unembed2, out.transpose(-2, -1))
+            out = self.unembed2(out.transpose(-2, -1))
             out = out.flatten(-2, -1).unsqueeze(1)
 
             # final normalize and dropout

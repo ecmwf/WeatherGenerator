@@ -55,7 +55,8 @@ class RMSNorm(torch.nn.Module):
             torch.Tensor: The output tensor after applying RMSNorm.
 
         """
-        output = self._norm(x.float()).type_as(x)
+        with torch.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16):
+            output = self._norm(x.float()).type_as(x)
         return output * self.weight
 
 
@@ -78,10 +79,11 @@ class AdaLayerNorm(torch.nn.Module):
         self.norm = torch.nn.LayerNorm(dim_embed_x, norm_eps, norm_elementwise_affine)
 
     def forward(self, x: torch.Tensor, aux: torch.Tensor | None = None) -> torch.Tensor:
-        for block in self.embed_aux:
-            aux = block(aux)
-        scale, shift = aux.split(aux.shape[-1] // 2, dim=-1)
+        with torch.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16):
+            for block in self.embed_aux:
+                aux = block(aux)
+            scale, shift = aux.split(aux.shape[-1] // 2, dim=-1)
 
-        x = self.norm(x) * (1 + scale) + shift
+            x = self.norm(x) * (1 + scale) + shift
 
         return x

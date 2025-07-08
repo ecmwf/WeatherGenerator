@@ -70,29 +70,31 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
 
     #########################################
     def forward(self, x, x_lens, ada_ln_aux=None):
-        x_in = x
-        x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+            x_in = x
+            x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
 
-        ## project onto heads and q,k,v and
-        #  ensure these are 4D tensors as required for flash attention
-        s = [x.shape[0], self.num_heads, -1]
-        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype)
-        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
-        vs = self.proj_heads_v(x).reshape(s)
+            ## project onto heads and q,k,v and
+            #  ensure these are 4D tensors as required for flash attention
+            s = [x.shape[0], self.num_heads, -1]
+            qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype)
+            ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
+            vs = self.proj_heads_v(x).reshape(s)
 
-        cum_x_lens = torch.cumsum(x_lens, 0, dtype=torch.int32)
-        # ordering of tensors (seq, heads, embed) (which differs from torch's flash attention implt)
-        outs = flash_attn_varlen_func(
-            qs,
-            ks,
-            vs,
-            cum_x_lens,
-            cum_x_lens,
-            x_lens.max(),
-            x_lens.max(),
-            softcap=self.softcap,
-            dropout_p=self.dropout_rate,
-        )
+            cum_x_lens = torch.cumsum(x_lens, 0, dtype=torch.int32)
+            # ordering of tensors (seq, heads, embed)
+            # (which differs from torch's flash attention implt)
+            outs = flash_attn_varlen_func(
+                qs,
+                ks,
+                vs,
+                cum_x_lens,
+                cum_x_lens,
+                x_lens.max(),
+                x_lens.max(),
+                softcap=self.softcap,
+                dropout_p=self.dropout_rate,
+            )
 
         # return x_in + self.dropout( self.proj_out( outs.flatten( -2, -1)) )
         return x_in + self.proj_out(outs.flatten(-2, -1))
@@ -155,17 +157,18 @@ class MultiSelfAttentionHead_Varlen_Flex(torch.nn.Module):
 
     #########################################
     def forward(self, x, x_lens=None):
-        x_in = x
-        x = self.lnorm(x)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+            x_in = x
+            x = self.lnorm(x)
 
-        ## project onto heads and q,k,v and
-        #  ensure these are 4D tensors as required for flash attention
-        s = [x.shape[0], 1, self.num_heads, -1]
-        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).permute([1, 2, 0, 3])
-        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).permute([1, 2, 0, 3])
-        vs = self.proj_heads_v(x).reshape(s).permute([1, 2, 0, 3])
+            ## project onto heads and q,k,v and
+            #  ensure these are 4D tensors as required for flash attention
+            s = [x.shape[0], 1, self.num_heads, -1]
+            qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).permute([1, 2, 0, 3])
+            ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).permute([1, 2, 0, 3])
+            vs = self.proj_heads_v(x).reshape(s).permute([1, 2, 0, 3])
 
-        outs = self.compiled_flex_attention(qs, ks, vs).transpose(1, 2).squeeze()
+            outs = self.compiled_flex_attention(qs, ks, vs).transpose(1, 2).squeeze()
 
         return x_in + self.dropout(self.proj_out(outs.flatten(-2, -1)))
 
@@ -234,16 +237,17 @@ class MultiSelfAttentionHead_Local(torch.nn.Module):
 
     #########################################
     def forward(self, x, ada_ln_aux=None):
-        x_in = x
-        x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+            x_in = x
+            x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
 
-        # project onto heads
-        s = [x.shape[0], x.shape[1], self.num_heads, -1]
-        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3])
-        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3])
-        vs = self.proj_heads_v(x).reshape(s).permute([0, 2, 1, 3])
+            # project onto heads
+            s = [x.shape[0], x.shape[1], self.num_heads, -1]
+            qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3])
+            ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3])
+            vs = self.proj_heads_v(x).reshape(s).permute([0, 2, 1, 3])
 
-        outs = self.flex_attention(qs, ks, vs, block_mask=self.block_mask).transpose(1, 2)
+            outs = self.flex_attention(qs, ks, vs, block_mask=self.block_mask).transpose(1, 2)
 
         return x_in + self.proj_out(self.dropout(outs.flatten(-2, -1)))
 
@@ -310,40 +314,41 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
 
     #########################################
     def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
-        if self.with_residual:
-            x_q_in = x_q
-        x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
-        x_kv = self.lnorm_in_kv(x_kv)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+            if self.with_residual:
+                x_q_in = x_q
+            x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
+            x_kv = self.lnorm_in_kv(x_kv)
 
-        ## project onto heads and q,k,v and
-        #  ensure these are 4D tensors as required for flash attention
-        s = [x_q.shape[0], self.num_heads, self.dim_head_proj]
-        qs = self.lnorm_q(self.proj_heads_q(x_q).reshape(s)).to(self.dtype)
-        s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
-        ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype)
-        vs = self.proj_heads_v(x_kv).reshape(s)
+            ## project onto heads and q,k,v and
+            #  ensure these are 4D tensors as required for flash attention
+            s = [x_q.shape[0], self.num_heads, self.dim_head_proj]
+            qs = self.lnorm_q(self.proj_heads_q(x_q).reshape(s)).to(self.dtype)
+            s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
+            ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype)
+            vs = self.proj_heads_v(x_kv).reshape(s)
 
-        if x_kv_lens is not None:
-            cum_x_q_lens = torch.cumsum(x_q_lens, 0, dtype=torch.int32)
-            cum_x_kv_lens = torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
-            outs = flash_attn_varlen_func(
-                qs,
-                ks,
-                vs,
-                cum_x_q_lens,
-                cum_x_kv_lens,
-                x_q_lens.max(),
-                x_kv_lens.max(),
-                softcap=self.softcap,
-                dropout_p=self.dropout_rate,
-            )
-        else:
-            assert False
+            if x_kv_lens is not None:
+                cum_x_q_lens = torch.cumsum(x_q_lens, 0, dtype=torch.int32)
+                cum_x_kv_lens = torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
+                outs = flash_attn_varlen_func(
+                    qs,
+                    ks,
+                    vs,
+                    cum_x_q_lens,
+                    cum_x_kv_lens,
+                    x_q_lens.max(),
+                    x_kv_lens.max(),
+                    softcap=self.softcap,
+                    dropout_p=self.dropout_rate,
+                )
+            else:
+                assert False
 
-        # outs = self.dropout( self.proj_out( outs.flatten( -2, -1)) )
-        outs = self.proj_out(outs.flatten(-2, -1))
-        if self.with_residual:
-            outs = x_q_in + outs
+            # outs = self.dropout( self.proj_out( outs.flatten( -2, -1)) )
+            outs = self.proj_out(outs.flatten(-2, -1))
+            if self.with_residual:
+                outs = x_q_in + outs
 
         return outs
 
@@ -427,44 +432,44 @@ class MultiCrossAttentionHead_Varlen_SlicedQ(torch.nn.Module):
 
     #########################################
     def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
-        if self.with_residual:
-            x_q_in = x_q
-        x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
-        x_kv = self.lnorm_in_kv(x_kv)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+            if self.with_residual:
+                x_q_in = x_q
+            x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
+            x_kv = self.lnorm_in_kv(x_kv)
 
-        ## project onto heads and q,k,v and
-        #  ensure these are 4D tensors as required for flash attention
-        s = [x_q.shape[0], self.num_heads, self.dim_head_proj]
-        qs = [
-            self.lnorm_q(head_proj(x_q_i).reshape(s)).to(self.dtype)
-            for head_proj, x_q_i in zip(self.proj_heads_q, x_q.transpose(1, 0), strict=False)
-        ]
-        s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
-        ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype)
-        vs = self.proj_heads_v(x_kv).reshape(s)
-
-        cum_x_q_lens = torch.cumsum(x_q_lens, 0, dtype=torch.int32)
-        cum_x_kv_lens = torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
-        outs = []
-        for _i, qs_i in enumerate(qs):
-            outs += [
-                flash_attn_varlen_func(
-                    qs_i,
-                    ks,
-                    vs,
-                    cum_x_q_lens,
-                    cum_x_kv_lens,
-                    x_q_lens.max(),
-                    x_kv_lens.max(),
-                    softcap=self.softcap,
-                    dropout_p=self.dropout_rate,
-                )
+            ## project onto heads and q,k,v and
+            #  ensure these are 4D tensors as required for flash attention
+            s = [x_q.shape[0], self.num_heads, self.dim_head_proj]
+            qs = [
+                self.lnorm_q(head_proj(x_q_i).reshape(s)).to(self.dtype)
+                for head_proj, x_q_i in zip(self.proj_heads_q, x_q.transpose(1, 0), strict=False)
             ]
+            s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
+            ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype)
+            vs = self.proj_heads_v(x_kv).reshape(s)
 
-        # outs = self.dropout( self.proj_out( torch.stack(outs).transpose(1,0).flatten( -2, -1)) )
-        outs = self.proj_out(torch.stack(outs).transpose(1, 0).flatten(-2, -1))
-        if self.with_residual:
-            outs = x_q_in + outs.reshape(x_q_in.shape)
+            cum_x_q_lens = torch.cumsum(x_q_lens, 0, dtype=torch.int32)
+            cum_x_kv_lens = torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
+            outs = []
+            for _i, qs_i in enumerate(qs):
+                outs += [
+                    flash_attn_varlen_func(
+                        qs_i,
+                        ks,
+                        vs,
+                        cum_x_q_lens,
+                        cum_x_kv_lens,
+                        x_q_lens.max(),
+                        x_kv_lens.max(),
+                        softcap=self.softcap,
+                        dropout_p=self.dropout_rate,
+                    )
+                ]
+
+            outs = self.proj_out(torch.stack(outs).transpose(1, 0).flatten(-2, -1))
+            if self.with_residual:
+                outs = x_q_in + outs.reshape(x_q_in.shape)
 
         return outs
 
@@ -524,21 +529,23 @@ class MultiSelfAttentionHead(torch.nn.Module):
 
     #########################################
     def forward(self, x, ada_ln_aux=None):
-        x_in = x
-        # x = self.lnorm( x)
-        x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+            x_in = x
+            # x = self.lnorm( x)
+            x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
 
-        ## project onto heads and q,k,v and
-        #  ensure these are 4D tensors as required for flash attention
-        s = [*([x.shape[0], 1] if len(x.shape) == 2 else x.shape[:-1]), self.num_heads, -1]
-        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype)
-        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
-        vs = self.proj_heads_v(x).reshape(s).to(self.dtype)
+            ## project onto heads and q,k,v and
+            #  ensure these are 4D tensors as required for flash attention
+            s = [*([x.shape[0], 1] if len(x.shape) == 2 else x.shape[:-1]), self.num_heads, -1]
+            qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype)
+            ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
+            vs = self.proj_heads_v(x).reshape(s).to(self.dtype)
 
-        # ordering of tensors (seq, heads, embed) (which differs from torch's flash attention implt)
-        outs = flash_attn_func(qs, ks, vs, dropout_p=self.dropout_rate)
+            # ordering of tensors (seq, heads, embed)
+            # (which differs from torch's flash attention implt)
+            outs = flash_attn_func(qs, ks, vs, dropout_p=self.dropout_rate)
 
-        # return x_in + self.dropout( self.proj_out( outs.flatten( -2, -1)) )
+            # return x_in + self.dropout( self.proj_out( outs.flatten( -2, -1)) )
         return x_in + self.proj_out(outs.flatten(-2, -1))
 
     #########################################
@@ -608,25 +615,26 @@ class MultiCrossAttentionHead(torch.nn.Module):
 
     #########################################
     def forward(self, x_q, x_kv):
-        if self.with_residual:
-            x_q_in = x_q
-        x_q, x_kv = self.lnorm_in_q(x_q), self.lnorm_in_kv(x_kv)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+            if self.with_residual:
+                x_q_in = x_q
+            x_q, x_kv = self.lnorm_in_q(x_q), self.lnorm_in_kv(x_kv)
 
-        ## project onto heads and q,k,v and
-        #  ensure these are 4D tensors as required for flash attention
-        s = [x_q.shape[0], -1, self.num_heads, self.dim_head_proj]
-        qs = self.lnorm_q(self.proj_heads_q(x_q).reshape(s)).to(self.dtype).transpose(-3, -2)
-        s = [x_kv.shape[0], -1, self.num_heads, self.dim_head_proj]
-        ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype).transpose(-3, -2)
-        vs = self.proj_heads_v(x_kv).reshape(s).transpose(-3, -2)
+            ## project onto heads and q,k,v and
+            #  ensure these are 4D tensors as required for flash attention
+            s = [x_q.shape[0], -1, self.num_heads, self.dim_head_proj]
+            qs = self.lnorm_q(self.proj_heads_q(x_q).reshape(s)).to(self.dtype).transpose(-3, -2)
+            s = [x_kv.shape[0], -1, self.num_heads, self.dim_head_proj]
+            ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype).transpose(-3, -2)
+            vs = self.proj_heads_v(x_kv).reshape(s).transpose(-3, -2)
 
-        # correct ordering of tensors with seq dimension second but last is critical
-        with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.FLASH_ATTENTION):
-            outs = self.att(qs, ks, vs).transpose(2, 1)
+            # correct ordering of tensors with seq dimension second but last is critical
+            with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.FLASH_ATTENTION):
+                outs = self.att(qs, ks, vs).transpose(2, 1)
 
-        outs = self.dropout(self.proj_out(outs.flatten(-2, -1)))
-        if self.with_residual:
-            outs = x_q_in + outs
+            outs = self.dropout(self.proj_out(outs.flatten(-2, -1)))
+            if self.with_residual:
+                outs = x_q_in + outs
 
         return outs
 

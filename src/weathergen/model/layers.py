@@ -62,16 +62,17 @@ class MLP(torch.nn.Module):
         self.layers.append(nonlin())
 
     def forward(self, *args):
-        x, x_in, aux = args[0], args[0], args[-1]
+        with torch.autocast(enabled=True, dtype=torch.bfloat16, device_type="cuda"):
+            x, x_in, aux = args[0], args[0], args[-1]
 
-        for i, layer in enumerate(self.layers):
-            x = layer(x, aux) if (i == 0 and self.with_aux) else layer(x)
+            for i, layer in enumerate(self.layers):
+                x = layer(x, aux) if (i == 0 and self.with_aux) else layer(x)
 
-        if self.with_residual:
-            if x.shape[-1] == x_in.shape[-1]:
-                x = x_in + x
-            else:
-                assert x.shape[-1] % x_in.shape[-1] == 0
-                x = x + x_in.repeat([*[1 for _ in x.shape[:-1]], x.shape[-1] // x_in.shape[-1]])
+            if self.with_residual:
+                if x.shape[-1] == x_in.shape[-1]:
+                    x = x_in + x
+                else:
+                    assert x.shape[-1] % x_in.shape[-1] == 0
+                    x = x + x_in.repeat([*[1 for _ in x.shape[:-1]], x.shape[-1] // x_in.shape[-1]])
 
         return x

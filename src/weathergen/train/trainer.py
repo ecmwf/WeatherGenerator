@@ -19,7 +19,9 @@ from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import MixedPrecision, ShardingStrategy
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy  # default_auto_wrap_policy,
+from deepspeed.utils import set_z3_leaf_modules
 
+from weathergen.model.engines import EnsPredictionHead
 import weathergen.train.loss as losses
 import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
@@ -441,8 +443,6 @@ class Trainer(Trainer_Base):
                 if target.shape[0] > 0 and pred.shape[0] > 0:
                     # extract data/coords and remove token dimension if it exists
                     pred = pred.reshape([pred.shape[0], *target.shape])
-                    _logger.debug(f"predition dtype: {pred.dtype}")
-                    _logger.debug(f"target dtype: {target.dtype}")
 
                     assert pred.shape[1] > 0
 
