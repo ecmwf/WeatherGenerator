@@ -180,6 +180,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.num_healpix_cells_source: int = 12 * 4**self.healpix_level_source
         self.num_healpix_cells_target: int = 12 * 4**self.healpix_level_target
 
+        print("*************************************************")
+        print("What actually is self.streams here?", self.streams)
+        print("What is self.streams_datasets?", self.streams_datasets)
+
         if cf.training_mode == "forecast":
             self.tokenizer = TokenizerForecast(cf.healpix_level, cf.data_loader_rng_seed)
         elif cf.training_mode == "masking":
