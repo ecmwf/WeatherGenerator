@@ -145,7 +145,6 @@ class StreamEmbedTransformer(torch.nn.Module):
         peh = positional_encoding_harmonic
 
         # embed provided input data
-
         x = peh(checkpoint(self.embed, x_in.transpose(-2, -1), use_reentrant=False))
 
         for layer in self.layers:

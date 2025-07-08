@@ -58,12 +58,6 @@ class Masker:
         Returns:
             list[torch.Tensor]: The unmasked tokens (model input).
         """
-        
-        # be honest here, what is tokenized_data?
-        # It is a list of tensors, where each tensor represents the tokens for a cell.
-
-        #print("Tokenized data shape example:", tokenized_data[0].size() if tokenized_data else "No data")
-        
         token_lens = [len(t) for t in tokenized_data]
         num_tokens = sum(token_lens)
 
@@ -111,55 +105,6 @@ class Masker:
 
         elif self.masking_strategy == "healpix":
             flat_mask = self._generate_healpix_mask(token_lens, rate)
-            #print("Shape of flat_mask:", flat_mask.shape)
-
-        elif self.masking_strategy == "channel":
-            # so the masking strategy is channel masking,
-            # which means we generate a mask for each channel...
-            # of the tokenized data.
-            # NOTE: probably shouldn't call this flat_mask,
-            # as it is not flat, but a list of masks for each channel.
-            not_flat_mask = self._generate_channel_mask(tokenized_data, rate)
-
-            # quick hack to do this, as we have a list of masks for each channel,
-            # we need different logic to what we have for the flat mask
-
-            #split_indices = np.cumsum(token_lens)[:-1]
-            #self.perm_sel = np.split(not_flat_mask, split_indices)
-            
-            #print("What is the type of perm_sel?", type(self.perm_sel))
-            #print("What is actually the shape of the first element of perm_sel in channel?", self.perm_sel[0].shape)
-
-            # make a list of not_flat_mask of the same length of tokenized_data, with the same not_flat_mask
-            # so that we can use it to mask the source data.
-
-            self.perm_sel = [not_flat_mask] * len(tokenized_data)
-            #print("Computed the not_flat_mask for channel masking, it is a list of tensors.")
-
-            #for data, p in zip(tokenized_data, self.perm_sel, strict=True):
-            #    print("In the source...")
-            #    print("Data shape:", len(data), "Mask shape:", len(p), "Shape of first element of data:", data[0].shape, "Shape of first element of mask:", p[0].shape)
-                #print("Some zipped item:", zip(tokenized_data, not_flat_mask, strict=True)[0])
-
-            # set some values of data to be 0.0, depending on the mask
-
-            source_data = []
-            for data, p in zip(tokenized_data, self.perm_sel, strict=True):
-                #print("Data shape before masking:", data.shape)
-                #print("First 20 values before masking:", data[0, 0, :20])
-                data[:, :, p[0, 0, :]] = 0.0
-                #print("Data shape after masking:", data.shape)
-                #print("First 20 values after masking:", data[0, 0, :20])
-                source_data.append(data)
-
-            #source_data = [data[:, :, ~p[0, 0, :]] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
-
-            #print("Shape of first element of tokenized_data:", tokenized_data[0].shape if tokenized_data else "No data")
-            #print("Shape of first element of source_data:", source_data[0].shape if source_data else "No data")
-
-            #print("I just computed the source_data for channel masking, it is a list of tensors.")
-
-            return source_data
 
         else:
             assert False, f"Unknown masking strategy: {self.masking_strategy}"
@@ -169,28 +114,8 @@ class Masker:
         split_indices = np.cumsum(token_lens)[:-1]
         self.perm_sel = np.split(flat_mask, split_indices)
 
-        #print("What is the type of perm_sel?", type(self.perm_sel))
-        #print("Length of perm_sel:", [len(self.perm_sel)])
-        #print("What is the shape of the first element of perm_sel?", self.perm_sel[0].shape)
-        #print("What is actually the first element of perm_sel?", self.perm_sel[0])
-
-        #print("What is the type of tokenized_data?", type(tokenized_data))
-        #print("Length of tokenized_data:", len(tokenized_data))
-        #print("What is the shape of the first element of tokenized_data?", tokenized_data[0].shape if tokenized_data else "No data")
-
         # Apply the mask to get the source data (where mask is False)
-        
-
-        
         source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
-
-        #print("***********************************")
-        #print([data.shape for data, p in zip(tokenized_data, self.perm_sel, strict=True)])
-        #print([p.shape for data, p in zip(tokenized_data, self.perm_sel, strict=True)])
-        #print("***********************************")
-
-        #print("Length of source_data:", len(source_data))
-        #print("Shape of first element of source_data:", source_data[0].shape if source_data else "No data")
 
         return source_data
 
@@ -229,79 +154,9 @@ class Masker:
 
         feature_dim = 6 + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
 
-        #print("What is the feature dimension?", feature_dim)
-
         processed_target_tokens = []
-
-        #print("Length of target_tokenized_data:", len(target_tokenized_data))
-        #print("Length of first element of target_tokenized_data:", len(target_tokenized_data[0]) if target_tokenized_data else "No data")
-        #print("Target tokenized data shape of first element:", target_tokenized_data[0][0].shape if target_tokenized_data else "No data")
-
-        if self.masking_strategy == "channel":
-
-            # If the masking strategy is channel, we need to handle the target tokens differently.
-            # We will apply the same channel mask to each tensor in target_tokenized_data.
-            for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
-                
-                #print("Length of cc:", len(cc))
-                #print("Length of pp:", len(pp))
-                #print("cc", cc)
-                #print("pp", pp)
-                # cc is a list containing one tensor
-                # pp is a list containing one tensor, which is a boolean mask for the channels
-                #print("Shape of c:", [c.shape for c in cc[0:10]])
-                #print("Shape of c:", [c for c in cc[0:10]])
-                #print("p shape:", [p.shape for p in pp[0:10]])
-                # assert that the first and second rows of pp are the same values                
-                #for p in pp:
-                #     assert all(p[0, :] == p[1, :]), "The first and second rows of pp must be the same values for channel masking."
-                #    assert all(p[0, :] == p[2, :]), "The first and third rows of pp must be the same values for channel masking."
-
-
-                # select the first 8 channels from each tensor in cc 
-                # actually, I don't think we want these first information channels for the target tokens?
-                
-                #first_8_channels = [c[:, :(6 + coords.shape[-1] + geoinfos.shape[-1])] for c in cc]
-                #print("Shape of first_8_channels:", first_8_channels[0].shape if first_8_channels else "No data")
-                #selected_tensors = [c[:, p[0, :]] for c, p in zip(cc, pp, strict=True)]
-                #print("Shape of selected_tensors:", [s.shape for s in selected_tensors[0:10]])
-
-
-                selected_tensors = []
-                for c, p in zip(cc, pp, strict=True):
-                    c[:, ~p[0, :]] = np.nan  # Set the channels that are not masked to NaN
-                    selected_tensors.append(c)
-
-
-                # concatenate first_8_channels and selected_tensors along the last dimension
-                #selected_tensors = [torch.cat((c, fc), dim=-1) for c, fc in zip(first_8_channels, selected_tensors, strict=True)]
-
-                #print("Shape of selected_tensors after concatenation:", [s.shape for s in selected_tensors[0:10]])
-
-                if selected_tensors:
-                    #print("Length of selected_tensors:", len(selected_tensors))
-                    #print("Shape of first element of selected_tensors:", [s.shape for s in selected_tensors[0:10]])
-                    processed_target_tokens.append(torch.cat(selected_tensors))
-                else:
-                    print("I SHOULD NOT BE HERE")
-                    processed_target_tokens.append(
-                        torch.empty(0, feature_dim, dtype=coords.dtype, device=coords.device)
-                    )
-
-            #print("Processed target tokens shape:", [t.shape for t in processed_target_tokens[0:10]])            
-            
-            return processed_target_tokens
-
-        
-        
         for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
-
-            #print("Shape of c:", [c.shape for c in cc[0:10]])
-            #print("p:", [p for p in pp[0:10]])
-
             selected_tensors = [c for c, p in zip(cc, pp, strict=True) if p]
-            #print("Length of selected_tensors:", len(selected_tensors))
-            #print("Shape of first element of selected_tensors:", [s.shape for s in selected_tensors[0:10]])
             if selected_tensors:
                 processed_target_tokens.append(torch.cat(selected_tensors))
             else:
@@ -309,8 +164,6 @@ class Masker:
                     torch.empty(0, feature_dim, dtype=coords.dtype, device=coords.device)
                 )
 
-        #print("Processed target tokens shape:", [t.shape for t in processed_target_tokens[0:10]])
-            
         return processed_target_tokens
 
     def _generate_healpix_mask(self, token_lens: list[int], rate: float) -> np.typing.NDArray:
@@ -385,72 +238,3 @@ class Masker:
         flat_mask = np.repeat(cell_mask, token_lens)
 
         return flat_mask
-
-    
-    def _generate_channel_mask(self, tokenized_data: list[torch.Tensor], rate: float) -> list[np.typing.NDArray]:
-        """
-        Generates a mask for each channel in the tokenized data based on the specified rate.
-
-        Args:
-            tokenized_data (list[torch.Tensor]): A list of tensors, where each tensor represents
-                                                 the tokens for a cell.
-            rate (float): The desired masking rate for each channel.
-
-        Returns:
-            list[np.ndarray]: A list of boolean arrays, where each array corresponds to a channel
-                              and indicates which tokens are masked.
-        """
-        
-        # Calculate the number of channels from the first tensor
-        num_channels = tokenized_data[0].shape[-1]
-
-        # Check if all tensors have the same number of channels
-        for t in tokenized_data:
-            if t.shape[-1] != num_channels:
-                assert False, (
-                    "All tensors in tokenized_data must have the same number of channels."
-                    f" Expected {num_channels}, but found {t.shape[-1]}."
-                )
-
-
-
-        #print(f"Number of channels in tokenized data: {num_channels}")
-        
-        # this should be something like 6 + coords.shape[-1] + geoinfos.shape[-1] ?
-        mask_count = int((num_channels - 8) * rate)
-
-        #print("What is the mask_count?", mask_count)
-        
-        #if mask_count == 0 and self.masking_ratio > 0: # Ensure at least one if ratio is > 0
-        #    mask_count = 1 if num_channels > 0 else 0
-
-        # Create a 1D boolean array for channels to mask (True means mask)
-        channel_mask_1d = np.zeros(num_channels, dtype=bool)
-        
-        # print("Channel mask 1d:", channel_mask_1d)
-        
-        # make sure the first 8 entries False, as they are not masked
-        # this should be something like 6 + coords.shape[-1] + geoinfos.shape[-1]
-        channel_mask_1d[:8] = False
-        # print("Channel mask 1d after setting first 8 entries to False:", channel_mask_1d)
-        
-        if mask_count > 0:
-            masked_channel_indices = np.random.choice(
-                    (num_channels-8), mask_count, replace=False
-                ) + 8  # Offset by 8 to skip the first 8 channels
-            # print("Masked channel indices:", masked_channel_indices)    
-
-            channel_mask_1d[masked_channel_indices] = True
-
-            # print("Channel mask 1d after masking:", channel_mask_1d)
-
-        
-        full_mask = channel_mask_1d[np.newaxis, np.newaxis, :]
-
-        # repeat the mask for each token_size in the tokenized data
-        # so the second axis needs shape token_size
-        full_mask = np.repeat(full_mask, tokenized_data[0].shape[1], axis=1)
-
-        #print("Shape of full_mask after repeating to try to extend to the right shape for token_size:", full_mask.shape)
-
-        return full_mask
