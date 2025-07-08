@@ -125,9 +125,11 @@ def locs_to_ctr_coords(ctrs_r3, locs: list) -> list:
     ## express each centroid in local coordinates w.r.t to healpix center
     #  by rotating center to origin
     local_locs = [
-        torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1)
-        if len(s) > 0
-        else torch.zeros([0, 3])
+        (
+            torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1)
+            if len(s) > 0
+            else torch.zeros([0, 3])
+        )
         for i, (R, s) in enumerate(zip(ctrs_Rs, locs, strict=False))
     ]
 
@@ -247,12 +249,14 @@ def get_target_coords_local(hlc, target_coords, geoinfo_offset):
 
     # target_coords_lens = [len(t) for t in target_coords]
     tcs = [
-        s2tor3(
-            torch.deg2rad(90.0 - t[..., geoinfo_offset].to(torch.float64)),
-            torch.deg2rad(180.0 + t[..., geoinfo_offset + 1].to(torch.float64)),
+        (
+            s2tor3(
+                torch.deg2rad(90.0 - t[..., geoinfo_offset].to(torch.float64)),
+                torch.deg2rad(180.0 + t[..., geoinfo_offset + 1].to(torch.float64)),
+            )
+            if len(t) > 0
+            else torch.tensor([])
         )
-        if len(t) > 0
-        else torch.tensor([])
         for t in target_coords
     ]
     target_coords = torch.cat(target_coords)
@@ -351,12 +355,14 @@ def get_target_coords_local_fast(hlc, target_coords, geoinfo_offset):
 
     # target_coords_lens = [len(t) for t in target_coords]
     tcs = [
-        s2tor3(
-            torch.deg2rad(90.0 - t[..., geoinfo_offset].to(torch.float64)),
-            torch.deg2rad(180.0 + t[..., geoinfo_offset + 1].to(torch.float64)),
+        (
+            s2tor3(
+                torch.deg2rad(90.0 - t[..., geoinfo_offset].to(torch.float64)),
+                torch.deg2rad(180.0 + t[..., geoinfo_offset + 1].to(torch.float64)),
+            )
+            if len(t) > 0
+            else torch.tensor([])
         )
-        if len(t) > 0
-        else torch.tensor([])
         for t in target_coords
     ]
     target_coords = torch.cat(target_coords)
@@ -448,12 +454,14 @@ def get_target_coords_local_ffast(
 
     # target_coords_lens = [len(t) for t in target_coords]
     tcs = [
-        s2tor3(
-            torch.deg2rad(90.0 - t[..., 0]),
-            torch.deg2rad(180.0 + t[..., 1]),
+        (
+            s2tor3(
+                torch.deg2rad(90.0 - t[..., 0]),
+                torch.deg2rad(180.0 + t[..., 1]),
+            )
+            if len(t) > 0
+            else torch.tensor([])
         )
-        if len(t) > 0
-        else torch.tensor([])
         for t in target_coords
     ]
     target_coords = torch.cat(target_coords)
