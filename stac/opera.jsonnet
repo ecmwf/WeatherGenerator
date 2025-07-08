@@ -19,7 +19,7 @@ local common = import 'common.jsonnet';
   providers: [
     common.providers.ecmwf_host,
   ],
-  processing_level: '1C',
+  processing_level: 'NA',
   
   variables: {
     names: ['mask', 'quality', 'tp'],
