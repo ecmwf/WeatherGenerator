@@ -37,6 +37,17 @@ def _is_distributed_initialized():
     return dist.is_available() and dist.is_initialized()
 
 def get_rank_from_config(config_path, default=0):
+    """
+    Attempts to determine the rank (i.e., the process ID in a parallel job)
+    by checking common environment variables used by various HPC schedulers.
+
+    Parameters:
+        config_path (str): Path to a JSON configuration file (not yet implemented).
+        default (int): Default rank value to return if no environment variable is found.
+
+    Returns:
+        int: The detected rank or the default value.
+    """
     # TODO read the json file
     # with open(config_path) as f:
     #     var_list = json.load(f)
@@ -54,6 +65,17 @@ def get_rank_from_config(config_path, default=0):
     return int(default)
 
 def get_size_from_config(config_path, default=1):
+    """
+    Attempts to determine the total number of processes (world size)
+    by checking common environment variables used by various HPC schedulers.
+
+    Parameters:
+        config_path (str): Path to a JSON configuration file (not yet implemented).
+        default (int): Default size value to return if no environment variable is found.
+
+    Returns:
+        int: The detected world size or the default value.
+    """
     # TODO read the json file
     # with open(config_path) as f:
     #    var_list = json.load(f)
