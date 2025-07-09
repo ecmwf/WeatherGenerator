@@ -12,6 +12,7 @@ Copyright (c) 2025, Sebastian Hoffmann
 # TODO: move the DDP code from trainer.py to this file
 
 import torch.distributed as dist
+import torch
 
 SYNC_TIMEOUT_SEC = 60 * 60  # 1 hour
 
@@ -33,3 +34,18 @@ def is_root(pg: dist.ProcessGroup | None = None) -> bool:
 
 def _is_distributed_initialized():
     return dist.is_available() and dist.is_initialized()
+
+
+def str_to_tensor(s: str, max_len: int, device="cpu") -> torch.Tensor:
+    """Encodes a string into a tensor of ASCII values, padded to max_len."""
+    ascii_vals = [ord(c) for c in s]
+    # Pad with 0 (null character)
+    padded_vals = ascii_vals + [0] * (max_len - len(ascii_vals))
+    return torch.tensor(padded_vals, dtype=torch.int32, device=device)
+
+
+def tensor_to_str(t: torch.Tensor) -> str:
+    """Decodes a tensor of ASCII values back to a string."""
+    # Filter out null padding characters
+    ascii_vals = [i for i in t.tolist() if i != 0]
+    return "".join([chr(c) for c in ascii_vals])

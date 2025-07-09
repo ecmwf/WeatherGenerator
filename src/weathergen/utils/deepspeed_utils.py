@@ -1,3 +1,12 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 import logging
 import os
 
@@ -5,10 +14,12 @@ import deepspeed
 import torch
 import torch.distributed as dist
 
+from weathergen.utils.distributed import tensor_to_str, str_to_tensor, is_root
+
 _logger = logging.getLogger(__name__)
 
 
-def setup_deepspeed_environment():
+def setup_deepspeed_environment(cf):
     """
     Sets up environment variables required for torch.distributed,
     especially in a Slurm environment.
@@ -53,6 +64,24 @@ def setup_deepspeed_environment():
         local_rank = int(os.environ["LOCAL_RANK"])
         torch.cuda.set_device(local_rank)
         _logger.info(f"Rank {dist.get_rank()} set to use CUDA device {local_rank}")
+
+    run_id_tensor = str_to_tensor(cf.run_id, max_len=128).to("cuda")  # Use a helper
+    dist.broadcast(run_id_tensor, src=0)
+    if not is_root():
+        cf.run_id = tensor_to_str(run_id_tensor)  # Use a helper
+    _logger.info(f"Rank {dist.get_rank()} synchronized run_id: {cf.run_id}")
+
+    # Broadcast RNG seed
+    if hasattr(cf, "data_loader_rng_seed") and cf.data_loader_rng_seed is not None:
+        seed_tensor = torch.tensor([cf.data_loader_rng_seed], dtype=torch.int32).to("cuda")
+        dist.broadcast(seed_tensor, src=0)
+        cf.data_loader_rng_seed = seed_tensor.item()
+
+    cf.rank = dist.get_rank()
+    cf.num_ranks = dist.get_world_size()
+    cf.with_ddp = True
+
+    return
 
 
 def get_deepspeed_config(

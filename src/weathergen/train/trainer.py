@@ -19,7 +19,7 @@ from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import MixedPrecision, ShardingStrategy
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy  # default_auto_wrap_policy,
-from deepspeed.utils import set_z3_leaf_modules
+from deepspeed.ops.adam import DeepSpeedCPUAdam
 
 from weathergen.model.engines import EnsPredictionHead
 import weathergen.train.loss as losses
@@ -67,13 +67,13 @@ class Trainer(Trainer_Base):
 
         if cf.with_deepspeed:
             # Set up DeepSpeed environment for Slurm
-            setup_deepspeed_environment()
+            setup_deepspeed_environment(cf)
+        else:
+            self.init_ddp(cf)
 
         # Get num_ranks of previous, to be continued run before
         # num_ranks gets overwritten by current setting during init_ddp()
         self.num_ranks_original = cf.get("num_ranks", None)
-
-        self.init_ddp(cf)
 
         # read configuration of data streams
         cf.streams = config.load_streams(Path(cf.streams_directory))
@@ -237,13 +237,25 @@ class Trainer(Trainer_Base):
         beta2 = 1.0 - kappa * (1.0 - 0.999)
         eps = 1e-08 / np.sqrt(kappa)
         # beta1, beta2, eps = 0.125, 0.125, 1e-08
-        self.optimizer = torch.optim.AdamW(
-            self.ddp_model.parameters(),
-            lr=cf.lr_start,
-            weight_decay=cf.weight_decay,
-            betas=(beta1, beta2),
-            eps=eps,
-        )
+
+        if cf.get("deepspeed_cpu_offload", False):
+            _logger.info("CPU offload is enabled, using DeepSpeedCPUAdam optimizer.")
+            self.optimizer = DeepSpeedCPUAdam(
+                self.ddp_model.parameters(),
+                lr=cf.lr_start,
+                weight_decay=cf.weight_decay,
+                betas=(beta1, beta2),
+                eps=eps,
+            )
+        else:
+            _logger.info("Using standard torch.optim.AdamW optimizer.")
+            self.optimizer = torch.optim.AdamW(
+                self.ddp_model.parameters(),
+                lr=cf.lr_start,
+                weight_decay=cf.weight_decay,
+                betas=(beta1, beta2),
+                eps=eps,
+            )
 
         # if with_fsdp then parameter count is unreliable
         if (self.cf.rank == 0 and not cf.with_fsdp) or not cf.with_ddp:
