@@ -9,7 +9,6 @@
 
 import logging
 import time
-from pathlib import Path
 
 import numpy as np
 import torch
@@ -18,8 +17,13 @@ import tqdm
 from deepspeed.ops.adam import DeepSpeedCPUAdam
 from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import MixedPrecision, ShardingStrategy
-from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy  # default_auto_wrap_policy,
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    MixedPrecision,
+    ShardingStrategy,
+)
+from torch.distributed.fsdp.wrap import (
+    size_based_auto_wrap_policy,  # default_auto_wrap_policy,
+)
 
 import weathergen.train.loss as losses
 import weathergen.utils.config as config
@@ -37,7 +41,7 @@ from weathergen.utils.deepspeed_utils import (
 )
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TRAIN, VAL, TrainLogger
-from weathergen.utils.validation_io import write_validation
+from weathergen.utils.validation_io import write_output
 
 _logger = logging.getLogger(__name__)
 
@@ -73,28 +77,22 @@ class Trainer(Trainer_Base):
         # Get num_ranks of previous, to be continued run before
         # num_ranks gets overwritten by current setting during init_ddp()
         self.num_ranks_original = cf.get("num_ranks", None)
-
-        # read configuration of data streams
         cf.streams = config.load_streams(Path(cf.streams_directory))
-
         # create output directory
-        cf.run_path = cf.run_path if hasattr(cf, "run_path") else "./results"
-        cf.model_path = cf.model_path if hasattr(cf, "model_path") else "./models"
-        path_run = Path(cf.run_path) / cf.run_id
-        path_model = Path(cf.model_path) / cf.run_id
         if self.cf.rank == 0:
-            path_run.mkdir(exist_ok=True, parents=True)
-            path_model.mkdir(exist_ok=True, parents=True)
-        self.path_run = path_run
+            config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
+            config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
         self.init_perf_monitoring()
-        self.train_logger = TrainLogger(cf, self.path_run)
+        self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
     ###########################################
     def inference(self, cf, run_id_trained, epoch):
         # general initalization
         self.init(cf)
 
+        # !! modifies config: adds config.streams[i].<stage>_source_channels
+        # and config.streams[i].<stage>_target_channels !!
         self.dataset_val = MultiStreamDataSampler(
             cf,
             cf.start_date_val,
@@ -434,7 +432,12 @@ class Trainer(Trainer_Base):
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):
             for i_obs, (target, target_coords, si) in enumerate(
-                zip(targets_rt[fstep], targets_coords_rt[fstep], self.cf.streams, strict=False)
+                zip(
+                    targets_rt[fstep],
+                    targets_coords_rt[fstep],
+                    self.cf.streams,
+                    strict=False,
+                )
             ):
                 pred = preds[fstep][i_obs]
 
@@ -697,11 +700,10 @@ class Trainer(Trainer_Base):
                             targets_lens,
                         ) = ret
                         sources = [[item.source_raw for item in b] for b in batch[0]]
-                        write_validation(
+                        write_output(
                             self.cf,
-                            self.path_run,
-                            self.cf.rank,
                             epoch,
+                            bidx,
                             sources,
                             preds_all,
                             targets_all,

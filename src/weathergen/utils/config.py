@@ -23,6 +23,7 @@ from weathergen.train.utils import get_run_id
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
 _DEFAULT_MODEL_PATH = "./models"
+_DEFAULT_RESULT_PATH = "./results"
 
 _logger = logging.getLogger(__name__)
 
@@ -319,6 +320,32 @@ def load_streams(streams_directory: Path) -> list[Config]:
             continue
 
     return list(streams.values())
+
+
+def set_paths(config: Config) -> Config:
+    """Set the configs run_path model_path attributes to default values if not present."""
+    config = config.copy()
+    config.run_path = config.get("run_path", None) or _DEFAULT_RESULT_PATH
+    config.model_path = config.get("model_path", None) or _DEFAULT_MODEL_PATH
+
+    return config
+
+
+def get_path_run(config: Config) -> Path:
+    """Get the current runs run_path for storing run results and logs."""
+    return Path(config.run_path) / config.run_id
+
+
+def get_path_model(config: Config) -> Path:
+    """Get the current runs model_path for storing model checkpoints."""
+    return Path(config.model_path) / config.run_id
+
+
+def get_path_output(config: Config, epoch: int) -> Path:
+    base_path = get_path_run(config)
+    fname = f"validation_epoch{epoch:05d}_rank{config.rank:04d}.zarr"
+
+    return base_path / fname
 
 
 def get_dtype(value: str) -> torch.dtype:
