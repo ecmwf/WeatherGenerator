@@ -11,7 +11,6 @@ import datetime
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import TypeAlias
 
 import numpy as np
 from numpy import datetime64, timedelta64
@@ -22,16 +21,16 @@ from weathergen.utils.better_abc import ABCMeta, abstract_attribute
 _logger = logging.getLogger(__name__)
 
 # The numpy date time 64 time (nanosecond precision)
-NPDT64: TypeAlias = datetime64
+type NPDT64 = datetime64
 # The numpy delta time 64 time (nanosecond precision)
-NPTDel64: TypeAlias = timedelta64
+type NPTDel64 = timedelta64
 
-DType: TypeAlias = np.float32  # The type for the data in the datasets.
+type DType = np.float32  # The type for the data in the datasets.
 
 """
 The type for indexing into datasets. It is a multiple of hours.
 """
-TIndex: TypeAlias = np.int64
+type TIndex = np.int64
 
 
 _DT_ZERO = np.datetime64("1850-01-01T00:00")
