@@ -8,7 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from dataclasses import dataclass
-from typing import List, Any
+from typing import List
 import json
 import logging
 import dask.array as da
@@ -68,27 +68,6 @@ def to_json(func):
     return wrapper
 
 
-def to_list(obj: Any) -> List:
-    """
-    Converts given object to list if obj is not already a list. Sets are also transformed to a list.
-
-    Parameters
-    ----------
-    obj : Any
-        Object to convert to list
-
-    Returns
-    ----------
-    list
-        List containing obj, or obj itself if obj was already a list
-    """
-    if isinstance(obj, (set, tuple)):
-        obj = list(obj)
-    elif not isinstance(obj, list):
-        obj = [obj]
-    return obj
-
-
 @dataclass(frozen=True)
 class VerifiedData:
     prediction: xr.DataArray
@@ -113,6 +92,44 @@ class VerifiedData:
             xr.broadcast(self.prediction, self.ground_truth)
         except ValueError as e:
             raise ValueError(f"Forecast and truth are not broadcastable: {e}")
+        
+
+def get_score(data: VerifiedData, score_name: str, agg_dims: str | List[str] = "all",
+              ens_dim: str = "ens", compute: bool = False, **kwargs) -> xr.DataArray:
+    """
+    Get the score for the given data and score name.
+    Note that the scores are aggregated over all dimensions of the prediction data by default.
+
+    Parameters
+    ----------
+    data : VerifiedData
+        VerifiedData object containing prediction and ground truth data.
+    score_name : str
+        Name of the score to calculate.
+    agg_dims : str | List[str]
+        List of dimension names over which the score will be aggregated (most often averaged).
+        If set to 'all', aggregation will be performed over all dimensions of the forecast data.
+    ens_dim : str
+        Name of the ensemble dimension in the forecast data. Only used for probabilistic scores.
+    compute : bool
+        If True, the score will be computed immediately. If False, the score will be returned
+        as a lazy xarray DataArray, which allows for efficient graph construction and execution
+    kwargs : dict
+        Additional keyword arguments to pass to the score function.
+
+    Returns
+    -------
+    xr.DataArray
+        Calculated score as an xarray DataArray.
+    """
+    sc = Scores(agg_dims=agg_dims, ens_dim=ens_dim)
+
+    score_data = sc.get_score(data, score_name, **kwargs)
+    if compute:
+        # If compute is True, compute the score immediately
+        return score_data.compute()
+
+    return score_data
 
 
 # scores class
@@ -138,8 +155,8 @@ class Scores:
         Returns
         -------
         """
-        self._agg_dims_in = agg_dims
-        self._ens_dim = ens_dim
+        self._agg_dims_in = self._validate_agg_dims(agg_dims)
+        self._ens_dim = self._validate_ens_dim(ens_dim)
 
         self.det_metrics_dict = {
             "ets": self.calc_ets,
@@ -164,7 +181,7 @@ class Scores:
             "spread": self.calc_spread,
         }
 
-    def __call__(self, data: VerifiedData, score_name: str, **kwargs):
+    def get_score(self, data: VerifiedData, score_name: str, compute: bool = False, **kwargs):
         """
         Calculate the score for the given data and score name.
 
@@ -186,6 +203,9 @@ class Scores:
             VerifiedData object containing prediction and ground truth data.
         score_name : str
             Name of the score to calculate.
+        compute : bool
+            If True, the score will be computed immediately. If False, the score will be returned
+            as a lazy xarray DataArray, which allows for efficient graph construction and execution.
         kwargs : dict
             Additional keyword arguments to pass to the score function.
 
@@ -235,30 +255,19 @@ class Scores:
 
         return result
 
-    @property
-    def agg_dims_in(self):
-        return self._agg_dims_in
-
-    @agg_dims_in.setter
-    def agg_dims(self, dims):
+    def _validate_agg_dims(self, dims):
         if dims == "all":
-            self._agg_dims_in = dims
-        else:
-            agg_dims = to_list(dims)
-            assert all([isinstance(dim) for dim in dims]), (
-                "All elements of the agg_dims must be strings."
-            )
+            return dims
+        if isinstance(dims, str):
+            return [dims]
+        if isinstance(dims, list) and all(isinstance(d, str) for d in dims):
+            return dims
+        raise ValueError("agg_dims must be 'all', a string, or list of strings.")
 
-            self._agg_dims_in = agg_dims
-
-    @property
-    def ens_dim(self):
-        return self._ens_dim
-
-    @ens_dim.setter
-    def ens_dim(self, ens_dim):
-        assert isinstance(ens_dim, str), "ens_dim must be a string."
-        self._ens_dim = ens_dim
+    def _validate_ens_dim(self, dim):
+        if not isinstance(dim, str):
+            raise ValueError("ens_dim must be a string.")
+        return dim   
 
     def _sum(self, data: xr.DataArray) -> xr.DataArray:
         """
