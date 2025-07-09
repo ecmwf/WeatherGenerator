@@ -1,3 +1,5 @@
+# ruff: noqa: T201
+
 #!/usr/bin/env -S uv run
 # /// script
 # dependencies = [ "BeautifulSoup4", "requests"
