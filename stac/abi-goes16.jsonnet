@@ -76,7 +76,7 @@ local common = import 'common.jsonnet';
 	]	
   },
 
-  geometry: [-81, 15, 81, 135],
+  geometry: [-165, -60, -15, 60],
 
   dataset: {
     dataset_name: 'RP_ABI-L1b-RadF-M6C*_G16_s*_e*_c*.nc',
