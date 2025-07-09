@@ -20,9 +20,9 @@ local metopb = import 'metopb.jsonnet';
 local fy3a = import 'fy3a.jsonnet';
 local fy3b = import 'fy3b.jsonnet';
 local fy3c = import 'fy3c.jsonnet';
+local goes16 = import 'abi-goes16.jsonnet';
 
-
-local datasets = [era5v8, opera, cerra, seviri, imerg, nppatms, synop, metopa, metopb, fy3a, fy3b, fy3c];
+local datasets = [era5v8, opera, cerra, seviri, imerg, nppatms, synop, metopa, metopb, fy3a, fy3b, fy3c, goes16];
 
 local check = fn.check_unique_ids(datasets);
 

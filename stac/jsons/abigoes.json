@@ -1,0 +1,486 @@
+{
+   "assets": {
+      "RP_ABI-L1b-RadF-M6C*_G16_s*_e*_c*.nc": {
+         "description": "Observation dataset",
+         "href": "RP_ABI-L1b-RadF-M6C*_G16_s*_e*_c*.nc",
+         "inodes": "5.426.532",
+         "locations": [
+            "hpc2020"
+         ],
+         "roles": [
+            "data"
+         ],
+         "size": "230.8 TB",
+         "title": "RP_ABI-L1b-RadF-M6C*_G16_s*_e*_c*.nc",
+         "type": "application/vnd+netcdf"
+      }
+   },
+   "bbox": [
+      81,
+      135,
+      81,
+      15
+   ],
+   "geometry": {
+      "coordinates": [
+         [
+            [
+               81,
+               135
+            ],
+            [
+               81,
+               15
+            ],
+            [
+               81,
+               15
+            ],
+            [
+               81,
+               135
+            ],
+            [
+               81,
+               135
+            ]
+         ]
+      ],
+      "type": "Polygon"
+   },
+   "id": "weathergen.atmo.ABI-GOES16",
+   "properties": {
+      "description": "The Advanced Baseline Imager (ABI) on GOES16 (Geostationary Operational Environmental Satellite 16) provides high-resolution, multispectral imagery for real-time weather monitoring and forecasting. GOES-16 is also called GOES-East as it covers the Eastern side of the Americas.",
+      "end_datetime": "2024-12-31 23:50:20",
+      "fixed_timesteps": "True",
+      "frequency": "10min",
+      "keywords": [
+         "atmosphere",
+         "observation",
+         "geostationary",
+         "satellite"
+      ],
+      "name": "ABI-GOES16",
+      "processing_level": "Operational L1b",
+      "providers": [
+         {
+            "name": "NASA",
+            "roles": [
+               "provider"
+            ],
+            "url": "https://www.nasa.gov"
+         },
+         {
+            "name": "NASA",
+            "roles": [
+               "processor"
+            ],
+            "url": "https://www.nasa.gov"
+         }
+      ],
+      "start_datetime": "2017-12-17T00:00:41",
+      "title": "ABI-GOES16",
+      "unique_id": "13",
+      "variables": {
+         "DQF": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "Rad": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "a_h_NRTH": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "algorithm_dynamic_input_data_container": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "algorithm_product_version_container": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "b_h_NRTH": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "band_id": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "band_wavelength": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "band_wavelength_star_look": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "earth_sun_distance_anomaly_in_AU": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "esun": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "focal_plane_temperature_threshold_decreasing": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "focal_plane_temperature_threshold_exceeded_count": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "focal_plane_temperature_threshold_increasing": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "geospatial_lat_lon_extent": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "goes_imager_projection": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "kappa0": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "max_radiance_value_of_valid_pixels": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "maximum_focal_plane_temperature": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "mean_radiance_value_of_valid_pixels": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "min_radiance_value_of_valid_pixels": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "missing_pixel_count": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "nominal_satellite_height": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "nominal_satellite_subpoint_lat": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "nominal_satellite_subpoint_lon": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "percent_uncorrectable_L0_errors": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "planck_bc1": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "planck_bc2": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "planck_fk1": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "planck_fk2": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "processing_parm_version_container": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "reprocessing_version": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "saturated_pixel_count": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "star_id": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "std_dev_radiance_value_of_valid_pixels": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "t": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "t_star_look": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "time_bounds": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "time_bounds_rows": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "time_bounds_swaths": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "undersaturated_pixel_count": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "valid_pixel_count": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "x": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "x_image": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "x_image_bounds": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "y": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "y_image": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "y_image_bounds": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         },
+         "yaw_flip_flag": {
+            "max": "NA",
+            "mean": "NA",
+            "min": "NA",
+            "std": "NA",
+            "tendency_mean": "NA",
+            "tendency_std": "NA"
+         }
+      }
+   },
+   "stac_extensions": [
+      "https://stac-extensions.github.io/datacube/v2.2.0/schema.json",
+      "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json",
+      "https://stac-extensions.github.io/xarray-assets/v1.0.0/schema.json"
+   ],
+   "stac_version": "1.0.0",
+   "type": "Feature"
+}

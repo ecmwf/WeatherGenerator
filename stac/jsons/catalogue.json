@@ -84,6 +84,12 @@
          "rel": "child",
          "title": "FY-3C, MWHS",
          "type": "application/json"
+      },
+      {
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/shmh40/dev/stac_test/stac/jsons/abigoes.json",
+         "rel": "child",
+         "title": "ABI-GOES16",
+         "type": "application/json"
       }
    ],
    "stac_extensions": [
