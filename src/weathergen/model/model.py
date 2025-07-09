@@ -579,7 +579,7 @@ class Model(torch.nn.Module):
 
             ## embed token coords, concatenating along batch dimension
             # (which is taking care of through the varlen attention)
-            with torch.amp.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16):
+            with torch.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16):
                 chunks = []
                 for i_b in range(len(streams_data)):
                     if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1:

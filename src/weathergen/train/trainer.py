@@ -9,6 +9,7 @@
 
 import logging
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -669,14 +670,9 @@ class Trainer(Trainer_Base):
                     stddev_all = torch.zeros(len(cf.streams)) * torch.nan
 
                     # evaluate model
-                    with torch.autocast(
-                        device_type="cuda",
-                        dtype=self.mixed_precision_dtype,
-                        enabled=cf.with_mixed_precision,
-                    ):
-                        preds = self.ddp_model(
-                            self.model_params, batch, cf.forecast_offset, forecast_steps
-                        )
+                    preds = self.ddp_model(
+                        self.model_params, batch, cf.forecast_offset, forecast_steps
+                    )
 
                     # compute loss and log output
                     if bidx < cf.log_validation:
