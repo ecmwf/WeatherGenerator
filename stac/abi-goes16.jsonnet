@@ -24,8 +24,8 @@ local common = import 'common.jsonnet';
 
   variables: {
     names: [
-        'time_bounds_swaths',
-        'time_bounds_rows',
+    'time_bounds_swaths',
+    'time_bounds_rows',
 	'a_h_NRTH',
 	'b_h_NRTH',
 	'Rad',
@@ -76,7 +76,7 @@ local common = import 'common.jsonnet';
 	]	
   },
 
-  geometry: [-165, -60, -15, 60],
+  geometry: [-156, -81, 6, 81],
 
   dataset: {
     dataset_name: 'RP_ABI-L1b-RadF-M6C*_G16_s*_e*_c*.nc',
