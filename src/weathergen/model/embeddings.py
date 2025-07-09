@@ -143,7 +143,7 @@ class StreamEmbedTransformer(torch.nn.Module):
     def forward_channels(self, x_in, centroids):
         peh = positional_encoding_harmonic
 
-        with torch.amp.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16):
+        with torch.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16):
             # embed provided input data
             x = peh(self.embed(x_in.transpose(-2, -1)))
 
@@ -176,7 +176,7 @@ class StreamEmbedTransformer(torch.nn.Module):
 
     def forward_columns(self, x_in, centroids):
         # embed provided input data
-        with torch.amp.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16):
+        with torch.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16):
             x = positional_encoding_harmonic(self.embed(x_in))
 
             for layer in self.layers:

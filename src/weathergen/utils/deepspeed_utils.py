@@ -14,7 +14,7 @@ import deepspeed
 import torch
 import torch.distributed as dist
 
-from weathergen.utils.distributed import tensor_to_str, str_to_tensor, is_root
+from weathergen.utils.distributed import is_root, str_to_tensor, tensor_to_str
 
 _logger = logging.getLogger(__name__)
 

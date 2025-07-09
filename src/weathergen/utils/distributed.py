@@ -11,8 +11,8 @@ Copyright (c) 2025, Sebastian Hoffmann
 # TODO: copy other utilities from dmlcloud such as root_wrap etc.
 # TODO: move the DDP code from trainer.py to this file
 
-import torch.distributed as dist
 import torch
+import torch.distributed as dist
 
 SYNC_TIMEOUT_SEC = 60 * 60  # 1 hour
 
