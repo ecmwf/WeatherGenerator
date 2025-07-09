@@ -16,8 +16,13 @@ import torch.utils.data.distributed
 import tqdm
 from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import MixedPrecision, ShardingStrategy
-from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy  # default_auto_wrap_policy,
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    MixedPrecision,
+    ShardingStrategy,
+)
+from torch.distributed.fsdp.wrap import (
+    size_based_auto_wrap_policy,  # default_auto_wrap_policy,
+)
 
 import weathergen.train.loss as losses
 import weathergen.utils.config as config
@@ -377,7 +382,12 @@ class Trainer(Trainer_Base):
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):
             for i_obs, (target, target_coords, si) in enumerate(
-                zip(targets_rt[fstep], targets_coords_rt[fstep], self.cf.streams, strict=False)
+                zip(
+                    targets_rt[fstep],
+                    targets_coords_rt[fstep],
+                    self.cf.streams,
+                    strict=False,
+                )
             ):
                 pred = preds[fstep][i_obs]
 
