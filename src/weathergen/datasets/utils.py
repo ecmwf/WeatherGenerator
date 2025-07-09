@@ -67,7 +67,7 @@ def s2tor3(lats, lons):
 
 
 ####################################################################################################
-def r3tos2(pos):
+def r3tos2_old(pos):
     """
     Convert from spherical to Cartesion R^3 coordinates
 
@@ -81,12 +81,13 @@ def r3tos2(pos):
     out = torch.stack([lats, lons])
     return out.permute([*list(torch.arange(len(out.shape))[:-1] + 1), 0])
 
-def r3tos2_optimized(pos):
+@torch.compile(fullgraph=True)
+def r3tos2(pos):
     """
     Convert from Cartesian R^3 coordinates to spherical coordinates (lat, lon).
     Assumes last dimension of `pos` is 3: [x, y, z]
     """
-    pos.cuda()
+    #pos.cuda()
     x = pos[..., 0]
     y = pos[..., 1]
     z = pos[..., 2]
@@ -98,7 +99,7 @@ def r3tos2_optimized(pos):
     result = torch.empty((*lat.shape, 2), dtype=pos.dtype, device=pos.device)
     result[..., 0] = lat
     result[..., 1] = lon
-    return result.cpu
+    return result
 
 
 ####################################################################################################

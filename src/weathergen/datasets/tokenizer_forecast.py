@@ -28,7 +28,6 @@ from weathergen.datasets.utils import (
     healpix_verts_rots,
     locs_to_cell_coords_ctrs,
     r3tos2,
-    r3tos2_optimized,
 )
 from weathergen.utils.logger import init_loggers
 
@@ -202,7 +201,7 @@ class TokenizerForecast:
                 source_means = torch.cat(source_means)
                 # TODO: precompute also source_means_r3 and then just cat
                 source_centroids = torch.cat(
-                    [source_means.to(torch.float32), r3tos2_optimized(source_means).to(torch.float32)], -1
+                    [source_means.to(torch.float32), r3tos2(source_means).to(torch.float32)], -1
                 )
                 source_centroids = torch.split(source_centroids, source_means_lens)
 
