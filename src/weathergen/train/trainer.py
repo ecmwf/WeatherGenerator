@@ -524,13 +524,9 @@ class Trainer(Trainer_Base):
 
             # evaluate model
             with torch.autocast(
-<<<<<<< HEAD
                 device_type="cuda",
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
-=======
-                device_type="cuda", dtype=self.mixed_precision_dtype, enabled=cf.with_mixed_precision
->>>>>>> d1ed02e (Make the attention dtype and norm eps configurable)
             ):
                 preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
 

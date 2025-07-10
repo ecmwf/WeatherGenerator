@@ -84,7 +84,7 @@ masking_rate_sampling: True
 # sample a subset of all target points, useful e.g. to reduce memory requirements
 # include a masking strategy here, currently only supporting "random" and "block"
 masking_strategy: "random"
-sampling_rate_target: 0.25
+sampling_rate_target: 0.4
 
 num_epochs: 24
 samples_per_epoch: 4096
