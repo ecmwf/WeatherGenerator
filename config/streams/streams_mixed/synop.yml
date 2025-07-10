@@ -3,7 +3,7 @@
 # 1 : geostationay satellites
 # 2 : conventional observations
 
-Surface Combined :
+SurfaceCombined :
   type : obs
   filenames : ['observations-ea-ofb-0001-1979-2023-combined-surface-v2.zarr']
   loss_weight : 1.0

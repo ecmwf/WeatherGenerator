@@ -11,7 +11,6 @@ import datetime
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import TypeAlias
 
 import numpy as np
 from numpy import datetime64, timedelta64
@@ -22,16 +21,16 @@ from weathergen.utils.better_abc import ABCMeta, abstract_attribute
 _logger = logging.getLogger(__name__)
 
 # The numpy date time 64 time (nanosecond precision)
-NPDT64: TypeAlias = datetime64
+type NPDT64 = datetime64
 # The numpy delta time 64 time (nanosecond precision)
-NPTDel64: TypeAlias = timedelta64
+type NPTDel64 = timedelta64
 
-DType: TypeAlias = np.float32  # The type for the data in the datasets.
+type DType = np.float32  # The type for the data in the datasets.
 
 """
 The type for indexing into datasets. It is a multiple of hours.
 """
-TIndex: TypeAlias = np.int32
+type TIndex = np.int64
 
 
 _DT_ZERO = np.datetime64("1850-01-01T00:00")
@@ -136,8 +135,8 @@ class TimeWindowHandler:
             start and end of temporal window
         """
 
-        idx_start: TIndex = np.int32(0)
-        idx_end = np.int32((self.t_end - self.t_start) // self.t_window_step)
+        idx_start: TIndex = np.int64(0)
+        idx_end = np.int64((self.t_end - self.t_start) // self.t_window_step)
         assert idx_start <= idx_end, f"time window idxs invalid: {idx_start} <= {idx_end}"
 
         return TimeIndexRange(idx_start, idx_end)
@@ -596,7 +595,7 @@ class DataReaderTimestep(DataReaderBase):
         self.data_end_time = data_end_time
         self.period = period
 
-    def _get_dataset_idxs(self, idx: TIndex) -> tuple[NDArray[np.int32], DTRange]:
+    def _get_dataset_idxs(self, idx: TIndex) -> tuple[NDArray[np.int64], DTRange]:
         """
         Get dataset indexes for a given time window index.
 
@@ -607,7 +606,7 @@ class DataReaderTimestep(DataReaderBase):
 
         Returns
         -------
-        NDArray[np.int32]
+        NDArray[np.int64]
             Array of dataset indexes corresponding to the time window.
         """
         return get_dataset_indexes_timestep(
@@ -631,7 +630,7 @@ def get_dataset_indexes_timestep(
     period: NPTDel64,
     idx: TIndex,
     tw_handler: TimeWindowHandler,
-) -> tuple[NDArray[np.int32], DTRange]:
+) -> tuple[NDArray[np.int64], DTRange]:
     """
     Get dataset indexes for a given time window index, when the dataset is periodic.
 
@@ -651,7 +650,7 @@ def get_dataset_indexes_timestep(
 
     Returns
     -------
-    NDArray[np.int32]
+    NDArray[np.int64]
         Array of dataset indexes corresponding to the time window.
     """
 
@@ -663,11 +662,11 @@ def get_dataset_indexes_timestep(
         or not data_end_time
         or dtr.end < data_start_time
         or dtr.start > data_end_time
-        or dtr.start < data_start_time
-        or dtr.end > data_end_time
+        or (dtr.start + period) < data_start_time
+        or (dtr.end - period) > data_end_time
         or (data_end_time is not None and dtr.start > data_end_time)
     ):
-        return (np.array([], dtype=np.int32), dtr)
+        return (np.array([], dtype=np.int64), dtr)
 
     # relative time in dataset
     delta_t_start = dtr.start - data_start_time
@@ -680,9 +679,9 @@ def get_dataset_indexes_timestep(
     if (delta_t_start % period) > np.timedelta64(0, "s"):
         # empty window in between two timesteps
         if start_didx == end_didx:
-            return (np.array([], dtype=np.int32), dtr)
+            return (np.array([], dtype=np.int64), dtr)
         start_didx += 1
 
     end_didx = start_didx + int((dtr.end - dtr.start - t_epsilon) / period)
 
-    return (np.arange(start_didx, end_didx + 1, dtype=np.int32), dtr)
+    return (np.arange(start_didx, end_didx + 1, dtype=np.int64), dtr)

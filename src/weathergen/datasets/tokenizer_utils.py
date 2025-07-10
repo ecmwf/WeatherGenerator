@@ -206,23 +206,25 @@ def tokenize_window_space(
     # reorder based on cells (except for coords_local) and then cat along
     # (time,coords,geoinfos,source) dimension and then split based on cells
     tokens_cells = [
-        list(
-            torch.split(
-                torch.cat(
-                    (
-                        torch.full([len(idxs), 1], stream_id, dtype=torch.float32),
-                        times_enc_padded[idxs],
-                        coords_local[i],
-                        geoinfos_padded[idxs],
-                        source_padded[idxs],
+        (
+            list(
+                torch.split(
+                    torch.cat(
+                        (
+                            torch.full([len(idxs), 1], stream_id, dtype=torch.float32),
+                            times_enc_padded[idxs],
+                            coords_local[i],
+                            geoinfos_padded[idxs],
+                            source_padded[idxs],
+                        ),
+                        1,
                     ),
-                    1,
-                ),
-                idxs_lens,
+                    idxs_lens,
+                )
             )
+            if idxs_lens[0] > 0
+            else []
         )
-        if idxs_lens[0] > 0
-        else []
         for i, (idxs, idxs_lens) in enumerate(zip(idxs_ord, idxs_ord_lens, strict=True))
     ]
 
