@@ -87,7 +87,9 @@ select = [
     # isort
     "I",
     # Banned imports
-    "TID"
+    "TID",
+    # Naming conventions
+    "N"
 ]
 
 # These rules are sensible and should be enabled at a later stage.
@@ -100,7 +102,9 @@ ignore = [
   "SIM102",
   "SIM401",
   # To ignore, not relevant for us
-  "SIM108" # in case additional norm layer supports are added in future  
+  "SIM108", # in case additional norm layer supports are added in future
+  "N817", # we use heavy acronyms
+  #"N806",
 ]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
