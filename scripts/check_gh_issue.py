@@ -6,6 +6,8 @@
 # exclude-newer = "2025-01-01T00:00:00Z"
 # ///
 
+# ruff: noqa: T201
+
 """
 Checks that a pull request has a corresponding GitHub issue.
 
