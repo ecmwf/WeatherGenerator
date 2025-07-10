@@ -197,13 +197,9 @@ class Trainer(Trainer_Base):
             mp = (
                 None
                 if not cf.with_mixed_precision
-<<<<<<< HEAD
                 else MixedPrecision(
                     param_dtype=self.mixed_precision_dtype, cast_forward_inputs=True
                 )
-=======
-                else MixedPrecision(param_dtype=self.mixed_precision_dtype, cast_forward_inputs=True)
->>>>>>> d1ed02e (Make the attention dtype and norm eps configurable)
             )
             mp = None
             self.ddp_model = FSDP(
@@ -213,6 +209,7 @@ class Trainer(Trainer_Base):
                 cpu_offload=None,
                 sync_module_states=(run_id_contd is not None),
                 mixed_precision=mp,
+                use_orig_params=True,
             )
 
         self.model_params = ModelParams().create(cf).to("cuda")
