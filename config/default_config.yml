@@ -118,6 +118,7 @@ val_initial: False
 
 loader_num_workers: 8
 log_validation: 0
+analysis_streams_output: ["ERA5"]
 
 istep: 0
 run_history: []
@@ -130,4 +131,3 @@ run_id: ???
 train_log:
   # The period to log metrics (in number of batch steps)
   log_interval: 20
-
