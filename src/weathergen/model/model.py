@@ -467,7 +467,9 @@ class Model(torch.nn.Module):
 
     #########################################
     def assimilate_local(self, model_params, tokens, cell_lens):
-        batch_size = self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
+        batch_size = (
+            self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
+        )
 
         s = self.q_cells.shape
         # print( f'{np.prod(np.array(tokens.shape))} :: {np.prod(np.array(s))}'
@@ -565,7 +567,9 @@ class Model(torch.nn.Module):
     #########################################
     def predict(self, model_params, fstep, tokens, streams_data, target_coords_idxs):
         # fp32, i32 = torch.float32, torch.int32
-        batch_size = self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
+        batch_size = (
+            self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
+        )
 
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
         tokens_stream = (tokens.reshape(s) + model_params.pe_global).flatten(0, 1)
