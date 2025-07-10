@@ -26,7 +26,7 @@ try:
     from xhistogram.xarray import histogram
 except Exception:
     _logger.warning(
-        "Could not import xskillscore and xhistogram. Thus, CRPS and"
+        "Could not import xskillscore and xhistogram. Thus, CRPS and "
         + "rank histogram-calculations are not supported."
     )
 

@@ -8,6 +8,7 @@
 # weathergen-evaluate = { path = "../../../../../packages/evaluate" }
 # ///
 
+import sys
 import argparse
 import json
 import logging
@@ -20,11 +21,18 @@ import xarray as xr
 from weathergen.common.io import ZarrIO
 from weathergen.evaluate.score import VerifiedData, get_score
 
+handler = logging.StreamHandler(sys.stdout)
+formatter = logging.Formatter('%(asctime)s - %(funcName)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+
 _logger = logging.getLogger(__name__)
+_logger.setLevel(logging.INFO)
+_logger.addHandler(handler)
+_logger.propagate = False  # Prevent double logging if root logger also logs
 
 _REPO_ROOT = Path(
     __file__
-).parent.parent.parent.parent.parent  # TODO use importlib for resources
+).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_RESULT_PATH = _REPO_ROOT / "results"
 
 
@@ -93,11 +101,10 @@ def calc_scores_per_stream(
         },
     )
 
-    print(f"Processing stream {stream}...")
     for fstep in forecast_steps:
         targets, preds = [], []
         _logger.info(f"Processing forecast_step {fstep} of stream {stream}...")
-        for sample in sorted(samples)[0:10]:
+        for sample in sorted(samples):
             out = zio.get_data(sample, stream, fstep)
             targets.append(out.target.as_xarray().squeeze())
             preds.append(out.prediction.as_xarray().squeeze())
