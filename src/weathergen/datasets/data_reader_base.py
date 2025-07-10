@@ -77,15 +77,15 @@ def str_to_datetime64(s: str | int | NPDT64) -> NPDT64:
 def str_to_timedelta(s: str | datetime.timedelta) -> datetime.timedelta:
     """
     Convert a string to a timedelta object.
-    The format is expected to be "HH:MM:SS".
+    The format is expected to be "D-HH:MM:SS".
     """
 
     if isinstance(s, datetime.timedelta):
         return s
-    format_str = "%H:%M:%S"
+    format_str = "%d-%H:%M:%S"
     assert isinstance(s, str), type(s)
     t = datetime.datetime.strptime(s, format_str)
-    return datetime.timedelta(hours=t.hour, minutes=t.minute, seconds=t.second)
+    return datetime.timedelta(days=t.day, hours=t.hour, minutes=t.minute, seconds=t.second)
 
 
 class TimeWindowHandler:
