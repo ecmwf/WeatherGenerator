@@ -1,0 +1,6 @@
+# masking
+train : 
+  plot :
+    g6s5lwq2:
+      slurm_id: 0
+      description: "24 epoch strat"

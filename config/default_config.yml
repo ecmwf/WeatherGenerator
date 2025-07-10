@@ -111,8 +111,8 @@ start_date: 197901010000
 end_date: 202012310000
 start_date_val: 202101010000
 end_date_val: 202201010000
-len_hrs: 24
-step_hrs: 24
+len_hrs: 24 # Length of the input/output window in hours, interval open on the right (e.g. 24 means 0-23 for hourly data)
+step_hrs: 24 # Step size in hours for the input/output window (e.g. 12 means 0-len_hrs or 12-len_hrs+12)
 input_window_steps: 1
 
 val_initial: False
