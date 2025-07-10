@@ -7,18 +7,17 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from dataclasses import dataclass
-from typing import List
-import json
+import inspect
 import logging
+from dataclasses import dataclass
+from typing import Any
+
 import dask.array as da
 import numpy as np
 import pandas as pd
-import inspect
 import xarray as xr
-import numpy as np
 
-#from common.io import MockIO
+# from common.io import MockIO
 
 _logger = logging.getLogger(__name__)
 
@@ -31,6 +30,24 @@ except Exception:
         + "rank histogram-calculations are not supported."
     )
 
+def to_list(obj: Any) -> list:
+    """
+    Convert given object to list if obj is not already a list. Sets are also transformed to a list.
+
+    Parameters
+    ----------
+    obj : Any
+        The object to transform into a list.
+    Returns
+    -------
+    list
+        A list containing the object, or the object itself if it was already a list.
+    """
+    if isinstance(obj, set | tuple):
+        obj = list(obj)
+    elif not isinstance(obj, list):
+        obj = [obj]
+    return obj
 
 # helper function to calculate skill score
 def _get_skill_score(
@@ -83,11 +100,17 @@ class VerifiedData:
             # Attempt broadcast
             xr.broadcast(self.prediction, self.ground_truth)
         except ValueError as e:
-            raise ValueError(f"Forecast and truth are not broadcastable: {e}")
-        
+            raise ValueError(f"Forecast and truth are not broadcastable: {e}") from e
 
-def get_score(data: VerifiedData, score_name: str, agg_dims: str | List[str] = "all",
-              ens_dim: str = "ens", compute: bool = False, **kwargs) -> xr.DataArray:
+
+def get_score(
+    data: VerifiedData,
+    score_name: str,
+    agg_dims: str | list[str] = "all",
+    ens_dim: str = "ens",
+    compute: bool = False,
+    **kwargs,
+) -> xr.DataArray:
     """
     Get the score for the given data and score name.
     Note that the scores are aggregated over all dimensions of the prediction data by default.
@@ -132,7 +155,7 @@ class Scores:
 
     def __init__(
         self,
-        agg_dims: str | List[str] = "all",
+        agg_dims: str | list[str] = "all",
         ens_dim: str = "ens",
     ):
         """
@@ -161,7 +184,6 @@ class Scores:
             "rmse": self.calc_rmse,
             "bias": self.calc_bias,
             "acc": self.calc_acc,
-            "bias": self.calc_bias,
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
@@ -173,7 +195,9 @@ class Scores:
             "spread": self.calc_spread,
         }
 
-    def get_score(self, data: VerifiedData, score_name: str, compute: bool = False, **kwargs):
+    def get_score(
+        self, data: VerifiedData, score_name: str, compute: bool = False, **kwargs
+    ):
         """
         Calculate the score for the given data and score name.
 
@@ -245,7 +269,11 @@ class Scores:
         # Call lazy evaluation function
         result = f(**args)
 
-        return result
+        if compute:
+            return result.compute()
+        else:
+            # Return lazy evaluation result
+            return result
 
     def _validate_agg_dims(self, dims):
         if dims == "all":
@@ -259,7 +287,7 @@ class Scores:
     def _validate_ens_dim(self, dim):
         if not isinstance(dim, str):
             raise ValueError("ens_dim must be a string.")
-        return dim   
+        return dim
 
     def _sum(self, data: xr.DataArray) -> xr.DataArray:
         """
@@ -340,7 +368,7 @@ class Scores:
 
         return pss
 
-    def calc_l1(self, p: xr.DataArray, gt: xr.DataArray, scale_dims: List = None):
+    def calc_l1(self, p: xr.DataArray, gt: xr.DataArray, scale_dims: list = None):
         """
         Calculate the L1 error norm of forecast data w.r.t. reference data.
         Note that the L1 error norm is calculated as the sum of absolute differences.
@@ -348,34 +376,34 @@ class Scores:
         """
         l1 = self._sum(np.abs(p - gt))
 
-        if _scale_dims:
-            _scale_dims = to_list(scale_dims)
+        if scale_dims:
+            scale_dims = to_list(scale_dims)
 
-            assert all([dim in p.dims for dim in _scale_dims]), (
-                f"Provided scale dimensions {_scale_dims} are not all present in the prediction data dimensions {p.dims}."
+            assert all([dim in p.dims for dim in scale_dims]), (
+                f"Provided scale dimensions {scale_dims} are not all present in the prediction data dimensions {p.dims}."
             )
 
-            len_dims = np.array([p.sizes[dim] for dim in _scale_dims])
+            len_dims = np.array([p.sizes[dim] for dim in scale_dims])
             l1 /= np.prod(len_dims)
 
         return l1
 
-    def calc_l2(self, p: xr.DataArray, gt: xr.DataArray, scale_dims: List = None):
+    def calc_l2(self, p: xr.DataArray, gt: xr.DataArray, scale_dims: list = None):
         """
         Calculate the L2 error norm of forecast data w.r.t. reference data.
         Note that the L2 error norm is calculated as the sum of absolute differences.
         If scale_dims is not None, the L2 will scaled by the number of elements in the average dimensions.
         """
-        l2 = self._sum(np.sqrt((np.square(p - gt))))
+        l2 = self._sum(np.sqrt(np.square(p - gt)))
 
-        if _scale_dims:
-            _scale_dims = to_list(scale_dims)
+        if scale_dims:
+            scale_dims = to_list(scale_dims)
 
-            assert all([dim in p.dims for dim in _scale_dims]), (
-                f"Provided scale dimensions {_scale_dims} are not all present in the prediction data dimensions {p.dims}."
+            assert all([dim in p.dims for dim in scale_dims]), (
+                f"Provided scale dimensions {scale_dims} are not all present in the prediction data dimensions {p.dims}."
             )
 
-            len_dims = np.array([p.sizes[dim] for dim in _scale_dims])
+            len_dims = np.array([p.sizes[dim] for dim in scale_dims])
             l2 /= np.prod(len_dims)
 
         return l2
@@ -415,7 +443,6 @@ class Scores:
             raise ValueError(
                 "Cannot calculate root mean squared error without aggregation dimensions (agg_dims=None)."
             )
-            raise ValueError(msg)
 
         rmse = np.sqrt(self.calc_mse(p, gt))
 
@@ -426,7 +453,7 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         clim_mean: xr.DataArray,
-        spatial_dims: List = ["lat", "lon"],
+        spatial_dims: list = None,
     ):
         """
         Calculate anomaly correlation coefficient (ACC).
@@ -449,7 +476,8 @@ class Scores:
         """
 
         # Check if spatial_dims are in the data
-        spatial_dims = to_list(spatial_dims)
+        spatial_dims = ["lat", "lon"] if spatial_dims is None else to_list(spatial_dims)
+        
         for dim in spatial_dims:
             if dim not in p.dims:
                 raise ValueError(
@@ -500,7 +528,7 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         order: int = 1,
-        non_spatial_avg_dims: List[str] = None,
+        non_spatial_avg_dims: list[str] = None,
     ):
         """
         Calculates the ratio between the spatial variability of differental operator with order 1 (highher values unsupported yest)
@@ -527,7 +555,9 @@ class Scores:
 
         ratio_spat_variability = fcst_grad / ref_grd
         if non_spatial_avg_dims is not None:
-            ratio_spat_variability = ratio_spat_variability.mean(dim=non_spatial_avg_dims)
+            ratio_spat_variability = ratio_spat_variability.mean(
+                dim=non_spatial_avg_dims
+            )
 
         return ratio_spat_variability
 
@@ -538,7 +568,7 @@ class Scores:
         seeps_weights: xr.DataArray,
         t1: xr.DataArray,
         t3: xr.DataArray,
-        spatial_dims: List,
+        spatial_dims: list,
     ):
         """
         Calculates stable equitable error in probabiliyt space (SEEPS), see Rodwell et al., 2011
@@ -569,11 +599,15 @@ class Scores:
         """
 
         def seeps(ground_truth, prediction, thr_light, thr_heavy, seeps_weights):
-            ob_ind = (ground_truth > thr_light).astype(int) + (ground_truth >= thr_heavy).astype(
-                int
-            )
-            fc_ind = (prediction > thr_light).astype(int) + (prediction >= thr_heavy).astype(int)
-            indices = fc_ind * 3 + ob_ind  # index of each data point in their local 3x3 matrices
+            ob_ind = (ground_truth > thr_light).astype(int) + (
+                ground_truth >= thr_heavy
+            ).astype(int)
+            fc_ind = (prediction > thr_light).astype(int) + (
+                prediction >= thr_heavy
+            ).astype(int)
+            indices = (
+                fc_ind * 3 + ob_ind
+            )  # index of each data point in their local 3x3 matrices
             seeps_val = seeps_weights[
                 indices, np.arange(len(indices))
             ]  # pick the right weight for each data point
@@ -584,7 +618,10 @@ class Scores:
             assert len(spatial_dims) == 2, (
                 "Provide two spatial dimensions for three-dimensional data."
             )
-            prediction, ground_truth = p.stack({"xy": spatial_dims}), gt.stack({"xy": spatial_dims})
+            prediction, ground_truth = (
+                p.stack({"xy": spatial_dims}),
+                gt.stack({"xy": spatial_dims}),
+            )
             seeps_weights = seeps_weights.stack({"xy": spatial_dims})
             t3 = t3.stack({"xy": spatial_dims})
             lstack = True
@@ -600,7 +637,9 @@ class Scores:
         )
 
         if prediction.ndim == 1:
-            seeps_values_all = seeps(ground_truth, prediction, t1.values, t3, seeps_weights)
+            seeps_values_all = seeps(
+                ground_truth, prediction, t1.values, t3, seeps_weights
+            )
         else:
             prediction, ground_truth = (
                 prediction.transpose(..., "xy"),
@@ -609,13 +648,22 @@ class Scores:
             seeps_values_all = xr.full_like(prediction, np.nan)
             seeps_values_all.name = "seeps"
             for it in range(ground_truth.shape[0]):
-                prediction_now, ground_truth_now = prediction[it, ...], ground_truth[it, ...]
+                prediction_now, ground_truth_now = (
+                    prediction[it, ...],
+                    ground_truth[it, ...],
+                )
                 # in case of missing data, skip computation
-                if np.all(np.isnan(prediction_now)) or np.all(np.isnan(ground_truth_now)):
+                if np.all(np.isnan(prediction_now)) or np.all(
+                    np.isnan(ground_truth_now)
+                ):
                     continue
 
                 seeps_values_all[it, ...] = seeps(
-                    ground_truth_now, prediction_now, t1.values, t3, seeps_weights.values
+                    ground_truth_now,
+                    prediction_now,
+                    t1.values,
+                    t3,
+                    seeps_weights.values,
                 )
 
         if lstack:
@@ -637,7 +685,7 @@ class Scores:
         """
         ens_std = p.std(dim=self.ens_dim)
 
-        return self._mean(np.sqrt((ens_std**2)))
+        return self._mean(np.sqrt(ens_std**2))
 
     def calc_ssr(self, p: xr.DataArray, gt: xr.DataArray):
         """
@@ -648,7 +696,9 @@ class Scores:
 
         return ssr
 
-    def calc_crps(self, p: xr.DataArray, gt: xr.DataArray, method: str = "ensemble", **kwargs):
+    def calc_crps(
+        self, p: xr.DataArray, gt: xr.DataArray, method: str = "ensemble", **kwargs
+    ):
         """
         Wrapper around CRPS-methods provided by xskillscore-package.
         See https://xskillscore.readthedocs.io/en/stable/api
@@ -745,15 +795,22 @@ class Scores:
                 # underlying arrays are numpy arrays -> use numpy's native random generator
                 rng = np.random.default_rng()
 
-                obs_stacked += rng.random(size=obs_stacked.shape, dtype=np.float32) * noise_fac
-                fcst_stacked += rng.random(size=fcst_stacked.shape, dtype=np.float32) * noise_fac
+                obs_stacked += (
+                    rng.random(size=obs_stacked.shape, dtype=np.float32) * noise_fac
+                )
+                fcst_stacked += (
+                    rng.random(size=fcst_stacked.shape, dtype=np.float32) * noise_fac
+                )
             else:
                 # underlying arrays are dask arrays -> use dask's random generator
                 obs_stacked += (
-                    da.random.random(size=obs_stacked.shape, chunks=obs_stacked.chunks) * noise_fac
+                    da.random.random(size=obs_stacked.shape, chunks=obs_stacked.chunks)
+                    * noise_fac
                 )
                 fcst_stacked += (
-                    da.random.random(size=fcst_stacked.shape, chunks=fcst_stacked.chunks)
+                    da.random.random(
+                        size=fcst_stacked.shape, chunks=fcst_stacked.chunks
+                    )
                     * noise_fac
                 )
 
@@ -781,13 +838,18 @@ class Scores:
         See https://xskillscore.readthedocs.io/en/stable/api
         Note: this version is found to be very slow. Use calc_rank_histogram alternatively.
         """
-        rank_hist = xskillscore.rank_histogram(gt, p, member_dim=self.ens_dim, dim=self._agg_dims)
+        rank_hist = xskillscore.rank_histogram(
+            gt, p, member_dim=self.ens_dim, dim=self._agg_dims
+        )
 
         return rank_hist
 
     @staticmethod
     def calc_geo_spatial_diff(
-        scalar_field: xr.DataArray, order: int = 1, r_e: float = 6371.0e3, dom_avg: bool = True
+        scalar_field: xr.DataArray,
+        order: int = 1,
+        r_e: float = 6371.0e3,
+        dom_avg: bool = True,
     ):
         """
         Calculates the amplitude of the gradient (order=1) or the Laplacian (order=2)
@@ -811,7 +873,7 @@ class Scores:
 
         def check_for_coords(coord_names_data, coord_names_expected):
             try:
-                i = coord_names_expected.index()
+                _ = coord_names_expected.index()
             except ValueError as e:
                 expected_names = ",".join(coord_names_expected)
                 raise ValueError(
@@ -822,12 +884,17 @@ class Scores:
         _, lat_name = check_for_coords(dims, lat_dims)
         _, lon_name = check_for_coords(dims, lon_dims)
 
-        lat, lon = np.deg2rad(scalar_field[lat_name]), np.deg2rad(scalar_field[lon_name])
+        lat, lon = (
+            np.deg2rad(scalar_field[lat_name]),
+            np.deg2rad(scalar_field[lon_name]),
+        )
         dphi, dlambda = lat[1].values - lat[0].values, lon[1].values - lon[0].values
 
         if order == 1:
             dvar_dlambda = (
-                1.0 / (r_e * np.cos(lat) * dlambda) * scalar_field.differentiate(lon_name)
+                1.0
+                / (r_e * np.cos(lat) * dlambda)
+                * scalar_field.differentiate(lon_name)
             )
             dvar_dphi = 1.0 / (r_e * dphi) * scalar_field.differentiate(lat_name)
             dvar_dlambda = dvar_dlambda.transpose(
@@ -838,34 +905,8 @@ class Scores:
             if dom_avg:
                 var_diff_amplitude = var_diff_amplitude.mean(dim=[lat_name, lon_name])
         else:
-            raise ValueError(f"Second-order differentation is not implemenetd in {method} yet.")
+            raise ValueError(
+                f"Second-order differentation is not implemenetd in {method} yet."
+            )
 
         return var_diff_amplitude
-
-
-# Example usage in tests
-if __name__ == "__main__":
-    assert False, "Cannot run score.py as a Python-script."
-
-    io = MockIO(config={"dummy": True})
-
-    # get some mocked data
-    data = io.get_data(1, "ERA5", 0)
-    gt = data.target.as_xarray()
-    p = data.prediction.as_xarray() * 1.1
-
-    data = VerifiedData(p * 1.1, gt)
-
-    sc = Scores("all")
-
-    # calculate single score
-    rmse = sc(data, "rmse").compute()
-    print(rmse.compute())
-
-    # calculate several scores at once
-    score_names = ["mse", "mae", "bias"]
-    score_list = [sc(data, score_name) for score_name in score_names]
-    combined_scores = xr.concat(score_list, dim="score_name")
-    combined_scores["score_name"] = score_names
-
-    print(combined_scores.compute())
