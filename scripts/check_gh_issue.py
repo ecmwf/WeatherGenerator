@@ -1,5 +1,3 @@
-# ruff: noqa: T201
-
 #!/usr/bin/env -S uv run
 # /// script
 # dependencies = [ "BeautifulSoup4", "requests"
@@ -7,6 +5,8 @@
 # [tool.uv]
 # exclude-newer = "2025-01-01T00:00:00Z"
 # ///
+
+# ruff: noqa: T201
 
 """
 Checks that a pull request has a corresponding GitHub issue.
