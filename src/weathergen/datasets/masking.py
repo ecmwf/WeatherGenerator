@@ -43,6 +43,15 @@ class Masker:
         # until it is generated in mask_source.
         self.perm_sel: list[np.typing.NDArray] = None
 
+        # Check for required masking_strategy_config at construction time
+        if self.masking_strategy == "healpix":
+            hl_data = self.masking_strategy_config.get("hl_data")
+            hl_mask = self.masking_strategy_config.get("hl_mask")
+            assert hl_data is not None and hl_mask is not None, (
+                "If HEALPix masking, hl_data and hl_mask must be given in masking_strategy_config."
+            )
+            assert hl_mask < hl_data, "hl_mask must be less than hl_data for HEALPix masking."
+
     def mask_source(
         self,
         tokenized_data: list[torch.Tensor],
@@ -227,19 +236,10 @@ class Masker:
         hl_data = self.masking_strategy_config.get("hl_data")
         hl_mask = self.masking_strategy_config.get("hl_mask")
 
-        if hl_data is None or hl_mask is None:
-            assert False, (
-                "If masking with HEALPix, hl_data and hl_mask must be provided in masking_strategy_config."
-            )
-
-        if hl_mask >= hl_data:
-            assert False, "hl_mask must be less than hl_data for HEALPix masking."
-
         num_data_cells = 12 * (4**hl_data)
-        if len(token_lens) != num_data_cells:
-            assert False, (
-                f"Expected {num_data_cells} cells at level {hl_data}, got {len(token_lens)}."
-            )
+        assert len(token_lens) == num_data_cells, (
+            f"Expected {num_data_cells} cells at level {hl_data}, got {len(token_lens)}."
+        )
 
         # Calculate the number of parent cells at the mask level (hl_mask)
         num_parent_cells = 12 * (4**hl_mask)
