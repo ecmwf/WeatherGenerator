@@ -1,0 +1,46 @@
+verbose: true
+overwrite: true
+metrics: ["rmse", "l1", "mse"]
+input_dir: "/home/ecm9336/eval_io/WeatherGenerator/results/"
+output_dir: "/ec/perm/ecm9336/evaluation/test/"
+save_mode: "png"
+dpi_val: 300
+create_html: true
+fstep_summary_plots: true
+
+model_ids:
+  wz9rbl3w:
+    streams:
+      ERA5:
+        variables: ["2t", "10u"]
+        fsteps: [0]
+        samples: [0, 1]
+    label: "test"
+    epoch: 0
+    rank: 0
+    plot_maps: false
+    plot_histograms: false
+
+  nrwbg732:
+    streams:
+      ERA5:
+        variables: ["2t", "10u", "q_50", "t_100"]
+        fsteps: [0]
+    label: "test1"
+    epoch: 0
+    rank: 0
+    plot_maps: false
+    plot_histograms: false
+
+#forecast mode
+  # skqp3xvu:
+  #   streams:
+  #     ERA5:
+  #       variables: ["2t", "10u", "q_50", "t_100"]
+  #       # fsteps: [0]
+  #   label: "test1"
+  #   epoch: 0
+  #   rank: 0
+  #   plot_maps: false
+  #   plot_histograms: false
+
