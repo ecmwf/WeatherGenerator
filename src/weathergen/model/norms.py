@@ -88,14 +88,12 @@ class AdaLayerNorm(torch.nn.Module):
         return x
 
 
-def modulate(x, shift, scale, num_tokens=9, hidden_dim=2048):
-    return (
-        x.view(-1, num_tokens, hidden_dim) * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
-    )
+def modulate(x, shift, scale):
+    return x * (1 + scale) + shift
 
 
-def apply_gate(x, gate, num_tokens=9, hidden_dim=2048):
-    return (x.view(-1, num_tokens, hidden_dim) * gate.unsqueeze(1))
+def apply_gate(x, gate):
+    return x * gate
 
 
 class AdaLayerNormLayer(torch.nn.Module):
@@ -136,9 +134,15 @@ class AdaLayerNormLayer(torch.nn.Module):
         shift, scale, gate = self.adaLN_modulation(c).chunk(3, dim=1)
         return (
             apply_gate(
-                self.layer(modulate(self.ln(x), shift, scale, 9, self.dim), c, **kwargs),
+                self.layer(
+                    modulate(
+                        self.ln(x),
+                        shift,
+                        scale,
+                    ),
+                    c,
+                    **kwargs,
+                ),
                 gate,
-                9,
-                self.dim,
             )
         ) + x

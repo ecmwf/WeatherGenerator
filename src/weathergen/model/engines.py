@@ -404,7 +404,7 @@ class TargetPredictionEngine(nn.Module):
         }
         self.dim_adapter = nn.Sequential(
             nn.SiLU(),
-            nn.Linear(self.cf.ae_global_dim_embed, self.dims_embed[0]),
+            nn.Linear(9*self.cf.ae_global_dim_embed, self.dims_embed[0]),
             nn.LayerNorm(self.dims_embed[0]),
         )
         self.tte = nn.ModuleList()

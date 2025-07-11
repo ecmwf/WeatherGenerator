@@ -467,8 +467,8 @@ class MultiCrossAttentionHead_Varlen_SlicedQ(torch.nn.Module):
                     vs,
                     cum_x_q_lens,
                     cum_x_kv_lens,
-                    x_q_lens.max(),
-                    x_kv_lens.max(),
+                    x_q_lens.max().item(),
+                    x_kv_lens.max().item(),
                     softcap=self.softcap,
                     dropout_p=self.dropout_rate,
                 )

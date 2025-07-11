@@ -270,7 +270,7 @@ class Model(torch.nn.Module):
                 softcap,
                 tro_type,
             )
-            tte = torch.compile(tte, dynamic=True)
+            # tte = torch.compile(tte, dynamic=True)
 
             self.target_token_engines.append(tte)
 
@@ -577,7 +577,7 @@ class Model(torch.nn.Module):
         )
         tokens_stream = tokens_stream[
             torch.repeat_interleave(streams_data[0][0].target_coords_lens[0])
-        ]  # .flatten(0, 1)
+        ].flatten(-2, -1)
 
         # pair with tokens from assimilation engine to obtain target tokens
         preds_tokens = []
@@ -625,23 +625,14 @@ class Model(torch.nn.Module):
 
             # lens for varlen attention
             tcs_lens = target_coords_idxs[ii][fstep]
-
-            tc_tokens = (
-                tte(
-                    tokens_stream,
-                    tc_tokens,
-                    torch.cat(
-                        [
-                            model_params.tokens_lens[0:1],
-                            model_params.tokens_lens[
-                                torch.repeat_interleave(streams_data[0][0].target_coords_lens[0])
-                                + 1
-                            ],
-                        ]
-                    ),
-                    tcs_lens,
-                ).sum(dim=1)
-                / 8
+            tcs_lens = torch.cat(
+                [model_params.tokens_lens[0:1], tcs_lens[tcs_lens.nonzero()].flatten()]
+            )
+            tc_tokens = tte(
+                tokens_stream,
+                tc_tokens,
+                tcs_lens,
+                tcs_lens,
             )
 
             # final prediction head to map back to physical space

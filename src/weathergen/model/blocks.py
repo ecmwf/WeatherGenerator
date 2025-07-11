@@ -12,8 +12,8 @@ import torch.nn as nn
 
 from weathergen.model.norms import AdaLayerNormLayer
 from weathergen.model.attention import (
-    MultiSelfAttentionHead,
-    MultiCrossAttentionHead,
+    MultiSelfAttentionHead_Varlen,
+    MultiCrossAttentionHead_Varlen,
 )
 from weathergen.model.layers import MLP
 
@@ -28,7 +28,7 @@ class SelfAttentionBlock(nn.Module):
 
         self.with_adanorm = with_adanorm
 
-        self.mhsa = MultiSelfAttentionHead(
+        self.mhsa = MultiSelfAttentionHead_Varlen(
             dim_embed=dim,
             num_heads=num_heads,
             with_residual=False,
@@ -75,7 +75,7 @@ class SelfAttentionBlock(nn.Module):
     def forward(self, x, x_lens, aux=None, aux_lens=None):
         # we have aux_lens as arg to be consistent with the CrossAttentionBlock
         assert self.with_adanorm ^ (aux is None), "Conditioning is not being used"
-        x = self.mhsa_block(x, aux)
+        x = self.mhsa_block(x, aux, x_lens=x_lens)
         x = self.mlp_block(x, aux)
         return x
 
@@ -103,7 +103,7 @@ class CrossAttentionBlock(nn.Module):
         self.with_mlp = with_self_attn
 
         if with_self_attn:
-            self.mhsa = MultiSelfAttentionHead(
+            self.mhsa = MultiSelfAttentionHead_Varlen(
                 dim_embed=dim,
                 num_heads=num_heads,
                 with_residual=False,
@@ -118,7 +118,7 @@ class CrossAttentionBlock(nn.Module):
                     lambda x, _, **kwargs: self.mhsa_fn(self.ln_sa(x), None, **kwargs) + x
                 )
 
-        self.cross_attn = MultiCrossAttentionHead(
+        self.cross_attn = MultiCrossAttentionHead_Varlen(
             dim_embed_q=dim_aux,
             dim_embed_kv=dim,
             num_heads=num_heads,
@@ -175,7 +175,7 @@ class CrossAttentionBlock(nn.Module):
 
     def forward(self, x, aux, aux_lens=None, x_lens=None):
         if self.with_self_attn:
-            x = self.mhsa_block(x, aux)
-        x = self.cross_attn_block(x, aux)
+            x = self.mhsa_block(x, aux, x_lens=x_lens)
+        x = self.cross_attn_block(x, aux, x_q_lens=aux_lens, x_kv_lens=x_lens)
         x = self.mlp_block(x, aux)
         return x
