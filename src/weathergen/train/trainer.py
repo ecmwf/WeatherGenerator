@@ -36,7 +36,7 @@ from weathergen.train.trainer_base import Trainer_Base
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import all_gather, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
-from weathergen.utils.validation_io import write_validation
+from weathergen.utils.validation_io import write_output
 
 _logger = logging.getLogger(__name__)
 
@@ -766,7 +766,7 @@ class Trainer(Trainer_Base):
             - After logging, historical loss and standard deviation records are cleared.
         """
         avg_loss, losses_all, stddev_all = self._prepare_losses_for_logging()
-        samples = self.cf.istep * self.cf.batch_size * self.cf.num_ranks
+        samples = self.cf.istep * self.cf.batch_size_per_gpu * self.cf.num_ranks
 
         if is_root():
             # plain logger
