@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from utils import to_list
 # from common.io import MockIO
 
 _logger = logging.getLogger(__name__)
@@ -30,24 +31,6 @@ except Exception:
         + "rank histogram-calculations are not supported."
     )
 
-def to_list(obj: Any) -> list:
-    """
-    Convert given object to list if obj is not already a list. Sets are also transformed to a list.
-
-    Parameters
-    ----------
-    obj : Any
-        The object to transform into a list.
-    Returns
-    -------
-    list
-        A list containing the object, or the object itself if it was already a list.
-    """
-    if isinstance(obj, set | tuple):
-        obj = list(obj)
-    elif not isinstance(obj, list):
-        obj = [obj]
-    return obj
 
 # helper function to calculate skill score
 def _get_skill_score(
@@ -77,8 +60,14 @@ def _get_skill_score(
     return skill_score
 
 
+
 @dataclass(frozen=True)
 class VerifiedData:
+    """
+    # Used to ensure that the prediction and ground truth data are compatible, 
+    # i.e. dimensions, broadcastability.
+    # This is meant to ensure that the data can be used for score calculations.
+    """
     prediction: xr.DataArray
     ground_truth: xr.DataArray
 
@@ -275,7 +264,7 @@ class Scores:
             # Return lazy evaluation result
             return result
 
-    def _validate_agg_dims(self, dims):
+    def _validate_agg_dims(self, dims: str | list[str]) -> list[str] | str:
         if dims == "all":
             return dims
         if isinstance(dims, str):
@@ -284,7 +273,7 @@ class Scores:
             return dims
         raise ValueError("agg_dims must be 'all', a string, or list of strings.")
 
-    def _validate_ens_dim(self, dim):
+    def _validate_ens_dim(self, dim: str) -> str:
         if not isinstance(dim, str):
             raise ValueError("ens_dim must be a string.")
         return dim
