@@ -103,8 +103,7 @@ ignore = [
   "SIM401",
   # To ignore, not relevant for us
   "SIM108", # in case additional norm layer supports are added in future
-  "N817", # we use heavy acronyms
-  #"N806",
+  "N817" # we use heavy acronyms, e.g., allowing 'import LongModuleName as LMN' (LMN is accepted)
 ]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
