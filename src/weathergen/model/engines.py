@@ -21,7 +21,9 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
+from weathergen.model.utils import get_activation
 from weathergen.utils.config import Config, get_dtype
+
 
 
 class EmbeddingEngine:
@@ -314,7 +316,7 @@ class ForecastingEngine:
 class EnsPredictionHead(torch.nn.Module):
     #########################################
     def __init__(
-        self, dim_embed, dim_out, ens_num_layers, ens_size, norm_type="LayerNorm", hidden_factor=2
+        self, dim_embed, dim_out, ens_num_layers, ens_size, norm_type="LayerNorm", hidden_factor=2, last_activation: str ="Linear"
     ):
         """Constructor"""
 
@@ -323,6 +325,8 @@ class EnsPredictionHead(torch.nn.Module):
         dim_internal = dim_embed * hidden_factor
         # norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
         enl = ens_num_layers
+
+        final_activation = get_activation(last_activation)
 
         self.pred_heads = torch.nn.ModuleList()
         for i in range(ens_size):
@@ -338,6 +342,10 @@ class EnsPredictionHead(torch.nn.Module):
                 self.pred_heads[-1].append(
                     torch.nn.Linear(dim_internal, dim_out if enl - 2 == i else dim_internal)
                 )
+
+            # Add optional final non-linear activation
+            if final_activation is not None and enl >= 1:
+                self.pred_heads[-1].append(final_activation)
 
     #########################################
     @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")

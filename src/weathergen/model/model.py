@@ -282,6 +282,7 @@ class Model(torch.nn.Module):
                     si["pred_head"]["num_layers"],
                     si["pred_head"]["ens_size"],
                     norm_type=cf.norm_type,
+                    last_activation=si.get("last_activation", "Linear"),
                 )
             )
 
