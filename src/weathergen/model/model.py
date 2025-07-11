@@ -275,6 +275,11 @@ class Model(torch.nn.Module):
             self.target_token_engines.append(tte)
 
             # ensemble prediction heads to provide probabilistic prediction
+            last_activation = si.get("last_activation", "Linear")
+            if last_activation != "Linear":
+                print(
+                    f"Using {last_activation} activation for prediction head of {si['name']} stream"
+                )
             self.pred_heads.append(
                 EnsPredictionHead(
                     dims_embed[-1],
