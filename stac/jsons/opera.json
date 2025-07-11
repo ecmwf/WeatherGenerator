@@ -64,6 +64,7 @@
          "observations"
       ],
       "name": "OPERA",
+      "processing_level": "NA",
       "providers": [
          {
             "name": "ECMWF",
