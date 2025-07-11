@@ -9,6 +9,7 @@
 
 from typing import Any
 
+
 def to_list(obj: Any) -> list:
     """
     Convert given object to list if obj is not already a list. Sets are also transformed to a list.

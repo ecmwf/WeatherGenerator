@@ -60,14 +60,14 @@ def _get_skill_score(
     return skill_score
 
 
-
 @dataclass(frozen=True)
 class VerifiedData:
     """
-    # Used to ensure that the prediction and ground truth data are compatible, 
+    # Used to ensure that the prediction and ground truth data are compatible,
     # i.e. dimensions, broadcastability.
     # This is meant to ensure that the data can be used for score calculations.
     """
+
     prediction: xr.DataArray
     ground_truth: xr.DataArray
 
@@ -466,7 +466,7 @@ class Scores:
 
         # Check if spatial_dims are in the data
         spatial_dims = ["lat", "lon"] if spatial_dims is None else to_list(spatial_dims)
-        
+
         for dim in spatial_dims:
             if dim not in p.dims:
                 raise ValueError(

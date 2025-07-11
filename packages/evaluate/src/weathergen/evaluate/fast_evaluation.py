@@ -18,7 +18,7 @@ import xarray as xr
 
 from weathergen.common.io import ZarrIO
 from score import VerifiedData, get_score
-from utils import to_list 
+from utils import to_list
 
 _logger = logging.getLogger(__name__)
 
@@ -55,7 +55,10 @@ def peek_tar_channels(zio: ZarrIO, stream: str) -> list[str]:
 
 
 def calc_scores_per_stream(
-    zio: ZarrIO, stream: str, metrics: list[str], channels: str | list[str] | None = None
+    zio: ZarrIO,
+    stream: str,
+    metrics: list[str],
+    channels: str | list[str] | None = None,
 ) -> xr.DataArray:
     """
     Calculate the provided score metrics for a specific.
@@ -85,11 +88,14 @@ def calc_scores_per_stream(
         else channels_stream
     )
 
-    # initialize the DataArray to store metrics 
+    # initialize the DataArray to store metrics
     # TO-DO: Support lazy initialization (with dask) and subsequent processing
-    #        for very large number of forecast steps 
+    #        for very large number of forecast steps
     metric_stream = xr.DataArray(
-        np.full((nforecast_steps, len(channels_stream), nmetrics), np.nan,),
+        np.full(
+            (nforecast_steps, len(channels_stream), nmetrics),
+            np.nan,
+        ),
         coords={
             "forecast_step": forecast_steps,
             "channel": channels_stream,
@@ -133,7 +139,9 @@ def calc_scores_per_stream(
     return metric_stream
 
 
-def metric_list_to_dict(metric_list: list[xr.DataArray], streams: list) -> dict[str,dict[str,dict[int,dict[str, float]]]]:
+def metric_list_to_dict(
+    metric_list: list[xr.DataArray], streams: list
+) -> dict[str, dict[str, dict[int, dict[str, float]]]]:
     """
     Convert a list of xarray DataArrays containing metrics into a nested dictionary structure.
 
@@ -149,7 +157,9 @@ def metric_list_to_dict(metric_list: list[xr.DataArray], streams: list) -> dict[
         A nested dictionary where the first level keys are stream names, the second level keys are channel names (if applicable),
         and the third level keys are forecast steps, with metric names as the final keys.
     """
-    result = result = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict))))
+    result = result = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    )
 
     assert len(metric_list) == len(streams), (
         "Inconsistent list of metrics and streams passed."
@@ -161,7 +171,9 @@ def metric_list_to_dict(metric_list: list[xr.DataArray], streams: list) -> dict[
 
         metrics = da_metric.coords["metric"].values
         # TODO: Avoid conversion to integer
-        forecast_steps = [int(fstep) for fstep in da_metric.coords["forecast_step"].values]
+        forecast_steps = [
+            int(fstep) for fstep in da_metric.coords["forecast_step"].values
+        ]
 
         channels = da_metric.coords["channel"].values
         for ch_idx, ch in enumerate(channels):
