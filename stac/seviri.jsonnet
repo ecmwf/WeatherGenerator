@@ -20,6 +20,7 @@ local common = import 'common.jsonnet';
     common.providers.ecmwf_host,
     common.providers.eumetsat,
   ],
+  processing_level: '1C',
 
   // Retrieved with: root.data.attrs["colnames"]),
   // {root.data.attrs["mins"],root.data.attrs["maxs"], root.data.attrs["means"],

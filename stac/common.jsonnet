@@ -22,10 +22,25 @@
       roles: ['provider'],
       url: 'https://www.nasa.gov',
     },
+    nasa_processor: {
+      name: 'NASA',
+      roles: ['processor'],
+      url: 'https://www.nasa.gov',
+    },    
     eumetsat: {
       name: 'EUMETSAT',
       roles: ['provider'],
       url: 'https://eumetsat.int',
+    },
+    eumetsat_processor: {
+      name: 'EUMETSAT',
+      roles: ['processor'],
+      url: 'https://eumetsat.int',
+    },
+    cma: {
+      name: 'CMA',
+      roles: ['provider'],
+      url: 'https://www.cma.gov.cn/',
     },
   },
   hpc: {
