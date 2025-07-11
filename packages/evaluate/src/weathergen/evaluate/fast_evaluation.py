@@ -10,15 +10,15 @@
 import argparse
 import json
 import logging
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
 import xarray as xr
-
-from weathergen.common.io import ZarrIO
 from score import VerifiedData, get_score
 from utils import to_list
+
+from weathergen.common.io import ZarrIO
 
 _logger = logging.getLogger(__name__)
 

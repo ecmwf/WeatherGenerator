@@ -10,14 +10,13 @@
 import inspect
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 import dask.array as da
 import numpy as np
 import pandas as pd
 import xarray as xr
-
 from utils import to_list
+
 # from common.io import MockIO
 
 _logger = logging.getLogger(__name__)
