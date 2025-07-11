@@ -7,28 +7,20 @@
 # [tool.uv.sources]
 # weathergen-evaluate = { path = "../../../../../packages/evaluate" }
 # ///
-
-import sys
 import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from collections import defaultdict
 
 import numpy as np
 import xarray as xr
 
 from weathergen.common.io import ZarrIO
-from weathergen.evaluate.score import VerifiedData, get_score
-
-handler = logging.StreamHandler(sys.stdout)
-formatter = logging.Formatter('%(asctime)s - %(funcName)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
+from score import VerifiedData, get_score
+from utils import to_list 
 
 _logger = logging.getLogger(__name__)
-_logger.setLevel(logging.INFO)
-_logger.addHandler(handler)
-_logger.propagate = False  # Prevent double logging if root logger also logs
 
 _REPO_ROOT = Path(
     __file__
@@ -37,9 +29,9 @@ _DEFAULT_RESULT_PATH = _REPO_ROOT / "results"
 
 
 ### Auxiliary functions
-def peek_tar_channels(zio: ZarrIO, stream: str):
+def peek_tar_channels(zio: ZarrIO, stream: str) -> list[str]:
     """
-    Peek the channels of a tar stream in a ZarrIO object.
+    Peek the channels of a target stream in a ZarrIO object.
 
     Parameters
     ----------
@@ -57,13 +49,14 @@ def peek_tar_channels(zio: ZarrIO, stream: str):
 
     dummy_out = zio.get_data(0, stream, 0)
     channels = dummy_out.target.channels
+    _logger.debug(f"Peeked channels for stream {stream}: {channels}")
 
     return channels
 
 
 def calc_scores_per_stream(
-    zio: ZarrIO, stream: str, metrics: list[str], channels: str | list[str] = None
-):
+    zio: ZarrIO, stream: str, metrics: list[str], channels: str | list[str] | None = None
+) -> xr.DataArray:
     """
     Calculate the provided score metrics for a specific.
     Parameters
@@ -82,6 +75,7 @@ def calc_scores_per_stream(
     # Get stream-specific information
     forecast_steps = zio.forecast_steps
     nmetrics, nforecast_steps = len(metrics), len(forecast_steps)
+    # TODO: Avoid conversion to integer
     samples = [int(sample) for sample in zio.samples]
     channels_stream = peek_tar_channels(zio, stream)
     # filter channels if provided
@@ -91,9 +85,11 @@ def calc_scores_per_stream(
         else channels_stream
     )
 
-    # initialize the DataArray to store metrics
+    # initialize the DataArray to store metrics 
+    # TO-DO: Support lazy initialization (with dask) and subsequent processing
+    #        for very large number of forecast steps 
     metric_stream = xr.DataArray(
-        np.full((nforecast_steps, len(channels_stream), nmetrics), np.nan),
+        np.full((nforecast_steps, len(channels_stream), nmetrics), np.nan,),
         coords={
             "forecast_step": forecast_steps,
             "channel": channels_stream,
@@ -137,27 +133,7 @@ def calc_scores_per_stream(
     return metric_stream
 
 
-def to_list(obj: Any) -> list:
-    """
-    Convert given object to list if obj is not already a list. Sets are also transformed to a list.
-
-    Parameters
-    ----------
-    obj : Any
-        The object to transform into a list.
-    Returns
-    -------
-    list
-        A list containing the object, or the object itself if it was already a list.
-    """
-    if isinstance(obj, set | tuple):
-        obj = list(obj)
-    elif not isinstance(obj, list):
-        obj = [obj]
-    return obj
-
-
-def metric_list_to_dict(metric_list: list[xr.DataArray], streams: list):
+def metric_list_to_dict(metric_list: list[xr.DataArray], streams: list) -> dict[str,dict[str,dict[int,dict[str, float]]]]:
     """
     Convert a list of xarray DataArrays containing metrics into a nested dictionary structure.
 
@@ -173,7 +149,7 @@ def metric_list_to_dict(metric_list: list[xr.DataArray], streams: list):
         A nested dictionary where the first level keys are stream names, the second level keys are channel names (if applicable),
         and the third level keys are forecast steps, with metric names as the final keys.
     """
-    result = {}
+    result = result = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict))))
 
     assert len(metric_list) == len(streams), (
         "Inconsistent list of metrics and streams passed."
@@ -182,50 +158,30 @@ def metric_list_to_dict(metric_list: list[xr.DataArray], streams: list):
     for istream, da_metric in enumerate(metric_list):
         # Get the stream name (e.g., 'ERA5', 'IMERG', etc.)
         stream = streams[istream]
-        if stream not in result:
-            result[stream] = {}
-
-        # Check if 'channel' exists (not all arrays have it)
-        has_channel = "channel" in da_metric.dims
 
         metrics = da_metric.coords["metric"].values
-        forecast_steps = to_list(da_metric.coords["forecast_step"].values)
+        # TODO: Avoid conversion to integer
+        forecast_steps = [int(fstep) for fstep in da_metric.coords["forecast_step"].values]
 
-        if has_channel:
-            channels = da_metric.coords["channel"].values
-            for ch_idx, ch in enumerate(channels):
-                ch = str(ch)
-                if ch not in result[stream]:
-                    result[stream][ch] = {}
+        channels = da_metric.coords["channel"].values
+        for ch_idx, ch in enumerate(channels):
+            ch = str(ch)
 
-                for step_idx, step in enumerate(forecast_steps):
-                    step = str(step)
-                    if step not in result[stream][ch]:
-                        result[stream][ch][step] = {}
-
-                    for metric_idx, metric in enumerate(metrics):
-                        metric = str(metric)
-                        value = float(
-                            da_metric.isel(
-                                {
-                                    "metric": metric_idx,
-                                    "forecast_step": step_idx,
-                                    "channel": ch_idx,
-                                }
-                            ).values
-                        )
-                        result[stream][ch][step][metric] = value
-        else:
-            # If no channel dimension, data is per forecast_step and metric only
             for step_idx, step in enumerate(forecast_steps):
                 step = str(step)
-                if step not in result[stream]:
-                    result[stream][step] = {}
 
                 for metric_idx, metric in enumerate(metrics):
                     metric = str(metric)
-                    value = float(da_metric.values[metric_idx, step_idx])
-                    result[stream][step][metric] = value
+                    value = float(
+                        da_metric.isel(
+                            {
+                                "metric": metric_idx,
+                                "forecast_step": step_idx,
+                                "channel": ch_idx,
+                            }
+                        ).values
+                    )
+                    result[stream][ch][step][metric] = value
 
     return result
 
@@ -235,8 +191,8 @@ def fast_evaluation(
     metrics: list[str],
     save_dir: Path,
     results_dir: Path = _DEFAULT_RESULT_PATH,
-    streams: str | list[str] = None,
-    channels: str | list[str] = None,
+    streams: str | list[str] | None = None,
+    channels: str | list[str] | None = None,
     epoch: int = 0,
     rank: int = 0,
 ):
@@ -285,7 +241,7 @@ def fast_evaluation(
 
     # Save the results to a JSON file
     save_dir.mkdir(parents=True, exist_ok=True)
-    save_path = save_dir / f"metrics_{run_id}_epoch{epoch:05d}_rank{rank:04d}.json"
+    save_path = save_dir / f"metrics_{run_id}_epoch{epoch:05d}.json"
 
     _logger.info(f"Saving results to {save_path}")
     with open(save_path, "w") as f:
