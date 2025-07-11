@@ -1,13 +1,13 @@
 local common = import 'common.jsonnet';
 
 {
-  name: 'NPP-ATMS',
-  filename: 'npp-atms.json',
-  description: 'The NPP-ATMS (Advanced Technology Microwave Sounder) dataset is derived from the ATMS instrument onboard the NOAA/NASA National Polar-orbiting Partnership (NPP) satellite. It provides global measurements of atmospheric temperature, moisture, and pressure profiles, crucial for weather forecasting and climate monitoring',
-  title: 'NPP-ATMS',
-  unique_id: '6',
-  start_datetime: '2011-12-11T00:36:13',
-  end_datetime: '2018-12-31T23:58:08',
+  name: 'FY-3A, MWHS',
+  filename: 'fy3a.json',
+  description: "The data from the MWHS microwave radiometer onboard FY-3A, a Fengyun satellite. Data is available for three FY-3 satellites, FY-3A, FY-3B and FY-3C.",
+  title: 'FY-3A, MWHS',
+  unique_id: '10',
+  start_datetime: '2008-07-01T00:19:46',
+  end_datetime: '2014-05-05T00:33:45',
   frequency: 'NA',
   fixed_timesteps: 'False',
   keywords: [
@@ -18,10 +18,12 @@ local common = import 'common.jsonnet';
   ],
   providers: [
     common.providers.ecmwf_host,
-    common.providers.nasa,
-    common.providers.eumetsat_processor
+    common.providers.cma,
+    common.providers.eumetsat_processor,
   ],
   processing_level: '1C',
+
+
 
   variables: {
     names: [
@@ -49,12 +51,12 @@ local common = import 'common.jsonnet';
   geometry: [-180, 180, -90, 90],
 
   dataset: {
-    dataset_name: 'MICROWAVE_FCDR_V1.1-20200512/SNPP/*/*.nc',
+    dataset_name: 'MICROWAVE_FCDR_V1.1-20200512/FY3A/*/*.nc',
     type: 'application/vnd+netcdf',
     description: 'Observation dataset',
-    locations: [common.hpc.hpc2020, common.hpc.jsc],
-    size: '2.9 TB',
-    inodes: '44469',
+    locations: [common.hpc.hpc2020],
+    size: '664.9 GB',
+    inodes: '31039',
     roles: ['data'],
   },
 }

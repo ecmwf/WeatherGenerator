@@ -63,6 +63,7 @@
          "global"
       ],
       "name": "IMERG",
+      "processing_level": "NA",
       "providers": [
          {
             "name": "ECMWF",
