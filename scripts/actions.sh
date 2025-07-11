@@ -26,7 +26,7 @@ case "$1" in
   integration-test)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run pytest ./integration_tests/small1.py --verbose
+      uv run pytest ./integration_tests/small1_test.py --verbose
     )
     ;;
   *)

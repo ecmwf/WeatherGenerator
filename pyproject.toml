@@ -89,7 +89,9 @@ select = [
     # Banned imports
     "TID",
     # Naming conventions
-    "N"
+    "N",
+    # print
+    "T201"
 ]
 
 # These rules are sensible and should be enabled at a later stage.
