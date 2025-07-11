@@ -70,8 +70,8 @@ loss_fcts_val:
     - "mse"
     - 1.0
 
-batch_size: 1
-batch_size_validation: 1
+batch_size_per_gpu: 1
+batch_size_validation_per_gpu: 1
 
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
@@ -118,6 +118,7 @@ val_initial: False
 
 loader_num_workers: 8
 log_validation: 0
+analysis_streams_output: ["ERA5"]
 
 istep: 0
 run_history: []
@@ -130,4 +131,3 @@ run_id: ???
 train_log:
   # The period to log metrics (in number of batch steps)
   log_interval: 20
-

@@ -138,8 +138,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 ds_type = stream_info["type"]
                 logger.info(
-                    f"Opening dataset with type: {ds_type} from"
-                    + f" stream config {stream_info['name']}."
+                    f"Opening dataset with type: {ds_type}"
+                    + f"from stream config {stream_info['name']}.",
                 )
                 ds = dataset(filename=filename, **kwargs)
 
@@ -147,6 +147,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if len(ds) > 0:
                     self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
 
+                # MODIFIES config !!!
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
                 stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
 
@@ -379,13 +380,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     streams_data += [stream_data]
 
                 # skip completely empty batch item or when all targets are empty -> no grad
-                if (
-                    np.array([s.empty() for s in streams_data]).all()
-                    or np.array([s.target_empty() for s in streams_data]).all()
-                ):
-                    continue
-
-                batch += [streams_data]
+                if not (all(s.empty() or s.target_empty() for s in streams_data)):
+                    batch += [streams_data]
 
             # aggregated lens of tokens per cell
             source_cell_lens = compute_source_cell_lens(batch)
