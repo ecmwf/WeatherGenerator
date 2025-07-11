@@ -1,7 +1,8 @@
 """
 Utilities related to reading and writing metrics.
 
-We use our own simple json-based format to abstract away various backends (our own pipeline, mlflow, wandb, etc.).
+We use our own simple json-based format to abstract away various backends
+ (our own pipeline, mlflow, wandb, etc.).
 """
 
 from pathlib import Path

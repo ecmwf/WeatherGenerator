@@ -124,7 +124,6 @@ class StreamData:
         None
         """
 
-        # self.target_tokens[fstep] += [[torch.zeros((0,0), dtype=torch.int32) for _ in range(self.nhc_target)]]
         self.target_tokens[fstep] += [[torch.tensor([], dtype=torch.int32)]]
         self.target_tokens_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
         self.target_coords[fstep] += [[torch.zeros((0, 106)) for _ in range(self.nhc_target)]]
@@ -144,8 +143,10 @@ class StreamData:
         ----------
         ss_raw : torch.tensor( number of data points in time window , number of channels )
         ss_lens : torch.tensor( number of healpix cells )
-        ss_cells : list( number of healpix cells )[ torch.tensor( tokens per cell, token size, number of channels) ]
-        ss_centroids : list(number of healpix cells )[ torch.tensor( for source , 5) ]
+        ss_cells : list( number of healpix cells )
+            [ torch.tensor( tokens per cell, token size, number of channels) ]
+        ss_centroids : list(number of healpix cells )
+            [ torch.tensor( for source , 5) ]
 
         Returns
         -------
@@ -172,14 +173,17 @@ class StreamData:
         ----------
         fstep : int
             forecast step
-        targets : torch.tensor( number of healpix cells )[ torch.tensor( num tokens, channels) ]
-            Target data for loss computation
+        targets : torch.tensor( number of healpix cells )
+            [ torch.tensor( num tokens, channels) ]
+              Target data for loss computation
         targets_lens : torch.tensor( number of healpix cells)
             length of targets per cell
-        target_coords : list( number of healpix cells)[ torch.tensor( points per cell, 105)]
-            target coordinates
-        target_times : list( number of healpix cells)[ torch.tensor( points per cell)]
-            absolute target times
+        target_coords : list( number of healpix cells)
+            [ torch.tensor( points per cell, 105) ]
+              target coordinates
+        target_times : list( number of healpix cells)
+            [ torch.tensor( points per cell) ]
+              absolute target times
 
         Returns
         -------

@@ -10,6 +10,7 @@
 import argparse
 import logging
 import subprocess
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -20,6 +21,8 @@ import weathergen.utils.config as config
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
 _logger = logging.getLogger(__name__)
+
+DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
 
 
 ####################################################################################################
@@ -33,7 +36,8 @@ def _ensure_list(value):
     Returns
     -------
     list
-        A list containing the input value if it was not a list, or the input value itself if it was already a list.
+        A list containing the input value if it was not a list,
+          or the input value itself if it was already a list.
     """
     return value if isinstance(value, list) else [value]
 
@@ -56,7 +60,10 @@ def _check_run_id_dict(run_id_dict: dict) -> bool:
     for k, v in run_id_dict.items():
         if not isinstance(k, str) or not isinstance(v, list) or len(v) != 2:
             raise argparse.ArgumentTypeError(
-                f"Each key must be a string and each value must be a list of [job_id, experiment_name], but got: {k}: {v}"
+                (
+                    "Each key must be a string and",
+                    f" each value must be a list of [job_id, experiment_name], but got: {k}: {v}",
+                )
             )
 
 
@@ -118,8 +125,8 @@ def _read_yaml_config(yaml_file_path):
     # convert to legacy format
     config_dict = {}
     for k, v in config_dict_temp.items():
-        assert type(v["slurm_id"]) == int, "slurm_id has to be int."
-        assert type(v["description"]) == str, "description has to be str."
+        assert isinstance(v["slurm_id"], int), "slurm_id has to be int."
+        assert isinstance(v["description"], str), "description has to be str."
         config_dict[k] = [v["slurm_id"], v["description"]]
 
     # Validate the structure: {run_id: [job_id, experiment_name]}
@@ -552,13 +559,13 @@ def plot_loss_per_run(
     plt.close()
 
 
-####################################################################################################
-if __name__ == "__main__":
+def plot_train(args=None):
     # Example usage:
     # When providing a YAML for configuring the run IDs:
     # python plot_training.py -rf eval_run.yml -m ./trained_models -o ./training_plots
     # When providing a string for configuring the run IDs:
-    # python plot_training.py -rs "{run_id: [job_id, experiment_name]}" -m ./trained_models -o ./training_plots
+    # python plot_training.py -rs "{run_id: [job_id, experiment_name]}"
+    #    -m ./trained_models -o ./training_plots
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     parser = argparse.ArgumentParser(
@@ -616,25 +623,26 @@ if __name__ == "__main__":
         help="Type of x-axis used in plots. Options: 'step' or 'reltime'",
     )
 
-    run_id_group = parser.add_mutually_exclusive_group(required=True)
+    run_id_group = parser.add_mutually_exclusive_group()
     run_id_group.add_argument(
-        "-rs",
-        "--run_ids_dict",
+        "-fd",
+        "--from_dict",
         type=_read_str_config,
-        dest="rs",
-        help="Dictionary-string of form '{run_id: [job_id, experiment_name]}' for training runs to plot",
+        dest="fd",
+        help="Dictionary-string of form '{run_id: [job_id, experiment_name]}'"
+        + "for training runs to plot",
     )
 
     run_id_group.add_argument(
-        "-rf",
-        "--run_ids_file",
-        dest="rf",
+        "-fy",
+        "--from_yaml",
+        dest="fy",
         type=_read_yaml_config,
-        help="YAML file configuring the training run IDS to plot",
+        help="YAML file configuring the training run ids to plot",
     )
 
     # parse the command line arguments
-    args = parser.parse_args()
+    args = parser.parse_args(args)
 
     model_base_dir = Path(args.model_base_dir)
     out_dir = Path(args.output_dir)
@@ -643,7 +651,17 @@ if __name__ == "__main__":
     if args.x_type not in x_types_valid:
         raise ValueError(f"x_type must be one of {x_types_valid}, but got {args.x_type}")
 
-    runs_ids = args.rs if args.rs is not None else args.rf
+    # Post-processing default logic for config from YAML-file
+    if args.fd is None and args.fy is None:
+        if DEFAULT_RUN_FILE.exists():
+            args.fy = _read_yaml_config(DEFAULT_RUN_FILE)
+        else:
+            raise ValueError(
+                f"Please provide a run_id dictionary or a YAML file with run_ids, "
+                f"or create a default file at {DEFAULT_RUN_FILE}."
+            )
+
+    runs_ids = args.fd if args.fd is not None else args.fy
 
     if args.delete == "True":
         clean_plot_folder(out_dir)
@@ -655,7 +673,9 @@ if __name__ == "__main__":
     # determine which runs are still alive (as a process, though they might hang internally)
     ret = subprocess.run(["squeue"], capture_output=True)
     lines = str(ret.stdout).split("\\n")
-    runs_active = [np.array([str(v[0]) in l for l in lines[1:]]).any() for v in runs_ids.values()]
+    runs_active = [
+        np.array([str(v[0]) in line for line in lines[1:]]).any() for v in runs_ids.values()
+    ]
 
     x_scale_log = False
 
@@ -715,3 +735,9 @@ if __name__ == "__main__":
         get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
         plot_dir=out_dir,
     )
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]  # get CLI args
+
+    plot_train(args)

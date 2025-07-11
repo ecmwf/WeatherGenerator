@@ -4,21 +4,20 @@ Coding recipe for abstract fields in Python.
 Based on https://stackoverflow.com/questions/23831510/abstract-attribute-not-property
 
 It is necessary because of our coding style and python's limited support for abstract fields.
-This code is a workaround to allow defining abstract attributes in classes that use the `ABCMeta` metaclass.
+This code is a workaround to allow defining abstract attributes
+in classes that use the `ABCMeta` metaclass.
 """
 
 from abc import ABCMeta as NativeABCMeta
 from collections.abc import Callable
-from typing import Any, TypeVar, cast
-
-R = TypeVar("R")
+from typing import Any, cast
 
 
 class DummyAttribute:
     pass
 
 
-def abstract_attribute(obj: Callable[[Any], R] | None = None) -> R:
+def abstract_attribute[R](obj: Callable[[Any], R] | None = None) -> R:
     _obj = cast(Any, obj)
     if obj is None:
         _obj = DummyAttribute()

@@ -103,7 +103,8 @@ def locs_to_cell_coords(hl: int, locs: list, dx=0.5, dy=0.5) -> list:
     )
     healpix_centers_Rs = vecs_to_rots(healpix_centers)
 
-    # express each centroid in local coordinates w.r.t to healpix center by rotating center to origin
+    ## express each centroid in local coordinates w.r.t to healpix center
+    #  by rotating center to origin
     local_locs = [
         torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1) if len(s) > 0 else torch.tensor([])
         for i, (R, s) in enumerate(zip(healpix_centers_Rs, locs, strict=False))
@@ -121,11 +122,14 @@ def locs_to_ctr_coords(ctrs_r3, locs: list) -> list:
 
     ctrs_Rs = vecs_to_rots(ctrs_r3).to(torch.float32)
 
-    # express each centroid in local coordinates w.r.t to healpix center by rotating center to origin
+    ## express each centroid in local coordinates w.r.t to healpix center
+    #  by rotating center to origin
     local_locs = [
-        torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1)
-        if len(s) > 0
-        else torch.zeros([0, 3])
+        (
+            torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1)
+            if len(s) > 0
+            else torch.zeros([0, 3])
+        )
         for i, (R, s) in enumerate(zip(ctrs_Rs, locs, strict=False))
     ]
 
@@ -172,7 +176,8 @@ def locs_to_cell_coords_ctrs(healpix_centers_Rs, locs: list) -> list:
     at the healpix cell center
     """
 
-    # express each centroid in local coordinates w.r.t to healpix center by rotating center to origin
+    ## express each centroid in local coordinates w.r.t to healpix center
+    #  by rotating center to origin
     local_locs = [
         torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1) if len(s) > 0 else torch.tensor([])
         for i, (R, s) in enumerate(zip(healpix_centers_Rs, locs, strict=False))
@@ -219,7 +224,7 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
     return a
 
 
-# ####################################################################################################
+####################################################################################################
 # def add_local_vert_coords_ctrs3( ctrs, verts, tcs, a, zi, geoinfo_offset) :
 
 #   ref = torch.tensor( [1., 0., 0.])
@@ -229,7 +234,8 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
 #   aa = locs_to_cell_coords_ctrs( ctrs, verts.transpose(0,1))
 #   aa = ref - torch.cat( [aaa.unsqueeze(0).repeat( [*tt.shape[:-1],1,1])
 #                                                               if len(tt)>0 else torch.tensor([])
-#                                                               for tt,aaa in zip(tcs,aa)] if tt>, 0 )
+#                                                               for tt,aaa in zip(tcs,aa)]
+#                                                               if tt>, 0 )
 #   aa = aa.flatten(1,2)
 #   a[...,(geoinfo_offset+zi):(geoinfo_offset+zi+aa.shape[-1])] = aa
 #   return a
@@ -243,12 +249,14 @@ def get_target_coords_local(hlc, target_coords, geoinfo_offset):
 
     # target_coords_lens = [len(t) for t in target_coords]
     tcs = [
-        s2tor3(
-            torch.deg2rad(90.0 - t[..., geoinfo_offset].to(torch.float64)),
-            torch.deg2rad(180.0 + t[..., geoinfo_offset + 1].to(torch.float64)),
+        (
+            s2tor3(
+                torch.deg2rad(90.0 - t[..., geoinfo_offset].to(torch.float64)),
+                torch.deg2rad(180.0 + t[..., geoinfo_offset + 1].to(torch.float64)),
+            )
+            if len(t) > 0
+            else torch.tensor([])
         )
-        if len(t) > 0
-        else torch.tensor([])
         for t in target_coords
     ]
     target_coords = torch.cat(target_coords)
@@ -347,12 +355,14 @@ def get_target_coords_local_fast(hlc, target_coords, geoinfo_offset):
 
     # target_coords_lens = [len(t) for t in target_coords]
     tcs = [
-        s2tor3(
-            torch.deg2rad(90.0 - t[..., geoinfo_offset].to(torch.float64)),
-            torch.deg2rad(180.0 + t[..., geoinfo_offset + 1].to(torch.float64)),
+        (
+            s2tor3(
+                torch.deg2rad(90.0 - t[..., geoinfo_offset].to(torch.float64)),
+                torch.deg2rad(180.0 + t[..., geoinfo_offset + 1].to(torch.float64)),
+            )
+            if len(t) > 0
+            else torch.tensor([])
         )
-        if len(t) > 0
-        else torch.tensor([])
         for t in target_coords
     ]
     target_coords = torch.cat(target_coords)
@@ -368,8 +378,10 @@ def get_target_coords_local_fast(hlc, target_coords, geoinfo_offset):
     a = torch.zeros(
         [*target_coords.shape[:-1], (target_coords.shape[-1] - 2) + 5 * (3 * 5) + 3 * 8]
     )
-    # a = torch.zeros( [*target_coords.shape[:-1], (target_coords.shape[-1]-2) + 5*(3*5) + 3*8])
-    # a = torch.zeros( [*target_coords.shape[:-1], 148]) #(target_coords.shape[-1]-2) + 5*(3*5) + 3*8])
+    # a = torch.zeros( [*target_coords.shape[:-1],
+    #  (target_coords.shape[-1]-2) + 5*(3*5) + 3*8])
+    # a = torch.zeros( [*target_coords.shape[:-1], 148])
+    #    #(target_coords.shape[-1]-2) + 5*(3*5) + 3*8])
     a[..., :geoinfo_offset] = target_coords[..., :geoinfo_offset]
     ref = torch.tensor([1.0, 0.0, 0.0])
 
@@ -442,12 +454,14 @@ def get_target_coords_local_ffast(
 
     # target_coords_lens = [len(t) for t in target_coords]
     tcs = [
-        s2tor3(
-            torch.deg2rad(90.0 - t[..., 0]),
-            torch.deg2rad(180.0 + t[..., 1]),
+        (
+            s2tor3(
+                torch.deg2rad(90.0 - t[..., 0]),
+                torch.deg2rad(180.0 + t[..., 1]),
+            )
+            if len(t) > 0
+            else torch.tensor([])
         )
-        if len(t) > 0
-        else torch.tensor([])
         for t in target_coords
     ]
     target_coords = torch.cat(target_coords)
@@ -573,14 +587,18 @@ def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
             if not s.source_empty():
                 s.source_idxs_embed = torch.cat(
                     [
-                        torch.arange(o, o + l, dtype=torch.int64)
-                        for o, l in zip(offsets, source_tokens_lens[ib, itype], strict=False)
+                        torch.arange(offset, offset + token_len, dtype=torch.int64)
+                        for offset, token_len in zip(
+                            offsets, source_tokens_lens[ib, itype], strict=False
+                        )
                     ]
                 )
                 s.source_idxs_embed_pe = torch.cat(
                     [
-                        torch.arange(o, o + l, dtype=torch.int32)
-                        for o, l in zip(offsets_pe, source_tokens_lens[ib][itype], strict=False)
+                        torch.arange(offset, offset + token_len, dtype=torch.int32)
+                        for offset, token_len in zip(
+                            offsets_pe, source_tokens_lens[ib][itype], strict=False
+                        )
                     ]
                 )
 

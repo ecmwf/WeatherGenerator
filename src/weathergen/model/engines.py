@@ -21,7 +21,7 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
-from weathergen.utils.config import Config
+from weathergen.utils.config import Config, get_dtype
 
 
 class EmbeddingEngine:
@@ -99,6 +99,8 @@ class LocalAssimilationEngine:
                     with_qk_lnorm=self.cf.ae_local_with_qk_lnorm,
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
+                    norm_eps=self.cf.norm_eps,
+                    attention_dtype=get_dtype(self.cf.attention_dtype),
                 )
             )
             self.ae_local_blocks.append(
@@ -108,6 +110,7 @@ class LocalAssimilationEngine:
                     with_residual=True,
                     dropout_rate=self.cf.ae_local_dropout_rate,
                     norm_type=self.cf.norm_type,
+                    norm_eps=self.cf.mlp_norm_eps,
                 )
             )
         return self.ae_local_blocks
@@ -141,6 +144,8 @@ class Local2GlobalAssimilationEngine:
                 dropout_rate=self.cf.ae_adapter_dropout_rate,
                 with_flash=self.cf.with_flash_attention,
                 norm_type=self.cf.norm_type,
+                norm_eps=self.cf.norm_eps,
+                attention_dtype=get_dtype(self.cf.attention_dtype),
             )
         )
         self.ae_adapter.append(
@@ -150,6 +155,7 @@ class Local2GlobalAssimilationEngine:
                 with_residual=True,
                 dropout_rate=self.cf.ae_adapter_dropout_rate,
                 norm_type=self.cf.norm_type,
+                norm_eps=self.cf.mlp_norm_eps,
             )
         )
         self.ae_adapter.append(
@@ -164,6 +170,8 @@ class Local2GlobalAssimilationEngine:
                 dropout_rate=self.cf.ae_adapter_dropout_rate,
                 with_flash=self.cf.with_flash_attention,
                 norm_type=self.cf.norm_type,
+                norm_eps=self.cf.norm_eps,
+                attention_dtype=get_dtype(self.cf.attention_dtype),
             )
         )
         return self.ae_adapter
@@ -190,7 +198,8 @@ class GlobalAssimilationEngine:
         """
         global_rate = int(1 / self.cf.ae_global_att_dense_rate)
         for i in range(self.cf.ae_global_num_blocks):
-            # Alternate between local and global attention as controlled by cf.ae_global_att_dense_rate
+            ## Alternate between local and global attention
+            #  as controlled by cf.ae_global_att_dense_rate
             # Last block is always global attention
             if i % global_rate == 0 or i + 1 == self.cf.ae_global_num_blocks:
                 self.ae_global_blocks.append(
@@ -201,6 +210,8 @@ class GlobalAssimilationEngine:
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
+                        norm_eps=self.cf.norm_eps,
+                        attention_dtype=get_dtype(self.cf.attention_dtype),
                     )
                 )
             else:
@@ -214,6 +225,8 @@ class GlobalAssimilationEngine:
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
+                        norm_eps=self.cf.norm_eps,
+                        attention_dtype=get_dtype(self.cf.attention_dtype),
                     )
                 )
             # MLP block
@@ -225,6 +238,7 @@ class GlobalAssimilationEngine:
                     dropout_rate=self.cf.ae_global_dropout_rate,
                     hidden_factor=self.cf.ae_global_mlp_hidden_factor,
                     norm_type=self.cf.norm_type,
+                    norm_eps=self.cf.mlp_norm_eps,
                 )
             )
         return self.ae_global_blocks
@@ -262,6 +276,8 @@ class ForecastingEngine:
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
                             dim_aux=1,
+                            norm_eps=self.cf.norm_eps,
+                            attention_dtype=get_dtype(self.cf.attention_dtype),
                         )
                     )
                 else:
@@ -276,6 +292,8 @@ class ForecastingEngine:
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
                             dim_aux=1,
+                            norm_eps=self.cf.norm_eps,
+                            attention_dtype=get_dtype(self.cf.attention_dtype),
                         )
                     )
                 # Add MLP block
@@ -287,6 +305,7 @@ class ForecastingEngine:
                         dropout_rate=self.cf.fe_dropout_rate,
                         norm_type=self.cf.norm_type,
                         dim_aux=1,
+                        norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
         return self.fe_blocks
@@ -386,6 +405,8 @@ class TargetPredictionEngine:
                     norm_type=self.cf.norm_type,
                     softcap=self.softcap,
                     dim_aux=self.dim_coord_in,
+                    norm_eps=self.cf.norm_eps,
+                    attention_dtype=get_dtype(self.cf.attention_dtype),
                 )
             )
 
@@ -400,6 +421,8 @@ class TargetPredictionEngine:
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
                         dim_aux=self.dim_coord_in,
+                        norm_eps=self.cf.norm_eps,
+                        attention_dtype=get_dtype(self.cf.attention_dtype),
                     )
                 )
 
@@ -413,6 +436,7 @@ class TargetPredictionEngine:
                     dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                     norm_type=self.cf.norm_type,
                     dim_aux=(self.dim_coord_in if self.cf.pred_mlp_adaln else None),
+                    norm_eps=self.cf.mlp_norm_eps,
                 )
             )
         return self.tte

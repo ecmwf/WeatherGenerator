@@ -1,0 +1,71 @@
+[project]
+name = "weathergen-common"
+version = "0.1.0"
+description = "The WeatherGenerator Machine Learning Earth System Model"
+readme = "../../README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+]
+
+[dependency-groups]
+dev = [
+ "pytest~=8.3.5",
+ "pytest-mock>=3.14.1",
+ "ruff==0.9.7",
+]
+
+
+
+[tool.black]
+
+# Wide rows
+line-length = 100
+
+
+# The linting configuration
+[tool.ruff]
+
+# Wide rows
+line-length = 100
+
+[tool.ruff.lint]
+# All disabled until the code is formatted.
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+    # Banned imports
+    "TID"
+]
+
+# These rules are sensible and should be enabled at a later stage.
+ignore = [
+  # "B006",
+  "B011",
+  "UP008",
+  "SIM117",
+  "SIM118",
+  "SIM102",
+  "SIM401",
+  "UP040", # TODO: enable later
+  # To ignore, not relevant for us
+  "SIM108" # in case additional norm layer supports are added in future  
+]
+
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/weathergen"]

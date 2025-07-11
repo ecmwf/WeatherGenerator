@@ -19,7 +19,8 @@ class RMSNorm(torch.nn.Module):
 
         Args:
             dim (int): The dimension of the input tensor.
-            eps (float, optional): A small value added to the denominator for numerical stability. Default is 1e-6.
+            eps (float, optional): A small value added to the denominator for numerical stability.
+            Default is 1e-6.
 
         Attributes:
             eps (float): A small value added to the denominator for numerical stability.
@@ -64,7 +65,7 @@ class AdaLayerNorm(torch.nn.Module):
     """
 
     def __init__(
-        self, dim_embed_x, dim_aux, norm_elementwise_affine: bool = False, norm_eps: float = 1e-5
+        self, dim_embed_x, dim_aux, norm_elementwise_affine: bool = False, norm_eps: float = 1e-3
     ):
         super().__init__()
 

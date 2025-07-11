@@ -1,4 +1,6 @@
+# ruff: noqa: T201
 # (C) Copyright 2025 WeatherGenerator contributors.
+
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -30,6 +32,7 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP
 from weathergen.model.utils import get_num_parameters
+from weathergen.utils.config import get_dtype
 from weathergen.utils.logger import logger
 from weathergen.utils.config import Config
 
@@ -55,6 +58,7 @@ class ModelParams(torch.nn.Module):
         """
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**cf.healpix_level
+        self.dtype = get_dtype(cf.attention_dtype)
 
         # positional encodings
 
@@ -62,14 +66,14 @@ class ModelParams(torch.nn.Module):
         len_token_seq = 1024
         position = torch.arange(0, len_token_seq).unsqueeze(1)
         div = torch.exp(torch.arange(0, dim_embed, 2) * -(math.log(len_token_seq) / dim_embed))
-        pe_embed = torch.zeros(len_token_seq, dim_embed, dtype=torch.float16)
+        pe_embed = torch.zeros(len_token_seq, dim_embed, dtype=self.dtype)
         pe_embed[:, 0::2] = torch.sin(position * div[: pe_embed[:, 0::2].shape[1]])
         pe_embed[:, 1::2] = torch.cos(position * div[: pe_embed[:, 1::2].shape[1]])
         self.pe_embed = torch.nn.Parameter(pe_embed, requires_grad=False)
 
         dim_embed = cf.ae_global_dim_embed
         pe = torch.zeros(
-            self.num_healpix_cells, cf.ae_local_num_queries, dim_embed, dtype=torch.float16
+            self.num_healpix_cells, cf.ae_local_num_queries, dim_embed, dtype=self.dtype
         )
         xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2) / dim_embed
         pe[..., 0::2] = 0.5 * torch.sin(torch.outer(8 * torch.arange(cf.ae_local_num_queries), xs))
@@ -102,8 +106,8 @@ class ModelParams(torch.nn.Module):
         self.hp_nbours = torch.nn.Parameter(nbours, requires_grad=False)
 
         # varlen index set for tokens
-        assert cf.batch_size == cf.batch_size_validation
-        bs = cf.batch_size
+        assert cf.batch_size_per_gpu == cf.batch_size_validation_per_gpu
+        bs = cf.batch_size_per_gpu
         nqs = 9
         s = [bs, self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed]
         pad = torch.zeros(1, dtype=torch.int32)
@@ -170,6 +174,7 @@ class Model(torch.nn.Module):
         self.num_healpix_cells = 12 * 4**self.healpix_level
 
         self.cf = cf
+        self.dtype = get_dtype(self.cf.attention_dtype)
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
@@ -231,7 +236,7 @@ class Model(torch.nn.Module):
 
         ###############
         # embed coordinates yielding one query token for each target token
-        dropout_rate = 0.1
+        dropout_rate = cf.embed_dropout_rate
         self.embed_target_coords = torch.nn.ModuleList()
         self.target_token_engines = torch.nn.ModuleList()
         self.pred_adapter_kv = torch.nn.ModuleList()
@@ -276,7 +281,9 @@ class Model(torch.nn.Module):
 
             # embedding network for coordinates
             if etc["net"] == "linear":
-                self.embed_target_coords.append(torch.nn.Linear(dim_coord_in, dims_embed[0]))
+                self.embed_target_coords.append(
+                    torch.nn.Linear(dim_coord_in, dims_embed[0], bias=False)
+                )
             elif etc["net"] == "mlp":
                 self.embed_target_coords.append(
                     MLP(
@@ -285,6 +292,7 @@ class Model(torch.nn.Module):
                         hidden_factor=8,
                         with_residual=False,
                         dropout_rate=dropout_rate,
+                        norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
             else:
@@ -300,6 +308,7 @@ class Model(torch.nn.Module):
                         with_residual=True,
                         dropout_rate=dropout_rate,
                         norm_type=cf.norm_type,
+                        norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
             else:
@@ -515,7 +524,7 @@ class Model(torch.nn.Module):
         )
         offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
         tokens_all = torch.empty(
-            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=torch.float16, device="cuda"
+            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=self.dtype, device="cuda"
         )
 
         for _, sb in enumerate(streams_data):
@@ -524,14 +533,21 @@ class Model(torch.nn.Module):
                     idxs = s.source_idxs_embed
                     idxs_pe = s.source_idxs_embed_pe
 
-                    # create full scatter index (there's no broadcasting which is likely highly inefficient)
+                    # create full scatter index
+                    # (there's no broadcasting which is likely highly inefficient)
                     idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
                     x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
                     # there's undocumented limitation in flash_attn that will make embed fail if
                     # #tokens is too large; code below is a work around
-                    # x_embed = torch.cat( [embed( s_c, c_c).flatten(0,1)
-                    #                 for s_c,c_c in zip( torch.split( s.source_tokens_cells, 49152),
-                    #                                     torch.split( s.source_centroids, 49152))])
+                    # x_embed = torch.cat(
+                    #     [
+                    #         embed(s_c, c_c).flatten(0, 1)
+                    #         for s_c, c_c in zip(
+                    #             torch.split(s.source_tokens_cells, 49152),
+                    #             torch.split(s.source_centroids, 49152),
+                    #         )
+                    #     ]
+                    # )
 
                     # scatter write to reorder from per stream to per cell ordering
                     tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
@@ -550,7 +566,9 @@ class Model(torch.nn.Module):
             Tokens for global assimilation
         """
 
-        batch_size = self.cf.batch_size if self.training else self.cf.batch_size_validation
+        batch_size = (
+            self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
+        )
 
         s = self.q_cells.shape
         # print( f'{np.prod(np.array(tokens.shape))} :: {np.prod(np.array(s))}'
@@ -571,8 +589,15 @@ class Model(torch.nn.Module):
         # for block in self.ae_local_blocks :
         #   tokens = checkpoint( block, tokens, cell_lens, use_reentrant=False)
 
-        # for block in self.ae_adapter :
-        #   tokens_global = checkpoint( block, tokens_global, tokens, q_cells_lens, cell_lens, use_reentrant=False)
+        # for block in self.ae_adapter:
+        #     tokens_global = checkpoint(
+        #         block,
+        #         tokens_global,
+        #         tokens,
+        #         q_cells_lens,
+        #         cell_lens,
+        #         use_reentrant=False,
+        #     )
 
         # work around to bug in flash attention for hl>=5
 
@@ -673,7 +698,9 @@ class Model(torch.nn.Module):
         """
 
         # fp32, i32 = torch.float32, torch.int32
-        batch_size = self.cf.batch_size if self.training else self.cf.batch_size_validation
+        batch_size = (
+            self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
+        )
 
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
         tokens_stream = (tokens.reshape(s) + model_params.pe_global).flatten(0, 1)
@@ -689,8 +716,8 @@ class Model(torch.nn.Module):
 
             assert batch_size == 1
 
-            # embed token coords, concatenating along batch dimension (which is taking care of through
-            # the varlen attention)
+            ## embed token coords, concatenating along batch dimension
+            # (which is taking care of through the varlen attention)
             with torch.amp.autocast("cuda", dtype=torch.float32, enabled=False):
                 tc_tokens = torch.cat(
                     [
@@ -708,7 +735,10 @@ class Model(torch.nn.Module):
             if torch.isnan(tc_tokens).any():
                 nn = si["name"]
                 logger.warning(
-                    f"Skipping prediction for {nn} because of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens."
+                    (
+                        f"Skipping prediction for {nn} because",
+                        f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
+                    )
                 )
                 preds_tokens += [torch.tensor([], device=tc_tokens.device)]
                 continue
@@ -716,9 +746,9 @@ class Model(torch.nn.Module):
                 preds_tokens += [torch.tensor([], device=tc_tokens.device)]
                 continue
 
-            # TODO: how to support tte_kv efficiently, generate 1-ring neighborhoods here or on a per
-            #       stream basis
-            assert type(tte_kv) == torch.nn.Identity
+            # TODO: how to support tte_kv efficiently,
+            #  generate 1-ring neighborhoods here or on a per stream basis
+            assert isinstance(tte_kv, torch.nn.Identity)
 
             # lens for varlen attention
             tcs_lens = target_coords_idxs[ii][fstep]
