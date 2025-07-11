@@ -3,11 +3,13 @@ overwrite: true
 metrics: ["rmse", "l1", "mse"]
 input_dir: "/home/ecm9336/eval_io/WeatherGenerator/results/"
 output_dir: "/ec/perm/ecm9336/evaluation/test/"
+jsons_dir: "/ec/perm/ecm9336/evaluation/test/jsons/"
 save_mode: "png"
 dpi_val: 300
 create_html: true
 fstep_summary_plots: true
 
+#MTM models
 model_ids:
   wz9rbl3w:
     streams:
@@ -15,7 +17,7 @@ model_ids:
         variables: ["2t", "10u"]
         fsteps: [0]
         samples: [0, 1]
-    label: "test"
+    label: "MTM ERA5"
     epoch: 0
     rank: 0
     plot_maps: false
@@ -26,21 +28,34 @@ model_ids:
       ERA5:
         variables: ["2t", "10u", "q_50", "t_100"]
         fsteps: [0]
-    label: "test1"
+    label: "MTM mixed"
     epoch: 0
     rank: 0
     plot_maps: false
     plot_histograms: false
 
-#forecast mode
-  # skqp3xvu:
-  #   streams:
-  #     ERA5:
-  #       variables: ["2t", "10u", "q_50", "t_100"]
-  #       # fsteps: [0]
-  #   label: "test1"
-  #   epoch: 0
-  #   rank: 0
-  #   plot_maps: false
-  #   plot_histograms: false
+#forecast model
+  wnt5us9b:
+    streams:
+      ERA5:
+        variables: ["2t", "10u", "q_50", "t_100"]
+        fsteps: [0, 1]
+    label: "forecast ERA5"
+    epoch: 0
+    rank: 0
+    plot_maps: false
+    plot_histograms: false
 
+  vy2d4be7:
+    streams:
+      ERA5:
+        variables: ["z_500", "t_100"]
+        fsteps: [1]
+      NPPATMS:
+        variables: ["obsvalue_rawbt_1", "obsvalue_rawbt_5"]
+        fsteps: [1]
+    label: "forecast mixed"
+    epoch: 0
+    rank: 0
+    plot_maps: true
+    plot_histograms: true
