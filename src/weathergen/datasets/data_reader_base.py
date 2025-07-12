@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
+import pandas as pd
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass
