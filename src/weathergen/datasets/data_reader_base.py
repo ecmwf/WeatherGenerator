@@ -8,12 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
-import pandas as pd
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass
 
 import numpy as np
+import pandas as pd
 from numpy import datetime64, timedelta64
 from numpy.typing import NDArray
 
