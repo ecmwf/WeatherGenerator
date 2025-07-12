@@ -74,18 +74,15 @@ def str_to_datetime64(s: str | int | NPDT64) -> NPDT64:
     return np.datetime64(datetime.datetime.strptime(str(s), format_str))
 
 
-def str_to_timedelta(s: str | datetime.timedelta) -> datetime.timedelta:
+def str_to_timedelta(s : str | datetime.timedelta) -> pd.Timedelta:
     """
-    Convert a string to a timedelta object.
-    The format is expected to be "D-HH:MM:SS".
+    Convert a string or datetime.timedelta object to a pd.Timedelta object.
+    The format is expected to be "HH:MM:SS" or "dd days HH:MM:SS".
     """
 
-    if isinstance(s, datetime.timedelta):
-        return s
-    format_str = "%d-%H:%M:%S"
-    assert isinstance(s, str), type(s)
-    t = datetime.datetime.strptime(s, format_str)
-    return datetime.timedelta(days=t.day, hours=t.hour, minutes=t.minute, seconds=t.second)
+    if not isinstance(s, str) and not isinstance(s, datetime.timedelta):
+        raise TypeError("Input must be a string or a datetime.timedelta object")
+    return pd.to_timedelta(s)
 
 
 class TimeWindowHandler:
