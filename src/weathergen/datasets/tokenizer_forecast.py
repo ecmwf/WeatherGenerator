@@ -40,11 +40,11 @@ class TokenizerForecast:
         self.num_healpix_cells_source = 12 * 4**self.hl_source
         self.num_healpix_cells_target = 12 * 4**self.hl_target
 
-        verts00, verts00_Rs = healpix_verts_rots(self.hl_source, 0.0, 0.0)
-        verts10, verts10_Rs = healpix_verts_rots(self.hl_source, 1.0, 0.0)
-        verts11, verts11_Rs = healpix_verts_rots(self.hl_source, 1.0, 1.0)
-        verts01, verts01_Rs = healpix_verts_rots(self.hl_source, 0.0, 1.0)
-        vertsmm, vertsmm_Rs = healpix_verts_rots(self.hl_source, 0.5, 0.5)
+        verts00, verts00_rots = healpix_verts_rots(self.hl_source, 0.0, 0.0)
+        verts10, verts10_rots = healpix_verts_rots(self.hl_source, 1.0, 0.0)
+        verts11, verts11_rots = healpix_verts_rots(self.hl_source, 1.0, 1.0)
+        verts01, verts01_rots = healpix_verts_rots(self.hl_source, 0.0, 1.0)
+        vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_source, 0.5, 0.5)
         self.hpy_verts = [
             verts00.to(torch.float32),
             verts10.to(torch.float32),
@@ -52,19 +52,19 @@ class TokenizerForecast:
             verts01.to(torch.float32),
             vertsmm.to(torch.float32),
         ]
-        self.hpy_verts_Rs_source = [
-            verts00_Rs.to(torch.float32),
-            verts10_Rs.to(torch.float32),
-            verts11_Rs.to(torch.float32),
-            verts01_Rs.to(torch.float32),
-            vertsmm_Rs.to(torch.float32),
+        self.hpy_verts_rots_source = [
+            verts00_rots.to(torch.float32),
+            verts10_rots.to(torch.float32),
+            verts11_rots.to(torch.float32),
+            verts01_rots.to(torch.float32),
+            vertsmm_rots.to(torch.float32),
         ]
 
-        verts00, verts00_Rs = healpix_verts_rots(self.hl_target, 0.0, 0.0)
-        verts10, verts10_Rs = healpix_verts_rots(self.hl_target, 1.0, 0.0)
-        verts11, verts11_Rs = healpix_verts_rots(self.hl_target, 1.0, 1.0)
-        verts01, verts01_Rs = healpix_verts_rots(self.hl_target, 0.0, 1.0)
-        vertsmm, vertsmm_Rs = healpix_verts_rots(self.hl_target, 0.5, 0.5)
+        verts00, verts00_rots = healpix_verts_rots(self.hl_target, 0.0, 0.0)
+        verts10, verts10_rots = healpix_verts_rots(self.hl_target, 1.0, 0.0)
+        verts11, verts11_rots = healpix_verts_rots(self.hl_target, 1.0, 1.0)
+        verts01, verts01_rots = healpix_verts_rots(self.hl_target, 0.0, 1.0)
+        vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_target, 0.5, 0.5)
         self.hpy_verts = [
             verts00.to(torch.float32),
             verts10.to(torch.float32),
@@ -72,33 +72,33 @@ class TokenizerForecast:
             verts01.to(torch.float32),
             vertsmm.to(torch.float32),
         ]
-        self.hpy_verts_Rs_target = [
-            verts00_Rs.to(torch.float32),
-            verts10_Rs.to(torch.float32),
-            verts11_Rs.to(torch.float32),
-            verts01_Rs.to(torch.float32),
-            vertsmm_Rs.to(torch.float32),
+        self.hpy_verts_rots_target = [
+            verts00_rots.to(torch.float32),
+            verts10_rots.to(torch.float32),
+            verts11_rots.to(torch.float32),
+            verts01_rots.to(torch.float32),
+            vertsmm_rots.to(torch.float32),
         ]
 
         self.verts_local = []
         verts = torch.stack([verts10, verts11, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts00_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts00_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts11, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts10_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts10_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts10, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts11_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts11_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts11, verts10, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts01_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts01_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts10, verts11, verts01])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(vertsmm_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(vertsmm_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         self.hpy_verts_local_target = torch.stack(self.verts_local).transpose(0, 1)
@@ -168,7 +168,7 @@ class TokenizerForecast:
             time_win=time_win,
             token_size=token_size,
             hl=self.hl_source,
-            hpy_verts_Rs=self.hpy_verts_Rs_source[-1],
+            hpy_verts_rots=self.hpy_verts_rots_source[-1],
             n_coords=normalizer.normalize_coords,
             n_geoinfos=normalizer.normalize_geoinfos,
             n_data=normalizer.normalize_source_channels,
@@ -272,7 +272,7 @@ class TokenizerForecast:
                 target_coords,
                 target_geoinfos,
                 target_times,
-                self.hpy_verts_Rs_target,
+                self.hpy_verts_rots_target,
                 self.hpy_verts_local_target,
                 self.hpy_nctrs_target,
             )

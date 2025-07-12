@@ -46,13 +46,13 @@ if __name__ == "__main__":
     pr = pr.split("/")[0]
     r = requests.get(f"https://github.com/{repo}/pull/{pr}")
     soup = BeautifulSoup(r.text, "html.parser")
-    issueForm = soup.find_all("form", {"aria-label": re.compile("Link issues")})
+    issue_form = soup.find_all("form", {"aria-label": re.compile("Link issues")})
     msg = msg_template.format(pr=pr, repo=repo)
 
-    if not issueForm:
+    if not issue_form:
         print(msg)
         exit(1)
-    issues = [i["href"] for i in issueForm[0].find_all("a")]
+    issues = [i["href"] for i in issue_form[0].find_all("a")]
     issues = [i for i in issues if i is not None and repo in i]
     print(f"Linked issues for PR {pr}:")
     print(f"Found {len(issues)} linked issues.")
