@@ -174,8 +174,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.batch_size = batch_size
 
-        self.data_loader_rng_seed = cf.data_loader_rng_seed
-        self.rng = np.random.default_rng( self.data_loader_rng_seed)
+        self.data_loader_rng_seed = (
+            cf.data_loader_rng_seed
+            if cf.data_loader_rng_seed > cf.loader_num_workers
+            else cf.data_loader_rng_seed * 13
+        )
+        self.rng = np.random.default_rng(self.data_loader_rng_seed)
 
         self.healpix_level_source: int = cf.healpix_level
         self.healpix_level_target: int = cf.healpix_level
@@ -233,11 +237,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     ###################################################
     def reset(self):
-
         self.data_loader_rng_seed *= 13
         worker_info = torch.utils.data.get_worker_info()
         div_factor = (worker_info.id + 1) if worker_info is not None else 1
-        self.rng = np.random.default_rng( int(self.data_loader_rng_seed / div_factor))
+        self.rng = np.random.default_rng(int(self.data_loader_rng_seed / div_factor))
 
         fsm = (
             self.forecast_steps[min(self.epoch, len(self.forecast_steps) - 1)]
@@ -272,7 +275,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         else:
             assert False
 
-        self.tokenizer.reset( self.rng)
+        self.tokenizer.reset(self.rng)
 
     ###################################################
     def denormalize_source_channels(self, obs_id, data):
