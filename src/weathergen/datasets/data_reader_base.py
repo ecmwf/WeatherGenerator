@@ -82,10 +82,10 @@ def str_to_timedelta(s: str | datetime.timedelta) -> datetime.timedelta:
 
     if isinstance(s, datetime.timedelta):
         return s
-    format_str = "%H:%M:%S"
+    format_str = "%d-%H:%M:%S"
     assert isinstance(s, str), type(s)
     t = datetime.datetime.strptime(s, format_str)
-    return datetime.timedelta(hours=t.hour, minutes=t.minute, seconds=t.second)
+    return datetime.timedelta(days=t.day, hours=t.hour, minutes=t.minute, seconds=t.second)
 
 
 class TimeWindowHandler:
