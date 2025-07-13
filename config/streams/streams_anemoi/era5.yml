@@ -9,12 +9,25 @@
 
 ERA5 :
   type : anemoi
-  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr']
-  # source : ['u_', 'v_', '10u', '10v']
-  # target : ['10u', '10v']
-  source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp']
-  target_exclude : ['w_', 'slor', 'sdor', 'z', 'tcw', 'cp', 'tp']
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v7-ml137.zarr']
+  source : [
+    'u_23', 'u_30', 'u_37', 'u_44', 'u_51', 'u_58', # u-component of wind for 5 to 96 hPa or roughly 36 to 17 km
+    'v_23', 'v_30', 'v_37', 'v_44', 'v_51', 'v_58', # v-component of wind
+    't_23', 't_30', 't_37', 't_44', 't_51', 't_58', # temperature
+    'q_23', 'q_30', 'q_37', 'q_44', 'q_51', 'q_58', # specific humidity
+    'w_23', 'w_30', 'w_37', 'w_44', 'w_51', 'w_58', # vertical velocity
+    ]
+  target : [
+    'u_23', 'u_30', 'u_37', 'u_44', 'u_51', 'u_58',
+    'v_23', 'v_30', 'v_37', 'v_44', 'v_51', 'v_58',
+    't_23', 't_30', 't_37', 't_44', 't_51', 't_58',
+    'q_23', 'q_30', 'q_37', 'q_44', 'q_51', 'q_58',
+    'w_23', 'w_30', 'w_37', 'w_44', 'w_51', 'w_58',
+    ]
+  # source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp']
+  # target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp']
   loss_weight : 1.
+  frequency : '24:00:00'
   masking_rate : 0.6
   masking_rate_none : 0.05
   token_size : 32
