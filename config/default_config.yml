@@ -47,7 +47,7 @@ forecast_steps: 2
 forecast_policy: fixed #fixed
 forecast_freeze_model: False
 forecast_att_dense_rate: 1.0 # 0.25
-fe_num_blocks: 8
+fe_num_blocks: 12
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -86,7 +86,7 @@ sampling_rate_target: 1.0
 # include a masking strategy here, currently only supporting "random" and "block"
 masking_strategy: "random"
 
-num_epochs: 24
+num_epochs: 32
 samples_per_epoch: 4096
 samples_per_validation: 512
 shuffle: True
@@ -94,10 +94,10 @@ shuffle: True
 lr_scaling_policy: "sqrt"
 lr_start: 0.000001
 lr_max: 0.00005
-lr_final_decay: 0.000001
+lr_final_decay: 0.00002
 lr_final: 0.0
 lr_steps_warmup: 256
-lr_steps_cooldown: 4096
+lr_steps_cooldown: 512
 lr_policy_warmup: "cosine"
 lr_policy_decay: "linear"
 lr_policy_cooldown: "linear"
