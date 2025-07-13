@@ -75,10 +75,10 @@ def str_to_datetime64(s: str | int | NPDT64) -> NPDT64:
     return np.datetime64(datetime.datetime.strptime(str(s), format_str))
 
 
-def str_to_timedelta(s : str | datetime.timedelta) -> pd.Timedelta:
+def str_to_timedelta(s: str | datetime.timedelta) -> pd.Timedelta:
     """
     Convert a string or datetime.timedelta object to a pd.Timedelta object.
-    The string format is expected to be "HH:MM:SS". 
+    The string format is expected to be "HH:MM:SS".
     Hours are not limited to two digits. Minutes and seconds must be in the range 0-59.
     """
 
@@ -89,7 +89,7 @@ def str_to_timedelta(s : str | datetime.timedelta) -> pd.Timedelta:
         return pd.Timedelta(s)
     if isinstance(s, str):
         # ensure that the string is in "HH:MM:SS" format
-        parts = s.split(':')
+        parts = s.split(":")
         if not len(parts) == 3:
             raise ValueError("String must be in 'HH:MM:SS' format")
         if not all(part.isdigit() for part in parts):
