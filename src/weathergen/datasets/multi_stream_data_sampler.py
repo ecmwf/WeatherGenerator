@@ -173,7 +173,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.sampling_rate_target = cf.sampling_rate_target
 
         self.batch_size = batch_size
-        self.rng = np.random.default_rng(cf.data_loader_rng_seed)
+
+        self.data_loader_rng_seed = cf.data_loader_rng_seed
+        self.rng = np.random.default_rng( self.data_loader_rng_seed)
 
         self.healpix_level_source: int = cf.healpix_level
         self.healpix_level_target: int = cf.healpix_level
@@ -181,10 +183,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.num_healpix_cells_target: int = 12 * 4**self.healpix_level_target
 
         if cf.training_mode == "forecast":
-            self.tokenizer = TokenizerForecast(cf.healpix_level, cf.data_loader_rng_seed)
+            self.tokenizer = TokenizerForecast(cf.healpix_level, self.rng)
         elif cf.training_mode == "masking":
             masker = Masker(cf.masking_rate, cf.masking_strategy, cf.masking_rate_sampling)
-            self.tokenizer = TokenizerMasking(cf.healpix_level, cf.data_loader_rng_seed, masker)
+            self.tokenizer = TokenizerMasking(cf.healpix_level, self.rng, masker)
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
             msg = "masked token modeling does not support self.input_window_steps > 1; "
             msg += "increase window length"
@@ -231,6 +233,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     ###################################################
     def reset(self):
+
+        self.data_loader_rng_seed *= 13
+        worker_info = torch.utils.data.get_worker_info()
+        div_factor = (worker_info.id + 1) if worker_info is not None else 1
+        self.rng = np.random.default_rng( int(self.data_loader_rng_seed / div_factor))
+
         fsm = (
             self.forecast_steps[min(self.epoch, len(self.forecast_steps) - 1)]
             if self.forecast_policy != "random"
@@ -264,7 +272,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         else:
             assert False
 
-        self.tokenizer.reset()
+        self.tokenizer.reset( self.rng)
 
     ###################################################
     def denormalize_source_channels(self, obs_id, data):
@@ -423,7 +431,5 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 f"{self.rank}::{worker_info.id}"
                 + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
             )
-        # ensure the tokenizers use different seeds
-        self.tokenizer.reset()
 
         return iter_start, iter_end
