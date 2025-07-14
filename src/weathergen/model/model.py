@@ -570,14 +570,14 @@ class Model(torch.nn.Module):
 
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
         tokens_stream = (tokens.reshape(s) + model_params.pe_global).flatten(0, 1)
-        tokens_stream = (
-            tokens_stream[model_params.hp_nbours.flatten()]
-            .flatten(0, 1)
-            .reshape(self.num_healpix_cells, 9, -1)
-        )
+        tokens_stream = tokens_stream[model_params.hp_nbours.flatten()]
         tokens_stream = tokens_stream[
-            torch.repeat_interleave(streams_data[0][0].target_coords_lens[0])
-        ].flatten(-2, -1)
+            torch.repeat_interleave(streams_data[0][0].target_coords_lens[0] > 0, 9)
+        ].flatten(0, 1)
+        tokens_lens = model_params.tokens_lens[: (tokens_stream.shape[0] // 9) + 1]
+        # tokens_stream = tokens_stream.reshape(self.num_healpix_cells, 9, -1)[
+        #     torch.repeat_interleave(streams_data[0][0].target_coords_lens[0])
+        # ].sum(dim=1)/8
 
         # pair with tokens from assimilation engine to obtain target tokens
         preds_tokens = []
@@ -631,7 +631,7 @@ class Model(torch.nn.Module):
             tc_tokens = tte(
                 tokens_stream,
                 tc_tokens,
-                tcs_lens,
+                tokens_lens,
                 tcs_lens,
             )
 

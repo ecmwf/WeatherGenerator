@@ -18,7 +18,7 @@ from weathergen.model.attention import (
     MultiSelfAttentionHead_Local,
     MultiSelfAttentionHead_Varlen,
 )
-
+from weathergen.model.activations import SwiGLU
 from weathergen.model.blocks import (
     SelfAttentionBlock,
     CrossAttentionBlock,
@@ -393,7 +393,6 @@ class TargetPredictionEngine(nn.Module):
         self.tro_type = tro_type
 
         attention_kwargs = {
-            "with_qk_lnorm": True,
             "dropout_rate": 0.1,  # Assuming dropout_rate is 0.1
             "with_flash": self.cf.with_flash_attention,
             "norm_type": self.cf.norm_type,
@@ -403,64 +402,92 @@ class TargetPredictionEngine(nn.Module):
             "attention_dtype": get_dtype(self.cf.attention_dtype),
         }
         self.dim_adapter = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(9*self.cf.ae_global_dim_embed, self.dims_embed[0]),
+            SwiGLU(),
+            nn.Linear(self.cf.ae_global_dim_embed // 2, self.dims_embed[0]),
             nn.LayerNorm(self.dims_embed[0]),
         )
+        self.cross_attn = MultiCrossAttentionHead_Varlen(
+            dim_embed_q=self.dims_embed[0],
+            dim_embed_kv=self.dims_embed[0],
+            num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+            with_residual=True,
+            with_qk_lnorm=False,
+            **attention_kwargs,
+        )
+        attention_kwargs["with_qk_lnorm"] = True
+
+        prev_dim = self.dims_embed[0]
+        # prev_dim = self.cf.ae_global_dim_embed
         self.tte = nn.ModuleList()
-        for ith, dim in enumerate(self.dims_embed[:-1]):
-            next_dim = self.dims_embed[ith+1]
+        for ith, next_dim in enumerate(self.dims_embed[1:]):
             if self.cf.decoder_type == "PerceiverIO":
                 # a single cross attention layer as per https://arxiv.org/pdf/2107.14795
-                self.tte.append(CrossAttentionBlock(
-                    dim=dim,
-                    dim_aux=next_dim,
-                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
-                    with_self_attn=True,
-                    with_adanorm=False,
-                    with_mlp=False,
-                    attention_kwargs=attention_kwargs,
-                ))
+                self.tte.append(
+                    CrossAttentionBlock(
+                        dim=prev_dim,
+                        dim_aux=next_dim,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        with_self_attn=False,
+                        with_adanorm=False,
+                        with_mlp=False,
+                        attention_kwargs=attention_kwargs,
+                    )
+                )
             elif self.cf.decoder_type == "AdaLayerNormConditioning":
-                self.tte.append(SelfAttentionBlock(
-                    dim=dim,
-                    dim_aux=dim,
-                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
-                    attention_kwargs=attention_kwargs,
-                    with_adanorm=True,
-                ))
+                self.tte.append(
+                    SelfAttentionBlock(
+                        dim=prev_dim,
+                        dim_aux=prev_dim,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        attention_kwargs=attention_kwargs,
+                        with_adanorm=True,
+                    )
+                )
             elif self.cf.decoder_type == "CrossAttentionConditioning":
-                self.tte.append(CrossAttentionBlock(
-                    dim=dim,
-                    dim_aux=dim,
-                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
-                    with_self_attn=True,
-                    with_adanorm=False,
-                    with_mlp=True,
-                    attention_kwargs=attention_kwargs,
-                ))
+                self.tte.append(
+                    CrossAttentionBlock(
+                        dim=prev_dim,
+                        dim_aux=next_dim,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        with_self_attn=True,
+                        with_adanorm=False,
+                        with_mlp=True,
+                        attention_kwargs=attention_kwargs,
+                    )
+                )
             elif self.cf.decoder_type == "CrossAttentionAdaNormConditioning":
-                self.tte.append(CrossAttentionBlock(
-                    dim=dim,
-                    dim_aux=dim,
-                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
-                    with_self_attn=True,
-                    with_adanorm=True,
-                    with_mlp=True,
-                    attention_kwargs=attention_kwargs,
-                ))
+                self.tte.append(
+                    CrossAttentionBlock(
+                        dim=prev_dim,
+                        dim_aux=next_dim,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        with_self_attn=True,
+                        with_adanorm=True,
+                        with_mlp=True,
+                        attention_kwargs=attention_kwargs,
+                    )
+                )
             else:
                 raise NotImplementedError(
                     f"{self.cf.decoder_type} is not implemented for prediction heads"
                 )
+            prev_dim = self.dims_embed[ith]
 
     def forward(self, latent, output_cond, latent_lens, output_cond_lens):
-        latent = self.dim_adapter(latent)
+        latent = checkpoint(self.dim_adapter, latent, use_reentrant=False)
+        latent = checkpoint(
+            self.cross_attn,
+            x_q=output_cond,
+            x_kv=latent,
+            x_kv_lens=latent_lens,
+            x_q_lens=output_cond_lens,
+            use_reentrant=False,
+        )
         for layer in self.tte:
             latent = checkpoint(
                 layer,
                 x=latent,
-                x_lens=latent_lens,
+                x_lens=output_cond_lens,
                 aux=output_cond,
                 aux_lens=output_cond_lens,
                 use_reentrant=False,
