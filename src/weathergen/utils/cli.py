@@ -122,8 +122,8 @@ def _add_model_loading_params(parser: argparse.ArgumentParser):
         "--from_run_id",
         required=True,
         help=(
-            "Start inference or continue training from the WeatherGenerator",
-            " model with the given run id.",
+            "Start inference or continue training from the WeatherGenerator"
+            " model with the given run id."
         ),
     )
     parser.add_argument(
