@@ -26,14 +26,16 @@ def write_output(
     targets_times_all,
     targets_lens,
 ):
-    if cf.analysis_streams_output is None:
+    output_stream_names = cf.analysis_streams_output
+    if output_stream_names is None:
         output_stream_names = [stream.name for stream in cf.streams]
         _logger.info(f"Using all streams as output streams: {output_stream_names}")
-    else:
-        output_stream_names = [
-            stream.name for stream in cf.streams if stream.name in cf.analysis_streams_output
-        ]
-    _logger.info(f"Using output streams: {output_stream_names}")
+    
+    output_streams = {
+        name: output_stream_names.index(name) for name in cf.analysis_streams_output
+    }
+
+    _logger.info(f"Using output streams: {output_streams}")
     # TODO: streams anemoi `source`, `target` commented out???
 
     channels: list[list[str]] = [
@@ -55,7 +57,7 @@ def write_output(
         targets_coords_all,
         targets_times_all,
         targets_lens,
-        output_stream_names,
+        output_streams,
         channels,
         geoinfo_channels,
         sample_start,
