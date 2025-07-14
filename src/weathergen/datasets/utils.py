@@ -81,7 +81,8 @@ def r3tos2_old(pos):
     out = torch.stack([lats, lons])
     return out.permute([*list(torch.arange(len(out.shape))[:-1] + 1), 0])
 
-@torch.compile(fullgraph=True)
+#@torch.compile(fullgraph=True, mode="max-autotune")
+#@torch.compile(fullgraph=True)
 def r3tos2(pos):
     """
     Convert from Cartesian R^3 coordinates to spherical coordinates (lat, lon).
