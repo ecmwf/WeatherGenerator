@@ -55,6 +55,15 @@ class LossModule:
         #self.stream_loss_weight = {} —> normalize
         #self.channel_loss_weight = {} —> normalize
     
+    def call_loss_fct(
+        self,
+        mask,
+        loss_fct,
+        targets,
+        preds
+    ) -> None:
+        pass
+    
     def compute_loss(
         self,
         preds: Tensor,
@@ -116,12 +125,19 @@ class LossModule:
 
                     # loop over all channels
                     for i in range(target.shape[-1]):
+                        
+                        # TODO: create mask here and perform temp calculation in separate function
+
                         # if stream is internal time step, compute loss separately per step
                         if tok_spacetime:
                             # iterate over time steps and compute loss separately for each
-                            t_unique = torch.unique(target_coords[:, 1])
+                            t_unique = torch.unique(target_coords[:, 1]) # What happens for two targets at same position with different time stamps?
                             for t in t_unique:
                                 mask_t = t == target_coords[:, 1]
+                                # What dimensions do the following tensors have?
+                                #   pred[]
+                                #   target[]
+                                #   mask[]
                                 mask = torch.logical_and(mask_t, mask_nan[:, i])
                                 if mask.sum().item() > 0:
                                     # TODO: Move into separate function
