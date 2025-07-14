@@ -21,6 +21,19 @@
     },
     {
         "domain": "WeatherGen",
+        "module": "weathergen.datasets.tokenizer_masking", 
+        "functions": [
+            "encode_times_source",
+            "encode_times_target",
+            "tokenize_window_space",
+            "tokenize_window_spacetime",
+            "TokenizerMasking.batchify_source",
+            "TokenizerMasking.batchify_target",
+            "TokenizerMasking.reset"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
         "module": "weathergen.datasets.stream_data",
         "functions": [
             "StreamData.to_device",
