@@ -55,15 +55,6 @@ class LossModule:
         #self.stream_loss_weight = {} —> normalize
         #self.channel_loss_weight = {} —> normalize
     
-    def call_loss_fct(
-        self,
-        mask,
-        loss_fct,
-        targets,
-        preds
-    ) -> None:
-        pass
-    
     def compute_loss(
         self,
         preds: Tensor,
@@ -128,6 +119,8 @@ class LossModule:
                         
                         # TODO: create mask here and perform temp calculation in separate function
 
+                        '''
+                        #### ORIGINAL CODE START ####
                         # if stream is internal time step, compute loss separately per step
                         if tok_spacetime:
                             # iterate over time steps and compute loss separately for each
@@ -172,6 +165,45 @@ class LossModule:
                                 val = val + channel_loss_weight[i] * temp
                                 losses_all[si.name][i, j] += temp.item()
                                 ctr_chs += 1
+                        #### ORIGINAL CODE END ####
+                        
+                        '''
+
+                        #### SUGGESTION START ####
+                        # if stream is internal time step, compute loss separately per step
+                        if tok_spacetime:
+                            mask = []
+                            # iterate over time steps and create mask separately for each
+                            t_unique = torch.unique(target_coords[:, 1]) # What happens for two targets at same position with different time stamps?
+                            for t in t_unique:
+                                mask_t = t == target_coords[:, 1]
+                                # What dimensions do the following tensors have?
+                                #   pred[]
+                                #   target[]
+                                #   mask[]
+                                mask.append(torch.logical_and(mask_t, mask_nan[:, i])) # TODO: verify whether this is always called (if not, masks can have len 0, which then would have to be checked below)
+                        else:
+                            masks = [mask_nan[:, i]]
+
+                        for mask in masks:
+                            # only compute loss is there are non-NaN values
+                            if mask.sum().item() > 0:
+                                temp = loss_fct(
+                                    target[mask, i],
+                                    pred[:, mask, i],
+                                    pred[:, mask, i].mean(0),
+                                    (
+                                        pred[:, mask, i].std(0)
+                                        if ens
+                                        else torch.zeros(1, device=pred.device)
+                                    ),
+                                )
+                                val = val + channel_loss_weight[i] * temp
+                                losses_all[si.name][i, j] += temp.item()
+                                ctr_chs += 1
+                        #### SUGGESTION END ####
+                        #'''
+                        
                     val = val / ctr_chs if (ctr_chs > 0) else val
 
                     if loss_fct.__name__ in stat_loss_fcts:
