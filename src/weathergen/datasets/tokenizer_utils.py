@@ -100,7 +100,7 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
     posr3 = s2tor3(thetas, phis)
 
     # extract information to split according to cells by first sorting and then finding split idxs
-    hpy_idxs_ord = np.argsort(hpy_idxs, stable=True)
+    hpy_idxs_ord = np.argsort(hpy_idxs, kind='mergesort')
     splits = np.flatnonzero(np.diff(hpy_idxs[hpy_idxs_ord]))
 
     # extract per cell data

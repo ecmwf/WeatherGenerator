@@ -667,6 +667,9 @@ def plot_train(args=None):
         clean_plot_folder(out_dir)
 
     # read logged data
+    runs_ids = {
+        "m4har28d": [34298989, "ERA5 test"],
+    }
 
     runs_data = [TrainLogger.read(run_id, model_path=model_base_dir) for run_id in runs_ids]
 
