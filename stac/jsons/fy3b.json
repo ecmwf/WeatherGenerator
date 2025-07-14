@@ -1,18 +1,17 @@
 {
    "assets": {
-      "MICROWAVE_FCDR_V1.1-20200512/SNPP/*/*.nc": {
+      "MICROWAVE_FCDR_V1.1-20200512/FY3C/*/*.nc": {
          "description": "Observation dataset",
-         "href": "MICROWAVE_FCDR_V1.1-20200512/SNPP/*/*.nc",
-         "inodes": "44469",
+         "href": "MICROWAVE_FCDR_V1.1-20200512/FY3C/*/*.nc",
+         "inodes": "44204",
          "locations": [
-            "hpc2020",
-            "juwels_booster"
+            "hpc2020"
          ],
          "roles": [
             "data"
          ],
-         "size": "2.9 TB",
-         "title": "MICROWAVE_FCDR_V1.1-20200512/SNPP/*/*.nc",
+         "size": "961.4 GB",
+         "title": "MICROWAVE_FCDR_V1.1-20200512/FY3C/*/*.nc",
          "type": "application/vnd+netcdf"
       }
    },
@@ -49,10 +48,10 @@
       ],
       "type": "Polygon"
    },
-   "id": "weathergen.atmo.NPP-ATMS",
+   "id": "weathergen.atmo.FY-3B, MWHS",
    "properties": {
-      "description": "The NPP-ATMS (Advanced Technology Microwave Sounder) dataset is derived from the ATMS instrument onboard the NOAA/NASA National Polar-orbiting Partnership (NPP) satellite. It provides global measurements of atmospheric temperature, moisture, and pressure profiles, crucial for weather forecasting and climate monitoring",
-      "end_datetime": "2018-12-31T23:58:08",
+      "description": "The data from the MWHS microwave radiometer onboard FY-3B, a Fengyun satellite. Data is available for three FY-3 satellites, FY-3A, FY-3B and FY-3C.",
+      "end_datetime": "2018-12-31T22:29:55",
       "fixed_timesteps": "False",
       "frequency": "NA",
       "keywords": [
@@ -61,7 +60,7 @@
          "polar-orbiter",
          "satellite"
       ],
-      "name": "NPP-ATMS",
+      "name": "FY-3B, MWHS",
       "processing_level": "1C",
       "providers": [
          {
@@ -72,11 +71,11 @@
             "url": "https://ecmwf.int"
          },
          {
-            "name": "NASA",
+            "name": "CMA",
             "roles": [
                "provider"
             ],
-            "url": "https://www.nasa.gov"
+            "url": "https://www.cma.gov.cn/"
          },
          {
             "name": "EUMETSAT",
@@ -86,9 +85,9 @@
             "url": "https://eumetsat.int"
          }
       ],
-      "start_datetime": "2011-12-11T00:36:13",
-      "title": "NPP-ATMS",
-      "unique_id": "6",
+      "start_datetime": "2010-11-18T22:23:16",
+      "title": "FY-3B, MWHS",
+      "unique_id": "11",
       "variables": {
          "btemps": {
             "max": "NA",
