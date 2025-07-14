@@ -140,7 +140,7 @@ def calc_scores_per_stream(
 
 
 def metric_list_to_dict(
-    metric_list: list[xr.DataArray], streams: list
+    metric_list: list[xr.DataArray], streams: list[str]
 ) -> dict[str, dict[str, dict[int, dict[str, float]]]]:
     """
     Convert a list of xarray DataArrays containing metrics into a nested dictionary structure.
@@ -266,7 +266,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "-id", "--run_id", type=str, help="The ID of the run to evaluate."
+        "-id", "--run-id", type=str, help="The ID of the run to evaluate."
     )
     parser.add_argument(
         "-m",
@@ -278,14 +278,14 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-sd",
-        "--save_dir",
+        "--save-dir",
         type=Path,
         default=None,
         help="Directory to save the results.",
     )
     parser.add_argument(
         "-rd",
-        "--results_dir",
+        "--results-dir",
         type=Path,
         default=_DEFAULT_RESULT_PATH,
         help="Directory containing the results zarr files.",
