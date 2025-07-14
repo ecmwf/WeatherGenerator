@@ -86,7 +86,7 @@ sampling_rate_target: 1.0
 masking_strategy: "random"
 # masking_strategy_config is a dictionary of additional parameters for the masking strategy, here an example for "healpix" masking
 # which e.g. requires hl_data and hl_mask to be specified, with hl_data the hl level of the data and hl_mask for the mask
-# masking_strategy_config: {"hl_data": 5, "hl_mask": 1} # or for per channel masking, {"global": True} or {"per_cell": True}
+# masking_strategy_config: {"per_cell": True} # or for per channel masking, {"global": True} or {"per_cell": True}
 
 num_epochs: 24
 samples_per_epoch: 4096
