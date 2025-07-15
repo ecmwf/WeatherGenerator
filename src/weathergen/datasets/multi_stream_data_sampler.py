@@ -129,7 +129,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 else:
                     filename = pathlib.Path(datapath) / fname
 
-                    if not filename.exists():  # see above
+                    # DataReaderFesom can take regular expressions so this check is bypassed
+                    if not filename.exists() and stream_info["type"] != "fesom":  # see above
                         msg = (
                             f"Did not find input data for {stream_info['type']} "
                             f"stream '{stream_info['name']}': {filename}."

@@ -7,10 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import glob
 import logging
 from pathlib import Path
 from typing import override
 
+import dask.array as da
 import numpy as np
 import zarr
 
@@ -77,15 +79,32 @@ class DataReaderFesom(DataReaderTimestep):
         filename: Path,
         stream_info: dict,
     ) -> None:
-        self.filename = filename
-        self.ds = zarr.open(filename, mode="r")
-        self.mesh_size = self.ds.data.attrs["nod2"]
+        self.filenames = sorted(glob.glob(str(filename)))
 
-        self.time = self.ds["dates"]
+        if len(self.filenames) == 0:
+            name = stream_info["name"]
+            _logger.warning(
+                f"{name} couldn't find any files matching {filename}. Stream is skipped."
+            )
+            super().__init__(tw_handler, stream_info)
+            self.init_empty()
+            return
+
+        groups: list[zarr.Group] = [zarr.open_group(name, mode="r") for name in self.filenames]
+        times: list[zarr.Array] = [group["dates"] for group in groups]
+        data: list[zarr.Array] = [group["data"] for group in groups]
+
+        self.time = da.concatenate(times, axis=0)
+        self.data = da.concatenate(data, axis=0)
+
+        if "nod2" in groups[0].data.attrs:
+            self.mesh_size = groups[0].data.attrs["nod2"]
+        else:
+            self.mesh_size = groups[0].data.attrs["n_points"]
 
         # TODO: time conversion to datetime64 should happen here.
-        start_ds = self.time[0][0]
-        end_ds = self.time[-1][0]
+        start_ds = self.time[0][0].compute()
+        end_ds = self.time[-1][0].compute()
 
         if start_ds > tw_handler.t_end or end_ds < tw_handler.t_start:
             name = stream_info["name"]
@@ -94,7 +113,7 @@ class DataReaderFesom(DataReaderTimestep):
             self.init_empty()
             return
 
-        period = self.time[self.mesh_size][0] - self.time[0][0]
+        period = (self.time[self.mesh_size][0] - self.time[0][0]).compute()
 
         if tw_handler.t_start > start_ds:
             self.start_idx = ((tw_handler.t_start - start_ds) // period + 1) * self.mesh_size
@@ -121,7 +140,7 @@ class DataReaderFesom(DataReaderTimestep):
             period,
         )
 
-        self.colnames: list[str] = list(self.ds.data.attrs["colnames"])
+        self.colnames: list[str] = list(groups[0].data.attrs["colnames"])
         self.cols_idx = list(np.arange(len(self.colnames)))
         self.lat_index = list(self.colnames).index("lat")
         self.lon_index = list(self.colnames).index("lon")
@@ -135,16 +154,15 @@ class DataReaderFesom(DataReaderTimestep):
         # TODO, TODO, TODO:
         self.step_hrs = 1
 
-        self.data = self.ds["data"]
-
         self.properties = {
-            "stream_id": self.ds.data.attrs["obs_id"],
+            "stream_id": groups[0].data.attrs["obs_id"],
         }
 
-        self.mean = np.concatenate((np.array([0, 0]), np.array(self.ds.data.attrs["means"])))
+        self.mean = np.concatenate((np.array([0, 0]), np.array(groups[0].data.attrs["means"])))
         self.stdev = np.sqrt(
-            np.concatenate((np.array([1, 1]), np.array(self.ds.data.attrs["vars"])))
+            np.concatenate((np.array([1, 1]), np.array(groups[0].data.attrs["std"])))
         )
+        self.stdev[self.stdev == 0.0] = 1.0
 
         source_channels = stream_info.get("source")
         if source_channels:
@@ -214,7 +232,7 @@ class DataReaderFesom(DataReaderTimestep):
 
         (t_idxs, dtr) = self._get_dataset_idxs(idx)
 
-        if self.ds is None or self.len == 0 or len(t_idxs) == 0:
+        if self.len == 0 or len(t_idxs) == 0:
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
@@ -222,15 +240,17 @@ class DataReaderFesom(DataReaderTimestep):
         # TODO: handle sub-sampling
         start_row = t_idxs[0] * self.mesh_size
         end_row = (t_idxs[-1] + 1) * self.mesh_size
-        data = self.data.oindex[start_row:end_row, channels_idx]
 
-        lat = np.expand_dims(self.data.oindex[start_row:end_row, self.lat_index], 1)
-        lon = np.expand_dims(self.data.oindex[start_row:end_row, self.lon_index], 1)
+        _logger.info(f"Started loading data from : {start_row} {end_row}")
+
+        data = self.data[start_row:end_row, channels_idx].compute()
+        lat = np.expand_dims(self.data[start_row:end_row, self.lat_index].compute(), 1)
+        lon = np.expand_dims(self.data[start_row:end_row, self.lon_index].compute(), 1)
 
         coords = np.concatenate([lat, lon], 1)
         # empty geoinfos
         geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
-        datetimes = np.squeeze(self.time[start_row:end_row])
+        datetimes = np.squeeze(self.time[start_row:end_row].compute())
 
         rd = ReaderData(
             coords=coords,
