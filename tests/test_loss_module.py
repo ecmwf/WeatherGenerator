@@ -40,9 +40,9 @@ def prepare_trainer(cf):
 
     return trainer
 
-
 def collect_targets(cf_streams, streams_data, forecast_offset, forecast_steps):
     # merge across batch dimension (and keep streams)
+    # TODO: Undo list resorting
     targets_rt = [
         [
             torch.cat([t[i].target_tokens[fstep] for t in streams_data])
@@ -50,6 +50,7 @@ def collect_targets(cf_streams, streams_data, forecast_offset, forecast_steps):
         ]
         for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
     ]
+    # TODO: Undo list resorting
     targets_coords_rt = [
         [
             torch.cat([t[i].target_coords[fstep] for t in streams_data])
@@ -59,7 +60,6 @@ def collect_targets(cf_streams, streams_data, forecast_offset, forecast_steps):
     ]
 
     return (targets_rt, targets_coords_rt)
-
 
 @pytest.fixture
 def cf():
@@ -88,6 +88,7 @@ def test_loss(cf):
         preds = trainer.model(trainer.model_params, batch, cf.forecast_offset, cf.forecast_steps)
 
     ### Original loss computation
+    # TODO: remove dependency from old trainer.compute_loss() function
     loss1, losses_all1, stddev_all1, _ = trainer.compute_loss(
         trainer.loss_fcts_val,
         cf.forecast_offset,

@@ -37,8 +37,8 @@ _logger = logging.getLogger(__name__)
 class LossModule:
     def __init__(
         self,
-        cf_streams: ListConfig,  # TODO: determine type and set to default, possibly None
-        loss_fcts: list,
+        cf_streams: ListConfig,  # TODO: remove
+        loss_fcts: list, # TODO: remove
         stage: Stage = TRAIN,
         device: str = "cpu",
     ):
@@ -46,6 +46,19 @@ class LossModule:
         self.stage = stage
         self.device = device
         self.cf_streams = cf_streams
+
+
+
+        # TODO:
+        # - add config (cs) as parameter to LossModule
+        # - initialize loss functions here as follows and remove from train.run()
+        # get function handles for loss function terms
+        #self.loss_fcts = [[getattr(losses, name), w] for name, w in cf.loss_fcts]
+        #self.loss_fcts_val = [[getattr(losses, name), w] for name, w in cf.loss_fcts_val]
+
+
+
+
 
         # self.stream = stream
         # self.stream_loss_weight = {} —> normalize
@@ -58,6 +71,24 @@ class LossModule:
         targets_coords: Tensor,  # TODO: verify type
         streams_data: None,  # TODO: determine type
     ):
+        
+
+
+
+        # WE NEED THIS IN LINE 157
+        targets_times_raw_rt = [
+            [
+                np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
+                for i in range(len(self.cf.streams))
+            ]
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
+        ]
+
+
+
+
+
+
         # TODO: Rethink counters (ctr_ftarget and ctr_chs)
         ctr_ftarget = 0
 
@@ -74,6 +105,7 @@ class LossModule:
             st.name: torch.zeros(len(stat_loss_fcts), device=self.device) for st in self.cf_streams
         }  # Create tensor for each stream
         # assert len(targets) == len(preds) and len(preds) == len(self.cf_streams)
+
         for fstep in range(len(targets)):
             for i_strm, (target, target_coords, si) in enumerate(
                 zip(targets[fstep], targets_coords[fstep], self.cf_streams, strict=False)
@@ -118,24 +150,25 @@ class LossModule:
                         # TODO: create mask here and perform temp calculation in separate function
                         #### SUGGESTION START ####
                         # if stream is internal time step, compute loss separately per step
+                        # TODO: Outsource mask gathering in separate function
                         if tok_spacetime:
                             masks = []
                             # iterate over time steps and create mask separately for each
+                            # TODO: verify shapes -- t_unique must be same like targets, also test with 12h, i.e., two fsteps
                             t_unique = torch.unique(
-                                target_coords[:, 1]
+                                #target_coords[:, 1]
+                                #targets_times_raw_rt[fstep, i_strm]
+                                targets_times_raw_rt[i_strm, fstep] # THIS USES THE NEW SHAPE!!!
                             )  # What happens for two targets at same position with different time stamps?
                             for t in t_unique:
                                 mask_t = t == target_coords[:, 1]
-                                # What dimensions do the following tensors have?
-                                #   pred[]
-                                #   target[]
-                                #   mask[]
                                 masks.append(
                                     torch.logical_and(mask_t, mask_nan[:, i])
                                 )  # TODO: verify whether this is always called (if not, masks can have len 0, which then would have to be checked below)
                         else:
                             masks = [mask_nan[:, i]]
 
+                        # TODO: Outsource loss computation in separate function -- try to minimize arguments
                         for mask in masks:
                             # only compute loss is there are non-NaN values
                             if mask.sum().item() > 0:

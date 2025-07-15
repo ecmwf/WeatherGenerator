@@ -10,6 +10,7 @@
 import logging
 import time
 from pathlib import Path
+from typing import Any, List
 
 import numpy as np
 import torch
@@ -327,6 +328,135 @@ class Trainer(Trainer_Base):
 
         # log final model
         self.save_model(cf.num_epochs)
+    
+    ###########################################
+    def _collect_target_var(
+        self,
+        streams_data,
+        forecast_offset,
+        forecast_steps,
+        var_to_collect
+    ):
+        return [
+            [
+                torch.cat([t[i][var_to_collect][fstep] for t in streams_data])
+                for i in range(len(self.cf.streams))
+            ]
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
+        ]
+    
+    ###########################################
+    def _collect_logger_items(
+        self,
+        preds: List[List[Tensor]],
+        targets: List[List[Tensor]],
+        forecast_offset: int,
+        forecast_steps: int,
+        streams_data: List[List[Any]],
+    ):
+        """Collects and denormalizes prediction and target data for logging.
+
+        This function processes target and prediction tensors, extracts relevant
+        coordinates and timestamps, denormalizes the data, and organizes it
+        into a structured format suitable for logging or further analysis. It
+        handles potential empty tensors and NaN values.
+
+        Args:
+            preds: A list of lists, where the outer list
+                corresponds to forecast steps, and the inner list contains prediction
+                tensors for each observation stream. Each prediction tensor is
+                expected to be in the normalized latent or observation space,
+                depending on the model's output.
+            targets: A list of lists, where the outer list
+                corresponds to forecast steps, and the inner list contains target
+                tensors for each observation stream. Each target tensor is expected
+                to be in the normalized observation space.
+            forecast_offset: The starting offset for the forecast steps
+                relative to the original data.
+            forecast_steps: The number of forecast steps to consider.
+            streams_data: A list of lists, where each inner list
+                contains data objects (e.g., `BatchItem` instances) for each stream
+                at a specific time step. These objects are expected to have
+                `target_coords_raw` and `target_times_raw` attributes.
+
+        Returns:
+            tuple: A tuple containing:
+                - preds_all: Denormalized
+                predictions, organized by forecast step and observation stream.
+                - targets_all: Denormalized
+                targets, organized by forecast step and observation stream.
+                - targets_coords_raw: Raw target coordinates,
+                extracted and concatenated for each forecast step and stream.
+                - targets_times_raw: Raw target timestamps,
+                extracted and concatenated for each forecast step and stream.
+                - targets_lens: A list of lists, where each
+                inner list contains the original lengths (shape[0]) of the target
+                tensors before any filtering.
+        """
+        fsteps = len(targets)
+        preds_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+        targets_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+        targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+
+        '''
+        targets_coords_raw = [
+            [
+                torch.cat([t[i].target_coords_raw[fstep] for t in streams_data])
+                for i in range(len(self.cf.streams))
+            ]
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
+        ]
+        targets_times_raw = [
+            [
+                np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
+                for i in range(len(self.cf.streams))
+            ]
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
+        ]
+        '''
+        targets_coords_raw = self._collect_target_var(
+            streams_data=streams_data,
+            forecast_offset=forecast_offset,
+            forecast_steps=forecast_steps,
+            var_to_collect="target_coords_raw"
+        )
+        targets_times_raw = self._collect_target_var(
+            streams_data=streams_data,
+            forecast_offset=forecast_offset,
+            forecast_steps=forecast_steps,
+            var_to_collect="target_times_raw"
+        )
+        
+        # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
+        for fstep in range(len(targets)):
+            for i_obs, (target) in enumerate(zip(targets[fstep], strict=False)):
+                pred = preds[fstep][i_obs]
+
+                if not (target.shape[0] > 0 and pred.shape[0] > 0):
+                    continue
+
+                # extract data/coords and remove token dimension if it exists
+                pred = pred.reshape([pred.shape[0], *target.shape])
+                assert pred.shape[1] > 0
+
+                mask_nan = ~torch.isnan(target)
+                if pred[:, mask_nan].shape[1] == 0:
+                    continue
+
+                targets_lens[fstep][i_obs] += [target.shape[0]]
+                dn_data = self.dataset_val.denormalize_target_channels
+
+                f32 = torch.float32
+                preds_all[fstep][i_obs] += [dn_data(i_obs, pred.to(f32)).detach().cpu()]
+                targets_all[fstep][i_obs] += [dn_data(i_obs, target.to(f32)).detach().cpu()]
+
+        return (
+            preds_all,
+            targets_all,
+            targets_coords_raw,
+            targets_times_raw,
+            targets_lens,
+        )
 
     ###########################################
     def compute_loss(
