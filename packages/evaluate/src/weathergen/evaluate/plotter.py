@@ -55,7 +55,8 @@ class Plotter(object):
         self.fstep    = None
         self.model_id = model_id
         self.select   = {}
-        
+
+
     def selection(self, sample: str, stream: str, fstep:str):
         """
         Set the selection for the plots. This will be used to filter the data for plotting.
@@ -214,11 +215,14 @@ class LinePlots(object):
 
         data_list, label_list = self._check_lengths(data, labels)
         
-        assert x in data_list[0].dims, f"Compare::plot - x dimension '{x}' not found in data dimensions {data_list[0].dims}"
+        assert x in data_list[0].dims, "x dimension '{x}' not found in data dimensions {data_list[0].dims}"
         
         fig = plt.figure(figsize=self.fig_size, dpi=self.dpi_val)
         for i, data in enumerate(data_list):
-            averaged = data.mean(dim=[dim for dim in data.dims if dim != x])
+            non_zero_dims = [dim for dim in data.dims if dim != x and data[dim].shape[0] > 1]
+            if non_zero_dims:
+                logging.warning(f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
+            averaged = data.mean(dim=[dim for dim in data.dims if dim != x], skipna=True) 
             plt.plot(averaged[x], averaged.values, label = label_list[i], marker = "o", linestyle = "-")
 
         xlabel = self.clean_string(x)
