@@ -46,7 +46,7 @@ def write_output(
 
     # assume: is batch size guarnteed and constant:
     # => calculate global sample indices for this batch by offsetting by sample_start
-    sample_start = batch_idx * cf.batch_size_validation
+    sample_start = batch_idx * cf.batch_size_validation_per_gpu
 
     data = io.OutputBatchData(
         sources,

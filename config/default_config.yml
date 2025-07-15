@@ -71,8 +71,8 @@ loss_fcts_val:
     - "mse"
     - 1.0
 
-batch_size: 1
-batch_size_validation: 1
+batch_size_per_gpu: 1
+batch_size_validation_per_gpu: 1
 
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
