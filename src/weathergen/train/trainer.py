@@ -32,7 +32,7 @@ from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.train.loss import stat_loss_fcts
 from weathergen.train.lr_scheduler import LearningRateScheduler
-from weathergen.train.trainer_base import Trainer_Base
+from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import all_gather, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
@@ -41,10 +41,10 @@ from weathergen.utils.validation_io import write_output
 _logger = logging.getLogger(__name__)
 
 
-class Trainer(Trainer_Base):
+class Trainer(TrainerBase):
     ###########################################
     def __init__(self, checkpoint_freq=250, print_freq=10):
-        Trainer_Base.__init__(self)
+        TrainerBase.__init__(self)
 
         self.checkpoint_freq = checkpoint_freq
         self.print_freq = print_freq
