@@ -281,7 +281,9 @@ class OutputBatchData:
     def items(self) -> typing.Generator[OutputItem, None, None]:
         """Iterate over possible output items"""
         # TODO: filter for empty items?
-        for s, fo_s, fi_s in itertools.product(self.samples, self.stream_names.keys()):
+        for s, fo_s, fi_s in itertools.product(
+            self.samples, self.forecast_steps, self.stream_names.keys()
+        ):
             yield self.extract(ItemKey(int(s), int(fo_s), fi_s))
 
     def extract(self, key: ItemKey) -> OutputItem:
