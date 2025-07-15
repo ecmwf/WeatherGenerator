@@ -28,6 +28,8 @@ dependencies = [
  "dask~=2025.5.1",
  "hatchling",
  "weathergen-common",
+ "ipykernel>=6.29.5",
+ "flash-attn>=2.7.4.post1",
 ]
 
 [project.urls]
@@ -40,6 +42,7 @@ Issues = "https://github.com/ecmwf/WeatherGenerator/issues"
 train = "weathergen.run_train:train"
 train_continue = "weathergen.run_train:train_continue"
 inference = "weathergen.run_train:inference"
+rollout = "weathergen.run_train:rollout"
 plot = "weathergen.evaluate.plot:plot"
 plot_train = "weathergen.utils.plot_training:plot_train"
 

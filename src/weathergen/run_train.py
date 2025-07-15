@@ -23,6 +23,51 @@ from weathergen.train.trainer import Trainer
 from weathergen.utils.logger import init_loggers
 
 
+def rollout():
+    # By default, arguments from the command line are read.
+    rollout_from_args(sys.argv[1:])
+
+
+def rollout_from_args(argl: list[str]):
+    """
+    Rollout function for WeatherGenerator model.
+    Entry point for calling the inference code from the command line.
+
+    When running integration tests, the arguments are directly provided.
+    """
+    parser = cli.get_rollout_parser()
+    args = parser.parse_args(argl)
+
+    init_loggers()
+
+    rollout_overwrite = dict(
+        shuffle=False,
+        rollout_start_dates=args.rollout_dates,
+        rollout_type=args.rollout_type,
+        samples_per_validation=args.samples,
+        log_validation=args.samples if args.save_samples else 0,
+        analysis_streams_output=args.analysis_streams_output,
+    )
+
+    cli_overwrite = config.from_cli_arglist(args.options)
+
+    cf = config.load_config(
+        args.private_config,
+        args.from_run_id,
+        args.epoch,
+        *args.config,
+        rollout_overwrite,
+        cli_overwrite,
+    )
+    cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
+
+    cf.run_history += [(args.from_run_id, cf.istep)]
+    cf.streams = config.load_streams(Path(cf.streams_directory))
+    cf = config.set_paths(cf)
+
+    trainer = Trainer()
+    trainer.rollout(cf, args.from_run_id, args.epoch)
+
 def inference():
     # By default, arguments from the command line are read.
     inference_from_args(sys.argv[1:])

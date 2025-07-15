@@ -1,4 +1,5 @@
 streams_directory: "./config/streams/streams_anemoi/"
+# streams_directory: "./config/streams/era5_sfc"
 # streams_directory: "./config/streams/streams_anemoi_era5_split/"
 
 embed_orientation: "channels"
@@ -11,7 +12,7 @@ embed_dropout_rate: 0.1
 target_cell_local_prediction: True
 
 ae_local_dim_embed: 1024
-ae_local_num_blocks: 2
+ae_local_num_blocks: 0
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
@@ -25,7 +26,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 8
+ae_global_num_blocks: 4
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -40,13 +41,13 @@ pred_mlp_adaln: True
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-forecast_offset : 0
+forecast_offset : 1
 forecast_delta_hrs: 0
-forecast_steps: 0
-forecast_policy: null
+forecast_steps: 2
+forecast_policy: fixed #fixed
 forecast_freeze_model: False
-forecast_att_dense_rate: 0.25
-fe_num_blocks: 0
+forecast_att_dense_rate: 1.0 # 0.25
+fe_num_blocks: 8
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -75,7 +76,7 @@ batch_size_validation: 1
 
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "masking"
+training_mode: "forecast"
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
@@ -118,7 +119,6 @@ val_initial: False
 
 loader_num_workers: 8
 log_validation: 0
-analysis_streams_output: ["ERA5"]
 
 istep: 0
 run_history: []
@@ -131,3 +131,4 @@ run_id: ???
 train_log:
   # The period to log metrics (in number of batch steps)
   log_interval: 20
+

@@ -181,6 +181,7 @@ cython_debug/
 ?.*
 foo
 bar
+*.tar.gz
 *.grib
 *.nc
 *.npz

@@ -65,3 +65,52 @@ def write_output(
     with io.ZarrIO(config.get_path_output(cf, epoch)) as writer:
         for subset in data.items():
             writer.write_zarr(subset)
+
+def write_rollout_output(
+    cf,
+    epoch,
+    batch_idx,
+    sources,
+    preds_all,
+    targets_coords_all,
+    targets_times_all,
+    targets_lens,
+):
+    if cf.analysis_streams_output is None:
+        output_stream_names = [stream.name for stream in cf.streams]
+        _logger.info(f"Using all streams as output streams: {output_stream_names}")
+    else:
+        output_stream_names = [
+            stream.name for stream in cf.streams if stream.name in cf.analysis_streams_output
+        ]
+    _logger.info(f"Using output streams: {output_stream_names}")
+    # TODO: streams anemoi `source`, `target` commented out???
+
+    channels: list[list[str]] = [
+        list(stream.val_target_channels)
+        for stream in cf.streams
+        if stream.name in output_stream_names
+    ]
+
+    geoinfo_channels = [[] for _ in cf.streams]  # TODO obtain channels
+
+    # assume: is batch size guarnteed and constant:
+    # => calculate global sample indices for this batch by offsetting by sample_start
+    sample_start = batch_idx * cf.batch_size_validation
+
+    data = io.RolloutOutputBatchData(
+        sources,
+        preds_all,
+        targets_coords_all,
+        targets_times_all,
+        targets_lens,
+        output_stream_names,
+        channels,
+        geoinfo_channels,
+        sample_start,
+        cf.forecast_offset,
+    )
+
+    with io.ZarrIO(config.get_path_output(cf, epoch)) as writer:
+        for subset in data.items():
+            writer.write_zarr(subset)
