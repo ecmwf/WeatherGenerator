@@ -172,8 +172,8 @@ if __name__ == "__main__":
                         #save scores to json
                         save_path = jsons_dir.joinpath(f"{metric}_{model_id}_{stream}_epoch{model.epoch:05d}_rank{model.rank:04d}.json")
                         _logger.info(f"Saving results to {save_path}")
-                        # with open(save_path, "w") as f:
-                        #     json.dump(scores_dict[metric][stream][model_id].compute().to_dict(), f, indent=4)
+                        with open(save_path, "w") as f:
+                            json.dump(scores_dict[metric][stream][model_id].compute().to_dict(), f, indent=4)
 
 
 #plot summary
