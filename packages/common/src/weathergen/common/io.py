@@ -145,7 +145,7 @@ class ZarrIO:
         self.data_root = None
 
     def __enter__(self) -> typing.Self:
-        self._store = zarr.DirectoryStore(self._store_path)
+        self._store = zarr.storage.DirectoryStore(self._store_path)
         self.data_root = zarr.group(store=self._store)
 
         return self
