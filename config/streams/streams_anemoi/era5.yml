@@ -19,7 +19,6 @@ ERA5 :
   masking_rate_none : 0.05
   token_size : 32
   tokenize_spacetime : True
-  sampling_rate_target: 0.4
   embed : 
     net : transformer
     num_tokens : 1
@@ -31,7 +30,7 @@ ERA5 :
     dim_embed : 1024
   target_readout :
     type : 'obs_value'  # token or obs_value
-    num_layers : 1
+    num_layers : 2
     num_heads : 16
     # sampling_rate : 0.2
   pred_head :

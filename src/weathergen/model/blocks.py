@@ -125,7 +125,7 @@ class CrossAttentionBlock(nn.Module):
             with_residual=False,
             **kwargs["attention_kwargs"],
         )
-        self.cross_attn_fn = lambda x, c, **kwargs: self.cross_attn(x, c.unsqueeze(1), **kwargs)
+        self.cross_attn_fn = lambda x, c, **kwargs: self.cross_attn(c.unsqueeze(1), x, **kwargs)
         if self.with_adanorm:
             self.cross_attn_block = AdaLayerNormLayer(
                 dim, dim_aux, self.cross_attn_fn, dropout_rate
