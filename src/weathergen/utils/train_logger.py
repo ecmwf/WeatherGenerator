@@ -118,12 +118,12 @@ class TrainLogger:
         log_vals += [lr]
 
         for st in self.cf.streams:
-            st_name = _clean_name(st["name"])
+            st_name = clean_name(st["name"])
             loss = losses_all[st_name]
             stddev = stddev_all[st_name]
 
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts):
-                lf_name = _clean_name(lf_name)
+                lf_name = clean_name(lf_name)
                 metrics[_key_loss(st["name"], lf_name)] = loss[:, :, j].nanmean().item()
 
                 for k, ch_n in enumerate(st.train_target_channels):
@@ -164,7 +164,7 @@ class TrainLogger:
         log_vals += [samples]
 
         for st in self.cf.streams:
-            st_name = _clean_name(st["name"])
+            st_name = clean_name(st["name"])
             loss = losses_all[st_name]
             stddev = stddev_all[st_name]
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts_val):
@@ -200,7 +200,7 @@ class TrainLogger:
 
         # define cols for training
         cols_train = ["dtime", "samples", "mse", "lr"]
-        cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_0_mean", "learning_rate"]
+        cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
         for si in cf.streams:
             for lf in cf.loss_fcts:
                 cols1 += [_key_loss(si["name"], lf[0])]
@@ -428,9 +428,9 @@ def _key_loss(st_name: str, lf_name: str) -> str:
 
 
 def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
-    st_name = _clean_name(st_name)
-    lf_name = _clean_name(lf_name)
-    ch_name = _clean_name(ch_name)
+    st_name = clean_name(st_name)
+    lf_name = clean_name(lf_name)
+    ch_name = clean_name(ch_name)
     return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
 
 
