@@ -29,7 +29,6 @@ def write_output(
     output_stream_names = cf.analysis_streams_output
     if output_stream_names is None:
         output_stream_names = [stream.name for stream in cf.streams]
-        _logger.info(f"Using all streams as output streams: {output_stream_names}")
 
     output_streams = {name: output_stream_names.index(name) for name in cf.analysis_streams_output}
 

@@ -259,7 +259,7 @@ class OutputBatchData:
     targets_lens: list[list[list[int]]]
 
     # stream name: index into data
-    stream_names: dict[str, int]
+    streams: dict[str, int]
 
     # stream, channel name
     channels: list[list[str]]
@@ -282,7 +282,7 @@ class OutputBatchData:
         """Iterate over possible output items"""
         # TODO: filter for empty items?
         for s, fo_s, fi_s in itertools.product(
-            self.samples, self.forecast_steps, self.stream_names.keys()
+            self.samples, self.forecast_steps, self.streams.keys()
         ):
             yield self.extract(ItemKey(int(s), int(fo_s), fi_s))
 
@@ -291,7 +291,7 @@ class OutputBatchData:
         # adjust shifted values in ItemMeta
         sample = key.sample - self.sample_start
         forecast_step = key.forecast_step - self.forecast_offset
-        stream_idx = self.stream_names[key.stream]  # TODO: assure this is correct
+        stream_idx = self.streams[key.stream]
         lens = self.targets_lens[forecast_step][stream_idx]
         start = sum(lens[:sample])
         n_samples = lens[sample]
