@@ -226,15 +226,21 @@ class TokenizerMasking:
 
         return (source_tokens_cells, source_tokens_lens, source_centroids)
 
-    def sample_tensors_uniform_vectorized(self, tensor_list, lengths, max_total_points):
+    def sample_tensors_uniform_vectorized(
+        self, tensor_list: list, lengths: list, max_total_points: int
+    ):
         """
-        Vectorized version using numpy for faster cumulative sum computation.
+        This function randomly selects tensors up to a maximum number of total points
+
+        tensor_list: List[torch.tensor] the list to select from
+        lengths: List[int] the length of each tensor in tensor_list
+        max_total_points: the maximum number of total points to sample from
         """
         if not tensor_list:
             return [], 0
 
         # Create random permutation
-        perm = torch.randperm(len(tensor_list))
+        perm = self.rng.permutation(len(tensor_list))
 
         # Vectorized cumulative sum
         cumsum = torch.cumsum(lengths[perm], dim=0)
