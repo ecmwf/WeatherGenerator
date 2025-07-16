@@ -112,7 +112,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         datapath = cf.data_path_anemoi
                     case "radklim":
                         dataset = RadklimKerchunkReader
-                        datapath = "/p/scratch/weatherai/data/radklim/temp_radklim" # TODO 
+                        datapath = "/p/scratch/weatherai/data/radklim/temp_radklim" # TODO
                     case "fesom":
                         dataset = DataReaderFesom
                         datapath = cf.data_path_fesom
@@ -144,6 +144,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 logger.info(
                     f"Opening dataset with type: {ds_type} from"
                     + f" stream config {stream_info['name']}."
+                    f" stream config {stream_info['name']}."
                 )
                 ds = dataset(filename=filename, **kwargs)
 

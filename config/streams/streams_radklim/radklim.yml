@@ -13,7 +13,8 @@ RADKLIM:
   filenames: ['ref_2010.json'] 
   reference: "/p/scratch/weatherai/data/radklim/temp_radklim/ref_2010.json"
   stats_path: "/p/scratch/weatherai/data/radklim/temp_radklim/dummy_radklim_stats.json"
-
+  sample_coord_file: "/p/scratch/weatherai/data/radklim/radklim-rw/2010/RW_2017.002_201009.nc"
+  
   source_channels: ['RR']
   target_channels: ['RR']
   geoinfo_channels: []
@@ -22,18 +23,18 @@ RADKLIM:
   diagnostic: false
   masking_rate: 0.6
   masking_rate_none: 0.05
-  token_size: 32
+  token_size: 512
 
   embed:
     net: transformer
-    num_tokens: 1
-    num_heads: 8
-    dim_embed: 512
+    num_tokens: 512
+    num_heads: 4
+    dim_embed: 16
     num_blocks: 2
 
   embed_target_coords:
     net: linear
-    dim_embed: 512
+    dim_embed: 16
 
   target_readout:
     type: obs_value

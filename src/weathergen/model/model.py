@@ -462,7 +462,22 @@ class Model(torch.nn.Module):
                     # )
 
                     # scatter write to reorder from per stream to per cell ordering
-                    tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
+                    # tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
+                    num_embeddings_per_cell = (
+                        x_embed.shape[0]
+                        // model_params.pe_embed[idxs_pe].shape[0]
+                    )
+                    pe_embed_broadcasted = (
+                        model_params.pe_embed[idxs_pe]
+                        .unsqueeze(1)
+                        .repeat(1, num_embeddings_per_cell, 1)
+                        .flatten(0, 1)
+                    )
+                    src = x_embed + pe_embed_broadcasted
+
+                    # src = x_embed + model_params.pe_embed[idxs_pe]
+                    src = src.to(tokens_all.dtype)
+                    tokens_all.scatter_(0, idxs, src)
 
         return tokens_all
 
