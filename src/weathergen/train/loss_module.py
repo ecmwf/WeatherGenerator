@@ -64,7 +64,7 @@ class LossModule:
 
 
         # WE NEED THIS AROUND LINE 145 (for determination of t_unique)
-        #'''
+        '''
         ### transforms from [batch_sample][stream][fstep] into shape [fstep][stream][batch_sample]
         targets_times_raw_rt = [
             [
@@ -73,11 +73,7 @@ class LossModule:
             ]
             for fstep in range(self.cf.forecast_offset, self.cf.forecast_offset + self.cf.forecast_steps + 1)
         ]
-        #'''
-
-
-
-
+        '''
 
         # TODO: Rethink counters (ctr_ftarget and ctr_chs)
         ctr_ftarget = 0
@@ -96,7 +92,7 @@ class LossModule:
         }  # Create tensor for each stream
         # assert len(targets) == len(preds) and len(preds) == len(self.cf.streams)
 
-        for fstep in range(self.cf.forecast_steps):
+        for fstep in range(len(targets)):
             for i_strm, (target, target_coords, si) in enumerate(
                 zip(targets[fstep], targets_coords[fstep], self.cf.streams, strict=False)
             ):
@@ -144,16 +140,13 @@ class LossModule:
                             masks = []
                             # iterate over time steps and create mask separately for each
                             # TODO: verify shapes -- t_unique must be same like targets, also test with 12h, i.e., two fsteps
-                            print(fstep, i_strm)
-                            # t_unique = np.unique(streams_data[i_batch][i_strm].target_times_raw[fstep])
+                            #t_unique = np.unique(streams_data[i_batch][i_strm].target_times_raw[fstep])
                             t_unique = torch.unique(
-                                #target_coords[:, 1]
-                                targets_times_raw_rt[fstep, i_strm]
-                                #targets_times_raw_rt[i_strm, fstep] # THIS USES THE NEW SHAPE!!!
+                                target_coords[:, 1]
                             )  # What happens for two targets at same position with different time stamps?
                             for t in t_unique:
+                                #mask_t = Tensor(t == streams_data[i_batch][i_strm].target_times_raw[fstep]).to(mask_nan)
                                 mask_t = t == target_coords[:, 1]
-                                #mask_t = t == targets_times_raw_rt[i_strm, fstep]
                                 masks.append(
                                     torch.logical_and(mask_t, mask_nan[:, i])
                                 )  # TODO: verify whether this is always called (if not, masks can have len 0, which then has to be checked below)
