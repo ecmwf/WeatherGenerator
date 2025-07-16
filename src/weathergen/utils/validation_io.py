@@ -35,11 +35,7 @@ def write_output(
     _logger.info(f"Using output streams: {output_streams}")
     # TODO: streams anemoi `source`, `target` commented out???
 
-    channels: list[list[str]] = [
-        list(stream.val_target_channels)
-        for stream in cf.streams
-        if stream.name in output_stream_names
-    ]
+    channels: list[list[str]] = [list(stream.val_target_channels)for stream in cf.streams]
 
     geoinfo_channels = [[] for _ in cf.streams]  # TODO obtain channels
 
