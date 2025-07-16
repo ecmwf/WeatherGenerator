@@ -68,7 +68,7 @@ class Trainer(Trainer_Base):
         cf.model_path = cf.model_path if hasattr(cf, "model_path") else "./models"
         path_run = Path(cf.run_path) / cf.run_id
         path_model = Path(cf.model_path) / cf.run_id
-        if self.cf.rank == 0:
+        if is_root():
             path_run.mkdir(exist_ok=True, parents=True)
             path_model.mkdir(exist_ok=True, parents=True)
         self.path_run = path_run
@@ -121,7 +121,7 @@ class Trainer(Trainer_Base):
         for name, w in cf.loss_fcts_val:
             self.loss_fcts_val += [[getattr(losses, name), w]]
 
-        if self.cf.rank == 0:
+        if is_root():
             config.save(self.cf, epoch=0)
 
         _logger.info(f"Starting inference with id={self.cf.run_id}.")
@@ -216,7 +216,7 @@ class Trainer(Trainer_Base):
         self.model_params = ModelParams().create(cf).to("cuda")
 
         # if with_fsdp then parameter count is unreliable
-        if (self.cf.rank == 0 and not cf.with_fsdp) or not cf.with_ddp:
+        if (is_root() and not cf.with_fsdp) or not cf.with_ddp:
             self.model.print_num_parameters()
 
         # TODO: learning rate schedule
@@ -277,7 +277,7 @@ class Trainer(Trainer_Base):
             cf.lr_scaling_policy,
         )
 
-        if self.cf.istep > 0 and self.cf.rank == 0:
+        if self.cf.istep > 0 and is_root():
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
             _logger.info(str)
 
@@ -659,7 +659,7 @@ class Trainer(Trainer_Base):
                     torch.stack(self.stddev_hist).to(torch.float64).nanmean(0)
                 )
 
-                if self.cf.rank == 0 and self.cf.istep >= 0:
+                if is_root() and self.cf.istep >= 0:
                     loss_dict = {}
                     for j, (lname, _) in enumerate(cf.loss_fcts_val):
                         loss_dict[f"validation {lname}"] = torch.nanmean(losses_all[j]).item()
@@ -673,7 +673,7 @@ class Trainer(Trainer_Base):
                     samples = cf.istep * cf.batch_size * cf.num_ranks
                     self.train_logger.add_val(samples, losses_all, stddev_all)
 
-                if self.cf.rank == 0:
+                if is_root():
                     print(
                         f"validation ({cf.run_id}) : {epoch:03d} :",
                         f" loss = {torch.nanmean(losses_all[0]):.4E}",
@@ -738,7 +738,7 @@ class Trainer(Trainer_Base):
             stddev_avg = self.ddp_average(torch.nanmean(torch.stack(self.stddev_hist), axis=0))
             samples = self.cf.istep * self.cf.batch_size * self.cf.num_ranks
 
-            if self.cf.rank == 0:
+            if is_root():
                 # logging
                 loss_dict = {
                     "training mse": float(torch.nanmean(l_avg[0])),
@@ -770,7 +770,7 @@ class Trainer(Trainer_Base):
                 nanmean(torch.stack(self.losses_hist[-self.print_freq :]), axis=0)
             )
 
-            if self.cf.rank == 0:
+            if is_root():
                 # samples per sec
                 dt = time.time() - self.t_start
                 pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
