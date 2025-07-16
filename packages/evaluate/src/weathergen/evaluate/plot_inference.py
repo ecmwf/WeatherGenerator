@@ -3,7 +3,7 @@
 # dependencies = [
 #   "weathergen-evaluate",
 #   "weathergen-common",
-#   "panel", 
+#   "panel",
 #   "omegaconf"
 # ]
 # [tool.uv.sources]
