@@ -64,7 +64,8 @@ class LossModule:
 
 
         # WE NEED THIS AROUND LINE 145 (for determination of t_unique)
-        '''
+        #'''
+        ### transforms from [batch_sample][stream][fstep] into shape [fstep][stream][batch_sample]
         targets_times_raw_rt = [
             [
                 np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
@@ -72,7 +73,7 @@ class LossModule:
             ]
             for fstep in range(self.cf.forecast_offset, self.cf.forecast_offset + self.cf.forecast_steps + 1)
         ]
-        '''
+        #'''
 
 
 
@@ -95,7 +96,7 @@ class LossModule:
         }  # Create tensor for each stream
         # assert len(targets) == len(preds) and len(preds) == len(self.cf.streams)
 
-        for fstep in range(len(targets)):
+        for fstep in range(self.cf.forecast_steps):
             for i_strm, (target, target_coords, si) in enumerate(
                 zip(targets[fstep], targets_coords[fstep], self.cf.streams, strict=False)
             ):
@@ -127,6 +128,7 @@ class LossModule:
                     continue
                 ens = pred.shape[0] > 1
 
+                i_batch = 0 # TODO: Iterate over batch dimension here in future
                 # accumulate loss from different loss functions and channels
                 for j, (loss_fct, w) in enumerate(self.loss_fcts):
                     # compute per channel loss
@@ -142,9 +144,11 @@ class LossModule:
                             masks = []
                             # iterate over time steps and create mask separately for each
                             # TODO: verify shapes -- t_unique must be same like targets, also test with 12h, i.e., two fsteps
+                            print(fstep, i_strm)
+                            # t_unique = np.unique(streams_data[i_batch][i_strm].target_times_raw[fstep])
                             t_unique = torch.unique(
-                                target_coords[:, 1]
-                                #targets_times_raw_rt[fstep, i_strm]
+                                #target_coords[:, 1]
+                                targets_times_raw_rt[fstep, i_strm]
                                 #targets_times_raw_rt[i_strm, fstep] # THIS USES THE NEW SHAPE!!!
                             )  # What happens for two targets at same position with different time stamps?
                             for t in t_unique:
