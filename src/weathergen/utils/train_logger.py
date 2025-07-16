@@ -411,9 +411,9 @@ def _key_loss(st_name: str, lf_name: str) -> str:
 
 
 def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
-    st_name = clean_name(st_name)
-    lf_name = clean_name(lf_name)
-    ch_name = clean_name(ch_name)
+    st_name = _clean_name(st_name)
+    lf_name = _clean_name(lf_name)
+    ch_name = _clean_name(ch_name)
     return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
 
 
