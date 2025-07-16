@@ -206,8 +206,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         Advance epoch
         """
         self.epoch += 1
-        # advance since only copies are used for actual loading with parallel loaders
-        self.rng.random()
 
     ###################################################
     def get_sources_size(self):
@@ -426,9 +424,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             dist = torch.distributed
             self.data_loader_rng_seed *= (
                 (((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1)
-                * ((worker_info.id + 1) * 7)
-                * (self.epoch + 1)
-                * 13
+                * ((worker_info.id + 1) * 39)
+                * (self.epoch + 13)
+                * 7
             )
             # split workload
             per_worker = (local_end - local_start) // worker_info.num_workers
