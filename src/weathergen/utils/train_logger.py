@@ -11,7 +11,6 @@ import datetime
 import json
 import logging
 import math
-import re
 import time
 import traceback
 from dataclasses import dataclass
@@ -376,25 +375,18 @@ def clean_df(df, columns: list[str] | None):
     return df
 
 
-def clean_name(s, regex=r"[a-zA-Z0-9]+"):
+def clean_name(s):
     """
-    Convert a string to camelCase.
-    Characters to omit are all not in given regular expression.
+    Remove all characters from a string except letters, digits, and underscores.
 
-    :param s: Input string
-    :param regex: Regular expression defining valid characters in words
-    (defaults to alpha-numeric)
-    :return: CamelCase version of the input string
+    Args:
+        s (str): The input string.
+
+    Returns:
+        str: A new string containing only alphanumeric characters and underscores,
+             in the same order and capitalization as they appeared in the input.
     """
-    re_pattern = re.compile(regex)
-    words = re_pattern.findall(s)
-
-    if not words:
-        return ""
-
-    camel_cased = "".join(word.capitalize() for word in words)
-
-    return camel_cased
+    return "".join(c for c in s if c.isalnum() or c == "_")
 
 
 def _key_loss(st_name: str, lf_name: str) -> str:
