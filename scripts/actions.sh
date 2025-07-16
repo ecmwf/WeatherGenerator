@@ -52,12 +52,13 @@ case "$1" in
       # Create all the links
       for d in "logs" "models" "output" "plots" "results"
       do
-        echo "$d -> $working_dir$d"
         # If the link already exists, do nothing
-        if [ -L "$d" ]; then
-          echo "Link $d already exists, skipping. The results in $d will not be linked to the shared working directory."
+        # If a file with the same name exists, skip it
+        if [ -e "$d" ]; then
+          echo "'$d' already exists, skipping. The results in $d will not be linked to the shared working directory."
           continue
         fi
+        echo "$d -> $working_dir$d"
         ln -s "$working_dir$d" "$d"
       done
     )
