@@ -26,8 +26,24 @@ jobs:
       - name: Run ruff (black)
         # Do not attempt to install the default dependencies, this is much faster.
         # Run temporarily on a sub directory before the main restyling.
-        run: uv run --no-project --with "ruff==0.9.7" ruff format --target-version py312 --check -n src/
+        run: uv run --no-project --with "ruff==0.12.2" ruff format --target-version py312 --check -n src/ scripts/
 
       - name: Run ruff (flake8)
         # Do not attempt to install the default dependencies, this is much faster.
-        run: uv run --no-project --with "ruff==0.9.7" ruff check src/
+        run: uv run --no-project --verbose --with "ruff==0.12.2" ruff check src/ 
+  pr:
+    name: PR checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          # Install a specific version of uv.
+          version: "0.7.13"
+
+      - name: Check PR is linked to an issue
+      # Send the PR number to the script, which will check if it is linked to an issue.
+        run: scripts/check_gh_issue.py $GITHUB_REF_NAME

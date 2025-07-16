@@ -5,6 +5,10 @@ description = "The WeatherGenerator Machine Learning Earth System Model"
 readme = "../../README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
+    "xarray>=2025.6.1",
+    "dask>=2024.9.1",
+    "zarr==2.18.4, <3",
+    "numcodecs<0.16.0",
 ]
 
 [dependency-groups]
@@ -15,6 +19,18 @@ dev = [
 ]
 
 
+
+[tool.black]
+
+# Wide rows
+line-length = 100
+
+
+# The linting configuration
+[tool.ruff]
+
+# Wide rows
+line-length = 100
 
 [tool.ruff.lint]
 # All disabled until the code is formatted.
@@ -31,13 +47,12 @@ select = [
     "SIM",
     # isort
     "I",
+    # Banned imports
+    "TID"
 ]
 
 # These rules are sensible and should be enabled at a later stage.
 ignore = [
-  "E501",
-  "E721",
-  "E722",
   # "B006",
   "B011",
   "UP008",
@@ -45,9 +60,12 @@ ignore = [
   "SIM118",
   "SIM102",
   "SIM401",
+  "UP040", # TODO: enable later
   # To ignore, not relevant for us
-  "E741",
+  "SIM108" # in case additional norm layer supports are added in future  
 ]
+
+
 
 [build-system]
 requires = ["hatchling"]

@@ -96,7 +96,6 @@ def write_stream_file(write_path, content: str):
 
 
 def get_expected_config(key, config):
-    print(key, config)
     config = OmegaConf.create(config)
     config.name = key
     return config

@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import time
 import warnings
 from functools import partial
 
@@ -15,6 +14,7 @@ import astropy_healpix as hp
 import numpy as np
 import torch
 
+from weathergen.datasets.masking import Masker
 from weathergen.datasets.tokenizer_utils import (
     arc_alpha,
     encode_times_source,
@@ -32,20 +32,22 @@ from weathergen.utils.logger import init_loggers
 
 
 class TokenizerMasking:
-    def __init__(self, healpix_level: int):
+    def __init__(self, healpix_level: int, seed: int, masker: Masker):
         ref = torch.tensor([1.0, 0.0, 0.0])
 
         self.hl_source = healpix_level
         self.hl_target = healpix_level
 
+        self.masker = masker
+
         self.num_healpix_cells_source = 12 * 4**self.hl_source
         self.num_healpix_cells_target = 12 * 4**self.hl_target
 
-        verts00, verts00_Rs = healpix_verts_rots(self.hl_source, 0.0, 0.0)
-        verts10, verts10_Rs = healpix_verts_rots(self.hl_source, 1.0, 0.0)
-        verts11, verts11_Rs = healpix_verts_rots(self.hl_source, 1.0, 1.0)
-        verts01, verts01_Rs = healpix_verts_rots(self.hl_source, 0.0, 1.0)
-        vertsmm, vertsmm_Rs = healpix_verts_rots(self.hl_source, 0.5, 0.5)
+        verts00, verts00_rots = healpix_verts_rots(self.hl_source, 0.0, 0.0)
+        verts10, verts10_rots = healpix_verts_rots(self.hl_source, 1.0, 0.0)
+        verts11, verts11_rots = healpix_verts_rots(self.hl_source, 1.0, 1.0)
+        verts01, verts01_rots = healpix_verts_rots(self.hl_source, 0.0, 1.0)
+        vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_source, 0.5, 0.5)
         self.hpy_verts = [
             verts00.to(torch.float32),
             verts10.to(torch.float32),
@@ -53,19 +55,19 @@ class TokenizerMasking:
             verts01.to(torch.float32),
             vertsmm.to(torch.float32),
         ]
-        self.hpy_verts_Rs_source = [
-            verts00_Rs.to(torch.float32),
-            verts10_Rs.to(torch.float32),
-            verts11_Rs.to(torch.float32),
-            verts01_Rs.to(torch.float32),
-            vertsmm_Rs.to(torch.float32),
+        self.hpy_verts_rots_source = [
+            verts00_rots.to(torch.float32),
+            verts10_rots.to(torch.float32),
+            verts11_rots.to(torch.float32),
+            verts01_rots.to(torch.float32),
+            vertsmm_rots.to(torch.float32),
         ]
 
-        verts00, verts00_Rs = healpix_verts_rots(self.hl_target, 0.0, 0.0)
-        verts10, verts10_Rs = healpix_verts_rots(self.hl_target, 1.0, 0.0)
-        verts11, verts11_Rs = healpix_verts_rots(self.hl_target, 1.0, 1.0)
-        verts01, verts01_Rs = healpix_verts_rots(self.hl_target, 0.0, 1.0)
-        vertsmm, vertsmm_Rs = healpix_verts_rots(self.hl_target, 0.5, 0.5)
+        verts00, verts00_rots = healpix_verts_rots(self.hl_target, 0.0, 0.0)
+        verts10, verts10_rots = healpix_verts_rots(self.hl_target, 1.0, 0.0)
+        verts11, verts11_rots = healpix_verts_rots(self.hl_target, 1.0, 1.0)
+        verts01, verts01_rots = healpix_verts_rots(self.hl_target, 0.0, 1.0)
+        vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_target, 0.5, 0.5)
         self.hpy_verts = [
             verts00.to(torch.float32),
             verts10.to(torch.float32),
@@ -73,33 +75,33 @@ class TokenizerMasking:
             verts01.to(torch.float32),
             vertsmm.to(torch.float32),
         ]
-        self.hpy_verts_Rs_target = [
-            verts00_Rs.to(torch.float32),
-            verts10_Rs.to(torch.float32),
-            verts11_Rs.to(torch.float32),
-            verts01_Rs.to(torch.float32),
-            vertsmm_Rs.to(torch.float32),
+        self.hpy_verts_rots_target = [
+            verts00_rots.to(torch.float32),
+            verts10_rots.to(torch.float32),
+            verts11_rots.to(torch.float32),
+            verts01_rots.to(torch.float32),
+            vertsmm_rots.to(torch.float32),
         ]
 
         self.verts_local = []
         verts = torch.stack([verts10, verts11, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts00_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts00_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts11, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts10_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts10_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts10, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts11_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts11_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts11, verts10, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts01_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts01_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts10, verts11, verts01])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(vertsmm_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(vertsmm_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         self.hpy_verts_local_target = torch.stack(self.verts_local).transpose(0, 1)
@@ -121,26 +123,37 @@ class TokenizerMasking:
             .to(torch.float32)
         )
 
-        worker_info = torch.utils.data.get_worker_info()
-        div_factor = (worker_info.id + 1) if worker_info is not None else 1
-        self.rng = np.random.default_rng(int(time.time() / div_factor))
+        # ensure that the seed is sufficiently large so that the div below does not lead to
+        # aliasing
+        self.rng_seed = seed if seed > 16384 else seed * 16384
+        self._reinit_rng()
 
         self.size_time_embedding = 6
 
+    def _reinit_rng(self) -> None:
+        """
+        Reinitialize rng
+        """
+        worker_info = torch.utils.data.get_worker_info()
+        div_factor = (worker_info.id + 1) if worker_info is not None else 1
+        self.rng = np.random.default_rng(int(self.rng_seed / div_factor))
+
     def get_size_time_embedding(self) -> int:
-        """Get size of time embedding"""
+        """
+        Get size of time embedding
+        """
         return self.size_time_embedding
 
     def reset(self) -> None:
-        worker_info = torch.utils.data.get_worker_info()
-        div_factor = (worker_info.id + 1) if worker_info is not None else 1
-        self.rng = np.random.default_rng(int(time.time() / div_factor))
+        """
+        Reset state after epoch
+        """
+        self.rng_seed *= 2
+        self._reinit_rng()
 
     def batchify_source(
         self,
         stream_info: dict,
-        masking_rate: float,
-        masking_rate_sampling: bool,
         coords: np.array,
         geoinfos: np.array,
         source: np.array,
@@ -153,41 +166,29 @@ class TokenizerMasking:
         is_diagnostic = stream_info.get("diagnostic", False)
         tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
 
-        cur_masking_rate = 0.0
-        if masking_rate > 0.0:
-            # adjust if there's a per-stream masking rate
-            cur_masking_rate = stream_info.get("masking_rate", masking_rate)
-            # mask either patches or entire stream
-            if masking_rate_sampling:
-                cur_masking_rate = np.clip(
-                    np.abs(self.rng.normal(loc=cur_masking_rate, scale=1.0 / (2.5 * np.pi))),
-                    0.0,
-                    1.0,
-                )
-
         tokenize_window = partial(
             tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
             time_win=time_win,
             token_size=token_size,
             hl=self.hl_source,
-            hpy_verts_Rs=self.hpy_verts_Rs_source[-1],
+            hpy_verts_rots=self.hpy_verts_rots_source[-1],
             n_coords=normalizer.normalize_coords,
             n_geoinfos=normalizer.normalize_geoinfos,
             n_data=normalizer.normalize_source_channels,
             enc_time=encode_times_source,
         )
 
-        source_tokens_cells = torch.tensor([])
-        source_centroids = torch.tensor([])
-        source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
-        self.perm_sel = []
+        self.token_size = token_size
 
-        # return empty
-        if is_diagnostic or source.shape[1] == 0 or len(source) < 2 or cur_masking_rate == 1.0:
+        # return empty if there is no data or we are in diagnostic mode
+        if is_diagnostic or source.shape[1] == 0 or len(source) < 2:
+            source_tokens_cells = torch.tensor([])
+            source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
+            source_centroids = torch.tensor([])
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
-        # TODO: properly set stream_id; don't forget to normalize
-        source_tokens_cells = tokenize_window(
+        # tokenize all data first
+        tokenized_data = tokenize_window(
             0,
             coords,
             geoinfos,
@@ -195,28 +196,13 @@ class TokenizerMasking:
             times,
         )
 
-        source_tokens_cells = [
-            torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in source_tokens_cells
+        tokenized_data = [
+            torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in tokenized_data
         ]
-        source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
 
-        # perform masking globally by forgetting cells temporarily
-        mask = self.rng.uniform(0, 1, source_tokens_lens.sum().item()) < cur_masking_rate
+        # Use the masker to get source tokens and the selection mask for the target
+        source_tokens_cells = self.masker.mask_source(tokenized_data)
 
-        # ensure that masking is not degenerate i.e. it is not all true or false
-        if not mask.any():
-            mask[self.rng.integers(low=0, high=len(mask))] = True
-        if mask.all():
-            mask[self.rng.integers(low=0, high=len(mask))] = False
-
-        split_lens = np.cumsum(source_tokens_lens)[:-1]
-        self.perm_sel = np.split(mask, split_lens)
-        self.token_size = token_size
-
-        # select unmasked tokens for network input
-        source_tokens_cells = [
-            c[~p] for c, p in zip(source_tokens_cells, self.perm_sel, strict=True)
-        ]
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
 
         if source_tokens_lens.sum() > 0:
@@ -231,11 +217,12 @@ class TokenizerMasking:
             source_means_lens = [len(s) for s in source_means]
             # merge and split to vectorize computations
             source_means = torch.cat(source_means)
-            # TODO: precompute also source_means_r3 and then just cat
             source_centroids = torch.cat(
                 [source_means.to(torch.float32), r3tos2(source_means).to(torch.float32)], -1
             )
             source_centroids = torch.split(source_centroids, source_means_lens)
+        else:
+            source_centroids = torch.tensor([])
 
         return (source_tokens_cells, source_tokens_lens, source_centroids)
 
@@ -257,7 +244,7 @@ class TokenizerMasking:
         target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
 
         # target is empty
-        if len(self.perm_sel) == 0:
+        if len(self.masker.perm_sel) == 0:
             return (target_tokens, target_coords, torch.tensor([]), torch.tensor([]))
 
         # identity function
@@ -270,7 +257,7 @@ class TokenizerMasking:
             time_win=time_win,
             token_size=token_size,
             hl=self.hl_source,
-            hpy_verts_Rs=self.hpy_verts_Rs_source[-1],
+            hpy_verts_rots=self.hpy_verts_rots_source[-1],
             n_coords=id,
             n_geoinfos=normalizer.normalize_geoinfos,
             n_data=normalizer.normalize_target_channels,
@@ -280,7 +267,6 @@ class TokenizerMasking:
         )
 
         # tokenize
-        # TODO: properly set stream_id; don't forget to normalize
         target_tokens_cells = tokenize_window(
             0,
             coords,
@@ -289,16 +275,8 @@ class TokenizerMasking:
             times,
         )
 
-        # select masked tokens for network input
-        # TODO: implement sampling rate target
-        target_tokens = [
-            (
-                torch.cat([c if p else torch.tensor([]) for c, p in zip(cc, pp, strict=True)])
-                if len(cc) > 0
-                else torch.tensor(cc)
-            )
-            for cc, pp in zip(target_tokens_cells, self.perm_sel, strict=True)
-        ]
+        target_tokens = self.masker.mask_target(target_tokens_cells, coords, geoinfos, source)
+
         target_tokens_lens = [len(t) for t in target_tokens]
         if torch.tensor(target_tokens_lens).sum() == 0:
             return (torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([]))
@@ -333,7 +311,7 @@ class TokenizerMasking:
                 target_coords,
                 target_geoinfos,
                 target_times,
-                self.hpy_verts_Rs_target,
+                self.hpy_verts_rots_target,
                 self.hpy_verts_local_target,
                 self.hpy_nctrs_target,
             )

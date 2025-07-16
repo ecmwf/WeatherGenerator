@@ -24,6 +24,7 @@ from weathergen.datasets.data_reader_base import (
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.icon_dataset import IconDataset
+from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
@@ -137,8 +138,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 ds_type = stream_info["type"]
                 logger.info(
-                    f"Opening dataset with type: {ds_type} from",
-                    f" stream config {stream_info['name']}.",
+                    f"Opening dataset with type: {ds_type}"
+                    + f"from stream config {stream_info['name']}.",
                 )
                 ds = dataset(filename=filename, **kwargs)
 
@@ -146,6 +147,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if len(ds) > 0:
                     self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
 
+                # MODIFIES config !!!
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
                 stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
 
@@ -179,17 +181,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.num_healpix_cells_target: int = 12 * 4**self.healpix_level_target
 
         if cf.training_mode == "forecast":
-            self.tokenizer = TokenizerForecast(cf.healpix_level)
+            self.tokenizer = TokenizerForecast(cf.healpix_level, cf.data_loader_rng_seed)
         elif cf.training_mode == "masking":
-            self.tokenizer = TokenizerMasking(cf.healpix_level)
+            masker = Masker(cf.masking_rate, cf.masking_strategy, cf.masking_rate_sampling)
+            self.tokenizer = TokenizerMasking(cf.healpix_level, cf.data_loader_rng_seed, masker)
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
             msg = "masked token modeling does not support self.input_window_steps > 1; "
             msg += "increase window length"
             assert self.input_window_steps == 1, msg
         else:
             assert False, f"Unsupported training mode: {cf.training_mode}"
-        self.masking_rate = cf.masking_rate
-        self.masking_rate_sampling = cf.masking_rate_sampling
 
         self.epoch = 0
 
@@ -322,7 +323,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # for all sources for current stream
                     for _, ds in enumerate(stream_ds):
                         # source window (of potentially multi-step length)
-                        # TODO: Kacper is using this -- cannot so easily remove
                         rdata: ReaderData = ds.get_source(idx)
 
                         if rdata.is_empty():
@@ -336,8 +336,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                             (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                                 stream_info,
-                                self.masking_rate,
-                                self.masking_rate_sampling,
                                 torch.from_numpy(rdata.coords),
                                 torch.from_numpy(rdata.geoinfos),
                                 torch.from_numpy(rdata.data),
@@ -382,13 +380,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     streams_data += [stream_data]
 
                 # skip completely empty batch item or when all targets are empty -> no grad
-                if (
-                    np.array([s.empty() for s in streams_data]).all()
-                    or np.array([s.target_empty() for s in streams_data]).all()
-                ):
-                    continue
-
-                batch += [streams_data]
+                if not (all(s.empty() or s.target_empty() for s in streams_data)):
+                    batch += [streams_data]
 
             # aggregated lens of tokens per cell
             source_cell_lens = compute_source_cell_lens(batch)
@@ -431,9 +424,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
             )
         # ensure the tokenizers use different seeds
-        self.tokenizer.reset()
-
-        # ensure the tokenizers use different seeds. TODO: why double??
         self.tokenizer.reset()
 
         return iter_start, iter_end
