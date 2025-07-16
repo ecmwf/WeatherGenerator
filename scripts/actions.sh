@@ -53,6 +53,11 @@ case "$1" in
       for d in "logs" "models" "output" "plots" "results"
       do
         echo "$d -> $working_dir$d"
+        # If the link already exists, do nothing
+        if [ -L "$d" ]; then
+          echo "Link $d already exists, skipping. The results in $d will not be linked to the shared working directory."
+          continue
+        fi
         ln -s "$working_dir$d" "$d"
       done
     )
