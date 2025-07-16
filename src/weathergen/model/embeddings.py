@@ -171,9 +171,8 @@ class StreamEmbedTransformer(torch.nn.Module):
             out = torch.nn.functional.pad(out, [0, self.dim_out - out.shape[-1]], value=0.0)
         # final reshape
         out = self.dropout_final(out.reshape(-1, self.num_tokens, self.dim_out))
-        
-        return out
 
+        return out
 
     def forward_columns(self, x_in, centroids):
         # embed provided input data

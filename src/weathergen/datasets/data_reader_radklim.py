@@ -165,9 +165,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
         ds_full = ds_full.drop_vars(["lat", "lon"], errors="ignore")
 
         # 2) Subset variables & time
-        subset = ds_full[self.source_channels].isel(
-            time=slice(self.start_idx, self.end_idx)
-        )
+        subset = ds_full[self.source_channels].isel(time=slice(self.start_idx, self.end_idx))
         if "chunks" in self.stream_info:
             subset = subset.chunk(self.stream_info["chunks"])
 
@@ -184,11 +182,15 @@ class RadklimKerchunkReader(DataReaderTimestep):
 
             _logger.debug(
                 "lat2d shape=%s  min=%s  max=%s",
-                lat2d.shape, np.min(lat2d), np.max(lat2d),
+                lat2d.shape,
+                np.min(lat2d),
+                np.max(lat2d),
             )
             _logger.debug(
                 "lon2d shape=%s  min=%s  max=%s",
-                lon2d.shape, np.min(lon2d), np.max(lon2d),
+                lon2d.shape,
+                np.min(lon2d),
+                np.max(lon2d),
             )
 
             self.ds = self.ds.assign_coords(
@@ -216,33 +218,20 @@ class RadklimKerchunkReader(DataReaderTimestep):
 
         t_idxs_abs, dtr = self._get_dataset_idxs(idx)
         t_rel = t_idxs_abs - self.start_idx
-        if (
-            t_rel.size == 0
-            or np.any(t_rel < 0)
-            or np.any(t_rel >= self.ds.sizes["time"])
-        ):
+        if t_rel.size == 0 or np.any(t_rel < 0) or np.any(t_rel >= self.ds.sizes["time"]):
             return ReaderData.empty(len(channels_idx), len(self.geoinfo_idx))
 
-        ds_win = self.ds.isel(
-            time=slice(int(t_rel[0]), int(t_rel[-1]) + 1)
-        )
+        ds_win = self.ds.isel(time=slice(int(t_rel[0]), int(t_rel[-1]) + 1))
 
         # Flatten data
-        da = ds_win.to_array(dim="var").transpose(
-            "time", "y", "x", "var"
-        )
+        da = ds_win.to_array(dim="var").transpose("time", "y", "x", "var")
         raw = da.values
-        flat_data = (
-            raw.reshape(-1, raw.shape[-1])[..., channels_idx]
-            .astype(np.float32)
-        )
+        flat_data = raw.reshape(-1, raw.shape[-1])[..., channels_idx].astype(np.float32)
 
         # Coords and times
         lat2d = self.ds["lat"].values
         lon2d = self.ds["lon"].values
-        flat_coords = np.stack(
-            [lat2d.ravel(), lon2d.ravel()], axis=1
-        ).astype(np.float32)
+        flat_coords = np.stack([lat2d.ravel(), lon2d.ravel()], axis=1).astype(np.float32)
         full_coords = np.tile(flat_coords, (ds_win.sizes["time"], 1))
 
         full_times = np.repeat(
