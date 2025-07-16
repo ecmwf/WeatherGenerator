@@ -237,10 +237,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     ###################################################
     def reset(self):
-        self.data_loader_rng_seed *= 13
-        worker_info = torch.utils.data.get_worker_info()
-        div_factor = (worker_info.id + 1) if worker_info is not None else 1
-        self.rng = np.random.default_rng(int(self.data_loader_rng_seed / div_factor))
+        # initialize the random number generator: self.data_loader_rng_seed is set to a DDP-unique
+        # value in worker_workset()
+        self.rng = np.random.default_rng(self.data_loader_rng_seed)
 
         fsm = (
             self.forecast_steps[min(self.epoch, len(self.forecast_steps) - 1)]
@@ -413,7 +412,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     ###################################################
     def worker_workset(self):
-        # local_start, local_end = 0, len(self)
         local_start, local_end = self.rank * self.len, (self.rank + 1) * self.len
 
         worker_info = torch.utils.data.get_worker_info()
@@ -424,6 +422,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             iter_end = len(self)
 
         else:
+            # ensure the rng seed is fully unique across workers and epochs
+            dist = torch.distributed
+            self.data_loader_rng_seed *= (
+                (((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1)
+                * ((worker_info.id + 1) * 7)
+                * (self.epoch + 1)
+                * 13
+            )
             # split workload
             per_worker = (local_end - local_start) // worker_info.num_workers
             iter_start = local_start + worker_info.id * per_worker
