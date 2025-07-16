@@ -288,6 +288,7 @@ class Trainer(Trainer_Base):
             _logger.info(str)
 
         # get function handles for loss function terms
+        # TODO: Remove this once it is part of LossModule
         self.loss_fcts = [[getattr(losses, name), w] for name, w in cf.loss_fcts]
         self.loss_fcts_val = [[getattr(losses, name), w] for name, w in cf.loss_fcts_val]
 
@@ -330,23 +331,7 @@ class Trainer(Trainer_Base):
         self.save_model(cf.num_epochs)
     
     ###########################################
-    def _collect_target_var(
-        self,
-        streams_data,
-        forecast_offset,
-        forecast_steps,
-        var_to_collect
-    ):
-        return [
-            [
-                torch.cat([t[i][var_to_collect][fstep] for t in streams_data])
-                for i in range(len(self.cf.streams))
-            ]
-            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
-        ]
-    
-    ###########################################
-    def _collect_logger_items(
+    def _prepare_logging(
         self,
         preds: List[List[Tensor]],
         targets: List[List[Tensor]],
@@ -398,7 +383,8 @@ class Trainer(Trainer_Base):
         targets_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
         targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
 
-        '''
+        #'''
+        # TODO: Undo list resorting
         targets_coords_raw = [
             [
                 torch.cat([t[i].target_coords_raw[fstep] for t in streams_data])
@@ -406,6 +392,7 @@ class Trainer(Trainer_Base):
             ]
             for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
         ]
+        # TODO: Undo list resorting
         targets_times_raw = [
             [
                 np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
@@ -413,24 +400,11 @@ class Trainer(Trainer_Base):
             ]
             for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
         ]
-        '''
-        targets_coords_raw = self._collect_target_var(
-            streams_data=streams_data,
-            forecast_offset=forecast_offset,
-            forecast_steps=forecast_steps,
-            var_to_collect="target_coords_raw"
-        )
-        targets_times_raw = self._collect_target_var(
-            streams_data=streams_data,
-            forecast_offset=forecast_offset,
-            forecast_steps=forecast_steps,
-            var_to_collect="target_times_raw"
-        )
         
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets)):
-            for i_obs, (target) in enumerate(zip(targets[fstep], strict=False)):
-                pred = preds[fstep][i_obs]
+            for i_strm, (target) in enumerate(zip(targets[fstep], strict=False)):
+                pred = preds[fstep][i_strm]
 
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
                     continue
@@ -443,12 +417,12 @@ class Trainer(Trainer_Base):
                 if pred[:, mask_nan].shape[1] == 0:
                     continue
 
-                targets_lens[fstep][i_obs] += [target.shape[0]]
+                targets_lens[fstep][i_strm] += [target.shape[0]]
                 dn_data = self.dataset_val.denormalize_target_channels
 
                 f32 = torch.float32
-                preds_all[fstep][i_obs] += [dn_data(i_obs, pred.to(f32)).detach().cpu()]
-                targets_all[fstep][i_obs] += [dn_data(i_obs, target.to(f32)).detach().cpu()]
+                preds_all[fstep][i_strm] += [dn_data(i_strm, pred.to(f32)).detach().cpu()]
+                targets_all[fstep][i_strm] += [dn_data(i_strm, target.to(f32)).detach().cpu()]
 
         return (
             preds_all,
@@ -470,6 +444,7 @@ class Trainer(Trainer_Base):
         log_data=False,
     ):
         # merge across batch dimension (and keep streams)
+        # TODO: Undo list resorting
         targets_rt = [
             [
                 torch.cat([t[i].target_tokens[fstep] for t in streams_data])
@@ -477,6 +452,7 @@ class Trainer(Trainer_Base):
             ]
             for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
         ]
+        # TODO: Undo list resorting
         targets_coords_rt = [
             [
                 torch.cat([t[i].target_coords[fstep] for t in streams_data])
@@ -491,13 +467,15 @@ class Trainer(Trainer_Base):
             targets_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
             targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
 
+            # TODO: Undo list resorting
             targets_coords_raw_rt = [
                 [
                     torch.cat([t[i].target_coords_raw[fstep] for t in streams_data])
                     for i in range(len(self.cf.streams))
                 ]
                 for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
-            ]
+            ] # transforms from [batch_sample][stream][fstep] into shape [fstep][stream][batch_sample]
+            # TODO: Undo list resorting
             targets_times_raw_rt = [
                 [
                     np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])

@@ -100,8 +100,7 @@ def test_loss(cf):
 
     ### Loss computation with new class
     loss_module_val = LossModule(
-        cf_streams=trainer.cf.streams,
-        loss_fcts=trainer.loss_fcts_val,
+        cf=cf,
         stage=VAL,
         device=trainer.devices[0],
     )

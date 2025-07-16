@@ -25,9 +25,10 @@ import logging
 
 import numpy as np
 import torch
-from omegaconf.listconfig import ListConfig
+from omegaconf import DictConfig
 from torch import Tensor
 
+import weathergen.train.loss as losses
 from weathergen.train.loss import stat_loss_fcts
 from weathergen.utils.train_logger import TRAIN, VAL, Stage
 
@@ -37,30 +38,17 @@ _logger = logging.getLogger(__name__)
 class LossModule:
     def __init__(
         self,
-        cf_streams: ListConfig,  # TODO: remove
-        loss_fcts: list, # TODO: remove
+        cf: DictConfig,
         stage: Stage = TRAIN,
         device: str = "cpu",
     ):
-        self.loss_fcts = loss_fcts
+        self.cf = cf
         self.stage = stage
         self.device = device
-        self.cf_streams = cf_streams
 
+        loss_fcts = cf.loss_fcts if stage == TRAIN else cf.loss_fcts_val
+        self.loss_fcts = [[getattr(losses, name), w] for name, w in loss_fcts]
 
-
-        # TODO:
-        # - add config (cs) as parameter to LossModule
-        # - initialize loss functions here as follows and remove from train.run()
-        # get function handles for loss function terms
-        #self.loss_fcts = [[getattr(losses, name), w] for name, w in cf.loss_fcts]
-        #self.loss_fcts_val = [[getattr(losses, name), w] for name, w in cf.loss_fcts_val]
-
-
-
-
-
-        # self.stream = stream
         # self.stream_loss_weight = {} —> normalize
         # self.channel_loss_weight = {} —> normalize
 
@@ -75,15 +63,16 @@ class LossModule:
 
 
 
-        # WE NEED THIS IN LINE 157
+        # WE NEED THIS AROUND LINE 145 (for determination of t_unique)
+        '''
         targets_times_raw_rt = [
             [
                 np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
                 for i in range(len(self.cf.streams))
             ]
-            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
+            for fstep in range(self.cf.forecast_offset, self.cf.forecast_offset + self.cf.forecast_steps + 1)
         ]
-
+        '''
 
 
 
@@ -99,16 +88,16 @@ class LossModule:
                 (len(st[str(self.stage) + "_target_channels"]), len(self.loss_fcts)),
                 device=self.device,
             )
-            for st in self.cf_streams  # No nan here as it's divided so any remaining 0 become nan
+            for st in self.cf.streams  # No nan here as it's divided so any remaining 0 become nan
         }  # Create tensor for each stream
         stddev_all: dict[str, Tensor] = {
-            st.name: torch.zeros(len(stat_loss_fcts), device=self.device) for st in self.cf_streams
+            st.name: torch.zeros(len(stat_loss_fcts), device=self.device) for st in self.cf.streams
         }  # Create tensor for each stream
-        # assert len(targets) == len(preds) and len(preds) == len(self.cf_streams)
+        # assert len(targets) == len(preds) and len(preds) == len(self.cf.streams)
 
         for fstep in range(len(targets)):
             for i_strm, (target, target_coords, si) in enumerate(
-                zip(targets[fstep], targets_coords[fstep], self.cf_streams, strict=False)
+                zip(targets[fstep], targets_coords[fstep], self.cf.streams, strict=False)
             ):
                 pred = preds[fstep][i_strm]
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
@@ -147,8 +136,6 @@ class LossModule:
 
                     # loop over all channels
                     for i in range(target.shape[-1]):
-                        # TODO: create mask here and perform temp calculation in separate function
-                        #### SUGGESTION START ####
                         # if stream is internal time step, compute loss separately per step
                         # TODO: Outsource mask gathering in separate function
                         if tok_spacetime:
@@ -156,15 +143,16 @@ class LossModule:
                             # iterate over time steps and create mask separately for each
                             # TODO: verify shapes -- t_unique must be same like targets, also test with 12h, i.e., two fsteps
                             t_unique = torch.unique(
-                                #target_coords[:, 1]
+                                target_coords[:, 1]
                                 #targets_times_raw_rt[fstep, i_strm]
-                                targets_times_raw_rt[i_strm, fstep] # THIS USES THE NEW SHAPE!!!
+                                #targets_times_raw_rt[i_strm, fstep] # THIS USES THE NEW SHAPE!!!
                             )  # What happens for two targets at same position with different time stamps?
                             for t in t_unique:
                                 mask_t = t == target_coords[:, 1]
+                                #mask_t = t == targets_times_raw_rt[i_strm, fstep]
                                 masks.append(
                                     torch.logical_and(mask_t, mask_nan[:, i])
-                                )  # TODO: verify whether this is always called (if not, masks can have len 0, which then would have to be checked below)
+                                )  # TODO: verify whether this is always called (if not, masks can have len 0, which then has to be checked below)
                         else:
                             masks = [mask_nan[:, i]]
 
@@ -185,8 +173,6 @@ class LossModule:
                                 val = val + channel_loss_weight[i] * temp
                                 losses_all[si.name][i, j] += temp.item()
                                 ctr_chs += 1
-                        #### SUGGESTION END ####
-                        #'''
 
                     val = val / ctr_chs if (ctr_chs > 0) else val
 
