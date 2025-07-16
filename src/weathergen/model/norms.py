@@ -92,10 +92,6 @@ def modulate(x, shift, scale):
     return x * (1 + scale) + shift
 
 
-def apply_gate(x, gate):
-    return x * gate
-
-
 class AdaLayerNormLayer(torch.nn.Module):
     """
     AdaLayerNorm for embedding auxiliary information as done in DiT (Peebles & Xie) with zero initialisation
@@ -118,7 +114,7 @@ class AdaLayerNormLayer(torch.nn.Module):
         super().__init__()
 
         self.dim = dim
-        self.adaLN_modulation = nn.Sequential(nn.SiLU(), nn.Linear(dim_aux, 3 * dim, bias=True))
+        self.adaLN_modulation = nn.Sequential(nn.Linear(dim_aux, 3 * dim, bias=True))
 
         self.ln = nn.LayerNorm(dim, elementwise_affine=False, eps=norm_eps)
         self.layer = layer
@@ -130,19 +126,20 @@ class AdaLayerNormLayer(torch.nn.Module):
         nn.init.zeros_(self.adaLN_modulation[-1].weight)
         nn.init.zeros_(self.adaLN_modulation[-1].bias)
 
-    def forward(self, x: torch.Tensor, c: torch.Tensor, **kwargs) -> torch.Tensor:
-        shift, scale, gate = self.adaLN_modulation(c).chunk(3, dim=1)
+    def forward(self, x: torch.Tensor, c: torch.Tensor, x_lens, **kwargs) -> torch.Tensor:
+        # the -1 in torch.repeat_interleave(..) is because x_lens is designed for use with flash attention and
+        # thus has a spurious 0 at the beginning to satisfy the flash attention api
+        shift, scale, gate = self.adaLN_modulation(c)[torch.repeat_interleave(x_lens)-1].chunk(3, dim=1)
+        kwargs["x_lens"] = x_lens
         return (
-            apply_gate(
-                self.layer(
-                    modulate(
-                        self.ln(x),
-                        shift,
-                        scale,
-                    ),
-                    c,
-                    **kwargs,
+            gate
+            * self.layer(
+                modulate(
+                    self.ln(x),
+                    shift,
+                    scale,
                 ),
-                gate,
+                **kwargs,
             )
-        ) + x
+            + x
+        )

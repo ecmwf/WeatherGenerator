@@ -322,7 +322,7 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
         assert with_flash, "Only flash attention supported at the moment"
 
     #########################################
-    def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
+    def forward(self, x_q, x_kv, x_lens=None, x_kv_lens=None, ada_ln_aux=None):
         if self.with_residual:
             x_q_in = x_q
         # x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
@@ -337,7 +337,7 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
         vs = self.proj_heads_v(x_kv).reshape(s)
 
         if x_kv_lens is not None:
-            cum_x_q_lens = torch.cumsum(x_q_lens, 0, dtype=torch.int32)
+            cum_x_q_lens = torch.cumsum(x_lens, 0, dtype=torch.int32)
             cum_x_kv_lens = torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
             outs = flash_attn_varlen_func(
                 qs,
@@ -345,7 +345,7 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
                 vs,
                 cum_x_q_lens,
                 cum_x_kv_lens,
-                x_q_lens.max(),
+                x_lens.max(),
                 x_kv_lens.max(),
                 softcap=self.softcap,
                 dropout_p=self.dropout_rate,

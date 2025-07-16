@@ -402,67 +402,88 @@ class TargetPredictionEngine(nn.Module):
             "norm_eps": self.cf.norm_eps,
             "attention_dtype": get_dtype(self.cf.attention_dtype),
         }
-        self.dim_adapter = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(9*self.cf.ae_global_dim_embed, self.dims_embed[0]),
-            nn.LayerNorm(self.dims_embed[0]),
-        )
+        self.oned_pos = nn.Embedding(9, self.cf.ae_global_dim_embed)
+        self.in_norm = nn.LayerNorm(self.cf.ae_global_dim_embed, eps=1e-6)
         self.tte = nn.ModuleList()
         for ith, dim in enumerate(self.dims_embed[:-1]):
-            next_dim = self.dims_embed[ith+1]
+            next_dim = self.dims_embed[ith + 1]
             if self.cf.decoder_type == "PerceiverIO":
                 # a single cross attention layer as per https://arxiv.org/pdf/2107.14795
-                self.tte.append(CrossAttentionBlock(
-                    dim=dim,
-                    dim_aux=next_dim,
-                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
-                    with_self_attn=True,
-                    with_adanorm=False,
-                    with_mlp=False,
-                    attention_kwargs=attention_kwargs,
-                ))
+                self.tte.append(
+                    CrossAttentionBlock(
+                        dim_q=dim,
+                        dim_kv=self.cf.ae_global_dim_embed,
+                        dim_aux=self.cf.ae_global_dim_embed,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        with_self_attn=False,
+                        with_adanorm=False,
+                        with_mlp=False,
+                        attention_kwargs=attention_kwargs,
+                    )
+                )
             elif self.cf.decoder_type == "AdaLayerNormConditioning":
-                self.tte.append(SelfAttentionBlock(
-                    dim=dim,
-                    dim_aux=dim,
-                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
-                    attention_kwargs=attention_kwargs,
-                    with_adanorm=True,
-                ))
+                self.tte.append(
+                    SelfAttentionBlock(
+                        dim=dim,
+                        dim_aux=self.cf.ae_global_dim_embed,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        attention_kwargs=attention_kwargs,
+                        with_adanorm=True,
+                    )
+                )
             elif self.cf.decoder_type == "CrossAttentionConditioning":
-                self.tte.append(CrossAttentionBlock(
-                    dim=dim,
-                    dim_aux=dim,
-                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
-                    with_self_attn=True,
-                    with_adanorm=False,
-                    with_mlp=True,
-                    attention_kwargs=attention_kwargs,
-                ))
+                self.tte.append(
+                    CrossAttentionBlock(
+                        dim_q=dim,
+                        dim_kv=self.cf.ae_global_dim_embed,
+                        dim_aux=self.cf.ae_global_dim_embed,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        with_self_attn=True,
+                        with_adanorm=False,
+                        with_mlp=True,
+                        attention_kwargs=attention_kwargs,
+                    )
+                )
             elif self.cf.decoder_type == "CrossAttentionAdaNormConditioning":
-                self.tte.append(CrossAttentionBlock(
-                    dim=dim,
-                    dim_aux=dim,
-                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
-                    with_self_attn=True,
-                    with_adanorm=True,
-                    with_mlp=True,
-                    attention_kwargs=attention_kwargs,
-                ))
+                self.tte.append(
+                    CrossAttentionBlock(
+                        dim_q=dim,
+                        dim_kv=self.cf.ae_global_dim_embed,
+                        dim_aux=self.cf.ae_global_dim_embed,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        with_self_attn=True,
+                        with_adanorm=True,
+                        with_mlp=True,
+                        attention_kwargs=attention_kwargs,
+                    )
+                )
             else:
                 raise NotImplementedError(
                     f"{self.cf.decoder_type} is not implemented for prediction heads"
                 )
 
-    def forward(self, latent, output_cond, latent_lens, output_cond_lens):
-        latent = self.dim_adapter(latent)
+    def forward(self, latent, output, latent_lens, output_lens):
+        pos_embed = self.oned_pos(
+            torch.arange(0, 9, dtype=torch.int32, device=latent.device).unsqueeze(0)
+        )
+        latent = self.in_norm(latent)
         for layer in self.tte:
-            latent = checkpoint(
-                layer,
-                x=latent,
-                x_lens=latent_lens,
-                aux=output_cond,
-                aux_lens=output_cond_lens,
-                use_reentrant=False,
-            )
-        return latent
+            if isinstance(layer, CrossAttentionBlock):
+                output = checkpoint(
+                    layer,
+                    x=output,
+                    x_kv=(latent+pos_embed).flatten(0,1),
+                    x_lens=output_lens,
+                    aux=latent[:,0],
+                    x_kv_lens=latent_lens,
+                    use_reentrant=False,
+                )
+            else:
+                output = checkpoint(
+                    layer,
+                    x=output,
+                    x_lens=output_lens,
+                    aux=latent[:,0],
+                    use_reentrant=False,
+                )
+        return output

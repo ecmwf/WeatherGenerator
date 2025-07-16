@@ -575,9 +575,9 @@ class Model(torch.nn.Module):
             .flatten(0, 1)
             .reshape(self.num_healpix_cells, 9, -1)
         )
-        tokens_stream = tokens_stream[
-            torch.repeat_interleave(streams_data[0][0].target_coords_lens[0])
-        ].flatten(-2, -1)
+        # tokens_stream = tokens_stream[
+        #     torch.repeat_interleave(streams_data[0][0].target_coords_lens[0])
+        # ].flatten(-2, -1)
 
         # pair with tokens from assimilation engine to obtain target tokens
         preds_tokens = []
@@ -625,14 +625,14 @@ class Model(torch.nn.Module):
 
             # lens for varlen attention
             tcs_lens = target_coords_idxs[ii][fstep]
-            tcs_lens = torch.cat(
-                [model_params.tokens_lens[0:1], tcs_lens[tcs_lens.nonzero()].flatten()]
-            )
+            # tcs_lens = torch.cat(
+            #     [model_params.tokens_lens[0:1], tcs_lens[tcs_lens.nonzero()].flatten()]
+            # )
             tc_tokens = tte(
-                tokens_stream,
-                tc_tokens,
-                tcs_lens,
-                tcs_lens,
+                latent=tokens_stream,
+                output=tc_tokens,
+                latent_lens=model_params.tokens_lens,
+                output_lens=tcs_lens,
             )
 
             # final prediction head to map back to physical space
