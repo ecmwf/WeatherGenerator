@@ -3,7 +3,8 @@
 # dependencies = [
 #   "weathergen-evaluate",
 #   "weathergen-common",
-#   "panel"
+#   "panel",
+#   "omegaconf"
 # ]
 # [tool.uv.sources]
 # weathergen-evaluate = { path = "../../../../../packages/evaluate" }
