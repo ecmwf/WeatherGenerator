@@ -39,19 +39,21 @@ case "$1" in
       export working_dir=$(cat $(../WeatherGenerator-private/hpc/platform-env.py hpc-config) | uvx yq .path_shared_working_dir)
       # Remove quotes
       export working_dir=$(echo "$working_dir" | sed 's/[\"\x27]//g')
-      # If there is a trailing slash, remove it
-      working_dir=${working_dir%/}
       # If the working directory does not exist, exit with an error
       if [ ! -d "$working_dir" ]; then
         echo "Working directory $working_dir does not exist. Please check the configuration."
         exit 1
       fi
+      # Ensure the working directory ends with a slash
+      if [[ "$working_dir" != */ ]]; then
+        working_dir="$working_dir/"
+      fi
       echo "Working directory: $working_dir"
       # Create all the links
       for d in "logs" "models" "output" "plots" "results"
       do
-        echo "$d -> $working_dir/$d"
-        ln -s "$working_dir/$d" "$d"
+        echo "$d -> $working_dir$d"
+        ln -s "$working_dir$d" "$d"
       done
     )
     ;;
