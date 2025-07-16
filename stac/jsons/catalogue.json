@@ -54,6 +54,42 @@
          "rel": "child",
          "title": "SYNOP",
          "type": "application/json"
+      },
+      {
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/metopa.json",
+         "rel": "child",
+         "title": "Metop-A, MHS",
+         "type": "application/json"
+      },
+      {
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/metopb.json",
+         "rel": "child",
+         "title": "Metop-B, MHS",
+         "type": "application/json"
+      },
+      {
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/fy3a.json",
+         "rel": "child",
+         "title": "FY-3A, MWHS",
+         "type": "application/json"
+      },
+      {
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/fy3b.json",
+         "rel": "child",
+         "title": "FY-3B, MWHS",
+         "type": "application/json"
+      },
+      {
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/fy3c.json",
+         "rel": "child",
+         "title": "FY-3C, MWHS",
+         "type": "application/json"
+      },
+      {
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/abigoes.json",
+         "rel": "child",
+         "title": "ABI-GOES16",
+         "type": "application/json"
       }
    ],
    "stac_extensions": [

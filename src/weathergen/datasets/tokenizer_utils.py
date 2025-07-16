@@ -166,7 +166,7 @@ def tokenize_window_space(
     time_win,
     token_size,
     hl,
-    hpy_verts_Rs,
+    hpy_verts_rots,
     n_coords,
     n_geoinfos,
     n_data,
@@ -190,14 +190,15 @@ def tokenize_window_space(
     source_padded = torch.cat([torch.zeros_like(source[0]).unsqueeze(0), n_data(source)])
 
     # convert to local coordinates
-    # TODO: how to vectorize it so that there's no list comprhension (and the Rs are not duplicated)
+    # TODO: how to vectorize it so that there's no list comprhension (and the rots are not
+    # duplicated)
     # TODO: avoid that padded lists are rotated, which means potentially a lot of zeros
     if local_coords:
         fp32 = torch.float32
         posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])
         coords_local = [
             n_coords(r3tos2(torch.matmul(R, posr3[idxs].transpose(1, 0)).transpose(1, 0)).to(fp32))
-            for R, idxs in zip(hpy_verts_Rs, idxs_ord, strict=True)
+            for R, idxs in zip(hpy_verts_rots, idxs_ord, strict=True)
         ]
     else:
         coords_local = torch.cat([torch.zeros_like(coords[0]).unsqueeze(0), coords])
@@ -240,7 +241,7 @@ def tokenize_window_spacetime(
     time_win,
     token_size,
     hl,
-    hpy_verts_Rs,
+    hpy_verts_rots,
     n_coords,
     n_geoinfos,
     n_data,
@@ -267,7 +268,7 @@ def tokenize_window_spacetime(
             time_win,
             token_size,
             hl,
-            hpy_verts_Rs,
+            hpy_verts_rots,
             n_coords,
             n_geoinfos,
             n_data,
