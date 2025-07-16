@@ -1,0 +1,17 @@
+streams_directory: "./config/streams/streams_anemoi/"
+
+ae_local_num_blocks: 0
+ae_local_num_queries: 1
+
+ae_global_dim_embed: 2048
+ae_global_num_blocks: 6
+ae_global_num_heads: 32
+
+training_mode: "forecast"
+num_epochs: 2
+
+forecast_offset : 1
+forecast_steps: 0
+foercast_freeze_model : False
+forecast_delta_hrs: 0
+istep : 0
