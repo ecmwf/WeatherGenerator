@@ -1,5 +1,4 @@
 import logging
-import time
 
 import numpy as np
 import torch
@@ -30,14 +29,15 @@ class Masker:
         self.masking_strategy = masking_strategy
         self.masking_rate_sampling = masking_rate_sampling
 
-        # Initialize the random number generator.
-        worker_info = torch.utils.data.get_worker_info()
-        div_factor = (worker_info.id + 1) if worker_info is not None else 1
-        self.rng = np.random.default_rng(int(time.time() / div_factor))
-
         # Initialize the mask, set to None initially,
         # until it is generated in mask_source.
         self.perm_sel: list[np.typing.NDArray] = None
+
+    def reset_rng(self, rng) -> None:
+        """
+        Reset rng after epoch to ensure proper randomization
+        """
+        self.rng = rng
 
     def mask_source(
         self,
