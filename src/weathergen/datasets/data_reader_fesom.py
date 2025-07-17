@@ -10,7 +10,7 @@
 import glob
 import logging
 from pathlib import Path
-from typing import override, Optional
+from typing import override
 
 import dask
 import dask.array as da
@@ -26,6 +26,8 @@ from weathergen.datasets.data_reader_base import (
 )
 
 _logger = logging.getLogger(__name__)
+
+type NDArray = np.typing.NDArray
 
 
 class DataReaderFesom(DataReaderTimestep):
@@ -53,8 +55,8 @@ class DataReaderFesom(DataReaderTimestep):
             return
 
         # Initialize data-dependent attributes to None. They will be set by _lazy_init.
-        self.time: Optional[da.Array] = None
-        self.data: Optional[da.Array] = None
+        self.time: da.Array | None = None
+        self.data: da.Array | None = None
         self.len = 0  # Default length is 0 until initialized
         self.source_channels = []
         self.source_idx = []
@@ -177,7 +179,7 @@ class DataReaderFesom(DataReaderTimestep):
 
         self._initialized = True
 
-    def select(self, ch_filters: list[str]) -> tuple[list[str], np.ndarray]:
+    def select(self, ch_filters: list[str]) -> tuple[list[str], NDArray]:
         mask = [any(f in c for f in ch_filters) for c in self.colnames]
         selected_cols_idx = self.cols_idx[np.where(mask)[0]]
         selected_colnames = [self.colnames[i] for i in np.where(mask)[0]]
@@ -207,8 +209,6 @@ class DataReaderFesom(DataReaderTimestep):
 
         start_row = t_idxs[0] * self.mesh_size
         end_row = (t_idxs[-1] + 1) * self.mesh_size
-
-        _logger.info(f"Started loading data from : {start_row} {end_row}")
 
         # Note: we read all columns from start_row to end_row once,
         # then select the ones we need. This is more efficient for Zarr.
