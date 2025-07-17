@@ -18,6 +18,7 @@ local common = import 'common.jsonnet';
   providers: [
     common.providers.ecmwf_host,
   ],
+  processing_level: 'NA',
 
   // Retrieved with: root.data.attrs["colnames"],
   // root.data.attrs["mins"], root.data.attrs["maxs"],

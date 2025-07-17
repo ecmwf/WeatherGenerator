@@ -1,3 +1,5 @@
+# ruff: noqa: T201
+
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -9,7 +11,6 @@
 
 import logging
 import time
-from pathlib import Path
 
 import numpy as np
 import torch
@@ -17,27 +18,32 @@ import torch.utils.data.distributed
 import tqdm
 from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import MixedPrecision, ShardingStrategy
-from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy  # default_auto_wrap_policy,
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    MixedPrecision,
+    ShardingStrategy,
+)
+from torch.distributed.fsdp.wrap import (
+    size_based_auto_wrap_policy,  # default_auto_wrap_policy,
+)
 
 import weathergen.train.loss as losses
 import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.train.lr_scheduler import LearningRateScheduler
-from weathergen.train.trainer_base import Trainer_Base
+from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TRAIN, VAL, TrainLogger
-from weathergen.utils.validation_io import write_validation
+from weathergen.utils.validation_io import write_output
 
 _logger = logging.getLogger(__name__)
 
 
-class Trainer(Trainer_Base):
+class Trainer(TrainerBase):
     ###########################################
     def __init__(self, checkpoint_freq=250, print_freq=10):
-        Trainer_Base.__init__(self)
+        TrainerBase.__init__(self)
 
         self.checkpoint_freq = checkpoint_freq
         self.print_freq = print_freq
@@ -49,8 +55,8 @@ class Trainer(Trainer_Base):
     ):
         self.cf = cf
 
-        assert cf.samples_per_epoch % cf.batch_size == 0
-        assert cf.samples_per_validation % cf.batch_size_validation == 0
+        assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
+        assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
 
         self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
@@ -60,34 +66,29 @@ class Trainer(Trainer_Base):
         # num_ranks gets overwritten by current setting during init_ddp()
         self.num_ranks_original = cf.get("num_ranks", None)
 
+        # TODO remove num_ranks, rank, with_with ddp from config
         self.init_ddp(cf)
 
-        # read configuration of data streams
-        cf.streams = config.load_streams(Path(cf.streams_directory))
-
         # create output directory
-        cf.run_path = cf.run_path if hasattr(cf, "run_path") else "./results"
-        cf.model_path = cf.model_path if hasattr(cf, "model_path") else "./models"
-        path_run = Path(cf.run_path) / cf.run_id
-        path_model = Path(cf.model_path) / cf.run_id
         if self.cf.rank == 0:
-            path_run.mkdir(exist_ok=True, parents=True)
-            path_model.mkdir(exist_ok=True, parents=True)
-        self.path_run = path_run
+            config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
+            config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
         self.init_perf_monitoring()
-        self.train_logger = TrainLogger(cf, self.path_run)
+        self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
     ###########################################
     def inference(self, cf, run_id_trained, epoch):
         # general initalization
         self.init(cf)
 
+        # !! modifies config: adds config.streams[i].<stage>_source_channels
+        # and config.streams[i].<stage>_target_channels !!
         self.dataset_val = MultiStreamDataSampler(
             cf,
             cf.start_date_val,
             cf.end_date_val,
-            cf.batch_size_validation,
+            cf.batch_size_validation_per_gpu,
             cf.samples_per_validation,
             train_logger=self.train_logger,
             stage=VAL,
@@ -141,7 +142,7 @@ class Trainer(Trainer_Base):
             cf,
             cf.start_date,
             cf.end_date,
-            cf.batch_size,
+            cf.batch_size_per_gpu,
             cf.samples_per_epoch,
             train_logger=self.train_logger,
             stage=TRAIN,
@@ -151,7 +152,7 @@ class Trainer(Trainer_Base):
             cf,
             cf.start_date_val,
             cf.end_date_val,
-            cf.batch_size_validation,
+            cf.batch_size_validation_per_gpu,
             cf.samples_per_validation,
             train_logger=self.train_logger,
             stage=VAL,
@@ -225,7 +226,7 @@ class Trainer(Trainer_Base):
 
         # TODO: learning rate schedule
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
-        kappa = cf.batch_size * cf.num_ranks
+        kappa = cf.batch_size_per_gpu * cf.num_ranks
         beta1 = max(0.5, 1.0 - kappa * (1.0 - 0.9))
         beta2 = 1.0 - kappa * (1.0 - 0.999)
         eps = 1e-08 / np.sqrt(kappa)
@@ -243,7 +244,7 @@ class Trainer(Trainer_Base):
 
         # lr is updated after each batch so account for this
         # TODO: conf should be read-only, do not modify the conf in flight
-        cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size)
+        cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size_per_gpu)
 
         steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
         _logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
@@ -265,7 +266,7 @@ class Trainer(Trainer_Base):
             _logger.warning(s)
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
-            cf.batch_size,
+            cf.batch_size_per_gpu,
             cf.num_ranks,
             cf.lr_start,
             cf.lr_max,
@@ -294,8 +295,8 @@ class Trainer(Trainer_Base):
             epoch_base = int(self.cf.istep / len(self.data_loader))
         else:
             len_per_rank = (
-                len(self.dataset) // (self.num_ranks_original * cf.batch_size)
-            ) * cf.batch_size
+                len(self.dataset) // (self.num_ranks_original * cf.batch_size_per_gpu)
+            ) * cf.batch_size_per_gpu
             epoch_base = int(
                 self.cf.istep / (min(len_per_rank, cf.samples_per_epoch) * self.num_ranks_original)
             )
@@ -383,7 +384,12 @@ class Trainer(Trainer_Base):
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):
             for i_obs, (target, target_coords, si) in enumerate(
-                zip(targets_rt[fstep], targets_coords_rt[fstep], self.cf.streams, strict=False)
+                zip(
+                    targets_rt[fstep],
+                    targets_coords_rt[fstep],
+                    self.cf.streams,
+                    strict=False,
+                )
             ):
                 pred = preds[fstep][i_obs]
 
@@ -574,7 +580,7 @@ class Trainer(Trainer_Base):
             if bidx % self.checkpoint_freq == 0:
                 self.save_model(-1)
 
-            self.cf.istep += cf.batch_size
+            self.cf.istep += cf.batch_size_per_gpu
 
         self.dataset.advance()
 
@@ -630,11 +636,10 @@ class Trainer(Trainer_Base):
                             targets_lens,
                         ) = ret
                         sources = [[item.source_raw for item in b] for b in batch[0]]
-                        write_validation(
+                        write_output(
                             self.cf,
-                            self.path_run,
-                            self.cf.rank,
                             epoch,
+                            bidx,
                             sources,
                             preds_all,
                             targets_all,
@@ -658,7 +663,7 @@ class Trainer(Trainer_Base):
                     self.losses_hist += [losses_all]
                     self.stddev_hist += [stddev_all]
 
-                    pbar.update(self.cf.batch_size_validation)
+                    pbar.update(self.cf.batch_size_validation_per_gpu)
 
                 losses_all = self.ddp_average(
                     torch.stack(self.losses_hist).to(torch.float64).nanmean(0)
@@ -678,7 +683,7 @@ class Trainer(Trainer_Base):
                         )
 
                     # add data to plain logger
-                    samples = cf.istep * cf.batch_size * cf.num_ranks
+                    samples = cf.istep * cf.batch_size_per_gpu * cf.num_ranks
                     self.train_logger.add_val(samples, losses_all, stddev_all)
 
                 if self.cf.rank == 0:
@@ -726,9 +731,9 @@ class Trainer(Trainer_Base):
                     ("_" + name) if name is not None else "",
                 ]
             )
-            base_path = Path(self.cf.model_path) / self.cf.run_id
-            file_out: Path = base_path / (filename + ".chkpt")
-            file_tmp: Path = base_path / (filename + "_tmp.chkpt")
+            base_path = config.get_path_model(self.cf)
+            file_out = base_path / (filename + ".chkpt")
+            file_tmp = base_path / (filename + "_tmp.chkpt")
             # save temp file (slow)
             torch.save(state, file_tmp)
             # move file (which is changing the link in the file system and very fast)
@@ -744,7 +749,7 @@ class Trainer(Trainer_Base):
         if bidx % log_interval == 0:
             l_avg = self.ddp_average(torch.nanmean(torch.stack(self.losses_hist), axis=0))
             stddev_avg = self.ddp_average(torch.nanmean(torch.stack(self.stddev_hist), axis=0))
-            samples = self.cf.istep * self.cf.batch_size * self.cf.num_ranks
+            samples = self.cf.istep * self.cf.batch_size_per_gpu * self.cf.num_ranks
 
             if self.cf.rank == 0:
                 # logging
@@ -783,7 +788,7 @@ class Trainer(Trainer_Base):
                 dt = time.time() - self.t_start
                 pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
                 pstr += "(lr={:.2E}, s/sec={:.3f})"
-                len_dataset = len(self.data_loader) // self.cf.batch_size
+                len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
                 print(
                     pstr.format(
                         epoch,
@@ -792,7 +797,7 @@ class Trainer(Trainer_Base):
                         self.cf.istep,
                         np.nanmean(l_avg[0]),
                         self.lr_scheduler.get_lr(),
-                        (self.print_freq * self.cf.batch_size) / dt,
+                        (self.print_freq * self.cf.batch_size_per_gpu) / dt,
                     ),
                     flush=True,
                 )
