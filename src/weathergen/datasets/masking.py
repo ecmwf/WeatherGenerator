@@ -1,5 +1,4 @@
 import logging
-import time
 
 import numpy as np
 import torch
@@ -34,10 +33,7 @@ class Masker:
         # masking_strategy_config is a dictionary that can hold any additional parameters
         self.masking_strategy_config = masking_strategy_config
 
-        # Initialize the random number generator.
-        worker_info = torch.utils.data.get_worker_info()
-        div_factor = (worker_info.id + 1) if worker_info is not None else 1
-        self.rng = np.random.default_rng(int(time.time() / div_factor))
+
 
         # Initialize the mask, set to None initially,
         # until it is generated in mask_source.
@@ -57,6 +53,12 @@ class Masker:
             assert "global" in self.masking_strategy_config or "per_cell" in self.masking_strategy_config, (
                 "Masking strategy must specify either 'global' or 'per_cell' in masking_strategy_config."
             )
+            
+    def reset_rng(self, rng) -> None:
+        """
+        Reset rng after epoch to ensure proper randomization
+        """
+        self.rng = rng
 
     def mask_source(
         self,
