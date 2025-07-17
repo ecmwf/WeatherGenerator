@@ -32,7 +32,7 @@ from weathergen.utils.logger import init_loggers
 
 
 class TokenizerMasking:
-    def __init__(self, healpix_level: int, rng, masker: Masker):
+    def __init__(self, healpix_level: int, masker: Masker):
         ref = torch.tensor([1.0, 0.0, 0.0])
 
         self.hl_source = healpix_level
@@ -123,8 +123,6 @@ class TokenizerMasking:
             .to(torch.float32)
         )
 
-        self.rng = rng
-
         self.size_time_embedding = 6
 
     def get_size_time_embedding(self) -> int:
@@ -133,10 +131,11 @@ class TokenizerMasking:
         """
         return self.size_time_embedding
 
-    def reset(self, rng) -> None:
+    def reset_rng(self, rng) -> None:
         """
-        Reset state after epoch
+        Reset rng after epoch to ensure proper randomization
         """
+        self.masker.reset_rng(rng)
         self.rng = rng
 
     def batchify_source(

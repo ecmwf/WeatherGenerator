@@ -187,10 +187,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.num_healpix_cells_target: int = 12 * 4**self.healpix_level_target
 
         if cf.training_mode == "forecast":
-            self.tokenizer = TokenizerForecast(cf.healpix_level, self.rng)
+            self.tokenizer = TokenizerForecast(cf.healpix_level)
         elif cf.training_mode == "masking":
             masker = Masker(cf.masking_rate, cf.masking_strategy, cf.masking_rate_sampling)
-            self.tokenizer = TokenizerMasking(cf.healpix_level, self.rng, masker)
+            self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
             msg = "masked token modeling does not support self.input_window_steps > 1; "
             msg += "increase window length"
@@ -203,7 +203,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ###################################################
     def advance(self):
         """
-        Advance epoch
+        Advance epoch (this is applied to the template for the worker processes)
         """
         self.epoch += 1
 
@@ -266,13 +266,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.perms_forecast_dt = fsm * np.ones(len_dt_samples, dtype=np.int64)
         elif self.forecast_policy == "random" or self.forecast_policy == "sequential_random":
             # randint high=one-past
-            self.perms_forecast_dt = np.random.randint(
+            self.perms_forecast_dt = self.rng.integers(
                 low=self.forecast_steps.min(), high=fsm + 1, size=len_dt_samples, dtype=np.int64
             )
         else:
             assert False
 
-        self.tokenizer.reset(self.rng)
+        self.tokenizer.reset_rng(self.rng)
 
     ###################################################
     def denormalize_source_channels(self, obs_id, data):
@@ -421,6 +421,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         else:
             # ensure the rng seed is fully unique across workers and epochs
+            # the worker processes are generated as bit-wise copy of the "template" (the actual
+            # instance of the present class that is created) whenever __iter__ is started. This
+            # happens for each epoch, for train and validation, and independently for each DDP
+            # worker. After the bit-wise copy, the rng seed needs to be made unique for
+            # DDP workers, loader process, epoch.
             dist = torch.distributed
             self.data_loader_rng_seed *= (
                 (((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1)

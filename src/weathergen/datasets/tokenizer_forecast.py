@@ -31,7 +31,7 @@ from weathergen.utils.logger import init_loggers
 
 
 class TokenizerForecast:
-    def __init__(self, healpix_level: int, rng):
+    def __init__(self, healpix_level: int):
         ref = torch.tensor([1.0, 0.0, 0.0])
 
         self.hl_source = healpix_level
@@ -120,17 +120,15 @@ class TokenizerForecast:
             .to(torch.float32)
         )
 
-        self.rng = rng
-
     def get_size_time_embedding(self) -> int:
         """
         Get size of time embedding
         """
         return self.size_time_embedding
 
-    def reset(self, rng) -> None:
+    def reset_rng(self, rng) -> None:
         """
-        Reset state after epoch
+        Reset rng after epoch to ensure proper randomization
         """
         self.rng = rng
 
