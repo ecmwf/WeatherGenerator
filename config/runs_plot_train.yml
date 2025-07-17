@@ -7,31 +7,61 @@ train :
     #dgztdko9 : 
     #  slurm_id: 11952188
     #  description: "random, 0.8"
+
+    # alps random
+    r6n9f17y : 
+      slurm_id: 0
+      description: "random, 0.2"
+    mc7tglq2 : 
+      slurm_id: 0
+      description: "random, 0.4"
+    bhls2aq5 : 
+      slurm_id: 0
+      description: "random, 0.6"
+    mn62wrb3 : 
+      slurm_id: 0
+      description: "random, 0.8"
+
+    # alps block
+    lua24td8 : 
+      slurm_id: 0
+      description: "block, 0.2"
+    t5phagnj : 
+      slurm_id: 0
+      description: "block, 0.4"
+    yq69p7yx : 
+      slurm_id: 0
+      description: "block, 0.6"
+    llz92hry : 
+      slurm_id: 0
+      description: "block, 0.8"
+
     # healpix masking
-    #ocgmx23u : 
-    #  slurm_id: 0
-    #  description: "healpix, 0.2, hl_level 3"
-    #xjz5bsw6 : 
-    #  slurm_id: 0
-    #  description: "healpix, 0.4, hl_level 3"
-    #c534btp8 : 
-    #  slurm_id: 0
-    #  description: "healpix, 0.6, hl_level 3"
-    #dlctmqor : 
-    #  slurm_id: 0
-    #  description: "healpix, 0.8, hl_level 3"
-    #o4dmnf5z : 
-    #  slurm_id: 0
-    #  description: "healpix, 0.2, hl_level 1"
-    #i50ua7oz : 
-    #  slurm_id: 0
-    #  description: "healpix, 0.4, hl_level 1"
-    #rrf3mew2 : 
-    #  slurm_id: 0
-    #  description: "healpix, 0.6, hl_level 1"
-    #f9175xus : 
-    #  slurm_id: 0
-    #  description: "healpix, 0.8, hl_level 1"
+    ocgmx23u : 
+      slurm_id: 0
+      description: "healpix, 0.2, hl_level 3"
+    xjz5bsw6 : 
+      slurm_id: 0
+      description: "healpix, 0.4, hl_level 3"
+    c534btp8 : 
+      slurm_id: 0
+      description: "healpix, 0.6, hl_level 3"
+    dlctmqor : 
+      slurm_id: 0
+      description: "healpix, 0.8, hl_level 3"
+    o4dmnf5z : 
+      slurm_id: 0
+      description: "healpix, 0.2, hl_level 1"
+    i50ua7oz : 
+      slurm_id: 0
+      description: "healpix, 0.4, hl_level 1"
+    rrf3mew2 : 
+      slurm_id: 0
+      description: "healpix, 0.6, hl_level 1"
+    f9175xus : 
+      slurm_id: 0
+      description: "healpix, 0.8, hl_level 1"
+
     # channel masking
     grwmyvg7 : 
       slurm_id: 0

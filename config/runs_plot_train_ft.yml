@@ -1,12 +1,12 @@
 train : 
   plot :
     # random masking
-    v9mbu064_ft : 
-      slurm_id: 11952186
-      description: "ft, random, 0.2"
-    dgztdko9_ft : 
-      slurm_id: 11952188
-      description: "ft, random, 0.8"
+    #v9mbu064_ft : 
+    #  slurm_id: 0
+    #  description: "ft, random, 0.2"
+    #dgztdko9_ft : 
+    #  slurm_id: 0
+    #  description: "ft, random, 0.8"
     # healpix masking
     #ocgmx23u_ft : 
     #  slurm_id: 0
@@ -14,9 +14,9 @@ train :
     #xjz5bsw6_ft : 
     #  slurm_id: 0
     #  description: "ft, healpix, 0.4, hl_level 3"
-    #c534btp8_ft : 
-    #  slurm_id: 0
-    #  description: "ft, healpix, 0.6, hl_level 3"
+    c534btp8_ft : 
+      slurm_id: 0
+      description: "ft, healpix, 0.6, hl_level 3"
     #dlctmqor_ft : 
     #  slurm_id: 0
     #  description: "ft, healpix, 0.8, hl_level 3"
@@ -54,7 +54,7 @@ train :
     #vzsl502k_ft : 
     #  slurm_id: 0
     #  description: "ft, channel, 0.6, per_cell"
-    #y1mplb38_ft : 
-    #  slurm_id: 0
-    #  description: "ft, channel, 0.8, per_cell"
+    y1mplb38_ft : 
+      slurm_id: 0
+      description: "ft, channel, 0.8, per_cell"
 
