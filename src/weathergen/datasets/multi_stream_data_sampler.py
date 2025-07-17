@@ -174,12 +174,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.batch_size = batch_size
 
+        # ensure data_loader_rng_seed is not smaller than loader_num_workers to avoid
+        # issues in per loader rng seed computation
         self.data_loader_rng_seed = (
             cf.data_loader_rng_seed
             if cf.data_loader_rng_seed > cf.loader_num_workers
             else cf.data_loader_rng_seed * 13
         )
-        self.rng = np.random.default_rng(self.data_loader_rng_seed)
 
         self.healpix_level_source: int = cf.healpix_level
         self.healpix_level_target: int = cf.healpix_level
@@ -429,7 +430,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             dist = torch.distributed
             self.data_loader_rng_seed *= (
                 (((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1)
-                * ((worker_info.id + 1) * 39)
+                * ((worker_info.id + 1) * 37)
                 * (self.epoch + 13)
                 * 7
             )
