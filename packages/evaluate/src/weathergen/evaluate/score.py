@@ -95,6 +95,7 @@ def get_score(
     data: VerifiedData,
     score_name: str,
     agg_dims: str | list[str] = "all",
+    group_by_coord: str = None,
     ens_dim: str = "ens",
     compute: bool = False,
     **kwargs,
@@ -127,7 +128,7 @@ def get_score(
     """
     sc = Scores(agg_dims=agg_dims, ens_dim=ens_dim)
 
-    score_data = sc.get_score(data, score_name, **kwargs)
+    score_data = sc.get_score(data, score_name, group_by_coord, **kwargs)
     if compute:
         # If compute is True, compute the score immediately
         return score_data.compute()
@@ -184,7 +185,12 @@ class Scores:
         }
 
     def get_score(
-        self, data: VerifiedData, score_name: str, compute: bool = False, **kwargs
+        self,
+        data: VerifiedData,
+        score_name: str,
+        group_by_coord: str | None = None,
+        compute: bool = False,
+        **kwargs,
     ):
         """
         Calculate the score for the given data and score name.
@@ -250,6 +256,11 @@ class Scores:
         arg_names: list[str] = inspect.getfullargspec(f).args[1:]
 
         args = {"p": data.prediction, "gt": data.ground_truth}
+
+        # Add group_by_coord if provided
+        if group_by_coord is not None:
+            args["group_by_coord"] = self._validate_groupby_coord(data, group_by_coord)
+
         for an in arg_names:
             if an in kwargs:
                 args[an] = kwargs[an]
@@ -276,6 +287,42 @@ class Scores:
         if not isinstance(dim, str):
             raise ValueError("ens_dim must be a string.")
         return dim
+
+    def _validate_groupby_coord(
+        self, data: VerifiedData, group_by_coord: str | None
+    ) -> str | None:
+        """
+        Check if the group_by_coord is present in both prediction and ground truth data and compatible.
+        Raises ValueError if conditions are not met.
+
+        Parameters
+        ----------
+        data : VerifiedData
+            VerifiedData object containing prediction and ground truth data.
+        group_by_coord : str
+            Name of the coordinate to group by.
+
+        Returns
+        -------
+        group_by_coord : str
+            Validated group_by_coord
+        """
+        p, gt = data.prediction, data.ground_truth
+        if group_by_coord not in p.coords or group_by_coord not in gt.coords:
+            raise ValueError(
+                f"Coordinate '{group_by_coord}' must be present in both prediction and ground truth data."
+            )
+
+        # Check if the dims associated with the groupby_coord are compatible
+        dims_p = set(p.coords[group_by_coord].dims)
+        dims_gt = set(gt.coords[group_by_coord].dims)
+        if dims_p != dims_gt:
+            raise ValueError(
+                f"Coordinate '{group_by_coord}' is associated with different dimensions: "
+                f"{dims_p} in prediction, {dims_gt} in ground truth."
+            )
+
+        return group_by_coord
 
     def _sum(self, data: xr.DataArray) -> xr.DataArray:
         """
@@ -310,11 +357,19 @@ class Scores:
         return data.mean(dim=self._agg_dims)
 
     def get_2x2_event_counts(
-        self, p: xr.DataArray, gt: xr.DataArray, thresh: float
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        thresh: float,
+        group_by_coord: str | None = None,
     ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]:
         """
         Get counts of 2x2 contingency tables
         """
+        if group_by_coord:
+            p = p.groupby(group_by_coord)
+            gt = gt.groupby(group_by_coord)
+
         a = self._sum((p >= thresh) & (gt >= thresh))
         b = self._sum((p >= thresh) & (gt >= thresh))
         c = self._sum((p < thresh) & (gt >= thresh))
@@ -324,8 +379,14 @@ class Scores:
 
     ### Deterministic scores
 
-    def calc_ets(self, p: xr.DataArray, gt: xr.DataArray, thresh=0.1):
-        a, b, c, d = self.get_2x2_event_counts(p, gt, thresh)
+    def calc_ets(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        group_by_coord: str | None = None,
+        thresh: float = 0.1,
+    ):
+        a, b, c, d = self.get_2x2_event_counts(p, gt, thresh, group_by_coord)
         n = a + b + c + d
         ar = (a + b) * (a + c) / n  # random reference forecast
 
@@ -336,8 +397,14 @@ class Scores:
 
         return ets
 
-    def calc_fbi(self, p: xr.DataArray, gt: xr.DataArray, thresh=0.1):
-        a, b, c, _ = self.get_2x2_event_counts(p, gt, thresh)
+    def calc_fbi(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        group_by_coord: str | None = None,
+        thresh: float = 0.1,
+    ):
+        a, b, c, _ = self.get_2x2_event_counts(p, gt, thresh, group_by_coord)
 
         denom = a + c
         fbi = (a + b) / denom
@@ -346,8 +413,14 @@ class Scores:
 
         return fbi
 
-    def calc_pss(self, p: xr.DataArray, gt: xr.DataArray, thresh=0.1):
-        a, b, c, d = self.get_2x2_event_counts(p, gt, thresh)
+    def calc_pss(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        group_by_coord: str | None = None,
+        thresh: float = 0.1,
+    ):
+        a, b, c, d = self.get_2x2_event_counts(p, gt, thresh, group_by_coord)
 
         denom = (a + c) * (b + d)
         pss = (a * d - b * c) / denom
@@ -356,13 +429,24 @@ class Scores:
 
         return pss
 
-    def calc_l1(self, p: xr.DataArray, gt: xr.DataArray, scale_dims: list = None):
+    def calc_l1(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        group_by_coord: str | None = None,
+        scale_dims: list = None,
+    ):
         """
         Calculate the L1 error norm of forecast data w.r.t. reference data.
         Note that the L1 error norm is calculated as the sum of absolute differences.
         If scale_dims is not None, the L1 will scaled by the number of elements in the average dimensions.
         """
-        l1 = self._sum(np.abs(p - gt))
+        l1 = np.abs(p - gt)
+
+        if group_by_coord:
+            l1 = l1.groupby(group_by_coord)
+
+        l1 = self._sum(l1)
 
         if scale_dims:
             scale_dims = to_list(scale_dims)
@@ -376,13 +460,24 @@ class Scores:
 
         return l1
 
-    def calc_l2(self, p: xr.DataArray, gt: xr.DataArray, scale_dims: list = None):
+    def calc_l2(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        group_by_coord: str | None = None,
+        scale_dims: list = None,
+    ):
         """
         Calculate the L2 error norm of forecast data w.r.t. reference data.
         Note that the L2 error norm is calculated as the sum of absolute differences.
         If scale_dims is not None, the L2 will scaled by the number of elements in the average dimensions.
         """
-        l2 = self._sum(np.sqrt(np.square(p - gt)))
+        l2 = np.sqrt(np.square(p - gt))
+
+        if group_by_coord:
+            l2 = l2.groupby(group_by_coord)
+
+        l2 = self._sum(l2)
 
         if scale_dims:
             scale_dims = to_list(scale_dims)
@@ -396,43 +491,85 @@ class Scores:
 
         return l2
 
-    def calc_mae(self, p: xr.DataArray, gt: xr.DataArray):
+    def calc_mae(
+        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
+    ):
         """
-        Calculate mean absolute error (MAE) of forecast data w.r.t. reference data
+        Calculate mean absolute error (MAE) of forecast data w.r.t. reference data.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the MAE score.
         """
         if self._agg_dims is None:
             raise ValueError(
                 "Cannot calculate mean absolute error without aggregation dimensions (agg_dims=None)."
             )
-        mae = self._mean(np.abs(p - gt))
+        mae = np.abs(p - gt)
+
+        if group_by_coord:
+            mae = mae.groupby(group_by_coord)
+
+        mae = self._mean(mae)
 
         return mae
 
-    def calc_mse(self, p: xr.DataArray, gt: xr.DataArray):
+    def calc_mse(
+        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
+    ):
         """
-        Calculate mean squared error (MSE) of forecast data w.r.t. reference data
-        :return: MSE averaged over provided dimensions
+        Calculate mean squared error (MSE) of forecast data w.r.t. reference data.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        group_by_coord: str
+            Name of the coordinate to group by.
         """
         if self._agg_dims is None:
             raise ValueError(
                 "Cannot calculate mean squared error without aggregation dimensions (agg_dims=None)."
             )
 
-        mse = self._mean(np.square(p - gt))
+        mse = np.square(p - gt)
+
+        if group_by_coord:
+            mse = mse.groupby(group_by_coord)
+
+        mse = self._mean(mse)
 
         return mse
 
-    def calc_rmse(self, p: xr.DataArray, gt: xr.DataArray):
+    def calc_rmse(
+        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
+    ):
         """
         Calculate root mean squared error (RMSE) of forecast data w.r.t. reference data
-        :return: RMSE averaged over provided dimensions
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the RMSE score.
         """
         if self._agg_dims is None:
             raise ValueError(
                 "Cannot calculate root mean squared error without aggregation dimensions (agg_dims=None)."
             )
 
-        rmse = np.sqrt(self.calc_mse(p, gt))
+        rmse = np.sqrt(self.calc_mse(p, gt, group_by_coord))
 
         return rmse
 
@@ -441,6 +578,7 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         clim_mean: xr.DataArray,
+        group_by_coord: str | None = None,
         spatial_dims: list = None,
     ):
         """
@@ -458,6 +596,9 @@ class Scores:
             Ground truth data array
         clim_mean: xr.DataArray
             Climatological mean data array, which is used to calculate anomalies
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the ACC score.
         spatial_dims: List[str]
             Names of spatial dimensions over which ACC is calculated.
             Note: No averaging is possible over these dimensions.
@@ -479,6 +620,9 @@ class Scores:
         )
 
         # Exclude spatial dimensions from averaging since ACC is always calculated over them
+        if group_by_coord:
+            acc = acc.groupby(group_by_coord)
+
         if self._agg_dims is not None:
             mean_dims = [x for x in self._agg_dims if x not in spatial_dims]
             if len(mean_dims) > 0:
@@ -486,23 +630,55 @@ class Scores:
 
         return acc
 
-    def calc_bias(self, p: xr.DataArray, gt: xr.DataArray):
+    def calc_bias(
+        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
+    ):
         """
         Calculate mean bias of forecast data w.r.t. reference data
-        """
 
-        bias = self._mean(p - gt)
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the bias score.
+        """
+        bias = p - gt
+
+        if group_by_coord:
+            bias = bias.groupby(group_by_coord)
+
+        bias = self._mean(bias)
 
         return bias
 
-    def calc_psnr(self, p: xr.DataArray, gt: xr.DataArray, pixel_max: float = 1.0):
+    def calc_psnr(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        group_by_coord: str | None = None,
+        pixel_max: float = 1.0,
+    ):
         """
         Calculate PSNR of forecast data w.r.t. reference data
-        :param kwargs: known keyword argument 'pixel_max' for maximum value of data
-        :return: averaged PSNR
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the PSNR score.
+        pixel_max: float
+            Maximum pixel value in the data. Default is 1.0.
         """
 
-        mse = self.calc_mse(p, gt)
+        mse = self.calc_mse(p, gt, group_by_coord)
         if np.count_nonzero(mse) == 0:
             psnr = mse
             psnr[...] = 100.0
@@ -515,11 +691,12 @@ class Scores:
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
+        group_by_coord: str | None = None,
         order: int = 1,
         non_spatial_avg_dims: list[str] = None,
     ):
         """
-        Calculates the ratio between the spatial variability of differental operator with order 1 (highher values unsupported yest)
+        Calculates the ratio between the spatial variability of differental operator with order 1 (higher values unsupported yest)
         forecast and ground truth data using the calc_geo_spatial-method.
 
         NOTE:
@@ -531,6 +708,9 @@ class Scores:
             Forecast data array
         gt: xr.DataArray
             Ground truth data array
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the spatial variability ratio.
         order: int
             Order of the spatial differential operator to be applied. Supported orders: 1
         non_spatial_avg_dims: List[str]
@@ -542,6 +722,10 @@ class Scores:
         ref_grd = self.calc_geo_spatial_diff(gt, order=order)
 
         ratio_spat_variability = fcst_grad / ref_grd
+
+        if group_by_coord:
+            ratio_spat_variability = ratio_spat_variability.groupby(group_by_coord)
+
         if non_spatial_avg_dims is not None:
             ratio_spat_variability = ratio_spat_variability.mean(
                 dim=non_spatial_avg_dims
@@ -557,6 +741,7 @@ class Scores:
         t1: xr.DataArray,
         t3: xr.DataArray,
         spatial_dims: list,
+        group_by_coord: str | None = None,
     ):
         """
         Calculates stable equitable error in probabiliyt space (SEEPS), see Rodwell et al., 2011
@@ -579,6 +764,9 @@ class Scores:
             Threshold for strong precipitation events
         spatial_dims: List[str]
             List of spatial dimensions of the data, e.g. ["lat", "lon"]
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the sseps score.
 
         Returns
         -------
@@ -657,6 +845,9 @@ class Scores:
         if lstack:
             seeps_values_all = seeps_values_all.unstack()
 
+        if group_by_coord:
+            seeps_values_all = seeps_values_all.groupby(group_by_coord)
+
         if self._agg_dims is not None:
             seeps_values = self._mean(seeps_values_all)
         else:
@@ -666,26 +857,46 @@ class Scores:
 
     ### Probablistic scores
 
-    def calc_spread(self, p: xr.DataArray, gt: xr.DataArray):
+    def calc_spread(self, p: xr.DataArray, group_by_coord: str | None = None):
         """
         Calculate the spread of the forecast ensemble
-        :return: spread averaged over the provided dimensions
         """
         ens_std = p.std(dim=self.ens_dim)
 
+        if group_by_coord:
+            ens_std = ens_std.groupby(group_by_coord)
+
         return self._mean(np.sqrt(ens_std**2))
 
-    def calc_ssr(self, p: xr.DataArray, gt: xr.DataArray):
+    def calc_ssr(
+        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
+    ):
         """
         Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data
-        :return: the SSR averaged over provided dimensions
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array with ensemble dimension
+        gt: xr.DataArray
+            Ground truth data array
+        group_by_coord: str | None
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the SSR score.
         """
-        ssr = self.calc_spread(p) / self.calc_rmse(p, gt)  # spread/rmse
+        ssr = self.calc_spread(p, group_by_coord) / self.calc_rmse(
+            p, gt, group_by_coord
+        )  # spread/rmse
 
         return ssr
 
     def calc_crps(
-        self, p: xr.DataArray, gt: xr.DataArray, method: str = "ensemble", **kwargs
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        group_by_coord: str | None = None,
+        method: str = "ensemble",
+        **kwargs,
     ):
         """
         Wrapper around CRPS-methods provided by xskillscore-package.
@@ -697,17 +908,24 @@ class Scores:
             Forecast data array with ensemble dimension
         gt: xr.DataArray
             Ground truth data array
+        group_by_coord: str | None
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the CRPS score.
         method: str
             Method to calculate CRPS. Supported methods: ["ensemble", "gaussian"]
         kwargs: dict
             Other keyword parameters supported by respective CRPS-method from the xskillscore package
 
-
-        :param method: Method to calculate CRPS. Supported methods: ["ensemble", "gaussian"]
-        :param kwargs: Other keyword parameters supported by respective CRPS-method
-        :return: calculated CRPS
+        Returns
+        -------
+        xr.DataArray
+            CRPS score data array averaged over the provided dimensions
         """
         crps_methods = ["ensemble", "gaussian"]
+
+        if group_by_coord:
+            p = p.groupby(group_by_coord)
+            gt = gt.groupby(group_by_coord)
 
         if method == "ensemble":
             func_kwargs = {
@@ -738,6 +956,7 @@ class Scores:
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
+        group_by_coord: str | None = None,
         norm: bool = True,
         add_noise: bool = True,
         noise_fac=1.0e-03,
@@ -754,6 +973,9 @@ class Scores:
         norm: bool
             Flag if normalized counts should be returned. If True, the rank histogram will be normalized by
             the number of ensemble members in the forecast data.
+        group_by_coord: str | None
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the rank histogram.
         add_noise: bool
             Flag if a small amount of random noise should be added to the data to avoid ties in the rank histogram.
             This is recommended for fair computations, cf. Sec. 4.2.2 in Harris et al. 2022
@@ -761,6 +983,9 @@ class Scores:
             Magnitude of random noise to be added to the data if add_noise is True. Default is 1.0e-03.
             This value is only relevant if add_noise is True
         """
+        if group_by_coord is not None:
+            p = p.groupby(group_by_coord)
+            gt = gt.groupby(group_by_coord)
 
         # unstack stacked time-dimension beforehand if required (time may be stacked for forecast data)
         ground_truth = gt

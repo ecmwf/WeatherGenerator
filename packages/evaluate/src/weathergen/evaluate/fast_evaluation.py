@@ -21,11 +21,17 @@ from utils import to_list
 from weathergen.common.io import ZarrIO
 
 _logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 _REPO_ROOT = Path(
     __file__
 ).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_RESULT_PATH = _REPO_ROOT / "results"
+
+### TODO:
+# - Make use of config file from inference run
+# - Add support a posteriori aggregation of metrics 
+# - Convert fsteps into lead time hours
 
 
 ### Auxiliary functions
@@ -78,8 +84,10 @@ def calc_scores_per_stream(
     # Get stream-specific information
     forecast_steps = zio.forecast_steps
     nmetrics, nforecast_steps = len(metrics), len(forecast_steps)
-    # TODO: Avoid conversion to integer
-    samples = [int(sample) for sample in zio.samples]
+    # TODO: Avoid conversion to integer and sorting
+    samples = sorted([int(sample) for sample in zio.samples])
+    nsamples = len(samples)
+
     channels_stream = peek_tar_channels(zio, stream)
     # filter channels if provided
     channels_stream = (
@@ -93,23 +101,36 @@ def calc_scores_per_stream(
     #        for very large number of forecast steps
     metric_stream = xr.DataArray(
         np.full(
-            (nforecast_steps, len(channels_stream), nmetrics),
+            (nsamples, nforecast_steps, len(channels_stream), nmetrics),
             np.nan,
         ),
         coords={
+            "sample": samples,
             "forecast_step": forecast_steps,
             "channel": channels_stream,
             "metric": metrics,
         },
     )
 
+    points_per_sample = xr.DataArray(
+        np.full((nforecast_steps, nsamples), np.nan),
+        coords={"forecast_step": forecast_steps, "sample": samples},
+        dims=("forecast_step", "sample"),
+        name=f"points_per_sample_{stream}",
+    )
+
     for fstep in forecast_steps:
         targets, preds = [], []
+        pps = []
         _logger.info(f"Processing forecast_step {fstep} of stream {stream}...")
-        for sample in sorted(samples):
+        for sample in samples:
             out = zio.get_data(sample, stream, fstep)
-            targets.append(out.target.as_xarray().squeeze())
-            preds.append(out.prediction.as_xarray().squeeze())
+            target, pred = out.target.as_xarray(), out.prediction.as_xarray()
+
+            targets.append(target.squeeze())
+            preds.append(pred.squeeze())
+            pps.append(len(target.ipoint))
+
 
         # Concatenate targets and predictions along the 'ipoint' dimension and verify the data
         _logger.debug(
@@ -127,75 +148,131 @@ def calc_scores_per_stream(
             f"Build computation graphs for metrics for stream {stream}, forecast_step {fstep}..."
         )
         combined_metrics = [
-            get_score(score_data, metric, agg_dims="ipoint") for metric in metrics
+            get_score(score_data, metric, agg_dims="ipoint", group_by_coord="sample") for metric in metrics
         ]
         combined_metrics = xr.concat(combined_metrics, dim="metric")
         combined_metrics["metric"] = metrics
 
-        # Store the computed metrics in the DataArray and does computation
+        # Do computation and store the computed metrics in the DataArray 
+        _logger.debug(
         metric_stream.loc[{"forecast_step": fstep}] = combined_metrics.compute()
+        points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
         _logger.info(f"Computed metrics for forecast_step {fstep} of stream {stream}.")
 
-    return metric_stream
+    return metric_stream, points_per_sample
 
 
-def metric_list_to_dict(
-    metric_list: list[xr.DataArray], streams: list[str]
-) -> dict[str, dict[str, dict[int, dict[str, float]]]]:
+def metric_list_to_dict(metrics_list: list[xr.DataArray], npoints_sample_list: list[xr.DataArray], streams: list[str]) -> list[dict]:
     """
-    Convert a list of xarray DataArrays containing metrics into a nested dictionary structure.
+    Convert a list of xarray DataArrays containing metrics and a corresponding list of DataArrays containing
+    the number of points per sample into a list of dictionaries.
+
+    NOTE: 
+    This function is not used right now, but kept for future reference.
+    
+    Parameters
+    ----------
+    metrics_list : list[xr.DataArray]
+        A list of xarray DataArrays, each containing metrics for a specific stream.
+    npoints_sample_list : list[xr.DataArray]
+        A list of xarray DataArrays, each containing the number of points per sample for the corresponding stream.
+    streams : list[str]
+        A list of stream names corresponding to the DataArrays in metrics_list and npoints_sample_list.
+    
+    Returns
+    -------
+    result : list[dict]
+        A list of dictionaries where each dictionary contains the stream name, sample ID, forecast step,
+        channel name, metrics, and the number of points for that sample.
+    """
+
+    result = []
+
+    assert len(metrics_list) == len(npoints_sample_list) == len(streams), (
+        "The lengths of metrics_list, npoints_sample_list, and streams must be the same."
+    )
+
+    for stream, metrics_da, points_da in zip(streams, metrics_list, npoints_sample_list):
+        stream = stream.lower()
+        metric_names = metrics_da.coords['metric'].values
+        samples = metrics_da.coords['sample'].values
+        steps = metrics_da.coords['forecast_step'].values
+        channels = metrics_da.coords['channel'].values
+
+        for _, sample in enumerate(samples):
+            for step in steps:
+                n_points = int(points_da.sel({"forecast_step": step, "sample": sample}).values)
+                for channel in channels:
+                    record = {
+                        "stream": stream,
+                        "sample": int(sample),
+                        "forecast_step": str(step),
+                        "channel": str(channel),
+                        "metrics": {},
+                        "n_points": n_points,
+                    }
+
+                    metrics_samples = metrics_da.sel({"sample": sample, "forecast_step": step, "channel": channel}).values
+                    for m_idx in range(len(metric_names)):
+                        record["metrics"][str(metric_names[m_idx])] = float(metrics_samples[m_idx])
+
+                    result.append(record)
+
+    return result
+
+
+def metric_list_to_json(metrics_list: list[xr.DataArray], npoints_sample_list: list[xr.DataArray], streams: list[str],
+                        save_dir: Path, run_id: str, epoch: int):
+    """
+    Write the evaluation results collected in a list of xarray DataArrays for the metrics to to stream- and metric-specific JSON files.
 
     Parameters
     ----------
-    metric_list : list[xr.DataArray]
+    metrics_list : list[xr.DataArray]
         A list of xarray DataArrays, each containing metrics for a specific stream.
+    npoints_sample_list : list[xr.DataArray]
+        A list of xarray DataArrays, each containing the number of points per sample for the corresponding stream.
     streams : list[str]
-        A list of stream names corresponding to the DataArrays in metric_list.
-    Returns
-    -------
-    result : dict
-        A nested dictionary where the first level keys are stream names, the second level keys are channel names (if applicable),
-        and the third level keys are forecast steps, with metric names as the final keys.
+        A list of stream names corresponding to the DataArrays in metrics_list and npoints_sample_list.
+    save_dir : Path
+        The directory where the JSON files will be saved.
+    run_id : str
+        The ID of the inference run to evaluate.
+    epoch : int
+        The epoch number of the inference run.
     """
-    result = result = defaultdict(
-        lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+
+    assert len(metrics_list) == len(npoints_sample_list) == len(streams), (
+        "The lengths of metrics_list, npoints_sample_list, and streams must be the same."
     )
 
-    assert len(metric_list) == len(streams), (
-        "Inconsistent list of metrics and streams passed."
-    )
+    # Ensure the save directory exists
+    save_dir.mkdir(parents=True, exist_ok=True)
 
-    for istream, da_metric in enumerate(metric_list):
-        # Get the stream name (e.g., 'ERA5', 'IMERG', etc.)
-        stream = streams[istream]
+    for s_idx, stream in enumerate(streams):
+        metrics_stream, npoints_sample_stream = metrics_list[s_idx], npoints_sample_list[s_idx]
 
-        metrics = da_metric.coords["metric"].values
-        # TODO: Avoid conversion to integer
-        forecast_steps = [
-            int(fstep) for fstep in da_metric.coords["forecast_step"].values
-        ]
+        _logger.debug(f"Processing metrics from stream {stream}...")
 
-        channels = da_metric.coords["channel"].values
-        for ch_idx, ch in enumerate(channels):
-            ch = str(ch)
+        for metric in metrics_stream.coords['metric'].values:
+            _logger.debug(f"Processing metric {metric} of stream {stream}...")
 
-            for step_idx, step in enumerate(forecast_steps):
-                step = str(step)
+            # Select the metric data for the current stream and convert to a xarray Dataset 
+            metric_now = metrics_stream.sel(metric=metric) 
+            metric_ds = xr.Dataset({"metric": metric_now, "n_datapoints": npoints_sample_stream})
 
-                for metric_idx, metric in enumerate(metrics):
-                    metric = str(metric)
-                    value = float(
-                        da_metric.isel(
-                            {
-                                "metric": metric_idx,
-                                "forecast_step": step_idx,
-                                "channel": ch_idx,
-                            }
-                        ).values
-                    )
-                    result[stream][ch][step][metric] = value
+            # Convert the Dataset to a dictionary
+            metric_dict = metric_ds.to_dict()
 
-    return result
+            # Save the results to a JSON file
+            save_path = save_dir / f"{stream}_{metric}_{run_id}_epoch{epoch:05d}.json"
+
+            _logger.info(f"Saving results to {save_path}")
+            with open(save_path, "w") as f:
+                json.dump(metric_dict, f, indent=4)
+
+    _logger.info(f"Saved all results of inference run {run_id} - epoch {epoch:d} successfully to {save_dir}.")
+
 
 
 def fast_evaluation(
@@ -214,7 +291,7 @@ def fast_evaluation(
     Parameters
     ----------
     run_id : str
-        The ID of the run to evaluate.
+        The ID of the inference run to evaluate.
     metrics : list[str]
         A list of metric names to evaluate.
     save_dir : Path
@@ -230,6 +307,7 @@ def fast_evaluation(
         raise FileNotFoundError(f"Results zarr file not found: {results_zarr}")
 
     all_metric_streams = []
+    points_per_sample_streams = []
 
     # Open the ZarrIO object to access the data
     _logger.info(f"Loading inference data from{results_zarr}")
@@ -240,33 +318,26 @@ def fast_evaluation(
         for stream in streams:
             _logger.info(f"Processing stream {stream}...")
 
-            metric_stream = calc_scores_per_stream(zio, stream, metrics, channels)
+            metric_stream, pps = calc_scores_per_stream(zio, stream, metrics, channels)
             all_metric_streams.append(metric_stream)
+            points_per_sample_streams.append(pps)
 
     _logger.info(
         f"Finished computing metric scores for all streams. Total streams processed: {len(all_metric_streams)}"
     )
 
-    # Convert the list of metric streams to a nested dictionary structure
-    _logger.debug("Converting metric streams to dictionary format...")
-    metric_dict = metric_list_to_dict(all_metric_streams, streams)
-
-    # Save the results to a JSON file
-    save_dir.mkdir(parents=True, exist_ok=True)
-    save_path = save_dir / f"metrics_{run_id}_epoch{epoch:05d}.json"
-
-    _logger.info(f"Saving results to {save_path}")
-    with open(save_path, "w") as f:
-        json.dump(metric_dict, f, indent=4)
+    # Save the metrics to individual JSON files
+    _logger.info("Saving metrics to individual JSON files...")
+    metric_list_to_json(all_metric_streams, points_per_sample_streams, streams, save_dir, run_id, epoch)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Fast evaluation of weather generator runs."
+        description="Fast evaluation of Weather Generator runs."
     )
 
     parser.add_argument(
-        "-id", "--run-id", type=str, help="The ID of the run to evaluate."
+        "-id", "--run-id", type=str, help="The ID of the inference run to evaluate."
     )
     parser.add_argument(
         "-m",
