@@ -47,7 +47,7 @@ def peek_tar_channels(zio: ZarrIO, stream: str) -> list[str]:
     if not isinstance(zio, ZarrIO):
         raise TypeError("zio must be an instance of ZarrIO")
 
-    dummy_out = zio.get_data(0, stream, 0)
+    dummy_out = zio.get_data(0, stream, min(list(map(int, zio.forecast_steps))))
     channels = dummy_out.target.channels
     _logger.debug(f"Peeked channels for stream {stream}: {channels}")
 
@@ -119,6 +119,9 @@ def calc_scores_per_stream(
             xr.concat(targets, dim="ipoint"),
             xr.concat(preds, dim="ipoint"),
         )
+        targets_all = targets_all.sel(channel = channels_stream)
+        preds_all = preds_all.sel(channel = channels_stream)
+        
         _logger.debug(f"Verifying data for stream {stream}, forecast_step {fstep}...")
         score_data = VerifiedData(preds_all, targets_all)
 
@@ -233,6 +236,7 @@ def fast_evaluation(
 
     # Open the ZarrIO object to access the data
     _logger.info(f"Loading inference data from{results_zarr}")
+
 
     with ZarrIO(results_zarr) as zio:
         streams = streams or zio.streams
