@@ -185,6 +185,9 @@ class Trainer(TrainerBase):
         if cf.forecast_freeze_model:
             self.model = self.model.freeze_weights_forecast()
 
+        print("Before .to(): CUDA mem allocated:", torch.cuda.memory_allocated())
+        print("Before .to(): CUDA mem reserved:", torch.cuda.memory_reserved())
+
         self.model = self.model.to(self.devices[0])
 
         if cf.compile_model:

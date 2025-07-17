@@ -1,7 +1,5 @@
-streams_directory: "./config/streams/streams_anemoi/"
-# streams_directory: "./config/streams/streams_anemoi_era5_split/"
-
-embed_orientation: "channels"
+streams_directory: "/p/project/hclimrep/almikaeel1/WeatherGenerator/WeatherGenerator/config/streams/streams_radklim"
+embed_orientation: "columns"
 embed_local_coords: True
 embed_centroids_local_coords: False
 embed_size_centroids: 0

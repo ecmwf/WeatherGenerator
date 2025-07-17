@@ -23,6 +23,7 @@ from weathergen.datasets.data_reader_base import (
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
+from weathergen.datasets.data_reader_radklim import RadklimKerchunkReader
 from weathergen.datasets.icon_dataset import IconDataset
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData
@@ -109,6 +110,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     case "anemoi":
                         dataset = DataReaderAnemoi
                         datapath = cf.data_path_anemoi
+                    case "radklim":
+                        dataset = RadklimKerchunkReader
+                        datapath = "/p/scratch/weatherai/data/radklim/temp_radklim"  # TODO
                     case "fesom":
                         dataset = DataReaderFesom
                         datapath = cf.data_path_fesom
@@ -138,8 +142,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 ds_type = stream_info["type"]
                 logger.info(
-                    f"Opening dataset with type: {ds_type}"
-                    + f"from stream config {stream_info['name']}.",
+                    f"Opening dataset with type: {ds_type} from"
+                    + f" stream config {stream_info['name']}."
+                    f" stream config {stream_info['name']}."
                 )
                 ds = dataset(filename=filename, **kwargs)
 
