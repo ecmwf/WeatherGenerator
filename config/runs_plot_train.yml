@@ -1,0 +1,60 @@
+train : 
+  plot :
+    # random masking
+    #v9mbu064 : 
+    #  slurm_id: 11952186
+    #  description: "random, 0.2"
+    #dgztdko9 : 
+    #  slurm_id: 11952188
+    #  description: "random, 0.8"
+    # healpix masking
+    #ocgmx23u : 
+    #  slurm_id: 0
+    #  description: "healpix, 0.2, hl_level 3"
+    #xjz5bsw6 : 
+    #  slurm_id: 0
+    #  description: "healpix, 0.4, hl_level 3"
+    #c534btp8 : 
+    #  slurm_id: 0
+    #  description: "healpix, 0.6, hl_level 3"
+    #dlctmqor : 
+    #  slurm_id: 0
+    #  description: "healpix, 0.8, hl_level 3"
+    #o4dmnf5z : 
+    #  slurm_id: 0
+    #  description: "healpix, 0.2, hl_level 1"
+    #i50ua7oz : 
+    #  slurm_id: 0
+    #  description: "healpix, 0.4, hl_level 1"
+    #rrf3mew2 : 
+    #  slurm_id: 0
+    #  description: "healpix, 0.6, hl_level 1"
+    #f9175xus : 
+    #  slurm_id: 0
+    #  description: "healpix, 0.8, hl_level 1"
+    # channel masking
+    grwmyvg7 : 
+      slurm_id: 0
+      description: "channel, 0.2, global"
+    fmcskew0 : 
+      slurm_id: 0
+      description: "channel, 0.4, global"
+    ig31dlum : 
+      slurm_id: 0
+      description: "channel, 0.6, global"
+    j78nhv4r : 
+      slurm_id: 0
+      description: "channel, 0.8, global"
+    g4ts9lie : 
+      slurm_id: 0
+      description: "channel, 0.2, per_cell"
+    oj56x4nq : 
+      slurm_id: 0
+      description: "channel, 0.4, per_cell"
+    vzsl502k : 
+      slurm_id: 0
+      description: "channel, 0.6, per_cell"
+    y1mplb38 : 
+      slurm_id: 0
+      description: "channel, 0.8, per_cell"
+
