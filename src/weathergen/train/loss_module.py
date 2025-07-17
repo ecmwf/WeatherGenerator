@@ -51,6 +51,21 @@ class LossModule:
 
         # self.stream_loss_weight = {} —> normalize
         # self.channel_loss_weight = {} —> normalize
+    
+    @staticmethod
+    def _construct_masks(
+        target_times_raw: np.array,
+        mask_nan: Tensor
+    ):
+        """
+        Construct a list of masks for intermediate time steps within one forecast step. Only applies for specific datasets.
+        """
+        masks = []
+        t_unique = Tensor(np.unique(target_times_raw)).to(mask_nan)
+        for t in t_unique:
+            mask_t = t==target_times_raw
+            masks.append(torch.logical_and(mask_t, mask_nan))
+        return masks
 
     def compute_loss(
         self,
@@ -59,22 +74,6 @@ class LossModule:
         targets_coords: Tensor,  # TODO: verify type
         streams_data: None,  # TODO: determine type
     ):
-        
-
-
-
-        # WE NEED THIS AROUND LINE 145 (for determination of t_unique)
-        '''
-        ### transforms from [batch_sample][stream][fstep] into shape [fstep][stream][batch_sample]
-        targets_times_raw_rt = [
-            [
-                np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
-                for i in range(len(self.cf.streams))
-            ]
-            for fstep in range(self.cf.forecast_offset, self.cf.forecast_offset + self.cf.forecast_steps + 1)
-        ]
-        '''
-
         # TODO: Rethink counters (ctr_ftarget and ctr_chs)
         ctr_ftarget = 0
 
@@ -92,28 +91,27 @@ class LossModule:
         }  # Create tensor for each stream
         # assert len(targets) == len(preds) and len(preds) == len(self.cf.streams)
 
+        assert len(targets) == self.cf.forecast_steps + 1, "Length of targets does not match number of forecast_steps."
         for fstep in range(len(targets)):
-            for i_strm, (target, target_coords, si) in enumerate(
-                zip(targets[fstep], targets_coords[fstep], self.cf.streams, strict=False)
+            for i_strm, (target, strm) in enumerate(
+                zip(targets[fstep], self.cf.streams, strict=False)
             ):
                 pred = preds[fstep][i_strm]
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
                     continue
 
-                num_channels = len(si[str(self.stage) + "_target_channels"])
+                num_channels = len(strm[str(self.stage) + "_target_channels"])
 
                 # set loss_weights to 1. when not specified
-                obs_loss_weight = si["loss_weight"] if "loss_weight" in si else 1.0
+                obs_loss_weight = strm["loss_weight"] if "loss_weight" in strm else 1.0
                 channel_loss_weight = (
-                    si["channel_weight"] if "channel_weight" in si else np.ones(num_channels)
+                    strm["channel_weight"] if "channel_weight" in strm else np.ones(num_channels)
                 )
                 # in validation mode, always unweighted loss is computed
                 obs_loss_weight = 1.0 if self.stage == VAL else obs_loss_weight
                 channel_loss_weight = (
                     np.ones(num_channels) if self.stage == VAL else channel_loss_weight
                 )
-
-                tok_spacetime = si["tokenize_spacetime"] if "tokenize_spacetime" in si else False
 
                 # extract data/coords and remove token dimension if it exists
                 pred = pred.reshape([pred.shape[0], *target.shape])
@@ -124,6 +122,7 @@ class LossModule:
                     continue
                 ens = pred.shape[0] > 1
 
+                tok_spacetime = strm["tokenize_spacetime"] if "tokenize_spacetime" in strm else False
                 i_batch = 0 # TODO: Iterate over batch dimension here in future
                 # accumulate loss from different loss functions and channels
                 for j, (loss_fct, w) in enumerate(self.loss_fcts):
@@ -132,30 +131,26 @@ class LossModule:
                     # TODO: Rethink counters (ctr_ftarget and ctr_chs)
                     ctr_chs = 0.0
 
+
+
+                    # TODO: Dataclass as new issue
+
+
                     # loop over all channels
                     for i in range(target.shape[-1]):
-                        # if stream is internal time step, compute loss separately per step
-                        # TODO: Outsource mask gathering in separate function
+
                         if tok_spacetime:
-                            masks = []
-                            # iterate over time steps and create mask separately for each
-                            # TODO: verify shapes -- t_unique must be same like targets, also test with 12h, i.e., two fsteps
-                            #t_unique = np.unique(streams_data[i_batch][i_strm].target_times_raw[fstep])
-                            t_unique = torch.unique(
-                                target_coords[:, 1]
-                            )  # What happens for two targets at same position with different time stamps?
-                            for t in t_unique:
-                                #mask_t = Tensor(t == streams_data[i_batch][i_strm].target_times_raw[fstep]).to(mask_nan)
-                                mask_t = t == target_coords[:, 1]
-                                masks.append(
-                                    torch.logical_and(mask_t, mask_nan[:, i])
-                                )  # TODO: verify whether this is always called (if not, masks can have len 0, which then has to be checked below)
+                            # if stream is internal time step, build masks separately per step
+                            masks = self._construct_masks(
+                                target_times_raw=streams_data[i_batch][i_strm].target_times_raw[fstep],
+                                mask_nan=mask_nan[:, i]
+                            )
                         else:
                             masks = [mask_nan[:, i]]
-
-                        # TODO: Outsource loss computation in separate function -- try to minimize arguments
+                        
+                        # Compute the actual loss, apply loss weighting, and add it to the losses_all list
                         for mask in masks:
-                            # only compute loss is there are non-NaN values
+                            # only compute loss if there are non-NaN values
                             if mask.sum().item() > 0:
                                 temp = loss_fct(
                                     target[mask, i],
@@ -167,15 +162,16 @@ class LossModule:
                                         else torch.zeros(1, device=pred.device)
                                     ),
                                 )
+                                # TODO: Implement separate loss weighting functionality over space, channels, time, etc.
                                 val = val + channel_loss_weight[i] * temp
-                                losses_all[si.name][i, j] += temp.item()
+                                losses_all[strm.name][i, j] += temp.item()
                                 ctr_chs += 1
 
                     val = val / ctr_chs if (ctr_chs > 0) else val
 
                     if loss_fct.__name__ in stat_loss_fcts:
                         indx = stat_loss_fcts.index(loss_fct.__name__)
-                        stddev_all[si.name][indx] += pred[:, mask_nan].std(0).mean().item()
+                        stddev_all[strm.name][indx] += pred[:, mask_nan].std(0).mean().item()
                     # ignore NaNs so that training can continue even if one pred-net diverges
                     loss = loss + (
                         (w * val * obs_loss_weight)

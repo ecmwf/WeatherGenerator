@@ -25,6 +25,12 @@ def prepare_trainer(cf):
         stage=VAL,
         shuffle=cf.shuffle,
     )
+    '''
+    batch = next(iter(trainer.dataset_val))
+    batch = trainer.batch_to_device(batch)
+    batch[0][0][0].target_times_raw
+    breakpoint()
+    '''
 
     sources_size = trainer.dataset_val.get_sources_size()
     targets_num_channels = trainer.dataset_val.get_targets_num_channels()
