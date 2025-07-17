@@ -310,6 +310,16 @@ class ForecastingEngine:
                         norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
+
+        def init_weights_final(m):
+            if isinstance(m, torch.nn.Linear):
+                torch.nn.init.normal_(m.weight, mean=0, std=0.001)
+                if m.bias is not None:
+                    torch.nn.init.normal_(m.bias, mean=0, std=0.001)
+
+        for block in self.fe_blocks:
+            block.apply(init_weights_final)
+
         return self.fe_blocks
 
 
