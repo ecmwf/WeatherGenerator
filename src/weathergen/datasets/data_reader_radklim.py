@@ -9,7 +9,6 @@ import xarray as xr
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
-    DType,
     ReaderData,
     TimeWindowHandler,
     TIndex,
@@ -73,7 +72,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
         if not self.norm_path.exists():
             raise FileNotFoundError(f"Normalization JSON not found: {self.norm_path}")
         if not self.sample_coord_file.exists():
-            raise FileNotFoundError(f"Sample coord file not found: {self._SAMPLE_COORD_FILE}")
+            raise FileNotFoundError(f"Sample coord file not found: {self.sample_coord_file}")
 
         # Read full time axis for window setup
         _logger.info("Reading time metadata from: %s", self.ref_path)
@@ -172,8 +171,8 @@ class RadklimKerchunkReader(DataReaderTimestep):
         # ---- >>>> Slice spatial dims to use only 1/10 (top-left) <<<< ----
         ny = subset.sizes["y"]
         nx = subset.sizes["x"]
-        y_slice = slice(0, ny // 10)
-        x_slice = slice(0, nx // 10)
+        y_slice = slice(0, ny // 2)
+        x_slice = slice(0, nx // 2)
         self.ds = subset.isel(y=y_slice, x=x_slice)
 
         with xr.open_dataset(self.sample_coord_file) as ds_sample:
@@ -199,7 +198,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
             )
             _logger.info(
                 "Injected static lat/lon from %s",
-                self._SAMPLE_COORD_FILE,
+                self.sample_coord_file,
             )
 
         # Save dims
@@ -243,7 +242,7 @@ class RadklimKerchunkReader(DataReaderTimestep):
         length = flat_data.shape[0]
         rdata = ReaderData(
             coords=full_coords,
-            geoinfos=np.zeros((length, len(self.geoinfo_idx)), dtype=DType),
+            geoinfos=np.zeros((length, len(self.geoinfo_idx)), dtype=np.float32),
             data=flat_data,
             datetimes=full_times,
         )
