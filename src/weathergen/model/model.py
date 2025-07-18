@@ -561,7 +561,12 @@ class Model(torch.nn.Module):
         return tokens_all
 
     #########################################
-    def assimilate_local(self, model_params: ModelParams, tokens: torch.Tensor, cell_lens: torch.Tensor) -> torch.Tensor:
+    def assimilate_local(
+        self,
+        model_params: ModelParams,
+        tokens: torch.Tensor,
+        cell_lens: torch.Tensor
+    ) -> torch.Tensor:
         """Processes embedded tokens locally and prepares them for the global assimilation
         Args:
             model_params : Query and embedding parameters
@@ -689,7 +694,14 @@ class Model(torch.nn.Module):
         return tokens
 
     #########################################
-    def predict(self, model_params: ModelParams, fstep: int, tokens: torch.Tensor, streams_data, target_coords_idxs) -> list[torch.Tensor]:
+    def predict(
+        self,
+        model_params: ModelParams,
+        fstep: int,
+        tokens: torch.Tensor,
+        streams_data,
+        target_coords_idxs
+    ) -> list[torch.Tensor]:
         """Predict outputs at the specific target coordinates based on the input weather state and
         pre-training task and projects the latent space representation back to physical space.
 
