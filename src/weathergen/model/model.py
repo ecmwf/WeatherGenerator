@@ -12,7 +12,6 @@
 import math
 import warnings
 from pathlib import Path
-from typing import List
 
 import astropy_healpix as hp
 import astropy_healpix.healpy
@@ -32,9 +31,8 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP
 from weathergen.model.utils import get_num_parameters
-from weathergen.utils.config import get_dtype
+from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.logger import logger
-from weathergen.utils.config import Config
 
 
 class ModelParams(torch.nn.Module):
@@ -158,8 +156,8 @@ class Model(torch.nn.Module):
         networks.
 
     pred_adapter_kv: Prediction adapter: Adapter to transform the global assimilation/forecasting
-        engine output to the prediction engine. Uses an MLP if `cf.pred_adapter_kv` is True, otherwise
-        it uses an identity function.
+        engine output to the prediction engine. Uses an MLP if `cf.pred_adapter_kv` is True,
+        otherwise it uses an identity function.
 
     target_token_engines: Prediction engine: Transformer based prediction network that generates
         output corresponding to target coordinates.
@@ -173,8 +171,10 @@ class Model(torch.nn.Module):
         Args:
             cf : Configuration with model parameters
             sources_size : List of number of channels for models
-            targets_num_channels : List with size of each output sample for coordinates target embedding
-            targets_coords_size : List with size of each input sample for coordinates target embedding
+            targets_num_channels : List with size of each output sample for coordinates target
+                embedding
+            targets_coords_size : List with size of each input sample for coordinates target
+                embedding
         """
         super(Model, self).__init__()
 
@@ -689,7 +689,7 @@ class Model(torch.nn.Module):
         return tokens
 
     #########################################
-    def predict(self, model_params: ModelParams, fstep: int, tokens: torch.Tensor, streams_data, target_coords_idxs) -> List[torch.Tensor]:
+    def predict(self, model_params: ModelParams, fstep: int, tokens: torch.Tensor, streams_data, target_coords_idxs) -> list[torch.Tensor]:
         """Predict outputs at the specific target coordinates based on the input weather state and
         pre-training task and projects the latent space representation back to physical space.
 
