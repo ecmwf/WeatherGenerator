@@ -20,7 +20,6 @@ from utils import to_list
 from weathergen.common.io import ZarrIO
 
 _logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
 
 _REPO_ROOT = Path(
     __file__
@@ -64,7 +63,7 @@ def calc_scores_per_stream(
     stream: str,
     metrics: list[str],
     channels: str | list[str] | None = None,
-) -> xr.DataArray:
+) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate the provided score metrics for a specific.
     Parameters
@@ -75,6 +74,8 @@ def calc_scores_per_stream(
         The name of the stream to process.
     metrics : list[str]
         A list of metric names to calculate.
+    channels : str | list[str] | None, optional
+        A list of channel names to restrict the evaluation to. If None, all channels are used.
     Returns
     -------
     metric_stream : xr.DataArray
@@ -89,24 +90,26 @@ def calc_scores_per_stream(
 
     channels_stream = peek_tar_channels(zio, stream)
     # filter channels if provided
-    channels_stream = (
+    channels = (
         [ch for ch in channels_stream if ch in to_list(channels)]
         if channels
         else channels_stream
     )
+    nchannels = len(channels)
 
     # initialize the DataArray to store metrics
-    # TO-DO: Support lazy initialization (with dask) and subsequent processing
-    #        for very large number of forecast steps
+    # TODO: Rather concatenate list of DataArrays than initializing empty arrays.
+    # TODO: Support lazy initialization (with dask) and subsequent processing
+    #       for very large number of forecast steps.
     metric_stream = xr.DataArray(
         np.full(
-            (nsamples, nforecast_steps, len(channels_stream), nmetrics),
+            (nsamples, nforecast_steps, nchannels, nmetrics),
             np.nan,
         ),
         coords={
             "sample": samples,
             "forecast_step": forecast_steps,
-            "channel": channels_stream,
+            "channel": channels,
             "metric": metrics,
         },
     )
@@ -138,6 +141,14 @@ def calc_scores_per_stream(
             xr.concat(targets, dim="ipoint"),
             xr.concat(preds, dim="ipoint"),
         )
+
+        if channels != channels_stream:
+            _logger.debug(
+                f"Restricting targets and predictions to channels {channels} for stream {stream}, forecast_step {fstep}..."
+            )
+            targets_all = targets_all.sel(channel=channels)
+            preds_all = preds_all.sel(channel=channels)
+
         _logger.debug(f"Verifying data for stream {stream}, forecast_step {fstep}...")
         score_data = VerifiedData(preds_all, targets_all)
 
@@ -192,19 +203,19 @@ def metric_list_to_dict(
     result = []
 
     assert len(metrics_list) == len(npoints_sample_list) == len(streams), (
-        "The lengths of metrics_list, npoints_sample_list, and streams must be the same."
+        f"The lengths of metrics_list ({len(metrics_list)}), npoints_sample_list ({len(npoints_sample_list)}), "
+        + f"and streams ({len(streams)}) must be the same."
     )
 
     for stream, metrics_da, points_da in zip(
         streams, metrics_list, npoints_sample_list, strict=False
     ):
-        stream = stream.lower()
         metric_names = metrics_da.coords["metric"].values
         samples = metrics_da.coords["sample"].values
         steps = metrics_da.coords["forecast_step"].values
         channels = metrics_da.coords["channel"].values
 
-        for _, sample in enumerate(samples):
+        for sample in samples:
             for step in steps:
                 n_points = int(
                     points_da.sel({"forecast_step": step, "sample": sample}).values
@@ -236,7 +247,7 @@ def metric_list_to_json(
     metrics_list: list[xr.DataArray],
     npoints_sample_list: list[xr.DataArray],
     streams: list[str],
-    save_dir: Path,
+    metric_dir: Path,
     run_id: str,
     epoch: int,
 ):
@@ -251,7 +262,7 @@ def metric_list_to_json(
         A list of xarray DataArrays, each containing the number of points per sample for the corresponding stream.
     streams : list[str]
         A list of stream names corresponding to the DataArrays in metrics_list and npoints_sample_list.
-    save_dir : Path
+    metric_dir : Path
         The directory where the JSON files will be saved.
     run_id : str
         The ID of the inference run to evaluate.
@@ -264,7 +275,7 @@ def metric_list_to_json(
     )
 
     # Ensure the save directory exists
-    save_dir.mkdir(parents=True, exist_ok=True)
+    metric_dir.mkdir(parents=True, exist_ok=True)
 
     for s_idx, stream in enumerate(streams):
         metrics_stream, npoints_sample_stream = (
@@ -287,21 +298,21 @@ def metric_list_to_json(
             metric_dict = metric_ds.to_dict()
 
             # Save the results to a JSON file
-            save_path = save_dir / f"{stream}_{metric}_{run_id}_epoch{epoch:05d}.json"
+            save_path = metric_dir / f"{run_id}_{stream}_{metric}_epoch{epoch:05d}.json"
 
             _logger.info(f"Saving results to {save_path}")
             with open(save_path, "w") as f:
                 json.dump(metric_dict, f, indent=4)
 
     _logger.info(
-        f"Saved all results of inference run {run_id} - epoch {epoch:d} successfully to {save_dir}."
+        f"Saved all results of inference run {run_id} - epoch {epoch:d} successfully to {metric_dir}."
     )
 
 
 def fast_evaluation(
     run_id: str,
     metrics: list[str],
-    save_dir: Path,
+    metric_dir: Path,
     results_dir: Path = _DEFAULT_RESULT_PATH,
     streams: str | list[str] | None = None,
     channels: str | list[str] | None = None,
@@ -317,8 +328,8 @@ def fast_evaluation(
         The ID of the inference run to evaluate.
     metrics : list[str]
         A list of metric names to evaluate.
-    save_dir : Path
-        The directory where the JSON-file with the results will be saved.
+    metric_dir : Path
+        The directory where the JSON-file with the metric results will be saved.
     """
 
     # get path to zarr storage
@@ -352,13 +363,18 @@ def fast_evaluation(
     # Save the metrics to individual JSON files
     _logger.info("Saving metrics to individual JSON files...")
     metric_list_to_json(
-        all_metric_streams, points_per_sample_streams, streams, save_dir, run_id, epoch
+        all_metric_streams,
+        points_per_sample_streams,
+        streams,
+        metric_dir,
+        run_id,
+        epoch,
     )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Fast evaluation of Weather Generator runs."
+        description="Fast evaluation of WeatherGenerator inference runs."
     )
 
     parser.add_argument(
@@ -373,11 +389,11 @@ if __name__ == "__main__":
         help="List of metrics to evaluate.",
     )
     parser.add_argument(
-        "-sd",
-        "--save-dir",
+        "-md",
+        "--metric-dir",
         type=Path,
         default=None,
-        help="Directory to save the results.",
+        help="Directory to save the metric results.",
     )
     parser.add_argument(
         "-rd",
@@ -398,7 +414,7 @@ if __name__ == "__main__":
         "-c",
         "--channels",
         type=str,
-        nargs="*",
+        nargs="+",
         default=None,
         help="List of channels to evaluate.",
     )
@@ -411,15 +427,17 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.save_dir is None:
-        save_dir = _DEFAULT_RESULT_PATH / args.run_id
+    logging.basicConfig(level=logging.DEBUG)
+
+    if args.metric_dir is None:
+        metric_dir = _DEFAULT_RESULT_PATH / args.run_id
     else:
-        save_dir = args.save_dir
+        metric_dir = args.metric_dir
 
     fast_evaluation(
         args.run_id,
         args.metrics,
-        save_dir,
+        metric_dir,
         args.results_dir,
         args.streams,
         args.channels,
