@@ -13,10 +13,11 @@ class Masker:
     Attributes:
         masking_rate (float): The base rate at which tokens are masked.
         masking_strategy (str): The strategy used for masking (e.g., "random",
-        "block", "healpix", ...more to be implemented).
+        "block", "healpix", "channel").
         masking_rate_sampling (bool): Whether to sample the masking rate from a distribution.
-        rng (np.random.Generator): A random number generator.
-
+        masking_strategy_config (dict): Configuration for the masking strategy, can include
+                                        additional parameters like "hl_data", "hl_mask", etc.
+                                        specific to the masking strategy.
     """
 
     def __init__(
