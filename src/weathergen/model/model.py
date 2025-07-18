@@ -37,10 +37,11 @@ from weathergen.utils.logger import logger
 
 class ModelParams(torch.nn.Module):
     """Creation of query and embedding parameters of the model."""
+
     def __init__(self) -> None:
         super(ModelParams, self).__init__()
 
-    def create(self, cf: Config) -> 'ModelParams':
+    def create(self, cf: Config) -> "ModelParams":
         """Creates positional embedding for each grid point for each stream used after stream
         embedding, positional embedding for all stream assimilated cell-level local embedding,
         initializing queries for local-to-global adapters, HEALPix neighbourhood based parameter
@@ -165,6 +166,7 @@ class Model(torch.nn.Module):
     pred_heads: Prediction head: Final layers using target token engines output for mapping target
         coordinates to its physical space.
     """
+
     #########################################
     def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size):
         """
@@ -188,7 +190,7 @@ class Model(torch.nn.Module):
         self.targets_coords_size = targets_coords_size
 
     #########################################
-    def create(self) -> 'Model':
+    def create(self) -> "Model":
         """Create each individual module of the model"""
         cf = self.cf
 
@@ -349,7 +351,7 @@ class Model(torch.nn.Module):
         return self
 
     #########################################
-    def freeze_weights_forecast(self) -> 'Model':
+    def freeze_weights_forecast(self) -> "Model":
         """Freezes core model weights and makes forecasting engine weights trainable"""
 
         # freeze everything
@@ -412,7 +414,7 @@ class Model(torch.nn.Module):
         print("-----------------")
 
     #########################################
-    def load(self, run_id: str, epoch: str=-1) -> None:
+    def load(self, run_id: str, epoch: str = -1) -> None:
         """Loads model state from checkpoint and checks for missing and unused keys.
         Args:
             run_id : model_id of the trained model
@@ -562,10 +564,7 @@ class Model(torch.nn.Module):
 
     #########################################
     def assimilate_local(
-        self,
-        model_params: ModelParams,
-        tokens: torch.Tensor,
-        cell_lens: torch.Tensor
+        self, model_params: ModelParams, tokens: torch.Tensor, cell_lens: torch.Tensor
     ) -> torch.Tensor:
         """Processes embedded tokens locally and prepares them for the global assimilation
         Args:
@@ -700,7 +699,7 @@ class Model(torch.nn.Module):
         fstep: int,
         tokens: torch.Tensor,
         streams_data,
-        target_coords_idxs
+        target_coords_idxs,
     ) -> list[torch.Tensor]:
         """Predict outputs at the specific target coordinates based on the input weather state and
         pre-training task and projects the latent space representation back to physical space.
