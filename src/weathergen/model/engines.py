@@ -12,11 +12,11 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.model.attention import (
-    MultiCrossAttentionHead_Varlen,
-    MultiCrossAttentionHead_Varlen_SlicedQ,
+    MultiCrossAttentionHeadVarlen,
+    MultiCrossAttentionHeadVarlenSlicedQ,
     MultiSelfAttentionHead,
-    MultiSelfAttentionHead_Local,
-    MultiSelfAttentionHead_Varlen,
+    MultiSelfAttentionHeadLocal,
+    MultiSelfAttentionHeadVarlen,
 )
 
 from weathergen.model.blocks import (
@@ -28,6 +28,7 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
+from weathergen.model.norms import RMSNorm, SwiGLU
 from weathergen.utils.config import Config, get_dtype
 
 
@@ -99,7 +100,7 @@ class LocalAssimilationEngine:
         """
         for _ in range(self.cf.ae_local_num_blocks):
             self.ae_local_blocks.append(
-                MultiSelfAttentionHead_Varlen(
+                MultiSelfAttentionHeadVarlen(
                     self.cf.ae_local_dim_embed,
                     num_heads=self.cf.ae_local_num_heads,
                     dropout_rate=self.cf.ae_local_dropout_rate,
@@ -140,7 +141,7 @@ class Local2GlobalAssimilationEngine:
         :return: torch.nn.ModuleList containing the local-to-global assimilation adapter blocks.
         """
         self.ae_adapter.append(
-            MultiCrossAttentionHead_Varlen_SlicedQ(
+            MultiCrossAttentionHeadVarlenSlicedQ(
                 self.cf.ae_global_dim_embed,
                 self.cf.ae_local_dim_embed,
                 num_slices_q=self.cf.ae_local_num_queries,
@@ -166,7 +167,7 @@ class Local2GlobalAssimilationEngine:
             )
         )
         self.ae_adapter.append(
-            MultiCrossAttentionHead_Varlen_SlicedQ(
+            MultiCrossAttentionHeadVarlenSlicedQ(
                 self.cf.ae_global_dim_embed,
                 self.cf.ae_local_dim_embed,
                 num_slices_q=self.cf.ae_local_num_queries,
@@ -223,7 +224,7 @@ class GlobalAssimilationEngine:
                 )
             else:
                 self.ae_global_blocks.append(
-                    MultiSelfAttentionHead_Local(
+                    MultiSelfAttentionHeadLocal(
                         self.cf.ae_global_dim_embed,
                         num_heads=self.cf.ae_global_num_heads,
                         qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
@@ -289,7 +290,7 @@ class ForecastingEngine:
                     )
                 else:
                     self.fe_blocks.append(
-                        MultiSelfAttentionHead_Local(
+                        MultiSelfAttentionHeadLocal(
                             self.cf.ae_global_dim_embed,
                             num_heads=self.cf.fe_num_heads,
                             qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
@@ -315,6 +316,16 @@ class ForecastingEngine:
                         norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
+
+        def init_weights_final(m):
+            if isinstance(m, torch.nn.Linear):
+                torch.nn.init.normal_(m.weight, mean=0, std=0.001)
+                if m.bias is not None:
+                    torch.nn.init.normal_(m.bias, mean=0, std=0.001)
+
+        for block in self.fe_blocks:
+            block.apply(init_weights_final)
+
         return self.fe_blocks
 
 
@@ -402,8 +413,11 @@ class TargetPredictionEngine(nn.Module):
             "norm_eps": self.cf.norm_eps,
             "attention_dtype": get_dtype(self.cf.attention_dtype),
         }
-        self.oned_pos = nn.Embedding(9, self.cf.ae_global_dim_embed)
-        self.in_norm = nn.LayerNorm(self.cf.ae_global_dim_embed, eps=1e-6)
+        self.adapter = nn.Sequential(
+                nn.Linear(self.cf.ae_global_dim_embed, self.dims_embed[0]*2),
+                SwiGLU(),
+                nn.LayerNorm(self.dims_embed[0])
+                )
         self.tte = nn.ModuleList()
         for ith, dim in enumerate(self.dims_embed[:-1]):
             next_dim = self.dims_embed[ith + 1]
@@ -412,8 +426,8 @@ class TargetPredictionEngine(nn.Module):
                 self.tte.append(
                     CrossAttentionBlock(
                         dim_q=dim,
-                        dim_kv=self.cf.ae_global_dim_embed,
-                        dim_aux=self.cf.ae_global_dim_embed,
+                        dim_kv=self.dims_embed[0],
+                        dim_aux=self.dims_embed[0],
                         num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
                         with_self_attn=False,
                         with_adanorm=False,
@@ -425,7 +439,7 @@ class TargetPredictionEngine(nn.Module):
                 self.tte.append(
                     SelfAttentionBlock(
                         dim=dim,
-                        dim_aux=self.cf.ae_global_dim_embed,
+                        dim_aux=self.dims_embed[0],
                         num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
                         attention_kwargs=attention_kwargs,
                         with_adanorm=True,
@@ -436,7 +450,7 @@ class TargetPredictionEngine(nn.Module):
                     CrossAttentionBlock(
                         dim_q=dim,
                         dim_kv=self.cf.ae_global_dim_embed,
-                        dim_aux=self.cf.ae_global_dim_embed,
+                        dim_aux=self.dims_embed[0],
                         num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
                         with_self_attn=True,
                         with_adanorm=False,
@@ -448,8 +462,8 @@ class TargetPredictionEngine(nn.Module):
                 self.tte.append(
                     CrossAttentionBlock(
                         dim_q=dim,
-                        dim_kv=self.cf.ae_global_dim_embed,
-                        dim_aux=self.cf.ae_global_dim_embed,
+                        dim_kv=self.dims_embed[0],
+                        dim_aux=self.dims_embed[0],
                         num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
                         with_self_attn=True,
                         with_adanorm=True,
@@ -463,18 +477,15 @@ class TargetPredictionEngine(nn.Module):
                 )
 
     def forward(self, latent, output, latent_lens, output_lens):
-        pos_embed = self.oned_pos(
-            torch.arange(0, 9, dtype=torch.int32, device=latent.device).unsqueeze(0)
-        )
-        latent = self.in_norm(latent)
+        latent = self.adapter(latent)
         for layer in self.tte:
             if isinstance(layer, CrossAttentionBlock):
                 output = checkpoint(
                     layer,
                     x=output,
-                    x_kv=(latent+pos_embed).flatten(0,1),
+                    x_kv=(latent).flatten(0,1),
                     x_lens=output_lens,
-                    aux=latent[:,0],
+                    aux=latent[:,0].detach(),
                     x_kv_lens=latent_lens,
                     use_reentrant=False,
                 )
@@ -483,7 +494,7 @@ class TargetPredictionEngine(nn.Module):
                     layer,
                     x=output,
                     x_lens=output_lens,
-                    aux=latent[:,0],
+                    aux=latent[:,0].detach(),
                     use_reentrant=False,
                 )
         return output

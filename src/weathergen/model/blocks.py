@@ -12,8 +12,8 @@ import torch.nn as nn
 
 from weathergen.model.norms import AdaLayerNormLayer
 from weathergen.model.attention import (
-    MultiSelfAttentionHead_Varlen,
-    MultiCrossAttentionHead_Varlen,
+    MultiSelfAttentionHeadVarlen,
+    MultiCrossAttentionHeadVarlen,
 )
 from weathergen.model.layers import MLP
 
@@ -28,7 +28,7 @@ class SelfAttentionBlock(nn.Module):
 
         self.with_adanorm = with_adanorm
 
-        self.mhsa = MultiSelfAttentionHead_Varlen(
+        self.mhsa = MultiSelfAttentionHeadVarlen(
             dim_embed=dim,
             num_heads=num_heads,
             with_residual=False,
@@ -103,7 +103,7 @@ class CrossAttentionBlock(nn.Module):
         self.with_mlp = with_self_attn
 
         if with_self_attn:
-            self.mhsa = MultiSelfAttentionHead_Varlen(
+            self.mhsa = MultiSelfAttentionHeadVarlen(
                 dim_embed=dim_q,
                 num_heads=num_heads,
                 with_residual=False,
@@ -117,7 +117,7 @@ class CrossAttentionBlock(nn.Module):
                     lambda x, _, **kwargs: self.mhsa(self.ln_sa(x), **kwargs) + x
                 )
 
-        self.cross_attn = MultiCrossAttentionHead_Varlen(
+        self.cross_attn = MultiCrossAttentionHeadVarlen(
             dim_embed_q=dim_q,
             dim_embed_kv=dim_kv,
             num_heads=num_heads,

@@ -87,7 +87,11 @@ select = [
     # isort
     "I",
     # Banned imports
-    "TID"
+    "TID",
+    # Naming conventions
+    "N",
+    # print
+    "T201"
 ]
 
 # These rules are sensible and should be enabled at a later stage.
@@ -100,7 +104,8 @@ ignore = [
   "SIM102",
   "SIM401",
   # To ignore, not relevant for us
-  "SIM108" # in case additional norm layer supports are added in future  
+  "SIM108", # in case additional norm layer supports are added in future
+  "N817" # we use heavy acronyms, e.g., allowing 'import LongModuleName as LMN' (LMN is accepted)
 ]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
@@ -112,6 +117,9 @@ line-ending = "lf"
 
 
 [tool.uv]
+# Most work is done a distributed filesystem, where hardlink is not always possible.
+# Also, trying to resolve some permissions issue, see #344.
+link-mode = "symlink"
 # This guarantees that the build is deterministic and will not be impacted 
 # by future releases of dependencies or sub-dependencies. 
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer

@@ -10,6 +10,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 # from https://github.com/meta-llama/llama/blob/main/llama/model.py
@@ -91,6 +92,13 @@ class AdaLayerNorm(torch.nn.Module):
 def modulate(x, shift, scale):
     return x * (1 + scale) + shift
 
+class SwiGLU(nn.Module):
+    def __init__(self):
+        super(SwiGLU, self).__init__()
+
+    def forward(self, x):
+        x1, x2 = x.chunk(2, dim=-1)
+        return x2 * F.silu(x1)
 
 class AdaLayerNormLayer(torch.nn.Module):
     """
@@ -114,7 +122,9 @@ class AdaLayerNormLayer(torch.nn.Module):
         super().__init__()
 
         self.dim = dim
-        self.adaLN_modulation = nn.Sequential(nn.Linear(dim_aux, 3 * dim, bias=True))
+        self.adaLN_modulation = nn.Sequential(
+            nn.Linear(dim_aux, 4 * dim_aux), SwiGLU(), nn.Linear(2 * dim_aux, 3 * dim, bias=True)
+        )
 
         self.ln = nn.LayerNorm(dim, elementwise_affine=False, eps=norm_eps)
         self.layer = layer
@@ -129,7 +139,9 @@ class AdaLayerNormLayer(torch.nn.Module):
     def forward(self, x: torch.Tensor, c: torch.Tensor, x_lens, **kwargs) -> torch.Tensor:
         # the -1 in torch.repeat_interleave(..) is because x_lens is designed for use with flash attention and
         # thus has a spurious 0 at the beginning to satisfy the flash attention api
-        shift, scale, gate = self.adaLN_modulation(c)[torch.repeat_interleave(x_lens)-1].chunk(3, dim=1)
+        shift, scale, gate = self.adaLN_modulation(c)[torch.repeat_interleave(x_lens) - 1].chunk(
+            3, dim=1
+        )
         kwargs["x_lens"] = x_lens
         return (
             gate

@@ -17,7 +17,7 @@ from weathergen.model.norms import AdaLayerNorm, RMSNorm
 
 
 ####################################################################################################
-class MultiSelfAttentionHead_Varlen(torch.nn.Module):
+class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     #########################################
     def __init__(
         self,
@@ -34,7 +34,7 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
     ):
-        super(MultiSelfAttentionHead_Varlen, self).__init__()
+        super(MultiSelfAttentionHeadVarlen, self).__init__()
 
         self.num_heads = num_heads
         self.dropout_rate = dropout_rate
@@ -50,10 +50,10 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
         else:
             norm = RMSNorm
 
-        if dim_aux is not None:
-            self.lnorm = AdaLayerNorm(dim_embed, dim_aux, norm_eps=norm_eps)
-        else:
-            self.lnorm = norm(dim_embed, eps=norm_eps)
+        # if dim_aux is not None:
+        #     self.lnorm = AdaLayerNorm(dim_embed, dim_aux, norm_eps=norm_eps)
+        # else:
+        #     self.lnorm = norm(dim_embed, eps=norm_eps)
         self.proj_heads_q = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_k = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_v = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
@@ -104,7 +104,7 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
 
 
 ####################################################################################################
-class MultiSelfAttentionHead_Varlen_Flex(torch.nn.Module):
+class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
     #########################################
     def __init__(
         self,
@@ -120,7 +120,7 @@ class MultiSelfAttentionHead_Varlen_Flex(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
     ):
-        super(MultiSelfAttentionHead_Varlen_Flex, self).__init__()
+        super(MultiSelfAttentionHeadVarlenFlex, self).__init__()
 
         self.num_heads = num_heads
         self.with_flash = with_flash
@@ -183,7 +183,7 @@ class MultiSelfAttentionHead_Varlen_Flex(torch.nn.Module):
 
 
 ####################################################################################################
-class MultiSelfAttentionHead_Local(torch.nn.Module):
+class MultiSelfAttentionHeadLocal(torch.nn.Module):
     #########################################
     def __init__(
         self,
@@ -201,7 +201,7 @@ class MultiSelfAttentionHead_Local(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
     ):
-        super(MultiSelfAttentionHead_Local, self).__init__()
+        super(MultiSelfAttentionHeadLocal, self).__init__()
 
         self.num_heads = num_heads
         self.with_flash = with_flash
@@ -262,7 +262,7 @@ class MultiSelfAttentionHead_Local(torch.nn.Module):
 
 
 ####################################################################################################
-class MultiCrossAttentionHead_Varlen(torch.nn.Module):
+class MultiCrossAttentionHeadVarlen(torch.nn.Module):
     #########################################
     def __init__(
         self,
@@ -280,7 +280,7 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
     ):
-        super(MultiCrossAttentionHead_Varlen, self).__init__()
+        super(MultiCrossAttentionHeadVarlen, self).__init__()
 
         self.num_heads = num_heads
         self.dropout_rate = dropout_rate
@@ -295,11 +295,11 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
 
         self.dim_head_proj = dim_embed_q // num_heads if dim_head_proj is None else dim_head_proj
 
-        if dim_aux is not None:
-            self.lnorm_in_q = AdaLayerNorm(dim_embed_q, dim_aux, norm_eps=norm_eps)
-        else:
-            self.lnorm_in_q = norm(dim_embed_q, eps=norm_eps)
-        self.lnorm_in_kv = norm(dim_embed_kv, eps=norm_eps)
+        # if dim_aux is not None:
+        #     self.lnorm_in_q = AdaLayerNorm(dim_embed_q, dim_aux, norm_eps=norm_eps)
+        # else:
+        #     self.lnorm_in_q = norm(dim_embed_q, eps=norm_eps)
+        # self.lnorm_in_kv = norm(dim_embed_kv, eps=norm_eps)
 
         self.proj_heads_q = torch.nn.Linear(dim_embed_q, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_k = torch.nn.Linear(
@@ -371,7 +371,7 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
 
 
 ####################################################################################################
-class MultiCrossAttentionHead_Varlen_SlicedQ(torch.nn.Module):
+class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
     #########################################
     def __init__(
         self,
@@ -390,7 +390,7 @@ class MultiCrossAttentionHead_Varlen_SlicedQ(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
     ):
-        super(MultiCrossAttentionHead_Varlen_SlicedQ, self).__init__()
+        super(MultiCrossAttentionHeadVarlenSlicedQ, self).__init__()
 
         self.num_slices_q = num_slices_q
         self.num_heads = num_heads
