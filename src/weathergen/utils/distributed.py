@@ -10,11 +10,9 @@ Copyright (c) 2025, Sebastian Hoffmann
 
 # TODO: copy other utilities from dmlcloud such as root_wrap etc.
 # TODO: move the DDP code from trainer.py to this file
-import pickle
 
 import torch
 import torch.distributed as dist
-from torch import Tensor
 
 SYNC_TIMEOUT_SEC = 60 * 60  # 1 hour
 
@@ -66,49 +64,41 @@ def get_rank() -> int:
     return dist.get_rank()
 
 
-def all_gather(data: Tensor) -> list[Tensor]:
+def ddp_average(data: torch.Tensor) -> torch.Tensor:
     """
-    Run all_gather on arbitrary shape Tensor
+    Average a tensor across DDP ranks
 
-    Source: https://github.com/facebookresearch/maskrcnn-benchmark/blob/57eec25b75144d9fb1a6857f32553e1574177daf/maskrcnn_benchmark/utils/comm.py#L48
+    Params:
+        data: tensor to be averaged (arbitrary shape)
 
-    Args:
-        data: Tensor
-    Returns:
-        list[data]: list of data gathered from each rank already on CPU
+    Return :
+        tensor with same shape as data, but entries averaged across all DDP ranks
     """
-    world_size = get_world_size()
-    if world_size == 1:
-        return [data]
+    if _is_distributed_initialized():
+        dist.all_reduce(data.cuda(), op=torch.distributed.ReduceOp.AVG)
+    return data.cpu()
 
-    # serialized to a Tensor
-    buffer = pickle.dumps(data)
-    storage = torch.ByteStorage.from_buffer(buffer)
-    tensor = torch.ByteTensor(storage).to(data.device)
 
-    # obtain Tensor size of each rank
-    local_size = torch.LongTensor([tensor.numel()]).to(data.device)
-    size_list = [torch.LongTensor([0]).to(data.device) for _ in range(world_size)]
-    dist.all_gather(size_list, local_size)
+def ddp_average_nan(data: torch.Tensor) -> torch.Tensor:
+    """
+    Average a tensor across DDP ranks, excluding NaN and 0. when computing average
 
-    size_list = [int(size.item()) for size in size_list]
-    max_size = max(size_list)
+    Params:
+        data: tensor to be averaged (arbitrary shape)
 
-    # receiving Tensor from all ranks
-    # we pad the tensor because torch all_gather does not support
-    # gathering tensors of different shapes
-    tensor_list = []
-    for _ in size_list:
-        tensor_list.append(torch.ByteTensor(size=(max_size,)).to("cuda"))
-    if local_size != max_size:
-        padding = torch.ByteTensor(size=(max_size - local_size,)).to("cuda")
-        tensor = torch.cat((tensor, padding), dim=0)
-
-    dist.all_gather(tensor_list, tensor)
-
-    data_list = []
-    for size, tensor in zip(size_list, tensor_list, strict=False):
-        buffer = tensor.cpu().numpy().tobytes()[:size]
-        data_list.append(pickle.loads(buffer).cpu())
-
-    return data_list
+    Return :
+        tensor with same shape as data, but entries averaged across all DDP ranks
+    """
+    if _is_distributed_initialized():
+        # set NaNs to zero and communicate the vals
+        mask = torch.isnan(data)
+        data[mask] = 0.0
+        dist.all_reduce(data.cuda(), op=torch.distributed.ReduceOp.SUM)
+        # communicate the number of non-Nan values across ranks
+        # also treat 0.0 as a nan-type value since loss was not computed there (e.g. empty
+        # target) and it should not be taken into account when computing mean
+        mask = torch.logical_and(mask, data == 0.0)
+        sizes = mask.to(torch.int32)
+        dist.all_reduce(sizes.cuda(), op=torch.distributed.ReduceOp.SUM)
+        data = data / sizes
+    return data.cpu()
