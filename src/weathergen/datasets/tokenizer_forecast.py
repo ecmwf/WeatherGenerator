@@ -120,6 +120,8 @@ class TokenizerForecast:
             .to(torch.float32)
         )
 
+        self.size_time_embedding = 6
+
     def get_size_time_embedding(self) -> int:
         """
         Get size of time embedding
