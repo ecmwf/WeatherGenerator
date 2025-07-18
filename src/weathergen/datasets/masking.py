@@ -200,6 +200,12 @@ class Masker:
 
                 selected_tensors = []
                 for c, p in zip(cc, pp, strict=True):
+                    
+                    # assert that c has the same shape at dimension 1 as p
+                    assert c.shape[-1] == p.shape[-1], (
+                        f"The source and target channels must be the same."
+                    )
+
                     # slightly complicated as the first dimension of c varies with data in the cell.
                     c[:, ~p[0, :]] = torch.nan  # Set the channels that are not masked to NaN
                     selected_tensors.append(c)
