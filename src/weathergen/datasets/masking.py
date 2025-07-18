@@ -1,5 +1,4 @@
 import logging
-import time
 
 import numpy as np
 import torch
@@ -14,9 +13,11 @@ class Masker:
     Attributes:
         masking_rate (float): The base rate at which tokens are masked.
         masking_strategy (str): The strategy used for masking (e.g., "random",
-        "block", "healpix", ...more to be implemented).
+        "block", "healpix", "channel").
         masking_rate_sampling (bool): Whether to sample the masking rate from a distribution.
-        rng (np.random.Generator): A random number generator.
+        masking_strategy_config (dict): Configuration for the masking strategy, can include
+                                        additional parameters like "hl_data", "hl_mask", etc.
+                                        specific to the masking strategy.
 
     """
 
@@ -33,11 +34,6 @@ class Masker:
 
         # masking_strategy_config is a dictionary that can hold any additional parameters
         self.masking_strategy_config = masking_strategy_config
-
-        # Initialize the random number generator.
-        worker_info = torch.utils.data.get_worker_info()
-        div_factor = (worker_info.id + 1) if worker_info is not None else 1
-        self.rng = np.random.default_rng(int(time.time() / div_factor))
 
         # Initialize the mask, set to None initially,
         # until it is generated in mask_source.
@@ -58,6 +54,11 @@ class Masker:
                 "Masking strategy must specify either 'global' or 'per_cell' in masking_strategy_config."
             )
 
+    def reset_rng(self, rng) -> None:
+        """
+        Reset rng after epoch to ensure proper randomization
+        """
+        self.rng = rng
     def mask_source(
         self,
         tokenized_data: list[torch.Tensor],
