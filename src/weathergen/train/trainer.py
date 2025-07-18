@@ -380,6 +380,11 @@ class Trainer(Trainer_Base):
 
         #'''
         # TODO: Undo list resorting
+        # The following list operations realize a reshaping of the original tensors in streams_data
+        # from shape [batch_sample][stream][fstep] into shape [fstep][stream][batch_sample]. When
+        # removing the reshaping, make sure to index the tensors starting at forecast_offset, e.g.,
+        # target_times_raw = streams_data[i_batch][i_strm].target_times_raw[forecast_offset+fstep],
+        # when iterating over batch, stream, and fsteps.
         targets_rt = [
             [
                 torch.cat([t[i].target_tokens[fstep] for t in streams_data])
@@ -410,8 +415,10 @@ class Trainer(Trainer_Base):
         targets_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
         targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
 
+        # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
+        i_batch = 0
         for fstep in range(len(targets_rt)):
-            for i_strm, (target) in enumerate(zip(targets_rt[fstep], strict=False)):
+            for i_strm, target in enumerate(targets_rt[fstep]):
                 pred = preds[fstep][i_strm]
 
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
@@ -427,6 +434,7 @@ class Trainer(Trainer_Base):
 
                 targets_lens[fstep][i_strm] += [target.shape[0]]
                 dn_data = self.dataset_val.denormalize_target_channels
+
 
                 f32 = torch.float32
                 preds_all[fstep][i_strm] += [dn_data(i_strm, pred.to(f32)).detach().cpu()]

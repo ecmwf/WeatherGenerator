@@ -46,26 +46,6 @@ def prepare_trainer(cf):
 
     return trainer
 
-def collect_targets(cf_streams, streams_data, forecast_offset, forecast_steps):
-    # merge across batch dimension (and keep streams)
-    # TODO: Undo list resorting
-    targets_rt = [
-        [
-            torch.cat([t[i].target_tokens[fstep] for t in streams_data])
-            for i in range(len(cf_streams))
-        ]
-        for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
-    ]
-    # TODO: Undo list resorting
-    targets_coords_rt = [
-        [
-            torch.cat([t[i].target_coords[fstep] for t in streams_data])
-            for i in range(len(cf_streams))
-        ]
-        for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
-    ]
-
-    return (targets_rt, targets_coords_rt)
 
 @pytest.fixture
 def cf():
@@ -110,14 +90,54 @@ def test_loss(cf):
         stage=VAL,
         device=trainer.devices[0],
     )
-    targets_rt, targets_coords_rt = collect_targets(
-        trainer.cf.streams, batch[0], cf.forecast_offset, cf.forecast_steps
-    )
+
     loss2, losses_all2, stddev_all2 = loss_module_val.compute_loss(
         preds=preds,
-        targets=targets_rt,
-        targets_coords=targets_coords_rt,
         streams_data=batch[0],
     )
 
     assert loss1 == loss2, "Loss computations return different values."
+
+
+def test_logging_prep(cf):
+    trainer = prepare_trainer(cf)
+
+    batch = next(iter(trainer.dataset_val))
+    batch = trainer.batch_to_device(batch)
+
+    trainer.model.eval()
+    # with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=cf.with_mixed_precision):
+    with torch.autocast(
+        device_type="cuda", dtype=trainer.mixed_precision_dtype, enabled=cf.with_mixed_precision
+    ):
+        preds = trainer.model(trainer.model_params, batch, cf.forecast_offset, cf.forecast_steps)
+
+    preds2 = [[preds[0][0].clone()]]
+
+    ### Original logging preparation
+    # TODO: remove dependency from old trainer.compute_loss() function
+    _, _, _, logging_items = trainer.compute_loss(
+        trainer.loss_fcts_val,
+        cf.forecast_offset,
+        cf.forecast_steps,
+        batch[0],
+        preds,
+        VAL,
+        log_data=True
+    )
+    preds_all, targets_all, targets_coords_raw, targets_times_raw, targets_lens = logging_items
+
+    ### New logging preparation
+    logging_items2 = trainer._prepare_logging(
+        preds=preds2,
+        forecast_offset=cf.forecast_offset,
+        forecast_steps=cf.forecast_steps,
+        streams_data=batch[0],
+    )
+    preds_all2, targets_all2, targets_coords_raw2, targets_times_raw2, targets_lens2 = logging_items2
+
+    assert (preds_all[0][0][0] == preds_all2[0][0][0]).all()
+    assert (targets_all[0][0][0] == targets_all2[0][0][0]).all()
+    assert (targets_coords_raw[0][0] == targets_coords_raw2[0][0]).all()
+    assert (targets_times_raw[0][0] == targets_times_raw2[0][0]).all()
+    assert targets_lens == targets_lens2
