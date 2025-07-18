@@ -10,7 +10,7 @@
 import logging
 import time
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 import numpy as np
 import torch
@@ -329,15 +329,14 @@ class Trainer(Trainer_Base):
 
         # log final model
         self.save_model(cf.num_epochs)
-    
+
     ###########################################
     def _prepare_logging(
         self,
-        preds: List[List[Tensor]],
-        targets: List[List[Tensor]],
+        preds: list[list[Tensor]],
         forecast_offset: int,
         forecast_steps: int,
-        streams_data: List[List[Any]],
+        streams_data: list[list[Any]],
     ):
         """Collects and denormalizes prediction and target data for logging.
 
@@ -378,12 +377,16 @@ class Trainer(Trainer_Base):
                 inner list contains the original lengths (shape[0]) of the target
                 tensors before any filtering.
         """
-        fsteps = len(targets)
-        preds_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
-        targets_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
-        targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
 
         #'''
+        # TODO: Undo list resorting
+        targets_rt = [
+            [
+                torch.cat([t[i].target_tokens[fstep] for t in streams_data])
+                for i in range(len(self.cf.streams))
+            ]
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
+        ]
         # TODO: Undo list resorting
         targets_coords_raw = [
             [
@@ -400,10 +403,15 @@ class Trainer(Trainer_Base):
             ]
             for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
         ]
-        
+
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
-        for fstep in range(len(targets)):
-            for i_strm, (target) in enumerate(zip(targets[fstep], strict=False)):
+        fsteps = len(targets_rt)
+        preds_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+        targets_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+        targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+
+        for fstep in range(len(targets_rt)):
+            for i_strm, (target) in enumerate(zip(targets_rt[fstep], strict=False)):
                 pred = preds[fstep][i_strm]
 
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
@@ -474,7 +482,7 @@ class Trainer(Trainer_Base):
                     for i in range(len(self.cf.streams))
                 ]
                 for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
-            ] # transforms from [batch_sample][stream][fstep] into shape [fstep][stream][batch_sample]
+            ]  # transforms from [batch_sample][stream][fstep] into shape [fstep][stream][batch_sample]
             # TODO: Undo list resorting
             targets_times_raw_rt = [
                 [
