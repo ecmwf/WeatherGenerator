@@ -95,7 +95,7 @@ def get_score(
     data: VerifiedData,
     score_name: str,
     agg_dims: str | list[str] = "all",
-    group_by_coord: str = None,
+    group_by_coord: str | None = None,
     ens_dim: str = "ens",
     compute: bool = False,
     **kwargs,
@@ -259,7 +259,8 @@ class Scores:
 
         # Add group_by_coord if provided
         if group_by_coord is not None:
-            args["group_by_coord"] = self._validate_groupby_coord(data, group_by_coord)
+            if self._validate_groupby_coord(data, group_by_coord):
+                args["group_by_coord"] = group_by_coord
 
         for an in arg_names:
             if an in kwargs:
@@ -290,10 +291,12 @@ class Scores:
 
     def _validate_groupby_coord(
         self, data: VerifiedData, group_by_coord: str | None
-    ) -> str | None:
+    ) -> bool:
         """
         Check if the group_by_coord is present in both prediction and ground truth data and compatible.
         Raises ValueError if conditions are not met.
+        If group_by_coord does not have more than one unique value in the prediction data,
+        a warning is logged and the function returns False, indicating that grouping is not applicable.
 
         Parameters
         ----------
@@ -304,8 +307,8 @@ class Scores:
 
         Returns
         -------
-        group_by_coord : str
-            Validated group_by_coord
+        group_by_coord : bool
+            True if the group_by_coord is valid for grouping, False otherwise.
         """
         p, gt = data.prediction, data.ground_truth
         if group_by_coord not in p.coords or group_by_coord not in gt.coords:
@@ -322,7 +325,14 @@ class Scores:
                 f"{dims_p} in prediction, {dims_gt} in ground truth."
             )
 
-        return group_by_coord
+        if len(np.atleast_1d(p.coords[group_by_coord].values)) > 1:
+            return True
+        else:
+            _logger.warning(
+                f"Coordinate '{group_by_coord}' has only one unique value in prediction data. "
+                "It will not be used for grouping."
+            )
+            return False
 
     def _sum(self, data: xr.DataArray) -> xr.DataArray:
         """
