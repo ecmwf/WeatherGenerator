@@ -18,7 +18,6 @@ class Masker:
         masking_strategy_config (dict): Configuration for the masking strategy, can include
                                         additional parameters like "hl_data", "hl_mask", etc.
                                         specific to the masking strategy.
-
     """
 
     def __init__(
