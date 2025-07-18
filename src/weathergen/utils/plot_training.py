@@ -425,7 +425,7 @@ def plot_loss_per_stream(
 
         # no valid data found
         if (min_val >= max_val) or np.isnan(min_val) or np.isnan(max_val):
-            return
+            continue
 
         legend = plt.legend(legend_str, loc="upper right" if not x_scale_log else "lower left")
         for line in legend.get_lines():
