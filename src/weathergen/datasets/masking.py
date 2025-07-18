@@ -46,13 +46,13 @@ class Masker:
                 "If HEALPix masking, hl_data and hl_mask must be given in masking_strategy_config."
             )
             assert hl_mask < hl_data, "hl_mask must be less than hl_data for HEALPix masking."
-    
+
     def reset_rng(self, rng) -> None:
         """
         Reset rng after epoch to ensure proper randomization
         """
         self.rng = rng
-        
+
     def mask_source(
         self,
         tokenized_data: list[torch.Tensor],
@@ -96,7 +96,7 @@ class Masker:
         # Handle the special case where all tokens are masked
         if rate == 1.0:
             token_lens = [len(t) for t in tokenized_data]
-            self.perm_sel = [np.ones(l, dtype=bool) for l in token_lens]
+            self.perm_sel = [np.ones(token, dtype=bool) for token in token_lens]
             source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
             return source_data
 
