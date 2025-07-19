@@ -34,7 +34,7 @@ from weathergen.train.loss import stat_loss_fcts
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
-from weathergen.utils.distributed import ddp_average, ddp_average_nan, is_root
+from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.validation_io import write_output
 
@@ -611,17 +611,17 @@ class Trainer(TrainerBase):
         real_loss = torch.tensor(self.loss_model_hist, device=self.devices[0])
         # Gather all tensors from all ranks into a list and stack them into one tensor again
         # real_loss = torch.cat(all_gather(real_loss))
-        real_loss = ddp_average_nan(real_loss)
+        real_loss = torch.cat(all_gather_vlen(real_loss))
 
         for stream in self.cf.streams:  # Loop over all steams
             stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
             stream_all = torch.stack(stream_hist).to(torch.float64)
-            losses_all[stream.name] = ddp_average_nan(stream_all)
+            losses_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
             # losses_all[stream.name] = torch.cat(all_gather(stream_all))
             stream_hist = [stddev_all[stream.name] for stddev_all in self.stdev_unweighted_hist]
             stream_all = torch.stack(stream_hist).to(torch.float64)
             # stddev_all[stream.name] = torch.cat(all_gather(stream_all))
-            stddev_all[stream.name] = ddp_average_nan(stream_all)
+            stddev_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
 
         return real_loss, losses_all, stddev_all
 

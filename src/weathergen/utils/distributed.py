@@ -79,26 +79,27 @@ def ddp_average(data: torch.Tensor) -> torch.Tensor:
     return data.cpu()
 
 
-def ddp_average_nan(data: torch.Tensor) -> torch.Tensor:
-    """
-    Average a tensor across DDP ranks, excluding NaN and 0. when computing average
+def all_gather_vlen(tensor: torch.Tensor, group=None) -> list[torch.Tensor]:
+    """Gather tensors with the same number of dimensions but different lengths."""
+    world_size = dist.get_world_size(group=group)
+    # Gather lengths first
+    shape = torch.as_tensor(tensor.shape, device=tensor.device)
+    shapes = [torch.empty_like(shape) for _ in range(world_size)]
+    dist.all_gather(shapes, shape, group=group)
+    # Gather data
+    inputs = [tensor] * world_size
+    outputs = [torch.empty(*_shape, dtype=tensor.dtype, device=tensor.device) for _shape in shapes]
+    dist.all_to_all(outputs, inputs, group=group)
+    return outputs
 
-    Params:
-        data: tensor to be averaged (arbitrary shape)
 
-    Return :
-        tensor with same shape as data, but entries averaged across all DDP ranks
-    """
-    if _is_distributed_initialized():
-        # set NaNs to zero and communicate the vals
-        mask = torch.isnan(data)
-        data[mask] = 0.0
-        dist.all_reduce(data.cuda(), op=torch.distributed.ReduceOp.SUM)
-        # communicate the number of non-Nan values across ranks
-        # also treat 0.0 as a nan-type value since loss was not computed there (e.g. empty
-        # target) and it should not be taken into account when computing mean
-        mask = torch.logical_and(mask, data == 0.0)
-        sizes = mask.to(torch.int32)
-        dist.all_reduce(sizes.cuda(), op=torch.distributed.ReduceOp.SUM)
-        data = data / sizes
-    return data.cpu()
+def all_gather_vdim(tensor: torch.Tensor, group=None) -> list[torch.Tensor]:
+    """Gather tensors with different number of dimensions."""
+    world_size = dist.get_world_size(group=group)
+    # Gather shapes first
+    shapes = all_gather_vlen(torch.as_tensor(tensor.shape, device=tensor.device), group=group)
+    # Gather data
+    inputs = [tensor] * world_size
+    outputs = [torch.empty(*_shape, dtype=tensor.dtype, device=tensor.device) for _shape in shapes]
+    dist.all_to_all(outputs, inputs, group=group)
+    return outputs
