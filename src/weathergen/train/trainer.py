@@ -34,7 +34,7 @@ from weathergen.train.loss import stat_loss_fcts
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
-from weathergen.utils.distributed import all_gather, is_root
+from weathergen.utils.distributed import ddp_average, ddp_average_nan, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.validation_io import write_output
 
@@ -42,14 +42,12 @@ _logger = logging.getLogger(__name__)
 
 
 class Trainer(TrainerBase):
-    ###########################################
     def __init__(self, checkpoint_freq=250, print_freq=10):
         TrainerBase.__init__(self)
 
         self.checkpoint_freq = checkpoint_freq
         self.print_freq = print_freq
 
-    ###########################################
     def init(
         self,
         cf: Config,
@@ -78,7 +76,6 @@ class Trainer(TrainerBase):
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
-    ###########################################
     def inference(self, cf, run_id_trained, epoch):
         # general initalization
         self.init(cf)
@@ -134,7 +131,6 @@ class Trainer(TrainerBase):
         self.validate(epoch=0)
         _logger.info(f"Finished inference run with id: {cf.run_id}")
 
-    ###########################################
     def run(self, cf, run_id_contd=None, epoch_contd=None):
         # general initalization
         self.init(cf)
@@ -329,7 +325,6 @@ class Trainer(TrainerBase):
         # log final model
         self.save_model(cf.num_epochs)
 
-    ###########################################
     def compute_loss(
         self,
         loss_fcts,
@@ -386,12 +381,13 @@ class Trainer(TrainerBase):
             st.name: torch.zeros(
                 (len(st[str(stage) + "_target_channels"]), len(loss_fcts)), device=device
             )
-            for st in self.cf.streams  # No nan here as it's divided so any remaining 0 become nan
-        }  # Create tensor for each stream
+            for st in self.cf.streams
+        }
+        # Create list storing losses for each stream
         stddev_all: dict[str, Tensor] = {
             st.name: torch.zeros(len(stat_loss_fcts), device=device) for st in self.cf.streams
-        }  # Create tensor for each stream
-        # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
+        }
+
         for fstep in range(len(targets_rt)):
             for i_obs, (target, target_coords, si) in enumerate(
                 zip(
@@ -526,7 +522,6 @@ class Trainer(TrainerBase):
             ),
         )
 
-    ###########################################
     def train(self, epoch):
         cf = self.cf
         self.ddp_model.train()
@@ -581,12 +576,12 @@ class Trainer(TrainerBase):
             self.stdev_unweighted_hist += [stddev_all]
 
             perf_gpu, perf_mem = self.get_perf()
-            self.perf_gpu = self.ddp_average(torch.tensor([perf_gpu])).item()
-            self.perf_mem = self.ddp_average(torch.tensor([perf_mem])).item()
+            self.perf_gpu = ddp_average(torch.tensor([perf_gpu])).item()
+            self.perf_mem = ddp_average(torch.tensor([perf_mem])).item()
 
-            self.log_terminal(bidx, epoch)
+            self._log_terminal(bidx, epoch)
             if bidx % log_interval == 0:
-                self.log(TRAIN)
+                self._log(TRAIN)
 
             # model checkpoint
             if bidx % self.checkpoint_freq == 0:
@@ -615,19 +610,21 @@ class Trainer(TrainerBase):
         # Make list of losses into a tensor. This is individual tensor per rank
         real_loss = torch.tensor(self.loss_model_hist, device=self.devices[0])
         # Gather all tensors from all ranks into a list and stack them into one tensor again
-        real_loss = torch.cat(all_gather(real_loss))
+        # real_loss = torch.cat(all_gather(real_loss))
+        real_loss = ddp_average_nan(real_loss)
 
         for stream in self.cf.streams:  # Loop over all steams
             stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
             stream_all = torch.stack(stream_hist).to(torch.float64)
-            losses_all[stream.name] = torch.cat(all_gather(stream_all))
+            losses_all[stream.name] = ddp_average_nan(stream_all)
+            # losses_all[stream.name] = torch.cat(all_gather(stream_all))
             stream_hist = [stddev_all[stream.name] for stddev_all in self.stdev_unweighted_hist]
             stream_all = torch.stack(stream_hist).to(torch.float64)
-            stddev_all[stream.name] = torch.cat(all_gather(stream_all))
+            # stddev_all[stream.name] = torch.cat(all_gather(stream_all))
+            stddev_all[stream.name] = ddp_average_nan(stream_all)
 
         return real_loss, losses_all, stddev_all
 
-    ###########################################
     def validate(self, epoch):
         cf = self.cf
         self.ddp_model.eval()
@@ -702,12 +699,11 @@ class Trainer(TrainerBase):
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
-                self.log(VAL)
+                self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
 
-    ###########################################
     def batch_to_device(self, batch):
         # forecast_steps is dropped here from the batch
         return (
@@ -716,7 +712,6 @@ class Trainer(TrainerBase):
             [[b.to("cuda") for b in bf] for bf in batch[2]],
         )
 
-    ###########################################
     def save_model(self, epoch: int, name=None):
         # Saving at epoch == max_epoch means that we are saving the latest checkpoint.
         max_epoch = self.cf.num_epochs
@@ -752,8 +747,7 @@ class Trainer(TrainerBase):
             # save config
             config.save(self.cf, epoch)
 
-    ###########################################
-    def log(self, stage: Stage):
+    def _log(self, stage: Stage):
         """
         Logs training or validation metrics.
 
@@ -786,8 +780,7 @@ class Trainer(TrainerBase):
 
             self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
-    ###########################################
-    def log_terminal(self, bidx: int, epoch: int):
+    def _log_terminal(self, bidx: int, epoch: int):
         if bidx % self.print_freq == 0 and bidx > 0:
             # compute from last iteration
             avg_loss, losses_all, _ = self._prepare_losses_for_logging()
