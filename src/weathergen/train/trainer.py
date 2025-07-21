@@ -185,6 +185,9 @@ class Trainer(TrainerBase):
         if cf.forecast_freeze_model:
             self.model = self.model.freeze_weights_forecast()
 
+        # select decoder to be fine-tuned; rest is frozen
+        self.model = self.model.freeze_weights_decoder( [1])
+
         self.model = self.model.to(self.devices[0])
 
         if cf.compile_model:

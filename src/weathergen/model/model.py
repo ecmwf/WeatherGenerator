@@ -303,6 +303,31 @@ class Model(torch.nn.Module):
         return self
 
     #########################################
+    def freeze_weights_decoder(self, unfreeze_idxs):
+        """Freeze model weights"""
+
+        # freeze everything
+        for p in self.parameters():
+            p.requires_grad = False
+        self.q_cells.requires_grad = False
+
+        # unfreeze forecast part
+        for i, block in enumerate(self.embed_target_coords) :
+            if i in unfreeze_idxs :
+                for p in block.parameters():
+                    p.requires_grad = True
+        for i, block in enumerate(self.target_token_engines) :
+            if i in unfreeze_idxs :
+                for p in block.parameters():
+                    p.requires_grad = True
+        for i, block in enumerate(self.pred_heads) :
+            if i in unfreeze_idxs :
+                for p in block.parameters():
+                    p.requires_grad = True
+
+        return self
+
+    #########################################
     def print_num_parameters(self):
         cf = self.cf
         num_params_embed = [get_num_parameters(embed) for embed in self.embeds]
