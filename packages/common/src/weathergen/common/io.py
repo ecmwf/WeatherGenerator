@@ -240,7 +240,8 @@ class ZarrIO:
 class OutputBatchData:
     """Provide convenient access to adapt existing output data structures."""
 
-    # sample, stream, tensor(datapoint, channel) => datapoints is accross all datasets per stream
+    # sample, stream, tensor(datapoint, channel+coords)
+    # => datapoints is accross all datasets per stream
     sources: list[list]
 
     # fstep, stream, redundant dim (size 1), tensor(sample x datapoint, channel)
@@ -296,7 +297,7 @@ class OutputBatchData:
         start = sum(lens[:sample])
         n_samples = lens[sample]
 
-        _logger.info("extracting subset")
+        _logger.info(f"extracting subset: {key}")
         _logger.info(
             f"sample: start:{self.sample_start} rel_idx:{sample} range:{start}-{start + n_samples}"
         )
@@ -342,20 +343,31 @@ class OutputBatchData:
 
         if key.with_source:
             source_data = self.sources[sample][stream_idx].cpu().detach().numpy()
+
+            # split data into coords, geoinfo, channels
+            _source_coords = source_data[:, : -len(channels)]
+            source_coords = _source_coords[:, :2]
+            source_times = _source_coords[:, 2]
+            source_geoinfo = _source_coords[:, 2 : -len(channels)]
+
+            # TODO asserts that times, coords, geoinfos should match?
+
             source_dataset = OutputDataset(
                 "source",
                 key,
-                source_data,
-                times,
-                coords,
-                geoinfo,
+                source_data[:, -len(channels) :],
+                source_times,
+                source_coords,
+                source_geoinfo,
                 channels,
                 geoinfo_channels,
             )
 
-            assert len(channels) == source_data.shape[1], (
+            _logger.info(f"source shape: {source_dataset.data.shape}")
+            assert len(channels) == source_dataset.data.shape[1], (
                 "Number of channel names does not align with data"
             )
+            assert len(geoinfo_channels) == source_dataset.geoinfo
         else:
             source_dataset = None
 
