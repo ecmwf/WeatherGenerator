@@ -209,5 +209,6 @@ results
 playground/
 plots/
 .config/
-
+*.sh
+*.code-workspace
 
