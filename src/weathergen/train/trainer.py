@@ -227,9 +227,14 @@ class Trainer(TrainerBase):
 
         # TODO: learning rate schedule
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
-        kappa = cf.batch_size_per_gpu * cf.num_ranks
-        beta1 = max(0.5, 1.0 - kappa * (1.0 - 0.9))
-        beta2 = 1.0 - kappa * (1.0 - 0.999)
+        # aiming for beta1=0.9 and beta2=0.95 following the MAE paper https://arxiv.org/pdf/2111.06377
+        kappa = (
+            cf.batch_size_per_gpu * cf.num_ranks
+        )  # I doubt this holds for us from some anecdotal runs
+        beta1 = max(
+            0.5, 1.0 - kappa * (1.0 - 0.975)
+        )  # aiming for beta1 = 0.9 at one node, ie kappa=B=4
+        beta2 = 1.0 - kappa * (1.0 - 0.9875)  # aiming for beta2 = 0.95 at one node, ie B=4
         eps = 1e-08 / np.sqrt(kappa)
         # beta1, beta2, eps = 0.125, 0.125, 1e-08
         self.optimizer = torch.optim.AdamW(
