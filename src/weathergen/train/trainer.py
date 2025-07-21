@@ -35,7 +35,7 @@ from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TRAIN, VAL, TrainLogger
-from weathergen.utils.validation_io import write_output
+#from weathergen.utils.validation_io import write_output
 
 _logger = logging.getLogger(__name__)
 
