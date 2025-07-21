@@ -31,15 +31,35 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP
 from weathergen.model.utils import get_num_parameters
-from weathergen.utils.config import get_dtype
+from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.logger import logger
 
 
 class ModelParams(torch.nn.Module):
-    def __init__(self):
+    """Creation of query and embedding parameters of the model."""
+
+    def __init__(self) -> None:
         super(ModelParams, self).__init__()
 
-    def create(self, cf):
+    def create(self, cf: Config) -> "ModelParams":
+        """Creates positional embedding for each grid point for each stream used after stream
+        embedding, positional embedding for all stream assimilated cell-level local embedding,
+        initializing queries for local-to-global adapters, HEALPix neighbourhood based parameter
+        initializing for target prediction.
+
+        Sinusoidal positional encoding: Harmonic positional encoding based upon sine and cosine for
+            both per stream after stream embedding and per cell level for local assimilation.
+
+        HEALPix neighbourhood structure: Determine the neighbors for each cell and initialize each
+            with its own cell number as well as the cell numbers of its neighbors. If a cell has
+            fewer than eight neighbors, use its own cell number to fill the remaining slots.
+
+        Query len based parameter creation: Calculate parameters for the calculated token length at
+            each cell after local assimilation.
+
+        Args:
+            cf : Configuration
+        """
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**cf.healpix_level
         self.dtype = get_dtype(cf.attention_dtype)
@@ -113,10 +133,51 @@ class ModelParams(torch.nn.Module):
 
 ####################################################################################################
 class Model(torch.nn.Module):
-    #########################################
-    def __init__(self, cf, sources_size, targets_num_channels, targets_coords_size):
-        """Constructor"""
+    """WeatherGenerator model architecture
 
+    WeatherGenerator consists of the following components:
+
+    embeds: embedding networks: Stream specific embedding networks.
+
+    ae_local_blocks: Local assimilation engine: transformer based network to combine different input
+        streams per healpix cell.
+
+    ae_adapter: Assimilation engine adapter: Adapter to transform local assimilation engine
+        information to the global assimilation engine.
+
+    ae_global_blocks: Global assimilation engine: Transformer network alternating between local and
+        global attention based upon global attention density rate.
+
+    fe_blocks: Forecasting engine: Transformer network using the output of global attention to
+        advance the latent representation in time.
+
+    embed_target_coords: Embedding networks for coordinates: Initializes embedding networks tailored
+        for metadata embedded target coordinates. The architecture is either a linear layer or a
+        multi-layer perceptron, determined by the configuration of the embedding target coordinate
+        networks.
+
+    pred_adapter_kv: Prediction adapter: Adapter to transform the global assimilation/forecasting
+        engine output to the prediction engine. Uses an MLP if `cf.pred_adapter_kv` is True,
+        otherwise it uses an identity function.
+
+    target_token_engines: Prediction engine: Transformer based prediction network that generates
+        output corresponding to target coordinates.
+
+    pred_heads: Prediction head: Final layers using target token engines output for mapping target
+        coordinates to its physical space.
+    """
+
+    #########################################
+    def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size):
+        """
+        Args:
+            cf : Configuration with model parameters
+            sources_size : List of number of channels for models
+            targets_num_channels : List with size of each output sample for coordinates target
+                embedding
+            targets_coords_size : List with size of each input sample for coordinates target
+                embedding
+        """
         super(Model, self).__init__()
 
         self.healpix_level = cf.healpix_level
@@ -129,12 +190,14 @@ class Model(torch.nn.Module):
         self.targets_coords_size = targets_coords_size
 
     #########################################
-    def create(self):
+    def create(self) -> "Model":
+        """Create each individual module of the model"""
         cf = self.cf
 
         # separate embedding networks for differnt observation types
         self.embeds = EmbeddingEngine(cf, self.sources_size).create()
 
+        ##############
         # local assimilation engine
         self.ae_local_blocks = LocalAssimilationEngine(cf).create()
 
@@ -142,6 +205,7 @@ class Model(torch.nn.Module):
         # local -> global assimilation engine adapter
         self.ae_adapter = Local2GlobalAssimilationEngine(cf).create()
 
+        ##############
         # learnable queries
         if cf.ae_local_queries_per_cell:
             s = (self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed)
@@ -181,7 +245,6 @@ class Model(torch.nn.Module):
         self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells).create()
 
         ###############
-
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
         self.embed_target_coords = torch.nn.ModuleList()
@@ -288,8 +351,8 @@ class Model(torch.nn.Module):
         return self
 
     #########################################
-    def freeze_weights_forecast(self):
-        """Freeze model weights"""
+    def freeze_weights_forecast(self) -> "Model":
+        """Freezes core model weights and makes forecasting engine weights trainable"""
 
         # freeze everything
         for p in self.parameters():
@@ -303,7 +366,9 @@ class Model(torch.nn.Module):
         return self
 
     #########################################
-    def print_num_parameters(self):
+    def print_num_parameters(self) -> None:
+        """Print number of parameters for entire model and each module used to build the model"""
+
         cf = self.cf
         num_params_embed = [get_num_parameters(embed) for embed in self.embeds]
         num_params_total = get_num_parameters(self)
@@ -349,7 +414,13 @@ class Model(torch.nn.Module):
         print("-----------------")
 
     #########################################
-    def load(self, run_id, epoch=-1):
+    def load(self, run_id: str, epoch: str = -1) -> None:
+        """Loads model state from checkpoint and checks for missing and unused keys.
+        Args:
+            run_id : model_id of the trained model
+            epoch : The epoch to load. Default (-1) is the latest epoch
+        """
+
         path_run = Path(self.cf.model_path) / run_id
         epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"
         filename = f"{run_id}_{epoch_id}.chkpt"
@@ -381,7 +452,24 @@ class Model(torch.nn.Module):
         return tuple(preds_all[0])
 
     #########################################
-    def forward(self, model_params, batch, forecast_offset, forecast_steps):
+    def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
+        """Performs the forward pass of the model to generate forecasts
+
+        Tokens are processed through the model components, which were defined in the create method.
+        Args:
+            model_params : Query and embedding parameters
+            batch :
+                streams_data : Contains tokenized source data and target data for each dataset and
+                    each stream
+                source_cell_lens : Used to identify range of tokens to use from generated tokens in
+                    cell embedding
+                target_coords_idxs : Indices of target coordinates for each dataset.
+            forecast_offset : Starting index for iteration
+            forecast_steps : Number of forecast steps to calculate from forecast_offset
+        Returns:
+            A list containing all prediction results
+        """
+
         (streams_data, source_cell_lens, target_coords_idxs) = batch
 
         # embed
@@ -422,7 +510,15 @@ class Model(torch.nn.Module):
         return preds_all
 
     #########################################
-    def embed_cells(self, model_params, streams_data):
+    def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
+        """Embeds input data for each stream separately and rearranges it to cell-wise order
+        Args:
+            model_params : Query and embedding parameters
+            streams_data : Used to initialize first tokens for pre-processing
+        Returns:
+            Tokens for local assimilation
+        """
+
         source_tokens_lens = torch.stack(
             [
                 torch.stack(
@@ -469,7 +565,19 @@ class Model(torch.nn.Module):
         return tokens_all
 
     #########################################
-    def assimilate_local(self, model_params, tokens, cell_lens):
+    def assimilate_local(
+        self, model_params: ModelParams, tokens: torch.Tensor, cell_lens: torch.Tensor
+    ) -> torch.Tensor:
+        """Processes embedded tokens locally and prepares them for the global assimilation
+        Args:
+            model_params : Query and embedding parameters
+            tokens : Input tokens to be processed by local assimilation
+            cell_lens : Used to identify range of tokens to use from generated tokens in cell
+                embedding
+        Returns:
+            Tokens for global assimilation
+        """
+
         batch_size = (
             self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
         )
@@ -552,7 +660,15 @@ class Model(torch.nn.Module):
         return tokens_global
 
     #########################################
-    def assimilate_global(self, model_params, tokens):
+    def assimilate_global(self, model_params: ModelParams, tokens: torch.Tensor) -> torch.Tensor:
+        """Performs transformer based global assimilation in latent space
+        Args:
+            model_params : Query and embedding parameters (never used)
+            tokens : Input tokens to be pre-processed by global assimilation
+        Returns:
+            Latent representation of the model
+        """
+
         # global assimilation engine and adapter
         for block in self.ae_global_blocks:
             tokens = checkpoint(block, tokens, use_reentrant=False)
@@ -560,7 +676,18 @@ class Model(torch.nn.Module):
         return tokens
 
     #########################################
-    def forecast(self, model_params, tokens):
+    def forecast(self, model_params: ModelParams, tokens: torch.Tensor) -> torch.Tensor:
+        """Advances latent space representation in time
+
+        Args:
+            model_params : Query and embedding parameters (never used)
+            tokens : Input tokens to be processed by the model.
+        Returns:
+            Processed tokens
+        Raises:
+            ValueError: For unexpected arguments in checkpoint method
+        """
+
         for it, block in enumerate(self.fe_blocks):
             aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
             tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
@@ -568,7 +695,27 @@ class Model(torch.nn.Module):
         return tokens
 
     #########################################
-    def predict(self, model_params, fstep, tokens, streams_data, target_coords_idxs):
+    def predict(
+        self,
+        model_params: ModelParams,
+        fstep: int,
+        tokens: torch.Tensor,
+        streams_data,
+        target_coords_idxs,
+    ) -> list[torch.Tensor]:
+        """Predict outputs at the specific target coordinates based on the input weather state and
+        pre-training task and projects the latent space representation back to physical space.
+
+        Args:
+            model_params : Query and embedding parameters
+            fstep : Number of forecast steps
+            tokens : Tokens from global assimilation engine
+            streams_data : Used to initialize target coordinates tokens and index information
+            target_coords_idxs : Indices of target coordinates
+        Returns:
+            Prediction output tokens in physical representation for each target_coords.
+        """
+
         # fp32, i32 = torch.float32, torch.int32
         batch_size = (
             self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
