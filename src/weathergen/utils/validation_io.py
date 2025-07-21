@@ -26,22 +26,26 @@ def write_output(
     targets_times_all,
     targets_lens,
 ):
+    stream_names = [stream.name for stream in cf.streams]
     output_stream_names = cf.analysis_streams_output
     if output_stream_names is None:
-        output_stream_names = [stream.name for stream in cf.streams]
+        output_stream_names = stream_names
 
-    output_streams = {name: output_stream_names.index(name) for name in cf.analysis_streams_output}
+    output_streams = {name: stream_names.index(name) for name in output_stream_names}
 
-    _logger.info(f"Using output streams: {output_streams}")
-    # TODO: streams anemoi `source`, `target` commented out???
+    _logger.info(f"Using output streams: {output_streams} from streams: {stream_names}")
 
-    channels: list[list[str]] = [list(stream.val_target_channels)for stream in cf.streams]
+    channels: list[list[str]] = [list(stream.val_target_channels) for stream in cf.streams]
 
     geoinfo_channels = [[] for _ in cf.streams]  # TODO obtain channels
 
     # assume: is batch size guarnteed and constant:
     # => calculate global sample indices for this batch by offsetting by sample_start
     sample_start = batch_idx * cf.batch_size_validation_per_gpu
+
+    assert len(stream_names) == len(targets_all[0]), "data does not match number of streams"
+    assert len(stream_names) == len(preds_all[0]), "data does not match number of streams"
+    assert len(stream_names) == len(sources[0]), "data does not match number of streams"
 
     data = io.OutputBatchData(
         sources,

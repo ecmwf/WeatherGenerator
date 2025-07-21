@@ -333,6 +333,13 @@ class OutputBatchData:
         channels = self.channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
 
+        assert len(channels) == target_data.shape[1], (
+            "Number of channel names does not align with data"
+        )
+        assert len(channels) == preds_data.shape[1], (
+            "Number of channel names does not align with data"
+        )
+
         if key.with_source:
             source_data = self.sources[sample][stream_idx].cpu().detach().numpy()
             source_dataset = OutputDataset(
@@ -344,6 +351,10 @@ class OutputBatchData:
                 geoinfo,
                 channels,
                 geoinfo_channels,
+            )
+
+            assert len(channels) == source_data.shape[1], (
+                "Number of channel names does not align with data"
             )
         else:
             source_dataset = None
