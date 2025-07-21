@@ -162,6 +162,7 @@ class Trainer(Trainer_Base):
                 "shuffle": False,
                 "num_workers": cf.loader_num_workers,
                 "pin_memory": True,
+                "prefetch_factor": 16,
             }
             self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
             self.data_loader_validation = torch.utils.data.DataLoader(
@@ -511,6 +512,7 @@ class Trainer(Trainer_Base):
 
         for bidx, batch in enumerate(dataset_iter):
             with profiler.ProfilerSection(f"Train after enumerate", profile=cf.profile):
+                
                 forecast_steps = batch[-1]
                 batch = self.batch_to_device(batch)
 

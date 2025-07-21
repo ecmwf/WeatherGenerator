@@ -421,7 +421,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             local_start, local_end = self.rank * self.len, (self.rank + 1) * self.len
 
             worker_info = torch.utils.data.get_worker_info()
-
             if worker_info is None:
                 assert self.num_ranks == 1
                 iter_start = 0

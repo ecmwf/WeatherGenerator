@@ -185,16 +185,37 @@ def tokenize_window_space(
     geoinfos_padded = torch.cat([torch.zeros_like(geoinfos[0]).unsqueeze(0), n_geoinfos(geoinfos)])
     source_padded = torch.cat([torch.zeros_like(source[0]).unsqueeze(0), n_data(source)])
 
+    '''
+    # Check idxs_ord
+    idx_lengths = [len(idxs) for idxs in idxs_ord]
+    unique_lengths = set(idx_lengths)
+    print(f"idxs lengths: {unique_lengths}")
+
+    # Check hpy_verts_Rs
+    if isinstance(hpy_verts_Rs, list):
+        try:
+            R_tensor = torch.stack(hpy_verts_Rs)
+            print(f"hpy_verts_Rs shape after stack: {R_tensor.shape}")
+        except Exception as e:
+            print(f"❌ Cannot stack hpy_verts_Rs: {e}")
+    elif isinstance(hpy_verts_Rs, torch.Tensor):
+        print(f"hpy_verts_Rs shape: {hpy_verts_Rs.shape}")
+    else:
+        print("❌ hpy_verts_Rs is not a list or tensor")
+    '''
     # convert to local coordinates
     # TODO: how to vectorize it so that there's no list comprhension (and the Rs are not duplicated)
     # TODO: avoid that padded lists are rotated, which means potentially a lot of zeros
     if local_coords:
         fp32 = torch.float32
         posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])
+        #if len(set(len(idxs) for idxs in idxs_ord)) == 1:
+        #    coords_local = vectorized_n_coord(posr3, idxs_ord, hpy_verts_Rs, n_coords)
+        #else:
         coords_local = [
             n_coords(r3tos2(torch.matmul(R, posr3[idxs].transpose(1, 0)).transpose(1, 0)).to(fp32))
             for R, idxs in zip(hpy_verts_Rs, idxs_ord, strict=True)
-        ]
+            ]
     else:
         coords_local = torch.cat([torch.zeros_like(coords[0]).unsqueeze(0), coords])
         coords_local = [coords_local[idxs] for idxs in idxs_ord]
@@ -224,6 +245,23 @@ def tokenize_window_space(
 
     return tokens_cells
 
+
+def vectorized_n_coord(posr3, idxs_ord, hpy_verts_Rs, n_coords):
+
+    # Stack idxs_ord into a tensor
+    idxs_tensor = torch.stack([
+        idxs if isinstance(idxs, torch.Tensor) else torch.tensor(idxs, device=posr3.device)
+        for idxs in idxs_ord
+    ])  # [B, K]
+
+    posr3_batch = posr3[idxs_tensor]  # [B, K, 3]
+
+    posr3_batch_T = posr3_batch.transpose(1, 2)  # [B, 3, K]
+
+    rotated = torch.matmul(hpy_verts_Rs, posr3_batch_T)  # [B, 3, K]
+
+    rotated = rotated.transpose(1, 2)  # [B, K, 3]
+    return n_coords(r3tos2(rotated).to(torch.float32))  # [B, K, 2] or whatever shape n_coords 
 
 def tokenize_window_spacetime(
     stream_id,
