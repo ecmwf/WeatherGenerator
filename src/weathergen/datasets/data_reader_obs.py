@@ -220,6 +220,11 @@ class DataReaderObs(DataReaderBase):
         ReaderDatas (coords, geoinfos, data, datetimes)
         """
 
+        if len(channels_idx) == 0:
+            return ReaderData.empty(
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
+
         start_row = self.indices_start[idx]
         end_row = self.indices_end[idx]
 
