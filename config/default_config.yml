@@ -91,10 +91,10 @@ shuffle: True
 
 lr_scaling_policy: "sqrt"
 lr_start: 0.000001
-lr_max: 0.0001
+lr_max: 0.000075
 lr_final_decay: 0.000001
 lr_final: 0.0
-lr_steps_warmup: 256
+lr_steps_warmup: 512
 lr_steps_cooldown: 512
 lr_policy_warmup: "cosine"
 lr_policy_decay: "linear"
