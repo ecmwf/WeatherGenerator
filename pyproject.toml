@@ -11,7 +11,7 @@ requires-python = ">=3.12,<3.13"
 # TODO: split the plotting dependencies into their own dep groups, they are not required.
 dependencies = [
  'torch==2.6.0',
- 'numpy~=2.2',
+ 'numpy==1.26.4',
  'astropy_healpix~=1.1.2',
  'zarr~=2.17',
  'anemoi-datasets~=0.5.16',
@@ -25,7 +25,7 @@ dependencies = [
  "flash-attn; sys_platform == 'linux'",
  "polars~=1.25.2",
  "omegaconf~=2.3.0",
- "dask~=2025.5.1",
+ "dask==2024.2.0",
  "hatchling",
  "weathergen-common",
 ]
