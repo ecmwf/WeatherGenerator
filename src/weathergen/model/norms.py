@@ -123,7 +123,8 @@ class AdaLayerNormLayer(torch.nn.Module):
 
         self.dim = dim
         self.adaLN_modulation = nn.Sequential(
-            nn.Linear(dim_aux, 4 * dim_aux), SwiGLU(), nn.Linear(2 * dim_aux, 3 * dim, bias=True)
+            nn.SiLU(),
+            nn.Linear(dim_aux, 3 * dim, bias=True)
         )
 
         self.ln = nn.LayerNorm(dim, elementwise_affine=False, eps=norm_eps)

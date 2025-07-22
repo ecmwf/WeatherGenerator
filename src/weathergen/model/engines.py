@@ -413,12 +413,11 @@ class TargetPredictionEngine(nn.Module):
             "norm_eps": self.cf.norm_eps,
             "attention_dtype": get_dtype(self.cf.attention_dtype),
         }
-        self.adapter = nn.Sequential(
-                nn.Linear(self.cf.ae_global_dim_embed, self.dims_embed[0]*2),
-                SwiGLU(),
-                nn.LayerNorm(self.dims_embed[0])
-                )
         self.tte = nn.ModuleList()
+        self.in_norm = nn.LayerNorm(self.cf.ae_global_dim_embed)
+        self.dropout = nn.Dropout(0.2)
+        self.pos_embed = nn.Parameter(torch.zeros(1, 9, self.cf.ae_global_dim_embed))
+        dim_aux = self.cf.ae_global_dim_embed
         for ith, dim in enumerate(self.dims_embed[:-1]):
             next_dim = self.dims_embed[ith + 1]
             if self.cf.decoder_type == "PerceiverIO":
@@ -426,8 +425,8 @@ class TargetPredictionEngine(nn.Module):
                 self.tte.append(
                     CrossAttentionBlock(
                         dim_q=dim,
-                        dim_kv=self.dims_embed[0],
-                        dim_aux=self.dims_embed[0],
+                        dim_kv=dim_aux,
+                        dim_aux=dim_aux,
                         num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
                         with_self_attn=False,
                         with_adanorm=False,
@@ -439,7 +438,7 @@ class TargetPredictionEngine(nn.Module):
                 self.tte.append(
                     SelfAttentionBlock(
                         dim=dim,
-                        dim_aux=self.dims_embed[0],
+                        dim_aux=dim_aux,
                         num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
                         attention_kwargs=attention_kwargs,
                         with_adanorm=True,
@@ -450,7 +449,7 @@ class TargetPredictionEngine(nn.Module):
                     CrossAttentionBlock(
                         dim_q=dim,
                         dim_kv=self.cf.ae_global_dim_embed,
-                        dim_aux=self.dims_embed[0],
+                        dim_aux=dim_aux,
                         num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
                         with_self_attn=True,
                         with_adanorm=False,
@@ -462,8 +461,8 @@ class TargetPredictionEngine(nn.Module):
                 self.tte.append(
                     CrossAttentionBlock(
                         dim_q=dim,
-                        dim_kv=self.dims_embed[0],
-                        dim_aux=self.dims_embed[0],
+                        dim_kv=dim_aux,
+                        dim_aux=dim_aux,
                         num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
                         with_self_attn=True,
                         with_adanorm=True,
@@ -477,7 +476,7 @@ class TargetPredictionEngine(nn.Module):
                 )
 
     def forward(self, latent, output, latent_lens, output_lens):
-        latent = self.adapter(latent)
+        latent = self.dropout(self.in_norm(latent+self.pos_embed))
         for layer in self.tte:
             if isinstance(layer, CrossAttentionBlock):
                 output = checkpoint(
@@ -485,7 +484,7 @@ class TargetPredictionEngine(nn.Module):
                     x=output,
                     x_kv=(latent).flatten(0,1),
                     x_lens=output_lens,
-                    aux=latent[:,0].detach(),
+                    aux=latent[:,0],
                     x_kv_lens=latent_lens,
                     use_reentrant=False,
                 )
@@ -494,7 +493,7 @@ class TargetPredictionEngine(nn.Module):
                     layer,
                     x=output,
                     x_lens=output_lens,
-                    aux=latent[:,0].detach(),
+                    aux=latent[:,0],
                     use_reentrant=False,
                 )
         return output

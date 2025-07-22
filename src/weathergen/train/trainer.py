@@ -235,7 +235,7 @@ class Trainer(TrainerBase):
             0.5, 1.0 - kappa * (1.0 - 0.975)
         )  # aiming for beta1 = 0.9 at one node, ie kappa=B=4
         beta2 = 1.0 - kappa * (1.0 - 0.9875)  # aiming for beta2 = 0.95 at one node, ie B=4
-        eps = 1e-08 / np.sqrt(kappa)
+        eps = 2e-08 / np.sqrt(kappa)
         # beta1, beta2, eps = 0.125, 0.125, 1e-08
         self.optimizer = torch.optim.AdamW(
             self.ddp_model.parameters(),
