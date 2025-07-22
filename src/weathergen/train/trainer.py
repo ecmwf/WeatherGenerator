@@ -379,6 +379,8 @@ class Trainer(Trainer_Base):
         """
 
         #'''
+        # TODO: Remove this function and port functionality to write_validation(), which then
+        # extracts preds_all, targets_all,... itself directly from stream_data.
         # TODO: Undo list resorting
         # The following list operations realize a reshaping of the original tensors in streams_data
         # from shape [batch_sample][stream][fstep] into shape [fstep][stream][batch_sample]. When
@@ -434,7 +436,6 @@ class Trainer(Trainer_Base):
 
                 targets_lens[fstep][i_strm] += [target.shape[0]]
                 dn_data = self.dataset_val.denormalize_target_channels
-
 
                 f32 = torch.float32
                 preds_all[fstep][i_strm] += [dn_data(i_strm, pred.to(f32)).detach().cpu()]
@@ -671,6 +672,7 @@ class Trainer(Trainer_Base):
             ):
                 preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
 
+                # TODO: check compute_loss() calls in project and adapt to dataclass
                 loss, losses_all, stddev_all, _ = self.compute_loss(
                     self.loss_fcts,
                     cf.forecast_offset,

@@ -21,7 +21,7 @@ from weathergen.utils.train_logger import TRAIN, VAL, Stage
 _logger = logging.getLogger(__name__)
 
 
-class LossModule:
+class LossCalculator:
     def __init__(
         self,
         cf: DictConfig,
@@ -35,44 +35,27 @@ class LossModule:
         loss_fcts = cf.loss_fcts if stage == TRAIN else cf.loss_fcts_val
         self.loss_fcts = [[getattr(losses, name), w] for name, w in loss_fcts]
 
-        # self.stream_loss_weight = {} —> normalize
-        # self.channel_loss_weight = {} —> normalize
-    
     @staticmethod
-    def _construct_masks(
-        target_times_raw: np.array,
-        mask_nan: Tensor
-    ):
+    def _construct_masks(target_times_raw: np.array, mask_nan: Tensor):
         """
         Construct a list of masks for intermediate time steps within one forecast step. Only applies for specific datasets.
         """
         masks = []
         t_unique = np.unique(target_times_raw)
         for t in t_unique:
-            mask_t = Tensor(t==target_times_raw).to(mask_nan)
+            mask_t = Tensor(t == target_times_raw).to(mask_nan)
             masks.append(torch.logical_and(mask_t, mask_nan))
         return masks
-    
+
     @staticmethod
-    def _compute_loss_with_mask(
-        target,
-        pred,
-        mask,
-        i_ch,
-        loss_fct,
-        ens
-    ):
+    def _compute_loss_with_mask(target, pred, mask, i_ch, loss_fct, ens):
         # only compute loss if there are non-NaN values
         if mask.sum().item() > 0:
             return loss_fct(
                 target[mask, i_ch],
                 pred[:, mask, i_ch],
                 pred[:, mask, i_ch].mean(0),
-                (
-                    pred[:, mask, i_ch].std(0)
-                    if ens
-                    else torch.zeros(1, device=pred.device)
-                ),
+                (pred[:, mask, i_ch].std(0) if ens else torch.zeros(1, device=pred.device)),
             )
         else:
             return 0
@@ -98,13 +81,15 @@ class LossModule:
         }  # Create tensor for each stream
         # assert len(targets) == len(preds) and len(preds) == len(self.cf.streams)
 
-        i_batch = 0 # TODO: Iterate over batch dimension here in future
+        i_batch = 0  # TODO: Iterate over batch dimension here in future
         for i_strm, strm in enumerate(self.cf.streams):
-            targets = streams_data[i_batch][i_strm].target_tokens[self.cf.forecast_offset:]
-            #assert len(targets) == self.cf.forecast_steps + 1, "Length of targets does not match number of forecast_steps."
-            
-            for fstep, target in enumerate(targets):    
+            targets = streams_data[i_batch][i_strm].target_tokens[self.cf.forecast_offset :]
+            assert len(targets) == self.cf.forecast_steps + 1, (
+                "Length of targets does not match number of forecast_steps."
+            )
+            for fstep, target in enumerate(targets):
                 pred = preds[fstep][i_strm]
+                # Only compute loss if target and prediction exists
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
                     continue
 
@@ -116,12 +101,14 @@ class LossModule:
                     strm["channel_weight"] if "channel_weight" in strm else np.ones(num_channels)
                 )
                 # in validation mode, always unweighted loss is computed
-                obs_loss_weight = 1.0 if self.stage == VAL else obs_loss_weight
-                channel_loss_weight = (
-                    np.ones(num_channels) if self.stage == VAL else channel_loss_weight
-                )
+                if self.stage == VAL:
+                    obs_loss_weight = 1.0
+                    channel_loss_weight = (
+                        np.ones(num_channels) if self.stage == VAL else channel_loss_weight
+                    )
 
-                # extract data/coords and remove token dimension if it exists
+                # extract data/coords and remove token dimension if it exists. Shape of pred is
+                # [ensemble, target_points, target_channels]
                 pred = pred.reshape([pred.shape[0], *target.shape])
                 assert pred.shape[1] > 0
 
@@ -130,23 +117,26 @@ class LossModule:
                     continue
                 ens = pred.shape[0] > 1
 
-                tok_spacetime = strm["tokenize_spacetime"] if "tokenize_spacetime" in strm else False
+                tok_spacetime = (
+                    strm["tokenize_spacetime"] if "tokenize_spacetime" in strm else False
+                )
                 # accumulate loss from different loss functions and channels
                 for i_lfct, (loss_fct, w) in enumerate(self.loss_fcts):
                     # compute per channel loss
                     val = torch.tensor(0.0, device=self.device, requires_grad=True)
                     ctr_chs = 0.0
 
-                    # TODO: Dataclass as new issue                            
+                    # TODO: Dataclass as new issue
 
                     # loop over all channels
                     for i_ch in range(target.shape[-1]):
-
                         if tok_spacetime:
                             # if stream is internal time step, build masks separately per step
                             masks = self._construct_masks(
-                                target_times_raw=streams_data[i_batch][i_strm].target_times_raw[self.cf.forecast_offset + fstep],
-                                mask_nan=mask_nan[:, i_ch]
+                                target_times_raw=streams_data[i_batch][i_strm].target_times_raw[
+                                    self.cf.forecast_offset + fstep
+                                ],
+                                mask_nan=mask_nan[:, i_ch],
                             )
                             for mask in masks:
                                 temp = self._compute_loss_with_mask(
@@ -155,7 +145,7 @@ class LossModule:
                                     mask=mask,
                                     i_ch=i_ch,
                                     loss_fct=loss_fct,
-                                    ens=ens
+                                    ens=ens,
                                 )
                                 val = val + channel_loss_weight[i_ch] * temp
                                 losses_all[strm.name][i_ch, i_lfct] += temp.item()
@@ -163,12 +153,12 @@ class LossModule:
                         else:
                             mask = mask_nan[:, i_ch]
                             temp = self._compute_loss_with_mask(
-                                target=target, 
+                                target=target,
                                 pred=pred,
                                 mask=mask,
                                 i_ch=i_ch,
                                 loss_fct=loss_fct,
-                                ens=ens
+                                ens=ens,
                             )
                             val = val + channel_loss_weight[i_ch] * temp
                             losses_all[strm.name][i_ch, i_lfct] += temp.item()
