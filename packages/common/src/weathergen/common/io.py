@@ -206,6 +206,26 @@ class OutputItem:
                 msg = f"Missing source dataset for item: {self.key.path}"
                 raise ValueError(msg)
 
+class RolloutOutputItem:
+    def __init__(
+        self,
+        prediction: OutputDataset,
+        source: OutputDataset | None = None,
+    ):
+        """Collection of possible datasets for one output item."""
+        self.prediction = prediction
+        self.source = source
+
+        self.key = self.prediction.item_key
+
+        self.datasets = [self.prediction]
+
+        if self.key.with_source:
+            if self.source:
+                self.datasets.append(self.source)
+            else:
+                msg = f"Missing source dataset for item: {self.key.path}"
+                raise ValueError(msg)
 
 class ZarrIO:
     """Manage zarr storage hierarchy."""
@@ -507,7 +527,6 @@ class RolloutOutputBatchData:
 
         datapoints = slice(start, start + n_samples)
 
-        target_data = self.targets[forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
         preds_data = (
             self.predictions[forecast_step][stream_idx][0]
             .transpose(1, 0)
@@ -546,9 +565,8 @@ class RolloutOutputBatchData:
             )
         else:
             source_dataset = None
-        return OutputItem(
+        return RolloutOutputItem(
             source=source_dataset,
-            target=None,
             prediction=OutputDataset(
                 "prediction",
                 key,
