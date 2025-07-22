@@ -12,6 +12,6 @@ num_epochs: 2
 
 forecast_offset : 1
 forecast_steps: 0
-foercast_freeze_model : False
+forecast_freeze_model : False
 forecast_delta_hrs: 0
 istep : 0
