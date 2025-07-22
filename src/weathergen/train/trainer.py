@@ -144,7 +144,7 @@ class Trainer(TrainerBase):
             cf,
             cf.start_date_val,
             cf.end_date_val,
-            cf.batch_size_validation,
+            cf.batch_size_validation_per_gpu,
             cf.samples_per_validation,
             train_logger=self.train_logger,
             stage=VAL,
@@ -153,20 +153,20 @@ class Trainer(TrainerBase):
 
         self.dataset_rollout.rollout_reset(cf.rollout_start_dates, cf.rollout_type)
 
+        print("Forecast steps calculator ", self.dataset_rollout.perms_forecast_dt)
+
         # make sure number of loaders does not exceed requested samples
         loader_num_workers = min(cf.samples_per_validation, cf.loader_num_workers)
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
             "shuffle": False,
-            "num_workers": 1, #loader_num_workers,
+            "num_workers": min(len(self.dataset_rollout),loader_num_workers),
             "pin_memory": True,
         }
         self.data_loader_rollout = torch.utils.data.DataLoader(
             self.dataset_rollout, **loader_params, sampler=None
         )
-
-        print(self.dataset_rollout.perms_forecast_dt)
 
         sources_size = self.dataset_rollout.get_sources_size()
         targets_num_channels = self.dataset_rollout.get_targets_num_channels()
@@ -769,20 +769,14 @@ class Trainer(TrainerBase):
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(
-                total=len(self.data_loader_rollout), disable=self.cf.with_ddp
+                total=len(self.data_loader_rollout), disable= self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_rollout_iter):
                     forecast_steps = batch[-1]
                     batch = self.batch_to_device(batch)
                     streams_data = batch[0]
 
-                    print("collecting batch data")
-
-                    #losses_all = torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
-                    #stddev_all = torch.zeros(len(cf.streams)) * torch.nan
-
-
-                    # evaluate model
+                    # rollout model
                     with torch.autocast(
                         device_type="cuda",
                         dtype=self.mixed_precision_dtype,
@@ -819,7 +813,6 @@ class Trainer(TrainerBase):
                                         self.cf.streams,
                                         strict=False)):
 
-                                print(fstep,targets_times_raw_rt[fstep][i_obs], preds[fstep][i_obs].shape)
                                 preds_all[fstep][i_obs] += [dn_data(i_obs, preds[fstep][i_obs].to(torch.float32)).detach().cpu()]
                                 targets_lens[fstep][i_obs] += [target_coords.shape[0]]
                                 
