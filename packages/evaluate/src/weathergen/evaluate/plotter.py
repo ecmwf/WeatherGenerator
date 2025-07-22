@@ -167,6 +167,8 @@ class Plotter(object):
             fig = plt.figure(dpi=self.dpi_val)
             ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
             ax.coastlines()   
+            print(data)
+            print(select_var)
             ds = data.sel(select_var).compute()
             scatter_plt = ax.scatter(ds["lon"], ds["lat"], c=ds,
                                         cmap='coolwarm', s=1, transform=ccrs.PlateCarree())
