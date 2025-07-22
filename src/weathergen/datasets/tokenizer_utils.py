@@ -196,10 +196,13 @@ def tokenize_window_space(
     if local_coords:
         fp32 = torch.float32
         posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])
-        coords_local = [
-            n_coords(r3tos2(torch.matmul(R, posr3[idxs].transpose(1, 0)).transpose(1, 0)).to(fp32))
-            for R, idxs in zip(hpy_verts_rots, idxs_ord, strict=True)
-        ]
+        if len(set(len(idxs) for idxs in idxs_ord)) == 1:
+            coords_local = vectorized_n_coord(posr3, idxs_ord, hpy_verts_rots, n_coords)
+        else:
+            coords_local = [
+                n_coords(r3tos2(torch.matmul(R, posr3[idxs].transpose(1, 0)).transpose(1, 0)).to(fp32))
+                for R, idxs in zip(hpy_verts_rots, idxs_ord, strict=True)
+            ]
     else:
         coords_local = torch.cat([torch.zeros_like(coords[0]).unsqueeze(0), coords])
         coords_local = [coords_local[idxs] for idxs in idxs_ord]
@@ -231,6 +234,22 @@ def tokenize_window_space(
 
     return tokens_cells
 
+def vectorized_n_coord(posr3, idxs_ord, hpy_verts_Rs, n_coords):
+
+    # Stack idxs_ord into a tensor
+    idxs_tensor = torch.stack([
+        idxs if isinstance(idxs, torch.Tensor) else torch.tensor(idxs, device=posr3.device)
+        for idxs in idxs_ord
+    ])  # [B, K]
+
+    posr3_batch = posr3[idxs_tensor]  # [B, K, 3]
+
+    posr3_batch_T = posr3_batch.transpose(1, 2)  # [B, 3, K]
+
+    rotated = torch.matmul(hpy_verts_Rs, posr3_batch_T)  # [B, 3, K]
+
+    rotated = rotated.transpose(1, 2)  # [B, K, 3]
+    return n_coords(r3tos2(rotated).to(torch.float32))  # [B, K, 2] or whatever shape n_coords 
 
 def tokenize_window_spacetime(
     stream_id,
