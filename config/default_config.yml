@@ -1,5 +1,4 @@
 streams_directory: "./config/streams/streams_anemoi/"
-# streams_directory: "./config/streams/streams_anemoi_era5_split/"
 
 embed_orientation: "channels"
 embed_local_coords: True
@@ -85,18 +84,18 @@ sampling_rate_target: 1.0
 # include a masking strategy here, currently only supporting "random" and "block"
 masking_strategy: "random"
 
-num_epochs: 24
+num_epochs: 32
 samples_per_epoch: 4096
 samples_per_validation: 512
 shuffle: True
 
 lr_scaling_policy: "sqrt"
 lr_start: 0.000001
-lr_max: 0.00005
+lr_max: 0.0001
 lr_final_decay: 0.000001
 lr_final: 0.0
 lr_steps_warmup: 256
-lr_steps_cooldown: 4096
+lr_steps_cooldown: 512
 lr_policy_warmup: "cosine"
 lr_policy_decay: "linear"
 lr_policy_cooldown: "linear"
