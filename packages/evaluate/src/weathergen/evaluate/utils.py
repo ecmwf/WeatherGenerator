@@ -14,9 +14,11 @@ from tqdm import tqdm
 import json
 import xarray as xr
 import numpy as np
+from omegaconf.listconfig import ListConfig
 
 from weathergen.common.io import ZarrIO
 from score import VerifiedData, get_score
+from score_utils import to_list
 from plotter import Plotter, LinePlots
 
 _logger = logging.getLogger(__name__)
@@ -41,21 +43,20 @@ def get_data(cfg: dict, model_id: str, stream: str, samples: list[int] = None,
 
     fname_zarr = model_dir.joinpath(f"{model_id}/validation_epoch{model["epoch"]:05d}_rank{model["rank"]:04d}.zarr")
         
-    assert (fname_zarr.exists() and fname_zarr.is_dir()), f"Check Zarr input: {fname_zarr}"
-
+    if not fname_zarr.exists() or not fname_zarr.is_dir():
+        _logger.error(f"Zarr file {fname_zarr} does not exist or is not a directory.")
+        raise FileNotFoundError(f"Zarr file {fname_zarr} does not exist or is not a directory.")
 
     with ZarrIO(fname_zarr) as zio:
         zio_forecast_steps = zio.forecast_steps
         stream_dict = model.streams[stream]
+        all_channels = peek_tar_channels(zio, stream, zio_forecast_steps[0])
         _logger.info(f"MODEL {model_id}: Processing stream {stream}...")
 
         fsteps    = stream_dict.get("forecast_step", zio_forecast_steps) if fsteps is None else fsteps 
         samples   = [int(sample) for sample in zio.samples] if samples is None else samples
-        channels = (
-            [ch for ch in stream_dict.get("channels") if ch in to_list(channels)]
-            if channels
-            else stream_dict.get("channels")
-        )
+        channels = channels if channels is not None else stream_dict.get("channels", all_channels) 
+        channels = to_list(channels)
 
         da_tars, da_preds = [], []
 
@@ -86,7 +87,8 @@ def get_data(cfg: dict, model_id: str, stream: str, samples: list[int] = None,
             )
             da_tars_fs  = xr.concat(da_tars_fs , dim="ipoint")
             da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
-            if channels != stream_dict.get("channels"):
+
+            if set(channels) != set(all_channels):
                 _logger.debug(
                 f"Restricting targets and predictions to channels {channels} for stream {stream}..."
                 )
@@ -137,7 +139,8 @@ def calc_scores_per_stream(cfg: dict, model_id: str, stream: str, metrics: list[
 
     _logger.debug(f"Running computation of metrics for stream {stream}...")
     combined_metrics = combined_metrics.compute()
-    print(combined_metrics)
+    combined_metrics = scalar_coord_to_dim(combined_metrics, "channel")
+
     _logger.info(f"Scores for model {model_id} - {stream} calculated successfully.")
 
     return combined_metrics, points_per_sample
@@ -171,13 +174,16 @@ def plot_data(cfg: str, model_id: str, stream: str, stream_dict: dict):
 
     da_tars, da_preds = get_data(cfg, model_id, stream, plot_samples, plot_fsteps, plot_vars)
 
+    if not plot_samples:
+        plot_samples = set(da_tars.sample.values)
+
     assert np.array_equal(da_tars.sample.values, da_preds.sample.values), f"Samples in targets and predictions do not match for model {model_id} and stream"
     assert np.array_equal(da_tars.forecast_step.values, da_preds.forecast_step.values), f"Forecast steps in targets and predictions do not match for model {model_id} and stream {stream}"
     assert np.array_equal(da_tars.channel.values, da_preds.channel.values), f"Channels in targets and predictions do not match for model {model_id} and stream {stream}"
     
     plot_names = []
     for fstep in da_tars.forecast_step.values:
-        for sample in tqdm(da_tars.sample.values, desc=f"Plotting {model_id} - {stream} - fstep {fstep}"):
+        for sample in tqdm(plot_samples, desc=f"Plotting {model_id} - {stream} - fstep {fstep}"):
             plots = []
 
             select = {"sample": sample, 
@@ -336,3 +342,57 @@ def plot_summary(cfg: dict, scores_dict: dict):
                     _logger.info(f"Creating plot for {metric} - {stream} - {var}.")
                     name = "_".join([metric, stream, var])
                     plotter.plot(selected_data, labels, tag = name, x_dim="forecast_step", y_dim = metric)
+
+############# Utility functions ############
+
+def peek_tar_channels(zio: ZarrIO, stream: str, fstep: int = 0) -> list[str]:
+    """
+    Peek the channels of a target stream in a ZarrIO object.
+
+    Parameters
+    ----------
+    zio : 
+        The ZarrIO object containing the tar stream.
+    stream : 
+        The name of the tar stream to peek.
+    fstep :  
+        The forecast step to peek. Default is 0.
+    Returns
+    -------
+    channels : 
+        A list of channel names in the tar stream.
+    """
+    if not isinstance(zio, ZarrIO):
+        raise TypeError("zio must be an instance of ZarrIO")
+
+    dummy_out = zio.get_data(0, stream, fstep)
+    channels = dummy_out.target.channels
+    _logger.debug(f"Peeked channels for stream {stream}: {channels}")
+
+    return channels
+
+def scalar_coord_to_dim(da, name, axis=-1):
+    """
+    Convert a scalar coordinate to a dimension in an xarray DataArray.
+    If the coordinate is already a dimension, it is returned unchanged.
+    
+    Parameters
+    ----------
+    da : xarray.DataArray
+        The DataArray to modify.
+    name : str
+        The name of the coordinate to convert.
+    axis : int, optional
+        The axis along which to expand the dimension. Default is -1 (last axis).
+    Returns
+    -------
+    xarray.DataArray
+        The modified DataArray with the scalar coordinate converted to a dimension.
+    """
+    if name in da.dims:
+        return da  # already a dimension
+    if name in da.coords and da.coords[name].ndim == 0:
+        val = da.coords[name].item()
+        da = da.drop_vars(name)
+        da = da.expand_dims({name: [val]}, axis=axis)
+    return da
