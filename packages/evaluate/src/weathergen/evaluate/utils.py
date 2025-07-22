@@ -169,9 +169,8 @@ def plot_data(cfg: str, model_id: str, stream: str, stream_dict: dict):
     plotter = Plotter(cfg, model_id)
 
     plot_samples  = plot_settings.get("sample", None)
-    plot_fsteps   = stream_dict.get("forecast_step" , None)
+    plot_fsteps   = stream_dict.get("forecast_step")
     plot_vars     = stream_dict.get("channels", None)
-
     da_tars, da_preds = get_data(cfg, model_id, stream, plot_samples, plot_fsteps, plot_vars)
 
     if not plot_samples:
@@ -180,9 +179,12 @@ def plot_data(cfg: str, model_id: str, stream: str, stream_dict: dict):
     assert np.array_equal(da_tars.sample.values, da_preds.sample.values), f"Samples in targets and predictions do not match for model {model_id} and stream"
     assert np.array_equal(da_tars.forecast_step.values, da_preds.forecast_step.values), f"Forecast steps in targets and predictions do not match for model {model_id} and stream {stream}"
     assert np.array_equal(da_tars.channel.values, da_preds.channel.values), f"Channels in targets and predictions do not match for model {model_id} and stream {stream}"
-    
+
+    plot_vars = da_tars.channel.values.tolist()
+    plot_samples = da_tars.sample.values.tolist()
+
     plot_names = []
-    for fstep in da_tars.forecast_step.values:
+    for fstep in plot_fsteps:
         for sample in tqdm(plot_samples, desc=f"Plotting {model_id} - {stream} - fstep {fstep}"):
             plots = []
 
@@ -214,31 +216,33 @@ def metric_list_to_json(
     metric_dir: Path,
     run_id: str,
     epoch: int,
+    rank: int = 0,  # Add rank so it matches filename expectations
 ):
     """
-    Write the evaluation results collected in a list of xarray DataArrays for the metrics to to stream- and metric-specific JSON files.
+    Write the evaluation results collected in a list of xarray DataArrays for the metrics
+    to stream- and metric-specific JSON files.
 
     Parameters
     ----------
     metrics_list : list[xr.DataArray]
-        A list of xarray DataArrays, each containing metrics for a specific stream.
+        Metrics per stream.
     npoints_sample_list : list[xr.DataArray]
-        A list of xarray DataArrays, each containing the number of points per sample for the corresponding stream.
+        Number of points per sample per stream.
     streams : list[str]
-        A list of stream names corresponding to the DataArrays in metrics_list and npoints_sample_list.
+        Stream names.
     metric_dir : Path
-        The directory where the JSON files will be saved.
+        Output directory.
     run_id : str
-        The ID of the inference run to evaluate.
+        Identifier of the inference run.
     epoch : int
-        The epoch number of the inference run.
+        Epoch number.
+    rank : int
+        Rank ID (default: 0), added to match retrieval expectations.
     """
-
     assert len(metrics_list) == len(npoints_sample_list) == len(streams), (
         "The lengths of metrics_list, npoints_sample_list, and streams must be the same."
     )
 
-    # Ensure the save directory exists
     metric_dir.mkdir(parents=True, exist_ok=True)
 
     for s_idx, stream in enumerate(streams):
@@ -247,22 +251,14 @@ def metric_list_to_json(
             npoints_sample_list[s_idx],
         )
 
-        _logger.debug(f"Processing metrics from stream {stream}...")
-
         for metric in metrics_stream.coords["metric"].values:
-            _logger.debug(f"Processing metric {metric} of stream {stream}...")
-
-            # Select the metric data for the current stream and convert to a xarray Dataset
             metric_now = metrics_stream.sel(metric=metric)
-            metric_ds = xr.Dataset(
-                {"metric": metric_now, "n_datapoints": npoints_sample_stream}
-            )
+            # Save as individual DataArray, not Dataset
+            metric_now.attrs["npoints_per_sample"] = npoints_sample_stream.values.tolist()
+            metric_dict = metric_now.to_dict()
 
-            # Convert the Dataset to a dictionary
-            metric_dict = metric_ds.to_dict()
-
-            # Save the results to a JSON file
-            save_path = metric_dir / f"{run_id}_{stream}_{metric}_epoch{epoch:05d}.json"
+            # Match the expected filename pattern
+            save_path = metric_dir / f"{metric}_{run_id}_{stream}_epoch{epoch:05d}_rank{rank:04d}.json"
 
             _logger.info(f"Saving results to {save_path}")
             with open(save_path, "w") as f:
@@ -272,28 +268,38 @@ def metric_list_to_json(
         f"Saved all results of inference run {run_id} - epoch {epoch:d} successfully to {metric_dir}."
     )
 
-
 def retrieve_metric_from_json(dir: str, model_id: str, stream: str, metric: str, epoch: int, rank: int):
     """
     Retrieve the score for a given model, stream, metric, epoch, and rank from a JSON file.
-    :param dir: Directory where the score files are stored.
-    :param model_id: Model identifier.
-    :param stream: Stream name.
-    :param metric: Metric name.
-    :param epoch: Epoch number.
-    :param rank: Rank number.
-    :return: xarray DataArray containing the score.
+
+    Parameters
+    ----------
+    dir : str
+        Directory where JSON files are stored.
+    model_id : str
+        Model/run identifier.
+    stream : str
+        Stream name.
+    metric : str
+        Metric name.
+    epoch : int
+        Epoch number.
+    rank : int
+        Rank ID.
+
+    Returns
+    -------
+    xr.DataArray
+        The metric DataArray.
     """
-    
-    #TODO adapt this to JSON output
-    score_path = Path(f"{dir}/{metric}_{model_id}_{stream}_epoch{epoch:05d}_rank{rank:04d}.json")
+    score_path = Path(dir) / f"{metric}_{model_id}_{stream}_epoch{epoch:05d}_rank{rank:04d}.json"
     _logger.debug(f"Looking for: {score_path}")
     if score_path.exists():
         with open(score_path, "r") as f:
             data_dict = json.load(f)
             return xr.DataArray.from_dict(data_dict)
     else:
-        raise FileNotFoundError (f"File {score_path} not found in the archive.")
+        raise FileNotFoundError(f"File {score_path} not found in the archive.")
 
 def plot_summary(cfg: dict, scores_dict: dict):
     """

@@ -1,6 +1,6 @@
 verbose: true
 model_dir : "./results/"
-output_plotting_dir: "./test/"
+output_plotting_dir: "./plots/"
 output_scores_dir : "./jsons/"
 image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
 dpi_val : 300
@@ -13,19 +13,19 @@ evaluation:
 
 #MTM models
 model_ids :
-  # wz9rbl3w:
-  #   streams:
-  #     ERA5:
-  #       forecast_step: [0]
-  #       variables: ["2t", "10u"]
-  #       evaluation: true
-  #       plotting: 
-  #         sample: [1, 2, 3]
-  #         plot_maps: true
-  #         plot_histograms: false
-  #   label: "MTM ERA5"
-  #   epoch: 0
-  #   rank: 0
+  wz9rbl3w:
+     streams:
+       ERA5:
+         forecast_step: [0]
+         channels: ["2t", "10u"]
+         evaluation: true
+         plotting: 
+           sample: [1, 2, 3]
+           plot_maps: false
+           plot_histograms: false
+     label: "MTM ERA5"
+     epoch: 0
+     rank: 0
     
   vy2d4be7:
     label: "forecast ERA5"
@@ -33,19 +33,19 @@ model_ids :
     rank: 0
     streams:
       ERA5:
-        forecast_step: [0]
-        variables: ["2t", "10u"]
+        # forecast_step: [0]
+        channels: ["2t", "10u"]
         evaluation: true
         plotting: 
           sample: [0]
-          plot_maps: true
-          plot_histograms: true 
+          plot_maps: false
+          plot_histograms: false 
       NPPATMS:
-        forecast_step: [1]
-        variables: ["obsvalue_rawbt_1", "obsvalue_rawbt_5"]
+        forecast_step: [1, 2]
+        channels: ["obsvalue_rawbt_1", "obsvalue_rawbt_5"]
         evaluation: true
         plotting: 
           sample: [0]
-          plot_maps: true
-          plot_histograms: true
+          plot_maps: false
+          plot_histograms: false
       

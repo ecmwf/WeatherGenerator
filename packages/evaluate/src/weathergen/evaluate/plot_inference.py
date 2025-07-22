@@ -80,15 +80,13 @@ if __name__ == "__main__":
                 for metric in metrics:
                     try: 
                         metric_data = retrieve_metric_from_json(out_scores_dir, model_id, stream, metric, model.epoch, model.rank)
-
                         scores_dict[metric][stream][model_id] = metric_data
                     except (FileNotFoundError, KeyError, ValueError) as e:
                         metrics_to_compute.append(metric)
-                
                 if metrics_to_compute:                
                     all_metrics, points_per_sample = calc_scores_per_stream(cfg, model_id, stream, metrics_to_compute)
 
-                    metric_list_to_json([all_metrics], [points_per_sample], [stream], out_scores_dir, model_id, model.epoch)
+                    metric_list_to_json([all_metrics], [points_per_sample], [stream], out_scores_dir, model_id, model.epoch, model.rank)
 
                     all_metrics = all_metrics.compute()
                     all_metrics = all_metrics.mean(dim="sample")
