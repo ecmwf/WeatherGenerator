@@ -154,13 +154,28 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         (t_idxs, dtr) = self._get_dataset_idxs(idx)
 
-        if self.ds is None or self.len == 0 or len(t_idxs) == 0 or data_type="source":
-            return ReaderData.empty(
-                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
-            )
-
+        if self.ds is None or self.len == 0 or len(t_idxs) == 0:
+            if data_type == "source":
+                return ReaderData.empty(
+                    num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+                )
             
+        # construct lat/lon coords
+        latlon = np.concatenate(
+            [
+                np.expand_dims(self.latitudes, 0),
+                np.expand_dims(self.longitudes, 0),
+            ],
+            axis=0,
+        ).transpose()
+
+        # repeat latlon len(t_idxs) times
+        coords = np.vstack((latlon,) * ( len(t_idxs) 
+                                         if len(t_idxs) != 0  
+                                         else self.time_window_handler.t_window_len//self.ds.frequency)) 
+        
         if len(t_idxs) > 0:
+            
             didx_start = t_idxs[0]
             # End is inclusive
             didx_end = t_idxs[-1] + 1
@@ -180,31 +195,23 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         else:
             didx_start = self.data_start_time + idx*self.ds.frequency
-            didx_end = self.data_start_time + (idx+ self.tw_handler.t_window_len//self.ds.frequecny + 1)*self.ds.frequency
+            didx_end = self.data_start_time + (idx + self.time_window_handler.t_window_len//self.ds.frequency)*self.ds.frequency
 
-            data = np.zeros((0,len(channels_idx)),dtype=np.float32)
-
-        # construct lat/lon coords
-        latlon = np.concatenate(
-            [
-                np.expand_dims(self.latitudes, 0),
-                np.expand_dims(self.longitudes, 0),
-            ],
-            axis=0,
-        ).transpose()
-        # repeat latlon len(t_idxs) times
-        coords = np.vstack((latlon,) * len(t_idxs))
+            data = np.zeros((coords.shape[0],len(channels_idx)),dtype=np.float32)
 
         # empty geoinfos for anemoi
         geoinfos = np.zeros((len(data), 0), dtype=data.dtype)
 
         # date time matching #data points of data
         # Assuming a fixed frequency for the dataset
-        datetimes = np.repeat(
-                        self.ds.dates[didx_start:didx_end]
-                        if len(t_idxs) > 0 
-                        else np.arange(didx_start,didx_end,self.ds.frequency),
-                        len(data) // len(t_idxs))
+
+        if len(t_idxs) == 0:
+            dates = np.arange(didx_start,didx_end,self.ds.frequency)
+            datetimes = np.repeat(dates,len(self.latitudes))
+        else:
+            datetimes = np.repeat(
+                            self.ds.dates[didx_start:didx_end],
+                            len(data) // len(t_idxs))
     
         rd = ReaderData(
             coords=coords,
@@ -212,6 +219,7 @@ class DataReaderAnemoi(DataReaderTimestep):
             data=data,
             datetimes=datetimes,
         )
+        
         check_reader_data(rd, dtr)
 
         return rd

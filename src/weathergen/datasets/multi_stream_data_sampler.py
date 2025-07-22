@@ -293,7 +293,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.perms_forecast_dt = ((end_date // self.time_window_handler.t_window_len) 
                             if end_date % self.time_window_handler.t_window_len
                             else (end_date // self.time_window_handler.t_window_len)+1)*np.ones(len(dates), dtype=np.int64)
-        pass
 
     ###################################################
     def denormalize_source_channels(self, obs_id, data):
@@ -318,9 +317,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         iter_start, iter_end = self.worker_workset()
         _logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={self.len}")
 
-        
-        print("reached inside iter function")
-
         if not self.is_rollout:
             # create new shuffeling
             self.reset()
@@ -332,7 +328,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # idx_raw is used to index into the dataset; the decoupling is needed
         # since there are empty batches
         idx_raw = iter_start
-        print(f"idx_raw reached {idx_raw} ")
+        
         for i, _bidx in enumerate(range(iter_start, iter_end, self.batch_size)):
             # forecast_dt needs to be constant per batch (amortized through data parallel training)
             forecast_dt = self.perms_forecast_dt[i]
@@ -343,7 +339,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             while len(batch) < self.batch_size:
                 idx: TIndex = self.perms[idx_raw % self.perms.shape[0]]
                 idx_raw += 1
-                print("idx", idx)
                 time_win1 = self.time_window_handler.window(idx)
 
                 streams_data: list[StreamData] = []
