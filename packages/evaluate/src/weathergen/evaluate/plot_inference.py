@@ -66,8 +66,6 @@ if __name__ == "__main__":
         streams = model["streams"].keys()
 
         for stream in streams: 
-            if stream.lower() == "era5": 
-                continue
             _logger.info(f"MODEL {model_id}: Processing stream {stream}...")
             
             stream_dict = model["streams"][stream]

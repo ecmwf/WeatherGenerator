@@ -106,6 +106,24 @@ class Plotter(object):
         self.fstep  = None
         self.select = {}
         return self
+    
+
+    def select_from_da(self, da: xr.DataArray, selection: dict) -> xr.DataArray:
+        """
+        Select data from an xarray DataArray based on given selectors.
+        :param da: xarray DataArray to select data from.
+        :param selection: Dictionary of selectors where keys are coordinate names and values are the values to select.
+        :return: xarray DataArray with selected data.
+        """
+        for key, value in selection.items():
+            if key in da.coords and key not in da.dims:
+                # Coordinate like 'sample' aligned to another dim
+                da = da.where(da[key] == value, drop=True)
+            else:
+                # Scalar coord or dim coord (e.g., 'forecast_step', 'channel')
+                da = da.sel({key: value})
+        return da
+
 
     def histogram(self, target: xr.DataArray, preds: xr.DataArray, variables: list, select: dict, tag = ""):
         """
@@ -125,12 +143,11 @@ class Plotter(object):
             fig = plt.figure(figsize=self.fig_size, dpi=self.dpi_val)
 
             #get common bin edges
-            targ = target.sel(select_var)
-            prds = preds.sel(select_var)
-            vals = np.concatenate([targ, prds])
+            targ, prd = self.select_from_da(target, select_var), self.select_from_da(preds, select_var)
+            vals = np.concatenate([targ, prd])
             bins = np.histogram_bin_edges(vals, bins=50)
             plt.hist(targ, bins=bins, alpha=0.7, label='Target')
-            plt.hist(prds, bins=bins, alpha=0.7, label='Prediction')
+            plt.hist(prd, bins=bins, alpha=0.7, label='Prediction')
 
             #set labels and title
             plt.xlabel(f"Variable: {var}")
@@ -167,10 +184,8 @@ class Plotter(object):
             fig = plt.figure(dpi=self.dpi_val)
             ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
             ax.coastlines()   
-            print(data)
-            print(select_var)
-            ds = data.sel(select_var).compute()
-            scatter_plt = ax.scatter(ds["lon"], ds["lat"], c=ds,
+            da = self.select_from_da(data, select_var).compute()
+            scatter_plt = ax.scatter(da["lon"], da["lat"], c=da,
                                         cmap='coolwarm', s=1, transform=ccrs.PlateCarree())
             plt.colorbar(scatter_plt, ax=ax, orientation='horizontal', label=f"Variable: {var}")
             ax.set_global()
