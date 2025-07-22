@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import dataclasses
 import logging
 
 import numpy as np
@@ -19,6 +20,14 @@ from weathergen.train.loss import stat_loss_fcts
 from weathergen.utils.train_logger import TRAIN, VAL, Stage
 
 _logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class ModelLoss:
+    # Resolve types and add descriptions
+    loss: list
+    losses_all: list
+    stddev_all: list
 
 
 class LossCalculator:
@@ -36,15 +45,18 @@ class LossCalculator:
         self.loss_fcts = [[getattr(losses, name), w] for name, w in loss_fcts]
 
     @staticmethod
-    def _construct_masks(target_times_raw: np.array, mask_nan: Tensor):
+    def _construct_masks(target_times_raw: np.array, mask_nan: Tensor, tok_spacetime: bool):
         """
         Construct a list of masks for intermediate time steps within one forecast step. Only applies for specific datasets.
         """
         masks = []
-        t_unique = np.unique(target_times_raw)
-        for t in t_unique:
-            mask_t = Tensor(t == target_times_raw).to(mask_nan)
-            masks.append(torch.logical_and(mask_t, mask_nan))
+        if tok_spacetime:
+            t_unique = np.unique(target_times_raw)
+            for t in t_unique:
+                mask_t = Tensor(t == target_times_raw).to(mask_nan)
+                masks.append(torch.logical_and(mask_t, mask_nan))
+        else:
+            masks.append(mask_nan)
         return masks
 
     @staticmethod
@@ -64,7 +76,7 @@ class LossCalculator:
         self,
         preds: Tensor,
         streams_data: None,  # TODO: determine type
-    ):
+    ) -> ModelLoss:
         ctr_ftarget = 0
 
         loss = torch.tensor(0.0, device=self.device, requires_grad=True)
@@ -84,7 +96,7 @@ class LossCalculator:
         i_batch = 0  # TODO: Iterate over batch dimension here in future
         for i_strm, strm in enumerate(self.cf.streams):
             targets = streams_data[i_batch][i_strm].target_tokens[self.cf.forecast_offset :]
-            assert len(targets) == self.cf.forecast_steps + 1, (
+            assert len(targets) == self.cf.forecast_offset + self.cf.forecast_steps, (
                 "Length of targets does not match number of forecast_steps."
             )
             for fstep, target in enumerate(targets):
@@ -95,17 +107,18 @@ class LossCalculator:
 
                 num_channels = len(strm[str(self.stage) + "_target_channels"])
 
-                # set loss_weights to 1. when not specified
-                obs_loss_weight = strm["loss_weight"] if "loss_weight" in strm else 1.0
-                channel_loss_weight = (
-                    strm["channel_weight"] if "channel_weight" in strm else np.ones(num_channels)
-                )
-                # in validation mode, always unweighted loss is computed
-                if self.stage == VAL:
-                    obs_loss_weight = 1.0
+                if self.stage == TRAIN:
+                    # set loss_weights to 1. when not specified
+                    obs_loss_weight = strm["loss_weight"] if "loss_weight" in strm else 1.0
                     channel_loss_weight = (
-                        np.ones(num_channels) if self.stage == VAL else channel_loss_weight
+                        strm["channel_weight"]
+                        if "channel_weight" in strm
+                        else np.ones(num_channels)
                     )
+                elif self.stage == VAL:
+                    # in validation mode, always unweighted loss is computed
+                    obs_loss_weight = 1.0
+                    channel_loss_weight = np.ones(num_channels)
 
                 # extract data/coords and remove token dimension if it exists. Shape of pred is
                 # [ensemble, target_points, target_channels]
@@ -126,32 +139,16 @@ class LossCalculator:
                     val = torch.tensor(0.0, device=self.device, requires_grad=True)
                     ctr_chs = 0.0
 
-                    # TODO: Dataclass as new issue
-
-                    # loop over all channels
+                    # Loop over all channels, construct masks and compute loss accordingly
                     for i_ch in range(target.shape[-1]):
-                        if tok_spacetime:
-                            # if stream is internal time step, build masks separately per step
-                            masks = self._construct_masks(
-                                target_times_raw=streams_data[i_batch][i_strm].target_times_raw[
-                                    self.cf.forecast_offset + fstep
-                                ],
-                                mask_nan=mask_nan[:, i_ch],
-                            )
-                            for mask in masks:
-                                temp = self._compute_loss_with_mask(
-                                    target=target,
-                                    pred=pred,
-                                    mask=mask,
-                                    i_ch=i_ch,
-                                    loss_fct=loss_fct,
-                                    ens=ens,
-                                )
-                                val = val + channel_loss_weight[i_ch] * temp
-                                losses_all[strm.name][i_ch, i_lfct] += temp.item()
-                                ctr_chs += 1
-                        else:
-                            mask = mask_nan[:, i_ch]
+                        masks = self._construct_masks(
+                            target_times_raw=streams_data[i_batch][i_strm].target_times_raw[
+                                self.cf.forecast_offset + fstep
+                            ],
+                            mask_nan=mask_nan[:, i_ch],
+                            tok_spacetime=tok_spacetime,
+                        )
+                        for mask in masks:
                             temp = self._compute_loss_with_mask(
                                 target=target,
                                 pred=pred,
@@ -160,7 +157,8 @@ class LossCalculator:
                                 loss_fct=loss_fct,
                                 ens=ens,
                             )
-                            val = val + channel_loss_weight[i_ch] * temp
+                            val = val + channel_loss_weight[i_ch] * temp  # Channel weighting
+                            # TODO: Add latitude weighting
                             losses_all[strm.name][i_ch, i_lfct] += temp.item()
                             ctr_chs += 1
 
@@ -192,4 +190,4 @@ class LossCalculator:
         losses_all = {k: v / ctr_ftarget for k, v in losses_all.items()}
         stddev_all = {k: v / ctr_ftarget for k, v in stddev_all.items()}
 
-        return loss, losses_all, stddev_all
+        return ModelLoss(loss=loss, losses_all=losses_all, stddev_all=stddev_all)

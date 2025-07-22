@@ -7,7 +7,7 @@ import weathergen.train.loss as losses
 import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
-from weathergen.train.loss_module import LossModule
+from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.trainer import Trainer
 from weathergen.utils.train_logger import VAL
 
@@ -25,12 +25,12 @@ def prepare_trainer(cf):
         stage=VAL,
         shuffle=cf.shuffle,
     )
-    '''
+    """
     batch = next(iter(trainer.dataset_val))
     batch = trainer.batch_to_device(batch)
     batch[0][0][0].target_times_raw
     breakpoint()
-    '''
+    """
 
     sources_size = trainer.dataset_val.get_sources_size()
     targets_num_channels = trainer.dataset_val.get_targets_num_channels()
@@ -85,16 +85,17 @@ def test_loss(cf):
     )
 
     ### Loss computation with new class
-    loss_module_val = LossModule(
+    loss_calculator_val = LossCalculator(
         cf=cf,
         stage=VAL,
         device=trainer.devices[0],
     )
 
-    loss2, losses_all2, stddev_all2 = loss_module_val.compute_loss(
+    model_loss = loss_calculator_val.compute_loss(
         preds=preds,
         streams_data=batch[0],
     )
+    loss2, losses_all2, stddev_all2 = model_loss.loss, model_loss.losses_all, model_loss.stddev_all
 
     assert loss1 == loss2, "Loss computations return different values."
 
@@ -123,7 +124,7 @@ def test_logging_prep(cf):
         batch[0],
         preds,
         VAL,
-        log_data=True
+        log_data=True,
     )
     preds_all, targets_all, targets_coords_raw, targets_times_raw, targets_lens = logging_items
 
@@ -134,7 +135,9 @@ def test_logging_prep(cf):
         forecast_steps=cf.forecast_steps,
         streams_data=batch[0],
     )
-    preds_all2, targets_all2, targets_coords_raw2, targets_times_raw2, targets_lens2 = logging_items2
+    preds_all2, targets_all2, targets_coords_raw2, targets_times_raw2, targets_lens2 = (
+        logging_items2
+    )
 
     assert (preds_all[0][0][0] == preds_all2[0][0][0]).all()
     assert (targets_all[0][0][0] == targets_all2[0][0][0]).all()
