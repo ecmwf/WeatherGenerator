@@ -25,7 +25,7 @@ from weathergen.utils.distributed import is_root, get_rank_from_config, get_size
 _logger = logging.getLogger(__name__)
 
 
-class Trainer_Base:
+class TrainerBase:
     def __init__(self):
         self.device_handles = []
         self.device_names = []

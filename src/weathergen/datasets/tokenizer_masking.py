@@ -32,7 +32,7 @@ from weathergen.utils.logger import init_loggers
 
 
 class TokenizerMasking:
-    def __init__(self, healpix_level: int, seed: int, masker: Masker):
+    def __init__(self, healpix_level: int, masker: Masker):
         ref = torch.tensor([1.0, 0.0, 0.0])
 
         self.hl_source = healpix_level
@@ -43,11 +43,11 @@ class TokenizerMasking:
         self.num_healpix_cells_source = 12 * 4**self.hl_source
         self.num_healpix_cells_target = 12 * 4**self.hl_target
 
-        verts00, verts00_Rs = healpix_verts_rots(self.hl_source, 0.0, 0.0)
-        verts10, verts10_Rs = healpix_verts_rots(self.hl_source, 1.0, 0.0)
-        verts11, verts11_Rs = healpix_verts_rots(self.hl_source, 1.0, 1.0)
-        verts01, verts01_Rs = healpix_verts_rots(self.hl_source, 0.0, 1.0)
-        vertsmm, vertsmm_Rs = healpix_verts_rots(self.hl_source, 0.5, 0.5)
+        verts00, verts00_rots = healpix_verts_rots(self.hl_source, 0.0, 0.0)
+        verts10, verts10_rots = healpix_verts_rots(self.hl_source, 1.0, 0.0)
+        verts11, verts11_rots = healpix_verts_rots(self.hl_source, 1.0, 1.0)
+        verts01, verts01_rots = healpix_verts_rots(self.hl_source, 0.0, 1.0)
+        vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_source, 0.5, 0.5)
         self.hpy_verts = [
             verts00.to(torch.float32),
             verts10.to(torch.float32),
@@ -55,19 +55,19 @@ class TokenizerMasking:
             verts01.to(torch.float32),
             vertsmm.to(torch.float32),
         ]
-        self.hpy_verts_Rs_source = [
-            verts00_Rs.to(torch.float32),
-            verts10_Rs.to(torch.float32),
-            verts11_Rs.to(torch.float32),
-            verts01_Rs.to(torch.float32),
-            vertsmm_Rs.to(torch.float32),
+        self.hpy_verts_rots_source = [
+            verts00_rots.to(torch.float32),
+            verts10_rots.to(torch.float32),
+            verts11_rots.to(torch.float32),
+            verts01_rots.to(torch.float32),
+            vertsmm_rots.to(torch.float32),
         ]
 
-        verts00, verts00_Rs = healpix_verts_rots(self.hl_target, 0.0, 0.0)
-        verts10, verts10_Rs = healpix_verts_rots(self.hl_target, 1.0, 0.0)
-        verts11, verts11_Rs = healpix_verts_rots(self.hl_target, 1.0, 1.0)
-        verts01, verts01_Rs = healpix_verts_rots(self.hl_target, 0.0, 1.0)
-        vertsmm, vertsmm_Rs = healpix_verts_rots(self.hl_target, 0.5, 0.5)
+        verts00, verts00_rots = healpix_verts_rots(self.hl_target, 0.0, 0.0)
+        verts10, verts10_rots = healpix_verts_rots(self.hl_target, 1.0, 0.0)
+        verts11, verts11_rots = healpix_verts_rots(self.hl_target, 1.0, 1.0)
+        verts01, verts01_rots = healpix_verts_rots(self.hl_target, 0.0, 1.0)
+        vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_target, 0.5, 0.5)
         self.hpy_verts = [
             verts00.to(torch.float32),
             verts10.to(torch.float32),
@@ -75,33 +75,33 @@ class TokenizerMasking:
             verts01.to(torch.float32),
             vertsmm.to(torch.float32),
         ]
-        self.hpy_verts_Rs_target = [
-            verts00_Rs.to(torch.float32),
-            verts10_Rs.to(torch.float32),
-            verts11_Rs.to(torch.float32),
-            verts01_Rs.to(torch.float32),
-            vertsmm_Rs.to(torch.float32),
+        self.hpy_verts_rots_target = [
+            verts00_rots.to(torch.float32),
+            verts10_rots.to(torch.float32),
+            verts11_rots.to(torch.float32),
+            verts01_rots.to(torch.float32),
+            vertsmm_rots.to(torch.float32),
         ]
 
         self.verts_local = []
         verts = torch.stack([verts10, verts11, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts00_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts00_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts11, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts10_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts10_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts10, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts11_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts11_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts11, verts10, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts01_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts01_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         verts = torch.stack([verts00, verts10, verts11, verts01])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(vertsmm_Rs, verts.transpose(0, 1)))
+        temp = ref - torch.stack(locs_to_cell_coords_ctrs(vertsmm_rots, verts.transpose(0, 1)))
         self.verts_local.append(temp.flatten(1, 2))
 
         self.hpy_verts_local_target = torch.stack(self.verts_local).transpose(0, 1)
@@ -123,20 +123,7 @@ class TokenizerMasking:
             .to(torch.float32)
         )
 
-        # ensure that the seed is sufficiently large so that the div below does not lead to
-        # aliasing
-        self.rng_seed = seed if seed > 16384 else seed * 16384
-        self._reinit_rng()
-
         self.size_time_embedding = 6
-
-    def _reinit_rng(self) -> None:
-        """
-        Reinitialize rng
-        """
-        worker_info = torch.utils.data.get_worker_info()
-        div_factor = (worker_info.id + 1) if worker_info is not None else 1
-        self.rng = np.random.default_rng(int(self.rng_seed / div_factor))
 
     def get_size_time_embedding(self) -> int:
         """
@@ -144,12 +131,12 @@ class TokenizerMasking:
         """
         return self.size_time_embedding
 
-    def reset(self) -> None:
+    def reset_rng(self, rng) -> None:
         """
-        Reset state after epoch
+        Reset rng after epoch to ensure proper randomization
         """
-        self.rng_seed *= 2
-        self._reinit_rng()
+        self.masker.reset_rng(rng)
+        self.rng = rng
 
     def batchify_source(
         self,
@@ -171,7 +158,7 @@ class TokenizerMasking:
             time_win=time_win,
             token_size=token_size,
             hl=self.hl_source,
-            hpy_verts_Rs=self.hpy_verts_Rs_source[-1],
+            hpy_verts_rots=self.hpy_verts_rots_source[-1],
             n_coords=normalizer.normalize_coords,
             n_geoinfos=normalizer.normalize_geoinfos,
             n_data=normalizer.normalize_source_channels,
@@ -226,6 +213,41 @@ class TokenizerMasking:
 
         return (source_tokens_cells, source_tokens_lens, source_centroids)
 
+    def sample_tensors_uniform_vectorized(
+        self, tensor_list: list, lengths: list, max_total_points: int
+    ):
+        """
+        This function randomly selects tensors up to a maximum number of total points
+
+        tensor_list: List[torch.tensor] the list to select from
+        lengths: List[int] the length of each tensor in tensor_list
+        max_total_points: the maximum number of total points to sample from
+        """
+        if not tensor_list:
+            return [], 0
+
+        # Create random permutation
+        perm = self.rng.permutation(len(tensor_list))
+
+        # Vectorized cumulative sum
+        cumsum = torch.cumsum(lengths[perm], dim=0)
+
+        # Find cutoff point
+        valid_mask = cumsum <= max_total_points
+        if not valid_mask.any():
+            return [], 0
+
+        num_selected = valid_mask.sum().item()
+        selected_indices = perm[:num_selected]
+        selected_indices = torch.zeros_like(perm).scatter(0, selected_indices, 1)
+
+        selected_tensors = [
+            t if mask.item() == 1 else t[:0]
+            for t, mask in zip(tensor_list, selected_indices, strict=False)
+        ]
+
+        return selected_tensors
+
     def batchify_target(
         self,
         stream_info: dict,
@@ -239,6 +261,7 @@ class TokenizerMasking:
     ):
         token_size = stream_info["token_size"]
         tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
+        max_num_targets = stream_info.get("max_num_targets", -1)
 
         target_tokens, target_coords = torch.tensor([]), torch.tensor([])
         target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
@@ -257,7 +280,7 @@ class TokenizerMasking:
             time_win=time_win,
             token_size=token_size,
             hl=self.hl_source,
-            hpy_verts_Rs=self.hpy_verts_Rs_source[-1],
+            hpy_verts_rots=self.hpy_verts_rots_source[-1],
             n_coords=id,
             n_geoinfos=normalizer.normalize_geoinfos,
             n_data=normalizer.normalize_target_channels,
@@ -283,6 +306,15 @@ class TokenizerMasking:
 
         tt_lin = torch.cat(target_tokens)
         tt_lens = target_tokens_lens
+
+        if max_num_targets > 0:
+            target_tokens = self.sample_tensors_uniform_vectorized(
+                target_tokens, torch.tensor(tt_lens), max_num_targets
+            )
+        tt_lin = torch.cat(target_tokens)
+        target_tokens_lens = [len(t) for t in target_tokens]
+        tt_lens = target_tokens_lens
+
         # TODO: can we avoid setting the offsets here manually?
         # TODO: ideally we would not have recover it; but using tokenize_window seems necessary for
         #       consistency -> split tokenize_window in two parts with the cat only happening in the
@@ -305,17 +337,17 @@ class TokenizerMasking:
         target_times_raw = np.split(time_win[0] + deltas_sec, np.cumsum(tt_lens)[:-1])
 
         # compute encoding of target coordinates used in prediction network
-        if torch.tensor(target_tokens_lens).sum() > 0:
+        if torch.tensor(tt_lens).sum() > 0:
             target_coords = get_target_coords_local_ffast(
                 self.hl_target,
                 target_coords,
                 target_geoinfos,
                 target_times,
-                self.hpy_verts_Rs_target,
+                self.hpy_verts_rots_target,
                 self.hpy_verts_local_target,
                 self.hpy_nctrs_target,
             )
             target_coords.requires_grad = False
-            target_coords = list(target_coords.split(target_tokens_lens))
+            target_coords = list(target_coords.split(tt_lens))
 
         return (target_tokens, target_coords, target_coords_raw, target_times_raw)

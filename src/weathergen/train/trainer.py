@@ -1,3 +1,5 @@
+# ruff: noqa: T201
+
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -16,15 +18,20 @@ import torch.utils.data.distributed
 import tqdm
 from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import MixedPrecision, ShardingStrategy
-from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy  # default_auto_wrap_policy,
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    MixedPrecision,
+    ShardingStrategy,
+)
+from torch.distributed.fsdp.wrap import (
+    size_based_auto_wrap_policy,  # default_auto_wrap_policy,
+)
 
 import weathergen.train.loss as losses
 import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.train.lr_scheduler import LearningRateScheduler
-from weathergen.train.trainer_base import Trainer_Base
+from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TRAIN, VAL, TrainLogger
@@ -33,10 +40,10 @@ from weathergen.utils.validation_io import write_output
 _logger = logging.getLogger(__name__)
 
 
-class Trainer(Trainer_Base):
+class Trainer(TrainerBase):
     ###########################################
     def __init__(self, checkpoint_freq=250, print_freq=10):
-        Trainer_Base.__init__(self)
+        TrainerBase.__init__(self)
 
         self.checkpoint_freq = checkpoint_freq
         self.print_freq = print_freq
@@ -48,8 +55,8 @@ class Trainer(Trainer_Base):
     ):
         self.cf = cf
 
-        assert cf.samples_per_epoch % cf.batch_size == 0
-        assert cf.samples_per_validation % cf.batch_size_validation == 0
+        assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
+        assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
 
         self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
@@ -63,7 +70,7 @@ class Trainer(Trainer_Base):
         self.init_ddp(cf)
 
         # create output directory
-        if self.cf.rank == 0:
+        if is_root():
             config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
             config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
@@ -81,7 +88,7 @@ class Trainer(Trainer_Base):
             cf,
             cf.start_date_val,
             cf.end_date_val,
-            cf.batch_size_validation,
+            cf.batch_size_validation_per_gpu,
             cf.samples_per_validation,
             train_logger=self.train_logger,
             stage=VAL,
@@ -117,7 +124,7 @@ class Trainer(Trainer_Base):
         for name, w in cf.loss_fcts_val:
             self.loss_fcts_val += [[getattr(losses, name), w]]
 
-        if self.cf.rank == 0:
+        if is_root():
             config.save(self.cf, epoch=0)
 
         _logger.info(f"Starting inference with id={self.cf.run_id}.")
@@ -135,7 +142,7 @@ class Trainer(Trainer_Base):
             cf,
             cf.start_date,
             cf.end_date,
-            cf.batch_size,
+            cf.batch_size_per_gpu,
             cf.samples_per_epoch,
             train_logger=self.train_logger,
             stage=TRAIN,
@@ -145,7 +152,7 @@ class Trainer(Trainer_Base):
             cf,
             cf.start_date_val,
             cf.end_date_val,
-            cf.batch_size_validation,
+            cf.batch_size_validation_per_gpu,
             cf.samples_per_validation,
             train_logger=self.train_logger,
             stage=VAL,
@@ -214,12 +221,12 @@ class Trainer(Trainer_Base):
         self.model_params = ModelParams().create(cf).to("cuda")
 
         # if with_fsdp then parameter count is unreliable
-        if (self.cf.rank == 0 and not cf.with_fsdp) or not cf.with_ddp:
+        if (is_root() and not cf.with_fsdp) or not cf.with_ddp:
             self.model.print_num_parameters()
 
         # TODO: learning rate schedule
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
-        kappa = cf.batch_size * cf.num_ranks
+        kappa = cf.batch_size_per_gpu * cf.num_ranks
         beta1 = max(0.5, 1.0 - kappa * (1.0 - 0.9))
         beta2 = 1.0 - kappa * (1.0 - 0.999)
         eps = 1e-08 / np.sqrt(kappa)
@@ -237,7 +244,7 @@ class Trainer(Trainer_Base):
 
         # lr is updated after each batch so account for this
         # TODO: conf should be read-only, do not modify the conf in flight
-        cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size)
+        cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size_per_gpu)
 
         steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
         _logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
@@ -259,7 +266,7 @@ class Trainer(Trainer_Base):
             _logger.warning(s)
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
-            cf.batch_size,
+            cf.batch_size_per_gpu,
             cf.num_ranks,
             cf.lr_start,
             cf.lr_max,
@@ -275,7 +282,7 @@ class Trainer(Trainer_Base):
             cf.lr_scaling_policy,
         )
 
-        if self.cf.istep > 0 and self.cf.rank == 0:
+        if self.cf.istep > 0 and is_root():
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
             _logger.info(str)
 
@@ -288,8 +295,8 @@ class Trainer(Trainer_Base):
             epoch_base = int(self.cf.istep / len(self.data_loader))
         else:
             len_per_rank = (
-                len(self.dataset) // (self.num_ranks_original * cf.batch_size)
-            ) * cf.batch_size
+                len(self.dataset) // (self.num_ranks_original * cf.batch_size_per_gpu)
+            ) * cf.batch_size_per_gpu
             epoch_base = int(
                 self.cf.istep / (min(len_per_rank, cf.samples_per_epoch) * self.num_ranks_original)
             )
@@ -377,7 +384,12 @@ class Trainer(Trainer_Base):
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         for fstep in range(len(targets_rt)):
             for i_obs, (target, target_coords, si) in enumerate(
-                zip(targets_rt[fstep], targets_coords_rt[fstep], self.cf.streams, strict=False)
+                zip(
+                    targets_rt[fstep],
+                    targets_coords_rt[fstep],
+                    self.cf.streams,
+                    strict=False,
+                )
             ):
                 pred = preds[fstep][i_obs]
 
@@ -568,7 +580,7 @@ class Trainer(Trainer_Base):
             if bidx % self.checkpoint_freq == 0:
                 self.save_model(-1)
 
-            self.cf.istep += cf.batch_size
+            self.cf.istep += cf.batch_size_per_gpu
 
         self.dataset.advance()
 
@@ -651,7 +663,7 @@ class Trainer(Trainer_Base):
                     self.losses_hist += [losses_all]
                     self.stddev_hist += [stddev_all]
 
-                    pbar.update(self.cf.batch_size_validation)
+                    pbar.update(self.cf.batch_size_validation_per_gpu)
 
                 losses_all = self.ddp_average(
                     torch.stack(self.losses_hist).to(torch.float64).nanmean(0)
@@ -660,7 +672,7 @@ class Trainer(Trainer_Base):
                     torch.stack(self.stddev_hist).to(torch.float64).nanmean(0)
                 )
 
-                if self.cf.rank == 0 and self.cf.istep >= 0:
+                if is_root() and self.cf.istep >= 0:
                     loss_dict = {}
                     for j, (lname, _) in enumerate(cf.loss_fcts_val):
                         loss_dict[f"validation {lname}"] = torch.nanmean(losses_all[j]).item()
@@ -671,10 +683,10 @@ class Trainer(Trainer_Base):
                         )
 
                     # add data to plain logger
-                    samples = cf.istep * cf.batch_size * cf.num_ranks
+                    samples = cf.istep * cf.batch_size_per_gpu * cf.num_ranks
                     self.train_logger.add_val(samples, losses_all, stddev_all)
 
-                if self.cf.rank == 0:
+                if is_root():
                     print(
                         f"validation ({cf.run_id}) : {epoch:03d} :",
                         f" loss = {torch.nanmean(losses_all[0]):.4E}",
@@ -737,9 +749,9 @@ class Trainer(Trainer_Base):
         if bidx % log_interval == 0:
             l_avg = self.ddp_average(torch.nanmean(torch.stack(self.losses_hist), axis=0))
             stddev_avg = self.ddp_average(torch.nanmean(torch.stack(self.stddev_hist), axis=0))
-            samples = self.cf.istep * self.cf.batch_size * self.cf.num_ranks
+            samples = self.cf.istep * self.cf.batch_size_per_gpu * self.cf.num_ranks
 
-            if self.cf.rank == 0:
+            if is_root():
                 # logging
                 loss_dict = {
                     "training mse": float(torch.nanmean(l_avg[0])),
@@ -771,12 +783,12 @@ class Trainer(Trainer_Base):
                 nanmean(torch.stack(self.losses_hist[-self.print_freq :]), axis=0)
             )
 
-            if self.cf.rank == 0:
+            if is_root():
                 # samples per sec
                 dt = time.time() - self.t_start
                 pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
                 pstr += "(lr={:.2E}, s/sec={:.3f})"
-                len_dataset = len(self.data_loader) // self.cf.batch_size
+                len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
                 print(
                     pstr.format(
                         epoch,
@@ -785,7 +797,7 @@ class Trainer(Trainer_Base):
                         self.cf.istep,
                         np.nanmean(l_avg[0]),
                         self.lr_scheduler.get_lr(),
-                        (self.print_freq * self.cf.batch_size) / dt,
+                        (self.print_freq * self.cf.batch_size_per_gpu) / dt,
                     ),
                     flush=True,
                 )
