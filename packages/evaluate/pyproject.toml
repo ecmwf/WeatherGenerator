@@ -9,6 +9,8 @@ dependencies = [
     "xskillscore",
     "xhistogram",
     "weathergen-common",
+    "plotly",
+    "kaleido",
 ]
 
 [dependency-groups]
