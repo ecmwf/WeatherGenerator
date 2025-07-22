@@ -8,7 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from typing import Any
-
+from omegaconf.listconfig import ListConfig
 
 def to_list(obj: Any) -> list:
     """
@@ -23,7 +23,7 @@ def to_list(obj: Any) -> list:
     list
         A list containing the object, or the object itself if it was already a list.
     """
-    if isinstance(obj, set | tuple):
+    if isinstance(obj, set | tuple | ListConfig):
         obj = list(obj)
     elif not isinstance(obj, list):
         obj = [obj]
