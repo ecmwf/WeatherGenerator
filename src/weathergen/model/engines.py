@@ -414,12 +414,13 @@ class TargetPredictionEngine(nn.Module):
             "attention_dtype": get_dtype(self.cf.attention_dtype),
         }
         self.tte = nn.ModuleList()
-        self.in_norm = nn.LayerNorm(self.cf.ae_global_dim_embed)
+        self.output_in_norm = nn.LayerNorm(self.dims_embed[0])
+        self.latent_in_norm = nn.LayerNorm(self.cf.ae_global_dim_embed)
+        self.final_norm = nn.LayerNorm(self.dims_embed[-1])
         self.dropout = nn.Dropout(0.2)
         self.pos_embed = nn.Parameter(torch.zeros(1, 9, self.cf.ae_global_dim_embed))
         dim_aux = self.cf.ae_global_dim_embed
         for ith, dim in enumerate(self.dims_embed[:-1]):
-            next_dim = self.dims_embed[ith + 1]
             if self.cf.decoder_type == "PerceiverIO":
                 # a single cross attention layer as per https://arxiv.org/pdf/2107.14795
                 self.tte.append(
@@ -476,7 +477,7 @@ class TargetPredictionEngine(nn.Module):
                 )
 
     def forward(self, latent, output, latent_lens, output_lens):
-        latent = self.dropout(self.in_norm(latent+self.pos_embed))
+        latent = self.dropout(self.latent_in_norm(latent+self.pos_embed))
         for layer in self.tte:
             if isinstance(layer, CrossAttentionBlock):
                 output = checkpoint(
@@ -496,4 +497,5 @@ class TargetPredictionEngine(nn.Module):
                     aux=latent[:,0],
                     use_reentrant=False,
                 )
+        output = self.final_norm(output)
         return output
