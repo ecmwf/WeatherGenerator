@@ -305,7 +305,7 @@ class LinePlots:
                 )
             averaged = data.mean(
                 dim=[dim for dim in data.dims if dim != x_dim], skipna=True
-            )
+            ).sortby(x_dim)
 
             plt.plot(
                 averaged[x_dim],
