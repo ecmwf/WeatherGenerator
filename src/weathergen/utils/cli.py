@@ -23,8 +23,14 @@ def get_continue_parser() -> argparse.ArgumentParser:
         help=(
             "Fine tune for forecasting. It overwrites some of the Config settings. "
             "Overwrites specified with --config take precedence."
-        ),
+        ))
+    parser.add_argument(
+        "--streams_directory",
+        type=str,
+        default=None,
+        help="Override path for streams_directory.",
     )
+    
 
     return parser
 
@@ -57,6 +63,12 @@ def get_inference_parser() -> argparse.ArgumentParser:
         type=bool,
         default=True,
         help="Toggle saving of samples from inference. Default True",
+    )
+    parser.add_argument(
+        "--streams_directory",
+        type=str,
+        default=None,
+        help="Override path for streams_directory.",
     )
     parser.add_argument(
         "--analysis_streams_output",
