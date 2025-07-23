@@ -5,6 +5,7 @@ output_scores_dir : "./jsons/"
 image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
 dpi_val : 300
 summary_plots : true
+print_summary: true
 
 evaluation:
   metrics  : ["rmse", "l1", "mse"]

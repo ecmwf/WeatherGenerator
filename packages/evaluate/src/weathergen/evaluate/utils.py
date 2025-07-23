@@ -153,7 +153,7 @@ def get_data(
 
 def calc_scores_per_stream(
     cfg: dict, model_id: str, stream: str, metrics: list[str]
-) -> tuple:
+) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given model and stream using the specified metrics.
     :param cfg: Configuration dictionary containing all information for the evaluation.
@@ -231,7 +231,7 @@ def calc_scores_per_stream(
     return metric_stream, points_per_sample
 
 
-def plot_data(cfg: str, model_id: str, stream: str, stream_dict: dict):
+def plot_data(cfg: str, model_id: str, stream: str, stream_dict: dict) -> list[str]:
     """
     Plot the data for a given model and stream.
 
@@ -402,7 +402,7 @@ def retrieve_metric_from_json(
         raise FileNotFoundError(f"File {score_path} not found in the archive.")
 
 
-def plot_summary(cfg: dict, scores_dict: dict):
+def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
     """
     Plot summary of the evaluation results.
     This function is a placeholder for future implementation.
@@ -463,6 +463,7 @@ def plot_summary(cfg: dict, scores_dict: dict):
                         tag=name,
                         x_dim="forecast_step",
                         y_dim=metric,
+                        print_summary = print_summary, 
                     )
 
 
