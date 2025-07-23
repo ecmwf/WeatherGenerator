@@ -293,7 +293,7 @@ class LinePlots:
             "x dimension '{x_dim}' not found in data dimensions {data_list[0].dims}"
         )
 
-        fig = plt.figure(figsize=self.fig_size, dpi=self.dpi_val)
+        fig = plt.figure(figsize=(12,6), dpi=self.dpi_val)
 
         for i, data in enumerate(data_list):
             non_zero_dims = [
