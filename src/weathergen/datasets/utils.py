@@ -61,7 +61,7 @@ def s2tor3(lats, lons):
     """
     x = torch.sin(lats) * torch.cos(lons)
     y = torch.sin(lats) * torch.sin(lons)
-    z = 0 #torch.cos(lats)
+    z = torch.zeros_like(lats) #torch.cos(lats)
     out = torch.stack([x, y, z])
     return out.permute([*list(np.arange(len(out.shape))[:-1] + 1), 0])
 
