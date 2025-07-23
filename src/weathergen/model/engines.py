@@ -245,7 +245,7 @@ class GlobalAssimilationEngine:
         # define a layer normalization layer for the final output (KCT)
         self.ae_global_blocks.append(
             torch.nn.LayerNorm(
-                self.cf.ae_global_dim_embed, eps=self.cf.norm_eps, elementwise_affine=True
+                (12288, 2048), eps=self.cf.norm_eps, elementwise_affine=True
             )
         )
         return self.ae_global_blocks
@@ -328,7 +328,7 @@ class ForecastingEngine:
         # define a layer normalization layer for the final output (KCT)
         self.fe_blocks.append(
             torch.nn.LayerNorm(
-                self.cf.ae_global_dim_embed, eps=self.cf.norm_eps, elementwise_affine=True
+                (12288, 2048), eps=self.cf.norm_eps, elementwise_affine=True
             )
         )
 
