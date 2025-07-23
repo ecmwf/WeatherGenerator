@@ -8,7 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 from typing import Any
+
 from omegaconf.listconfig import ListConfig
+
 
 def to_list(obj: Any) -> list:
     """
