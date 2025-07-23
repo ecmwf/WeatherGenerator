@@ -630,14 +630,17 @@ class Model(torch.nn.Module):
 
             # lens for varlen attention
             tcs_lens = target_coords_idxs[ii][fstep]
-            # tcs_lens = torch.cat(
-            #     [model_params.tokens_lens[0:1], tcs_lens[tcs_lens.nonzero()].flatten()]
-            # )
+            # coord information for learnable layer norm
+            tcs_aux = torch.cat(
+                [streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))]
+            )
+
             tc_tokens = tte(
                 latent=tokens_stream,
                 output=tc_tokens,
                 latent_lens=model_params.tokens_lens,
                 output_lens=tcs_lens,
+                coordinates=tcs_aux,
             )
 
             # final prediction head to map back to physical space

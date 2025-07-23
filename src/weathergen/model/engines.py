@@ -19,10 +19,7 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadVarlen,
 )
 
-from weathergen.model.blocks import (
-    SelfAttentionBlock,
-    CrossAttentionBlock,
-)
+from weathergen.model.blocks import SelfAttentionBlock, CrossAttentionBlock, OriginalPredictionBlock
 from weathergen.model.embeddings import (
     StreamEmbedLinear,
     StreamEmbedTransformer,
@@ -471,21 +468,47 @@ class TargetPredictionEngine(nn.Module):
                         attention_kwargs=attention_kwargs,
                     )
                 )
+            elif self.cf.decoder_type == "PerceiverIOCoordConditioning":
+                self.tte.append(
+                    OriginalPredictionBlock(
+                        config=self.cf,
+                        dim_in=dim,
+                        dim_kv=dim_aux,
+                        dim_aux=self.cf.dim_coord_in,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        attention_kwargs=attention_kwargs,
+                        mlp_norm_eps=self.cf.mlp_norm_eps,
+                    )
+                )
             else:
                 raise NotImplementedError(
                     f"{self.cf.decoder_type} is not implemented for prediction heads"
                 )
 
-    def forward(self, latent, output, latent_lens, output_lens):
-        latent = self.dropout(self.latent_in_norm(latent+self.pos_embed))
+    def forward(self, latent, output, latent_lens, output_lens, coordinates):
+        latent = (
+            self.dropout(self.latent_in_norm(latent + self.pos_embed))
+            if self.cf.decoder_type != "PerceiverIOCoordConditioning"
+            else latent
+        )
         for layer in self.tte:
-            if isinstance(layer, CrossAttentionBlock):
+            if isinstance(layer, OriginalPredictionBlock):
+                output = checkpoint(
+                    layer,
+                    latent=latent,
+                    output=output,
+                    coords=coordinates,
+                    latent_lens=latent_lens,
+                    output_lens=output_lens,
+                    use_reentrant=False,
+                )
+            elif isinstance(layer, CrossAttentionBlock):
                 output = checkpoint(
                     layer,
                     x=output,
-                    x_kv=(latent).flatten(0,1),
+                    x_kv=(latent).flatten(0, 1),
                     x_lens=output_lens,
-                    aux=latent[:,0],
+                    aux=latent[:, 0],
                     x_kv_lens=latent_lens,
                     use_reentrant=False,
                 )
@@ -494,8 +517,12 @@ class TargetPredictionEngine(nn.Module):
                     layer,
                     x=output,
                     x_lens=output_lens,
-                    aux=latent[:,0],
+                    aux=latent[:, 0],
                     use_reentrant=False,
                 )
-        output = self.final_norm(output)
+        output = (
+            self.final_norm(output)
+            if self.cf.decoder_type != "PerceiverIOCoordConditioning"
+            else output
+        )
         return output
