@@ -23,14 +23,14 @@ def get_continue_parser() -> argparse.ArgumentParser:
         help=(
             "Fine tune for forecasting. It overwrites some of the Config settings. "
             "Overwrites specified with --config take precedence."
-        ))
+        ),
+    )
     parser.add_argument(
         "--streams_directory",
         type=str,
         default=None,
         help="Override path for streams_directory.",
     )
-    
 
     return parser
 
