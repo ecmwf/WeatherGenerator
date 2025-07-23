@@ -48,7 +48,7 @@ if __name__ == "__main__":
     out_scores_dir = Path(cfg.output_scores_dir)
     out_scores_dir.mkdir(parents=True, exist_ok=True)
 
-    model_dir = Path(cfg.model_dir)
+    results_dir = Path(cfg.results_dir)
     metrics = cfg.evaluation.metrics
     
     # to get a structure like: scores_dict[metric][stream][model_id] = plot
@@ -83,13 +83,13 @@ if __name__ == "__main__":
                         scores_dict[metric][stream][model_id] = metric_data
                     except (FileNotFoundError, KeyError, ValueError) as e:
                         metrics_to_compute.append(metric)
-                if metrics_to_compute:                
+                if metrics_to_compute: 
+                        
                     all_metrics, points_per_sample = calc_scores_per_stream(cfg, model_id, stream, metrics_to_compute)
 
                     metric_list_to_json([all_metrics], [points_per_sample], [stream], out_scores_dir, model_id, model.epoch, model.rank)
 
                     all_metrics = all_metrics.compute()
-                    all_metrics = all_metrics.mean(dim="sample")
 
                     for metric in metrics_to_compute:
                         scores_dict[metric][stream][model_id] = all_metrics.sel({"metric": metric})

@@ -56,7 +56,7 @@ class Plotter(object):
         self.select   = {}
 
 
-    def update_selection(self, sample: str, stream: str, fstep:str):
+    def update_data_selection(self, sample: str, stream: str, fstep:str):
         """
         Set the selection for the plots. This will be used to filter the data for plotting.
         :param sample: sample name
@@ -71,7 +71,7 @@ class Plotter(object):
                         "forecast_step"  : self.fstep }
         return self
     
-    def update_selection(self, select: dict):
+    def update_data_selection(self, select: dict):
         """
         Set the selection for the plots. This will be used to filter the data for plotting.
         :param select: dictionary containing the selection parameters
@@ -95,7 +95,7 @@ class Plotter(object):
 
         return self
     
-    def clean_selection(self):
+    def clean_data_selection(self):
         """
         :param sample: sample name
         :param stream: stream name
@@ -136,7 +136,7 @@ class Plotter(object):
         """
         plot_names = []
         
-        self.update_selection(select)
+        self.update_data_selection(select)
         
         for var in variables:
             select_var = self.select | {"channel" : var}
@@ -162,7 +162,7 @@ class Plotter(object):
             plt.close()
             plot_names.append(name)
 
-        self.clean_selection()
+        self.clean_data_selection()
 
         return plot_names
 
@@ -176,7 +176,7 @@ class Plotter(object):
         :param select: selection to be applied to the DataArray
         """
         
-        self.update_selection(select)
+        self.update_data_selection(select)
 
         plot_names = []
         for var in variables:
@@ -189,7 +189,8 @@ class Plotter(object):
                                         cmap='coolwarm', s=1, transform=ccrs.PlateCarree())
             plt.colorbar(scatter_plt, ax=ax, orientation='horizontal', label=f"Variable: {var}")
             ax.set_global()
-            
+            ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
+
             #TODO: make this nicer
             parts = ["map",self.model_id, tag, str(self.sample), self.stream, str(self.fstep), var]
             name = "_".join(filter(None,parts))
@@ -197,7 +198,7 @@ class Plotter(object):
             plt.close()
             plot_names.append(name)
         
-        self.clean_selection()
+        self.clean_data_selection()
 
         return plot_names
 
