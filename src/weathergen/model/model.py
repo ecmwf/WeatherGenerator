@@ -688,10 +688,15 @@ class Model(torch.nn.Module):
         Raises:
             ValueError: For unexpected arguments in checkpoint method
         """
+        import torch.nn as nn
 
         for it, block in enumerate(self.fe_blocks):
-            aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
-            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+            # add a check for LayerNorm to avoid issues with checkpointing (KCT)
+            if isinstance(block, nn.LayerNorm):
+                tokens = checkpoint(block, tokens, use_reentrant=False)
+            else:
+                aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
+                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
 
         return tokens
 
