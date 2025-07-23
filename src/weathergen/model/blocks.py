@@ -45,6 +45,7 @@ class SelfAttentionBlock(nn.Module):
             dim_in=dim,
             dim_out=dim,
             hidden_factor=4,
+            dropout_rate=0.1,
             nonlin=approx_gelu,
             with_residual=False,
         )
