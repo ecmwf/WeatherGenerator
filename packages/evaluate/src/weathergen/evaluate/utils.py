@@ -15,13 +15,20 @@ import numpy as np
 import xarray as xr
 from plotter import LinePlots, Plotter
 from score import VerifiedData, get_score
-from score_utils import to_list
+from weathergen.evaluate.score_utils import to_list
 from tqdm import tqdm
-
+from dataclasses import dataclass
 from weathergen.common.io import ZarrIO
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
+
+
+@dataclass 
+class ZarrData:
+   target: dict
+   prediction: dict
+   points_per_sample: xr.DataArray | None       # <- now this is clear that it may or may not be present
 
 
 def get_data(
@@ -32,7 +39,7 @@ def get_data(
     fsteps: list[str] = None,
     channels: list[str] = None,
     return_counts: bool = False,
-) -> tuple:
+) -> ZarrData:
     """
     Retrieve prediction and target data for a given model from the Zarr store.
     :param cfg: Configuration dictionary containing all information.
@@ -84,6 +91,8 @@ def get_data(
                 dims=("forecast_step", "sample"),
                 name=f"points_per_sample_{stream}",
             )
+        else:
+            points_per_sample = None
 
         for fstep in fsteps:
             _logger.info(f"MODEL {model_id} - {stream}: Processing fstep {fstep}...")
@@ -145,10 +154,7 @@ def get_data(
                 f"Channels in targets and predictions do not match for model {model_id} and stream {stream}"
             )
 
-        if return_counts:
-            return da_tars, da_preds, points_per_sample
-        else:
-            return da_tars, da_preds
+        return ZarrData(target=da_tars, prediction=da_preds, points_per_sample=points_per_sample)
 
 
 def calc_scores_per_stream(
@@ -176,9 +182,13 @@ def calc_scores_per_stream(
     if fsteps == "all":
         fsteps = None
 
-    da_preds, da_tars, points_per_sample = get_data(
+    za = get_data(
         cfg, model_id, stream, return_counts=True
     )
+
+    da_preds = za.prediction
+    da_tars = za.target 
+    points_per_sample = za.points_per_sample
 
     assert da_preds.keys() == da_tars.keys(), (
         "Forcast steps in prediction and target do not match. Investigate."
@@ -261,9 +271,13 @@ def plot_data(cfg: str, model_id: str, stream: str, stream_dict: dict) -> list[s
     if plot_samples == "all":
         plot_samples = None
 
-    da_tars, da_preds = get_data(
+    za = get_data(
         cfg, model_id, stream, plot_samples, plot_fsteps, plot_chs
     )
+
+    da_tars = za.target
+    da_preds = za.prediction
+
     plot_fsteps = da_tars.keys()
 
     for (fstep, tars), (_, preds) in zip(
