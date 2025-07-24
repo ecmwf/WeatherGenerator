@@ -20,7 +20,7 @@ import torch.multiprocessing
 
 from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.config import Config
-from weathergen.utils.distributed import is_root
+from weathergen.utils.distributed import is_root, get_rank, get_size
 
 _logger = logging.getLogger(__name__)
 
@@ -54,15 +54,19 @@ class TrainerBase:
         if not use_cuda:
             return torch.device("cpu")
 
-        local_id_node = os.environ.get("SLURM_LOCALID", "-1")
-        if local_id_node == "-1":
+        # local_id_node = os.environ.get("SLURM_LOCALID", "-1")
+        rank = get_rank(default="-1")
+        cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        num_gpus = len(cuda_visible_devices.split(',')) if cuda_visible_devices else 0
+        rank_local = rank % num_gpus
+        
+        if rank == "-1":
             devices = ["cuda"]
         else:
             devices = [
-                f"cuda:{int(local_id_node) * num_accs_per_task + i}"
-                for i in range(num_accs_per_task)
+                f"cuda:{int(rank_local) * num_accs_per_task + i}" for i in range(num_accs_per_task)
             ]
-        torch.cuda.set_device(int(local_id_node) * num_accs_per_task)
+        torch.cuda.set_device(int(rank_local) * num_accs_per_task)
 
         return devices
 
@@ -82,20 +86,27 @@ class TrainerBase:
             _logger.info(f"rank: {rank} has run_id: {cf.run_id}")
             return
 
-        local_rank = int(os.environ.get("SLURM_LOCALID"))
-        ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
-        rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
-        num_ranks = int(os.environ.get("SLURM_NTASKS"))
+        # local_rank = int(os.environ.get("SLURM_LOCALID"))
+        # ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
+        # rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
+        # num_ranks = int(os.environ.get("SLURM_NTASKS"))
+        rank = get_rank(default=0)
+        num_ranks = get_size(default=1)
+        cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        num_gpus = len(cuda_visible_devices.split(',')) if cuda_visible_devices else 0
+        rank_local = rank % num_gpus
+        
         _logger.info(
-            f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, "
+            f"DDP initialization: local_rank={rank_local}, ranks_per_node={num_gpus}, "
             f"rank={rank}, num_ranks={num_ranks}"
         )
-
+        
+        master_port=os.getenv("MASTER_PORT")
         if rank == 0:
             # Check that port 1345 is available, raise an error if not
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 try:
-                    s.bind((master_node, 1345))
+                    s.bind((master_node, int(master_port)))
                 except OSError as e:
                     if e.errno == errno.EADDRINUSE:
                         _logger.error(
@@ -115,11 +126,11 @@ class TrainerBase:
 
         dist.init_process_group(
             backend="nccl",
-            init_method="tcp://" + master_node + ":1345",
+            init_method="tcp://" + master_node + f":{master_port}",
             timeout=datetime.timedelta(seconds=240),
             world_size=num_ranks,
             rank=rank,
-            device_id=torch.device("cuda", local_rank),
+            device_id=torch.device("cuda", rank_local),
         )
         if is_root():
             _logger.info("DDP initialized: root.")
