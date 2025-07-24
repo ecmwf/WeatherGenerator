@@ -109,7 +109,7 @@ def get_data(
             ):
                 out = zio.get_data(sample, stream, fstep)
                 target, pred = out.target.as_xarray(), out.prediction.as_xarray()
-
+                
                 da_tars_fs.append(target.squeeze())
                 da_preds_fs.append(pred.squeeze())
                 pps.append(len(target.ipoint))

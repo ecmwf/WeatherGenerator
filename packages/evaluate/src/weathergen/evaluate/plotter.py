@@ -37,7 +37,7 @@ class Plotter:
         self.out_plot_dir = out_plot_dir.joinpath(self.image_format).joinpath(model_id)
 
         if not os.path.exists(self.out_plot_dir):
-            _logger.info(f"creating dir {self.out_plot_dir}")
+            _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
         self.sample = None
@@ -110,7 +110,8 @@ class Plotter:
         preds: xr.DataArray,
         variables: list,
         select: dict,
-        tag="",
+        tag: str ="",
+        number: str = "", 
     ) -> list[str]:
         """
         Plot histogram of target vs predictions for a set of variables.
@@ -140,7 +141,7 @@ class Plotter:
             # set labels and title
             plt.xlabel(f"Variable: {var}")
             plt.ylabel("Frequency")
-            plt.title(f"Histogram of Target and Prediction: {var}")
+            plt.title(f"Histogram of Target and Prediction: {self.stream}, {var} : fstep = {self.fstep:03}")
             plt.legend(frameon=False)
 
             # TODO: make this nicer
@@ -150,8 +151,8 @@ class Plotter:
                 tag,
                 str(self.sample),
                 self.stream,
-                str(self.fstep),
                 var,
+                str(self.fstep).zfill(3),
             ]
             name = "_".join(filter(None, parts))
             plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
@@ -163,8 +164,12 @@ class Plotter:
         return plot_names
 
     def map(
-        self, data: xr.DataArray, variables: list, select: dict, tag: str = ""
-    ) -> list[str]:
+        self, 
+        data: xr.DataArray, 
+        variables: list, 
+        select: dict, 
+        tag: str = "") -> list[str]:
+
         """
         Plot 2D map for a dataset
 
@@ -183,6 +188,7 @@ class Plotter:
             ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
             ax.coastlines()
             da = self.select_from_da(data, select_var).compute()
+
             scatter_plt = ax.scatter(
                 da["lon"],
                 da["lat"],
@@ -194,6 +200,8 @@ class Plotter:
             plt.colorbar(
                 scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {var}"
             )
+
+            plt.title(f"{self.stream}, {var} : fstep = {self.fstep:03}")
             ax.set_global()
             ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
 
@@ -204,8 +212,8 @@ class Plotter:
                 tag,
                 str(self.sample),
                 self.stream,
-                str(self.fstep),
                 var,
+                str(self.fstep).zfill(3),
             ]
             name = "_".join(filter(None, parts))
             plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
@@ -303,7 +311,7 @@ class LinePlots:
                 dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1
             ]
             if non_zero_dims:
-                logging.warning(
+                logging.info(
                     f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
                 )
             averaged = data.mean(

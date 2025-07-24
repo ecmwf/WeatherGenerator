@@ -5,7 +5,7 @@ output_scores_dir : "./jsons/"
 image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
 dpi_val : 300
 summary_plots : true
-print_summary: false #print out score values on screen. it can be verbose
+print_summary: true #print out score values on screen. it can be verbose
 
 evaluation:
   metrics  : ["rmse", "l1", "mse"]
@@ -23,7 +23,7 @@ run_ids :
            sample: [1, 2, 3]
            forecast_step: [0]
            plot_maps: true
-           plot_histograms: false
+           plot_histograms: true
      label: "MTM ERA5"
      epoch: 0
      rank: 0
