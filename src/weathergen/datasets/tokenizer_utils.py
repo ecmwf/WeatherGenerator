@@ -61,11 +61,11 @@ def encode_times_target(times, time_win) -> torch.tensor:
     dt_win = pd.to_datetime(time_win)
     # for target only provide local time
     dt_delta = torch.tensor((dt - dt_win[0]).seconds, dtype=torch.float32).unsqueeze(1)
-    
+
     # Add some offset...before trigonometric encoding (in time units...)
-    offset_seconds = (1/72) * (12.0 * 3600.0)  # 10 minute offset?
+    offset_seconds = (1 / 72) * (12.0 * 3600.0)  # 10 minute offset?
     dt_delta = dt_delta + offset_seconds
-    
+
     time_tensor = torch.cat(
         (
             dt_delta,
@@ -86,7 +86,7 @@ def encode_times_target(times, time_win) -> torch.tensor:
 
     # We add + 0.5 as in ERA5 very often we otherwise get 0 as the first time and to prevent too
     # many zeros in the input, where we cannot learn anything we add an offset
-    return time_tensor # + 0.5 remove this offset to avoid breaking trigonometric ranges
+    return time_tensor  # + 0.5 remove this offset to avoid breaking trigonometric ranges
 
 
 def hpy_cell_splits(coords: torch.tensor, hl: int):
