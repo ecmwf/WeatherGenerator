@@ -10,17 +10,18 @@
 
 import torch.nn as nn
 
-from weathergen.model.norms import AdaLayerNormLayer
 from weathergen.model.attention import (
-    MultiSelfAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlen,
+    MultiSelfAttentionHeadVarlen,
 )
 from weathergen.model.layers import MLP
+from weathergen.model.norms import AdaLayerNormLayer
 
 
 class SelfAttentionBlock(nn.Module):
     """
-    A self attention block, i.e., adaptive layer norm with multi head self attenttion and adaptive layer norm with a FFN.
+    A self attention block, i.e., adaptive layer norm with multi head self attenttion and adaptive
+    layer norm with a FFN.
     """
 
     def __init__(self, dim, dim_aux, with_adanorm=True, num_heads=8, dropout_rate=0.1, **kwargs):
@@ -82,7 +83,8 @@ class SelfAttentionBlock(nn.Module):
 
 class CrossAttentionBlock(nn.Module):
     """
-    A cross attention block, i.e., adaptive layer norm with cross attenttion and adaptive layer norm with a FFN.
+    A cross attention block, i.e., adaptive layer norm with cross attenttion and adaptive layer norm
+    with a FFN.
     """
 
     def __init__(
@@ -184,11 +186,17 @@ class OriginalPredictionBlock(nn.Module):
         dim_aux,
         num_heads,
         attention_kwargs,
+        tr_dim_head_proj,
+        tr_mlp_hidden_factor,
+        tro_type,
         mlp_norm_eps=1e-6,
     ):
         super().__init__()
 
         self.cf = config
+        self.tro_type = tro_type
+        self.tr_dim_head_proj = tr_dim_head_proj
+        self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
 
         self.block = nn.ModuleList()
         # Multi-Cross Attention Head
@@ -229,3 +237,4 @@ class OriginalPredictionBlock(nn.Module):
                 output = layer(output, latent, output_lens, latent_lens, coords)
             else:
                 output = layer(output, output_lens, coords)
+        return output

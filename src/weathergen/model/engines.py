@@ -12,20 +12,17 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.model.attention import (
-    MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
     MultiSelfAttentionHead,
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
-
-from weathergen.model.blocks import SelfAttentionBlock, CrossAttentionBlock, OriginalPredictionBlock
+from weathergen.model.blocks import CrossAttentionBlock, OriginalPredictionBlock, SelfAttentionBlock
 from weathergen.model.embeddings import (
     StreamEmbedLinear,
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
-from weathergen.model.norms import RMSNorm, SwiGLU
 from weathergen.utils.config import Config, get_dtype
 
 
@@ -473,10 +470,14 @@ class TargetPredictionEngine(nn.Module):
                     OriginalPredictionBlock(
                         config=self.cf,
                         dim_in=dim,
+                        dim_out=self.dims_embed[ith + 1],
                         dim_kv=dim_aux,
-                        dim_aux=self.cf.dim_coord_in,
+                        dim_aux=self.dim_coord_in,
                         num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
                         attention_kwargs=attention_kwargs,
+                        tr_dim_head_proj=tr_dim_head_proj,
+                        tr_mlp_hidden_factor=tr_mlp_hidden_factor,
+                        tro_type=tro_type,
                         mlp_norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
@@ -495,7 +496,7 @@ class TargetPredictionEngine(nn.Module):
             if isinstance(layer, OriginalPredictionBlock):
                 output = checkpoint(
                     layer,
-                    latent=latent,
+                    latent=latent.flatten(0, 1),
                     output=output,
                     coords=coordinates,
                     latent_lens=latent_lens,
