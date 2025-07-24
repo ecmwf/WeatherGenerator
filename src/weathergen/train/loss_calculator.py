@@ -146,7 +146,7 @@ class LossCalculator:
             )
         else:
             # If no valid data under the mask, return 0 to avoid errors and not contribute to loss
-            return 0
+            return torch.zeros(1, device=pred.device)
 
     def compute_loss(
         self,
@@ -200,9 +200,6 @@ class LossCalculator:
         for i_strm, strm in enumerate(self.cf.streams):
             # Extract target tokens for current stream from the specified forecast offset onwards
             targets = streams_data[i_batch][i_strm].target_tokens[self.cf.forecast_offset :]
-            assert len(targets) == self.cf.forecast_offset + self.cf.forecast_steps, (
-                "Length of targets does not match number of forecast_steps."
-            )
             for fstep, target in enumerate(targets):
                 pred = preds[fstep][i_strm]
                 # Skip if either target or prediction has no data points
