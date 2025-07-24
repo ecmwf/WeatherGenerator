@@ -25,7 +25,7 @@ _logger.setLevel(logging.INFO)
 
 
 @dataclass 
-class ZarrData:
+class WeatherGeneratorOutput:
    target: dict
    prediction: dict
    points_per_sample: xr.DataArray | None       # <- now this is clear that it may or may not be present
@@ -33,17 +33,17 @@ class ZarrData:
 
 def get_data(
     cfg: dict,
-    model_id: str,
+    run_id: str,
     stream: str,
     samples: list[int] = None,
     fsteps: list[str] = None,
     channels: list[str] = None,
     return_counts: bool = False,
-) -> ZarrData:
+) -> WeatherGeneratorOutput:
     """
-    Retrieve prediction and target data for a given model from the Zarr store.
+    Retrieve prediction and target data for a given run from the Zarr store.
     :param cfg: Configuration dictionary containing all information.
-    :param model_id: Model identifier.
+    :param run_id: Run identifier.
     :param stream: Stream name to retrieve data for.
     :param samples: List of sample indices to retrieve. If None, all samples are retrieved.
     :param fsteps: List of forecast steps to retrieve. If None, all forecast steps are retrieved.
@@ -52,11 +52,11 @@ def get_data(
     :return: Tuple of xarray DataArrays for targets and predictions, and optionally the points per sample.
     """
 
-    model = cfg.model_ids[model_id]
+    run = cfg.run_ids[run_id]
     results_dir = Path(cfg.get("results_dir"))
 
     fname_zarr = results_dir.joinpath(
-        f"{model_id}/validation_epoch{model['epoch']:05d}_rank{model['rank']:04d}.zarr"
+        f"{run_id}/validation_epoch{run['epoch']:05d}_rank{run['rank']:04d}.zarr"
     )
 
     if not fname_zarr.exists() or not fname_zarr.is_dir():
@@ -67,11 +67,13 @@ def get_data(
 
     with ZarrIO(fname_zarr) as zio:
         zio_forecast_steps = zio.forecast_steps
-        stream_dict = model.streams[stream]
+        stream_dict = run.streams[stream]
         all_channels = peek_tar_channels(zio, stream, zio_forecast_steps[0])
-        _logger.info(f"MODEL {model_id}: Processing stream {stream}...")
+        _logger.info(f"RUN {run_id}: Processing stream {stream}...")
 
-        fsteps = sorted(zio_forecast_steps if fsteps is None else fsteps)
+        fsteps = zio_forecast_steps if fsteps is None else fsteps
+        # TODO: Avoid conversion of fsteps and sample to integers (as obtained from the ZarrIO)
+        fsteps = sorted([int(fstep) for fstep in fsteps])  
         samples = sorted(
             [int(sample) for sample in zio.samples] if samples is None else samples
         )
@@ -95,12 +97,12 @@ def get_data(
             points_per_sample = None
 
         for fstep in fsteps:
-            _logger.info(f"MODEL {model_id} - {stream}: Processing fstep {fstep}...")
+            _logger.info(f"RUN {run_id} - {stream}: Processing fstep {fstep}...")
             da_tars_fs, da_preds_fs = [], []
             pps = []
 
             for sample in tqdm(
-                samples, desc=f"Processing {model_id} - {stream} - {fstep}"
+                samples, desc=f"Processing {run_id} - {stream} - {fstep}"
             ):
                 out = zio.get_data(sample, stream, fstep)
                 target, pred = out.target.as_xarray(), out.prediction.as_xarray()
@@ -131,45 +133,23 @@ def get_data(
         da_tars = {fstep: da for fstep, da in zip(fsteps, da_tars, strict=False)}
         da_preds = {fstep: da for fstep, da in zip(fsteps, da_preds, strict=False)}
 
-        assert da_preds.keys() == da_tars.keys(), (
-            "Forcast steps in prediction and target do not match. Investigate."
-        )
 
-        # sanity checks
-        for fstep in da_tars.keys():
-            assert np.array_equal(
-                da_tars[fstep].sample.values, da_preds[fstep].sample.values
-            ), (
-                f"Samples in targets and predictions do not match for model {model_id} and stream"
-            )
-            assert np.array_equal(
-                da_tars[fstep].forecast_step.values,
-                da_preds[fstep].forecast_step.values,
-            ), (
-                f"Forecast steps in targets and predictions do not match for model {model_id} and stream {stream}"
-            )
-            assert np.array_equal(
-                da_tars[fstep].channel.values, da_preds[fstep].channel.values
-            ), (
-                f"Channels in targets and predictions do not match for model {model_id} and stream {stream}"
-            )
-
-        return ZarrData(target=da_tars, prediction=da_preds, points_per_sample=points_per_sample)
+        return WeatherGeneratorOutput(target=da_tars, prediction=da_preds, points_per_sample=points_per_sample)
 
 
 def calc_scores_per_stream(
-    cfg: dict, model_id: str, stream: str, metrics: list[str]
+    cfg: dict, run_id: str, stream: str, metrics: list[str]
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
-    Calculate scores for a given model and stream using the specified metrics.
+    Calculate scores for a given run and stream using the specified metrics.
     :param cfg: Configuration dictionary containing all information for the evaluation.
-    :param model_id: Model identifier.
+    :param run_id: Run identifier.
     :param stream: Stream name to calculate scores for.
     :param metrics: List of metric names to calculate.
     :return: Tuple of xarray DataArray containing the scores and the number of points per sample.
     """
     _logger.info(
-        f"MODEL {model_id} - {stream}: Calculating scores for metrics {metrics}..."
+        f"RUN {run_id} - {stream}: Calculating scores for metrics {metrics}..."
     )
 
     samples = cfg.evaluation.get("sample", None)
@@ -182,24 +162,24 @@ def calc_scores_per_stream(
     if fsteps == "all":
         fsteps = None
 
-    za = get_data(
-        cfg, model_id, stream, return_counts=True
+    output_data = get_data(
+        cfg, run_id, stream, return_counts=True
     )
 
-    da_preds = za.prediction
-    da_tars = za.target 
-    points_per_sample = za.points_per_sample
+    da_preds = output_data.prediction
+    da_tars = output_data.target 
+    points_per_sample = output_data.points_per_sample
 
-    assert da_preds.keys() == da_tars.keys(), (
-        "Forcast steps in prediction and target do not match. Investigate."
-    )
-
-    first_da = next(iter(da_tars.values()))
+    # get coordinate information from retrieved data
 
     fsteps = [int(k) for k in da_tars.keys()]
-    # TODO: improve the way we handle samples. This is hacky since we group by sample later.
+    first_da = list(da_preds.values())[0]
+
+    # TODO: improve the way we handle samples. 
     samples = list(np.atleast_1d(np.unique(first_da.sample.values)))
     channels = list(np.atleast_1d(first_da.channel.values))
+
+    metric_list = []
 
     metric_stream = xr.DataArray(
         np.full(
@@ -233,21 +213,27 @@ def calc_scores_per_stream(
 
         _logger.debug(f"Running computation of metrics for stream {stream}...")
         combined_metrics = combined_metrics.compute()
+        combined_metrics = scalar_coord_to_dim(combined_metrics, "channel")
 
-        metric_stream.loc[{"forecast_step": int(fstep)}] = combined_metrics.compute()
+        metric_list.append(combined_metrics)
 
-        _logger.info(f"Scores for model {model_id} - {stream} calculated successfully.")
+        metric_stream.loc[{"forecast_step": int(fstep)}] = combined_metrics
+
+        _logger.info(f"Scores for run {run_id} - {stream} calculated successfully.")
+
+    metric_stream = xr.concat(metric_list, dim="forecast_step")
+    metric_stream = metric_stream.assign_coords({"forecast_step": fsteps}) 
 
     return metric_stream, points_per_sample
 
 
-def plot_data(cfg: str, model_id: str, stream: str, stream_dict: dict) -> list[str]:
+def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str]:
     """
-    Plot the data for a given model and stream.
+    Plot the data for a given run and stream.
 
     :param da_tars: Target data as an xarray DataArray.
     :param da_preds: Prediction data as an xarray DataArray.
-    :param model_id: Model identifier.
+    :param run_id: Run identifier.
     :param stream: Stream name.
     :param stream_dict: Dictionary containing stream configuration.
     """
@@ -259,7 +245,7 @@ def plot_data(cfg: str, model_id: str, stream: str, stream_dict: dict) -> list[s
     ):
         return
 
-    plotter = Plotter(cfg, model_id)
+    plotter = Plotter(cfg, run_id)
 
     plot_samples = plot_settings.get("sample", None)
     plot_fsteps = plot_settings.get("forecast_step", None)
@@ -271,12 +257,12 @@ def plot_data(cfg: str, model_id: str, stream: str, stream_dict: dict) -> list[s
     if plot_samples == "all":
         plot_samples = None
 
-    za = get_data(
-        cfg, model_id, stream, plot_samples, plot_fsteps, plot_chs
+    model_output = get_data(
+        cfg, run_id, stream, plot_samples, plot_fsteps, plot_chs
     )
 
-    da_tars = za.target
-    da_preds = za.prediction
+    da_tars = model_output.target
+    da_preds = model_output.prediction
 
     plot_fsteps = da_tars.keys()
 
@@ -289,7 +275,7 @@ def plot_data(cfg: str, model_id: str, stream: str, stream_dict: dict) -> list[s
         plot_names = []
 
         for sample in tqdm(
-            plot_samples, desc=f"Plotting {model_id} - {stream} - fstep {fstep}"
+            plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"
         ):
             plots = []
 
@@ -321,7 +307,7 @@ def metric_list_to_json(
     npoints_sample_list: list[xr.DataArray],
     streams: list[str],
     metric_dir: Path,
-    model_id: str,
+    run_id: str,
     epoch: int,
     rank: int = 0,  # Add rank so it matches filename expectations
 ):
@@ -339,7 +325,7 @@ def metric_list_to_json(
         Stream names.
     metric_dir : Path
         Output directory.
-    model_id : str
+    run_id : str
         Identifier of the inference run.
     epoch : int
         Epoch number.
@@ -368,7 +354,7 @@ def metric_list_to_json(
 
             # Match the expected filename pattern
             save_path = (
-                metric_dir / f"{model_id}_{stream}_{metric}_epoch{epoch:05d}.json"
+                metric_dir / f"{run_id}_{stream}_{metric}_epoch{epoch:05d}.json"
             )
 
             _logger.info(f"Saving results to {save_path}")
@@ -376,22 +362,22 @@ def metric_list_to_json(
                 json.dump(metric_dict, f, indent=4)
 
     _logger.info(
-        f"Saved all results of inference run {model_id} - epoch {epoch:d} successfully to {metric_dir}."
+        f"Saved all results of inference run {run_id} - epoch {epoch:d} successfully to {metric_dir}."
     )
 
 
 def retrieve_metric_from_json(
-    dir: str, model_id: str, stream: str, metric: str, epoch: int, rank: int = 0
+    dir: str, run_id: str, stream: str, metric: str, epoch: int, rank: int = 0
 ):
     """
-    Retrieve the score for a given model, stream, metric, epoch, and rank from a JSON file.
+    Retrieve the score for a given run, stream, metric, epoch, and rank from a JSON file.
 
     Parameters
     ----------
     dir : str
         Directory where JSON files are stored.
-    model_id : str
-        Model/run identifier.
+    run_id : str
+        Run identifier.
     stream : str
         Stream name.
     metric : str
@@ -406,7 +392,7 @@ def retrieve_metric_from_json(
     xr.DataArray
         The metric DataArray.
     """
-    score_path = Path(dir) / f"{model_id}_{stream}_{metric}_epoch{epoch:05d}.json"
+    score_path = Path(dir) / f"{run_id}_{stream}_{metric}_epoch{epoch:05d}.json"
     _logger.debug(f"Looking for: {score_path}")
     if score_path.exists():
         with open(score_path) as f:
@@ -421,12 +407,11 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
     Plot summary of the evaluation results.
     This function is a placeholder for future implementation.
     :param cfg: Configuration dictionary containing all information.
-    :param models: Dictionary containing model information.
-    :param scores_dict: Dictionary containing scores for each model and stream.
+    :param scores_dict: Dictionary containing scores for each run and stream.
     """
     _logger.info("Plotting summary of evaluation results...")
 
-    models = cfg.model_ids
+    runs = cfg.run_ids
     metrics = cfg.evaluation.metrics
 
     plotter = LinePlots(cfg)
@@ -436,36 +421,42 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
         # TODO: improve this
         streams_set = list(
             sorted(
-                set.union(*[set(model["streams"].keys()) for model in models.values()])
+                set.union(*[set(run_id["streams"].keys()) for run_id in runs.values()])
             )
         )
 
         # get total list of channels
         # TODO: improve this
-        # TODO: support case where channels are not set in stream-config
-        channels_set = list(
-            sorted(
-                set.union(
-                    *[
-                        set(stream["channels"])
-                        for model in models.values()
-                        for stream in model["streams"].values()
-                    ]
-                )
-            )
-        )
+        channels_set = list(set(value
+                            for run_id in runs
+                            for stream in runs[run_id]["streams"]
+                            for value in np.atleast_1d(scores_dict[metric][stream][run_id]["channel"].values)
+                        ))
+
+        #channels_set = list(
+        #    sorted(
+        #        set(
+        #            *[
+        #                list(np.atleast_1d(scores_dict[metric][stream][run_id]["channel"].values))
+        #                for run_id in runs.keys()
+        #                for stream in runs[run_id]["streams"].keys()
+        #            ]
+        #        )
+        #    )
+        #)
 
         # TODO: move this into plot_utils
         for stream in streams_set:  # loop over streams
             for ch in channels_set:  # loop over channels
                 selected_data = []
                 labels = []
-                for model_id, data in scores_dict[metric][stream].items():
-                    # fill list of plots with one xarray per model_id, if it exists.
+                for run_id, data in scores_dict[metric][stream].items():
+                    # fill list of plots with one xarray per run_id, if it exists.
                     if ch not in set(np.atleast_1d(data.channel.values)):
                         continue
+                    
                     selected_data.append(data.sel(channel=ch))
-                    labels.append(models[model_id].get("label", model_id))
+                    labels.append(runs[run_id].get("label", run_id))
 
                 # if there is data for this stream and channel, plot it
                 if selected_data:
@@ -533,6 +524,6 @@ def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataA
         return da  # already a dimension
     if name in da.coords and da.coords[name].ndim == 0:
         val = da.coords[name].item()
-        da = da.drop_chs(name)
+        da = da.drop_vars(name)
         da = da.expand_dims({name: [val]}, axis=axis)
     return da
