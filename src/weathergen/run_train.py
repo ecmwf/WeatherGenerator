@@ -115,7 +115,6 @@ def train_continue() -> None:
 
     # track history of run to ensure traceability of results
     cf.run_history += [(args.from_run_id, cf.istep)]
-    # cf.streams = config.load_streams(Path(cf.streams_directory))
     cf = config.set_paths(cf)
 
     if args.finetune_forecast:
