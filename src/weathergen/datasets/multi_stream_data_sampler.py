@@ -39,9 +39,7 @@ from weathergen.utils.train_logger import Stage, TrainLogger
 _logger = logging.getLogger(__name__)
 
 type AnyDataReader = (
-    DataReaderBase
-    | DataReaderAnemoi
-    | DataReaderObs
+    DataReaderBase | DataReaderAnemoi | DataReaderObs
     # | FesomDataset | AtmorepDataset
 )
 

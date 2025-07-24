@@ -39,15 +39,15 @@ def peek_tar_channels(zio: ZarrIO, stream: str, fstep: int = 0) -> list[str]:
 
     Parameters
     ----------
-    zio : 
+    zio :
         The ZarrIO object containing the tar stream.
-    stream : 
+    stream :
         The name of the tar stream to peek.
-    fstep :  
+    fstep :
         The forecast step to peek. Default is 0.
     Returns
     -------
-    channels : 
+    channels :
         A list of channel names in the tar stream.
     """
     if not isinstance(zio, ZarrIO):
