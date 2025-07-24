@@ -140,7 +140,8 @@ def load_config(
 
 
 def _load_streams_in_config(config: Config) -> Config:
-    """If the config contains a streams_directory, loads the streams and returns the config with the streams set."""
+    """If the config contains a streams_directory, loads the streams and returns the config with
+    the streams set."""
     streams_directory = config.get("streams_directory", None)
     config = config.copy()
     if streams_directory is not None:
