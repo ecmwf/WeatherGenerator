@@ -63,7 +63,7 @@ def encode_times_target(times, time_win) -> torch.tensor:
     dt_delta = torch.tensor((dt - dt_win[0]).seconds, dtype=torch.float32).unsqueeze(1)
     
     # Add some offset...before trigonometric encoding (in time units...)
-    offset_seconds = (1/12) * (12.0 * 3600.0)  # 1 hour offset?
+    offset_seconds = (1/72) * (12.0 * 3600.0)  # 10 minute offset?
     dt_delta = dt_delta + offset_seconds
     
     time_tensor = torch.cat(
