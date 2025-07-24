@@ -410,7 +410,7 @@ class TargetPredictionEngine(nn.Module):
         self.tte = nn.ModuleList()
         self.output_in_norm = nn.LayerNorm(self.dims_embed[0])
         self.latent_in_norm = nn.LayerNorm(self.cf.ae_global_dim_embed)
-        self.final_norm = nn.LayerNorm(self.dims_embed[-1])
+        self.final_norm = nn.RMSNorm(self.dims_embed[-1])
         self.dropout = nn.Dropout(0.2)
         self.pos_embed = nn.Parameter(torch.zeros(1, 9, self.cf.ae_global_dim_embed))
         dim_aux = self.cf.ae_global_dim_embed

@@ -50,10 +50,8 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         else:
             norm = RMSNorm
 
-        # if dim_aux is not None:
-        #     self.lnorm = AdaLayerNorm(dim_embed, dim_aux, norm_eps=norm_eps)
-        # else:
-        #     self.lnorm = norm(dim_embed, eps=norm_eps)
+        if dim_aux is not None:
+            self.lnorm = AdaLayerNorm(dim_embed, dim_aux, norm_eps=norm_eps)
         self.proj_heads_q = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_k = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_v = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
@@ -73,6 +71,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     #########################################
     def forward(self, x, x_lens, ada_ln_aux=None):
         x_in = x
+        x = x if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
 
         ## project onto heads and q,k,v and
         #  ensure these are 4D tensors as required for flash attention
@@ -295,11 +294,8 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
 
         self.dim_head_proj = dim_embed_q // num_heads if dim_head_proj is None else dim_head_proj
 
-        # if dim_aux is not None:
-        #     self.lnorm_in_q = AdaLayerNorm(dim_embed_q, dim_aux, norm_eps=norm_eps)
-        # else:
-        #     self.lnorm_in_q = norm(dim_embed_q, eps=norm_eps)
-        # self.lnorm_in_kv = norm(dim_embed_kv, eps=norm_eps)
+        if dim_aux is not None:
+            self.lnorm_in_q = AdaLayerNorm(dim_embed_q, dim_aux, norm_eps=norm_eps)
 
         self.proj_heads_q = torch.nn.Linear(dim_embed_q, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_k = torch.nn.Linear(
@@ -325,8 +321,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
     def forward(self, x_q, x_kv, x_lens=None, x_kv_lens=None, ada_ln_aux=None):
         if self.with_residual:
             x_q_in = x_q
-        # x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
-        # x_kv = self.lnorm_in_kv(x_kv)
+        x_q = x_q if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
 
         ## project onto heads and q,k,v and
         #  ensure these are 4D tensors as required for flash attention
