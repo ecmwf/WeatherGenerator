@@ -131,6 +131,7 @@ class TrainerBase:
             world_size=num_ranks,
             rank=rank,
             #device_id=torch.device("cuda", rank_local),
+            device_id=torch.device("cuda", rank_local),
         )
         if is_root():
             _logger.info("DDP initialized: root.")
