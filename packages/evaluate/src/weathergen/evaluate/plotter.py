@@ -162,7 +162,9 @@ class Plotter:
 
         return plot_names
 
-    def map(self, data: xr.DataArray, variables: list, select: dict, tag: str = "") -> list[str]:
+    def map(
+        self, data: xr.DataArray, variables: list, select: dict, tag: str = ""
+    ) -> list[str]:
         """
         Plot 2D map for a dataset
 
@@ -216,7 +218,6 @@ class Plotter:
 
 
 class LinePlots:
-
     def __init__(self, cfg: dict):
         self.cfg = cfg
         out_plot_dir = Path(cfg.output_plotting_dir)
@@ -231,7 +232,9 @@ class LinePlots:
             _logger.info(f"creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
-    def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list ]:
+    def _check_lengths(
+        self, data: xr.DataArray | list, labels: str | list
+    ) -> tuple[list, list]:
         """
         Check if the lengths of data and labels match.
         :param data: DataArray or list of DataArrays to be plotted
@@ -257,15 +260,15 @@ class LinePlots:
         return data_list, label_list
 
     def print_all_points_from_graph(self, fig: plt.Figure) -> None:
-        for i, ax in enumerate(fig.get_axes()):
-            for j, line in enumerate(ax.get_lines()):
+        for ax in fig.get_axes():
+            for line in ax.get_lines():
                 ydata = line.get_ydata()
                 xdata = line.get_xdata()
                 label = line.get_label()
                 _logger.info(f"Summary for {label} plot:")
-                for xi, yi in zip(xdata, ydata):
+                for xi, yi in zip(xdata, ydata, strict=False):
                     _logger.info(f"  x: {xi:.3f}, y: {yi:.3f}")
-                _logger.info(f"--------------------------")
+                _logger.info("--------------------------")
         return
 
     def plot(
@@ -275,7 +278,7 @@ class LinePlots:
         tag: str = "",
         x_dim: str = "forecast_step",
         y_dim: str = "value",
-        print_summary: bool = False
+        print_summary: bool = False,
     ) -> None:
         """
         Plot a line graph comparing multiple datasets.
@@ -293,7 +296,7 @@ class LinePlots:
             "x dimension '{x_dim}' not found in data dimensions {data_list[0].dims}"
         )
 
-        fig = plt.figure(figsize=(12,6), dpi=self.dpi_val)
+        fig = plt.figure(figsize=(12, 6), dpi=self.dpi_val)
 
         for i, data in enumerate(data_list):
             non_zero_dims = [
@@ -328,7 +331,6 @@ class LinePlots:
         if print_summary:
             _logger.info(f"Summary values for {tag}")
             self.print_all_points_from_graph(fig)
-
 
         parts = ["compare", tag]
         name = "_".join(filter(None, parts))

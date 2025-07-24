@@ -9,26 +9,29 @@
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import xarray as xr
 from plotter import LinePlots, Plotter
 from score import VerifiedData, get_score
-from weathergen.evaluate.score_utils import to_list
 from tqdm import tqdm
-from dataclasses import dataclass
+
 from weathergen.common.io import ZarrIO
+from weathergen.evaluate.score_utils import to_list
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
 
-@dataclass 
+@dataclass
 class WeatherGeneratorOutput:
-   target: dict
-   prediction: dict
-   points_per_sample: xr.DataArray | None       # <- now this is clear that it may or may not be present
+    target: dict
+    prediction: dict
+    points_per_sample: (
+        xr.DataArray | None
+    )  # <- now this is clear that it may or may not be present
 
 
 def get_data(
@@ -73,7 +76,7 @@ def get_data(
 
         fsteps = zio_forecast_steps if fsteps is None else fsteps
         # TODO: Avoid conversion of fsteps and sample to integers (as obtained from the ZarrIO)
-        fsteps = sorted([int(fstep) for fstep in fsteps])  
+        fsteps = sorted([int(fstep) for fstep in fsteps])
         samples = sorted(
             [int(sample) for sample in zio.samples] if samples is None else samples
         )
@@ -133,8 +136,9 @@ def get_data(
         da_tars = {fstep: da for fstep, da in zip(fsteps, da_tars, strict=False)}
         da_preds = {fstep: da for fstep, da in zip(fsteps, da_preds, strict=False)}
 
-
-        return WeatherGeneratorOutput(target=da_tars, prediction=da_preds, points_per_sample=points_per_sample)
+        return WeatherGeneratorOutput(
+            target=da_tars, prediction=da_preds, points_per_sample=points_per_sample
+        )
 
 
 def calc_scores_per_stream(
@@ -162,12 +166,10 @@ def calc_scores_per_stream(
     if fsteps == "all":
         fsteps = None
 
-    output_data = get_data(
-        cfg, run_id, stream, return_counts=True
-    )
+    output_data = get_data(cfg, run_id, stream, return_counts=True)
 
     da_preds = output_data.prediction
-    da_tars = output_data.target 
+    da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
 
     # get coordinate information from retrieved data
@@ -175,7 +177,7 @@ def calc_scores_per_stream(
     fsteps = [int(k) for k in da_tars.keys()]
     first_da = list(da_preds.values())[0]
 
-    # TODO: improve the way we handle samples. 
+    # TODO: improve the way we handle samples.
     samples = list(np.atleast_1d(np.unique(first_da.sample.values)))
     channels = list(np.atleast_1d(first_da.channel.values))
 
@@ -222,7 +224,7 @@ def calc_scores_per_stream(
         _logger.info(f"Scores for run {run_id} - {stream} calculated successfully.")
 
     metric_stream = xr.concat(metric_list, dim="forecast_step")
-    metric_stream = metric_stream.assign_coords({"forecast_step": fsteps}) 
+    metric_stream = metric_stream.assign_coords({"forecast_step": fsteps})
 
     return metric_stream, points_per_sample
 
@@ -257,9 +259,7 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     if plot_samples == "all":
         plot_samples = None
 
-    model_output = get_data(
-        cfg, run_id, stream, plot_samples, plot_fsteps, plot_chs
-    )
+    model_output = get_data(cfg, run_id, stream, plot_samples, plot_fsteps, plot_chs)
 
     da_tars = model_output.target
     da_preds = model_output.prediction
@@ -353,9 +353,7 @@ def metric_list_to_json(
             metric_dict = metric_now.to_dict()
 
             # Match the expected filename pattern
-            save_path = (
-                metric_dir / f"{run_id}_{stream}_{metric}_epoch{epoch:05d}.json"
-            )
+            save_path = metric_dir / f"{run_id}_{stream}_{metric}_epoch{epoch:05d}.json"
 
             _logger.info(f"Saving results to {save_path}")
             with open(save_path, "w") as f:
@@ -427,23 +425,16 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
 
         # get total list of channels
         # TODO: improve this
-        channels_set = list(set(value
-                            for run_id in runs
-                            for stream in runs[run_id]["streams"]
-                            for value in np.atleast_1d(scores_dict[metric][stream][run_id]["channel"].values)
-                        ))
-
-        #channels_set = list(
-        #    sorted(
-        #        set(
-        #            *[
-        #                list(np.atleast_1d(scores_dict[metric][stream][run_id]["channel"].values))
-        #                for run_id in runs.keys()
-        #                for stream in runs[run_id]["streams"].keys()
-        #            ]
-        #        )
-        #    )
-        #)
+        channels_set = list(
+            set(
+                value
+                for run_id in runs
+                for stream in runs[run_id]["streams"]
+                for value in np.atleast_1d(
+                    scores_dict[metric][stream][run_id]["channel"].values
+                )
+            )
+        )
 
         # TODO: move this into plot_utils
         for stream in streams_set:  # loop over streams
@@ -454,7 +445,7 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
                     # fill list of plots with one xarray per run_id, if it exists.
                     if ch not in set(np.atleast_1d(data.channel.values)):
                         continue
-                    
+
                     selected_data.append(data.sel(channel=ch))
                     labels.append(runs[run_id].get("label", run_id))
 
@@ -468,7 +459,7 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
                         tag=name,
                         x_dim="forecast_step",
                         y_dim=metric,
-                        print_summary = print_summary, 
+                        print_summary=print_summary,
                     )
 
 

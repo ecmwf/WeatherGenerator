@@ -113,4 +113,4 @@ if __name__ == "__main__":
 # plot summary
 if cfg.summary_plots:
     _logger.info("Started creating summary plots..")
-    plot_summary(cfg, scores_dict, print_summary = cfg.print_summary)
+    plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)
