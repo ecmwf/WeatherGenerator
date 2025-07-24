@@ -42,9 +42,9 @@ if __name__ == "__main__":
 
     # load configuration
     cfg = OmegaConf.load(args.config)
-    models = cfg.model_ids
+    runs = cfg.run_ids
 
-    _logger.info(f"Detected {len(models)} models")
+    _logger.info(f"Detected {len(runs)} runs")
 
     assert cfg.get("output_scores_dir"), (
         "Please provide a path to the directory where the score files are stored or will be saved."
@@ -55,43 +55,43 @@ if __name__ == "__main__":
     results_dir = Path(cfg.results_dir)
     metrics = cfg.evaluation.metrics
 
-    # to get a structure like: scores_dict[metric][stream][model_id] = plot
+    # to get a structure like: scores_dict[metric][stream][run_id] = plot
     scores_dict = defaultdict(lambda: defaultdict(dict))
 
-    for model_id, model in models.items():
-        plotter = Plotter(cfg, model_id)
-        _logger.info(f"MODEL {model_id}: Getting data...")
+    for run_id, run in runs.items():
+        plotter = Plotter(cfg, run_id)
+        _logger.info(f"RUN {run_id}: Getting data...")
 
-        streams = model["streams"].keys()
+        streams = run["streams"].keys()
 
         for stream in streams:
-            _logger.info(f"MODEL {model_id}: Processing stream {stream}...")
+            _logger.info(f"RUN {run_id}: Processing stream {stream}...")
 
-            stream_dict = model["streams"][stream]
+            stream_dict = run["streams"][stream]
 
-            _logger.info(f"MODEL {model_id}: Plotting stream {stream}...")
-            plots = plot_data(cfg, model_id, stream, stream_dict)
+            _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
+            plots = plot_data(cfg, run_id, stream, stream_dict)
 
-            if stream_dict.evaluation:
-                _logger.info(f"Retrieve or compute scores for {model_id} - {stream}...")
+            if stream_dict.get("evaluation", None):
+                _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
 
                 metrics_to_compute = []
                 for metric in metrics:
                     try:
                         metric_data = retrieve_metric_from_json(
                             out_scores_dir,
-                            model_id,
+                            run_id,
                             stream,
                             metric,
-                            model.epoch,
-                            model.rank,
+                            run.epoch,
+                            run.rank,
                         )
-                        scores_dict[metric][stream][model_id] = metric_data
+                        scores_dict[metric][stream][run_id] = metric_data
                     except (FileNotFoundError, KeyError, ValueError):
                         metrics_to_compute.append(metric)
                 if metrics_to_compute:
                     all_metrics, points_per_sample = calc_scores_per_stream(
-                        cfg, model_id, stream, metrics_to_compute
+                        cfg, run_id, stream, metrics_to_compute
                     )
 
                     metric_list_to_json(
@@ -99,15 +99,13 @@ if __name__ == "__main__":
                         [points_per_sample],
                         [stream],
                         out_scores_dir,
-                        model_id,
-                        model.epoch,
-                        model.rank,
+                        run_id,
+                        run.epoch,
+                        run.rank,
                     )
 
-                    all_metrics = all_metrics.compute()
-
                     for metric in metrics_to_compute:
-                        scores_dict[metric][stream][model_id] = all_metrics.sel(
+                        scores_dict[metric][stream][run_id] = all_metrics.sel(
                             {"metric": metric}
                         )
 

@@ -11,7 +11,7 @@ evaluation:
   metrics  : ["rmse", "l1", "mse"]
 
 #MTM models
-model_ids :
+run_ids :
   wz9rbl3w:
      streams:
        ERA5:
