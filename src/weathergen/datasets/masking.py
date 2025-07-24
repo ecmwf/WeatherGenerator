@@ -47,11 +47,12 @@ class Masker:
             )
             assert hl_mask < hl_data, "hl_mask must be less than hl_data for HEALPix masking."
 
-        assert (
-            self.masking_strategy != "channel"
-            or "global" in self.masking_strategy_config
-            or "per_cell" in self.masking_strategy_config
-        ), "If masking_strategy is 'channel', its config must be 'global' or 'per_cell'."
+        if self.masking_strategy == "channel":
+            # Ensure that masking_strategy_config contains either 'global' or 'per_cell'
+            assert (
+                "global" in self.masking_strategy_config
+                or "per_cell" in self.masking_strategy_config
+            ), "Strategy must be 'global' or 'per_cell' in masking_strategy_config."
 
     def reset_rng(self, rng) -> None:
         """
