@@ -45,7 +45,7 @@ class DataReaderFesom(DataReaderTimestep):
         stream_info: dict,
     ) -> None:
         # Store configuration but DO NOT open files here
-        self.filenames = sorted(glob.glob(str(filename)))
+        self.filenames = sorted(glob.glob(str(filename) + "/*"))
         self._tw_handler = tw_handler
         self._stream_info = stream_info
 
@@ -85,7 +85,7 @@ class DataReaderFesom(DataReaderTimestep):
     def _lazy_init(self) -> None:
         """
         Initializes the dataset object. This method is called once per worker process
-        to ensure file handles are not shared across forked processes.
+        to ensure dask scheduler is not shared between them.
         """
         if self._initialized:
             return

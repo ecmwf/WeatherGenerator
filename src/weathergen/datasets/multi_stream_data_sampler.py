@@ -39,7 +39,9 @@ from weathergen.utils.train_logger import Stage, TrainLogger
 _logger = logging.getLogger(__name__)
 
 type AnyDataReader = (
-    DataReaderBase | DataReaderAnemoi | DataReaderObs
+    DataReaderBase
+    | DataReaderAnemoi
+    | DataReaderObs
     # | FesomDataset | AtmorepDataset
 )
 
@@ -129,8 +131,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 else:
                     filename = pathlib.Path(datapath) / fname
 
-                    # DataReaderFesom can take regular expressions so this check is bypassed
-                    if not filename.exists() and stream_info["type"] != "fesom":  # see above
+                    if not filename.exists():  # see above
                         msg = (
                             f"Did not find input data for {stream_info['type']} "
                             f"stream '{stream_info['name']}': {filename}."

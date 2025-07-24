@@ -9,7 +9,7 @@
 
 IFS_ATMO :
   type : fesom
-  filenames : ['atmos_all/*']
+  filenames : ['atmos_all']
   loss_weight : 1.
   source : null
   target : null

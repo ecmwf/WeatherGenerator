@@ -9,7 +9,7 @@
 
 FESOM_NODE :
   type : fesom
-  filenames : ['ocean_node/*']
+  filenames : ['ocean_node']
   loss_weight : 1.
   source : null
   target : null

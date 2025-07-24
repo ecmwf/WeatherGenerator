@@ -9,7 +9,7 @@
 
 FESOM_ELEM :
   type : fesom
-  filenames : ['ocean_elem/*']
+  filenames : ['ocean_elem']
   loss_weight : 1.
   source : null
   target : null
