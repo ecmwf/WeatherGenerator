@@ -211,9 +211,6 @@ class TokenizerMasking:
         else:
             source_centroids = torch.tensor([])
 
-        #print("source tokens cell length", len(source_tokens_cells))
-        #print("shape of first 10 elements of source tokens cells:", [source.shape for source in source_tokens_cells[0:10]])
-
         return (source_tokens_cells, source_tokens_lens, source_centroids)
 
     def sample_tensors_uniform_vectorized(
@@ -303,19 +300,12 @@ class TokenizerMasking:
 
         target_tokens = self.masker.mask_target(target_tokens_cells, coords, geoinfos, source)
 
-        #print("************************************************")
-        #print("Length of target_tokens:", len(target_tokens))
-        #print("Shape of first few elements of target_tokens:", [t.shape for t in target_tokens[0:10]])
-        #print("************************************************")
-
         target_tokens_lens = [len(t) for t in target_tokens]
-        #print("target_tokens_lens:", target_tokens_lens[0:10])
-        
+
         if torch.tensor(target_tokens_lens).sum() == 0:
             return (torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([]))
 
         tt_lin = torch.cat(target_tokens)
-        #print("tt_lin shape:", tt_lin.shape)
         tt_lens = target_tokens_lens
 
         if max_num_targets > 0:
@@ -333,22 +323,12 @@ class TokenizerMasking:
         offset = 6
         # offset of 1 : stream_id
         target_times = torch.split(tt_lin[..., 1:offset], tt_lens)
-        
-        
-        #print("offset:", offset)
-        #print("coords.shape:", coords.shape)
 
         target_coords = torch.split(tt_lin[..., offset : offset + coords.shape[-1]], tt_lens)
         offset += coords.shape[-1]
         target_geoinfos = torch.split(tt_lin[..., offset : offset + geoinfos.shape[-1]], tt_lens)
         offset += geoinfos.shape[-1]
         target_tokens = torch.split(tt_lin[..., offset:], tt_lens)
-
-        #print("************************************************")
-        #print("What is the len of target_coords here:", len(target_coords))
-        #print("What are the first few shapes of target_coords:", [t.shape for t in target_coords[0:10]])
-        #print("************************************************")
-
 
         offset = 6
         target_coords_raw = torch.split(tt_lin[:, offset : offset + coords.shape[-1]], tt_lens)

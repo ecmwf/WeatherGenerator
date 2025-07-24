@@ -13,10 +13,11 @@ class Masker:
     Attributes:
         masking_rate (float): The base rate at which tokens are masked.
         masking_strategy (str): The strategy used for masking (e.g., "random",
-        "block", "healpix", ...more to be implemented).
+        "block", "healpix", "channel").
         masking_rate_sampling (bool): Whether to sample the masking rate from a distribution.
-        rng (np.random.Generator): A random number generator.
-
+        masking_strategy_config (dict): Configuration for the masking strategy, can include
+                                        additional parameters like "hl_data", "hl_mask", etc.
+                                        specific to the masking strategy.
     """
 
     def __init__(
@@ -33,8 +34,6 @@ class Masker:
         # masking_strategy_config is a dictionary that can hold any additional parameters
         self.masking_strategy_config = masking_strategy_config
 
-
-
         # Initialize the mask, set to None initially,
         # until it is generated in mask_source.
         self.perm_sel: list[np.typing.NDArray] = None
@@ -47,13 +46,14 @@ class Masker:
                 "If HEALPix masking, hl_data and hl_mask must be given in masking_strategy_config."
             )
             assert hl_mask < hl_data, "hl_mask must be less than hl_data for HEALPix masking."
-        
+
         if self.masking_strategy == "channel":
             # Ensure that masking_strategy_config contains either 'global' or 'per_cell'
-            assert "global" in self.masking_strategy_config or "per_cell" in self.masking_strategy_config, (
-                "Masking strategy must specify either 'global' or 'per_cell' in masking_strategy_config."
-            )
-            
+            assert (
+                "global" in self.masking_strategy_config
+                or "per_cell" in self.masking_strategy_config
+            ), "Strategy must be 'global' or 'per_cell' in masking_strategy_config."
+
     def reset_rng(self, rng) -> None:
         """
         Reset rng after epoch to ensure proper randomization
@@ -77,12 +77,7 @@ class Masker:
         Returns:
             list[torch.Tensor]: The unmasked tokens (model input).
         """
-        
-        # be honest here, what is tokenized_data?
-        # It is a list of tensors, where each tensor represents the tokens for a cell.
 
-        #print("Tokenized data shape example:", tokenized_data[0].size() if tokenized_data else "No data")
-        
         token_lens = [len(t) for t in tokenized_data]
         num_tokens = sum(token_lens)
 
@@ -111,7 +106,7 @@ class Masker:
         # Handle the special case where all tokens are masked
         if rate == 1.0:
             token_lens = [len(t) for t in tokenized_data]
-            self.perm_sel = [np.ones(l, dtype=bool) for l in token_lens]
+            self.perm_sel = [np.ones(cell, dtype=bool) for cell in token_lens]
             source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
             return source_data
 
@@ -133,15 +128,15 @@ class Masker:
             flat_mask = self._generate_healpix_mask(token_lens, rate)
 
         elif self.masking_strategy == "channel":
-            mask = self._generate_channel_mask(
-                tokenized_data, rate, coords, geoinfos
-            )
+            mask = self._generate_channel_mask(tokenized_data, rate, coords, geoinfos)
 
         else:
             assert False, f"Unknown masking strategy: {self.masking_strategy}"
 
-        # if masking_strategy is channel, we need to handle the masking differently, 
-        # since p is not 1D Boolean for the list of cells, but 3D to mask the channels in each cell.
+        # if masking_strategy is channel,
+        # we need to handle the masking differently,
+        # since p is not 1D Boolean for the list of cells,
+        # but 3D to mask the channels in each cell.
         if self.masking_strategy == "channel":
             self.perm_sel = mask
             # In the source_data we will set the channels that are masked to 0.0.
@@ -156,7 +151,7 @@ class Masker:
         split_indices = np.cumsum(token_lens)[:-1]
         self.perm_sel = np.split(flat_mask, split_indices)
 
-        # Apply the mask to get the source data (where mask is False)        
+        # Apply the mask to get the source data (where mask is False)
         source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
 
         return source_data
@@ -193,22 +188,24 @@ class Masker:
         feature_dim = 6 + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
 
         processed_target_tokens = []
-            
-        for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
 
+        for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
             if self.masking_strategy == "channel":
-                # If the masking strategy is channel, we need to handle the target tokens differently.
-                # Since we don't have true or false on a per cell basis, instead per channel for each cell,
-                # we set the not masked channels to NaN so they are not used in the loss calculation.
-                
-                # Fail if target and source channels do not match. This will be relaxed in the future.
-                assert cc[0].shape[1] == pp.shape[2], (
-                    "The number of channels in the target must match the number of channels in the source."
-                    f" Expected {pp.shape[2]}, but found {cc[0].shape[1]}. Check the stream config."
-                )
+                # If the masking strategy is channel,
+                # we need to handle the target tokens differently.
+                # Since we don't have true or false on a per cell basis,
+                # instead per channel for each cell,
+                # we set the not masked channels to NaN so
+                # they are not used in the loss calculation.
 
                 selected_tensors = []
                 for c, p in zip(cc, pp, strict=True):
+                    
+                    # assert that c has the same shape at dimension 1 as p
+                    assert c.shape[-1] == p.shape[-1], (
+                        f"The source and target channels must be the same."
+                    )
+
                     # slightly complicated as the first dimension of c varies with data in the cell.
                     c[:, ~p[0, :]] = torch.nan  # Set the channels that are not masked to NaN
                     selected_tensors.append(c)
@@ -223,7 +220,7 @@ class Masker:
                 processed_target_tokens.append(
                     torch.empty(0, feature_dim, dtype=coords.dtype, device=coords.device)
                 )
-            
+
         return processed_target_tokens
 
     def _generate_healpix_mask(self, token_lens: list[int], rate: float) -> np.typing.NDArray:
@@ -290,113 +287,92 @@ class Masker:
 
         return flat_mask
 
-    
-    def _generate_channel_mask(self, tokenized_data: list[torch.Tensor],
-                                rate: float, 
-                                coords: torch.Tensor,
-                                geoinfos: torch.Tensor) -> list[np.typing.NDArray]:
+    def _generate_channel_mask(
+        self,
+        tokenized_data: list[torch.Tensor],
+        rate: float,
+        coords: torch.Tensor,
+        geoinfos: torch.Tensor,
+    ) -> list[np.typing.NDArray]:
         """
-        Generates a mask for each channel in the tokenized data based on the specified rate.
+        Generates a channel mask for each cell, handling completely empty tensors.
+        This method is robust against cells represented as 1D tensors of shape [0].
 
         Args:
-            tokenized_data (list[torch.Tensor]): A list of tensors, where each tensor represents
-                                                 the tokens for a cell.
-            rate (float): The desired masking rate for each channel.
+            tokenized_data (list[torch.Tensor]): A list of tensors. Most will have a shape of
+                                                (dim, num_tokens, num_channels), but some may
+                                            be empty with a shape of (0,), no data in cell
+            rate (float): The desired masking rate for channels.
+            coords (torch.Tensor): The coordinates tensor.
+            geoinfos (torch.Tensor): The geoinfos tensor.
 
         Returns:
-            list[np.ndarray]: A list of boolean arrays, where each array corresponds to a channel
-                              and indicates which tokens are masked.
+            list[np.ndarray]: A list of boolean masks. Each mask corresponds to a tensor
+                            in tokenized_data.
         """
-        
-        # Calculate the number of channels from the first tensor
-        num_channels = tokenized_data[0].shape[-1]
 
-        # Check if all tensors have the same number of channels
+        if not tokenized_data:
+            return []
+
+        # determine the number of channels
+        num_channels = None
         for t in tokenized_data:
-            if t.shape[-1] != num_channels:
-                assert False, (
-                    "All tensors in tokenized_data must have the same number of channels."
-                    f" Expected {num_channels}, but found {t.shape[-1]}."
-                )
+            if t.numel() > 0:
+                num_channels = t.shape[2]
+                break
 
-        # if masking_rate_sampling is enabled, sample the rate from a normal distribution.
+        # If all tensors in the batch are empty, return masks matching their shapes.
+        if num_channels is None:
+            return [np.empty(t.shape, dtype=bool) for t in tokenized_data]
+
+        # masking rate sampling, to be refactored as shared between methods
         if self.masking_rate_sampling:
             rate = np.clip(
                 np.abs(self.rng.normal(loc=rate, scale=1.0 / (2.5 * np.pi))),
                 0.0,
                 1.0,
             )
-        
-        # ignore the time, coords and geoinfos channels
-        mask_count = int((num_channels - (6 + coords.shape[-1] + geoinfos.shape[-1])) * rate)
 
-        # Create a 1D boolean array for channels to mask (True means mask)
-        channel_mask_1d = np.zeros(num_channels, dtype=bool)
-                
-        # We ensure the first channels, of time, coords and geoinfos channels are not masked        
-        if mask_count > 0:
-            masked_channel_indices = np.random.choice(
-                    (num_channels - (6 + coords.shape[-1] + geoinfos.shape[-1])), mask_count, replace=False
-                ) + (6 + coords.shape[-1] + geoinfos.shape[-1])  # Offset by time, coords, geoinfos
-            channel_mask_1d[masked_channel_indices] = True
-        
-        # per-cell tokens have shape (X, token_size, num_channels), so expand to 3D
-        channel_mask_3d = channel_mask_1d[np.newaxis, np.newaxis, :]
+        # isolate the number of actual data channels. 6 refers to time.
+        num_fixed_channels = 6 + coords.shape[-1] + geoinfos.shape[-1]
+        num_data_channels = num_channels - num_fixed_channels
+        mask_count = int(num_data_channels * rate)
 
-        # repeat the mask for each token_size in the tokenized data
-        # so the second axis has shape token_size
-        channel_mask_3d_token_size = np.repeat(channel_mask_3d, tokenized_data[0].shape[1], axis=1)
+        # generate masks for each cell...TODO: optimise this
+        full_mask = []
+        is_per_cell = self.masking_strategy_config.get("per_cell", False)
+        base_channel_mask_1d = None
 
-        # based on the masking_strategy_config, we will generate the full mask
-        # currently the options are global or per_cell channel masking
-        if self.masking_strategy_config.get("global"):
-            # If global_masking is True, generate the same channel mask for all cells.
-            full_mask = [channel_mask_3d_token_size] * len(tokenized_data)
-             
-        elif self.masking_strategy_config.get("per_cell"):
-            
-            # This is ugly, and should be refactored.
-            # Probably should be done above with channel_mask_1d.
-            # Create a list to store the permuted masks
-            permuted_masks = []
+        for cell_data in tokenized_data:
+            # Check for empty cells or wrong shapes
+            if cell_data.ndim != 3 or cell_data.shape[1] == 0:
+                # This cell is empty or has an unexpected shape (e.g., [0]).
+                # Then create a mask that matches the shape of the cell data.
+                full_mask.append(np.empty(cell_data.shape, dtype=bool))
+                continue
 
-            # Get the length of channels to permute
-            # the number of data channels minus time, coords and geoinfos channels
-            permute_length = channel_mask_3d_token_size.shape[2] - (6 + coords.shape[-1] + geoinfos.shape[-1])
+            # retrieve 1st dimension and token size
+            num_1st_dim = cell_data.shape[0]
+            num_tokens = cell_data.shape[1]
 
-            for cell_idx in range(len(tokenized_data)):
-                # Create a copy of the original full_mask to modify for each token
-                current_mask = channel_mask_3d_token_size.copy()
+            # determine the 1D channel mask for the current cell.
+            if is_per_cell or base_channel_mask_1d is None:
+                channel_mask_1d = np.zeros(num_channels, dtype=bool)
+                if mask_count > 0:
+                    masked_indices = (
+                        self.rng.choice(num_data_channels, mask_count, replace=False)
+                        + num_fixed_channels
+                    )  # offset by the fixed channels
+                    # set randomly chosen masked indices to True
+                    channel_mask_1d[masked_indices] = True
 
-                # Generate a perturbation of which channels to mask.
-                permutation_indices = np.random.permutation(permute_length)
+                if not is_per_cell:
+                    base_channel_mask_1d = channel_mask_1d
+            else:
+                channel_mask_1d = base_channel_mask_1d
 
-                # Iterate through the first two dimensions
-                for i in range(current_mask.shape[0]): 
-                    for j in range(current_mask.shape[1]): # Loop through the second dimension, token_size
-                        # Extract the slice of the third dimension we want to permute
-                        slice_to_permute = current_mask[i, j, (6 + coords.shape[-1] + geoinfos.shape[-1]):]
-                        # Permute the slice using permutation_indices
-                        permuted_slice = slice_to_permute[permutation_indices]
-                        # Assign the permuted slice back to the current_mask
-                        current_mask[i, j, (6 + coords.shape[-1] + geoinfos.shape[-1]):] = permuted_slice
-
-                # Append the modified current_mask to our list
-                permuted_masks.append(current_mask)
-
-            full_mask = permuted_masks
-        
-        # If neither global nor per_cell is specified, raise an error
-        # This is a safeguard, but should not happen due to the assert in __init__
-        else:
-            assert False, (
-                "Masking strategy must specify either 'global' or 'per_cell' in masking_strategy_config."
-            )
-
-        # assert the first (6 + coords.shape[-1] + geoinfos.shape[-1]) channels are not masked
-        assert np.all(~full_mask[0][0, 0, :(6 + coords.shape[-1] + geoinfos.shape[-1])]), (
-            "The first (6 + coords.shape[-1] + geoinfos.shape[-1]) channels should not be masked."
-            "This is likely due to an error in the masking strategy configuration."
-        )
+            # Expand the 1D channel mask to the 3D shape: (dim, num_tokens, num_channels).
+            cell_mask_3d = np.tile(channel_mask_1d, (num_1st_dim, num_tokens, 1))
+            full_mask.append(cell_mask_3d)
 
         return full_mask
