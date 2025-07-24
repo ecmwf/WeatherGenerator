@@ -27,7 +27,7 @@ _logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Fast evaluation of weather generator runs."
+        description="Fast evaluation of WeatherGenerator runs."
     )
     parser.add_argument(
         "--config",
