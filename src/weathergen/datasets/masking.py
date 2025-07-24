@@ -47,12 +47,11 @@ class Masker:
             )
             assert hl_mask < hl_data, "hl_mask must be less than hl_data for HEALPix masking."
 
-        if self.masking_strategy == "channel":
-            # Ensure that masking_strategy_config contains either 'global' or 'per_cell'
-            assert (
-                "global" in self.masking_strategy_config
-                or "per_cell" in self.masking_strategy_config
-            ), "Strategy must be 'global' or 'per_cell' in masking_strategy_config."
+        assert (
+            self.masking_strategy != "channel"
+            or "global" in self.masking_strategy_config
+            or "per_cell" in self.masking_strategy_config
+        ), "If masking_strategy is 'channel', its config must be 'global' or 'per_cell'."
 
     def reset_rng(self, rng) -> None:
         """
@@ -191,20 +190,11 @@ class Masker:
 
         for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
             if self.masking_strategy == "channel":
-                # If the masking strategy is channel,
-                # we need to handle the target tokens differently.
-                # Since we don't have true or false on a per cell basis,
-                # instead per channel for each cell,
-                # we set the not masked channels to NaN so
-                # they are not used in the loss calculation.
-
+                # If masking strategy is channel, handle target tokens differently.
+                # We don't have Booleans per cell, instead per channel for cell,
+                # we set the unmasked channels to NaN so not in the loss calculation.
                 selected_tensors = []
                 for c, p in zip(cc, pp, strict=True):
-                    
-                    # assert that c has the same shape at dimension 1 as p
-                    assert c.shape[-1] == p.shape[-1], (
-                        f"The source and target channels must be the same."
-                    )
 
                     # slightly complicated as the first dimension of c varies with data in the cell.
                     c[:, ~p[0, :]] = torch.nan  # Set the channels that are not masked to NaN
