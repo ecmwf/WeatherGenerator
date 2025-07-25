@@ -93,8 +93,8 @@ class Masker:
         if self.masking_rate_sampling:
             rate = np.clip(
                 np.abs(self.rng.normal(loc=rate, scale=1.0 / (2.5 * np.pi))),
-                0.0,
-                1.0,
+                0.01,
+                0.99,
             )
 
         if rate == 0.0:
@@ -200,6 +200,7 @@ class Masker:
                     # slightly complicated as the first dimension of c varies with data in the cell.
                     c[:, ~p[0, :]] = torch.nan  # Set the channels that are not masked to NaN
                     selected_tensors.append(c)
+            
             else:
                 # For other masking strategies, we simply select the tensors where the mask is True.
                 selected_tensors = [c for c, p in zip(cc, pp, strict=True) if p]
@@ -248,8 +249,8 @@ class Masker:
         if self.masking_rate_sampling:
             rate = np.clip(
                 np.abs(self.rng.normal(loc=rate, scale=1.0 / (2.5 * np.pi))),
-                0.0,
-                1.0,
+                0.01,
+                0.99,
             )
 
         # Choose parent cells to mask based on the specified rate.
@@ -320,8 +321,8 @@ class Masker:
         if self.masking_rate_sampling:
             rate = np.clip(
                 np.abs(self.rng.normal(loc=rate, scale=1.0 / (2.5 * np.pi))),
-                0.0,
-                1.0,
+                0.01,
+                0.99,
             )
 
         # isolate the number of actual data channels. 6 refers to time.
