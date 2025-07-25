@@ -14,8 +14,8 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
-from score import VerifiedData, get_score
-from score_utils import to_list
+from weathergen.evaluate.score import VerifiedData, get_score
+from weathergen.evaluate.score_utils import to_list
 
 from weathergen.common.io import ZarrIO
 

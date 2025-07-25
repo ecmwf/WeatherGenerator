@@ -7,7 +7,7 @@ case "$1" in
   sync)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv sync
+      uv sync --all-packages
     )
     ;;
   lint)
@@ -63,8 +63,25 @@ case "$1" in
       done
     )
     ;;
+  create-jupyter-kernel)
+    (
+      cd "$SCRIPT_DIR" || exit 1
+      uv run ipython kernel install --user --env VIRTUAL_ENV $(pwd)/.venv --name=weathergen_kernel --display-name "Python (WeatherGenerator)" 
+      echo "Jupyter kernel created. You can now use it in Jupyter Notebook or JupyterLab."
+      echo "To use this kernel, select 'Python (WeatherGenerator)' from the kernel options in Jupyter Notebook or JupyterLab."
+      echo "If you want to remove the kernel later, you can run:"
+      echo "jupyter kernelspec uninstall weathergen_kernel"
+    )
+    ;;
+  jupytext-sync)
+    (
+      cd "$SCRIPT_DIR" || exit 1
+      uv run jupytext --sync ../WeatherGenerator-private/notebooks/*py
+      echo "Jupytext sync completed."
+    )
+    ;;
   *)
-    echo "Usage: $0 {sync|lint|unit-test|integration-test|create-links}"
+    echo "Usage: $0 {sync|lint|unit-test|integration-test|create-links|create-jupyter-kernel|jupytext-sync}"
     exit 1
     ;;
 esac

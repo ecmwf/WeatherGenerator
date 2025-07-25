@@ -28,6 +28,7 @@ dependencies = [
  "dask~=2025.5.1",
  "hatchling",
  "weathergen-common",
+ "numexpr>=2.11.0",
 ]
 
 [project.urls]
@@ -53,6 +54,8 @@ packages = ["src/weathergen"]
 [dependency-groups]
 # The development dependencies
 dev = [
+ "ipykernel>=6.30.0",
+ "jupytext>=1.17.2",
  "pytest~=8.3.5",
  "pytest-mock>=3.14.1",
  "ruff==0.9.7",
