@@ -19,9 +19,8 @@ from typing import Literal
 
 import numpy as np
 import polars as pl
-
 import weathergen.utils.config as config
-from weathergen.utils.metrics import read_metrics_file
+from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 
 _weathergen_timestamp = "weathergen.timestamp"
 _weathergen_reltime = "weathergen.reltime"
@@ -66,12 +65,17 @@ class TrainLogger:
         # TODO: performance: we repeatedly open the file for each call. Better for multiprocessing
         # but we can probably do better and rely for example on the logging module.
 
-        with open(self.path_run / "metrics.json", "ab") as f:
+        metrics_path = get_train_metrics_path(
+            base_path=Path("results"), run_id=self.cf.run_id
+        )
+        with open(metrics_path, "ab") as f:
             s = json.dumps(clean_metrics) + "\n"
             f.write(s.encode("utf-8"))
 
     #######################################
-    def add_train(self, samples, lr, loss_avg, stddev_avg, perf_gpu=0.0, perf_mem=0.0) -> None:
+    def add_train(
+        self, samples, lr, loss_avg, stddev_avg, perf_gpu=0.0, perf_mem=0.0
+    ) -> None:
         """
         Log training data
         """
@@ -157,12 +161,19 @@ class TrainLogger:
 
         # define cols for training
         cols_train = ["dtime", "samples", "mse", "lr"]
-        cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_0_mean", "learning_rate"]
+        cols1 = [
+            _weathergen_timestamp,
+            "num_samples",
+            "loss_avg_0_mean",
+            "learning_rate",
+        ]
         for si in cf.streams:
             for _j, lf in enumerate(cf.loss_fcts):
                 cols1 += [_key_loss(si["name"], lf[0])]
                 cols_train += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
+                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
+                    + ", "
+                    + lf[0]
                 ]
         with_stddev = [("stats" in lf) for lf in cf.loss_fcts]
         if with_stddev:
@@ -177,8 +188,16 @@ class TrainLogger:
         try:
             with open(fname_log_train, "rb") as f:
                 log_train = np.loadtxt(f, delimiter=",")
-            log_train = log_train.reshape((log_train.shape[0] // len(cols_train), len(cols_train)))
-        except (TypeError, AttributeError, IndexError, ZeroDivisionError, ValueError) as e:
+            log_train = log_train.reshape(
+                (log_train.shape[0] // len(cols_train), len(cols_train))
+            )
+        except (
+            TypeError,
+            AttributeError,
+            IndexError,
+            ZeroDivisionError,
+            ValueError,
+        ) as e:
             _logger.warning(
                 (
                     f"Warning: no training data loaded for run_id={run_id}",
@@ -213,7 +232,9 @@ class TrainLogger:
         for si in cf.streams:
             for _, lf in enumerate(cf.loss_fcts_val):
                 cols_val += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
+                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
+                    + ", "
+                    + lf[0]
                 ]
                 cols2 += [_key_loss(si["name"], lf[0])]
         with_stddev = [("stats" in lf) for lf in cf.loss_fcts_val]
@@ -229,8 +250,16 @@ class TrainLogger:
         try:
             with open(fname_log_val, "rb") as f:
                 log_val = np.loadtxt(f, delimiter=",")
-            log_val = log_val.reshape((log_val.shape[0] // len(cols_val), len(cols_val)))
-        except (TypeError, AttributeError, IndexError, ZeroDivisionError, ValueError) as e:
+            log_val = log_val.reshape(
+                (log_val.shape[0] // len(cols_val), len(cols_val))
+            )
+        except (
+            TypeError,
+            AttributeError,
+            IndexError,
+            ZeroDivisionError,
+            ValueError,
+        ) as e:
             _logger.warning(
                 (
                     f"Warning: no validation data loaded for run_id={run_id}",
@@ -264,8 +293,16 @@ class TrainLogger:
         try:
             with open(fname_perf_val, "rb") as f:
                 log_perf = np.loadtxt(f, delimiter=",")
-            log_perf = log_perf.reshape((log_perf.shape[0] // len(cols_perf), len(cols_perf)))
-        except (TypeError, AttributeError, IndexError, ZeroDivisionError, ValueError) as e:
+            log_perf = log_perf.reshape(
+                (log_perf.shape[0] // len(cols_perf), len(cols_perf))
+            )
+        except (
+            TypeError,
+            AttributeError,
+            IndexError,
+            ZeroDivisionError,
+            ValueError,
+        ) as e:
             _logger.warning(
                 (
                     f"Warning: no validation data loaded for run_id={run_id}",
@@ -341,8 +378,9 @@ def read_metrics(
         run_id = cf.run_id
     assert run_id, "run_id must be provided"
 
+    metrics_path = get_train_metrics_path(base_path=results_path, run_id=run_id)
     # TODO: this should be a config option
-    df = read_metrics_file(results_path / run_id / "metrics.json")
+    df = read_metrics_file(metrics_path)
     if stage is not None:
         df = df.filter(pl.col("stage") == stage)
     df = df.drop("stage")
@@ -361,10 +399,14 @@ def clean_df(df, columns: list[str] | None):
 
     # Convert timestamp column to date
     df = df.with_columns(
-        pl.from_epoch(df[_weathergen_timestamp], time_unit="ms").alias(_weathergen_timestamp)
+        pl.from_epoch(df[_weathergen_timestamp], time_unit="ms").alias(
+            _weathergen_timestamp
+        )
     )
     df = df.with_columns(
-        (df[_weathergen_timestamp] - df[_weathergen_timestamp].min()).alias(_weathergen_reltime)
+        (df[_weathergen_timestamp] - df[_weathergen_timestamp].min()).alias(
+            _weathergen_reltime
+        )
     )
     _logger.info(f"schema {df.schema}")
 
