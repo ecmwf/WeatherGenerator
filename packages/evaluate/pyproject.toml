@@ -8,6 +8,8 @@ dependencies = [
     "cartopy>=0.24.1",
     "xskillscore",
     "xhistogram",
+    "panel",
+    "omegaconf",
     "weathergen-common",
 ]
 
