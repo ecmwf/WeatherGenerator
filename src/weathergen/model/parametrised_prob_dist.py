@@ -76,16 +76,17 @@ class InterpolatedLatents(nn.Module):
     Code taken and adapted from: https://github.com/Jiawei-Yang/DeTok/tree/main
     """
 
-    def __init__(self, gamma, use_additive_noise=False, deterministic=True):
+    def __init__(self, gamma, dim, use_additive_noise=False, deterministic=False):
         super().__init__()
         self.gamma = gamma
         self.use_additive_noise = use_additive_noise
         self.diag_gaussian = DiagonalGaussianDistribution(
             deterministic=deterministic, channel_dim=-1
         )
+        self.mean_and_var = nn.Linear(dim, 2*dim, bias=False)
 
     def interpolate_with_noise(self, z, sampling=False, noise_level=-1):
-        self.diag_gaussian.reset_parameters(z)
+        self.diag_gaussian.reset_parameters(self.mean_and_var(z))
         z_latents = self.diag_gaussian.sample() if sampling else self.diag_gaussian.mean
 
         if self.training and self.gamma > 0.0:

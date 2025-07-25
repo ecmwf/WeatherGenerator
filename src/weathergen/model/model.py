@@ -139,7 +139,7 @@ class Model(torch.nn.Module):
         # local assimilation engine
         self.ae_local_blocks = LocalAssimilationEngine(cf).create()
 
-        self.interpolate_latents = InterpolatedLatents(gamma=3)
+        self.interpolate_latents = InterpolatedLatents(gamma=3, dim=cf.ae_local_dim_embed)
 
         ##############
         # local -> global assimilation engine adapter
@@ -392,7 +392,7 @@ class Model(torch.nn.Module):
         tokens = self.embed_cells(model_params, streams_data)
 
         # local assimilation engine and adapter
-        tokens = self.assimilate_local(model_params, tokens, source_cell_lens)
+        tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
 
         tokens = self.assimilate_global(model_params, tokens)
 
@@ -423,7 +423,7 @@ class Model(torch.nn.Module):
             )
         ]
 
-        return preds_all
+        return preds_all, posteriors
 
     #########################################
     def embed_cells(self, model_params, streams_data):
@@ -492,10 +492,12 @@ class Model(torch.nn.Module):
         )
 
         # local assimilation model
-        for block in self.ae_local_blocks :
-          tokens = checkpoint( block, tokens, cell_lens, use_reentrant=False)
+        for block in self.ae_local_blocks:
+            tokens = checkpoint(block, tokens, cell_lens, use_reentrant=False)
 
-        self.interpolate_latents.interpolate_with_noise(tokens, sampling=False)
+        tokens, posteriors = self.interpolate_latents.interpolate_with_noise(
+            tokens, sampling=self.training
+        )
 
         for block in self.ae_adapter:
             tokens_global = checkpoint(
@@ -553,7 +555,7 @@ class Model(torch.nn.Module):
             + model_params.pe_global
         ).flatten(1, 2)
 
-        return tokens_global
+        return tokens_global, posteriors
 
     #########################################
     def assimilate_global(self, model_params, tokens):

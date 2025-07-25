@@ -545,7 +545,7 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
+                preds, posteriors = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
 
                 loss, _ = self.compute_loss(
                     self.loss_fcts,
@@ -556,6 +556,7 @@ class Trainer(TrainerBase):
                     losses_all,
                     stddev_all,
                 )
+                loss += cf.kl_weight * posteriors.kl().mean()
 
             # backward pass
             self.grad_scaler.scale(loss).backward()
@@ -616,7 +617,7 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds = self.ddp_model(
+                        preds, _ = self.ddp_model(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
 
