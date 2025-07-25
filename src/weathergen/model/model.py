@@ -240,11 +240,13 @@ class Model(torch.nn.Module):
         ###############
         # forecasting engine
         if isinstance(cf.forecast_steps, int):
-            assert not(cf.forecast_steps > 0 and cf.fe_num_blocks == 0), ("Empty forecast engine " 
-            "(fe_num_blocks = 0), but forecast_steps > 0")
+            assert not (cf.forecast_steps > 0 and cf.fe_num_blocks == 0), (
+                "Empty forecast engine (fe_num_blocks = 0), but forecast_steps > 0"
+            )
         else:
-            assert not(min(cf.forecast_steps) > 0 and cf.fe_num_blocks == 0), ("Empty forecast "
-            "engine (fe_num_blocks = 0), but forecast_steps[i] > 0 for some i")
+            assert not (min(cf.forecast_steps) > 0 and cf.fe_num_blocks == 0), (
+                "Empty forecast engine (fe_num_blocks = 0), but forecast_steps[i] > 0 for some i"
+            )
 
         self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells).create()
 
