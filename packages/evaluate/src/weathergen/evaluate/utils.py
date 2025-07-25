@@ -345,6 +345,7 @@ def metric_list_to_json(
             metric_now.attrs["npoints_per_sample"] = (
                 npoints_sample_stream.values.tolist()
             )
+            
             metric_dict = metric_now.to_dict()
 
             # Match the expected filename pattern
