@@ -110,8 +110,8 @@ class Plotter:
         preds: xr.DataArray,
         variables: list,
         select: dict,
-        tag: str ="",
-        number: str = "", 
+        tag: str = "",
+        number: str = "",
     ) -> list[str]:
         """
         Plot histogram of target vs predictions for a set of variables.
@@ -141,7 +141,9 @@ class Plotter:
             # set labels and title
             plt.xlabel(f"Variable: {var}")
             plt.ylabel("Frequency")
-            plt.title(f"Histogram of Target and Prediction: {self.stream}, {var} : fstep = {self.fstep:03}")
+            plt.title(
+                f"Histogram of Target and Prediction: {self.stream}, {var} : fstep = {self.fstep:03}"
+            )
             plt.legend(frameon=False)
 
             # TODO: make this nicer
@@ -164,12 +166,8 @@ class Plotter:
         return plot_names
 
     def map(
-        self, 
-        data: xr.DataArray, 
-        variables: list, 
-        select: dict, 
-        tag: str = "") -> list[str]:
-
+        self, data: xr.DataArray, variables: list, select: dict, tag: str = ""
+    ) -> list[str]:
         """
         Plot 2D map for a dataset
 
@@ -200,7 +198,9 @@ class Plotter:
             plt.colorbar(
                 scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {var}"
             )
-            plt.title(f"{self.stream}, {var} : fstep = {self.fstep:03} ({da["valid_time"][0].values})")
+            plt.title(
+                f"{self.stream}, {var} : fstep = {self.fstep:03} ({da['valid_time'][0].values})"
+            )
             ax.set_global()
             ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
 

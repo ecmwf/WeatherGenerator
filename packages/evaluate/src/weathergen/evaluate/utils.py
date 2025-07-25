@@ -29,9 +29,7 @@ _logger.setLevel(logging.INFO)
 class WeatherGeneratorOutput:
     target: dict
     prediction: dict
-    points_per_sample: (
-        xr.DataArray | None
-    )
+    points_per_sample: xr.DataArray | None
 
 
 def get_data(
@@ -105,7 +103,7 @@ def get_data(
             ):
                 out = zio.get_data(sample, stream, fstep)
                 target, pred = out.target.as_xarray(), out.prediction.as_xarray()
-                
+
                 da_tars_fs.append(target.squeeze())
                 da_preds_fs.append(pred.squeeze())
                 pps.append(len(target.ipoint))
@@ -167,7 +165,7 @@ def calc_scores_per_stream(
     da_preds = output_data.prediction
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
- 
+
     # get coordinate information from retrieved data
 
     fsteps = [int(k) for k in da_tars.keys()]
@@ -205,7 +203,7 @@ def calc_scores_per_stream(
             get_score(score_data, metric, agg_dims="ipoint", group_by_coord="sample")
             for metric in metrics
         ]
-       
+
         combined_metrics = xr.concat(combined_metrics, dim="metric")
         combined_metrics["metric"] = metrics
 
@@ -450,7 +448,9 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
                 # if there is data for this stream and channel, plot it
                 if selected_data:
                     _logger.info(f"Creating plot for {metric} - {stream} - {ch}.")
-                    name = "_".join([metric] + sorted(list(set(run_ids))) + [stream, ch])
+                    name = "_".join(
+                        [metric] + sorted(list(set(run_ids))) + [stream, ch]
+                    )
                     plotter.plot(
                         selected_data,
                         labels,
