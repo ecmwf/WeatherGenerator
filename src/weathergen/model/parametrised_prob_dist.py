@@ -14,17 +14,22 @@ import torch.nn as nn
 
 import numpy as np
 
+
 class DiagonalGaussianDistribution:
     """
     Used to represent a learned Gaussian Distribution as typical in a VAE
     Code taken and adapted from: https://github.com/Jiawei-Yang/DeTok/tree/main
     """
-    def __init__(self, parameters, deterministic=False, channel_dim=1):
+
+    def __init__(self, deterministic=False, channel_dim=1):
+        self.deterministic = deterministic
+        self.channel_dim = channel_dim
+
+    def reset_parameters(self, parameters):
         self.parameters = parameters.float()
-        self.mean, self.logvar = torch.chunk(parameters, 2, dim=channel_dim)
+        self.mean, self.logvar = torch.chunk(parameters, 2, dim=self.channel_dim)
         self.sum_dims = tuple(range(1, self.mean.dim()))
         self.logvar = torch.clamp(self.logvar, -30.0, 20.0)
-        self.deterministic = deterministic
         self.std = torch.exp(0.5 * self.logvar)
         self.var = torch.exp(self.logvar)
         if self.deterministic:
@@ -71,26 +76,34 @@ class InterpolatedLatents(nn.Module):
     Code taken and adapted from: https://github.com/Jiawei-Yang/DeTok/tree/main
     """
 
-    def __init__(self):
+    def __init__(self, gamma, use_additive_noise=False, deterministic=True):
         super().__init__()
-        self.to_posteriors = partial(DiagonalGaussianDistribution, channel_dim=-1)
+        self.gamma = gamma
+        self.use_additive_noise = use_additive_noise
+        self.diag_gaussian = DiagonalGaussianDistribution(
+            deterministic=deterministic, channel_dim=-1
+        )
 
     def interpolate_with_noise(self, z, sampling=False, noise_level=-1):
-        posteriors = self.to_posteriors(z)
-        z_latents = posteriors.sample() if sampling else posteriors.mean
+        self.diag_gaussian.reset_parameters(z)
+        z_latents = self.diag_gaussian.sample() if sampling else self.diag_gaussian.mean
 
         if self.training and self.gamma > 0.0:
             device = z_latents.device
-            bsz, n_tokens, chans = z_latents.shape
+            s = z_latents.shape
+            bsz = 1
             if noise_level > 0.0:
-                noise_level_tensor = torch.full((bsz, 1, 1), noise_level, device=device)
+                noise_level_tensor = torch.full(bsz, noise_level, device=device)
             else:
-                noise_level_tensor = torch.rand(bsz, 1, 1, device=device)
-            noise_level_tensor = noise_level_tensor.expand(-1, n_tokens, chans)
-            noise = torch.randn(bsz, n_tokens, chans, device=device) * self.gamma
+                noise_level_tensor = torch.rand(bsz, device=device)
+            # TODO: make this deal with batchsize > 1
+            # noise_level_tensor = (
+            #     noise_level_tensor[torch.repeat_interleave(z_lens)].unsqueeze(-1).expand(-1, s[-1])
+            # )
+            noise = torch.randn(s, device=device) * self.gamma
             if self.use_additive_noise:
                 z_latents = z_latents + noise_level_tensor * noise
             else:
                 z_latents = (1 - noise_level_tensor) * z_latents + noise_level_tensor * noise
 
-        return z_latents, posteriors
+        return z_latents, self.diag_gaussian
