@@ -76,7 +76,8 @@ case "$1" in
   jupytext-sync)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run jupytext --sync ../WeatherGenerator-private/notebooks/*py
+      # Run on any python or jupyter notebook files in the WeatherGenerator-private/notebooks directory
+      uv run jupytext --sync ../WeatherGenerator-private/notebooks/*.py ../WeatherGenerator-private/notebooks/*.ipynb
       echo "Jupytext sync completed."
     )
     ;;
