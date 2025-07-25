@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 from score import VerifiedData, get_score
-from utils import to_list
+from score_utils import to_list
 
 from weathergen.common.io import ZarrIO
 
@@ -33,25 +33,27 @@ _DEFAULT_RESULT_PATH = _REPO_ROOT / "results"
 
 
 ### Auxiliary functions
-def peek_tar_channels(zio: ZarrIO, stream: str) -> list[str]:
+def peek_tar_channels(zio: ZarrIO, stream: str, fstep: int = 0) -> list[str]:
     """
     Peek the channels of a target stream in a ZarrIO object.
 
     Parameters
     ----------
-    zio : ZarrIO
+    zio : 
         The ZarrIO object containing the tar stream.
-    stream : str
+    stream : 
         The name of the tar stream to peek.
+    fstep :  
+        The forecast step to peek. Default is 0.
     Returns
     -------
-    channels : list
+    channels : 
         A list of channel names in the tar stream.
     """
     if not isinstance(zio, ZarrIO):
         raise TypeError("zio must be an instance of ZarrIO")
 
-    dummy_out = zio.get_data(0, stream, 0)
+    dummy_out = zio.get_data(0, stream, fstep)
     channels = dummy_out.target.channels
     _logger.debug(f"Peeked channels for stream {stream}: {channels}")
 
@@ -88,7 +90,7 @@ def calc_scores_per_stream(
     samples = sorted([int(sample) for sample in zio.samples])
     nsamples = len(samples)
 
-    channels_stream = peek_tar_channels(zio, stream)
+    channels_stream = peek_tar_channels(zio, stream, forecast_steps[0])
     # filter channels if provided
     channels = (
         [ch for ch in channels_stream if ch in to_list(channels)]
