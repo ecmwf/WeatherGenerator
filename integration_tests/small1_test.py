@@ -18,6 +18,7 @@ import pytest
 import weathergen.common.io as io
 import weathergen.utils.config as config
 from weathergen.run_train import inference_from_args, train_with_args
+from weathergen.utils.metrics import get_train_metrics_path
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,7 @@ def evaluate_results(run_id):
 
 def load_metrics(run_id):
     """Helper function to load metrics"""
-    file_path = f"{weathergen_home}/results/{run_id}/metrics.json"
+    file_path = get_train_metrics_path(base_path=weathergen_home / "results", run_id=run_id)
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Metrics file not found for run_id: {run_id}")
     with open(file_path) as f:
@@ -110,7 +111,7 @@ def load_metrics(run_id):
 
 def assert_missing_metrics_file(run_id):
     """Test that a missing metrics file raises FileNotFoundError."""
-    file_path = f"{weathergen_home}/results/{run_id}/metrics.json"
+    file_path = get_train_metrics_path(base_path=weathergen_home / "results", run_id=run_id)
     assert os.path.exists(file_path), f"Metrics file does not exist for run_id: {run_id}"
     metrics = load_metrics(run_id)
     logger.info(f"Loaded metrics for run_id: {run_id}: {metrics}")
