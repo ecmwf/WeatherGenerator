@@ -31,7 +31,7 @@ class WeatherGeneratorOutput:
     prediction: dict
     points_per_sample: (
         xr.DataArray | None
-    )  # <- now this is clear that it may or may not be present
+    )
 
 
 def get_data(
@@ -80,11 +80,7 @@ def get_data(
         samples = sorted(
             [int(sample) for sample in zio.samples] if samples is None else samples
         )
-        channels = (
-            channels
-            if channels is not None
-            else stream_dict.get("channels", all_channels)
-        )
+        channels = channels or stream_dict.get("channels", all_channels)
         channels = to_list(channels)
 
         da_tars, da_preds = [], []
@@ -171,7 +167,7 @@ def calc_scores_per_stream(
     da_preds = output_data.prediction
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
-
+ 
     # get coordinate information from retrieved data
 
     fsteps = [int(k) for k in da_tars.keys()]
@@ -209,7 +205,7 @@ def calc_scores_per_stream(
             get_score(score_data, metric, agg_dims="ipoint", group_by_coord="sample")
             for metric in metrics
         ]
-
+       
         combined_metrics = xr.concat(combined_metrics, dim="metric")
         combined_metrics["metric"] = metrics
 
@@ -346,6 +342,7 @@ def metric_list_to_json(
 
         for metric in metrics_stream.coords["metric"].values:
             metric_now = metrics_stream.sel(metric=metric)
+
             # Save as individual DataArray, not Dataset
             metric_now.attrs["npoints_per_sample"] = (
                 npoints_sample_stream.values.tolist()
@@ -441,6 +438,7 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
             for ch in channels_set:  # loop over channels
                 selected_data = []
                 labels = []
+                run_ids = []
                 for run_id, data in scores_dict[metric][stream].items():
                     # fill list of plots with one xarray per run_id, if it exists.
                     if ch not in set(np.atleast_1d(data.channel.values)):
@@ -448,11 +446,11 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
 
                     selected_data.append(data.sel(channel=ch))
                     labels.append(runs[run_id].get("label", run_id))
-
+                    run_ids.append(run_id)
                 # if there is data for this stream and channel, plot it
                 if selected_data:
                     _logger.info(f"Creating plot for {metric} - {stream} - {ch}.")
-                    name = "_".join([metric, stream, ch])
+                    name = "_".join([metric] + sorted(list(set(run_ids))) + [stream, ch])
                     plotter.plot(
                         selected_data,
                         labels,

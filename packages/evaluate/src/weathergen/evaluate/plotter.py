@@ -200,8 +200,7 @@ class Plotter:
             plt.colorbar(
                 scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {var}"
             )
-
-            plt.title(f"{self.stream}, {var} : fstep = {self.fstep:03}")
+            plt.title(f"{self.stream}, {var} : fstep = {self.fstep:03} ({da["valid_time"][0].values})")
             ax.set_global()
             ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
 
