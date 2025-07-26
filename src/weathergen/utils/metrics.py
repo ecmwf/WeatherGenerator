@@ -49,3 +49,16 @@ def read_metrics_file(f: str | Path) -> pl.DataFrame:
             pl.when(pl.col(n).is_not_nan()).then(df1[n]).otherwise(df2[n]).alias(n)
         )
     return df1
+
+
+def get_train_metrics_path(base_path: Path, run_id: str) -> Path:
+    """
+    Return the path to the training metrics.json for a particular run_id. This is required for
+    backwards compatibility after changing the name of the `results/{RUN-ID}/metrics.json` file to
+    `results/{RUN-ID}/{RUN-ID}_train_metrics.json` to disambiguate `metrics.json`.
+    See https://github.com/ecmwf/WeatherGenerator/issues/590 for details.
+    """
+    if (base_path / run_id / "metrics.json").exists():
+        return base_path / run_id / "metrics.json"
+    else:
+        return base_path / run_id / f"{run_id}_train_metrics.json"
