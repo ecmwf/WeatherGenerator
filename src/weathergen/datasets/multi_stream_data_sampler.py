@@ -33,6 +33,9 @@ from weathergen.datasets.utils import (
     compute_offsets_scatter_embed,
     compute_source_cell_lens,
 )
+from weathergen.datasets.rollout_utils import (
+        end_date_determiner,
+        forecast_steps_calculator)
 from weathergen.utils.logger import init_loggers, logger
 from weathergen.utils.train_logger import Stage, TrainLogger
 
@@ -187,6 +190,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.num_healpix_cells_source: int = 12 * 4**self.healpix_level_source
         self.num_healpix_cells_target: int = 12 * 4**self.healpix_level_target
 
+        self.is_rollout = hasattr(cf,"rollout_type")
+        
+
         if cf.training_mode == "forecast":
             self.tokenizer = TokenizerForecast(cf.healpix_level)
         elif cf.training_mode == "masking":
@@ -275,6 +281,28 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.tokenizer.reset_rng(self.rng)
 
+    def rollout_reset(self, dates, forecast_type="annual"):
+        self.len = min(self.len, len(dates))
+        def convert_date_to_idx(date):
+            date = str_to_datetime64(date)
+            assert date > self.time_window_handler.t_start, f"{date} is before the start date {self.time_window_handler.t_start}"
+            assert date < (self.time_window_handler.t_end - self.time_window_handler.t_window_len), f"{date} is after the last end date incorporating time window {self.time_window_handler.t_end}"
+            return (date,(date - self.time_window_handler.t_start)//
+                        self.time_window_handler.t_window_step)
+
+        
+        dates,self.perms = zip(*map(convert_date_to_idx,dates))
+        self.perms = np.array(self.perms)
+        end_date = end_date_determiner(forecast_type)
+        
+        if type(end_date) is not np.timedelta64:
+            self.perms_forecast_dt = forecast_steps_calculator(end_date, dates, self.time_window_handler.t_window_len)
+        else:
+            end_date = end_date.astype(self.time_window_handler.t_window_len.dtype)
+            self.perms_forecast_dt = ((end_date // self.time_window_handler.t_window_len) 
+                            if end_date % self.time_window_handler.t_window_len
+                            else (end_date // self.time_window_handler.t_window_len)+1)*np.ones(len(dates), dtype=np.int64)
+
     ###################################################
     def denormalize_source_channels(self, obs_id, data):
         # TODO: with multiple ds per stream we need to distinguish these here
@@ -298,8 +326,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         iter_start, iter_end = self.worker_workset()
         _logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={self.len}")
 
-        # create new shuffeling
-        self.reset()
+        if not self.is_rollout:
+            # create new shuffeling
+            self.reset()
 
         nhc_target = self.num_healpix_cells_target
         nhc_source = self.num_healpix_cells_source
@@ -308,6 +337,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # idx_raw is used to index into the dataset; the decoupling is needed
         # since there are empty batches
         idx_raw = iter_start
+        
         for i, _bidx in enumerate(range(iter_start, iter_end, self.batch_size)):
             # forecast_dt needs to be constant per batch (amortized through data parallel training)
             forecast_dt = self.perms_forecast_dt[i]
@@ -318,7 +348,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             while len(batch) < self.batch_size:
                 idx: TIndex = self.perms[idx_raw % self.perms.shape[0]]
                 idx_raw += 1
-
                 time_win1 = self.time_window_handler.window(idx)
 
                 streams_data: list[StreamData] = []

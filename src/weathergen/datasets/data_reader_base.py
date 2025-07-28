@@ -347,7 +347,7 @@ class DataReaderBase(metaclass=ABCMeta):
         source data (coords, geoinfos, data, datetimes)
         """
 
-        rdata = self._get(idx, self.source_idx)
+        rdata = self._get(idx, self.source_idx,"source")
 
         return rdata
 
@@ -365,12 +365,12 @@ class DataReaderBase(metaclass=ABCMeta):
         target data (coords, geoinfos, data, datetimes)
         """
 
-        rdata = self._get(idx, self.target_idx)
+        rdata = self._get(idx, self.target_idx,"target")
 
         return rdata
 
     @abstractmethod
-    def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
+    def _get(self, idx: TIndex, channels_idx: list[int], data_type: str ="source") -> ReaderData:
         """
         Get data for window
 
@@ -380,6 +380,8 @@ class DataReaderBase(metaclass=ABCMeta):
             Index of temporal window
         channels_idx : np.array
             Selection of channels
+        data_type: str
+            For source or target
 
         Returns
         -------

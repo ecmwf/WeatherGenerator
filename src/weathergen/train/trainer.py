@@ -35,7 +35,7 @@ from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TRAIN, VAL, TrainLogger
-from weathergen.utils.validation_io import write_output
+from weathergen.utils.validation_io import write_output, write_rollout_output
 
 _logger = logging.getLogger(__name__)
 
@@ -131,6 +131,66 @@ class Trainer(TrainerBase):
 
         # inference validation set
         self.validate(epoch=0)
+        _logger.info(f"Finished inference run with id: {cf.run_id}")
+
+    ###########################################
+    def rollout(self, cf, run_id_trained, epoch):
+        # general initalization
+        self.init(cf)
+
+        # !! modifies config: adds config.streams[i].<stage>_source_channels
+        # and config.streams[i].<stage>_target_channels !!
+        self.dataset_rollout = MultiStreamDataSampler(
+            cf,
+            cf.start_date_val,
+            cf.end_date_val,
+            cf.batch_size_validation_per_gpu,
+            cf.samples_per_validation,
+            train_logger=self.train_logger,
+            stage=VAL,
+            shuffle=cf.shuffle,
+        )
+
+        self.dataset_rollout.rollout_reset(cf.rollout_start_dates, cf.rollout_type)
+
+        print("Forecast steps calculator ", self.dataset_rollout.perms_forecast_dt)
+
+        # make sure number of loaders does not exceed requested samples
+        loader_num_workers = min(cf.samples_per_validation, cf.loader_num_workers)
+        loader_params = {
+            "batch_size": None,
+            "batch_sampler": None,
+            "shuffle": False,
+            "num_workers": min(len(self.dataset_rollout),loader_num_workers),
+            "pin_memory": True,
+        }
+        self.data_loader_rollout = torch.utils.data.DataLoader(
+            self.dataset_rollout, **loader_params, sampler=None
+        )
+
+        sources_size = self.dataset_rollout.get_sources_size()
+        targets_num_channels = self.dataset_rollout.get_targets_num_channels()
+        targets_coords_size = self.dataset_rollout.get_targets_coords_size()
+
+        self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+        self.model = self.model.to(self.devices[0])
+        self.model.load(run_id_trained, epoch)
+        _logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
+        self.ddp_model = self.model
+        self.model_params = ModelParams().create(cf).to(self.devices[0])
+        _logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
+
+        self.loss_fcts_val = []
+        for name, w in cf.loss_fcts_val:
+            self.loss_fcts_val += [[getattr(losses, name), w]]
+
+        if self.cf.rank == 0:
+            config.save(self.cf, epoch=0)
+
+        _logger.info(f"Starting inference with id={self.cf.run_id}.")
+        print(f"Starting inference with id={self.cf.run_id}.")
+        # inference validation set
+        self.rollout_each_epoch(epoch=0)
         _logger.info(f"Finished inference run with id: {cf.run_id}")
 
     ###########################################
@@ -698,6 +758,78 @@ class Trainer(TrainerBase):
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
 
+    def rollout_each_epoch(self, epoch):
+        cf = self.cf
+        self.ddp_model.eval()
+
+        dataset_rollout_iter = iter(self.data_loader_rollout)
+
+        dn_data = self.dataset_rollout.denormalize_target_channels 
+
+        with torch.no_grad():
+            # print progress bar but only in interactive mode, i.e. when without ddp
+            with tqdm.tqdm(
+                total=len(self.data_loader_rollout), disable= self.cf.with_ddp
+            ) as pbar:
+                for bidx, batch in enumerate(dataset_rollout_iter):
+                    forecast_steps = batch[-1]
+                    batch = self.batch_to_device(batch)
+                    streams_data = batch[0]
+
+                    # rollout model
+                    with torch.autocast(
+                        device_type="cuda",
+                        dtype=self.mixed_precision_dtype,
+                        enabled=cf.with_mixed_precision,
+                    ):
+                        preds = self.ddp_model(
+                            self.model_params, batch, cf.forecast_offset, forecast_steps
+                        )
+
+                        targets_coords_raw_rt = [
+                            [
+                                torch.cat([t[i].target_coords_raw[fstep] for t in streams_data])
+                                for i in range(len(self.cf.streams))
+                            ]
+                            for fstep in range(cf.forecast_offset, cf.forecast_offset + forecast_steps + 1)
+                        ]
+
+                        targets_times_raw_rt = [
+                            [
+                                np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
+                                for i in range(len(self.cf.streams))
+                            ]
+                            for fstep in range(cf.forecast_offset, cf.forecast_offset + forecast_steps + 1)
+                        ]
+
+                        preds_all = [[[] for _ in self.cf.streams] for _ in range(len(targets_coords_raw_rt))]
+
+                        targets_lens = [[[] for _ in self.cf.streams] for _ in range(len(targets_coords_raw_rt))]
+
+                        for fstep in range(len(targets_coords_raw_rt)):
+                            for i_obs, (target_coords, si) in enumerate(
+                                    zip(
+                                        targets_coords_raw_rt[fstep],
+                                        self.cf.streams,
+                                        strict=False)):
+
+                                preds_all[fstep][i_obs] += [dn_data(i_obs, preds[fstep][i_obs].to(torch.float32)).detach().cpu()]
+                                targets_lens[fstep][i_obs] += [target_coords.shape[0]]
+                                
+                        sources = [[item.source_raw for item in b] for b in batch[0]]
+
+                        write_rollout_output(
+                                self.cf,
+                                epoch,
+                                bidx,
+                                sources,
+                                preds_all,
+                                targets_coords_raw_rt,
+                                targets_times_raw_rt,
+                                targets_lens)
+
+        # avoid that there is a systematic bias in the validation subset
+        self.dataset_rollout.advance()
     ###########################################
     def batch_to_device(self, batch):
         # forecast_steps is dropped here from the batch

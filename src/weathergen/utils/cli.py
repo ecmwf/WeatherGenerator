@@ -67,6 +67,44 @@ def get_inference_parser() -> argparse.ArgumentParser:
 
     return parser
 
+def get_rollout_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+
+    _add_model_loading_params(parser)
+    _add_general_arguments(parser)
+
+    parser.add_argument(
+        "--rollout_dates",
+        "-start",
+        type=_format_date,
+        nargs="+",
+        default= ["2022-10-01"],
+        help="Start date for rollout. Format must be parsable with pd.to_datetime.",
+    )
+    parser.add_argument(
+        "--rollout_type",
+        "-roll_out",
+        type=str,
+        default="century",
+        help="Determine end date for rollout by its type.",
+    )
+    parser.add_argument(
+        "--samples", type=int, default=10000000, help="Number of rollout samples."
+    )
+    parser.add_argument(  # behaviour changed => implies default=False
+        "--save_samples",
+        type=bool,
+        default=True,
+        help="Toggle saving of samples from inference. Default True",
+    )
+    parser.add_argument(
+        "--analysis_streams_output",
+        nargs="+",
+        default=["ERA5"],
+        help="Analysis output streams during inference.",
+    )
+
+    return parser
 
 def _format_date(date: str) -> str:
     try:

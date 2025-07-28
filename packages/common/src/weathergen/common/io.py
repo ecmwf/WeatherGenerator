@@ -113,6 +113,76 @@ class OutputDataset:
         )
 
 
+@dataclasses.dataclass
+class OutputDataset:
+    """Access source/target/prediction zarr data contained in one output item."""
+
+    name: str
+    item_key: ItemKey
+
+    # (datapoints, channels, ens)
+    data: zarr.Array  # wrong type => arary like
+
+    # (datapoints,)
+    times: zarr.Array
+
+    # (datapoints, 2)
+    coords: zarr.Array
+
+    # (datapoints, geoinfos) geoinfos are stream dependent => 0 for most gridded data
+    geoinfo: zarr.Array
+
+    channels: list[str]
+    geoinfo_channels: list[str]
+
+    @functools.cached_property
+    def arrays(self) -> dict[str, zarr.Array]:
+        """Iterate over the arrays and their names."""
+        return {
+            "data": self.data,
+            "times": self.times,
+            "coords": self.coords,
+            "geoinfo": self.geoinfo,
+        }
+
+    @functools.cached_property
+    def datapoints(self) -> NDArray[np.int_]:
+        return np.arange(self.data.shape[0])
+
+    def as_xarray(self, chunk_nsamples=CHUNK_N_SAMPLES) -> xr.Dataset:
+        """Convert raw dask arrays into chunked dask-aware xarray dataset."""
+        chunks = (chunk_nsamples, *self.data.shape[1:])
+
+        # maybe do dask conversion earlier? => usefull for parallel writing?
+        data = da.from_zarr(self.data, chunks=chunks)  # dont call compute to lazy load
+        # include pseudo ens dim so all data arrays have same dimensionality
+        # TODO: does it make sense for target and source to have ens dim?
+        additional_dims = (0, 1, 2) if len(data.shape) == 3 else (0, 1, 2, 5)
+        expanded_data = da.expand_dims(data, axis=additional_dims)
+        coords = da.from_zarr(self.coords).compute()
+        times = da.from_zarr(self.times).compute()
+        geoinfo = da.from_zarr(self.geoinfo).compute()
+
+        geoinfo = {name: ("ipoint", geoinfo[:, i]) for i, name in enumerate(self.geoinfo_channels)}
+        # TODO: make sample, stream, forecast_step DataArray attribute, test how it
+        # interacts with concatenating
+        return xr.DataArray(
+            expanded_data,
+            dims=["sample", "stream", "forecast_step", "ipoint", "channel", "ens"],
+            coords={
+                "sample": [self.item_key.sample],
+                "stream": [self.item_key.stream],
+                "forecast_step": [self.item_key.forecast_step],
+                "ipoint": self.datapoints,
+                "channel": self.channels,  # TODO: make sure channel names align with data
+                "valid_time": ("ipoint", times.astype("datetime64[ns]")),
+                "lat": ("ipoint", coords[:, 0]),
+                "lon": ("ipoint", coords[:, 1]),
+                **geoinfo,
+            },
+            name=self.name,
+        )
+
 class OutputItem:
     def __init__(
         self,
@@ -136,6 +206,26 @@ class OutputItem:
                 msg = f"Missing source dataset for item: {self.key.path}"
                 raise ValueError(msg)
 
+class RolloutOutputItem:
+    def __init__(
+        self,
+        prediction: OutputDataset,
+        source: OutputDataset | None = None,
+    ):
+        """Collection of possible datasets for one output item."""
+        self.prediction = prediction
+        self.source = source
+
+        self.key = self.prediction.item_key
+
+        self.datasets = [self.prediction]
+
+        if self.key.with_source:
+            if self.source:
+                self.datasets.append(self.source)
+            else:
+                msg = f"Missing source dataset for item: {self.key.path}"
+                raise ValueError(msg)
 
 class ZarrIO:
     """Manage zarr storage hierarchy."""
@@ -358,6 +448,125 @@ class OutputBatchData:
                 channels,
                 geoinfo_channels,
             ),
+            prediction=OutputDataset(
+                "prediction",
+                key,
+                preds_data,
+                times,
+                coords,
+                geoinfo,
+                channels,
+                geoinfo_channels,
+            ),
+        )
+
+@dataclasses.dataclass
+class RolloutOutputBatchData:
+    """Provide convenient access to adapt existing output data structures."""
+
+    # sample, stream, tensor(datapoint, channel) => datapoints is accross all datasets per stream
+    sources: list[list]
+
+    # fstep, stream, redundant dim (size 1), tensor(ens, sample x datapoint, channel)
+    predictions: list[list[list]]
+
+    # fstep, stream, tensor(sample x datapoint, 2 + geoinfos)
+    targets_coords: list[list]
+
+    # fstep, stream, (sample x datapoint)
+    targets_times: list[list[NDArray[DType]]]
+
+    # fstep, stream, redundant dim (size 1)
+    targets_lens: list[list[list[int]]]
+    
+    stream_names: list[str]
+
+    # stream, channel name
+    channels: list[list[str]]
+    geoinfo_channels: list[list[str]]
+
+    sample_start: int
+    forecast_offset: int
+
+    @functools.cached_property
+    def samples(self):
+        """Continous indices of all samples accross all batches."""
+        return np.arange(len(self.sources)) + self.sample_start
+
+    @functools.cached_property
+    def forecast_steps(self):
+        """Indices of all forecast steps adjusted by the forecast offset"""
+        return np.arange(len(self.targets_coords)) + self.forecast_offset
+
+    def items(self) -> typing.Generator[OutputItem, None, None]:
+        """Iterate over possible output items"""
+        filtered_streams = (stream for stream in self.stream_names if stream != "")
+        # TODO: filter for empty items?
+        for s, fo_s, fi_s in itertools.product(self.samples, self.forecast_steps, filtered_streams):
+            yield self.extract(ItemKey(int(s), int(fo_s), fi_s))
+
+    def extract(self, key: ItemKey) -> OutputItem:
+        """Extract datasets from lists for one output item."""
+        # adjust shifted values in ItemMeta
+        sample = key.sample - self.sample_start
+        forecast_step = key.forecast_step - self.forecast_offset
+        stream_idx = self.stream_names.index(key.stream)  # TODO: assure this is correct
+        lens = self.targets_lens[forecast_step][stream_idx]
+        start = sum(lens[:sample])
+        n_samples = lens[sample]
+
+        _logger.info("extracting subset")
+        _logger.info(
+            f"sample: start:{self.sample_start} rel_idx:{sample} range:{start}-{start + n_samples}"
+        )
+        _logger.info(
+            f"forecast_step: {key.forecast_step} = {forecast_step} (rel_step) + "
+            + f"{self.forecast_offset} (forecast_offset)"
+        )
+        _logger.info(f"stream: {key.stream} with index: {stream_idx}")
+
+        datapoints = slice(start, start + n_samples)
+
+        preds_data = (
+            self.predictions[forecast_step][stream_idx][0]
+            .transpose(1, 0)
+            .transpose(1, 2)[datapoints]
+            .cpu()
+            .detach()
+            .numpy()
+        )
+
+        _coords = self.targets_coords[forecast_step][stream_idx][datapoints].numpy()
+        coords = _coords[:, :2]  # first two columns are lat,lon
+        geoinfo = _coords[:, 2:]  # the rest is geoinfo => potentially empty
+        if geoinfo.size > 0:  # TODO: set geoinfo to be empty for now
+            geoinfo = np.empty((geoinfo.shape[0], 0))
+            _logger.warning(
+                "geoinformation channels are not implemented yet."
+                + "will be truncated to be of size 0."
+            )
+        times = self.targets_times[forecast_step][stream_idx][
+            datapoints
+        ]  # make conversion to datetime64[ns] here?
+        channels = self.channels[stream_idx]
+        geoinfo_channels = self.geoinfo_channels[stream_idx]
+
+        if key.with_source:
+            source_data = self.sources[sample][stream_idx].cpu().detach().numpy()
+            source_dataset = OutputDataset(
+                "source",
+                key,
+                source_data,
+                times,
+                coords,
+                geoinfo,
+                channels,
+                geoinfo_channels,
+            )
+        else:
+            source_dataset = None
+        return RolloutOutputItem(
+            source=source_dataset,
             prediction=OutputDataset(
                 "prediction",
                 key,

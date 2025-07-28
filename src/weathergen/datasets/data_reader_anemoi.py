@@ -134,7 +134,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         return self.len
 
     @override
-    def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
+    def _get(self, idx: TIndex, channels_idx: list[int], data_type: str) -> ReaderData:
         """
         Get data for window (for either source or target, through public interface)
 
@@ -144,6 +144,8 @@ class DataReaderAnemoi(DataReaderTimestep):
             Index of temporal window
         channels_idx : np.array
             Selection of channels
+        data_type: str
+            For source or target
 
         Returns
         -------
@@ -153,27 +155,11 @@ class DataReaderAnemoi(DataReaderTimestep):
         (t_idxs, dtr) = self._get_dataset_idxs(idx)
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
-            return ReaderData.empty(
-                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
-            )
-
-        didx_start = t_idxs[0]
-        # End is inclusive
-        didx_end = t_idxs[-1] + 1
-
-        # extract number of time steps and collapse ensemble dimension
-        # ds is a wrapper around zarr with get_coordinate_selection not being exposed since
-        # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
-        # sampling is required here
-        data = self.ds[didx_start:didx_end][:, :, 0].astype(np.float32)
-
-        # extract channels
-        data = (
-            data[:, list(channels_idx)]
-            .transpose([0, 2, 1])
-            .reshape((data.shape[0] * data.shape[2], -1))
-        )
-
+            if data_type == "source":
+                return ReaderData.empty(
+                    num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+                )
+            
         # construct lat/lon coords
         latlon = np.concatenate(
             [
@@ -182,22 +168,58 @@ class DataReaderAnemoi(DataReaderTimestep):
             ],
             axis=0,
         ).transpose()
+
         # repeat latlon len(t_idxs) times
-        coords = np.vstack((latlon,) * len(t_idxs))
+        coords = np.vstack((latlon,) * ( len(t_idxs) 
+                                         if len(t_idxs) != 0  
+                                         else self.time_window_handler.t_window_len//self.ds.frequency)) 
+        
+        if len(t_idxs) > 0:
+            
+            didx_start = t_idxs[0]
+            # End is inclusive
+            didx_end = t_idxs[-1] + 1
+
+            # extract number of time steps and collapse ensemble dimension
+            # ds is a wrapper around zarr with get_coordinate_selection not being exposed since
+            # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
+            # sampling is required here
+            data = self.ds[didx_start:didx_end][:, :, 0].astype(np.float32)
+
+            # extract channels
+            data = (
+                data[:, list(channels_idx)]
+                .transpose([0, 2, 1])
+                .reshape((data.shape[0] * data.shape[2], -1))
+            )
+
+        else:
+            didx_start = self.data_start_time + idx*self.ds.frequency
+            didx_end = self.data_start_time + (idx + self.time_window_handler.t_window_len//self.ds.frequency)*self.ds.frequency
+
+            data = np.zeros((coords.shape[0],len(channels_idx)),dtype=np.float32)
 
         # empty geoinfos for anemoi
         geoinfos = np.zeros((len(data), 0), dtype=data.dtype)
 
         # date time matching #data points of data
         # Assuming a fixed frequency for the dataset
-        datetimes = np.repeat(self.ds.dates[didx_start:didx_end], len(data) // len(t_idxs))
 
+        if len(t_idxs) == 0:
+            dates = np.arange(didx_start,didx_end,self.ds.frequency)
+            datetimes = np.repeat(dates,len(self.latitudes))
+        else:
+            datetimes = np.repeat(
+                            self.ds.dates[didx_start:didx_end],
+                            len(data) // len(t_idxs))
+    
         rd = ReaderData(
             coords=coords,
             geoinfos=geoinfos,
             data=data,
             datetimes=datetimes,
         )
+        
         check_reader_data(rd, dtr)
 
         return rd
