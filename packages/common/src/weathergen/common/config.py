@@ -365,6 +365,3 @@ def get_path_output(config: Config, epoch: int) -> Path:
     fname = f"validation_epoch{epoch:05d}_rank{config.rank:04d}.zarr"
 
     return base_path / fname
-
-
-

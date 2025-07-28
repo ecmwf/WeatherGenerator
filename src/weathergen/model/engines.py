@@ -9,6 +9,7 @@
 
 import torch
 
+from weathergen.common.config import Config
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -22,7 +23,6 @@ from weathergen.model.embeddings import (
 )
 from weathergen.model.layers import MLP
 from weathergen.utils.utils import get_dtype
-from weathergen.common.config import Config
 
 
 class EmbeddingEngine:

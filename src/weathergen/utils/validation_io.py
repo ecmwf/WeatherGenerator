@@ -9,8 +9,8 @@
 
 import logging
 
-import weathergen.common.io as io
 import weathergen.common.config as config
+import weathergen.common.io as io
 
 _logger = logging.getLogger(__name__)
 
