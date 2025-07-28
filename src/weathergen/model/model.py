@@ -31,7 +31,8 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP
 from weathergen.model.utils import get_num_parameters
-from weathergen.utils.config import Config, get_dtype
+from weathergen.utils.utils import get_dtype
+from weathergen.common.config import Config
 from weathergen.utils.logger import logger
 
 

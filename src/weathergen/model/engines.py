@@ -21,7 +21,8 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
-from weathergen.utils.config import Config, get_dtype
+from weathergen.utils.utils import get_dtype
+from weathergen.common.config import Config
 
 
 class EmbeddingEngine:

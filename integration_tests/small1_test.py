@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 import weathergen.common.io as io
-import weathergen.utils.config as config
+import weathergen.common.config as config
 from weathergen.run_train import inference_from_args, train_with_args
 from weathergen.utils.metrics import get_train_metrics_path
 

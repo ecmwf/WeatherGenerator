@@ -20,7 +20,7 @@ from typing import Literal
 import numpy as np
 import polars as pl
 
-import weathergen.utils.config as config
+import weathergen.common.config as config
 from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 
 _weathergen_timestamp = "weathergen.timestamp"
