@@ -545,7 +545,9 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                preds, posteriors = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
+                preds, posteriors = self.ddp_model(
+                    self.model_params, batch, cf.forecast_offset, forecast_steps
+                )
 
                 loss, _ = self.compute_loss(
                     self.loss_fcts,
