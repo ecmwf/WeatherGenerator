@@ -579,7 +579,7 @@ class Trainer(TrainerBase):
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu])).item()
             self.perf_mem = ddp_average(torch.tensor([perf_mem])).item()
 
-            self._log_terminal(bidx, epoch)
+            self._log_terminal(bidx, epoch, TRAIN)
             if bidx % log_interval == 0:
                 self._log(TRAIN)
 
@@ -590,40 +590,6 @@ class Trainer(TrainerBase):
             self.cf.istep += cf.batch_size_per_gpu
 
         self.dataset.advance()
-
-    def _prepare_losses_for_logging(
-        self,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """
-        Aggregates across ranks loss and standard deviation data for logging.
-
-        Returns:
-            real_loss (torch.Tensor): The scalar loss used for backpropagation.
-            losses_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
-                per-channel loss tensor.
-            stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
-                per-channel standard deviation tensor.
-        """
-        losses_all: dict[str, Tensor] = {}
-        stddev_all: dict[str, Tensor] = {}
-
-        # Make list of losses into a tensor. This is individual tensor per rank
-        real_loss = torch.tensor(self.loss_model_hist, device=self.devices[0])
-        # Gather all tensors from all ranks into a list and stack them into one tensor again
-        # real_loss = torch.cat(all_gather(real_loss))
-        real_loss = torch.cat(all_gather_vlen(real_loss))
-
-        for stream in self.cf.streams:  # Loop over all steams
-            stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
-            stream_all = torch.stack(stream_hist).to(torch.float64)
-            losses_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
-            # losses_all[stream.name] = torch.cat(all_gather(stream_all))
-            stream_hist = [stddev_all[stream.name] for stddev_all in self.stdev_unweighted_hist]
-            stream_all = torch.stack(stream_hist).to(torch.float64)
-            # stddev_all[stream.name] = torch.cat(all_gather(stream_all))
-            stddev_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
-
-        return real_loss, losses_all, stddev_all
 
     def validate(self, epoch):
         cf = self.cf
@@ -699,6 +665,7 @@ class Trainer(TrainerBase):
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
+                self._log_terminal(bidx, epoch, VAL)
                 self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
@@ -747,6 +714,40 @@ class Trainer(TrainerBase):
             # save config
             config.save(self.cf, epoch)
 
+    def _prepare_losses_for_logging(
+        self,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        """
+        Aggregates across ranks loss and standard deviation data for logging.
+
+        Returns:
+            real_loss (torch.Tensor): The scalar loss used for backpropagation.
+            losses_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
+                per-channel loss tensor.
+            stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
+                per-channel standard deviation tensor.
+        """
+        losses_all: dict[str, Tensor] = {}
+        stddev_all: dict[str, Tensor] = {}
+
+        # Make list of losses into a tensor. This is individual tensor per rank
+        real_loss = torch.tensor(self.loss_model_hist, device=self.devices[0])
+        # Gather all tensors from all ranks into a list and stack them into one tensor again
+        # real_loss = torch.cat(all_gather(real_loss))
+        real_loss = torch.cat(all_gather_vlen(real_loss))
+
+        for stream in self.cf.streams:  # Loop over all steams
+            stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
+            stream_all = torch.stack(stream_hist).to(torch.float64)
+            losses_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
+            # losses_all[stream.name] = torch.cat(all_gather(stream_all))
+            stream_hist = [stddev_all[stream.name] for stddev_all in self.stdev_unweighted_hist]
+            stream_all = torch.stack(stream_hist).to(torch.float64)
+            # stddev_all[stream.name] = torch.cat(all_gather(stream_all))
+            stddev_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
+
+        return real_loss, losses_all, stddev_all
+
     def _log(self, stage: Stage):
         """
         Logs training or validation metrics.
@@ -780,35 +781,49 @@ class Trainer(TrainerBase):
 
             self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
-    def _log_terminal(self, bidx: int, epoch: int):
-        if bidx % self.print_freq == 0 and bidx > 0:
+    def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
+        if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
             avg_loss, losses_all, _ = self._prepare_losses_for_logging()
 
             if is_root():
-                # samples per sec
-                dt = time.time() - self.t_start
-                pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
-                pstr += "(lr={:.2E}, s/sec={:.3f})"
-                len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
-                print(
-                    pstr.format(
-                        epoch,
-                        bidx,
-                        len_dataset,
-                        self.cf.istep,
-                        avg_loss.nanmean().item(),
-                        self.lr_scheduler.get_lr(),
-                        (self.print_freq * self.cf.batch_size_per_gpu) / dt,
-                    ),
-                    flush=True,
-                )
-                print("\t", end="")
-                for _, st in enumerate(self.cf.streams):
+                if stage == VAL:
                     print(
-                        "{}".format(st["name"]) + f" : {losses_all[st['name']].nanmean():0.4E} \t",
-                        end="",
+                        f"validation ({self.cf.run_id}) : {epoch:03d} : {avg_loss.nanmean().item()}"
                     )
-                print("\n", flush=True)
+                    for _, st in enumerate(self.cf.streams):
+                        print(
+                            "{}".format(st["name"])
+                            + f" : {losses_all[st['name']].nanmean():0.4E} \t",
+                            end="",
+                        )
+                    print("\n", flush=True)
+
+                elif stage == TRAIN:
+                    # samples per sec
+                    dt = time.time() - self.t_start
+                    pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
+                    pstr += "(lr={:.2E}, s/sec={:.3f})"
+                    len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
+                    print(
+                        pstr.format(
+                            epoch,
+                            bidx,
+                            len_dataset,
+                            self.cf.istep,
+                            avg_loss.nanmean().item(),
+                            self.lr_scheduler.get_lr(),
+                            (self.print_freq * self.cf.batch_size_per_gpu) / dt,
+                        ),
+                        flush=True,
+                    )
+                    print("\t", end="")
+                    for _, st in enumerate(self.cf.streams):
+                        print(
+                            "{}".format(st["name"])
+                            + f" : {losses_all[st['name']].nanmean():0.4E} \t",
+                            end="",
+                        )
+                    print("\n", flush=True)
 
             self.t_start = time.time()
