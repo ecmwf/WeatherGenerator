@@ -53,7 +53,11 @@ def peek_tar_channels(zio: ZarrIO, stream: str, fstep: int = 0) -> list[str]:
     if not isinstance(zio, ZarrIO):
         raise TypeError("zio must be an instance of ZarrIO")
 
+<<<<<<< HEAD
     dummy_out = zio.get_data(0, stream, fstep)
+=======
+    dummy_out = zio.get_data(0, stream, min(list(map(int, zio.forecast_steps))))
+>>>>>>> shmh40/dev/masking_ablations
     channels = dummy_out.target.channels
     _logger.debug(f"Peeked channels for stream {stream}: {channels}")
 
@@ -143,6 +147,7 @@ def calc_scores_per_stream(
             xr.concat(targets, dim="ipoint"),
             xr.concat(preds, dim="ipoint"),
         )
+<<<<<<< HEAD
 
         if channels != channels_stream:
             _logger.debug(
@@ -150,6 +155,11 @@ def calc_scores_per_stream(
             )
             targets_all = targets_all.sel(channel=channels)
             preds_all = preds_all.sel(channel=channels)
+=======
+        
+        targets_all = targets_all.sel(channel = channels_stream)
+        preds_all = preds_all.sel(channel = channels_stream)
+>>>>>>> shmh40/dev/masking_ablations
 
         _logger.debug(f"Verifying data for stream {stream}, forecast_step {fstep}...")
         score_data = VerifiedData(preds_all, targets_all)
