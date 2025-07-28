@@ -6,7 +6,6 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-
 import inspect
 import logging
 from dataclasses import dataclass
@@ -15,7 +14,7 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 import xarray as xr
-from utils import to_list
+from score_utils import to_list
 
 # from common.io import MockIO
 
@@ -32,6 +31,8 @@ except Exception:
 
 
 # helper function to calculate skill score
+
+
 def _get_skill_score(
     score_fcst: xr.DataArray, score_ref: xr.DataArray, score_perf: float
 ) -> xr.DataArray:
