@@ -93,8 +93,8 @@ class Masker:
         if self.masking_rate_sampling:
             rate = np.clip(
                 np.abs(self.rng.normal(loc=rate, scale=1.0 / (2.5 * np.pi))),
-                0.0,
-                1.0,
+                0.01,
+                0.99,
             )
 
         if rate == 0.0:
@@ -191,24 +191,16 @@ class Masker:
 
         for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
             if self.masking_strategy == "channel":
-                # If the masking strategy is channel,
-                # we need to handle the target tokens differently.
-                # Since we don't have true or false on a per cell basis,
-                # instead per channel for each cell,
-                # we set the not masked channels to NaN so
-                # they are not used in the loss calculation.
-
+                # If masking strategy is channel, handle target tokens differently.
+                # We don't have Booleans per cell, instead per channel for cell,
+                # we set the unmasked channels to NaN so not in the loss calculation.
                 selected_tensors = []
                 for c, p in zip(cc, pp, strict=True):
-                    
-                    # assert that c has the same shape at dimension 1 as p
-                    assert c.shape[-1] == p.shape[-1], (
-                        f"The source and target channels must be the same."
-                    )
 
                     # slightly complicated as the first dimension of c varies with data in the cell.
                     c[:, ~p[0, :]] = torch.nan  # Set the channels that are not masked to NaN
                     selected_tensors.append(c)
+            
             else:
                 # For other masking strategies, we simply select the tensors where the mask is True.
                 selected_tensors = [c for c, p in zip(cc, pp, strict=True) if p]
@@ -257,8 +249,8 @@ class Masker:
         if self.masking_rate_sampling:
             rate = np.clip(
                 np.abs(self.rng.normal(loc=rate, scale=1.0 / (2.5 * np.pi))),
-                0.0,
-                1.0,
+                0.01,
+                0.99,
             )
 
         # Choose parent cells to mask based on the specified rate.
@@ -329,8 +321,8 @@ class Masker:
         if self.masking_rate_sampling:
             rate = np.clip(
                 np.abs(self.rng.normal(loc=rate, scale=1.0 / (2.5 * np.pi))),
-                0.0,
-                1.0,
+                0.01,
+                0.99,
             )
 
         # isolate the number of actual data channels. 6 refers to time.
