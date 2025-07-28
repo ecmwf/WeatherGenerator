@@ -416,7 +416,6 @@ def clean_name(s):
 
 def _key_loss(st_name: str, lf_name: str) -> str:
     st_name = clean_name(st_name)
-    lf_name = clean_name(lf_name)
     return f"stream.{st_name}.loss_{lf_name}.loss_avg"
 
 
