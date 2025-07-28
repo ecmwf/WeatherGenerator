@@ -332,7 +332,9 @@ class TokenizerMasking:
         target_coords_raw = torch.split(tt_lin[:, offset : offset + coords.shape[-1]], tt_lens)
         # recover absolute time from relatives in encoded ones
         # TODO: avoid recover; see TODO above
-        deltas_sec = arc_alpha(tt_lin[..., 1], tt_lin[..., 2]) / (2.0 * np.pi) * (12 * 3600)
+        deltas_sec = (
+            arc_alpha(tt_lin[..., 1] - 0.5, tt_lin[..., 2] - 0.5) / (2.0 * np.pi) * (12 * 3600)
+        )
         deltas_sec = deltas_sec.numpy().astype("timedelta64[s]")
         target_times_raw = np.split(time_win[0] + deltas_sec, np.cumsum(tt_lens)[:-1])
 
