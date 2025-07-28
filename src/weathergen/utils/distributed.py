@@ -82,7 +82,7 @@ def ddp_average(data: torch.Tensor) -> torch.Tensor:
 def all_gather_vlen(tensor: torch.Tensor, group=None) -> list[torch.Tensor]:
     """Gather tensors with the same number of dimensions but different lengths."""
 
-    if not _is_distributed_initialized() :
+    if not _is_distributed_initialized():
         return [tensor]
 
     world_size = dist.get_world_size(group=group)
@@ -96,24 +96,24 @@ def all_gather_vlen(tensor: torch.Tensor, group=None) -> list[torch.Tensor]:
     inputs = [tensor] * world_size
     outputs = [torch.empty(*_shape, dtype=tensor.dtype, device=tensor.device) for _shape in shapes]
     dist.all_to_all(outputs, inputs, group=group)
-    
+
     return outputs
 
 
 def all_gather_vdim(tensor: torch.Tensor, group=None) -> list[torch.Tensor]:
     """Gather tensors with different number of dimensions."""
-    
-    if not _is_distributed_initialized() :
+
+    if not _is_distributed_initialized():
         return [tensor]
-    
+
     world_size = dist.get_world_size(group=group)
-    
+
     # Gather shapes first
     shapes = all_gather_vlen(torch.as_tensor(tensor.shape, device=tensor.device), group=group)
-    
+
     # Gather data
     inputs = [tensor] * world_size
     outputs = [torch.empty(*_shape, dtype=tensor.dtype, device=tensor.device) for _shape in shapes]
     dist.all_to_all(outputs, inputs, group=group)
-    
+
     return outputs
