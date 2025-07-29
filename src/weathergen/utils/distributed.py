@@ -43,10 +43,9 @@ def get_world_size() -> int:
     Returns:
         int: world size
     """
-    if not dist.is_available():
+    if not _is_distributed_initialized():
         return 1
-    if not dist.is_initialized():
-        return 1
+
     return dist.get_world_size()
 
 
@@ -57,10 +56,9 @@ def get_rank() -> int:
     Returns:
         int: current rank
     """
-    if not dist.is_available():
+    if not _is_distributed_initialized():
         return 0
-    if not dist.is_initialized():
-        return 0
+
     return dist.get_rank()
 
 
@@ -75,7 +73,7 @@ def ddp_average(data: torch.Tensor) -> torch.Tensor:
         tensor with same shape as data, but entries averaged across all DDP ranks
     """
     if _is_distributed_initialized():
-        dist.all_reduce(data.cuda(), op=torch.distributed.ReduceOp.AVG)
+        dist.all_reduce(data.cuda(), op=dist.ReduceOp.AVG)
     return data.cpu()
 
 
