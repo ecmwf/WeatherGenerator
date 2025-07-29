@@ -84,10 +84,10 @@ def init_loggers(
     This function follows a singleton pattern, it will only operate once per process
     and will be a no-op if called again.
 
-    Valid arguements for streams:
+    Valid arguements for streams: tuple of
       sys.stdout, sys.stderr : standard out and err streams
       null : /dev/null
-      string : assumed to string that specifies path and outfile to be used for stream
+      string/pathlib.Path : specifies path and outfile to be used for stream
 
     """
 
