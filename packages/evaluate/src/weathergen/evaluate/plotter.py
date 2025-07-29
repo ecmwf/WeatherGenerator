@@ -26,9 +26,9 @@ class Plotter:
 
         Parameters
         ----------
-        cfg: 
+        cfg:
             Configuration dictionary containing all information for the plotting.
-        model_id: 
+        model_id:
             If a model_id is given, the output will be saved in a folder called as the model_id.
         """
 
@@ -61,7 +61,7 @@ class Plotter:
             Dictionary containing the selection criteria. Expected keys are:
                 - "sample": Sample identifier
                 - "stream": Stream identifier
-                - "forecast_step": Forecast step identifier 
+                - "forecast_step": Forecast step identifier
         """
         self.select = select
 
@@ -106,9 +106,9 @@ class Plotter:
         ----------
         da:
             xarray DataArray to select data from.
-        selection: 
+        selection:
             Dictionary of selectors where keys are coordinate names and values are the values to select.
-        
+
         Returns
         -------
             xarray DataArray with selected data.
@@ -144,8 +144,8 @@ class Plotter:
         select: dict
             Selection to be applied to the DataArray
         tag: str
-            Any tag you want to add to the plot        
-        
+            Any tag you want to add to the plot
+
         Returns
         -------
             List of plot names for the saved histograms.
@@ -195,7 +195,12 @@ class Plotter:
         return plot_names
 
     def map(
-        self, data: xr.DataArray, variables: list, select: dict, tag: str = "", map_kwargs: dict = {}
+        self,
+        data: xr.DataArray,
+        variables: list,
+        select: dict,
+        tag: str = "",
+        map_kwargs: dict | None = None,
     ) -> list[str]:
         """
         Plot 2D map for a dataset
@@ -219,12 +224,12 @@ class Plotter:
                 - scale_marker_size: if True, the marker size will be scaled based on latitude (default is False)
                 - marker: marker style (default is 'o')
             Unknown keys will be passed to the scatter plot function.
-        
+
         Returns
         -------
             List of plot names for the saved maps.
         """
-        map_kwargs_save = map_kwargs.copy()     
+        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
         # check for known keys in map_kwargs
         marker_size_base = map_kwargs_save.pop("marker_size", 1)
         scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
@@ -241,7 +246,7 @@ class Plotter:
             da = self.select_from_da(data, select_var).compute()
 
             if scale_marker_size:
-                marker_size = (marker_size_base + 1.)*np.cos(np.radians(da["lat"]))
+                marker_size = (marker_size_base + 1.0) * np.cos(np.radians(da["lat"]))
             else:
                 marker_size = marker_size_base
 
@@ -253,8 +258,8 @@ class Plotter:
                 s=marker_size,
                 marker=marker,
                 transform=ccrs.PlateCarree(),
-                linewidths=0.,                   # only markers, avoids aliasing for very small markers
-                **map_kwargs_save
+                linewidths=0.0,  # only markers, avoids aliasing for very small markers
+                **map_kwargs_save,
             )
             plt.colorbar(
                 scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {var}"
@@ -308,7 +313,7 @@ class LinePlots:
 
         Parameters
         ----------
-        data: 
+        data:
             DataArray or list of DataArrays to be plotted
         labels:
             Label or list of labels for each dataset

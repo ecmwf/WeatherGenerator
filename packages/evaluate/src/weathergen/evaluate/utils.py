@@ -43,12 +43,12 @@ def get_data(
 ) -> WeatherGeneratorOutput:
     """
     Retrieve prediction and target data for a given run from the Zarr store.
-    
+
     Parameters
     ----------
     cfg :
         Configuration dictionary containing all information for the evaluation.
-    run_id : 
+    run_id :
         Run identifier.
     stream :
         Stream name to retrieve data for.
@@ -164,11 +164,11 @@ def calc_scores_per_stream(
         Configuration dictionary containing all information for the evaluation.
     run_id :
         Run identifier.
-    stream :    
+    stream :
         Stream name to calculate scores for.
     metrics :
         List of metric names to calculate.
-    
+
     Returns
     -------
     Tuple of xarray DataArray containing the scores and the number of points per sample.
@@ -345,9 +345,13 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
             }
 
             if plot_maps:
-                map_tar = plotter.map(tars, plot_chs, data_selection, "target", maps_config)
+                map_tar = plotter.map(
+                    tars, plot_chs, data_selection, "target", maps_config
+                )
 
-                map_pred = plotter.map(preds, plot_chs, data_selection, "preds", maps_config)
+                map_pred = plotter.map(
+                    preds, plot_chs, data_selection, "preds", maps_config
+                )
                 plots.extend([map_tar, map_pred])
 
             if plot_histograms:
@@ -471,7 +475,7 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
         Configuration dictionary containing all information for the evaluation.
     scores_dict :
         Dictionary containing scores for each metric and stream.
-    print_summary 
+    print_summary
         If True, print a summary of the evaluation results.
     """
     _logger.info("Plotting summary of evaluation results...")
@@ -532,6 +536,7 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
                         print_summary=print_summary,
                     )
 
+
 def get_default_markersize(stream_name: str) -> float:
     """
     Get the default marker size for a given stream name.
@@ -549,14 +554,13 @@ def get_default_markersize(stream_name: str) -> float:
     """
     s = stream_name.lower()
 
-    if s == "era5":
-        return 1.
-    elif s == "imerg":
-        return 0.25
-    elif s == "cerra":
-        return 0.1
-    else:
-        return 0.5
+    resolution_map = {
+        "era5": 1.0,
+        "imerg": 0.25,
+        "cerra": 0.1,
+    }
+    return resolution_map.get(s, 0.5)
+
 
 ############# Utility functions ############
 
