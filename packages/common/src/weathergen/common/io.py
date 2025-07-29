@@ -240,7 +240,8 @@ class ZarrIO:
 class OutputBatchData:
     """Provide convenient access to adapt existing output data structures."""
 
-    # sample, stream, tensor(datapoint, channel) => datapoints is accross all datasets per stream
+    # sample, stream, tensor(datapoint, channel+coords)
+    # => datapoints is accross all datasets per stream
     sources: list[list]
 
     # fstep, stream, redundant dim (size 1), tensor(sample x datapoint, channel)
@@ -258,7 +259,8 @@ class OutputBatchData:
     # fstep, stream, redundant dim (size 1)
     targets_lens: list[list[list[int]]]
 
-    stream_names: list[str]
+    # stream name: index into data (only streams in analysis_streams_output)
+    streams: dict[str, int]
 
     # stream, channel name
     channels: list[list[str]]
@@ -279,9 +281,10 @@ class OutputBatchData:
 
     def items(self) -> typing.Generator[OutputItem, None, None]:
         """Iterate over possible output items"""
-        filtered_streams = (stream for stream in self.stream_names if stream != "")
         # TODO: filter for empty items?
-        for s, fo_s, fi_s in itertools.product(self.samples, self.forecast_steps, filtered_streams):
+        for s, fo_s, fi_s in itertools.product(
+            self.samples, self.forecast_steps, self.streams.keys()
+        ):
             yield self.extract(ItemKey(int(s), int(fo_s), fi_s))
 
     def extract(self, key: ItemKey) -> OutputItem:
@@ -289,12 +292,12 @@ class OutputBatchData:
         # adjust shifted values in ItemMeta
         sample = key.sample - self.sample_start
         forecast_step = key.forecast_step - self.forecast_offset
-        stream_idx = self.stream_names.index(key.stream)  # TODO: assure this is correct
+        stream_idx = self.streams[key.stream]
         lens = self.targets_lens[forecast_step][stream_idx]
         start = sum(lens[:sample])
         n_samples = lens[sample]
 
-        _logger.info("extracting subset")
+        _logger.info(f"extracting subset: {key}")
         _logger.info(
             f"sample: start:{self.sample_start} rel_idx:{sample} range:{start}-{start + n_samples}"
         )
@@ -331,18 +334,40 @@ class OutputBatchData:
         channels = self.channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
 
+        assert len(channels) == target_data.shape[1], (
+            "Number of channel names does not align with data"
+        )
+        assert len(channels) == preds_data.shape[1], (
+            "Number of channel names does not align with data"
+        )
+
         if key.with_source:
             source_data = self.sources[sample][stream_idx].cpu().detach().numpy()
+
+            # split data into coords, geoinfo, channels
+            _source_coords = source_data[:, : -len(channels)]
+            source_coords = _source_coords[:, :2]
+            source_times = _source_coords[:, 2]
+            source_geoinfo = _source_coords[:, 2 : -len(channels)]
+
+            # TODO asserts that times, coords, geoinfos should match?
+
             source_dataset = OutputDataset(
                 "source",
                 key,
-                source_data,
-                times,
-                coords,
-                geoinfo,
+                source_data[:, -len(channels) :],
+                source_times,
+                source_coords,
+                source_geoinfo,
                 channels,
                 geoinfo_channels,
             )
+
+            _logger.info(f"source shape: {source_dataset.data.shape}")
+            assert len(channels) == source_dataset.data.shape[1], (
+                "Number of channel names does not align with data"
+            )
+            assert len(geoinfo_channels) == source_dataset.geoinfo.shape[1]
         else:
             source_dataset = None
 
