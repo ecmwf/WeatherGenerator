@@ -94,8 +94,8 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
             dropout_p=self.dropout_rate,
         )
 
-        if self.dropout_rate > 0.0:
-            x = self.dropout(self.proj_out(outs.flatten(-2, -1)))
+        x = self.proj_out(outs.flatten(-2, -1))
+
         if self.with_residual:
             x = x_in + x
 
@@ -156,7 +156,7 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
 
             return flex_attention(qs, ks, vs, score_mod=sparsity_mask)
 
-        self.compiled_flex_attention = torch.compile(att, dynamic=False, mode="max-autotune")
+        self.compiled_flex_attention = torch.compile(att, dynamic=False)
         # self.compiled_flex_attention = flex_attention
 
     #########################################
@@ -173,8 +173,7 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
 
         outs = self.compiled_flex_attention(qs, ks, vs).transpose(1, 2).squeeze()
 
-        if self.dropout_rate > 0.0:
-            x = self.dropout(self.proj_out(outs.flatten(-2, -1)))
+        x = self.proj_out(outs.flatten(-2, -1))
         if self.with_residual:
             x = x_in + x
 
@@ -241,7 +240,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
             mask_block_local, B=None, H=None, Q_LEN=qkv_len, KV_LEN=qkv_len
         )
         # compile for efficiency
-        self.flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune")
+        self.flex_attention = torch.compile(flex_attention, dynamic=False)
         # self.flex_attention = flex_attention
 
     #########################################
@@ -469,7 +468,6 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
                 )
             ]
 
-        # outs = self.dropout( self.proj_out( torch.stack(outs).transpose(1,0).flatten( -2, -1)) )
         outs = self.proj_out(torch.stack(outs).transpose(1, 0).flatten(-2, -1))
         if self.with_residual:
             outs = x_q_in + outs.reshape(x_q_in.shape)

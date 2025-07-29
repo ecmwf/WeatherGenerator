@@ -386,6 +386,16 @@ class TargetPredictionEngine(nn.Module):
         :param tr_mlp_hidden_factor: Hidden factor for the MLP layers.
         :param softcap: Softcap value for the attention layers.
         :param tro_type: Type of target readout (e.g., "obs_value").
+
+        the decoder_type decides the how the conditioning is done
+
+        PerceiverIO: is a simple CrossAttention layer with no MLP or Adaptive LayerNorm
+        AdaLayerNormConditioning: only conditions via the Adaptive LayerNorm
+        CrossAttentionConditioning: conditions via the CrossAttention layer but also uses an MLP
+        CrossAttentionAdaNormConditioning: conditions via the CrossAttention layer and 
+            Adaptive LayerNorm
+        OriginalPredictionBlock: The conditioning is the coordinates and is a modified Adaptive
+            LayerNorm that does not scale after the layer is applied
         """
         super(TargetPredictionEngine, self).__init__()
 
