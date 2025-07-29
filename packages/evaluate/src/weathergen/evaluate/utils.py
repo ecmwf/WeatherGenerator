@@ -43,14 +43,31 @@ def get_data(
 ) -> WeatherGeneratorOutput:
     """
     Retrieve prediction and target data for a given run from the Zarr store.
-    :param cfg: Configuration dictionary containing all information.
-    :param run_id: Run identifier.
-    :param stream: Stream name to retrieve data for.
-    :param samples: List of sample indices to retrieve. If None, all samples are retrieved.
-    :param fsteps: List of forecast steps to retrieve. If None, all forecast steps are retrieved.
-    :param channels: List of channel names to retrieve. If None, all channels are retrieved.
-    :param return_counts: If True, also return the number of points per sample.
-    :return: Tuple of xarray DataArrays for targets and predictions, and optionally the points per sample.
+    
+    Parameters
+    ----------
+    cfg :
+        Configuration dictionary containing all information for the evaluation.
+    run_id : 
+        Run identifier.
+    stream :
+        Stream name to retrieve data for.
+    samples :
+        List of sample indices to retrieve. If None, all samples are retrieved.
+    fsteps :
+        List of forecast steps to retrieve. If None, all forecast steps are retrieved.
+    channels :
+        List of channel names to retrieve. If None, all channels are retrieved.
+    return_counts :
+        If True, also return the number of points per sample.
+
+    Returns
+    -------
+    WeatherGeneratorOutput
+        A dataclass containing:
+        - target: Dictionary of xarray DataArrays for targets, indexed by forecast step.
+        - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast step.
+        - points_per_sample: xarray DataArray containing the number of points per sample, if `return_counts` is True.
     """
 
     run = cfg.run_ids[run_id]
@@ -140,11 +157,21 @@ def calc_scores_per_stream(
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
-    :param cfg: Configuration dictionary containing all information for the evaluation.
-    :param run_id: Run identifier.
-    :param stream: Stream name to calculate scores for.
-    :param metrics: List of metric names to calculate.
-    :return: Tuple of xarray DataArray containing the scores and the number of points per sample.
+
+    Parameters
+    ----------
+    cfg :
+        Configuration dictionary containing all information for the evaluation.
+    run_id :
+        Run identifier.
+    stream :    
+        Stream name to calculate scores for.
+    metrics :
+        List of metric names to calculate.
+    
+    Returns
+    -------
+    Tuple of xarray DataArray containing the scores and the number of points per sample.
     """
     _logger.info(
         f"RUN {run_id} - {stream}: Calculating scores for metrics {metrics}..."
@@ -227,13 +254,21 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     """
     Plot the data for a given run and stream.
 
-    :param da_tars: Target data as an xarray DataArray.
-    :param da_preds: Prediction data as an xarray DataArray.
-    :param run_id: Run identifier.
-    :param stream: Stream name.
-    :param stream_dict: Dictionary containing stream configuration.
+    Parameters
+    ----------
+    cfg :
+        Configuration dictionary containing all information for the evaluation.
+    run_id :
+        Run identifier.
+    stream :
+        Stream name to plot data for.
+    stream_dict :
+        Dictionary containing stream configuration.
+    Returns
+    -------
+    List of plot names generated during the plotting process.
     """
-
+    # handle plotting settings
     plot_settings = stream_dict.get("plotting", {})
 
     if not (
@@ -246,6 +281,36 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     plot_samples = plot_settings.get("sample", None)
     plot_fsteps = plot_settings.get("forecast_step", None)
     plot_chs = stream_dict.get("channels")
+
+    # Check if maps should be plotted and handle configuration if provided
+    maps_config = {}
+    if hasattr(plot_settings, "plot_maps"):
+        if isinstance(plot_settings.plot_maps, bool):
+            plot_maps = plot_settings.plot_maps
+        elif isinstance(plot_settings.plot_maps, dict):
+            plot_maps = True
+            maps_config = plot_settings.plot_maps
+        else:
+            raise TypeError(
+                "plot_maps must be a boolean or a dictionary with configuration."
+            )
+    else:
+        plot_maps = False
+
+    if not hasattr(maps_config, "marker_size"):
+        # Set default marker size if not specified in maps_config
+        maps_config["marker_size"] = get_default_markersize(stream)
+
+    # Check if histograms should be plotted
+    if hasattr(plot_settings, "plot_histograms"):
+        if isinstance(plot_settings.plot_histograms, bool):
+            plot_histograms = plot_settings.plot_histograms
+        else:
+            raise TypeError(
+                "plot_histograms must be a boolean or a dictionary with configuration."
+            )
+    else:
+        plot_histograms = False
 
     if plot_fsteps == "all":
         plot_fsteps = None
@@ -279,13 +344,13 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
                 "forecast_step": fstep,
             }
 
-            if plot_settings.plot_maps:
-                map_tar = plotter.map(tars, plot_chs, data_selection, "target")
+            if plot_maps:
+                map_tar = plotter.map(tars, plot_chs, data_selection, "target", maps_config)
 
-                map_pred = plotter.map(preds, plot_chs, data_selection, "preds")
+                map_pred = plotter.map(preds, plot_chs, data_selection, "preds", maps_config)
                 plots.extend([map_tar, map_pred])
 
-            if plot_settings.plot_histograms:
+            if plot_histograms:
                 h = plotter.histogram(tars, preds, plot_chs, data_selection)
                 plots.append(h)
 
@@ -399,8 +464,15 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
     """
     Plot summary of the evaluation results.
     This function is a placeholder for future implementation.
-    :param cfg: Configuration dictionary containing all information.
-    :param scores_dict: Dictionary containing scores for each run and stream.
+
+    Parameters
+    ----------
+    cfg :
+        Configuration dictionary containing all information for the evaluation.
+    scores_dict :
+        Dictionary containing scores for each metric and stream.
+    print_summary 
+        If True, print a summary of the evaluation results.
     """
     _logger.info("Plotting summary of evaluation results...")
 
@@ -460,6 +532,31 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
                         print_summary=print_summary,
                     )
 
+def get_default_markersize(stream_name: str) -> float:
+    """
+    Get the default marker size for a given stream name.
+    This function is used to set the marker size in plots.
+
+    Parameters
+    ----------
+    stream_name : str
+        The name of the stream.
+
+    Returns
+    -------
+    float
+        The default marker size for the stream.
+    """
+    s = stream_name.lower()
+
+    if s == "era5":
+        return 1.
+    elif s == "imerg":
+        return 0.25
+    elif s == "cerra":
+        return 0.1
+    else:
+        return 0.5
 
 ############# Utility functions ############
 

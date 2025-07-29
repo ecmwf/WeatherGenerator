@@ -166,7 +166,7 @@ class Plotter:
         return plot_names
 
     def map(
-        self, data: xr.DataArray, variables: list, select: dict, tag: str = ""
+        self, data: xr.DataArray, variables: list, select: dict, tag: str = "", map_kwargs: dict = {}
     ) -> list[str]:
         """
         Plot 2D map for a dataset
@@ -175,7 +175,19 @@ class Plotter:
         :param variables: list of variables to be plotted
         :param label: any tag you want to add to the plot
         :param select: selection to be applied to the DataArray
+        :param tag: any tag you want to add to the plot
+        :param map_kwargs: additional keyword arguments for the map
+                           Known keys are:
+                            - marker_size: base size of the marker (default is 1)
+                            - scale_marker_size: if True, the marker size will be scaled based on latitude (default is False)
+                            - marker: marker style (default is 'o') 
+                           Unknown keys will be passed to the scatter plot function.
         """
+        map_kwargs_save = map_kwargs.copy()     
+        # check for known keys in map_kwargs
+        marker_size_base = map_kwargs_save.pop("marker_size", 1)
+        scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
+        marker = map_kwargs_save.pop("marker", "o")
 
         self.update_data_selection(select)
 
@@ -187,13 +199,21 @@ class Plotter:
             ax.coastlines()
             da = self.select_from_da(data, select_var).compute()
 
+            if scale_marker_size:
+                marker_size = (marker_size_base + 1.)*np.cos(np.radians(da["lat"]))
+            else:
+                marker_size = marker_size_base
+
             scatter_plt = ax.scatter(
                 da["lon"],
                 da["lat"],
                 c=da,
                 cmap="coolwarm",
-                s=1,
+                s=marker_size,
+                marker=marker,
                 transform=ccrs.PlateCarree(),
+                linewidths=0.,                   # only markers, avoids aliasing for very small markers
+                **map_kwargs_save
             )
             plt.colorbar(
                 scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {var}"
