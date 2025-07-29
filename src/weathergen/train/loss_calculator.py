@@ -244,7 +244,7 @@ class LossCalculator:
                     strm["tokenize_spacetime"] if "tokenize_spacetime" in strm else False
                 )
                 # Accumulate loss from different loss functions and across channels
-                for i_lfct, (loss_fct, w) in enumerate(self.loss_fcts):
+                for i_lfct, (loss_fct, loss_fct_weight) in enumerate(self.loss_fcts):
                     # compute per channel loss
                     loss_lfct = torch.tensor(0.0, device=self.device, requires_grad=True)
                     ctr_chs = 0
@@ -286,7 +286,7 @@ class LossCalculator:
 
                     # Add the weighted and normalized loss from this loss function to the total
                     # batch loss.
-                    loss_fstep = loss_fstep + (w * loss_lfct * strm_loss_weight)
+                    loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct * strm_loss_weight)
                     ctr_fsteps = 1 if loss_lfct > 0.0 else 0
 
                 loss = loss + loss_fstep / ctr_fsteps if ctr_fsteps > 0 else loss
