@@ -414,7 +414,6 @@ class Trainer(TrainerBase):
         targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
 
         # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
-        i_batch = 0
         for fstep in range(len(targets_rt)):
             for i_strm, target in enumerate(targets_rt[fstep]):
                 pred = preds[fstep][i_strm]
@@ -649,17 +648,14 @@ class Trainer(TrainerBase):
         # Make list of losses into a tensor. This is individual tensor per rank
         real_loss = torch.tensor(self.loss_model_hist, device=self.devices[0])
         # Gather all tensors from all ranks into a list and stack them into one tensor again
-        # real_loss = torch.cat(all_gather(real_loss))
         real_loss = torch.cat(all_gather_vlen(real_loss))
 
         for stream in self.cf.streams:  # Loop over all steams
             stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
             stream_all = torch.stack(stream_hist).to(torch.float64)
             losses_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
-            # losses_all[stream.name] = torch.cat(all_gather(stream_all))
             stream_hist = [stddev_all[stream.name] for stddev_all in self.stdev_unweighted_hist]
             stream_all = torch.stack(stream_hist).to(torch.float64)
-            # stddev_all[stream.name] = torch.cat(all_gather(stream_all))
             stddev_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
 
         return real_loss, losses_all, stddev_all
