@@ -1,4 +1,4 @@
-streams_directory: "/p/project/hclimrep/almikaeel1/WeatherGenerator/WeatherGenerator/config/streams/streams_radklim"
+streams_directory: "./config/streams/streams_radklim"
 embed_orientation: "columns"
 embed_local_coords: True
 embed_centroids_local_coords: False
