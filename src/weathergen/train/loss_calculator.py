@@ -200,8 +200,8 @@ class LossCalculator:
             # normalize over forecast steps in window
             losses_all[strm.name][i_ch, i_lfct] /= ctr_substeps if ctr_substeps > 0 else 0.0
 
-            # normalize the accumulated loss for the current loss function
-            loss_lfct = loss_lfct / ctr_chs if (ctr_chs > 0) else loss_lfct
+        # normalize the accumulated loss for the current loss function
+        loss_lfct = loss_lfct / ctr_chs if (ctr_chs > 0) else loss_lfct
 
         return loss_lfct, losses_all
 
@@ -241,7 +241,7 @@ class LossCalculator:
         # gradient loss
         loss = torch.tensor(0.0, device=self.device, requires_grad=True)
         # counter for non-empty targets
-        ctr_targets = 0
+        ctr_streams = 0
 
         # initialize dictionaries for detailed loss tracking and standard deviation statistics
         # create tensor for each stream
@@ -322,22 +322,20 @@ class LossCalculator:
                         stddev_all[strm.name][indx] += pred[:, mask_nan].std(0).mean().item()
 
                     # Add the weighted and normalized loss from this loss function to the total
-                    # batch loss.
+                    # batch loss
                     loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct * strm_loss_weight)
                     ctr_fsteps += 1 if loss_lfct > 0.0 else 0
 
                 loss = loss + loss_fstep / ctr_fsteps if ctr_fsteps > 0 else loss
-                ctr_targets += 1 if loss_fstep > 0 else 0
+                ctr_streams += 1 if loss_fstep > 0 else 0
 
             # normalize by forecast step
             losses_all[strm.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
             stddev_all[strm.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
 
             # replace channels without information by nan to exclude from further computations
-            mask = losses_all[strm.name] == 0.0
-            losses_all[strm.name][mask] = torch.nan
-            mask = stddev_all[strm.name] == 0.0
-            stddev_all[strm.name][mask] = torch.nan
+            losses_all[strm.name][losses_all[strm.name] == 0.0] = torch.nan
+            stddev_all[strm.name][stddev_all[strm.name] == 0.0] = torch.nan
 
         if loss == 0.0:
             # streams_data[i] are samples in batch
@@ -349,7 +347,7 @@ class LossCalculator:
 
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)
-        loss = loss / ctr_targets
+        loss = loss / ctr_streams
 
         # Return all computed loss components encapsulated in a ModelLoss dataclass
         return LossValues(loss=loss, losses_all=losses_all, stddev_all=stddev_all)
