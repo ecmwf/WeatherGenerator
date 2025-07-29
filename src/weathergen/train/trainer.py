@@ -474,13 +474,13 @@ class Trainer(Trainer_Base):
                 enabled=cf.with_mixed_precision,
             ):
                 preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
-                model_loss = self.loss_calculator.compute_loss(
+                loss_values = self.loss_calculator.compute_loss(
                     preds=preds,
                     streams_data=batch[0],
                 )
-                loss = model_loss.loss
-                losses_all = model_loss.losses_all
-                stddev_all = model_loss.stddev_all
+                loss = loss_values.loss
+                losses_all = loss_values.losses_all
+                stddev_all = loss_values.stddev_all
 
             # backward pass
             self.grad_scaler.scale(loss).backward()
@@ -577,13 +577,13 @@ class Trainer(Trainer_Base):
 
                     # compute loss and log output
                     if bidx < cf.log_validation:
-                        model_loss = self.loss_calculator_val.compute_loss(
+                        loss_values = self.loss_calculator_val.compute_loss(
                             preds=preds,
                             streams_data=batch[0],
                         )
-                        loss = model_loss.loss
-                        losses_all = model_loss.losses_all
-                        stddev_all = model_loss.stddev_all
+                        loss = loss_values.loss
+                        losses_all = loss_values.losses_all
+                        stddev_all = loss_values.stddev_all
 
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
                         (
@@ -613,13 +613,13 @@ class Trainer(Trainer_Base):
                         )
 
                     else:
-                        model_loss = self.loss_calculator_val.compute_loss(
+                        loss_values = self.loss_calculator_val.compute_loss(
                             preds=preds,
                             streams_data=batch[0],
                         )
-                        loss = model_loss.loss
-                        losses_all = model_loss.losses_all
-                        stddev_all = model_loss.stddev_all
+                        loss = loss_values.loss
+                        losses_all = loss_values.losses_all
+                        stddev_all = loss_values.stddev_all
 
                     self.loss_unweighted_hist += [losses_all]
                     self.loss_model_hist += [loss.item()]
