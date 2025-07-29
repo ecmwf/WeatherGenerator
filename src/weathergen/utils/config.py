@@ -66,6 +66,8 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
     If run_id is a full path, loads it from the full path.
     """
 
+    print(f'Model path is {model_path}')
+
     if Path(run_id).exists():  # load from the full path if a full path is provided
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
@@ -282,8 +284,9 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
             "WEATHERGEN_PRIVATE_CONF or provide a path."
         )
     private_cf = OmegaConf.load(private_home)
+    print(f'model path in private_cf? {"model_path" in private_cf.keys()}')
     private_cf["model_path"] = (
-        private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
+        private_cf["model_path"] if "model_path" in private_cf.keys() else private_cf["path_shared_working_dir"] + "models"
     )
 
     if "secrets" in private_cf:
@@ -345,6 +348,8 @@ def load_streams(streams_directory: Path) -> list[Config]:
 def set_paths(config: Config) -> Config:
     """Set the configs run_path model_path attributes to default values if not present."""
     config = config.copy()
+    print(f'Getting wd: {config.get("path_shared_working_dir")}')
+    exit()
     config.run_path = config.get("run_path", None) or _DEFAULT_RESULT_PATH
     config.model_path = config.get("model_path", None) or _DEFAULT_MODEL_PATH
 

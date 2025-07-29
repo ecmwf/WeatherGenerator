@@ -110,6 +110,7 @@ def train_continue() -> None:
         *args.config,
         cli_overwrite,
     )
+    # print(f'private config var set to: {cf.private_config}')
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
     # track history of run to ensure traceability of results
@@ -150,6 +151,8 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     init_loggers()
 
     cli_overwrite = config.from_cli_arglist(args.options)
+    print(f'private config var set to: {args.private_config}')
+
     cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
     cf = config.set_run_id(cf, args.run_id, False)
 
