@@ -392,9 +392,9 @@ class TargetPredictionEngine(nn.Module):
         PerceiverIO: is a simple CrossAttention layer with no MLP or Adaptive LayerNorm
         AdaLayerNormConditioning: only conditions via the Adaptive LayerNorm
         CrossAttentionConditioning: conditions via the CrossAttention layer but also uses an MLP
-        CrossAttentionAdaNormConditioning: conditions via the CrossAttention layer and 
+        CrossAttentionAdaNormConditioning: conditions via the CrossAttention layer and
             Adaptive LayerNorm
-        OriginalPredictionBlock: The conditioning is the coordinates and is a modified Adaptive
+        PerceiverIOCoordConditioning: The conditioning is the coordinates and is a modified Adaptive
             LayerNorm that does not scale after the layer is applied
         """
         super(TargetPredictionEngine, self).__init__()
@@ -420,7 +420,7 @@ class TargetPredictionEngine(nn.Module):
         self.tte = nn.ModuleList()
         self.output_in_norm = nn.LayerNorm(self.dims_embed[0])
         self.latent_in_norm = nn.LayerNorm(self.cf.ae_global_dim_embed)
-        self.final_norm = nn.Identity() # nn.RMSNorm(self.dims_embed[-1])
+        self.final_norm = nn.Identity()  # nn.RMSNorm(self.dims_embed[-1])
         self.dropout = nn.Dropout(0.2)
         self.pos_embed = nn.Parameter(torch.zeros(1, 9, self.cf.ae_global_dim_embed))
         dim_aux = self.cf.ae_global_dim_embed
