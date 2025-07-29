@@ -23,8 +23,13 @@ class Plotter:
     def __init__(self, cfg: dict, model_id: str = ""):
         """
         Initialize the Plotter class.
-        :param cfg: config from the yaml file
-        :param model_id: if a model_id is given, the output will be saved in a folder called as the model_id
+
+        Parameters
+        ----------
+        cfg: 
+            Configuration dictionary containing all information for the plotting.
+        model_id: 
+            If a model_id is given, the output will be saved in a folder called as the model_id.
         """
 
         self.cfg = cfg
@@ -49,7 +54,14 @@ class Plotter:
     def update_data_selection(self, select: dict):
         """
         Set the selection for the plots. This will be used to filter the data for plotting.
-        :param select: dictionary containing the selection parameters
+
+        Parameters
+        ----------
+        select:
+            Dictionary containing the selection criteria. Expected keys are:
+                - "sample": Sample identifier
+                - "stream": Stream identifier
+                - "forecast_step": Forecast step identifier 
         """
         self.select = select
 
@@ -78,9 +90,7 @@ class Plotter:
 
     def clean_data_selection(self):
         """
-        :param sample: sample name
-        :param stream: stream name
-        :param fstep: forecasting step
+        Clean the data selection by resetting all selected values.
         """
         self.sample = None
         self.stream = None
@@ -91,9 +101,17 @@ class Plotter:
     def select_from_da(self, da: xr.DataArray, selection: dict) -> xr.DataArray:
         """
         Select data from an xarray DataArray based on given selectors.
-        :param da: xarray DataArray to select data from.
-        :param selection: Dictionary of selectors where keys are coordinate names and values are the values to select.
-        :return: xarray DataArray with selected data.
+
+        Parameters
+        ----------
+        da:
+            xarray DataArray to select data from.
+        selection: 
+            Dictionary of selectors where keys are coordinate names and values are the values to select.
+        
+        Returns
+        -------
+            xarray DataArray with selected data.
         """
         for key, value in selection.items():
             if key in da.coords and key not in da.dims:
@@ -111,15 +129,26 @@ class Plotter:
         variables: list,
         select: dict,
         tag: str = "",
-        number: str = "",
     ) -> list[str]:
         """
         Plot histogram of target vs predictions for a set of variables.
 
-        :param target: target sample for a specific (stream, sample, fstep)
-        :param preds: predictions sample for a specific (stream, sample, fstep)
-        :param variables: list of variables to be plotted
-        :param label: any tag you want to add to the plot
+        Parameters
+        ----------
+        target: xr.DataArray
+            Target sample for a specific (stream, sample, fstep)
+        preds: xr.DataArray
+            Predictions sample for a specific (stream, sample, fstep)
+        variables: list
+            List of variables to be plotted
+        select: dict
+            Selection to be applied to the DataArray
+        tag: str
+            Any tag you want to add to the plot        
+        
+        Returns
+        -------
+            List of plot names for the saved histograms.
         """
         plot_names = []
 
@@ -171,17 +200,29 @@ class Plotter:
         """
         Plot 2D map for a dataset
 
-        :param data: DataArray for a specific (stream, sample, fstep)
-        :param variables: list of variables to be plotted
-        :param label: any tag you want to add to the plot
-        :param select: selection to be applied to the DataArray
-        :param tag: any tag you want to add to the plot
-        :param map_kwargs: additional keyword arguments for the map
-                           Known keys are:
-                            - marker_size: base size of the marker (default is 1)
-                            - scale_marker_size: if True, the marker size will be scaled based on latitude (default is False)
-                            - marker: marker style (default is 'o') 
-                           Unknown keys will be passed to the scatter plot function.
+        Parameters
+        ----------
+        data: xr.DataArray
+            DataArray for a specific (stream, sample, fstep)
+        variables: list
+            List of variables to be plotted
+        label: str
+            Any tag you want to add to the plot
+        select: dict
+            Selection to be applied to the DataArray
+        tag: str
+            Any tag you want to add to the plot
+        map_kwargs: dict
+            Additional keyword arguments for the map.
+            Known keys are:
+                - marker_size: base size of the marker (default is 1)
+                - scale_marker_size: if True, the marker size will be scaled based on latitude (default is False)
+                - marker: marker style (default is 'o')
+            Unknown keys will be passed to the scatter plot function.
+        
+        Returns
+        -------
+            List of plot names for the saved maps.
         """
         map_kwargs_save = map_kwargs.copy()     
         # check for known keys in map_kwargs
@@ -264,9 +305,17 @@ class LinePlots:
     ) -> tuple[list, list]:
         """
         Check if the lengths of data and labels match.
-        :param data: DataArray or list of DataArrays to be plotted
-        :param labels: Label or list of labels for each dataset
-        :return: data_list, label_list - lists of data and labels
+
+        Parameters
+        ----------
+        data: 
+            DataArray or list of DataArrays to be plotted
+        labels:
+            Label or list of labels for each dataset
+
+        Returns
+        -------
+            data_list, label_list - lists of data and labels
         """
         assert type(data) == xr.DataArray or type(data) == list, (
             "Compare::plot - Data should be of type xr.DataArray or list"
@@ -309,12 +358,21 @@ class LinePlots:
     ) -> None:
         """
         Plot a line graph comparing multiple datasets.
-        :param data: DataArray or list of DataArrays to be plotted
-        :param labels: Label or list of labels for each dataset
-        :param tag: Tag to be added to the plot title and filename
-        :param x_dim: Dimension to be used for the x-axis. The code will average over all other dimensions. (default is "forecast_step")
-        :param y_dim: Name of the dimension to be used for the y-axis (default is "value")
-        :return: None
+
+        Parameters
+        ----------
+        data:
+            DataArray or list of DataArrays to be plotted
+        labels:
+            Label or list of labels for each dataset
+        tag:
+            Tag to be added to the plot title and filename
+        x_dim:
+            Dimension to be used for the x-axis. The code will average over all other dimensions.
+        y_dim:
+            Name of the dimension to be used for the y-axis (default is "value")
+        print_summary:
+            If True, print a summary of the values from the graph.
         """
 
         data_list, label_list = self._check_lengths(data, labels)
