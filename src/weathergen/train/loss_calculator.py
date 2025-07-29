@@ -146,7 +146,7 @@ class LossCalculator:
             )
         else:
             # If no valid data under the mask, return 0 to avoid errors and not contribute to loss
-            return torch.tensor(torch.nan, device=pred.device)
+            return torch.tensor(0.0, device=pred.device)
 
     def compute_loss(
         self,
@@ -180,8 +180,11 @@ class LossCalculator:
             - stddev_all: A dictionary mapping stream names to a tensor of mean standard deviations
                           of predictions for channels with statistical loss functions, normalized.
         """
-        n_trgts = 0  # Counter for non-empty forecast steps/targets contributing to overall loss
-        loss = torch.tensor(0.0, device=self.device, requires_grad=True)  # Main loss for backprop
+
+        # gradient loss
+        loss = torch.tensor(0.0, device=self.device, requires_grad=True)
+        # counter for non-empty targets
+        ctr_targets = 0
 
         # Initialize dictionaries for detailed loss tracking and standard deviation statistics
         losses_all: dict[str, Tensor] = {
@@ -199,6 +202,10 @@ class LossCalculator:
         for i_strm, strm in enumerate(self.cf.streams):
             # Extract target tokens for current stream from the specified forecast offset onwards
             targets = streams_data[i_batch][i_strm].target_tokens[self.cf.forecast_offset :]
+
+            loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
+            ctr_fsteps = 0
+
             for fstep, target in enumerate(targets):
                 pred = preds[fstep][i_strm]
                 # Skip if either target or prediction has no data points
@@ -239,12 +246,11 @@ class LossCalculator:
                 # Accumulate loss from different loss functions and across channels
                 for i_lfct, (loss_fct, w) in enumerate(self.loss_fcts):
                     # compute per channel loss
-                    val = torch.tensor(0.0, device=self.device, requires_grad=True)
-                    n_chs = target.shape[-1]
-                    ctr_nan = 0
+                    loss_lfct = torch.tensor(0.0, device=self.device, requires_grad=True)
+                    ctr_chs = 0
 
                     # Loop over all channels within the current stream and forecast step
-                    for i_ch in range(n_chs):
+                    for i_ch in range(target.shape[-1]):
                         # Construct masks based on spacetime tokenization setting
                         masks = self._construct_masks(
                             target_times_raw=streams_data[i_batch][i_strm].target_times_raw[
@@ -254,7 +260,7 @@ class LossCalculator:
                             tok_spacetime=tok_spacetime,
                         )
                         for mask in masks:
-                            temp = self._compute_loss_with_mask(
+                            loss_ch = self._compute_loss_with_mask(
                                 target=target,
                                 pred=pred,
                                 mask=mask,
@@ -265,17 +271,12 @@ class LossCalculator:
                             # Accumulate weighted loss for this loss function and channel. Only
                             # accumulate when temp is a number. Otherwise increment nan-counter for
                             # proper normalization
-                            if not torch.isnan(temp):
-                                # TODO: Add latitude weighting
-                                val = val + (channel_loss_weight[i_ch] * temp)  # Channel weighting
-                            else:
-                                # NaN values are ignored to prevent errors during optimization
-                                # steps.
-                                ctr_nan += 1
-                            losses_all[strm.name][i_ch, i_lfct] += temp.item()
+                            loss_lfct = loss_lfct + (channel_loss_weight[i_ch] * loss_ch)
+                            ctr_chs += 1 if loss_ch > 0.0 else 0
+                            losses_all[strm.name][i_ch, i_lfct] += loss_ch.item()
 
                     # Normalize the accumulated loss for the current loss function.
-                    val = val / (n_chs - ctr_nan) if ((n_chs - ctr_nan) > 0) else val
+                    loss_lfct = loss_lfct / ctr_chs if (ctr_chs > 0) else loss_lfct
 
                     # Update statistical deviation metrics if the current loss function is
                     # recognized as statistical
@@ -285,8 +286,15 @@ class LossCalculator:
 
                     # Add the weighted and normalized loss from this loss function to the total
                     # batch loss.
-                    loss = loss + (w * val * strm_loss_weight)
-                n_trgts += 1
+                    loss_fstep = loss_fstep + (w * loss_lfct * strm_loss_weight)
+                    ctr_fsteps = 1 if loss_lfct > 0.0 else 0
+
+                loss = loss + loss_fstep / ctr_fsteps if ctr_fsteps > 0 else loss
+                ctr_targets += 1 if loss_fstep > 0 else 0
+
+                # normalize by forecast step
+                losses_all[strm.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
+                stddev_all[strm.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
 
         if loss == 0.0:
             # streams_data[i] are samples in batch
@@ -298,10 +306,7 @@ class LossCalculator:
 
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)
-        loss = loss / n_trgts
-
-        losses_all = {k: v / n_trgts for k, v in losses_all.items()}
-        stddev_all = {k: v / n_trgts for k, v in stddev_all.items()}
+        loss = loss / ctr_targets
 
         # Return all computed loss components encapsulated in a ModelLoss dataclass
         return LossValues(loss=loss, losses_all=losses_all, stddev_all=stddev_all)
