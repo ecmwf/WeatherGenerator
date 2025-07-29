@@ -15,13 +15,13 @@ stat_loss_fcts = ["stats", "kernel_crps"]  # Names of loss functions that need s
 
 
 ####################################################################################################
-def Gaussian(x, mu=0.0, std_dev=1.0):
+def gaussian(x, mu=0.0, std_dev=1.0):
     # unnormalized Gaussian where maximum is one
     return torch.exp(-0.5 * (x - mu) * (x - mu) / (std_dev * std_dev))
 
 
 ####################################################################################################
-def normalized_Gaussian(x, mu=0.0, std_dev=1.0):
+def normalized_gaussian(x, mu=0.0, std_dev=1.0):
     return (1 / (std_dev * np.sqrt(2.0 * np.pi))) * torch.exp(
         -0.5 * (x - mu) * (x - mu) / (std_dev * std_dev)
     )
@@ -41,20 +41,20 @@ def gaussian_crps(target, ens, mu, stddev):
     # forecasts. Monthly Weather Review, 146(11):3885 – 3900, 2018.
     c1 = np.sqrt(1.0 / np.pi)
     t1 = 2.0 * erf((target - mu) / stddev) - 1.0
-    t2 = 2.0 * normalized_Gaussian((target - mu) / stddev)
+    t2 = 2.0 * normalized_gaussian((target - mu) / stddev)
     val = stddev * ((target - mu) / stddev * t1 + t2 - c1)
     return torch.mean(val)  # + torch.mean( torch.sqrt( stddev) )
 
 
 ####################################################################################################
 def stats(target, ens, mu, stddev):
-    diff = Gaussian(target, mu, stddev) - 1.0
+    diff = gaussian(target, mu, stddev) - 1.0
     return torch.mean(diff * diff) + torch.mean(torch.sqrt(stddev))
 
 
 ####################################################################################################
 def stats_normalized(target, ens, mu, stddev):
-    a = normalized_Gaussian(target, mu, stddev)
+    a = normalized_gaussian(target, mu, stddev)
     max = 1 / (np.sqrt(2 * np.pi) * stddev)
     d = a - max
     return torch.mean(d * d) + torch.mean(torch.sqrt(stddev))

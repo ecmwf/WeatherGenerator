@@ -10,11 +10,9 @@ Copyright (c) 2025, Sebastian Hoffmann
 
 # TODO: copy other utilities from dmlcloud such as root_wrap etc.
 # TODO: move the DDP code from trainer.py to this file
-import pickle
 
 import torch
 import torch.distributed as dist
-from torch import Tensor
 
 SYNC_TIMEOUT_SEC = 60 * 60  # 1 hour
 
@@ -45,10 +43,9 @@ def get_world_size() -> int:
     Returns:
         int: world size
     """
-    if not dist.is_available():
+    if not _is_distributed_initialized():
         return 1
-    if not dist.is_initialized():
-        return 1
+
     return dist.get_world_size()
 
 
@@ -59,56 +56,62 @@ def get_rank() -> int:
     Returns:
         int: current rank
     """
-    if not dist.is_available():
+    if not _is_distributed_initialized():
         return 0
-    if not dist.is_initialized():
-        return 0
+
     return dist.get_rank()
 
 
-def all_gather(data: Tensor) -> list[Tensor]:
+def ddp_average(data: torch.Tensor) -> torch.Tensor:
     """
-    Run all_gather on arbitrary shape Tensor
+    Average a tensor across DDP ranks
 
-    Source: https://github.com/facebookresearch/maskrcnn-benchmark/blob/57eec25b75144d9fb1a6857f32553e1574177daf/maskrcnn_benchmark/utils/comm.py#L48
+    Params:
+        data: tensor to be averaged (arbitrary shape)
 
-    Args:
-        data: Tensor
-    Returns:
-        list[data]: list of data gathered from each rank already on CPU
+    Return :
+        tensor with same shape as data, but entries averaged across all DDP ranks
     """
-    world_size = get_world_size()
-    if world_size == 1:
-        return [data]
+    if _is_distributed_initialized():
+        dist.all_reduce(data.cuda(), op=dist.ReduceOp.AVG)
+    return data.cpu()
 
-    # serialized to a Tensor
-    buffer = pickle.dumps(data)
-    storage = torch.ByteStorage.from_buffer(buffer)
-    tensor = torch.ByteTensor(storage).to(data.device)
 
-    # obtain Tensor size of each rank
-    local_size = torch.LongTensor([tensor.numel()]).to(data.device)
-    size_list = [torch.LongTensor([0]).to(data.device) for _ in range(world_size)]
-    dist.all_gather(size_list, local_size)
+def all_gather_vlen(tensor: torch.Tensor, group=None) -> list[torch.Tensor]:
+    """Gather tensors with the same number of dimensions but different lengths."""
 
-    size_list = [int(size.item()) for size in size_list]
-    max_size = max(size_list)
+    if not _is_distributed_initialized():
+        return [tensor]
 
-    # receiving Tensor from all ranks
-    # we pad the tensor because torch all_gather does not support
-    # gathering tensors of different shapes
-    tensor_list = []
-    for _ in size_list:
-        tensor_list.append(torch.ByteTensor(size=(max_size,)).to("cuda"))
-    if local_size != max_size:
-        padding = torch.ByteTensor(size=(max_size - local_size,)).to("cuda")
-        tensor = torch.cat((tensor, padding), dim=0)
+    world_size = dist.get_world_size(group=group)
 
-    dist.all_gather(tensor_list, tensor)
+    # Gather lengths first
+    shape = torch.as_tensor(tensor.shape, device=tensor.device)
+    shapes = [torch.empty_like(shape) for _ in range(world_size)]
+    dist.all_gather(shapes, shape, group=group)
 
-    data_list = []
-    for size, tensor in zip(size_list, tensor_list, strict=False):
-        buffer = tensor.cpu().numpy().tobytes()[:size]
-        data_list.append(pickle.loads(buffer).cpu())
+    # Gather data
+    inputs = [tensor] * world_size
+    outputs = [torch.empty(*_shape, dtype=tensor.dtype, device=tensor.device) for _shape in shapes]
+    dist.all_to_all(outputs, inputs, group=group)
 
-    return data_list
+    return outputs
+
+
+def all_gather_vdim(tensor: torch.Tensor, group=None) -> list[torch.Tensor]:
+    """Gather tensors with different number of dimensions."""
+
+    if not _is_distributed_initialized():
+        return [tensor]
+
+    world_size = dist.get_world_size(group=group)
+
+    # Gather shapes first
+    shapes = all_gather_vlen(torch.as_tensor(tensor.shape, device=tensor.device), group=group)
+
+    # Gather data
+    inputs = [tensor] * world_size
+    outputs = [torch.empty(*_shape, dtype=tensor.dtype, device=tensor.device) for _shape in shapes]
+    dist.all_to_all(outputs, inputs, group=group)
+
+    return outputs

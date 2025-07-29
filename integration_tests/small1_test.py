@@ -15,7 +15,10 @@ from pathlib import Path
 
 import pytest
 
+import weathergen.common.io as io
+import weathergen.utils.config as config
 from weathergen.run_train import inference_from_args, train_with_args
+from weathergen.utils.metrics import get_train_metrics_path
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,7 @@ def test_train(setup, test_run_id):
         f"{weathergen_home}/config/streams/streams_test/",
     )
 
+    logger.info("run inference")
     inference_from_args(
         ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--epoch", "0"]
         + [
@@ -66,15 +70,38 @@ def test_train(setup, test_run_id):
             f"{weathergen_home}/integration_tests/small1.yaml",
         ]
     )
+    logger.info("run evaluation")
+    evaluate_results(test_run_id)
     assert_missing_metrics_file(test_run_id)
     assert_train_loss_below_threshold(test_run_id)
     assert_val_loss_below_threshold(test_run_id)
     logger.info("end test_train")
 
 
+def evaluate_results(run_id):
+    cf = config.load_model_config(run_id, None, None)
+    data_root = config.get_path_output(cf, 0)
+
+    with io.ZarrIO(data_root) as reader:
+        samples = reader.samples
+        fsteps = reader.forecast_steps
+        streams = reader.streams
+
+        item = reader.get_data(samples[0], streams[0], fsteps[0])
+        ds = item.prediction.as_xarray()
+        logger.info(ds)
+        item.target.as_xarray()
+        logger.info(ds)
+        if item.key.with_source:
+            ds = item.source.as_xarray()
+            logger.info(ds)
+
+    # TODO: test concat multiple samples
+
+
 def load_metrics(run_id):
     """Helper function to load metrics"""
-    file_path = f"{weathergen_home}/results/{run_id}/metrics.json"
+    file_path = get_train_metrics_path(base_path=weathergen_home / "results", run_id=run_id)
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Metrics file not found for run_id: {run_id}")
     with open(file_path) as f:
@@ -84,7 +111,7 @@ def load_metrics(run_id):
 
 def assert_missing_metrics_file(run_id):
     """Test that a missing metrics file raises FileNotFoundError."""
-    file_path = f"{weathergen_home}/results/{run_id}/metrics.json"
+    file_path = get_train_metrics_path(base_path=weathergen_home / "results", run_id=run_id)
     assert os.path.exists(file_path), f"Metrics file does not exist for run_id: {run_id}"
     metrics = load_metrics(run_id)
     logger.info(f"Loaded metrics for run_id: {run_id}: {metrics}")

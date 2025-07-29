@@ -1,3 +1,5 @@
+# ruff: noqa: T201
+
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -9,7 +11,6 @@
 
 import logging
 import time
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -18,8 +19,13 @@ import tqdm
 from torch import Tensor
 from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import MixedPrecision, ShardingStrategy
-from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy  # default_auto_wrap_policy,
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    MixedPrecision,
+    ShardingStrategy,
+)
+from torch.distributed.fsdp.wrap import (
+    size_based_auto_wrap_policy,  # default_auto_wrap_policy,
+)
 
 import weathergen.train.loss as losses
 import weathergen.utils.config as config
@@ -27,32 +33,30 @@ from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
-from weathergen.train.trainer_base import Trainer_Base
+from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
-from weathergen.utils.distributed import all_gather, is_root
+from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
-from weathergen.utils.validation_io import write_validation
+from weathergen.utils.validation_io import write_output
 
 _logger = logging.getLogger(__name__)
 
 
-class Trainer(Trainer_Base):
-    ###########################################
+class Trainer(TrainerBase):
     def __init__(self, checkpoint_freq=250, print_freq=10):
-        Trainer_Base.__init__(self)
+        TrainerBase.__init__(self)
 
         self.checkpoint_freq = checkpoint_freq
         self.print_freq = print_freq
 
-    ###########################################
     def init(
         self,
         cf: Config,
     ):
         self.cf = cf
 
-        assert cf.samples_per_epoch % cf.batch_size == 0
-        assert cf.samples_per_validation % cf.batch_size_validation == 0
+        assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
+        assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
 
         self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
@@ -62,34 +66,28 @@ class Trainer(Trainer_Base):
         # num_ranks gets overwritten by current setting during init_ddp()
         self.num_ranks_original = cf.get("num_ranks", None)
 
+        # TODO remove num_ranks, rank, with_with ddp from config
         self.init_ddp(cf)
 
-        # read configuration of data streams
-        cf.streams = config.load_streams(Path(cf.streams_directory))
-
         # create output directory
-        cf.run_path = cf.run_path if hasattr(cf, "run_path") else "./results"
-        cf.model_path = cf.model_path if hasattr(cf, "model_path") else "./models"
-        path_run = Path(cf.run_path) / cf.run_id
-        path_model = Path(cf.model_path) / cf.run_id
-        if self.cf.rank == 0:
-            path_run.mkdir(exist_ok=True, parents=True)
-            path_model.mkdir(exist_ok=True, parents=True)
-        self.path_run = path_run
+        if is_root():
+            config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
+            config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
         self.init_perf_monitoring()
-        self.train_logger = TrainLogger(cf, self.path_run)
+        self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
-    ###########################################
     def inference(self, cf, run_id_trained, epoch):
         # general initalization
         self.init(cf)
 
+        # !! modifies config: adds config.streams[i].<stage>_source_channels
+        # and config.streams[i].<stage>_target_channels !!
         self.dataset_val = MultiStreamDataSampler(
             cf,
             cf.start_date_val,
             cf.end_date_val,
-            cf.batch_size_validation,
+            cf.batch_size_validation_per_gpu,
             cf.samples_per_validation,
             train_logger=self.train_logger,
             stage=VAL,
@@ -125,7 +123,7 @@ class Trainer(Trainer_Base):
         for name, w in cf.loss_fcts_val:
             self.loss_fcts_val += [[getattr(losses, name), w]]
 
-        if self.cf.rank == 0:
+        if is_root():
             config.save(self.cf, epoch=0)
 
         _logger.info(f"Starting inference with id={self.cf.run_id}.")
@@ -134,7 +132,6 @@ class Trainer(Trainer_Base):
         self.validate(epoch=0)
         _logger.info(f"Finished inference run with id: {cf.run_id}")
 
-    ###########################################
     def run(self, cf, run_id_contd=None, epoch_contd=None):
         # general initalization
         self.init(cf)
@@ -143,7 +140,7 @@ class Trainer(Trainer_Base):
             cf,
             cf.start_date,
             cf.end_date,
-            cf.batch_size,
+            cf.batch_size_per_gpu,
             cf.samples_per_epoch,
             train_logger=self.train_logger,
             stage=TRAIN,
@@ -153,7 +150,7 @@ class Trainer(Trainer_Base):
             cf,
             cf.start_date_val,
             cf.end_date_val,
-            cf.batch_size_validation,
+            cf.batch_size_validation_per_gpu,
             cf.samples_per_validation,
             train_logger=self.train_logger,
             stage=VAL,
@@ -222,12 +219,12 @@ class Trainer(Trainer_Base):
         self.model_params = ModelParams().create(cf).to("cuda")
 
         # if with_fsdp then parameter count is unreliable
-        if (self.cf.rank == 0 and not cf.with_fsdp) or not cf.with_ddp:
+        if (is_root() and not cf.with_fsdp) or not cf.with_ddp:
             self.model.print_num_parameters()
 
         # TODO: learning rate schedule
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
-        kappa = cf.batch_size * cf.num_ranks
+        kappa = cf.batch_size_per_gpu * cf.num_ranks
         beta1 = max(0.5, 1.0 - kappa * (1.0 - 0.9))
         beta2 = 1.0 - kappa * (1.0 - 0.999)
         eps = 1e-08 / np.sqrt(kappa)
@@ -245,7 +242,7 @@ class Trainer(Trainer_Base):
 
         # lr is updated after each batch so account for this
         # TODO: conf should be read-only, do not modify the conf in flight
-        cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size)
+        cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size_per_gpu)
 
         steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
         _logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
@@ -267,7 +264,7 @@ class Trainer(Trainer_Base):
             _logger.warning(s)
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
-            cf.batch_size,
+            cf.batch_size_per_gpu,
             cf.num_ranks,
             cf.lr_start,
             cf.lr_max,
@@ -283,7 +280,7 @@ class Trainer(Trainer_Base):
             cf.lr_scaling_policy,
         )
 
-        if self.cf.istep > 0 and self.cf.rank == 0:
+        if self.cf.istep > 0 and is_root():
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
             _logger.info(str)
 
@@ -296,8 +293,8 @@ class Trainer(Trainer_Base):
             epoch_base = int(self.cf.istep / len(self.data_loader))
         else:
             len_per_rank = (
-                len(self.dataset) // (self.num_ranks_original * cf.batch_size)
-            ) * cf.batch_size
+                len(self.dataset) // (self.num_ranks_original * cf.batch_size_per_gpu)
+            ) * cf.batch_size_per_gpu
             epoch_base = int(
                 self.cf.istep / (min(len_per_rank, cf.samples_per_epoch) * self.num_ranks_original)
             )
@@ -448,7 +445,6 @@ class Trainer(Trainer_Base):
             targets_lens,
         )
 
-    ###########################################
     def train(self, epoch):
         cf = self.cf
         self.ddp_model.train()
@@ -478,12 +474,9 @@ class Trainer(Trainer_Base):
                     preds=preds,
                     streams_data=batch[0],
                 )
-                loss = loss_values.loss
-                losses_all = loss_values.losses_all
-                stddev_all = loss_values.stddev_all
 
             # backward pass
-            self.grad_scaler.scale(loss).backward()
+            self.grad_scaler.scale(loss_values.loss).backward()
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
@@ -497,58 +490,26 @@ class Trainer(Trainer_Base):
             # update learning rate
             self.lr_scheduler.step()
 
-            self.loss_unweighted_hist += [losses_all]
-            self.loss_model_hist += [loss.item()]
-            self.stdev_unweighted_hist += [stddev_all]
+            self.loss_unweighted_hist += [loss_values.losses_all]
+            self.loss_model_hist += [loss_values.loss.item()]
+            self.stdev_unweighted_hist += [loss_values.stddev_all]
 
             perf_gpu, perf_mem = self.get_perf()
-            self.perf_gpu = self.ddp_average(torch.tensor([perf_gpu])).item()
-            self.perf_mem = self.ddp_average(torch.tensor([perf_mem])).item()
+            self.perf_gpu = ddp_average(torch.tensor([perf_gpu])).item()
+            self.perf_mem = ddp_average(torch.tensor([perf_mem])).item()
 
-            self.log_terminal(bidx, epoch)
+            self._log_terminal(bidx, epoch, TRAIN)
             if bidx % log_interval == 0:
-                self.log(TRAIN)
+                self._log(TRAIN)
 
             # model checkpoint
             if bidx % self.checkpoint_freq == 0:
                 self.save_model(-1)
 
-            self.cf.istep += cf.batch_size
+            self.cf.istep += cf.batch_size_per_gpu
 
         self.dataset.advance()
 
-    def _prepare_losses_for_logging(
-        self,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """
-        Aggregates across ranks loss and standard deviation data for logging.
-
-        Returns:
-            real_loss (torch.Tensor): The scalar loss used for backpropagation.
-            losses_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
-                per-channel loss tensor.
-            stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
-                per-channel standard deviation tensor.
-        """
-        losses_all: dict[str, Tensor] = {}
-        stddev_all: dict[str, Tensor] = {}
-
-        # Make list of losses into a tensor. This is individual tensor per rank
-        real_loss = torch.tensor(self.loss_model_hist, device=self.devices[0])
-        # Gather all tensors from all ranks into a list and stack them into one tensor again
-        real_loss = torch.cat(all_gather(real_loss))
-
-        for stream in self.cf.streams:  # Loop over all steams
-            stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
-            stream_all = torch.stack(stream_hist).to(torch.float64)
-            losses_all[stream.name] = torch.cat(all_gather(stream_all))
-            stream_hist = [stddev_all[stream.name] for stddev_all in self.stdev_unweighted_hist]
-            stream_all = torch.stack(stream_hist).to(torch.float64)
-            stddev_all[stream.name] = torch.cat(all_gather(stream_all))
-
-        return real_loss, losses_all, stddev_all
-
-    ###########################################
     def validate(self, epoch):
         cf = self.cf
         self.ddp_model.eval()
@@ -581,9 +542,6 @@ class Trainer(Trainer_Base):
                             preds=preds,
                             streams_data=batch[0],
                         )
-                        loss = loss_values.loss
-                        losses_all = loss_values.losses_all
-                        stddev_all = loss_values.stddev_all
 
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
                         (
@@ -599,11 +557,10 @@ class Trainer(Trainer_Base):
                             streams_data=batch[0],
                         )
                         sources = [[item.source_raw for item in b] for b in batch[0]]
-                        write_validation(
+                        write_output(
                             self.cf,
-                            self.path_run,
-                            self.cf.rank,
                             epoch,
+                            bidx,
                             sources,
                             preds_all,
                             targets_all,
@@ -617,22 +574,19 @@ class Trainer(Trainer_Base):
                             preds=preds,
                             streams_data=batch[0],
                         )
-                        loss = loss_values.loss
-                        losses_all = loss_values.losses_all
-                        stddev_all = loss_values.stddev_all
 
-                    self.loss_unweighted_hist += [losses_all]
-                    self.loss_model_hist += [loss.item()]
-                    self.stdev_unweighted_hist += [stddev_all]
+                    self.loss_unweighted_hist += [loss_values.losses_all]
+                    self.loss_model_hist += [loss_values.loss.item()]
+                    self.stdev_unweighted_hist += [loss_values.stddev_all]
 
-                    pbar.update(self.cf.batch_size_validation)
+                    pbar.update(self.cf.batch_size_validation_per_gpu)
 
-                self.log(VAL)
+                self._log_terminal(bidx, epoch, VAL)
+                self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
 
-    ###########################################
     def batch_to_device(self, batch):
         # forecast_steps is dropped here from the batch
         return (
@@ -641,7 +595,6 @@ class Trainer(Trainer_Base):
             [[b.to("cuda") for b in bf] for bf in batch[2]],
         )
 
-    ###########################################
     def save_model(self, epoch: int, name=None):
         # Saving at epoch == max_epoch means that we are saving the latest checkpoint.
         max_epoch = self.cf.num_epochs
@@ -665,9 +618,9 @@ class Trainer(Trainer_Base):
                     ("_" + name) if name is not None else "",
                 ]
             )
-            base_path = Path(self.cf.model_path) / self.cf.run_id
-            file_out: Path = base_path / (filename + ".chkpt")
-            file_tmp: Path = base_path / (filename + "_tmp.chkpt")
+            base_path = config.get_path_model(self.cf)
+            file_out = base_path / (filename + ".chkpt")
+            file_tmp = base_path / (filename + "_tmp.chkpt")
             # save temp file (slow)
             torch.save(state, file_tmp)
             # move file (which is changing the link in the file system and very fast)
@@ -677,21 +630,54 @@ class Trainer(Trainer_Base):
             # save config
             config.save(self.cf, epoch)
 
-    ###########################################
-    def log(self, stage: Stage):
+    def _prepare_losses_for_logging(
+        self,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        """
+        Aggregates across ranks loss and standard deviation data for logging.
+
+        Returns:
+            real_loss (torch.Tensor): The scalar loss used for backpropagation.
+            losses_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
+                per-channel loss tensor.
+            stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
+                per-channel standard deviation tensor.
+        """
+        losses_all: dict[str, Tensor] = {}
+        stddev_all: dict[str, Tensor] = {}
+
+        # Make list of losses into a tensor. This is individual tensor per rank
+        real_loss = torch.tensor(self.loss_model_hist, device=self.devices[0])
+        # Gather all tensors from all ranks into a list and stack them into one tensor again
+        # real_loss = torch.cat(all_gather(real_loss))
+        real_loss = torch.cat(all_gather_vlen(real_loss))
+
+        for stream in self.cf.streams:  # Loop over all steams
+            stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
+            stream_all = torch.stack(stream_hist).to(torch.float64)
+            losses_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
+            # losses_all[stream.name] = torch.cat(all_gather(stream_all))
+            stream_hist = [stddev_all[stream.name] for stddev_all in self.stdev_unweighted_hist]
+            stream_all = torch.stack(stream_hist).to(torch.float64)
+            # stddev_all[stream.name] = torch.cat(all_gather(stream_all))
+            stddev_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
+
+        return real_loss, losses_all, stddev_all
+
+    def _log(self, stage: Stage):
         """
         Logs training or validation metrics.
 
         Args:
             stage: Stage Is it's VAL, logs are treated as validation logs.
-                        If TRAIN, logs are treated as training logs.
+                        If TRAIN, logs are treated as training logs
 
         Notes:
             - This method only executes logging on the main process (rank 0).
             - After logging, historical loss and standard deviation records are cleared.
         """
         avg_loss, losses_all, stddev_all = self._prepare_losses_for_logging()
-        samples = self.cf.istep * self.cf.batch_size * self.cf.num_ranks
+        samples = self.cf.istep * self.cf.batch_size_per_gpu * self.cf.num_ranks
 
         if is_root():
             # plain logger
@@ -711,36 +697,49 @@ class Trainer(Trainer_Base):
 
             self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
-    ###########################################
-    def log_terminal(self, bidx: int, epoch: int):
-        if bidx % self.print_freq == 0 and bidx > 0:
+    def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
+        if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
             avg_loss, losses_all, _ = self._prepare_losses_for_logging()
 
             if is_root():
-                # samples per sec
-                dt = time.time() - self.t_start
-                pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
-                pstr += "(lr={:.2E}, s/sec={:.3f})"
-                len_dataset = len(self.data_loader) // self.cf.batch_size
-                print(
-                    pstr.format(
-                        epoch,
-                        bidx,
-                        len_dataset,
-                        self.cf.istep,
-                        avg_loss.nanmean().item(),
-                        self.lr_scheduler.get_lr(),
-                        (self.print_freq * self.cf.batch_size) / dt,
-                    ),
-                    flush=True,
-                )
-                print("\t", end="")
-                for _, st in enumerate(self.cf.streams):
+                if stage == VAL:
                     print(
-                        "{}".format(st["name"]) + f" : {losses_all[st['name']].nanmean():0.4E} \t",
-                        end="",
+                        f"validation ({self.cf.run_id}) : {epoch:03d} : {avg_loss.nanmean().item()}"
                     )
-                print("\n", flush=True)
+                    for _, st in enumerate(self.cf.streams):
+                        print(
+                            "{}".format(st["name"])
+                            + f" : {losses_all[st['name']].nanmean():0.4E} \t",
+                            end="",
+                        )
+                    print("\n", flush=True)
+
+                elif stage == TRAIN:
+                    # samples per sec
+                    dt = time.time() - self.t_start
+                    pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
+                    pstr += "(lr={:.2E}, s/sec={:.3f})"
+                    len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
+                    print(
+                        pstr.format(
+                            epoch,
+                            bidx,
+                            len_dataset,
+                            self.cf.istep,
+                            avg_loss.nanmean().item(),
+                            self.lr_scheduler.get_lr(),
+                            (self.print_freq * self.cf.batch_size_per_gpu) / dt,
+                        ),
+                        flush=True,
+                    )
+                    print("\t", end="")
+                    for _, st in enumerate(self.cf.streams):
+                        print(
+                            "{}".format(st["name"])
+                            + f" : {losses_all[st['name']].nanmean():0.4E} \t",
+                            end="",
+                        )
+                    print("\n", flush=True)
 
             self.t_start = time.time()
