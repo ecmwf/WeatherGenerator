@@ -11,6 +11,7 @@
 The entry point for training and inference weathergen-atmo
 """
 
+import logging
 import pdb
 import sys
 import time
@@ -38,7 +39,7 @@ def inference_from_args(argl: list[str]):
     parser = cli.get_inference_parser()
     args = parser.parse_args(argl)
 
-    init_loggers()
+    init_loggers(logging_level=logging.DEBUG, debug_output_streams="./logs/debug_log.txt")
 
     inference_overwrite = dict(
         shuffle=False,
