@@ -10,11 +10,11 @@
 import torch
 
 from weathergen.model.attention import (
-    MultiCrossAttentionHead_Varlen,
-    MultiCrossAttentionHead_Varlen_SlicedQ,
+    MultiCrossAttentionHeadVarlen,
+    MultiCrossAttentionHeadVarlenSlicedQ,
     MultiSelfAttentionHead,
-    MultiSelfAttentionHead_Local,
-    MultiSelfAttentionHead_Varlen,
+    MultiSelfAttentionHeadLocal,
+    MultiSelfAttentionHeadVarlen,
 )
 from weathergen.model.embeddings import (
     StreamEmbedLinear,
@@ -93,7 +93,7 @@ class LocalAssimilationEngine:
         """
         for _ in range(self.cf.ae_local_num_blocks):
             self.ae_local_blocks.append(
-                MultiSelfAttentionHead_Varlen(
+                MultiSelfAttentionHeadVarlen(
                     self.cf.ae_local_dim_embed,
                     num_heads=self.cf.ae_local_num_heads,
                     dropout_rate=self.cf.ae_local_dropout_rate,
@@ -134,7 +134,7 @@ class Local2GlobalAssimilationEngine:
         :return: torch.nn.ModuleList containing the local-to-global assimilation adapter blocks.
         """
         self.ae_adapter.append(
-            MultiCrossAttentionHead_Varlen_SlicedQ(
+            MultiCrossAttentionHeadVarlenSlicedQ(
                 self.cf.ae_global_dim_embed,
                 self.cf.ae_local_dim_embed,
                 num_slices_q=self.cf.ae_local_num_queries,
@@ -160,7 +160,7 @@ class Local2GlobalAssimilationEngine:
             )
         )
         self.ae_adapter.append(
-            MultiCrossAttentionHead_Varlen_SlicedQ(
+            MultiCrossAttentionHeadVarlenSlicedQ(
                 self.cf.ae_global_dim_embed,
                 self.cf.ae_local_dim_embed,
                 num_slices_q=self.cf.ae_local_num_queries,
@@ -217,7 +217,7 @@ class GlobalAssimilationEngine:
                 )
             else:
                 self.ae_global_blocks.append(
-                    MultiSelfAttentionHead_Local(
+                    MultiSelfAttentionHeadLocal(
                         self.cf.ae_global_dim_embed,
                         num_heads=self.cf.ae_global_num_heads,
                         qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
@@ -283,7 +283,7 @@ class ForecastingEngine:
                     )
                 else:
                     self.fe_blocks.append(
-                        MultiSelfAttentionHead_Local(
+                        MultiSelfAttentionHeadLocal(
                             self.cf.ae_global_dim_embed,
                             num_heads=self.cf.fe_num_heads,
                             qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
@@ -309,6 +309,16 @@ class ForecastingEngine:
                         norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
+
+        def init_weights_final(m):
+            if isinstance(m, torch.nn.Linear):
+                torch.nn.init.normal_(m.weight, mean=0, std=0.001)
+                if m.bias is not None:
+                    torch.nn.init.normal_(m.bias, mean=0, std=0.001)
+
+        for block in self.fe_blocks:
+            block.apply(init_weights_final)
+
         return self.fe_blocks
 
 
@@ -394,7 +404,7 @@ class TargetPredictionEngine:
         for i in range(len(self.dims_embed) - 1):
             # Multi-Cross Attention Head
             self.tte.append(
-                MultiCrossAttentionHead_Varlen(
+                MultiCrossAttentionHeadVarlen(
                     self.dims_embed[i],
                     self.cf.ae_global_dim_embed,
                     self.cf.streams[0]["target_readout"]["num_heads"],
@@ -414,7 +424,7 @@ class TargetPredictionEngine:
             # Optional Self-Attention Head
             if self.cf.pred_self_attention:
                 self.tte.append(
-                    MultiSelfAttentionHead_Varlen(
+                    MultiSelfAttentionHeadVarlen(
                         self.dims_embed[i],
                         num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
                         dropout_rate=0.1,  # Assuming dropout_rate is 0.1

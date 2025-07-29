@@ -138,8 +138,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 ds_type = stream_info["type"]
                 logger.info(
-                    f"Opening dataset with type: {ds_type} from"
-                    + f" stream config {stream_info['name']}."
+                    f"Opening dataset with type: {ds_type}"
+                    + f"from stream config {stream_info['name']}.",
                 )
                 ds = dataset(filename=filename, **kwargs)
 
@@ -147,6 +147,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if len(ds) > 0:
                     self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
 
+                # MODIFIES config !!!
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
                 stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
 
@@ -172,7 +173,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.sampling_rate_target = cf.sampling_rate_target
 
         self.batch_size = batch_size
-        self.rng = np.random.default_rng(cf.data_loader_rng_seed)
+
+        # ensure data_loader_rng_seed is not smaller than loader_num_workers to avoid
+        # issues in per loader rng seed computation
+        self.data_loader_rng_seed = (
+            cf.data_loader_rng_seed
+            if cf.data_loader_rng_seed > cf.loader_num_workers
+            else cf.data_loader_rng_seed * 13
+        )
 
         self.healpix_level_source: int = cf.healpix_level
         self.healpix_level_target: int = cf.healpix_level
@@ -180,10 +188,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.num_healpix_cells_target: int = 12 * 4**self.healpix_level_target
 
         if cf.training_mode == "forecast":
-            self.tokenizer = TokenizerForecast(cf.healpix_level, cf.data_loader_rng_seed)
+            self.tokenizer = TokenizerForecast(cf.healpix_level)
         elif cf.training_mode == "masking":
             masker = Masker(cf.masking_rate, cf.masking_strategy, cf.masking_rate_sampling)
-            self.tokenizer = TokenizerMasking(cf.healpix_level, cf.data_loader_rng_seed, masker)
+            self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
             msg = "masked token modeling does not support self.input_window_steps > 1; "
             msg += "increase window length"
@@ -196,11 +204,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ###################################################
     def advance(self):
         """
-        Advance epoch
+        Advance epoch (this is applied to the template for the worker processes)
         """
         self.epoch += 1
-        # advance since only copies are used for actual loading with parallel loaders
-        self.rng.random()
 
     ###################################################
     def get_sources_size(self):
@@ -230,6 +236,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     ###################################################
     def reset(self):
+        # initialize the random number generator: self.data_loader_rng_seed is set to a DDP-unique
+        # value in worker_workset()
+        self.rng = np.random.default_rng(self.data_loader_rng_seed)
+
         fsm = (
             self.forecast_steps[min(self.epoch, len(self.forecast_steps) - 1)]
             if self.forecast_policy != "random"
@@ -257,13 +267,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.perms_forecast_dt = fsm * np.ones(len_dt_samples, dtype=np.int64)
         elif self.forecast_policy == "random" or self.forecast_policy == "sequential_random":
             # randint high=one-past
-            self.perms_forecast_dt = np.random.randint(
+            self.perms_forecast_dt = self.rng.integers(
                 low=self.forecast_steps.min(), high=fsm + 1, size=len_dt_samples, dtype=np.int64
             )
         else:
             assert False
 
-        self.tokenizer.reset()
+        self.tokenizer.reset_rng(self.rng)
 
     ###################################################
     def denormalize_source_channels(self, obs_id, data):
@@ -379,13 +389,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     streams_data += [stream_data]
 
                 # skip completely empty batch item or when all targets are empty -> no grad
-                if (
-                    np.array([s.empty() for s in streams_data]).all()
-                    or np.array([s.target_empty() for s in streams_data]).all()
-                ):
-                    continue
-
-                batch += [streams_data]
+                if not (all(s.empty() or s.target_empty() for s in streams_data)):
+                    batch += [streams_data]
 
             # aggregated lens of tokens per cell
             source_cell_lens = compute_source_cell_lens(batch)
@@ -406,7 +411,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     ###################################################
     def worker_workset(self):
-        # local_start, local_end = 0, len(self)
         local_start, local_end = self.rank * self.len, (self.rank + 1) * self.len
 
         worker_info = torch.utils.data.get_worker_info()
@@ -417,6 +421,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             iter_end = len(self)
 
         else:
+            # ensure the rng seed is fully unique across workers and epochs
+            # the worker processes are generated as bit-wise copy of the "template" (the actual
+            # instance of the present class that is created) whenever __iter__ is started. This
+            # happens for each epoch, for train and validation, and independently for each DDP
+            # worker. After the bit-wise copy, the rng seed needs to be made unique for
+            # DDP workers, loader process, epoch.
+            dist = torch.distributed
+            self.data_loader_rng_seed *= (
+                (((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1)
+                * ((worker_info.id + 1) * 37)
+                * (self.epoch + 13)
+                * 7
+            )
             # split workload
             per_worker = (local_end - local_start) // worker_info.num_workers
             iter_start = local_start + worker_info.id * per_worker
@@ -427,7 +444,5 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 f"{self.rank}::{worker_info.id}"
                 + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
             )
-        # ensure the tokenizers use different seeds
-        self.tokenizer.reset()
 
         return iter_start, iter_end
