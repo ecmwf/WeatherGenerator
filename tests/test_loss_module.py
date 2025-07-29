@@ -97,7 +97,7 @@ def test_loss(cf):
         preds=preds,
         streams_data=batch[0],
     )
-    loss2, losses_all2, stddev_all2 = model_loss.loss, model_loss.losses_all, model_loss.stddev_all
+    loss2, _, _ = model_loss.loss, model_loss.losses_all, model_loss.stddev_all
 
     # assert loss1 == loss2, "Loss computations return different values."
 
