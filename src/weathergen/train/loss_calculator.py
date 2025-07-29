@@ -287,14 +287,14 @@ class LossCalculator:
                     # Add the weighted and normalized loss from this loss function to the total
                     # batch loss.
                     loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct * strm_loss_weight)
-                    ctr_fsteps = 1 if loss_lfct > 0.0 else 0
+                    ctr_fsteps += 1 if loss_lfct > 0.0 else 0
 
                 loss = loss + loss_fstep / ctr_fsteps if ctr_fsteps > 0 else loss
                 ctr_targets += 1 if loss_fstep > 0 else 0
 
-                # normalize by forecast step
-                losses_all[strm.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
-                stddev_all[strm.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
+            # normalize by forecast step
+            losses_all[strm.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
+            stddev_all[strm.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
 
         if loss == 0.0:
             # streams_data[i] are samples in batch
