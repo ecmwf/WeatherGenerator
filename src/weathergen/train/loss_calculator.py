@@ -148,7 +148,6 @@ class LossCalculator:
             # If no valid data under the mask, return 0 to avoid errors and not contribute to loss
             return torch.tensor(0.0, device=pred.device)
 
-    @staticmethod
     def _compute_loss_per_loss_function(
         self,
         loss_fct,
