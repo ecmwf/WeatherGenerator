@@ -1,15 +1,12 @@
-"""
-Utilities for writing distributed pytorch-based code.
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
 
-This module is adapted from code by Seb Hoffamn at:
-https://github.com/sehoffmann/dmlcloud/blob/develop/dmlcloud/core/distributed.py
-
-(same license as the rest of the code)
-Copyright (c) 2025, Sebastian Hoffmann
-"""
-
-# TODO: copy other utilities from dmlcloud such as root_wrap etc.
-# TODO: move the DDP code from trainer.py to this file
 
 import torch
 import torch.distributed as dist
