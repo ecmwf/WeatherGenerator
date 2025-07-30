@@ -283,7 +283,13 @@ class ZarrIO:
         _, example_sample = next(self.data_root.groups())
         _, example_stream = next(example_sample.groups())
         return list(example_stream.group_keys())
-
+@dataclasses.dataclass
+class DataCoordinates:
+    times: typing.Any
+    coords: typing.Any
+    geoinfo: typing.Any
+    channels: typing.Any
+    geoinfo_channels: typing.Any
 
 @dataclasses.dataclass
 class OutputBatchData:
@@ -365,26 +371,12 @@ class OutputBatchData:
                 .numpy()
             )
 
-        _coords = self.targets_coords[offest_key.forecast_step][stream_idx][datapoints].numpy()
-        coords = _coords[..., :2]  # first two columns are lat,lon
-        geoinfo = _coords[..., 2:]  # the rest is geoinfo => potentially empty
+        data_coords = self._extract_coordinates(stream_idx, offest_key, datapoints)
 
-        if geoinfo.size > 0:  # TODO: set geoinfo to be empty for now
-            geoinfo = np.empty((geoinfo.shape[0], 0))
-            _logger.warning(
-                "geoinformation channels are not implemented yet."
-                + "will be truncated to be of size 0."
-            )
-        times = self.targets_times[offest_key.forecast_step][stream_idx][
-            datapoints
-        ]  # make conversion to datetime64[ns] here?
-        channels = self.channels[stream_idx]
-        geoinfo_channels = self.geoinfo_channels[stream_idx]
-
-        assert len(channels) == target_data.shape[1], (
+        assert len(data_coords.channels) == target_data.shape[1], (
             "Number of channel names does not align with data"
         )
-        assert len(channels) == preds_data.shape[1], (
+        assert len(data_coords.channels) == preds_data.shape[1], (
             "Number of channel names does not align with data"
         )
 
@@ -392,7 +384,6 @@ class OutputBatchData:
             self._extract_predictions(offest_key.sample, stream_idx, key)
         else:
             source_dataset = None
-            
 
         return OutputItem(
             key=key,
@@ -401,21 +392,13 @@ class OutputBatchData:
                 "target",
                 key,
                 target_data,
-                times,
-                coords,
-                geoinfo,
-                channels,
-                geoinfo_channels,
+                **dataclasses.asdict(data_coords)
             ),
             prediction=OutputDataset(
                 "prediction",
                 key,
                 preds_data,
-                times,
-                coords,
-                geoinfo,
-                channels,
-                geoinfo_channels,
+                **dataclasses.asdict(data_coords)
             ),
         )
     
@@ -452,8 +435,24 @@ class OutputBatchData:
             key.stream
         )
     
-    def _extract_metadata(self):
-        pass
+    def _extract_coordinates(self, stream_idx, offest_key, datapoints) -> DataCoordinates:
+        _coords = self.targets_coords[offest_key.forecast_step][stream_idx][datapoints].numpy()
+        coords = _coords[:, :2]  # first two columns are lat,lon
+        geoinfo = _coords[:, 2:]  # the rest is geoinfo => potentially empty
+        if geoinfo.size > 0:  # TODO: set geoinfo to be empty for now
+            geoinfo = np.empty((geoinfo.shape[0], 0))
+            _logger.warning(
+                "geoinformation channels are not implemented yet."
+                + "will be truncated to be of size 0."
+            )
+        times = self.targets_times[offest_key.forecast_step][stream_idx][
+            datapoints
+        ]  # make conversion to datetime64[ns] here?
+        channels = self.channels[stream_idx]
+        geoinfo_channels = self.geoinfo_channels[stream_idx]
+
+        return DataCoordinates(times, coords, geoinfo, channels, geoinfo_channels)
+
         
     def _extract_predictions(self, sample, stream_idx, key):
         channels = self.channels[stream_idx]
