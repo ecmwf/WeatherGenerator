@@ -403,27 +403,10 @@ class OutputBatchData:
         )
 
         if key.with_source:
-            source = self.sources[sample][stream_idx]
-
-            # currently fails since no separate channels for source/target implemented
-            # assert source.data.shape[1] == len(channels), (
-            #     "Number of channel names does not align with data"
-            # )
-
-            source_dataset = OutputDataset(
-                "source",
-                key,
-                source.data,
-                source.datetimes,
-                source.coords,
-                source.geoinfos,
-                channels,
-                geoinfo_channels,
-            )
-
-            _logger.debug(f"source shape: {source_dataset.data.shape}")
+            self._extract_predictions(sample, stream_idx, key)
         else:
             source_dataset = None
+            
 
         return OutputItem(
             key=key,
@@ -449,3 +432,36 @@ class OutputBatchData:
                 geoinfo_channels,
             ),
         )
+    
+    def _offset_key(self, key: ItemKey):
+        return ItemKey(
+            key.sample - self.sample_start,
+            key.forecast_step - self.forecast_offset,
+            key.stream
+        )
+        
+    def _extract_predictions(self, sample, stream_idx, key):
+        channels = self.channels[stream_idx]
+        geoinfo_channels = self.geoinfo_channels[stream_idx]
+        
+        source = self.sources[sample][stream_idx]
+
+        # currently fails since no separate channels for source/target implemented
+        # assert source.data.shape[1] == len(channels), (
+        #     "Number of channel names does not align with data"
+        # )
+
+        source_dataset = OutputDataset(
+            "source",
+            key,
+            source.data,
+            source.datetimes,
+            source.coords,
+            source.geoinfos,
+            channels,
+            geoinfo_channels,
+        )
+
+        _logger.debug(f"source shape: {source_dataset.data.shape}")
+        
+        return source_dataset
