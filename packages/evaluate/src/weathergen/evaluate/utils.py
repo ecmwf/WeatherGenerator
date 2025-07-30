@@ -120,9 +120,10 @@ def get_data(
                 )
                 available_channels = da_tars_fs.channel.values
                 existing_channels = [ch for ch in channels if ch in available_channels]
-                _logger.warning(
-                    f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
-                )
+                if len(existing_channels) < len(channels):
+                    _logger.warning(
+                        f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
+                    )
 
                 da_tars_fs = da_tars_fs.sel(channel=existing_channels)
                 da_preds_fs = da_preds_fs.sel(channel=existing_channels)
