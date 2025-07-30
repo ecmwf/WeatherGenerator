@@ -238,7 +238,7 @@ class LinePlots:
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
-        
+
         _logger.info(f"saving summary plots to: {self.out_plot_dir}")
 
     def _check_lengths(
