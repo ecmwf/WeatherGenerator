@@ -297,15 +297,15 @@ class OutputBatchData:
         start = sum(lens[:sample])
         n_samples = lens[sample]
 
-        _logger.info(f"extracting subset: {key}")
-        _logger.info(
+        _logger.debug(f"extracting subset: {key}")
+        _logger.debug(
             f"sample: start:{self.sample_start} rel_idx:{sample} range:{start}-{start + n_samples}"
         )
-        _logger.info(
+        _logger.debug(
             f"forecast_step: {key.forecast_step} = {forecast_step} (rel_step) + "
             + f"{self.forecast_offset} (forecast_offset)"
         )
-        _logger.info(f"stream: {key.stream} with index: {stream_idx}")
+        _logger.debug(f"stream: {key.stream} with index: {stream_idx}")
 
         datapoints = slice(start, start + n_samples)
 
@@ -363,7 +363,7 @@ class OutputBatchData:
                 geoinfo_channels,
             )
 
-            _logger.info(f"source shape: {source_dataset.data.shape}")
+            _logger.debug(f"source shape: {source_dataset.data.shape}")
             assert len(channels) == source_dataset.data.shape[1], (
                 "Number of channel names does not align with data"
             )
