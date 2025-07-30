@@ -58,7 +58,7 @@ if __name__ == "__main__":
     scores_dict = defaultdict(lambda: defaultdict(dict))
 
     # common plotting options across streams and run_ids. e.g. vertical ranges.
-    plotting_opts = {}
+    plotting_opts = cfg.get("plotting_opts", {})
 
     for run_id, run in runs.items():
         _logger.info(f"RUN {run_id}: Getting data...")
