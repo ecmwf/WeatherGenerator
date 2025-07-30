@@ -157,6 +157,7 @@ class DataReaderAnemoi(DataReaderTimestep):
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
+        assert t_idxs[0] >= 0, "index must be non-negative"
         didx_start = t_idxs[0]
         # End is inclusive
         didx_end = t_idxs[-1] + 1
