@@ -11,6 +11,7 @@
 
 import logging
 import time
+from typing import Any
 
 import numpy as np
 import torch
@@ -26,11 +27,10 @@ from torch.distributed.fsdp.wrap import (
     size_based_auto_wrap_policy,  # default_auto_wrap_policy,
 )
 
-import weathergen.train.loss as losses
 import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
-from weathergen.train.loss import stat_loss_fcts
+from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
@@ -118,9 +118,7 @@ class Trainer(TrainerBase):
         self.model_params = ModelParams().create(cf).to(self.devices[0])
         _logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
 
-        self.loss_fcts_val = []
-        for name, w in cf.loss_fcts_val:
-            self.loss_fcts_val += [[getattr(losses, name), w]]
+        self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
         if is_root():
             config.save(self.cf, epoch=0)
@@ -289,9 +287,9 @@ class Trainer(TrainerBase):
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
             _logger.info(str)
 
-        # get function handles for loss function terms
-        self.loss_fcts = [[getattr(losses, name), w] for name, w in cf.loss_fcts]
-        self.loss_fcts_val = [[getattr(losses, name), w] for name, w in cf.loss_fcts_val]
+        # Instantiate loss calculator modules to compute losses
+        self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=self.devices[0])
+        self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
         # recover epoch when continuing run
         if self.num_ranks_original is None:
@@ -331,17 +329,63 @@ class Trainer(TrainerBase):
         # log final model
         self.save_model(cf.num_epochs)
 
-    def compute_loss(
+    ###########################################
+    def _prepare_logging(
         self,
-        loss_fcts,
-        forecast_offset,
-        forecast_steps,
-        streams_data,
-        preds,
-        stage=TRAIN,
-        log_data=False,
+        preds: list[list[Tensor]],
+        forecast_offset: int,
+        forecast_steps: int,
+        streams_data: list[list[Any]],
     ):
-        # merge across batch dimension (and keep streams)
+        """Collects and denormalizes prediction and target data for logging.
+
+        This function processes target and prediction tensors, extracts relevant
+        coordinates and timestamps, denormalizes the data, and organizes it
+        into a structured format suitable for logging or further analysis. It
+        handles potential empty tensors and NaN values.
+
+        Args:
+            preds: A list of lists, where the outer list
+                corresponds to forecast steps, and the inner list contains prediction
+                tensors for each observation stream. Each prediction tensor is
+                expected to be in the normalized latent or observation space,
+                depending on the model's output.
+            targets: A list of lists, where the outer list
+                corresponds to forecast steps, and the inner list contains target
+                tensors for each observation stream. Each target tensor is expected
+                to be in the normalized observation space.
+            forecast_offset: The starting offset for the forecast steps
+                relative to the original data.
+            forecast_steps: The number of forecast steps to consider.
+            streams_data: A list of lists, where each inner list
+                contains data objects (e.g., `BatchItem` instances) for each stream
+                at a specific time step. These objects are expected to have
+                `target_coords_raw` and `target_times_raw` attributes.
+
+        Returns:
+            tuple: A tuple containing:
+                - preds_all: Denormalized
+                predictions, organized by forecast step and observation stream.
+                - targets_all: Denormalized
+                targets, organized by forecast step and observation stream.
+                - targets_coords_raw: Raw target coordinates,
+                extracted and concatenated for each forecast step and stream.
+                - targets_times_raw: Raw target timestamps,
+                extracted and concatenated for each forecast step and stream.
+                - targets_lens: A list of lists, where each
+                inner list contains the original lengths (shape[0]) of the target
+                tensors before any filtering.
+        """
+
+        #'''
+        # TODO: Remove this function and port functionality to write_validation(), which then
+        # extracts preds_all, targets_all,... itself directly from stream_data.
+        # TODO: Undo list resorting
+        # The following list operations realize a reshaping of the original tensors in streams_data
+        # from shape [batch_sample][stream][fstep] into shape [fstep][stream][batch_sample]. When
+        # removing the reshaping, make sure to index the tensors starting at forecast_offset, e.g.,
+        # target_times_raw = streams_data[i_batch][i_strm].target_times_raw[forecast_offset+fstep],
+        # when iterating over batch, stream, and fsteps.
         targets_rt = [
             [
                 torch.cat([t[i].target_tokens[fstep] for t in streams_data])
@@ -349,183 +393,58 @@ class Trainer(TrainerBase):
             ]
             for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
         ]
-        targets_coords_rt = [
+        # TODO: Undo list resorting
+        targets_coords_raw = [
             [
-                torch.cat([t[i].target_coords[fstep] for t in streams_data])
+                torch.cat([t[i].target_coords_raw[fstep] for t in streams_data])
+                for i in range(len(self.cf.streams))
+            ]
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
+        ]
+        # TODO: Undo list resorting
+        targets_times_raw = [
+            [
+                np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
                 for i in range(len(self.cf.streams))
             ]
             for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
         ]
 
-        if log_data:
-            fsteps = len(targets_rt)
-            preds_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
-            targets_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
-            targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+        # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
+        fsteps = len(targets_rt)
+        preds_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+        targets_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+        targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
 
-            targets_coords_raw_rt = [
-                [
-                    torch.cat([t[i].target_coords_raw[fstep] for t in streams_data])
-                    for i in range(len(self.cf.streams))
-                ]
-                for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
-            ]
-            targets_times_raw_rt = [
-                [
-                    np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
-                    for i in range(len(self.cf.streams))
-                ]
-                for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
-            ]
-
-        ctr_ftarget = 0
-        device = self.devices[0]
-
-        loss = torch.tensor(0.0, device=device, requires_grad=True)
-        # Create list storing losses for each stream
-        losses_all: dict[str, Tensor] = {
-            st.name: torch.zeros(
-                (len(st[str(stage) + "_target_channels"]), len(loss_fcts)), device=device
-            )
-            for st in self.cf.streams
-        }
-        # Create list storing losses for each stream
-        stddev_all: dict[str, Tensor] = {
-            st.name: torch.zeros(len(stat_loss_fcts), device=device) for st in self.cf.streams
-        }
-
+        # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
         for fstep in range(len(targets_rt)):
-            for i_obs, (target, target_coords, si) in enumerate(
-                zip(
-                    targets_rt[fstep],
-                    targets_coords_rt[fstep],
-                    self.cf.streams,
-                    strict=False,
-                )
-            ):
-                pred = preds[fstep][i_obs]
+            for i_strm, target in enumerate(targets_rt[fstep]):
+                pred = preds[fstep][i_strm]
 
-                num_channels = len(si[str(stage) + "_target_channels"])
+                if not (target.shape[0] > 0 and pred.shape[0] > 0):
+                    continue
 
-                # set obs_loss_weight = 1. when not specified
-                obs_loss_weight = si["loss_weight"] if "loss_weight" in si else 1.0
-                channel_loss_weight = (
-                    si["channel_weight"] if "channel_weight" in si else np.ones(num_channels)
-                )
-                # in validation mode, always unweighted loss is computed
-                obs_loss_weight = 1.0 if stage == VAL else obs_loss_weight
-                channel_loss_weight = np.ones(num_channels) if stage == VAL else channel_loss_weight
+                # extract data/coords and remove token dimension if it exists
+                pred = pred.reshape([pred.shape[0], *target.shape])
+                assert pred.shape[1] > 0
 
-                tok_spacetime = si["tokenize_spacetime"] if "tokenize_spacetime" in si else False
+                mask_nan = ~torch.isnan(target)
+                if pred[:, mask_nan].shape[1] == 0:
+                    continue
 
-                if target.shape[0] > 0 and pred.shape[0] > 0:
-                    # extract data/coords and remove token dimension if it exists
-                    pred = pred.reshape([pred.shape[0], *target.shape])
-                    assert pred.shape[1] > 0
+                targets_lens[fstep][i_strm] += [target.shape[0]]
+                dn_data = self.dataset_val.denormalize_target_channels
 
-                    mask_nan = ~torch.isnan(target)
-                    if pred[:, mask_nan].shape[1] == 0:
-                        continue
-                    ens = pred.shape[0] > 1
-
-                    # accumulate loss from different loss functions and channels
-                    for j, (loss_fct, w) in enumerate(loss_fcts):
-                        # compute per channel loss
-                        val = torch.tensor(0.0, device=device, requires_grad=True)
-                        ctr_chs = 0.0
-
-                        # loop over all channels
-                        for i in range(target.shape[-1]):
-                            # if stream is internal time step, compute loss separately per step
-                            if tok_spacetime:
-                                # iterate over time steps and compute loss separately for each
-                                t_unique = torch.unique(target_coords[:, 1])
-                                for t in t_unique:
-                                    mask_t = t == target_coords[:, 1]
-                                    mask = torch.logical_and(mask_t, mask_nan[:, i])
-                                    if mask.sum().item() > 0:
-                                        temp = loss_fct(
-                                            target[mask, i],
-                                            pred[:, mask, i],
-                                            pred[:, mask, i].mean(0),
-                                            (
-                                                pred[:, mask, i].std(0)
-                                                if ens
-                                                else torch.zeros(1, device=pred.device)
-                                            ),
-                                        )
-                                        val = val + channel_loss_weight[i] * temp
-                                        losses_all[si.name][i, j] += temp.item()
-                                        ctr_chs += 1
-
-                            else:
-                                # only compute loss is there are non-NaN values
-                                if mask_nan[:, i].sum().item() > 0:
-                                    temp = loss_fct(
-                                        target[mask_nan[:, i], i],
-                                        pred[:, mask_nan[:, i], i],
-                                        pred[:, mask_nan[:, i], i].mean(0),
-                                        (
-                                            pred[:, mask_nan[:, i], i].std(0)
-                                            if ens
-                                            else torch.zeros(1, device=pred.device)
-                                        ),
-                                    )
-                                    val = val + channel_loss_weight[i] * temp
-                                    losses_all[si.name][i, j] += temp.item()
-                                    ctr_chs += 1
-                        val = val / ctr_chs if (ctr_chs > 0) else val
-
-                        if loss_fct.__name__ in stat_loss_fcts:
-                            indx = stat_loss_fcts.index(loss_fct.__name__)
-                            stddev_all[si.name][indx] += pred[:, mask_nan].std(0).mean().item()
-                        # ignore NaNs so that training can continue even if one pred-net diverges
-                        loss = loss + (
-                            (w * val * obs_loss_weight)
-                            if not torch.isnan(val)
-                            else torch.tensor(0.0, requires_grad=True)
-                        )
-                    ctr_ftarget += 1
-
-                    # log data for analysis
-                    if log_data:
-                        targets_lens[fstep][i_obs] += [target.shape[0]]
-                        dn_data = self.dataset_val.denormalize_target_channels
-
-                        f32 = torch.float32
-                        preds_all[fstep][i_obs] += [dn_data(i_obs, pred.to(f32)).detach().cpu()]
-                        targets_all[fstep][i_obs] += [dn_data(i_obs, target.to(f32)).detach().cpu()]
-
-        if loss == 0.0:
-            # streams_data[i] are samples in batch
-            # streams_data[i][0] is stream 0 (sample_idx is identical for all streams per sample)
-            _logger.warning(
-                f"Loss is 0.0 for sample(s): {[sd[0].sample_idx.item() for sd in streams_data]}."
-                + "This will likely lead to errors in the optimization step."
-            )
-
-        # normalize by all targets and forecast steps that were non-empty
-        # (with each having an expected loss of 1 for an uninitalized neural net)
-        loss = loss / ctr_ftarget
-
-        losses_all = {k: v / ctr_ftarget for k, v in losses_all.items()}
-        stddev_all = {k: v / ctr_ftarget for k, v in stddev_all.items()}
+                f32 = torch.float32
+                preds_all[fstep][i_strm] += [dn_data(i_strm, pred.to(f32)).detach().cpu()]
+                targets_all[fstep][i_strm] += [dn_data(i_strm, target.to(f32)).detach().cpu()]
 
         return (
-            loss,
-            losses_all,
-            stddev_all,
-            (
-                None
-                if not log_data
-                else [
-                    preds_all,
-                    targets_all,
-                    targets_coords_raw_rt,
-                    targets_times_raw_rt,
-                    targets_lens,
-                ]
-            ),
+            preds_all,
+            targets_all,
+            targets_coords_raw,
+            targets_times_raw,
+            targets_lens,
         )
 
     def train(self, epoch):
@@ -553,17 +472,13 @@ class Trainer(TrainerBase):
                 enabled=cf.with_mixed_precision,
             ):
                 preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
-
-                loss, losses_all, stddev_all, _ = self.compute_loss(
-                    self.loss_fcts,
-                    cf.forecast_offset,
-                    forecast_steps,
-                    batch[0],
-                    preds,
+                loss_values = self.loss_calculator.compute_loss(
+                    preds=preds,
+                    streams_data=batch[0],
                 )
 
             # backward pass
-            self.grad_scaler.scale(loss).backward()
+            self.grad_scaler.scale(loss_values.loss).backward()
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
@@ -577,9 +492,9 @@ class Trainer(TrainerBase):
             # update learning rate
             self.lr_scheduler.step()
 
-            self.loss_unweighted_hist += [losses_all]
-            self.loss_model_hist += [loss.item()]
-            self.stdev_unweighted_hist += [stddev_all]
+            self.loss_unweighted_hist += [loss_values.losses_all]
+            self.loss_model_hist += [loss_values.loss.item()]
+            self.stdev_unweighted_hist += [loss_values.stddev_all]
 
             perf_gpu, perf_mem = self.get_perf()
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu])).item()
@@ -625,23 +540,24 @@ class Trainer(TrainerBase):
 
                     # compute loss and log output
                     if bidx < cf.log_validation:
-                        loss, losses_all, stddev_all, ret = self.compute_loss(
-                            self.loss_fcts_val,
-                            cf.forecast_offset,
-                            forecast_steps,
-                            batch[0],
-                            preds,
-                            VAL,
-                            log_data=True,
+                        loss_values = self.loss_calculator_val.compute_loss(
+                            preds=preds,
+                            streams_data=batch[0],
                         )
 
+                        # TODO: Move _prepare_logging into write_validation by passing streams_data
                         (
                             preds_all,
                             targets_all,
                             targets_coords_all,
                             targets_times_all,
                             targets_lens,
-                        ) = ret
+                        ) = self._prepare_logging(
+                            preds=preds,
+                            forecast_offset=cf.forecast_offset,
+                            forecast_steps=cf.forecast_steps,
+                            streams_data=batch[0],
+                        )
                         sources = [[item.source_raw for item in b] for b in batch[0]]
                         write_output(
                             self.cf,
@@ -656,18 +572,14 @@ class Trainer(TrainerBase):
                         )
 
                     else:
-                        loss, losses_all, stddev_all, _ = self.compute_loss(
-                            self.loss_fcts_val,
-                            cf.forecast_offset,
-                            forecast_steps,
-                            batch[0],
-                            preds,
-                            VAL,
+                        loss_values = self.loss_calculator_val.compute_loss(
+                            preds=preds,
+                            streams_data=batch[0],
                         )
 
-                    self.loss_unweighted_hist += [losses_all]
-                    self.loss_model_hist += [loss.item()]
-                    self.stdev_unweighted_hist += [stddev_all]
+                    self.loss_unweighted_hist += [loss_values.losses_all]
+                    self.loss_model_hist += [loss_values.loss.item()]
+                    self.stdev_unweighted_hist += [loss_values.stddev_all]
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
@@ -739,17 +651,14 @@ class Trainer(TrainerBase):
         # Make list of losses into a tensor. This is individual tensor per rank
         real_loss = torch.tensor(self.loss_model_hist, device=self.devices[0])
         # Gather all tensors from all ranks into a list and stack them into one tensor again
-        # real_loss = torch.cat(all_gather(real_loss))
         real_loss = torch.cat(all_gather_vlen(real_loss))
 
         for stream in self.cf.streams:  # Loop over all steams
             stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
             stream_all = torch.stack(stream_hist).to(torch.float64)
             losses_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
-            # losses_all[stream.name] = torch.cat(all_gather(stream_all))
             stream_hist = [stddev_all[stream.name] for stddev_all in self.stdev_unweighted_hist]
             stream_all = torch.stack(stream_hist).to(torch.float64)
-            # stddev_all[stream.name] = torch.cat(all_gather(stream_all))
             stddev_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
 
         return real_loss, losses_all, stddev_all
