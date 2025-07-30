@@ -14,7 +14,6 @@ from collections import defaultdict
 from pathlib import Path
 
 from omegaconf import OmegaConf
-from plotter import Plotter
 from utils import (
     calc_scores_per_stream,
     metric_list_to_json,
@@ -58,11 +57,10 @@ if __name__ == "__main__":
     # to get a structure like: scores_dict[metric][stream][run_id] = plot
     scores_dict = defaultdict(lambda: defaultdict(dict))
 
-    # common plotting options across streams and run_ids. e.g. vertical ranges. 
+    # common plotting options across streams and run_ids. e.g. vertical ranges.
     plotting_opts = {}
 
     for run_id, run in runs.items():
-
         _logger.info(f"RUN {run_id}: Getting data...")
 
         streams = run["streams"].keys()
@@ -74,7 +72,9 @@ if __name__ == "__main__":
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                plots, plotting_opts = plot_data(cfg, run_id, stream, stream_dict, plotting_opts)
+                plots, plotting_opts = plot_data(
+                    cfg, run_id, stream, stream_dict, plotting_opts
+                )
 
             if stream_dict.get("evaluation"):
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")

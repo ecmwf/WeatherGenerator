@@ -230,11 +230,8 @@ def calc_scores_per_stream(
 
 
 def plot_data(
-    cfg: str, 
-    run_id: str, 
-    stream: str, 
-    stream_dict: dict, 
-    plotting_opts: dict) -> tuple[list[str], dict]:
+    cfg: str, run_id: str, stream: str, stream_dict: dict, plotting_opts: dict
+) -> tuple[list[str], dict]:
     """
     Plot the data for a given run and stream.
 
@@ -243,7 +240,7 @@ def plot_data(
     :param run_id: Run identifier.
     :param stream: Stream name.
     :param stream_dict: Dictionary containing stream configuration.
-    :plotting_opts: Dictionary containing all common plotting options across streams and variables. 
+    :plotting_opts: Dictionary containing all common plotting options across streams and variables.
     """
 
     plot_settings = stream_dict.get("plotting", {})
@@ -306,7 +303,7 @@ def plot_data(
             plot_names.append(plots)
 
     new_plotting_opts = plotter.ranges
-    
+
     return plot_names, new_plotting_opts
 
 
