@@ -280,9 +280,9 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
             }
 
             if plot_settings.plot_maps:
-                map_tar = plotter.map(tars, plot_chs, data_selection, "target")
+                map_tar = plotter.map(tars, plot_chs, data_selection, "target", plot_settings.get("area"))
 
-                map_pred = plotter.map(preds, plot_chs, data_selection, "preds")
+                map_pred = plotter.map(preds, plot_chs, data_selection, "preds", plot_settings.get("area"))
                 plots.extend([map_tar, map_pred])
 
             if plot_settings.plot_histograms:

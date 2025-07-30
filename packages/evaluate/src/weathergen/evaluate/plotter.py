@@ -166,15 +166,16 @@ class Plotter:
         return plot_names
 
     def map(
-        self, data: xr.DataArray, variables: list, select: dict, tag: str = ""
+        self, data: xr.DataArray, variables: list, select: dict, tag: str = "", area: list = [] 
     ) -> list[str]:
         """
         Plot 2D map for a dataset
 
         :param data: DataArray for a specific (stream, sample, fstep)
         :param variables: list of variables to be plotted
-        :param label: any tag you want to add to the plot
+        :param tag: any tag you want to add to the plot
         :param select: selection to be applied to the DataArray
+        :param area: list of coordinates [lon_min, lon_max, lat_min, lat_max] to set map extent
         """
 
         self.update_data_selection(select)
@@ -201,7 +202,15 @@ class Plotter:
             plt.title(
                 f"{self.stream}, {var} : fstep = {self.fstep:03} ({da['valid_time'][0].values})"
             )
-            ax.set_global()
+            
+            # Set map extent based on area parameter
+            if area:
+                # area should be [lon_min, lon_max, lat_min, lat_max]
+                lon_min, lon_max, lat_min, lat_max = area
+                ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
+            else:
+                ax.set_global()
+                
             ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
 
             # TODO: make this nicer
