@@ -338,30 +338,16 @@ class OutputBatchData:
 
     def extract(self, key: ItemKey) -> OutputItem:
         """Extract datasets from lists for one output item."""
-        # adjust shifted values in ItemMeta
+        _logger.debug(f"extracting subset: {key}")
         offest_key = self._offset_key(key)
         stream_idx = self.streams[key.stream]
-        _lens = self.targets_lens[offest_key.forecast_step][stream_idx]
+        datapoints = self._get_datapoints_per_sample(offest_key, stream_idx)
 
-        # empty target/prediction
-        if len(_lens) == 0:
-            _start = 0
-            _n_samples = 0
-        else:
-            _start = sum(_lens[:offest_key.sample])
-            _n_samples = _lens[:offest_key.sample]
-
-        _logger.debug(f"extracting subset: {key}")
-        _logger.debug(
-            f"sample: start:{self.sample_start} rel_idx:{offest_key.sample} range:{_start}-{_start + _n_samples}"
-        )
         _logger.debug(
             f"forecast_step: {key.forecast_step} = {offest_key.forecast_step} (rel_step) + "
             + f"{self.forecast_offset} (forecast_offset)"
         )
         _logger.debug(f"stream: {key.stream} with index: {stream_idx}")
-
-        datapoints = slice(_start, _start + _n_samples)
 
         if (datapoints.stop-datapoints.start) == 0:
             target_data = np.zeros((0, len(self.channels[stream_idx])), dtype=np.float32)
@@ -433,6 +419,23 @@ class OutputBatchData:
             ),
         )
     
+    def _get_datapoints_per_sample(self, offest_key, stream_idx):
+        lens = self.targets_lens[offest_key.forecast_step][stream_idx]
+
+        # empty target/prediction
+        if len(lens) == 0:
+            start = 0
+            n_samples = 0
+        else:
+            start = sum(lens[:offest_key.sample])
+            n_samples = lens[:offest_key.sample]
+
+        _logger.debug(
+            f"sample: start:{self.sample_start} rel_idx:{offest_key.sample} range:{start}-{start + n_samples}"
+        )
+
+        return slice(start, start + n_samples)
+    
     def _offset_key(self, key: ItemKey):
         """
         Correct indices in key to be useable for data extraction.
@@ -448,6 +451,9 @@ class OutputBatchData:
             key.forecast_step - self.forecast_offset,
             key.stream
         )
+    
+    def _extract_metadata(self):
+        pass
         
     def _extract_predictions(self, sample, stream_idx, key):
         channels = self.channels[stream_idx]
