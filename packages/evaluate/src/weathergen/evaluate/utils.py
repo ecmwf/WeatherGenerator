@@ -13,8 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import omegaconf as oc
 import xarray as xr
-from plotter import LinePlots, Plotter
+from plotter import DefaultMarkerSize, LinePlots, Plotter
 from score import VerifiedData, get_score
 from tqdm import tqdm
 
@@ -272,7 +273,11 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     plot_settings = stream_dict.get("plotting", {})
 
     if not (
-        plot_settings and (plot_settings.plot_maps or plot_settings.plot_histograms)
+        plot_settings
+        and (
+            plot_settings.get("plot_maps", False)
+            or plot_settings.get("plot_histograms", False)
+        )
     ):
         return
 
@@ -283,23 +288,17 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     plot_chs = stream_dict.get("channels")
 
     # Check if maps should be plotted and handle configuration if provided
-    maps_config = {}
-    if hasattr(plot_settings, "plot_maps"):
-        if isinstance(plot_settings.plot_maps, bool):
-            plot_maps = plot_settings.plot_maps
-        elif isinstance(plot_settings.plot_maps, dict):
-            plot_maps = True
-            maps_config = plot_settings.plot_maps
-        else:
-            raise TypeError(
-                "plot_maps must be a boolean or a dictionary with configuration."
-            )
-    else:
-        plot_maps = False
+    plot_maps = plot_settings.get("plot_maps", False)
+    if not isinstance(plot_maps, bool | oc.dictconfig.DictConfig):
+        raise TypeError(
+            "plot_maps must be a boolean or a dictionary with configuration."
+        )
+
+    maps_config = plot_maps if isinstance(plot_maps, oc.dictconfig.DictConfig) else {}
 
     if not hasattr(maps_config, "marker_size"):
         # Set default marker size if not specified in maps_config
-        maps_config["marker_size"] = get_default_markersize(stream)
+        maps_config["marker_size"] = DefaultMarkerSize.get_marker_size(stream)
 
     # Check if histograms should be plotted
     if hasattr(plot_settings, "plot_histograms"):
@@ -535,31 +534,6 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
                         y_dim=metric,
                         print_summary=print_summary,
                     )
-
-
-def get_default_markersize(stream_name: str) -> float:
-    """
-    Get the default marker size for a given stream name.
-    This function is used to set the marker size in plots.
-
-    Parameters
-    ----------
-    stream_name : str
-        The name of the stream.
-
-    Returns
-    -------
-    float
-        The default marker size for the stream.
-    """
-    s = stream_name.lower()
-
-    resolution_map = {
-        "era5": 1.0,
-        "imerg": 0.25,
-        "cerra": 0.1,
-    }
-    return resolution_map.get(s, 0.5)
 
 
 ############# Utility functions ############

@@ -245,10 +245,9 @@ class Plotter:
             ax.coastlines()
             da = self.select_from_da(data, select_var).compute()
 
+            marker_size = marker_size_base
             if scale_marker_size:
-                marker_size = (marker_size_base + 1.0) * np.cos(np.radians(da["lat"]))
-            else:
-                marker_size = marker_size_base
+                marker_size = (marker_size + 1.0) * np.cos(np.radians(da["lat"]))
 
             scatter_plt = ax.scatter(
                 da["lon"],
@@ -281,7 +280,9 @@ class Plotter:
                 str(self.fstep).zfill(3),
             ]
             name = "_".join(filter(None, parts))
-            plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
+            fname = f"{self.out_plot_dir.joinpath(name)}.{self.image_format}"
+            _logger.info(f"Saving map to {fname}")
+            plt.savefig(fname)
             plt.close()
             plot_names.append(name)
 
@@ -375,7 +376,7 @@ class LinePlots:
         x_dim:
             Dimension to be used for the x-axis. The code will average over all other dimensions.
         y_dim:
-            Name of the dimension to be used for the y-axis (default is "value")
+            Name of the dimension to be used for the y-axis.
         print_summary:
             If True, print a summary of the values from the graph.
         """
@@ -426,3 +427,49 @@ class LinePlots:
         name = "_".join(filter(None, parts))
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
         plt.close()
+
+
+class DefaultMarkerSize:
+    """
+    Utility class for managing default configuration values, such as marker sizes
+    for various data streams.
+    """
+
+    _marker_size_stream = {
+        "era5": 2.5,
+        "imerg": 0.25,
+        "cerra": 0.1,
+    }
+
+    _default_marker_size = 0.5
+
+    @classmethod
+    def get_marker_size(cls, stream_name: str) -> float:
+        """
+        Get the default marker size for a given stream name.
+
+        Parameters
+        ----------
+        stream_name : str
+            The name of the stream.
+
+        Returns
+        -------
+        float
+            The default marker size for the stream.
+        """
+        return cls._marker_size_stream.get(
+            stream_name.lower(), cls._default_marker_size
+        )
+
+    @classmethod
+    def list_streams(cls):
+        """
+        List all streams with defined marker sizes.
+
+        Returns
+        -------
+        list[str]
+            List of stream names.
+        """
+        return list(cls._marker_size_stream.keys())
