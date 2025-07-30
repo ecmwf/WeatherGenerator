@@ -27,7 +27,6 @@ from torch.distributed.fsdp.wrap import (
     size_based_auto_wrap_policy,  # default_auto_wrap_policy,
 )
 
-import weathergen.train.loss as losses
 import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
@@ -119,9 +118,7 @@ class Trainer(TrainerBase):
         self.model_params = ModelParams().create(cf).to(self.devices[0])
         _logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
 
-        self.loss_fcts_val = []
-        for name, w in cf.loss_fcts_val:
-            self.loss_fcts_val += [[getattr(losses, name), w]]
+        self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
         if is_root():
             config.save(self.cf, epoch=0)
