@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-ERA5 :
+ERA5ml :
   type : anemoi
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v7-ml137.zarr']
   # pick u,v,t,q for 15 model levels in different layers
@@ -18,7 +18,7 @@ ERA5 :
     'q_137', 'q_136', 'q_135', 'q_133', 'q_131', 'q_129', 'q_127', 'q_124', 'q_121', 'q_118', 'q_114', 'q_110', 'q_106', 'q_102',
     'z', '10u', '10v', '2t' # surface variables
   ]
-  target : []
+  target : ['10u', ]
   loss_weight : 1.
   masking_rate : 0.6
   masking_rate_none : 0.05
