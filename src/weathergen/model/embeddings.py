@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from weathergen.model.attention import MultiSelfAttentionHead, MultiCrossAttentionHead
+from weathergen.model.attention import MultiCrossAttentionHead, MultiSelfAttentionHead
 from weathergen.model.layers import MLP
 
 # from weathergen.model.mlp import MLP
