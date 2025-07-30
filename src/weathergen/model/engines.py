@@ -59,7 +59,7 @@ class EmbeddingEngine:
                         num_blocks=si["embed"]["num_blocks"],
                         num_heads=si["embed"]["num_heads"],
                         use_perceiver=si["embed"].get("use_perceiver", False),
-                        cross_attn_params = si["embed"].get("cross_attention", None),
+                        cross_attn_params=si["embed"].get("cross_attention", None),
                         norm_type=self.cf.norm_type,
                         embed_size_centroids=self.cf.embed_size_centroids,
                         unembed_mode=self.cf.embed_unembed_mode,

@@ -43,6 +43,7 @@ class PerceiverBlock(torch.nn.Module):
         x = self.mlp(x)
         return x
 
+
 class StreamEmbedTransformer(torch.nn.Module):
     def __init__(
         self,
@@ -55,7 +56,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         num_blocks,
         num_heads,
         use_perceiver=False,
-        cross_attn_params = None,
+        cross_attn_params=None,
         norm_type="LayerNorm",
         embed_size_centroids=64,
         unembed_mode="full",
@@ -82,21 +83,26 @@ class StreamEmbedTransformer(torch.nn.Module):
 
         if self.use_perceiver:
             assert mode == "channels", "cross-attention is only supported in channels mode"
-            assert cross_attn_params is not None, "cross_attn_params must be provided when use_perceiver=True"
-            
+            assert cross_attn_params is not None, (
+                "cross_attn_params must be provided when use_perceiver=True"
+            )
+
             self.num_queries = cross_attn_params["num_queries"]
             self.cross_attn_num_heads = cross_attn_params["num_heads"]
             self.selu = torch.nn.SELU(inplace=True)
-            
+
             num_channels = self.num_queries
             self.queries = torch.nn.Parameter(
-                torch.normal(mean=0.0, std=1.0 / np.sqrt(self.dim_embed), size=(1, self.num_queries, self.dim_embed))
+                torch.normal(
+                    mean=0.0,
+                    std=1.0 / np.sqrt(self.dim_embed),
+                    size=(1, self.num_queries, self.dim_embed),
+                )
             )
             self.perceiver_io = PerceiverBlock(self.dim_embed, self.cross_attn_num_heads)
         else:
             self.selu = torch.nn.Identity()
 
-        
         self.num_heads = num_heads
         self.embed_size_centroids = embed_size_centroids
         self.unembed_mode = unembed_mode
@@ -193,15 +199,15 @@ class StreamEmbedTransformer(torch.nn.Module):
         # embed provided input data
         # x : (num_healpix, num_channels, dim_embed)
         x = peh(self.selu(checkpoint(self.embed, x_in.transpose(-2, -1), use_reentrant=False)))
-        
+
         if self.use_perceiver:
             # cross-attention with queries
-            x = checkpoint(self.perceiver_io, 
-                self.queries.repeat(x.shape[0],1,1),
+            x = checkpoint(
+                self.perceiver_io,
+                self.queries.repeat(x.shape[0], 1, 1),
                 x,
                 use_reentrant=False,
             )
-
 
         for layer in self.layers:
             x = checkpoint(layer, x, use_reentrant=False)
