@@ -33,7 +33,7 @@ def write_output(
 
     output_streams = {name: stream_names.index(name) for name in output_stream_names}
 
-    _logger.info(f"Using output streams: {output_streams} from streams: {stream_names}")
+    _logger.debug(f"Using output streams: {output_streams} from streams: {stream_names}")
 
     channels: list[list[str]] = [list(stream.val_target_channels) for stream in cf.streams]
 
