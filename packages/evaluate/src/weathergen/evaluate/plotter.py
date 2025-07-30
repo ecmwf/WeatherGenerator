@@ -20,11 +20,12 @@ class Plotter:
     Contains all basic plotting functions.
     """
 
-    def __init__(self, cfg: dict, model_id: str = ""):
+    def __init__(self, cfg: dict, model_id: str = "", ranges: dict = {}):
         """
         Initialize the Plotter class.
         :param cfg: config from the yaml file
         :param model_id: if a model_id is given, the output will be saved in a folder called as the model_id
+        :param ranges: dictionary containing global vmax vmin. If Empty it will be filled by the first plot
         """
 
         self.cfg = cfg
@@ -45,6 +46,8 @@ class Plotter:
         self.fstep = None
         self.model_id = model_id
         self.select = {}
+
+        self.ranges = ranges 
 
     def update_data_selection(self, select: dict):
         """
@@ -103,6 +106,29 @@ class Plotter:
                 # Scalar coord or dim coord (e.g., 'forecast_step', 'channel')
                 da = da.sel({key: value})
         return da
+
+    def get_range(self, var: str) -> tuple[float, float]:
+        """
+        Get stored values of vmin and vmax per variable.
+        :param var: variable for which one needs to retrieve the range
+        :return: tuple with minimum and maximum values.   
+        """
+        vmin = self.ranges.get(var, {}).get("vmin", None)
+        vmax = self.ranges.get(var, {}).get("vmax", None)
+        return vmin, vmax
+
+    def set_range(self, var: str, vmin: float, vmax: float) -> None:
+        """
+        Set new values of vmin and vmax for a given variable.
+        :param var: variable for which one needs to set the range
+        :param vmin
+        para: vmax
+        """
+        self.ranges[var] = {
+            "vmin": vmin, 
+            "vmax": vmax, 
+        }
+        return self
 
     def histogram(
         self,
@@ -181,12 +207,15 @@ class Plotter:
 
         plot_names = []
         for var in variables:
+
             select_var = self.select | {"channel": var}
             fig = plt.figure(dpi=self.dpi_val)
             ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
             ax.coastlines()
             da = self.select_from_da(data, select_var).compute()
 
+            vmin, vmax = self.get_range(var) 
+    
             scatter_plt = ax.scatter(
                 da["lon"],
                 da["lat"],
@@ -194,6 +223,8 @@ class Plotter:
                 cmap="coolwarm",
                 s=1,
                 transform=ccrs.PlateCarree(),
+                vmin= vmin,
+                vmax= vmax,
             )
             plt.colorbar(
                 scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {var}"
@@ -203,6 +234,12 @@ class Plotter:
             )
             ax.set_global()
             ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
+
+            #store range for consistency across streams/fsteps 
+            if not vmin or not vmax: 
+                vmin = scatter_plt.get_clim()[0]
+                vmax = scatter_plt.get_clim()[1]
+                self.set_range(var, vmin, vmax)
 
             # TODO: make this nicer
             parts = [
