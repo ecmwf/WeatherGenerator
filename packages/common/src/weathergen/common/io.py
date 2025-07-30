@@ -339,40 +339,39 @@ class OutputBatchData:
     def extract(self, key: ItemKey) -> OutputItem:
         """Extract datasets from lists for one output item."""
         # adjust shifted values in ItemMeta
-        sample = key.sample - self.sample_start
-        forecast_step = key.forecast_step - self.forecast_offset
+        offest_key = self._offset_key(key)
         stream_idx = self.streams[key.stream]
-        lens = self.targets_lens[forecast_step][stream_idx]
+        _lens = self.targets_lens[offest_key.forecast_step][stream_idx]
 
         # empty target/prediction
-        if len(lens) == 0:
-            start = 0
-            n_samples = 0
+        if len(_lens) == 0:
+            _start = 0
+            _n_samples = 0
         else:
-            start = sum(lens[:sample])
-            n_samples = lens[sample]
+            _start = sum(_lens[:offest_key.sample])
+            _n_samples = _lens[:offest_key.sample]
 
         _logger.debug(f"extracting subset: {key}")
         _logger.debug(
-            f"sample: start:{self.sample_start} rel_idx:{sample} range:{start}-{start + n_samples}"
+            f"sample: start:{self.sample_start} rel_idx:{offest_key.sample} range:{_start}-{_start + _n_samples}"
         )
         _logger.debug(
-            f"forecast_step: {key.forecast_step} = {forecast_step} (rel_step) + "
+            f"forecast_step: {key.forecast_step} = {offest_key.forecast_step} (rel_step) + "
             + f"{self.forecast_offset} (forecast_offset)"
         )
         _logger.debug(f"stream: {key.stream} with index: {stream_idx}")
 
-        datapoints = slice(start, start + n_samples)
+        datapoints = slice(_start, _start + _n_samples)
 
-        if n_samples == 0:
+        if (datapoints.stop-datapoints.start) == 0:
             target_data = np.zeros((0, len(self.channels[stream_idx])), dtype=np.float32)
             preds_data = np.zeros((0, len(self.channels[stream_idx])), dtype=np.float32)
         else:
             target_data = (
-                self.targets[forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
+                self.targets[offest_key.forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
             )
             preds_data = (
-                self.predictions[forecast_step][stream_idx][0]
+                self.predictions[offest_key.forecast_step][stream_idx][0]
                 .transpose(1, 0)
                 .transpose(1, 2)[datapoints]
                 .cpu()
@@ -380,16 +379,17 @@ class OutputBatchData:
                 .numpy()
             )
 
-        _coords = self.targets_coords[forecast_step][stream_idx][datapoints].numpy()
+        _coords = self.targets_coords[offest_key.forecast_step][stream_idx][datapoints].numpy()
         coords = _coords[..., :2]  # first two columns are lat,lon
         geoinfo = _coords[..., 2:]  # the rest is geoinfo => potentially empty
+
         if geoinfo.size > 0:  # TODO: set geoinfo to be empty for now
             geoinfo = np.empty((geoinfo.shape[0], 0))
             _logger.warning(
                 "geoinformation channels are not implemented yet."
                 + "will be truncated to be of size 0."
             )
-        times = self.targets_times[forecast_step][stream_idx][
+        times = self.targets_times[offest_key.forecast_step][stream_idx][
             datapoints
         ]  # make conversion to datetime64[ns] here?
         channels = self.channels[stream_idx]
@@ -403,7 +403,7 @@ class OutputBatchData:
         )
 
         if key.with_source:
-            self._extract_predictions(sample, stream_idx, key)
+            self._extract_predictions(offest_key.sample, stream_idx, key)
         else:
             source_dataset = None
             
@@ -434,6 +434,15 @@ class OutputBatchData:
         )
     
     def _offset_key(self, key: ItemKey):
+        """
+        Correct indices in key to be useable for data extraction.
+        
+        `key` contains indices that are adjusted to have better output semantics.
+        To be useable in extraction these have to be adjusted to bridge the differences compared to the semantics of the data.
+            - `sample` is adjusted from a global continous index to a per batch index
+            - `forecast_step` is adjusted from including `forecast_offset` to indexing 
+               the data (always starts at 0)
+        """
         return ItemKey(
             key.sample - self.sample_start,
             key.forecast_step - self.forecast_offset,
