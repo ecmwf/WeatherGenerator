@@ -30,6 +30,7 @@ class Masker:
         self.masking_strategy_config = cf.get("masking_strategy_config", {})
 
         self.mask_value = 0.0
+        self.dim_time_enc = 6
 
         # Initialize the mask, set to None initially,
         # until it is generated in mask_source.
@@ -57,13 +58,12 @@ class Masker:
                 source_include = stream.get("source_include", [])
                 target_include = stream.get("target_include", [])
                 assert set(source_include) == set(target_include), (
-                    "Specified source and target channels are not identical. This is required for masking_mode=channel"
                 )
                 # check excludes
                 source_exclude = stream.get("source_exclude", [])
                 target_exclude = stream.get("target_exclude", [])
                 assert set(source_exclude) == set(target_exclude), (
-                    "Specified source and target channels are not identical. This is required for masking_mode=channel"
+                    "Source and target channels not identical. Required for masking_mode=channel"
                 )
 
     def reset_rng(self, rng) -> None:
@@ -166,10 +166,6 @@ class Masker:
             # Apply the mask to get the source data (where mask is False)
             source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
 
-        import code
-
-        code.interact(local=locals())
-
         return source_data
 
     def mask_target(
@@ -201,10 +197,11 @@ class Masker:
         # Pre-calculate the total feature dimension of a token to create
         # correctly shaped empty tensors.
 
-        feature_dim = 6 + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
+        feature_dim = self.dim_time_enc + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
 
         processed_target_tokens = []
 
+        # process all healpix cells used for embedding
         for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
             if self.masking_strategy == "channel":
                 # If masking strategy is channel, handle target tokens differently.
@@ -215,8 +212,8 @@ class Masker:
                     # slightly complicated as the first dimension of c varies with data in the cell.
                     # do not mask the first 8 channels,
                     # and set unmasked channels to nan
-                    c[:, (6 + coords.shape[-1] + geoinfos.shape[-1]) :][
-                        :, ~p[0, (6 + coords.shape[-1] + geoinfos.shape[-1]) :]
+                    c[:, (self.dim_time_enc + coords.shape[-1] + geoinfos.shape[-1]) :][
+                        :, ~p[0, (self.dim_time_enc + coords.shape[-1] + geoinfos.shape[-1]) :]
                     ] = torch.nan
                     selected_tensors.append(c)
 
