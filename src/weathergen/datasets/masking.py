@@ -3,6 +3,8 @@ import logging
 import numpy as np
 import torch
 
+from weathergen.utils.config import Config
+
 _logger = logging.getLogger(__name__)
 
 
@@ -20,19 +22,12 @@ class Masker:
                                         specific to the masking strategy.
     """
 
-    def __init__(
-        self,
-        masking_rate: float,
-        masking_strategy: str,
-        masking_rate_sampling: bool,
-        masking_strategy_config: dict,
-    ):
-        self.masking_rate = masking_rate
-        self.masking_strategy = masking_strategy
-        self.masking_rate_sampling = masking_rate_sampling
-
+    def __init__(self, cf: Config):
+        self.masking_rate = cf.masking_rate
+        self.masking_strategy = cf.masking_strategy
+        self.masking_rate_sampling = cf.masking_rate_sampling
         # masking_strategy_config is a dictionary that can hold any additional parameters
-        self.masking_strategy_config = masking_strategy_config
+        self.masking_strategy_config = cf.get("masking_strategy_config", {})
 
         # Initialize the mask, set to None initially,
         # until it is generated in mask_source.
@@ -53,6 +48,21 @@ class Masker:
                 "global" in self.masking_strategy_config
                 or "per_cell" in self.masking_strategy_config
             ), "Strategy must be 'global' or 'per_cell' in masking_strategy_config."
+
+            # check all streams that source and target channels are identical
+            for stream in cf.streams:
+                # check explicit includes
+                source_include = stream.get("source_include", [])
+                target_include = stream.get("target_include", [])
+                assert set(source_include) == set(target_include), (
+                    "Specified source and target channels are not identical. This is required for masking_mode=channel"
+                )
+                # check excludes
+                source_exclude = stream.get("source_exclude", [])
+                target_exclude = stream.get("target_exclude", [])
+                assert set(source_exclude) == set(target_exclude), (
+                    "Specified source and target channels are not identical. This is required for masking_mode=channel"
+                )
 
     def reset_rng(self, rng) -> None:
         """
