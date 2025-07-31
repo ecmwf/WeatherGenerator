@@ -302,6 +302,8 @@ class TokenizerMasking:
 
         target_tokens_lens = [len(t) for t in target_tokens]
         total_target = sum(target_tokens_lens)
+
+        # sampling the number of targets according to sampling_rate_target
         samples = (torch.empty(total_target).uniform_() < sampling_rate_target).split(
             target_tokens_lens
         )
