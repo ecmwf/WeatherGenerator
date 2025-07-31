@@ -190,6 +190,28 @@ def calc_scores_per_stream(
         },
     )
 
+    # Load climatological mean once if needed for ACC calculation
+    clim_mean = None
+    if "acc" in metrics:
+        # Get stream-specific configuration
+        run = cfg.run_ids[run_id]
+        stream_dict = run.streams[stream]
+
+        # Check for stream-specific climatology path first, then fall back to global
+        clim_path = stream_dict.get("auxiliary_material") or cfg.get(
+            "auxiliary_material"
+        )
+        if clim_path:
+            # this won't suffice, but it would be the correct location
+            clim_mean = xr.open_dataarray(clim_path)
+            _logger.info(
+                f"Loaded climatological mean for stream {stream} from {clim_path}"
+            )
+        else:
+            _logger.warning(
+                f"ACC metric requested for stream {stream} but 'auxiliary_material' path not found in stream config or global config"
+            )
+
     for (fstep, tars), (_, preds) in zip(
         da_tars.items(), da_preds.items(), strict=False
     ):
