@@ -58,6 +58,7 @@ class EmbeddingEngine:
                         dim_out=self.cf.ae_local_dim_embed,
                         num_blocks=si["embed"]["num_blocks"],
                         num_heads=si["embed"]["num_heads"],
+                        dropout_rate=self.cf.embed_dropout_rate,
                         norm_type=self.cf.norm_type,
                         embed_size_centroids=self.cf.embed_size_centroids,
                         unembed_mode=self.cf.embed_unembed_mode,
