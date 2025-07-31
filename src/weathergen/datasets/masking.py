@@ -27,10 +27,14 @@ class Masker:
         self.masking_strategy = cf.masking_strategy
         self.masking_rate_sampling = cf.masking_rate_sampling
         # masking_strategy_config is a dictionary that can hold any additional parameters
+        self.healpix_level_data = cf.healpix_level
         self.masking_strategy_config = cf.get("masking_strategy_config", {})
 
         self.mask_value = 0.0
         self.dim_time_enc = 6
+
+        # number of healpix cells
+        self.healpix_num_cells = 12 * (4**self.healpix_level_data)
 
         # Initialize the mask, set to None initially,
         # until it is generated in mask_source.
@@ -38,7 +42,7 @@ class Masker:
 
         # Check for required masking_strategy_config at construction time
         if self.masking_strategy == "healpix":
-            hl_data = self.masking_strategy_config.get("hl_data")
+            hl_data = self.healpix_level_data
             hl_mask = self.masking_strategy_config.get("hl_mask")
             assert hl_data is not None and hl_mask is not None, (
                 "If HEALPix masking, hl_data and hl_mask must be given in masking_strategy_config."
@@ -57,8 +61,7 @@ class Masker:
                 # check explicit includes
                 source_include = stream.get("source_include", [])
                 target_include = stream.get("target_include", [])
-                assert set(source_include) == set(target_include), (
-                )
+                assert set(source_include) == set(target_include), ()
                 # check excludes
                 source_exclude = stream.get("source_exclude", [])
                 target_exclude = stream.get("target_exclude", [])
@@ -98,16 +101,7 @@ class Masker:
             return tokenized_data
 
         # Set the masking rate.
-        # Use a local variable rate, so we keep the instance variable intact.
-        rate = self.masking_rate
-
-        # If masking_rate_sampling is enabled, sample the rate from a normal distribution.
-        if self.masking_rate_sampling:
-            rate = np.clip(
-                np.abs(self.rng.normal(loc=rate, scale=1.0 / (2.5 * np.pi))),
-                0.01,
-                0.99,
-            )
+        rate = self._get_sampling_rate()
 
         if rate == 0.0:
             _logger.warning(
@@ -231,6 +225,23 @@ class Masker:
 
         return processed_target_tokens
 
+    def _get_sampling_rate(self):
+        """
+        Get the sampling, if requested by sampling it itself
+        """
+
+        # if masking_rate_sampling is enabled, sample the rate from a normal distribution.
+        if self.masking_rate_sampling:
+            rate = np.clip(
+                np.abs(self.rng.normal(loc=self.masking_rate, scale=1.0 / (2.5 * np.pi))),
+                0.01,
+                0.99,
+            )
+        else:
+            rate = self.masking_rate
+
+        return rate
+
     def _generate_healpix_mask(self, token_lens: list[int], rate: float) -> np.typing.NDArray:
         """
         Generates a token-level mask based on hierarchical HEALPix cell selection.
@@ -248,12 +259,11 @@ class Masker:
         """
 
         # hl_data and hl_mask should be provided in masking_strategy_config
-        hl_data = self.masking_strategy_config.get("hl_data")
+        hl_data = self.healpix_level_data
         hl_mask = self.masking_strategy_config.get("hl_mask")
 
-        num_data_cells = 12 * (4**hl_data)
-        assert len(token_lens) == num_data_cells, (
-            f"Expected {num_data_cells} cells at level {hl_data}, got {len(token_lens)}."
+        assert len(token_lens) == self.healpix_num_cells, (
+            f"Expected {self.healpix_num_cells} cells at level {hl_data}, got {len(token_lens)}."
         )
 
         # Calculate the number of parent cells at the mask level (hl_mask)
@@ -261,13 +271,7 @@ class Masker:
         level_diff = hl_data - hl_mask
         num_children_per_parent = 4**level_diff
 
-        # if masking_rate_sampling is enabled, sample the rate from a normal distribution.
-        if self.masking_rate_sampling:
-            rate = np.clip(
-                np.abs(self.rng.normal(loc=rate, scale=1.0 / (2.5 * np.pi))),
-                0.01,
-                0.99,
-            )
+        rate = self._get_sampling_rate()
 
         # Choose parent cells to mask based on the specified rate.
         num_parents_to_mask = int(np.round(rate * num_parent_cells))
@@ -275,22 +279,20 @@ class Masker:
         if num_parents_to_mask == 0:
             return np.zeros(sum(token_lens), dtype=bool)
 
-        # Mask, and print about what we are doing.
+        # Select parent cells to mask
         parent_ids_to_mask = self.rng.choice(num_parent_cells, num_parents_to_mask, replace=False)
-
-        # Now determine which child cells (and their tokens) are masked.
-        cell_mask = np.zeros(num_data_cells, dtype=bool)
 
         # For each parent ID, calculate the child indices and set them in the mask
         parent_ids = np.asarray(parent_ids_to_mask)
         child_offsets = np.arange(num_children_per_parent)
         child_indices = (parent_ids[:, None] * num_children_per_parent + child_offsets).reshape(-1)
 
+        # set mask list for children
+        cell_mask = np.zeros(self.healpix_num_cells, dtype=bool)
         cell_mask[child_indices] = True
 
         # Make the cell-level mask flat and apply it to the token lengths.
-        # np.repeat. It repeats each element of `cell_mask`
-        # a number of times specified by `token_lens`.
+        # np.repeat repeats each element of `cell_mask` a number of times specified by `token_lens`.
         flat_mask = np.repeat(cell_mask, token_lens)
 
         return flat_mask
