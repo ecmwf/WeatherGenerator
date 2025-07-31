@@ -281,7 +281,7 @@ class Plotter:
             ]
             name = "_".join(filter(None, parts))
             fname = f"{self.out_plot_dir.joinpath(name)}.{self.image_format}"
-            _logger.info(f"Saving map to {fname}")
+            _logger.debug(f"Saving map to {fname}")
             plt.savefig(fname)
             plt.close()
             plot_names.append(name)

@@ -301,15 +301,11 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
         maps_config["marker_size"] = DefaultMarkerSize.get_marker_size(stream)
 
     # Check if histograms should be plotted
-    if hasattr(plot_settings, "plot_histograms"):
-        if isinstance(plot_settings.plot_histograms, bool):
-            plot_histograms = plot_settings.plot_histograms
-        else:
-            raise TypeError(
-                "plot_histograms must be a boolean or a dictionary with configuration."
-            )
-    else:
-        plot_histograms = False
+    plot_histograms = plot_settings.get("plot_histograms", False)
+    if not isinstance(plot_settings.plot_histograms, bool):
+        raise TypeError(
+            "plot_histograms must be a boolean or a dictionary with configuration."
+        )
 
     if plot_fsteps == "all":
         plot_fsteps = None
