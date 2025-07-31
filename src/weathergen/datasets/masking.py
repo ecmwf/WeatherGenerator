@@ -196,11 +196,10 @@ class Masker:
                 # we set the unmasked channels to NaN so not in the loss calculation.
                 selected_tensors = []
                 for c, p in zip(cc, pp, strict=True):
-
                     # slightly complicated as the first dimension of c varies with data in the cell.
                     c[:, ~p[0, :]] = torch.nan  # Set the channels that are not masked to NaN
                     selected_tensors.append(c)
-            
+
             else:
                 # For other masking strategies, we simply select the tensors where the mask is True.
                 selected_tensors = [c for c, p in zip(cc, pp, strict=True) if p]
