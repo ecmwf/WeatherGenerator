@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from typing import Any
+from typing import Any, ClassVar
 from dataclasses import dataclass
 import logging
 import xarray as xr
@@ -46,6 +46,11 @@ class RegionBoundingBox:
     lon_max: float
 
     def __post_init__(self):
+        """Validate the bounding box coordinates."""
+        self.validate()
+
+    def validate(self):
+        """Validate the bounding box coordinates."""
         if not (-90 <= self.lat_min <= 90 and -90 <= self.lat_max <= 90):
             raise ValueError(f"Latitude bounds must be between -90 and 90. Got: {self.lat_min}, {self.lat_max}")
         if not (-180 <= self.lon_min <= 180 and -180 <= self.lon_max <= 180):
@@ -87,19 +92,25 @@ class RegionBoundingBox:
 
         return data.sel({data_dim: mask})
 
-    @staticmethod
-    def from_region_name(region: str) -> "RegionBoundingBox":
-        """Create a predefined bounding box from region name."""
-        region_req = region.lower()
-        _logger.info(f"Getting bounding box coordinates for region '{region_req}'...")
-        if region_req == "global":
-            return RegionBoundingBox(-90., 90., -180., 180.)
-        elif region_req == "northern_hemisphere":
-            return RegionBoundingBox(0., 90., -180., 180.)
-        elif region_req == "southern_hemisphere":
-            return RegionBoundingBox(-90., 0., -180., 180.)
-        elif region_req == "tropics":
-            return RegionBoundingBox(-30., 30., -180., 180.)
-        else:
-            raise ValueError(f"Region '{region}' is not supported. "
-                             "Supported: global, northern_hemisphere, southern_hemisphere.")
+    @classmethod
+    def from_region_name(cls, region: str) -> "RegionBoundingBox":
+        region = region.lower()
+        try:
+            return cls(*RegionLibrary.REGIONS[region])
+        except KeyError:
+            raise ValueError(
+                f"Region '{region}' is not supported. "
+                f"Available regions: {', '.join(RegionLibrary.REGIONS.keys())}"
+            )
+
+
+class RegionLibrary:
+    """
+    Predefined bounding boxes for known regions.
+    """
+    REGIONS: ClassVar[dict[str, tuple[float, float, float, float]]] = {
+        "global": (-90., 90., -180., 180.),
+        "northern_hemisphere": (0., 90., -180., 180.),
+        "southern_hemisphere": (-90., 0., -180., 180.),
+        "tropics": (-30., 30., -180., 180.),
+    }
