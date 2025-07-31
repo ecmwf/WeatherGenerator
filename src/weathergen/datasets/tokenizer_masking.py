@@ -301,7 +301,7 @@ class TokenizerMasking:
         target_tokens = self.masker.mask_target(target_tokens_cells, coords, geoinfos, source)
 
         target_tokens_lens = [len(t) for t in target_tokens]
-
+        
         if torch.tensor(target_tokens_lens).sum() == 0:
             return (torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([]))
 
@@ -323,7 +323,6 @@ class TokenizerMasking:
         offset = 6
         # offset of 1 : stream_id
         target_times = torch.split(tt_lin[..., 1:offset], tt_lens)
-
         target_coords = torch.split(tt_lin[..., offset : offset + coords.shape[-1]], tt_lens)
         offset += coords.shape[-1]
         target_geoinfos = torch.split(tt_lin[..., offset : offset + geoinfos.shape[-1]], tt_lens)
