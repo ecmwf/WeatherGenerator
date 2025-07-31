@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Get the directory where the script is located
+# TODO: this is the root weathergenerator directory, rename the variable.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
 
 case "$1" in
@@ -66,6 +66,7 @@ case "$1" in
   create-jupyter-kernel)
     (
       cd "$SCRIPT_DIR" || exit 1
+      uv sync --all-packages
       uv run ipython kernel install --user --env VIRTUAL_ENV $(pwd)/.venv --name=weathergen_kernel --display-name "Python (WeatherGenerator)" 
       echo "Jupyter kernel created. You can now use it in Jupyter Notebook or JupyterLab."
       echo "To use this kernel, select 'Python (WeatherGenerator)' from the kernel options in Jupyter Notebook or JupyterLab."
@@ -77,7 +78,7 @@ case "$1" in
     (
       cd "$SCRIPT_DIR" || exit 1
       # Run on any python or jupyter notebook files in the WeatherGenerator-private/notebooks directory
-      uv run jupytext --sync ../WeatherGenerator-private/notebooks/*.py ../WeatherGenerator-private/notebooks/*.ipynb
+      uv run jupytext --set-formats ipynb,py:percent --sync  ../WeatherGenerator-private/notebooks/*.ipynb
       echo "Jupytext sync completed."
     )
     ;;
