@@ -267,13 +267,7 @@ class Plotter:
                 f"{self.stream}, {var} : fstep = {self.fstep:03} ({da['valid_time'][0].values.astype('datetime64[s]')})"
             )
             
-            # Set map extent based on area parameter
-            if area:
-                # area should be [lon_min, lon_max, lat_min, lat_max]
-                lon_min, lon_max, lat_min, lat_max = area
-                ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
-            else:
-                ax.set_global()
+            ax.set_global()
                 
             ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
 
