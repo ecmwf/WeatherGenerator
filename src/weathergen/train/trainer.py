@@ -212,6 +212,7 @@ class Trainer(TrainerBase):
                 cpu_offload=None,
                 sync_module_states=(run_id_contd is not None),
                 mixed_precision=mp,
+                use_orig_params=True,
             )
 
         self.model_params = ModelParams().create(cf).to("cuda")
@@ -230,6 +231,7 @@ class Trainer(TrainerBase):
         )  # aiming for beta1 = 0.9 at one node, ie kappa=B=4
         beta2 = 1.0 - kappa * (1.0 - 0.9875)  # aiming for beta2 = 0.95 at one node, ie B=4
         eps = 2e-08 / np.sqrt(kappa)
+
         self.optimizer = torch.optim.AdamW(
             self.ddp_model.parameters(),
             lr=cf.lr_start,
