@@ -87,7 +87,9 @@ class TrainLogger:
         # TODO: performance: we repeatedly open the file for each call. Better for multiprocessing
         # but we can probably do better and rely for example on the logging module.
 
-        metrics_path = get_train_metrics_path(base_path=Path(self.cf.run_path), run_id=self.cf.run_id)
+        metrics_path = get_train_metrics_path(
+            base_path=Path(self.cf.run_path), run_id=self.cf.run_id
+        )
         with open(metrics_path, "ab") as f:
             s = json.dumps(clean_metrics) + "\n"
             f.write(s.encode("utf-8"))
