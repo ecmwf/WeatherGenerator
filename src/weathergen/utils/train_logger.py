@@ -366,8 +366,7 @@ def read_metrics(
 
     metrics_path = get_train_metrics_path(base_path=results_path, run_id=run_id)
     # TODO: this should be a config option
-    df = read_metrics_file(cf.run_path + f"/{run_id}/metrics.json") #KCT
-    # df = read_metrics_file(metrics_path)
+    df = read_metrics_file(metrics_path)
     if stage is not None:
         df = df.filter(pl.col("stage") == stage)
     df = df.drop("stage")
