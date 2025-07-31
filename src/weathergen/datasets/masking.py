@@ -199,7 +199,9 @@ class Masker:
                     # slightly complicated as the first dimension of c varies with data in the cell.
                     # do not mask the first 8 channels,
                     # and set unmasked channels to nan
-                    c[:, (6 + coords.shape[-1] + geoinfos.shape[-1]):][:, ~p[0, (6 + coords.shape[-1] + geoinfos.shape[-1]):]] = torch.nan
+                    c[:, (6 + coords.shape[-1] + geoinfos.shape[-1]) :][
+                        :, ~p[0, (6 + coords.shape[-1] + geoinfos.shape[-1]) :]
+                    ] = torch.nan
                     selected_tensors.append(c)
 
             else:
