@@ -106,7 +106,7 @@ class Masker:
         # Handle the special case where all tokens are masked
         if rate == 1.0:
             token_lens = [len(t) for t in tokenized_data]
-            self.perm_sel = [np.ones(cell, dtype=bool) for cell in token_lens]
+            self.perm_sel = [np.ones(tl, dtype=bool) for tl in token_lens]
             source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
             return source_data
 
