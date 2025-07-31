@@ -23,9 +23,13 @@ class Plotter:
     def __init__(self, cfg: dict, model_id: str = "", ranges: dict = None):
         """
         Initialize the Plotter class.
-        :param cfg: config from the yaml file
-        :param model_id: if a model_id is given, the output will be saved in a folder called as the model_id
-        :param ranges: dictionary containing global vmax vmin. If Empty it will be filled by the first plot
+
+        Parameters
+        ----------
+        cfg:
+            Configuration dictionary containing all information for the plotting.
+        model_id:
+            If a model_id is given, the output will be saved in a folder called as the model_id.
         """
 
         self.cfg = cfg
@@ -52,7 +56,14 @@ class Plotter:
     def update_data_selection(self, select: dict):
         """
         Set the selection for the plots. This will be used to filter the data for plotting.
-        :param select: dictionary containing the selection parameters
+
+        Parameters
+        ----------
+        select:
+            Dictionary containing the selection criteria. Expected keys are:
+                - "sample": Sample identifier
+                - "stream": Stream identifier
+                - "forecast_step": Forecast step identifier
         """
         self.select = select
 
@@ -81,9 +92,7 @@ class Plotter:
 
     def clean_data_selection(self):
         """
-        :param sample: sample name
-        :param stream: stream name
-        :param fstep: forecasting step
+        Clean the data selection by resetting all selected values.
         """
         self.sample = None
         self.stream = None
@@ -94,9 +103,17 @@ class Plotter:
     def select_from_da(self, da: xr.DataArray, selection: dict) -> xr.DataArray:
         """
         Select data from an xarray DataArray based on given selectors.
-        :param da: xarray DataArray to select data from.
-        :param selection: Dictionary of selectors where keys are coordinate names and values are the values to select.
-        :return: xarray DataArray with selected data.
+
+        Parameters
+        ----------
+        da:
+            xarray DataArray to select data from.
+        selection:
+            Dictionary of selectors where keys are coordinate names and values are the values to select.
+
+        Returns
+        -------
+            xarray DataArray with selected data.
         """
         for key, value in selection.items():
             if key in da.coords and key not in da.dims:
@@ -137,15 +154,26 @@ class Plotter:
         variables: list,
         select: dict,
         tag: str = "",
-        number: str = "",
     ) -> list[str]:
         """
         Plot histogram of target vs predictions for a set of variables.
 
-        :param target: target sample for a specific (stream, sample, fstep)
-        :param preds: predictions sample for a specific (stream, sample, fstep)
-        :param variables: list of variables to be plotted
-        :param label: any tag you want to add to the plot
+        Parameters
+        ----------
+        target: xr.DataArray
+            Target sample for a specific (stream, sample, fstep)
+        preds: xr.DataArray
+            Predictions sample for a specific (stream, sample, fstep)
+        variables: list
+            List of variables to be plotted
+        select: dict
+            Selection to be applied to the DataArray
+        tag: str
+            Any tag you want to add to the plot
+
+        Returns
+        -------
+            List of plot names for the saved histograms.
         """
         plot_names = []
 
@@ -192,16 +220,45 @@ class Plotter:
         return plot_names
 
     def map(
-        self, data: xr.DataArray, variables: list, select: dict, tag: str = ""
+        self,
+        data: xr.DataArray,
+        variables: list,
+        select: dict,
+        tag: str = "",
+        map_kwargs: dict | None = None,
     ) -> list[str]:
         """
         Plot 2D map for a dataset
 
-        :param data: DataArray for a specific (stream, sample, fstep)
-        :param variables: list of variables to be plotted
-        :param label: any tag you want to add to the plot
-        :param select: selection to be applied to the DataArray
+        Parameters
+        ----------
+        data: xr.DataArray
+            DataArray for a specific (stream, sample, fstep)
+        variables: list
+            List of variables to be plotted
+        label: str
+            Any tag you want to add to the plot
+        select: dict
+            Selection to be applied to the DataArray
+        tag: str
+            Any tag you want to add to the plot
+        map_kwargs: dict
+            Additional keyword arguments for the map.
+            Known keys are:
+                - marker_size: base size of the marker (default is 1)
+                - scale_marker_size: if True, the marker size will be scaled based on latitude (default is False)
+                - marker: marker style (default is 'o')
+            Unknown keys will be passed to the scatter plot function.
+
+        Returns
+        -------
+            List of plot names for the saved maps.
         """
+        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
+        # check for known keys in map_kwargs
+        marker_size_base = map_kwargs_save.pop("marker_size", 1)
+        scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
+        marker = map_kwargs_save.pop("marker", "o")
 
         self.update_data_selection(select)
 
@@ -213,6 +270,10 @@ class Plotter:
             ax.coastlines()
             da = self.select_from_da(data, select_var).compute()
 
+            marker_size = marker_size_base
+            if scale_marker_size:
+                marker_size = (marker_size + 1.0) * np.cos(np.radians(da["lat"]))
+
             vmin, vmax = self.get_range(var)
 
             scatter_plt = ax.scatter(
@@ -220,10 +281,13 @@ class Plotter:
                 da["lat"],
                 c=da,
                 cmap="coolwarm",
-                s=1,
+                s=marker_size,
+                marker=marker,
                 transform=ccrs.PlateCarree(),
                 vmin=vmin,
                 vmax=vmax,
+                linewidths=0.0,  # only markers, avoids aliasing for very small markers
+                **map_kwargs_save,
             )
             plt.colorbar(
                 scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {var}"
@@ -251,7 +315,9 @@ class Plotter:
                 str(self.fstep).zfill(3),
             ]
             name = "_".join(filter(None, parts))
-            plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
+            fname = f"{self.out_plot_dir.joinpath(name)}.{self.image_format}"
+            _logger.debug(f"Saving map to {fname}")
+            plt.savefig(fname)
             plt.close()
             plot_names.append(name)
 
@@ -272,19 +338,27 @@ class LinePlots:
             "line_plots"
         )
         if not os.path.exists(self.out_plot_dir):
-            _logger.info(f"creating dir {self.out_plot_dir}")
+            _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
-        _logger.info(f"saving summary plots to: {self.out_plot_dir}")
+        _logger.info(f"Saving summary plots to: {self.out_plot_dir}")
 
     def _check_lengths(
         self, data: xr.DataArray | list, labels: str | list
     ) -> tuple[list, list]:
         """
         Check if the lengths of data and labels match.
-        :param data: DataArray or list of DataArrays to be plotted
-        :param labels: Label or list of labels for each dataset
-        :return: data_list, label_list - lists of data and labels
+
+        Parameters
+        ----------
+        data:
+            DataArray or list of DataArrays to be plotted
+        labels:
+            Label or list of labels for each dataset
+
+        Returns
+        -------
+            data_list, label_list - lists of data and labels
         """
         assert type(data) == xr.DataArray or type(data) == list, (
             "Compare::plot - Data should be of type xr.DataArray or list"
@@ -327,12 +401,21 @@ class LinePlots:
     ) -> None:
         """
         Plot a line graph comparing multiple datasets.
-        :param data: DataArray or list of DataArrays to be plotted
-        :param labels: Label or list of labels for each dataset
-        :param tag: Tag to be added to the plot title and filename
-        :param x_dim: Dimension to be used for the x-axis. The code will average over all other dimensions. (default is "forecast_step")
-        :param y_dim: Name of the dimension to be used for the y-axis (default is "value")
-        :return: None
+
+        Parameters
+        ----------
+        data:
+            DataArray or list of DataArrays to be plotted
+        labels:
+            Label or list of labels for each dataset
+        tag:
+            Tag to be added to the plot title and filename
+        x_dim:
+            Dimension to be used for the x-axis. The code will average over all other dimensions.
+        y_dim:
+            Name of the dimension to be used for the y-axis.
+        print_summary:
+            If True, print a summary of the values from the graph.
         """
 
         data_list, label_list = self._check_lengths(data, labels)
@@ -381,3 +464,49 @@ class LinePlots:
         name = "_".join(filter(None, parts))
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
         plt.close()
+
+
+class DefaultMarkerSize:
+    """
+    Utility class for managing default configuration values, such as marker sizes
+    for various data streams.
+    """
+
+    _marker_size_stream = {
+        "era5": 2.5,
+        "imerg": 0.25,
+        "cerra": 0.1,
+    }
+
+    _default_marker_size = 0.5
+
+    @classmethod
+    def get_marker_size(cls, stream_name: str) -> float:
+        """
+        Get the default marker size for a given stream name.
+
+        Parameters
+        ----------
+        stream_name : str
+            The name of the stream.
+
+        Returns
+        -------
+        float
+            The default marker size for the stream.
+        """
+        return cls._marker_size_stream.get(
+            stream_name.lower(), cls._default_marker_size
+        )
+
+    @classmethod
+    def list_streams(cls):
+        """
+        List all streams with defined marker sizes.
+
+        Returns
+        -------
+        list[str]
+            List of stream names.
+        """
+        return list(cls._marker_size_stream.keys())

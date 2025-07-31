@@ -56,6 +56,7 @@ class Trainer(TrainerBase):
 
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
+        assert cf.forecast_policy if cf.forecast_steps > 0 else True
 
         self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
@@ -211,6 +212,7 @@ class Trainer(TrainerBase):
                 cpu_offload=None,
                 sync_module_states=(run_id_contd is not None),
                 mixed_precision=mp,
+                use_orig_params=True,
             )
 
         self.model_params = ModelParams().create(cf).to("cuda")
@@ -219,13 +221,17 @@ class Trainer(TrainerBase):
         if (is_root() and not cf.with_fsdp) or not cf.with_ddp:
             self.model.print_num_parameters()
 
-        # TODO: learning rate schedule
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
-        kappa = cf.batch_size_per_gpu * cf.num_ranks
-        beta1 = max(0.5, 1.0 - kappa * (1.0 - 0.9))
-        beta2 = 1.0 - kappa * (1.0 - 0.999)
-        eps = 1e-08 / np.sqrt(kappa)
-        # beta1, beta2, eps = 0.125, 0.125, 1e-08
+        # aiming for beta1=0.9 and beta2=0.95 following the MAE paper https://arxiv.org/pdf/2111.06377
+        kappa = (
+            cf.batch_size_per_gpu * cf.num_ranks
+        )  # I doubt this holds for us from some anecdotal runs
+        beta1 = max(
+            0.5, 1.0 - kappa * (1.0 - 0.975)
+        )  # aiming for beta1 = 0.9 at one node, ie kappa=B=4
+        beta2 = 1.0 - kappa * (1.0 - 0.9875)  # aiming for beta2 = 0.95 at one node, ie B=4
+        eps = 2e-08 / np.sqrt(kappa)
+
         self.optimizer = torch.optim.AdamW(
             self.ddp_model.parameters(),
             lr=cf.lr_start,
@@ -688,7 +694,7 @@ class Trainer(TrainerBase):
                     self.perf_mem,
                 )
 
-            self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
     def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
         if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:
