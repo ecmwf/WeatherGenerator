@@ -29,6 +29,8 @@ class Masker:
         # masking_strategy_config is a dictionary that can hold any additional parameters
         self.masking_strategy_config = cf.get("masking_strategy_config", {})
 
+        self.mask_value = 0.0
+
         # Initialize the mask, set to None initially,
         # until it is generated in mask_source.
         self.perm_sel: list[np.typing.NDArray] = None
@@ -143,26 +145,26 @@ class Masker:
         else:
             assert False, f"Unknown masking strategy: {self.masking_strategy}"
 
-        # if masking_strategy is channel,
-        # we need to handle the masking differently,
-        # since p is not 1D Boolean for the list of cells,
-        # but 3D to mask the channels in each cell.
+        # apply mask
+
+        # if masking_strategy is channel, we need to handle the masking differently,
+        # since p is not 1D Boolean for the list of cells, but 3D to mask the channels in each cell.
         if self.masking_strategy == "channel":
             self.perm_sel = mask
             # In the source_data we will set the channels that are masked to 0.0.
             source_data = []
             for data, p in zip(tokenized_data, self.perm_sel, strict=True):
-                data[p] = 0.0
+                data[p] = self.mask_value
                 source_data.append(data)
-            return source_data
 
-        # Split the flat mask to match the structure of the tokenized data (list of lists)
-        # This will be perm_sel, as a class attribute, used to mask the target data.
-        split_indices = np.cumsum(token_lens)[:-1]
-        self.perm_sel = np.split(flat_mask, split_indices)
+        else:
+            # Split the flat mask to match the structure of the tokenized data (list of lists)
+            # This will be perm_sel, as a class attribute, used to mask the target data.
+            split_indices = np.cumsum(token_lens)[:-1]
+            self.perm_sel = np.split(flat_mask, split_indices)
 
-        # Apply the mask to get the source data (where mask is False)
-        source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
+            # Apply the mask to get the source data (where mask is False)
+            source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
 
         return source_data
 
