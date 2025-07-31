@@ -59,7 +59,6 @@ class MLP(torch.nn.Module):
             self.layers.append(torch.nn.Dropout(p=dropout_rate))
 
         self.layers.append(torch.nn.Linear(dim_hidden, dim_out))
-        # self.layers.append(nonlin())
 
     def forward(self, *args):
         x, x_in, aux = args[0], args[0], args[-1]
