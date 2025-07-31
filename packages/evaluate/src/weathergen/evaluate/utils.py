@@ -15,11 +15,10 @@ from pathlib import Path
 import numpy as np
 import omegaconf as oc
 import xarray as xr
-from tqdm import tqdm
-
 from plotter import DefaultMarkerSize, LinePlots, Plotter
 from score import VerifiedData, get_score
 from score_utils import RegionBoundingBox
+from tqdm import tqdm
 
 from weathergen.common.io import ZarrIO
 from weathergen.evaluate.score_utils import to_list
@@ -57,7 +56,7 @@ def get_data(
     stream :
         Stream name to retrieve data for.
     region :
-        Region name to retrieve data for. 
+        Region name to retrieve data for.
     samples :
         List of sample indices to retrieve. If None, all samples are retrieved.
     fsteps :
@@ -88,7 +87,7 @@ def get_data(
         raise FileNotFoundError(
             f"Zarr file {fname_zarr} does not exist or is not a directory."
         )
-    
+
     bbox = RegionBoundingBox.from_region_name(region)
 
     with ZarrIO(fname_zarr) as zio:
@@ -248,14 +247,18 @@ def calc_scores_per_stream(
     ):
         _logger.debug(f"Verifying data for stream {stream}...")
 
-        if preds.ipoint.size > 0: 
+        if preds.ipoint.size > 0:
             score_data = VerifiedData(preds, tars)
 
             # Build up computation graphs for all metrics
-            _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
+            _logger.debug(
+                f"Build computation graphs for metrics for stream {stream}..."
+            )
 
             combined_metrics = [
-                get_score(score_data, metric, agg_dims="ipoint", group_by_coord="sample")
+                get_score(
+                    score_data, metric, agg_dims="ipoint", group_by_coord="sample"
+                )
                 for metric in metrics
             ]
 
@@ -347,9 +350,7 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     # Check if histograms should be plotted
     plot_histograms = plot_settings.get("plot_histograms", False)
     if not isinstance(plot_settings.plot_histograms, bool):
-        raise TypeError(
-            "plot_histograms must be a boolean."
-        )
+        raise TypeError("plot_histograms must be a boolean.")
 
     if plot_fsteps == "all":
         plot_fsteps = None
@@ -357,7 +358,9 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     if plot_samples == "all":
         plot_samples = None
 
-    model_output = get_data(cfg, run_id, stream, samples=plot_samples, fsteps=plot_fsteps, channels=plot_chs)
+    model_output = get_data(
+        cfg, run_id, stream, samples=plot_samples, fsteps=plot_fsteps, channels=plot_chs
+    )
 
     da_tars = model_output.target
     da_preds = model_output.prediction
@@ -419,13 +422,13 @@ def metric_list_to_json(
 
     Parameters
     ----------
-    metrics_list : 
+    metrics_list :
         Metrics per stream.
     npoints_sample_list :
         Number of points per sample per stream.
-    streams : 
+    streams :
         Stream names.
-    region : 
+    region :
         Region name.
     metric_dir :
         Output directory.
@@ -456,7 +459,10 @@ def metric_list_to_json(
             metric_dict = metric_now.to_dict()
 
             # Match the expected filename pattern
-            save_path = metric_dir / f"{run_id}_{stream}_{region}_{metric}_epoch{epoch:05d}.json"
+            save_path = (
+                metric_dir
+                / f"{run_id}_{stream}_{region}_{metric}_epoch{epoch:05d}.json"
+            )
 
             _logger.info(f"Saving results to {save_path}")
             with open(save_path, "w") as f:
@@ -468,23 +474,24 @@ def metric_list_to_json(
 
 
 def retrieve_metric_from_json(
-    dir: str, run_id: str, stream: str, region: str, metric: str, epoch: int):
+    dir: str, run_id: str, stream: str, region: str, metric: str, epoch: int
+):
     """
     Retrieve the score for a given run, stream, metric, epoch, and rank from a JSON file.
 
     Parameters
     ----------
-    dir : 
+    dir :
         Directory where JSON files are stored.
     run_id :
         Run identifier.
-    stream : 
+    stream :
         Stream name.
-    region : 
+    region :
         Region name.
-    metric : 
+    metric :
         Metric name.
-    epoch : 
+    epoch :
         Epoch number.
 
     Returns
@@ -492,7 +499,9 @@ def retrieve_metric_from_json(
     xr.DataArray
         The metric DataArray.
     """
-    score_path = Path(dir) / f"{run_id}_{stream}_{region}_{metric}_epoch{epoch:05d}.json"
+    score_path = (
+        Path(dir) / f"{run_id}_{stream}_{region}_{metric}_epoch{epoch:05d}.json"
+    )
     _logger.debug(f"Looking for: {score_path}")
     if score_path.exists():
         with open(score_path) as f:
@@ -531,7 +540,9 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
             # TODO: improve this
             streams_set = list(
                 sorted(
-                    set.union(*[set(run_id["streams"].keys()) for run_id in runs.values()])
+                    set.union(
+                        *[set(run_id["streams"].keys()) for run_id in runs.values()]
+                    )
                 )
             )
 
@@ -543,7 +554,9 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
                     for run_id in runs
                     for stream in scores_dict.get(metric).get(region).keys()
                     if run_id
-                    in scores_dict.get(metric, {}).get(region, {}).get(stream, {})  # check if run_id exists
+                    in scores_dict.get(metric, {})
+                    .get(region, {})
+                    .get(stream, {})  # check if run_id exists
                     for value in np.atleast_1d(
                         scores_dict[metric][region][stream][run_id]["channel"].values
                     )
@@ -560,7 +573,7 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
                         # fill list of plots with one xarray per run_id, if it exists.
                         if ch not in set(np.atleast_1d(data.channel.values)):
                             continue
-                        
+
                         # continue if data contains NaN values
                         if data.isnull().any():
                             continue
@@ -571,9 +584,14 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
 
                     # if there is data for this stream and channel, plot it
                     if selected_data:
-                        _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
+                        _logger.info(
+                            f"Creating plot for {metric} - {region} - {stream} - {ch}."
+                        )
                         name = "_".join(
-                            [metric] + [region] + sorted(list(set(run_ids))) + [stream, ch]
+                            [metric]
+                            + [region]
+                            + sorted(list(set(run_ids)))
+                            + [stream, ch]
                         )
                         plotter.plot(
                             selected_data,

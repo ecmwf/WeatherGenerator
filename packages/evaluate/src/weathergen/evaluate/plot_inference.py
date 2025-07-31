@@ -79,7 +79,7 @@ if __name__ == "__main__":
 
                 for region in regions:
                     metrics_to_compute = []
-                    
+
                     for metric in metrics:
                         try:
                             metric_data = retrieve_metric_from_json(
@@ -89,7 +89,7 @@ if __name__ == "__main__":
                                 region,
                                 metric,
                                 run.epoch,
-                                )
+                            )
                             scores_dict[metric][region][stream][run_id] = metric_data
                         except (FileNotFoundError, KeyError, ValueError):
                             metrics_to_compute.append(metric)
@@ -110,8 +110,8 @@ if __name__ == "__main__":
                         )
 
                         for metric in metrics_to_compute:
-                            scores_dict[metric][region][stream][run_id] = all_metrics.sel(
-                                {"metric": metric}
+                            scores_dict[metric][region][stream][run_id] = (
+                                all_metrics.sel({"metric": metric})
                             )
 
 
