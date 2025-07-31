@@ -59,7 +59,6 @@ if __name__ == "__main__":
     scores_dict = defaultdict(lambda: defaultdict(dict))
 
     for run_id, run in runs.items():
-
         plotter = Plotter(cfg, run_id)
         _logger.info(f"RUN {run_id}: Getting data...")
 
@@ -69,7 +68,7 @@ if __name__ == "__main__":
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
 
             stream_dict = run["streams"][stream]
-           
+
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
                 plots = plot_data(cfg, run_id, stream, stream_dict)
@@ -113,6 +112,6 @@ if __name__ == "__main__":
 
 
 # plot summary
-if cfg.summary_plots:
+if scores_dict and cfg.summary_plots:
     _logger.info("Started creating summary plots..")
     plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)
