@@ -25,6 +25,11 @@ from weathergen.evaluate.score_utils import to_list
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
+_REPO_ROOT = Path(
+    __file__
+).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
+_DEFAULT_RESULT_PATH = _REPO_ROOT / "results"
+
 
 @dataclass
 class WeatherGeneratorOutput:
@@ -72,7 +77,7 @@ def get_data(
     """
 
     run = cfg.run_ids[run_id]
-    results_dir = Path(cfg.get("results_dir"))
+    results_dir = Path(cfg.get("results_dir", _DEFAULT_RESULT_PATH))
 
     fname_zarr = results_dir.joinpath(
         f"{run_id}/validation_epoch{run['epoch']:05d}_rank{run['rank']:04d}.zarr"
