@@ -192,12 +192,14 @@ class Masker:
         for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
             if self.masking_strategy == "channel":
                 # If masking strategy is channel, handle target tokens differently.
-                # We don't have Booleans per cell, instead per channel for cell,
-                # we set the unmasked channels to NaN so not in the loss calculation.
+                # We don't have Booleans per cell, instead per channel per cell,
+                # we set the unmasked channels to NaN so not in loss.
                 selected_tensors = []
                 for c, p in zip(cc, pp, strict=True):
                     # slightly complicated as the first dimension of c varies with data in the cell.
-                    c[:, ~p[0, :]] = torch.nan  # Set the channels that are not masked to NaN
+                    # do not mask the first 8 channels,
+                    # and set unmasked channels to nan
+                    c[:, (6 + coords.shape[-1] + geoinfos.shape[-1]):][:, ~p[0, (6 + coords.shape[-1] + geoinfos.shape[-1]):]] = torch.nan
                     selected_tensors.append(c)
 
             else:
