@@ -301,6 +301,17 @@ class TokenizerMasking:
         target_tokens = self.masker.mask_target(target_tokens_cells, coords, geoinfos, source)
 
         target_tokens_lens = [len(t) for t in target_tokens]
+        total_target = sum(target_tokens_lens)
+
+        # sampling the number of targets according to sampling_rate_target
+        samples = (torch.empty(total_target).uniform_() < sampling_rate_target).split(
+            target_tokens_lens
+        )
+        target_tokens = [
+            (tokens[samples]) for tokens, samples in zip(target_tokens, samples, strict=False)
+        ]
+        target_tokens_lens = [len(t) for t in target_tokens]
+
         if torch.tensor(target_tokens_lens).sum() == 0:
             return (torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([]))
 
@@ -332,7 +343,9 @@ class TokenizerMasking:
         target_coords_raw = torch.split(tt_lin[:, offset : offset + coords.shape[-1]], tt_lens)
         # recover absolute time from relatives in encoded ones
         # TODO: avoid recover; see TODO above
-        deltas_sec = arc_alpha(tt_lin[..., 1], tt_lin[..., 2]) / (2.0 * np.pi) * (12 * 3600)
+        deltas_sec = (
+            arc_alpha(tt_lin[..., 1] - 0.5, tt_lin[..., 2] - 0.5) / (2.0 * np.pi) * (12 * 3600)
+        )
         deltas_sec = deltas_sec.numpy().astype("timedelta64[s]")
         target_times_raw = np.split(time_win[0] + deltas_sec, np.cumsum(tt_lens)[:-1])
 

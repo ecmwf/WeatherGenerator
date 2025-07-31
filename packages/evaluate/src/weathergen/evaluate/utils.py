@@ -13,8 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import omegaconf as oc
 import xarray as xr
-from plotter import LinePlots, Plotter
+from plotter import DefaultMarkerSize, LinePlots, Plotter
 from score import VerifiedData, get_score
 from tqdm import tqdm
 
@@ -29,9 +30,7 @@ _logger.setLevel(logging.INFO)
 class WeatherGeneratorOutput:
     target: dict
     prediction: dict
-    points_per_sample: (
-        xr.DataArray | None
-    )  # <- now this is clear that it may or may not be present
+    points_per_sample: xr.DataArray | None
 
 
 def get_data(
@@ -45,14 +44,31 @@ def get_data(
 ) -> WeatherGeneratorOutput:
     """
     Retrieve prediction and target data for a given run from the Zarr store.
-    :param cfg: Configuration dictionary containing all information.
-    :param run_id: Run identifier.
-    :param stream: Stream name to retrieve data for.
-    :param samples: List of sample indices to retrieve. If None, all samples are retrieved.
-    :param fsteps: List of forecast steps to retrieve. If None, all forecast steps are retrieved.
-    :param channels: List of channel names to retrieve. If None, all channels are retrieved.
-    :param return_counts: If True, also return the number of points per sample.
-    :return: Tuple of xarray DataArrays for targets and predictions, and optionally the points per sample.
+
+    Parameters
+    ----------
+    cfg :
+        Configuration dictionary containing all information for the evaluation.
+    run_id :
+        Run identifier.
+    stream :
+        Stream name to retrieve data for.
+    samples :
+        List of sample indices to retrieve. If None, all samples are retrieved.
+    fsteps :
+        List of forecast steps to retrieve. If None, all forecast steps are retrieved.
+    channels :
+        List of channel names to retrieve. If None, all channels are retrieved.
+    return_counts :
+        If True, also return the number of points per sample.
+
+    Returns
+    -------
+    WeatherGeneratorOutput
+        A dataclass containing:
+        - target: Dictionary of xarray DataArrays for targets, indexed by forecast step.
+        - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast step.
+        - points_per_sample: xarray DataArray containing the number of points per sample, if `return_counts` is True.
     """
 
     run = cfg.run_ids[run_id]
@@ -80,11 +96,7 @@ def get_data(
         samples = sorted(
             [int(sample) for sample in zio.samples] if samples is None else samples
         )
-        channels = (
-            channels
-            if channels is not None
-            else stream_dict.get("channels", all_channels)
-        )
+        channels = channels or stream_dict.get("channels", all_channels)
         channels = to_list(channels)
 
         da_tars, da_preds = [], []
@@ -109,7 +121,7 @@ def get_data(
             ):
                 out = zio.get_data(sample, stream, fstep)
                 target, pred = out.target.as_xarray(), out.prediction.as_xarray()
-                
+
                 da_tars_fs.append(target.squeeze())
                 da_preds_fs.append(pred.squeeze())
                 pps.append(len(target.ipoint))
@@ -124,8 +136,15 @@ def get_data(
                 _logger.debug(
                     f"Restricting targets and predictions to channels {channels} for stream {stream}..."
                 )
-                da_tars_fs = da_tars_fs.sel(channel=channels)
-                da_preds_fs = da_preds_fs.sel(channel=channels)
+                available_channels = da_tars_fs.channel.values
+                existing_channels = [ch for ch in channels if ch in available_channels]
+                if len(existing_channels) < len(channels):
+                    _logger.warning(
+                        f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
+                    )
+
+                da_tars_fs = da_tars_fs.sel(channel=existing_channels)
+                da_preds_fs = da_preds_fs.sel(channel=existing_channels)
 
             da_tars.append(da_tars_fs)
             da_preds.append(da_preds_fs)
@@ -146,11 +165,21 @@ def calc_scores_per_stream(
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
-    :param cfg: Configuration dictionary containing all information for the evaluation.
-    :param run_id: Run identifier.
-    :param stream: Stream name to calculate scores for.
-    :param metrics: List of metric names to calculate.
-    :return: Tuple of xarray DataArray containing the scores and the number of points per sample.
+
+    Parameters
+    ----------
+    cfg :
+        Configuration dictionary containing all information for the evaluation.
+    run_id :
+        Run identifier.
+    stream :
+        Stream name to calculate scores for.
+    metrics :
+        List of metric names to calculate.
+
+    Returns
+    -------
+    Tuple of xarray DataArray containing the scores and the number of points per sample.
     """
     _logger.info(
         f"RUN {run_id} - {stream}: Calculating scores for metrics {metrics}..."
@@ -233,17 +262,29 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     """
     Plot the data for a given run and stream.
 
-    :param da_tars: Target data as an xarray DataArray.
-    :param da_preds: Prediction data as an xarray DataArray.
-    :param run_id: Run identifier.
-    :param stream: Stream name.
-    :param stream_dict: Dictionary containing stream configuration.
+    Parameters
+    ----------
+    cfg :
+        Configuration dictionary containing all information for the evaluation.
+    run_id :
+        Run identifier.
+    stream :
+        Stream name to plot data for.
+    stream_dict :
+        Dictionary containing stream configuration.
+    Returns
+    -------
+    List of plot names generated during the plotting process.
     """
-
+    # handle plotting settings
     plot_settings = stream_dict.get("plotting", {})
 
     if not (
-        plot_settings and (plot_settings.plot_maps or plot_settings.plot_histograms)
+        plot_settings
+        and (
+            plot_settings.get("plot_maps", False)
+            or plot_settings.get("plot_histograms", False)
+        )
     ):
         return
 
@@ -252,6 +293,26 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     plot_samples = plot_settings.get("sample", None)
     plot_fsteps = plot_settings.get("forecast_step", None)
     plot_chs = stream_dict.get("channels")
+
+    # Check if maps should be plotted and handle configuration if provided
+    plot_maps = plot_settings.get("plot_maps", False)
+    if not isinstance(plot_maps, bool | oc.dictconfig.DictConfig):
+        raise TypeError(
+            "plot_maps must be a boolean or a dictionary with configuration."
+        )
+
+    maps_config = plot_maps if isinstance(plot_maps, oc.dictconfig.DictConfig) else {}
+
+    if not hasattr(maps_config, "marker_size"):
+        # Set default marker size if not specified in maps_config
+        maps_config["marker_size"] = DefaultMarkerSize.get_marker_size(stream)
+
+    # Check if histograms should be plotted
+    plot_histograms = plot_settings.get("plot_histograms", False)
+    if not isinstance(plot_settings.plot_histograms, bool):
+        raise TypeError(
+            "plot_histograms must be a boolean."
+        )
 
     if plot_fsteps == "all":
         plot_fsteps = None
@@ -285,13 +346,17 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
                 "forecast_step": fstep,
             }
 
-            if plot_settings.plot_maps:
-                map_tar = plotter.map(tars, plot_chs, data_selection, "target")
+            if plot_maps:
+                map_tar = plotter.map(
+                    tars, plot_chs, data_selection, "target", maps_config
+                )
 
-                map_pred = plotter.map(preds, plot_chs, data_selection, "preds")
+                map_pred = plotter.map(
+                    preds, plot_chs, data_selection, "preds", maps_config
+                )
                 plots.extend([map_tar, map_pred])
 
-            if plot_settings.plot_histograms:
+            if plot_histograms:
                 h = plotter.histogram(tars, preds, plot_chs, data_selection)
                 plots.append(h)
 
@@ -346,6 +411,7 @@ def metric_list_to_json(
 
         for metric in metrics_stream.coords["metric"].values:
             metric_now = metrics_stream.sel(metric=metric)
+
             # Save as individual DataArray, not Dataset
             metric_now.attrs["npoints_per_sample"] = (
                 npoints_sample_stream.values.tolist()
@@ -404,8 +470,15 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
     """
     Plot summary of the evaluation results.
     This function is a placeholder for future implementation.
-    :param cfg: Configuration dictionary containing all information.
-    :param scores_dict: Dictionary containing scores for each run and stream.
+
+    Parameters
+    ----------
+    cfg :
+        Configuration dictionary containing all information for the evaluation.
+    scores_dict :
+        Dictionary containing scores for each metric and stream.
+    print_summary
+        If True, print a summary of the evaluation results.
     """
     _logger.info("Plotting summary of evaluation results...")
 
@@ -429,7 +502,9 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
             set(
                 value
                 for run_id in runs
-                for stream in runs[run_id]["streams"]
+                for stream in scores_dict.get(metric).keys()
+                if run_id
+                in scores_dict.get(metric, {}).get(stream, {})  # check if run_id exists
                 for value in np.atleast_1d(
                     scores_dict[metric][stream][run_id]["channel"].values
                 )
@@ -441,6 +516,7 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
             for ch in channels_set:  # loop over channels
                 selected_data = []
                 labels = []
+                run_ids = []
                 for run_id, data in scores_dict[metric][stream].items():
                     # fill list of plots with one xarray per run_id, if it exists.
                     if ch not in set(np.atleast_1d(data.channel.values)):
@@ -448,11 +524,13 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
 
                     selected_data.append(data.sel(channel=ch))
                     labels.append(runs[run_id].get("label", run_id))
-
+                    run_ids.append(run_id)
                 # if there is data for this stream and channel, plot it
                 if selected_data:
                     _logger.info(f"Creating plot for {metric} - {stream} - {ch}.")
-                    name = "_".join([metric, stream, ch])
+                    name = "_".join(
+                        [metric] + sorted(list(set(run_ids))) + [stream, ch]
+                    )
                     plotter.plot(
                         selected_data,
                         labels,

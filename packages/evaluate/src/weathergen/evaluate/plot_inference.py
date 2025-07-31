@@ -69,10 +69,11 @@ if __name__ == "__main__":
 
             stream_dict = run["streams"][stream]
 
-            _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-            plots = plot_data(cfg, run_id, stream, stream_dict)
+            if stream_dict.get("plotting"):
+                _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
+                plots = plot_data(cfg, run_id, stream, stream_dict)
 
-            if stream_dict.get("evaluation", None):
+            if stream_dict.get("evaluation"):
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
 
                 metrics_to_compute = []
@@ -111,6 +112,6 @@ if __name__ == "__main__":
 
 
 # plot summary
-if cfg.summary_plots:
+if scores_dict and cfg.summary_plots:
     _logger.info("Started creating summary plots..")
     plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)
