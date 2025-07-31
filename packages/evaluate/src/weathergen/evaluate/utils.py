@@ -304,7 +304,7 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     plot_histograms = plot_settings.get("plot_histograms", False)
     if not isinstance(plot_settings.plot_histograms, bool):
         raise TypeError(
-            "plot_histograms must be a boolean or a dictionary with configuration."
+            "plot_histograms must be a boolean."
         )
 
     if plot_fsteps == "all":
