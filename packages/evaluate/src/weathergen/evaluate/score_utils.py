@@ -8,8 +8,14 @@
 # nor does it submit to any jurisdiction.
 
 from typing import Any
+from dataclasses import dataclass
+import logging
+import xarray as xr
 
 from omegaconf.listconfig import ListConfig
+
+_logger = logging.getLogger(__name__)
+_logger.setLevel(logging.INFO)
 
 
 def to_list(obj: Any) -> list:
@@ -30,3 +36,70 @@ def to_list(obj: Any) -> list:
     elif not isinstance(obj, list):
         obj = [obj]
     return obj
+
+
+@dataclass(frozen=True)
+class RegionBoundingBox:
+    lat_min: float
+    lat_max: float
+    lon_min: float
+    lon_max: float
+
+    def __post_init__(self):
+        if not (-90 <= self.lat_min <= 90 and -90 <= self.lat_max <= 90):
+            raise ValueError(f"Latitude bounds must be between -90 and 90. Got: {self.lat_min}, {self.lat_max}")
+        if not (-180 <= self.lon_min <= 180 and -180 <= self.lon_max <= 180):
+            raise ValueError(f"Longitude bounds must be between -180 and 180. Got: {self.lon_min}, {self.lon_max}")
+        if self.lat_min >= self.lat_max:
+            raise ValueError(f"Latitude minimum must be less than maximum. Got: {self.lat_min}, {self.lat_max}")
+        if self.lon_min >= self.lon_max:
+            raise ValueError(f"Longitude minimum must be less than maximum. Got: {self.lon_min}, {self.lon_max}")
+
+    def contains(self, lat: float, lon: float) -> bool:
+        """Check if a lat/lon point is within the bounding box."""
+        return (self.lat_min <= lat <= self.lat_max) and (self.lon_min <= lon <= self.lon_max)
+
+    def apply_mask(self, data: xr.Dataset | xr.DataArray, lat_name: str ="lat", lon_name: str ="lon", data_dim: str ="ipoint") -> xr.Dataset | xr.DataArray:
+        """Filter Dataset or DataArray by spatial bounding box on 'ipoint' dimension.
+        Parameters
+        ----------
+        data : 
+            The data to filter.
+        lat_name:
+            Name of the latitude coordinate in the data.
+        lon_name:
+            Name of the longitude coordinate in the data.
+        data_dim:
+            Name of the dimension that contains the lat/lon coordinates.
+
+        Returns
+        -------
+        Filtered data with only points within the bounding box.
+        """
+        # lat/lon coordinates should be 1D and aligned with ipoint
+        lat = data[lat_name]
+        lon = data[lon_name]
+
+        mask = (
+            (lat >= self.lat_min) & (lat <= self.lat_max) &
+            (lon >= self.lon_min) & (lon <= self.lon_max)
+        )
+
+        return data.sel({data_dim: mask})
+
+    @staticmethod
+    def from_region_name(region: str) -> "RegionBoundingBox":
+        """Create a predefined bounding box from region name."""
+        region_req = region.lower()
+        _logger.info(f"Getting bounding box coordinates for region '{region_req}'...")
+        if region_req == "global":
+            return RegionBoundingBox(-90., 90., -180., 180.)
+        elif region_req == "northern_hemisphere":
+            return RegionBoundingBox(0., 90., -180., 180.)
+        elif region_req == "southern_hemisphere":
+            return RegionBoundingBox(-90., 0., -180., 180.)
+        elif region_req == "tropics":
+            return RegionBoundingBox(-30., 30., -180., 180.)
+        else:
+            raise ValueError(f"Region '{region}' is not supported. "
+                             "Supported: global, northern_hemisphere, southern_hemisphere.")
