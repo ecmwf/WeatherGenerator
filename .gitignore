@@ -204,10 +204,10 @@ output/
 logs/
 models/
 results/
+plots/
 models
 results
 playground/
-plots/
 .config/
 personal/
 
