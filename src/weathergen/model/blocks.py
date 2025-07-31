@@ -24,7 +24,7 @@ class SelfAttentionBlock(nn.Module):
     layer norm with a FFN.
     """
 
-    def __init__(self, dim, dim_aux, with_adanorm=True, num_heads=8, dropout_rate=0.1, **kwargs):
+    def __init__(self, dim, dim_aux, with_adanorm, num_heads, dropout_rate, **kwargs):
         super().__init__()
 
         self.with_adanorm = with_adanorm
@@ -92,11 +92,11 @@ class CrossAttentionBlock(nn.Module):
         dim_q,
         dim_kv,
         dim_aux,
-        with_self_attn=True,
-        with_adanorm=True,
-        with_mlp=True,
-        num_heads=8,
-        dropout_rate=0.1,
+        with_self_attn,
+        with_adanorm,
+        with_mlp,
+        num_heads,
+        dropout_rate,
         **kwargs,
     ):
         super().__init__()

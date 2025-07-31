@@ -340,14 +340,13 @@ class Model(torch.nn.Module):
                 softcap,
                 tro_type,
             )
-            # tte = torch.compile(tte, dynamic=True)
 
             self.target_token_engines.append(tte)
 
             # ensemble prediction heads to provide probabilistic prediction
             self.pred_heads.append(
                 EnsPredictionHead(
-                    dims_embed[0],
+                    dims_embed[-1],
                     self.targets_num_channels[i_obs],
                     si["pred_head"]["num_layers"],
                     si["pred_head"]["ens_size"],
@@ -733,9 +732,6 @@ class Model(torch.nn.Module):
             .flatten(0, 1)
             .reshape(self.num_healpix_cells, 9, -1)
         )
-        # tokens_stream = tokens_stream[
-        #     torch.repeat_interleave(streams_data[0][0].target_coords_lens[0])
-        # ].flatten(-2, -1)
 
         # pair with tokens from assimilation engine to obtain target tokens
         preds_tokens = []

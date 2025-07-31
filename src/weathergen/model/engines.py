@@ -447,6 +447,7 @@ class TargetPredictionEngine(nn.Module):
                         num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
                         attention_kwargs=attention_kwargs,
                         with_adanorm=True,
+                        dropout_rate=0.1,
                     )
                 )
             elif self.cf.decoder_type == "CrossAttentionConditioning":
@@ -459,6 +460,7 @@ class TargetPredictionEngine(nn.Module):
                         with_self_attn=True,
                         with_adanorm=False,
                         with_mlp=True,
+                        dropout_rate=0.1,
                         attention_kwargs=attention_kwargs,
                     )
                 )
@@ -472,6 +474,7 @@ class TargetPredictionEngine(nn.Module):
                         with_self_attn=True,
                         with_adanorm=True,
                         with_mlp=True,
+                        dropout_rate=0.1,
                         attention_kwargs=attention_kwargs,
                     )
                 )

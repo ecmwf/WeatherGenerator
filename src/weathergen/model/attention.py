@@ -157,7 +157,6 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
             return flex_attention(qs, ks, vs, score_mod=sparsity_mask)
 
         self.compiled_flex_attention = torch.compile(att, dynamic=False)
-        # self.compiled_flex_attention = flex_attention
 
     #########################################
     def forward(self, x, x_lens=None):
@@ -514,8 +513,8 @@ class MultiSelfAttentionHead(torch.nn.Module):
         else:
             self.lnorm = norm(dim_embed)
         self.proj_heads_q = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
-        self.proj_heads_k = torch.nn.Linear(dim_embed, (num_heads) * self.dim_head_proj, bias=False)
-        self.proj_heads_v = torch.nn.Linear(dim_embed, (num_heads) * self.dim_head_proj, bias=False)
+        self.proj_heads_k = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
+        self.proj_heads_v = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_out = torch.nn.Linear(dim_embed, dim_embed, bias=False)
 
         lnorm = norm if with_qk_lnorm else torch.nn.Identity
@@ -599,10 +598,10 @@ class MultiCrossAttentionHead(torch.nn.Module):
             dim_embed_q, num_heads * self.dim_head_proj_q, bias=False
         )
         self.proj_heads_k = torch.nn.Linear(
-            dim_embed_kv, (num_heads) * self.dim_head_proj_kv, bias=False
+            dim_embed_kv, num_heads * self.dim_head_proj_kv, bias=False
         )
         self.proj_heads_v = torch.nn.Linear(
-            dim_embed_kv, (num_heads) * self.dim_head_proj_kv, bias=False
+            dim_embed_kv, num_heads * self.dim_head_proj_kv, bias=False
         )
         self.proj_out = torch.nn.Linear(dim_embed_kv, dim_embed_kv, bias=False)
 
