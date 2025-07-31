@@ -56,6 +56,7 @@ class Trainer(TrainerBase):
 
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
+        assert cf.forecast_policy if cf.forecast_steps > 0 else True
 
         self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
