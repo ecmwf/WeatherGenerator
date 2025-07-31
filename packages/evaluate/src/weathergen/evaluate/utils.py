@@ -118,8 +118,15 @@ def get_data(
                 _logger.debug(
                     f"Restricting targets and predictions to channels {channels} for stream {stream}..."
                 )
-                da_tars_fs = da_tars_fs.sel(channel=channels)
-                da_preds_fs = da_preds_fs.sel(channel=channels)
+                available_channels = da_tars_fs.channel.values
+                existing_channels = [ch for ch in channels if ch in available_channels]
+                if len(existing_channels) < len(channels):
+                    _logger.warning(
+                        f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
+                    )
+
+                da_tars_fs = da_tars_fs.sel(channel=existing_channels)
+                da_preds_fs = da_preds_fs.sel(channel=existing_channels)
 
             da_tars.append(da_tars_fs)
             da_preds.append(da_preds_fs)
@@ -424,7 +431,9 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
             set(
                 value
                 for run_id in runs
-                for stream in runs[run_id]["streams"]
+                for stream in scores_dict.get(metric).keys()
+                if run_id
+                in scores_dict.get(metric, {}).get(stream, {})  # check if run_id exists
                 for value in np.atleast_1d(
                     scores_dict[metric][stream][run_id]["channel"].values
                 )

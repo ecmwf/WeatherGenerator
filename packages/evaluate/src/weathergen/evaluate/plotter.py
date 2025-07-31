@@ -199,7 +199,7 @@ class Plotter:
                 scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {var}"
             )
             plt.title(
-                f"{self.stream}, {var} : fstep = {self.fstep:03} ({da['valid_time'][0].values})"
+                f"{self.stream}, {var} : fstep = {self.fstep:03} ({da['valid_time'][0].values.astype('datetime64[s]')})"
             )
             ax.set_global()
             ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
@@ -236,8 +236,10 @@ class LinePlots:
             "line_plots"
         )
         if not os.path.exists(self.out_plot_dir):
-            _logger.info(f"creating dir {self.out_plot_dir}")
+            _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
+
+        _logger.info(f"Saving summary plots to: {self.out_plot_dir}")
 
     def _check_lengths(
         self, data: xr.DataArray | list, labels: str | list
