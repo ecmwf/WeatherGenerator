@@ -283,6 +283,8 @@ class ZarrIO:
         _, example_sample = next(self.data_root.groups())
         _, example_stream = next(example_sample.groups())
         return list(example_stream.group_keys())
+
+
 @dataclasses.dataclass
 class DataCoordinates:
     times: typing.Any
@@ -290,6 +292,7 @@ class DataCoordinates:
     geoinfo: typing.Any
     channels: typing.Any
     geoinfo_channels: typing.Any
+
 
 @dataclasses.dataclass
 class OutputBatchData:
@@ -356,12 +359,15 @@ class OutputBatchData:
         )
         _logger.debug(f"stream: {key.stream} with index: {stream_idx}")
 
-        if (datapoints.stop-datapoints.start) == 0:
+        if (datapoints.stop - datapoints.start) == 0:
             target_data = np.zeros((0, len(self.channels[stream_idx])), dtype=np.float32)
             preds_data = np.zeros((0, len(self.channels[stream_idx])), dtype=np.float32)
         else:
             target_data = (
-                self.targets[offest_key.forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
+                self.targets[offest_key.forecast_step][stream_idx][0][datapoints]
+                .cpu()
+                .detach()
+                .numpy()
             )
             preds_data = (
                 self.predictions[offest_key.forecast_step][stream_idx][0]
@@ -389,20 +395,12 @@ class OutputBatchData:
         return OutputItem(
             key=key,
             source=source_dataset,
-            target=OutputDataset(
-                "target",
-                key,
-                target_data,
-                **dataclasses.asdict(data_coords)
-            ),
+            target=OutputDataset("target", key, target_data, **dataclasses.asdict(data_coords)),
             prediction=OutputDataset(
-                "prediction",
-                key,
-                preds_data,
-                **dataclasses.asdict(data_coords)
+                "prediction", key, preds_data, **dataclasses.asdict(data_coords)
             ),
         )
-    
+
     def _get_datapoints_per_sample(self, offest_key, stream_idx):
         lens = self.targets_lens[offest_key.forecast_step][stream_idx]
 
@@ -411,31 +409,29 @@ class OutputBatchData:
             start = 0
             n_samples = 0
         else:
-            start = sum(lens[:offest_key.sample])
-            n_samples = lens[:offest_key.sample]
+            start = sum(lens[: offest_key.sample])
+            n_samples = lens[: offest_key.sample]
 
         _logger.debug(
             f"sample: start:{self.sample_start} rel_idx:{offest_key.sample} range:{start}-{start + n_samples}"
         )
 
         return slice(start, start + n_samples)
-    
+
     def _offset_key(self, key: ItemKey):
         """
         Correct indices in key to be useable for data extraction.
-        
+
         `key` contains indices that are adjusted to have better output semantics.
         To be useable in extraction these have to be adjusted to bridge the differences compared to the semantics of the data.
             - `sample` is adjusted from a global continous index to a per batch index
-            - `forecast_step` is adjusted from including `forecast_offset` to indexing 
+            - `forecast_step` is adjusted from including `forecast_offset` to indexing
                the data (always starts at 0)
         """
         return ItemKey(
-            key.sample - self.sample_start,
-            key.forecast_step - self.forecast_offset,
-            key.stream
+            key.sample - self.sample_start, key.forecast_step - self.forecast_offset, key.stream
         )
-    
+
     def _extract_coordinates(self, stream_idx, offest_key, datapoints) -> DataCoordinates:
         _coords = self.targets_coords[offest_key.forecast_step][stream_idx][datapoints].numpy()
         coords = _coords[:, :2]  # first two columns are lat,lon
@@ -454,11 +450,10 @@ class OutputBatchData:
 
         return DataCoordinates(times, coords, geoinfo, channels, geoinfo_channels)
 
-        
     def _extract_predictions(self, sample, stream_idx, key):
         channels = self.source_channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
-        
+
         source = self.sources[sample][stream_idx]
 
         # currently fails since no separate channels for source/target implemented
@@ -478,5 +473,5 @@ class OutputBatchData:
         )
 
         _logger.debug(f"source shape: {source_dataset.data.shape}")
-        
+
         return source_dataset
