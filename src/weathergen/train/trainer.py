@@ -694,7 +694,7 @@ class Trainer(TrainerBase):
                     self.perf_mem,
                 )
 
-            self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
     def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
         if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:
