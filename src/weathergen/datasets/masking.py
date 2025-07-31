@@ -95,7 +95,7 @@ class Masker:
 
         # If there are no tokens, return empty lists.
         if num_tokens == 0:
-            return tokenized_data, []
+            return tokenized_data
 
         # Set the masking rate.
         # Use a local variable rate, so we keep the instance variable intact.
@@ -165,6 +165,10 @@ class Masker:
 
             # Apply the mask to get the source data (where mask is False)
             source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
+
+        import code
+
+        code.interact(local=locals())
 
         return source_data
 
