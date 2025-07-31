@@ -550,9 +550,7 @@ class Model(torch.nn.Module):
                     # create full scatter index
                     # (there's no broadcasting which is likely highly inefficient)
                     idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-
                     x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
-
                     # there's undocumented limitation in flash_attn that will make embed fail if
                     # #tokens is too large; code below is a work around
                     # x_embed = torch.cat(
