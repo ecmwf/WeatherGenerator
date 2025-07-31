@@ -193,13 +193,9 @@ def calc_scores_per_stream(
     # Load climatological mean once if needed for ACC calculation
     clim_mean = None
     if "acc" in metrics:
-        # Get stream-specific configuration
-        run = cfg.run_ids[run_id]
-        stream_dict = run.streams[stream]
-
-        # Check for stream-specific climatology path first, then fall back to global
-        clim_path = stream_dict.get("auxiliary_material") or cfg.get(
-            "auxiliary_material"
+        # Get stream-specific path
+        clim_path = cfg.get(
+            "auxiliary_data_path" # update to match the expected key
         )
         if clim_path:
             # this won't suffice, but it would be the correct location
