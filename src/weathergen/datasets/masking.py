@@ -16,6 +16,21 @@ class Masker:
         masking_rate (float): The base rate at which tokens are masked.
         masking_strategy (str): The strategy used for masking (e.g., "random",
         "block", "healpix", "channel").
+        "random" - random masking of tokens at the level of the data
+        "block" - masking out large blocks of tokens in 1D, without spatial meaning
+        "healpix" - masking at the level of HEALPix cells, where all child cells
+                    of a parent cell at a specific HEALpix level are masked 
+                    if the parent is masked.
+                    The healpix level can be configured with hl_data and hl_mask.
+                    e.g. masking_strategy_config = {"hl_data": 5, "hl_mask": 3}
+                    where hl_data is the level of the data and hl_mask is the level
+                    of the masking that we want to apply, 
+                    e.g. level 1 very large cells masked
+        "channel" - masking data channels, where channels of the data are masked
+                    can be done per-cell (each cell has different channels masked) 
+                    or globally (all have the same channels masked).
+                    e.g. masking_strategy_config = {"mode": "per_cell"} or
+                    {"mode": "global"}
         masking_rate_sampling (bool): Whether to sample the masking rate from a distribution.
         masking_strategy_config (dict): Configuration for the masking strategy, can include
                                         additional parameters like "hl_data", "hl_mask", etc.
@@ -52,9 +67,8 @@ class Masker:
         if self.masking_strategy == "channel":
             # Ensure that masking_strategy_config contains either 'global' or 'per_cell'
             assert (
-                "global" in self.masking_strategy_config
-                or "per_cell" in self.masking_strategy_config
-            ), "Strategy must be 'global' or 'per_cell' in masking_strategy_config."
+                    self.masking_strategy_config.get("mode") in ["global", "per_cell"]
+                ), "masking_strategy_config must contain 'mode' key with value 'global' or 'per_cell'."
 
             # check all streams that source and target channels are identical
             for stream in cf.streams:
@@ -348,7 +362,7 @@ class Masker:
         num_tokens = tokenized_data_merged.shape[0]
         token_size = tokenized_data_merged.shape[1]
 
-        if not self.masking_strategy_config.get("per_cell", False):
+        if self.masking_strategy_config.get("mode") == "global":
             # generate global mask
             channel_mask = np.zeros(num_channels, dtype=bool)
             m = num_fixed_channels + self.rng.choice(num_data_channels, mask_count, replace=False)
