@@ -21,10 +21,9 @@ class Masker:
         "healpix" - masking at the level of HEALPix cells, where all child cells
                     of a parent cell at a specific HEALpix level are masked
                     if the parent is masked.
-                    The healpix level can be configured with hl_data and hl_mask.
-                    e.g. masking_strategy_config = {"hl_data": 5, "hl_mask": 3}
-                    where hl_data is the level of the data and hl_mask is the level
-                    of the masking that we want to apply,
+                    The healpix level must be configured with hl_mask.
+                    e.g. masking_strategy_config = {"hl_mask": 1}
+                    with hl_mask the level for masking that we want to apply
                     e.g. level 1 very large cells masked
         "channel" - masking data channels, where channels of the data are masked
                     can be done per-cell (each cell has different channels masked)
@@ -33,8 +32,8 @@ class Masker:
                     {"mode": "global"}
         masking_rate_sampling (bool): Whether to sample the masking rate from a distribution.
         masking_strategy_config (dict): Configuration for the masking strategy, can include
-                                        additional parameters like "hl_data", "hl_mask", etc.
-                                        specific to the masking strategy.
+                                        additional parameters like "hl_mask", etc.
+                                        specific to the masking strategy. See above.
     """
 
     def __init__(self, cf: Config):
@@ -60,7 +59,7 @@ class Masker:
             hl_data = self.healpix_level_data
             hl_mask = self.masking_strategy_config.get("hl_mask")
             assert hl_data is not None and hl_mask is not None, (
-                "If HEALPix masking, hl_data and hl_mask must be given in masking_strategy_config."
+                "If HEALPix masking, hl_mask must be given in masking_strategy_config."
             )
             assert hl_mask < hl_data, "hl_mask must be less than hl_data for HEALPix masking."
 
@@ -276,7 +275,7 @@ class Masker:
             np.ndarray: A flat boolean array (the token-level mask).
         """
 
-        # hl_data and hl_mask should be provided in masking_strategy_config
+        # hl_mask should be provided in masking_strategy_config
         hl_data = self.healpix_level_data
         hl_mask = self.masking_strategy_config.get("hl_mask")
 
