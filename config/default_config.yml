@@ -91,7 +91,7 @@ masking_strategy: "random"
 # "channel": requires mode to be specified, "per_cell" or "global", 
 # to do channel masking per cell or same channel mask for all cells
 # e.g. masking_strategy_config: {"mode": "per_cell"} or masking_strategy_config: {"mode": "global"}
-# masking_strategy_config: {"per_cell" : True}
+# masking_strategy_config: {"mode" : "per_cell"}
 
 num_epochs: 32
 samples_per_epoch: 4096
