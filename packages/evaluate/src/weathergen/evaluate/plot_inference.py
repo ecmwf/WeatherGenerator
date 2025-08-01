@@ -13,7 +13,7 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, DictConfig
 from plotter import Plotter
 from utils import (
     calc_scores_per_stream,
@@ -25,23 +25,8 @@ from utils import (
 
 _logger = logging.getLogger(__name__)
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Fast evaluation of WeatherGenerator runs."
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        help="Path to the configuration yaml file for plotting. e.g. config/plottig_config.yaml",
-    )
 
-    args = parser.parse_args()
-
-    # configure logging
-    logging.basicConfig(level=logging.INFO)
-
-    # load configuration
-    cfg = OmegaConf.load(args.config)
+def run_main(cfg: DictConfig) -> None:
     runs = cfg.run_ids
 
     _logger.info(f"Detected {len(runs)} runs")
@@ -109,9 +94,28 @@ if __name__ == "__main__":
                         scores_dict[metric][stream][run_id] = all_metrics.sel(
                             {"metric": metric}
                         )
+    # plot summary
+    if scores_dict and cfg.summary_plots:
+        _logger.info("Started creating summary plots..")
+        plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)
 
 
-# plot summary
-if scores_dict and cfg.summary_plots:
-    _logger.info("Started creating summary plots..")
-    plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Fast evaluation of WeatherGenerator runs."
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        help="Path to the configuration yaml file for plotting. e.g. config/plottig_config.yaml",
+    )
+
+    args = parser.parse_args()
+
+    # configure logging
+    logging.basicConfig(level=logging.INFO)
+
+    # load configuration
+    cfg = OmegaConf.load(args.config)
+    run_main(cfg)
