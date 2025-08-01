@@ -354,6 +354,7 @@ class Trainer(TrainerBase):
         forecast_offset: int,
         forecast_steps: int,
         streams_data: list[list[Any]],
+        msds: MultiStreamDataSampler | None  = None,
     ):
         """Collects and denormalizes prediction and target data for logging.
 
@@ -451,7 +452,8 @@ class Trainer(TrainerBase):
                     continue
 
                 targets_lens[fstep][i_strm] += [target.shape[0]]
-                dn_data = self.dataset_val.denormalize_target_channels
+                msds = msds or self.dataset_val
+                dn_data = msds.denormalize_target_channels
 
                 f32 = torch.float32
                 preds_all[fstep][i_strm] += [dn_data(i_strm, pred.to(f32)).detach().cpu()]
