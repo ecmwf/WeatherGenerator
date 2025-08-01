@@ -30,6 +30,8 @@ class Plotter:
             Configuration dictionary containing all information for the plotting.
         model_id:
             If a model_id is given, the output will be saved in a folder called as the model_id.
+        range:
+            Dictionary of common ranges across forecast steps and stream. keys: variable, values: (vmin, vmax) tuple.
         """
 
         self.cfg = cfg
@@ -127,25 +129,30 @@ class Plotter:
     def get_range(self, var: str) -> tuple[float, float]:
         """
         Get stored values of vmin and vmax per variable.
-        :param var: variable for which one needs to retrieve the range
-        :return: tuple with minimum and maximum values.
+
+        Parameters
+        ----------
+        var :
+            variable for which one needs to retrieve the range
+
+        Returns
+        -------
+            tuple[float, float] with minimum and maximum in the range
         """
-        vmin = self.ranges.get(var, {}).get("vmin", None)
-        vmax = self.ranges.get(var, {}).get("vmax", None)
-        return vmin, vmax
+        return self.ranges.get(var, (None, None))
 
     def set_range(self, var: str, vmin: float, vmax: float) -> None:
         """
         Set new values of vmin and vmax for a given variable.
-        :param var: variable for which one needs to set the range
-        :param vmin
-        para: vmax
+        var:
+            variable used as key for vmin and vmax
+        vmin:
+            minimum value of the range
+        vmax:
+            maximum value of the range
         """
-        self.ranges[var] = {
-            "vmin": vmin,
-            "vmax": vmax,
-        }
-        return self
+
+        self.ranges[var] = (vmin, vmax)
 
     def histogram(
         self,

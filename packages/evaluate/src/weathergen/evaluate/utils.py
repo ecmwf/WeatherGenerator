@@ -274,6 +274,8 @@ def plot_data(
         Stream name to plot data for.
     stream_dict :
         Dictionary containing stream configuration.
+    plotting_opts:
+        Dictionary of type: { var : (vmin, vmax)} containing all common plotting options across streams and variables.
     Returns
     -------
     List of plot names generated during the plotting process.
@@ -312,9 +314,7 @@ def plot_data(
     # Check if histograms should be plotted
     plot_histograms = plot_settings.get("plot_histograms", False)
     if not isinstance(plot_settings.plot_histograms, bool):
-        raise TypeError(
-            "plot_histograms must be a boolean."
-        )
+        raise TypeError("plot_histograms must be a boolean.")
 
     if plot_fsteps == "all":
         plot_fsteps = None
