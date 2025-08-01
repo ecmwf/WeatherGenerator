@@ -345,8 +345,10 @@ def load_streams(streams_directory: Path) -> list[Config]:
 def set_paths(config: Config) -> Config:
     """Set the configs run_path model_path attributes to default values if not present."""
     config = config.copy()
-    config.run_path = config.get("run_path", None) or _DEFAULT_RESULT_PATH
-    config.model_path = config.get("model_path", None) or _DEFAULT_MODEL_PATH
+    # pathlib.Path are not json serializable, so we convert them to str
+    config.run_path = config.get("run_path", None) or str(_DEFAULT_RESULT_PATH)
+    config.model_path = config.get("model_path", None) or str(_DEFAULT_MODEL_PATH)
+
 
     return config
 
