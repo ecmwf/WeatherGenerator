@@ -77,6 +77,24 @@ class Trainer(TrainerBase):
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
+    def init_inference(self, cf: Config, run_id_trained: str, epoch: int, msds: MultiStreamDataSampler):
+        """
+        Initializes the trainer for inference mode. Does not write any config does not perform validation steps"""
+        # general initalization
+        self.init(cf)
+
+        sources_size = msds.get_sources_size()
+        targets_num_channels = msds.get_targets_num_channels()
+        targets_coords_size = msds.get_targets_coords_size()
+
+        self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+        self.model = self.model.to(self.devices[0])
+        self.model.load(run_id_trained, epoch)
+        _logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
+        self.ddp_model = self.model
+        self.model_params = ModelParams().create(cf).to(self.devices[0])
+        _logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
+
     def inference(self, cf, run_id_trained, epoch):
         # general initalization
         self.init(cf)
