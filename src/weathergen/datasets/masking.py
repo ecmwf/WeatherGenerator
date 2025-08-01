@@ -19,15 +19,15 @@ class Masker:
         "random" - random masking of tokens at the level of the data
         "block" - masking out large blocks of tokens in 1D, without spatial meaning
         "healpix" - masking at the level of HEALPix cells, where all child cells
-                    of a parent cell at a specific HEALpix level are masked 
+                    of a parent cell at a specific HEALpix level are masked
                     if the parent is masked.
                     The healpix level can be configured with hl_data and hl_mask.
                     e.g. masking_strategy_config = {"hl_data": 5, "hl_mask": 3}
                     where hl_data is the level of the data and hl_mask is the level
-                    of the masking that we want to apply, 
+                    of the masking that we want to apply,
                     e.g. level 1 very large cells masked
         "channel" - masking data channels, where channels of the data are masked
-                    can be done per-cell (each cell has different channels masked) 
+                    can be done per-cell (each cell has different channels masked)
                     or globally (all have the same channels masked).
                     e.g. masking_strategy_config = {"mode": "per_cell"} or
                     {"mode": "global"}
@@ -66,9 +66,9 @@ class Masker:
 
         if self.masking_strategy == "channel":
             # Ensure that masking_strategy_config contains either 'global' or 'per_cell'
-            assert (
-                    self.masking_strategy_config.get("mode") in ["global", "per_cell"]
-                ), "masking_strategy_config must contain 'mode' key with value 'global' or 'per_cell'."
+            assert self.masking_strategy_config.get("mode") in ["global", "per_cell"], (
+                "masking_strategy_config must contain 'mode' key with value 'global' or 'per_cell'."
+            )
 
             # check all streams that source and target channels are identical
             for stream in cf.streams:
