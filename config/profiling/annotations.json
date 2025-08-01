@@ -55,6 +55,26 @@
     },
     {
         "domain": "WeatherGen",
+        "module": "weathergen.model.model",
+        "functions": [
+            "ModelParams.__init__",
+            "ModelParams.create",
+            "Model.__init__",
+            "Model.create",
+            "Model.freeze_weights_forecast",
+            "Model.print_num_parameters",
+            "Model.load",
+            "Model.forward_jac",
+            "Model.forward",
+            "Model.embed_cells",
+            "Model.assimilate_local",
+            "Model.assimilate_global",
+            "Model.forecast",
+            "Model.predict"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
         "module": "weathergen.datasets.utils",
         "functions": [
             "s2tor3",
