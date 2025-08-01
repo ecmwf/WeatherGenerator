@@ -38,6 +38,19 @@ def to_list(obj: Any) -> list:
     return obj
 
 
+class RegionLibrary:
+    """
+    Predefined bounding boxes for known regions.
+    """
+
+    REGIONS: ClassVar[dict[str, tuple[float, float, float, float]]] = {
+        "global": (-90.0, 90.0, -180.0, 180.0),
+        "nhem": (0.0, 90.0, -180.0, 180.0),
+        "shem": (-90.0, 0.0, -180.0, 180.0),
+        "tropics": (-30.0, 30.0, -180.0, 180.0),
+    }
+
+
 @dataclass(frozen=True)
 class RegionBoundingBox:
     lat_min: float
@@ -120,16 +133,3 @@ class RegionBoundingBox:
                 f"Region '{region}' is not supported. "
                 f"Available regions: {', '.join(RegionLibrary.REGIONS.keys())}"
             ) from err
-
-
-class RegionLibrary:
-    """
-    Predefined bounding boxes for known regions.
-    """
-
-    REGIONS: ClassVar[dict[str, tuple[float, float, float, float]]] = {
-        "global": (-90.0, 90.0, -180.0, 180.0),
-        "northern_hemisphere": (0.0, 90.0, -180.0, 180.0),
-        "southern_hemisphere": (-90.0, 0.0, -180.0, 180.0),
-        "tropics": (-30.0, 30.0, -180.0, 180.0),
-    }

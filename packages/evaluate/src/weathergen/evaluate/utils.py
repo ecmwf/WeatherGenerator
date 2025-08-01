@@ -273,18 +273,7 @@ def calc_scores_per_stream(
             _logger.warning(
                 f"No data available for stream {stream} at forecast step {fstep} in region {region}. Skipping metrics calculation."
             )
-
-            combined_metrics = xr.DataArray(
-                np.full(
-                    (len(samples), len(channels), len(metrics)),
-                    np.nan,
-                ),
-                coords={
-                    "sample": samples,
-                    "channel": channels,
-                    "metric": metrics,
-                },
-            )
+            continue
 
         metric_list.append(combined_metrics)
 
@@ -553,7 +542,8 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
                     value
                     for run_id in runs
                     for stream in scores_dict.get(metric).get(region).keys()
-                    if run_id
+                    if region in scores_dict.get(metric, {})
+                    and run_id
                     in scores_dict.get(metric, {})
                     .get(region, {})
                     .get(stream, {})  # check if run_id exists
