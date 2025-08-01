@@ -413,7 +413,8 @@ class OutputBatchData:
             n_samples = lens[: offest_key.sample]
 
         _logger.debug(
-            f"sample: start:{self.sample_start} rel_idx:{offest_key.sample} range:{start}-{start + n_samples}"
+            f"sample: start:{self.sample_start} rel_idx:{offest_key.sample}"
+            + f"range:{start}-{start + n_samples}"
         )
 
         return slice(start, start + n_samples)
@@ -423,7 +424,8 @@ class OutputBatchData:
         Correct indices in key to be useable for data extraction.
 
         `key` contains indices that are adjusted to have better output semantics.
-        To be useable in extraction these have to be adjusted to bridge the differences compared to the semantics of the data.
+        To be useable in extraction these have to be adjusted to bridge the differences
+        compared to the semantics of the data.
             - `sample` is adjusted from a global continous index to a per batch index
             - `forecast_step` is adjusted from including `forecast_offset` to indexing
                the data (always starts at 0)
