@@ -408,6 +408,13 @@ class TargetPredictionEngine(nn.Module):
         self.softcap = softcap
         self.tro_type = tro_type
 
+        # For backwards compatibility
+        from omegaconf import OmegaConf
+
+        self.cf = OmegaConf.merge(
+            OmegaConf.create({"decoder_type": "PerceiverIOCoordConditioning"}), self.cf
+        )
+
         attention_kwargs = {
             "with_qk_lnorm": True,
             "dropout_rate": 0.1,  # Assuming dropout_rate is 0.1
