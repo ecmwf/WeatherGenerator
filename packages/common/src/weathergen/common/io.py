@@ -388,7 +388,7 @@ class OutputBatchData:
         )
 
         if key.with_source:
-            self._extract_predictions(offest_key.sample, stream_idx, key)
+            source_dataset = self._extract_sources(offest_key.sample, stream_idx, key)
         else:
             source_dataset = None
 
@@ -452,7 +452,7 @@ class OutputBatchData:
 
         return DataCoordinates(times, coords, geoinfo, channels, geoinfo_channels)
 
-    def _extract_predictions(self, sample, stream_idx, key):
+    def _extract_sources(self, sample, stream_idx, key):
         channels = self.source_channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
 
