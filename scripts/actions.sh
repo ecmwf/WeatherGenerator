@@ -78,7 +78,7 @@ case "$1" in
     (
       cd "$SCRIPT_DIR" || exit 1
       # Run on any python or jupyter notebook files in the WeatherGenerator-private/notebooks directory
-      uv run jupytext --set-formats ipynb,py:percent --sync  ../WeatherGenerator-private/notebooks/*.ipynb ../WeatherGenerator-private/notebooks/*.ipy
+      uv run jupytext --set-formats ipynb,py:percent --sync  ../WeatherGenerator-private/notebooks/*.ipynb ../WeatherGenerator-private/notebooks/*.py
       echo "Jupytext sync completed."
     )
     ;;
