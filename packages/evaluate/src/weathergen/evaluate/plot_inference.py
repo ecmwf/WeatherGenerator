@@ -14,8 +14,8 @@ from collections import defaultdict
 from pathlib import Path
 
 from omegaconf import OmegaConf, DictConfig
-from plotter import Plotter
-from utils import (
+from weathergen.evaluate.plotter import Plotter
+from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
     plot_data,
