@@ -466,80 +466,105 @@ def retrieve_metric_from_json(
         raise FileNotFoundError(f"File {score_path} not found in the archive.")
 
 
-def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
+def get_streams_set(runs: dict) -> list:
+    """Extract a sorted list of all streams from run configuration."""
+    return sorted(set.union(*[set(run["streams"].keys()) for run in runs.values()]))
+
+def get_channels_set(scores_dict: dict, metric: str, runs: dict) -> list:
+    """Extract a sorted list of all channels available for a given metric."""
+    channels = set()
+    for run_id in runs:
+        for stream in scores_dict.get(metric, {}).keys():
+            if run_id in scores_dict.get(metric, {}).get(stream, {}):
+                ch_values = np.atleast_1d(scores_dict[metric][stream][run_id]["channel"].values)
+                channels.update(ch_values)
+    return sorted(channels)
+
+
+def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool, plot_type: str = "summary") -> None:
     """
-    Plot summary of the evaluation results.
-    This function is a placeholder for future implementation.
+    Generic function to plot evaluation results.
 
     Parameters
     ----------
-    cfg :
-        Configuration dictionary containing all information for the evaluation.
-    scores_dict :
-        Dictionary containing scores for each metric and stream.
-    print_summary
-        If True, print a summary of the evaluation results.
+    cfg : dict
+        Evaluation configuration object.
+    scores_dict : dict
+        Scores by metric, stream, and run_id.
+    print_summary : bool
+        Whether to print summary statistics.
+    plot_type : str
+        Type of plot: "summary" or "ratio".
     """
-    _logger.info("Plotting summary of evaluation results...")
+    _logger.info(f"Plotting {plot_type} of evaluation results...")
 
     runs = cfg.run_ids
     metrics = cfg.evaluation.metrics
-
     plotter = LinePlots(cfg)
 
     for metric in metrics:
-        # get total list of streams
-        # TODO: improve this
-        streams_set = list(
-            sorted(
-                set.union(*[set(run_id["streams"].keys()) for run_id in runs.values()])
-            )
-        )
+        streams_set = get_streams_set(runs)
 
-        # get total list of channels
-        # TODO: improve this
-        channels_set = list(
-            set(
-                value
-                for run_id in runs
-                for stream in scores_dict.get(metric).keys()
-                if run_id
-                in scores_dict.get(metric, {}).get(stream, {})  # check if run_id exists
-                for value in np.atleast_1d(
-                    scores_dict[metric][stream][run_id]["channel"].values
-                )
-            )
-        )
+        if plot_type == "summary":
+            channels_set = get_channels_set(scores_dict, metric, runs)
 
-        # TODO: move this into plot_utils
-        for stream in streams_set:  # loop over streams
-            for ch in channels_set:  # loop over channels
+            for stream in streams_set:
+                for ch in channels_set:
+                    selected_data = []
+                    labels = []
+                    run_ids = []
+                    for run_id, data in scores_dict[metric].get(stream, {}).items():
+                        if ch not in set(np.atleast_1d(data.channel.values)):
+                            continue
+                        selected_data.append(data.sel(channel=ch))
+                        label = runs[run_id].get("label", run_id)
+                        if label != run_id:
+                            label = f"{run_id} - {label}"
+                        labels.append(label)
+                        run_ids.append(run_id)
+
+                    if selected_data:
+                        _logger.info(f"Creating plot for {metric} - {stream} - {ch}")
+                        name = "_".join(["compare", metric] + sorted(set(run_ids)) + [stream, ch])
+                        plotter.plot(
+                            selected_data,
+                            labels,
+                            tag=name,
+                            x_dim="forecast_step",
+                            y_dim=metric,
+                            print_summary=print_summary,
+                        )
+
+        elif plot_type == "ratio":
+            for stream in streams_set:
                 selected_data = []
                 labels = []
                 run_ids = []
-                for run_id, data in scores_dict[metric][stream].items():
-                    # fill list of plots with one xarray per run_id, if it exists.
-                    if ch not in set(np.atleast_1d(data.channel.values)):
+                for run_id in runs:
+                    data = scores_dict.get(metric, {}).get(stream, {}).get(run_id)
+                    if data is None:
                         continue
-
-                    selected_data.append(data.sel(channel=ch))
-                    labels.append(runs[run_id].get("label", run_id))
+                    selected_data.append(data)
+                    label = runs[run_id].get("label", run_id)
+                    if label != run_id:
+                        label = f"{run_id} - {label}"
+                    labels.append(label)
                     run_ids.append(run_id)
-                # if there is data for this stream and channel, plot it
-                if selected_data:
-                    _logger.info(f"Creating plot for {metric} - {stream} - {ch}.")
-                    name = "_".join(
-                        [metric] + sorted(list(set(run_ids))) + [stream, ch]
-                    )
-                    plotter.plot(
+
+                if len(selected_data) > 1:
+                    _logger.info(f"Creating Ratio plot for {metric} - {stream}")
+                    name = "_".join(["ratio",metric] + sorted(set(run_ids)) + [stream])
+                    plotter.ratio_plot(
                         selected_data,
                         labels,
                         tag=name,
-                        x_dim="forecast_step",
+                        x_dim="channel",
                         y_dim=metric,
                         print_summary=print_summary,
                     )
-
+        else:
+            raise ValueError(f"Invalid plot_type: {plot_type}")
+    
 
 ############# Utility functions ############
 

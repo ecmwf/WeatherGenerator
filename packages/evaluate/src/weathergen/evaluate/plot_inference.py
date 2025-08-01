@@ -112,6 +112,12 @@ if __name__ == "__main__":
 
 
 # plot summary
-if scores_dict and cfg.summary_plots:
+if scores_dict and cfg.plot_summary:
     _logger.info("Started creating summary plots..")
-    plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)
+    print_vals = cfg.plot_summary.print_summary
+    if cfg.plot_summary.line_plots:
+        plot_summary(cfg, scores_dict, print_summary=print_vals, plot_type = "summary")
+    if cfg.plot_summary.ratio_plots:
+        plot_summary(cfg, scores_dict, print_summary=print_vals, plot_type = "ratio")
+    if cfg.plot_summary.bar_plot:
+        bar_plot(cfg, scores_dict)

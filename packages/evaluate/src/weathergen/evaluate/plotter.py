@@ -355,6 +355,34 @@ class LinePlots:
                 _logger.info("--------------------------")
         return
 
+    def _preprocess_data(self, data, x_dim):
+        """Average all dims except x_dim and sort."""
+        if x_dim not in data.dims:
+            raise ValueError(f"x dimension '{x_dim}' not in {data.dims}")
+
+        non_x_dims = [dim for dim in data.dims if dim != x_dim]
+        if any(data.sizes.get(dim, 1) > 1 for dim in non_x_dims):
+            logging.info(f"Averaging over dimensions: {non_x_dims}")
+        
+        return data.mean(dim=non_x_dims, skipna=True).sortby(x_dim)
+
+    def _plot_base(self, fig, tag, x_dim, y_dim, print_summary, line = None):
+        """Apply labels, title, legend, save and optionally print summary."""
+        plt.xlabel("".join(c if c.isalnum() else " " for c in x_dim))
+        plt.ylabel("".join(c if c.isalnum() else " " for c in y_dim))
+        plt.title("".join(c if c.isalnum() else " " for c in tag))
+        plt.legend(frameon=False)
+
+        if print_summary:
+            _logger.info(f"Summary values for {tag}")
+            self.print_all_points_from_graph(fig)
+        
+        if line:
+            plt.axhline(y=line, color='black', linestyle='--', linewidth=1)
+
+        plt.savefig(f"{self.out_plot_dir.joinpath(tag)}.{self.image_format}")
+        plt.close()
+
     def plot(
         self,
         data: xr.DataArray | list,
@@ -363,46 +391,13 @@ class LinePlots:
         x_dim: str = "forecast_step",
         y_dim: str = "value",
         print_summary: bool = False,
-    ) -> None:
-        """
-        Plot a line graph comparing multiple datasets.
-
-        Parameters
-        ----------
-        data:
-            DataArray or list of DataArrays to be plotted
-        labels:
-            Label or list of labels for each dataset
-        tag:
-            Tag to be added to the plot title and filename
-        x_dim:
-            Dimension to be used for the x-axis. The code will average over all other dimensions.
-        y_dim:
-            Name of the dimension to be used for the y-axis.
-        print_summary:
-            If True, print a summary of the values from the graph.
-        """
+        ) -> None:
 
         data_list, label_list = self._check_lengths(data, labels)
-
-        assert x_dim in data_list[0].dims, (
-            "x dimension '{x_dim}' not found in data dimensions {data_list[0].dims}"
-        )
-
         fig = plt.figure(figsize=(12, 6), dpi=self.dpi_val)
 
         for i, data in enumerate(data_list):
-            non_zero_dims = [
-                dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1
-            ]
-            if non_zero_dims:
-                logging.info(
-                    f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
-                )
-            averaged = data.mean(
-                dim=[dim for dim in data.dims if dim != x_dim], skipna=True
-            ).sortby(x_dim)
-
+            averaged = self._preprocess_data(data, x_dim)
             plt.plot(
                 averaged[x_dim],
                 averaged.values,
@@ -411,25 +406,42 @@ class LinePlots:
                 linestyle="-",
             )
 
-        xlabel = "".join(c if c.isalnum() else " " for c in x_dim)
-        plt.xlabel(xlabel)
+        self._plot_base(fig, tag, x_dim, y_dim, print_summary)
 
-        ylabel = "".join(c if c.isalnum() else " " for c in y_dim)
-        plt.ylabel(ylabel)
+    def ratio_plot(
+        self,
+        data: xr.DataArray | list,
+        labels: str | list,
+        tag: str = "",
+        x_dim: str = "forecast_step",
+        y_dim: str = "value",
+        print_summary: bool = False,
+    ) -> None:
 
-        title = "".join(c if c.isalnum() else " " for c in tag)
-        plt.title(title)
-        plt.legend(frameon=False)
+        data_list, label_list = self._check_lengths(data, labels)
+        assert all(dl.dims == data_list[0].dims for dl in data_list), (
+            "reference and dataset list do not have the same dimensions."
+        )
 
-        if print_summary:
-            _logger.info(f"Summary values for {tag}")
-            self.print_all_points_from_graph(fig)
+        fig = plt.figure(figsize=(12, 6), dpi=self.dpi_val)
 
-        parts = ["compare", tag]
-        name = "_".join(filter(None, parts))
-        plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
-        plt.close()
+        ref = self._preprocess_data(data_list[0], x_dim)
 
+        for i, data in enumerate(data_list[1:]):
+            num = self._preprocess_data(data, x_dim)
+
+            comm_ch = list(set(num.coords["channel"].values) & set(ref.coords["channel"].values))
+            ratio = num.sel(channel=comm_ch) / ref.sel(channel=comm_ch)
+
+            plt.plot(
+                comm_ch,
+                ratio.values,
+                label=label_list[i + 1],
+                marker="o",
+                linestyle="-",
+            )
+
+        self._plot_base(fig, tag, x_dim, y_dim, print_summary, line = 1.)
 
 class DefaultMarkerSize:
     """
