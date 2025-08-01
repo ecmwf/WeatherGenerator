@@ -349,7 +349,6 @@ def set_paths(config: Config) -> Config:
     config.run_path = config.get("run_path", None) or str(_DEFAULT_RESULT_PATH)
     config.model_path = config.get("model_path", None) or str(_DEFAULT_MODEL_PATH)
 
-
     return config
 
 

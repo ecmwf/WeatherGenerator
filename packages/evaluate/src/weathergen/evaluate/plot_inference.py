@@ -13,8 +13,8 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
-from omegaconf import OmegaConf, DictConfig
-from weathergen.evaluate.plotter import Plotter
+from omegaconf import DictConfig, OmegaConf
+
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
@@ -37,14 +37,12 @@ def run_main(cfg: DictConfig) -> None:
     out_scores_dir = Path(cfg.output_scores_dir)
     out_scores_dir.mkdir(parents=True, exist_ok=True)
 
-    results_dir = Path(cfg.results_dir)
     metrics = cfg.evaluation.metrics
 
     # to get a structure like: scores_dict[metric][stream][run_id] = plot
     scores_dict = defaultdict(lambda: defaultdict(dict))
 
     for run_id, run in runs.items():
-        plotter = Plotter(cfg, run_id)
         _logger.info(f"RUN {run_id}: Getting data...")
 
         streams = run["streams"].keys()
@@ -56,7 +54,7 @@ def run_main(cfg: DictConfig) -> None:
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                plots = plot_data(cfg, run_id, stream, stream_dict)
+                plot_data(cfg, run_id, stream, stream_dict)
 
             if stream_dict.get("evaluation"):
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
@@ -98,7 +96,6 @@ def run_main(cfg: DictConfig) -> None:
     if scores_dict and cfg.summary_plots:
         _logger.info("Started creating summary plots..")
         plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)
-
 
 
 if __name__ == "__main__":
