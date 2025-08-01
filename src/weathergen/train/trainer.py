@@ -35,6 +35,8 @@ from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TRAIN, VAL, TrainLogger
+from weathergen.utils.profiler import ProfilerSection
+
 #from weathergen.utils.validation_io import write_output
 
 _logger = logging.getLogger(__name__)
@@ -539,7 +541,8 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
+                with ProfilerSection("forward", profile=True):
+                    preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
 
                 loss, _ = self.compute_loss(
                     self.loss_fcts,
@@ -552,16 +555,19 @@ class Trainer(TrainerBase):
                 )
 
             # backward pass
-            self.grad_scaler.scale(loss).backward()
+            with ProfilerSection("backward", profile=True):
+                self.grad_scaler.scale(loss).backward()
 
             # gradient clipping
-            self.grad_scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), max_norm=cf.grad_clip)
+            with ProfilerSection("gradient clipping", profile=True):
+                self.grad_scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), max_norm=cf.grad_clip)
 
             # optimizer step
-            self.grad_scaler.step(self.optimizer)
-            self.grad_scaler.update()
-            self.optimizer.zero_grad()
+            with ProfilerSection("optimizer step", profile=True):
+                self.grad_scaler.step(self.optimizer)
+                self.grad_scaler.update()
+                self.optimizer.zero_grad()
 
             # update learning rate
             self.lr_scheduler.step()
