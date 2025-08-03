@@ -1,0 +1,8 @@
+train : 
+  plot :
+    g12p39n6:
+      slurm_id: 0
+      description: "predict pl from ml"
+    o4s1izuj:
+      slurm_id: 0
+      description: "predict pl control"
