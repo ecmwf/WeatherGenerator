@@ -10,7 +10,7 @@
 ERA5pl :
   type : anemoi
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr']
-  source : []
+  source : ['10u']
   target : ['2t', '10u', '10v', 't_850', 'u_850', 'v_850', 'q_850', 'z_500']
   loss_weight : 1.
   masking_rate : 0.6
