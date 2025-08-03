@@ -6,3 +6,7 @@ train :
     o4s1izuj:
       slurm_id: 0
       description: "predict pl control"
+    uht31qd4:
+      slurm_id: 0
+      description: "predict pl control after rebase"
+    
