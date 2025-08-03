@@ -188,7 +188,7 @@ class TokenizerMasking:
         ]
 
         # Use the masker to get source tokens and the selection mask for the target
-        source_tokens_cells = self.masker.mask_source(tokenized_data)
+        source_tokens_cells = self.masker.mask_source(tokenized_data, coords, geoinfos, source)
 
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
 
