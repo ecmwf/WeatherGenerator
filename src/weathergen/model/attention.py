@@ -310,6 +310,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         lnorm = norm if with_qk_lnorm else torch.nn.Identity
         self.lnorm_q = lnorm(self.dim_head_proj, eps=norm_eps)
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
+        self.lnorm_kv = lnorm(self.dim_embed_kv, eps=norm_eps)
 
         self.dtype = attention_dtype
         assert with_flash, "Only flash attention supported at the moment"
@@ -319,6 +320,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         if self.with_residual:
             x_q_in = x_q
         x_q = x_q if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
+        x_kv = self.lnorm_kv(x_kv)
 
         ## project onto heads and q,k,v and
         #  ensure these are 4D tensors as required for flash attention
