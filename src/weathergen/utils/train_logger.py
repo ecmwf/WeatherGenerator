@@ -19,9 +19,10 @@ from typing import Literal
 
 import numpy as np
 import polars as pl
+from torch import Tensor
 
 import weathergen.utils.config as config
-from weathergen.utils.metrics import read_metrics_file
+from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 
 _weathergen_timestamp = "weathergen.timestamp"
 _weathergen_reltime = "weathergen.reltime"
@@ -37,6 +38,26 @@ RunId = str
 # All the stages currently implemented:
 TRAIN: Stage = "train"
 VAL: Stage = "val"
+
+
+@dataclass
+class Metrics:
+    run_id: RunId
+    stage: Stage
+    train: pl.DataFrame
+    val: pl.DataFrame
+    system: pl.DataFrame
+
+    def by_mode(self, s: str) -> pl.DataFrame:
+        match s:
+            case "train":
+                return self.train
+            case "val":
+                return self.val
+            case "system":
+                return self.system
+            case _:
+                raise ValueError(f"Unknown mode {s}. Use 'train', 'val' or 'system'.")
 
 
 class TrainLogger:
@@ -66,38 +87,54 @@ class TrainLogger:
         # TODO: performance: we repeatedly open the file for each call. Better for multiprocessing
         # but we can probably do better and rely for example on the logging module.
 
-        with open(self.path_run / "metrics.json", "ab") as f:
+        metrics_path = get_train_metrics_path(base_path=Path("results"), run_id=self.cf.run_id)
+        with open(metrics_path, "ab") as f:
             s = json.dumps(clean_metrics) + "\n"
             f.write(s.encode("utf-8"))
 
     #######################################
-    def add_train(self, samples, lr, loss_avg, stddev_avg, perf_gpu=0.0, perf_mem=0.0) -> None:
+    def add_train(
+        self,
+        samples: int,
+        lr: float,
+        avg_loss: Tensor,
+        losses_all: dict[str, Tensor],
+        stddev_all: dict[str, Tensor],
+        perf_gpu: float = 0.0,
+        perf_mem: float = 0.0,
+    ) -> None:
         """
         Log training data
         """
+        metrics: dict[str, float] = dict(num_samples=samples)
 
-        metrics = dict(num_samples=samples)
-
-        log_vals = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
+        log_vals: list[float] = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
         log_vals += [samples]
 
-        metrics["loss_avg_0_mean"] = np.nanmean(loss_avg[0])
+        metrics["loss_avg_mean"] = avg_loss.nanmean().item()
         metrics["learning_rate"] = lr
         metrics["num_samples"] = int(samples)
-        log_vals += [np.nanmean(loss_avg[0])]
+        log_vals += [avg_loss.nanmean().item()]
         log_vals += [lr]
 
-        for i_obs, st in enumerate(self.cf.streams):
+        for st in self.cf.streams:
             st_name = _clean_name(st["name"])
+            loss = losses_all[st_name]
+            stddev = stddev_all[st_name]
+
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts):
                 lf_name = _clean_name(lf_name)
-                metrics[_key_loss(st_name, lf_name)] = loss_avg[j, i_obs]
-                if len(stddev_avg) > 0:
-                    metrics[_key_stddev(st_name)] = stddev_avg[i_obs]
-                log_vals += [loss_avg[j, i_obs]]
-        if len(stddev_avg) > 0:
-            for i_obs, _rt in enumerate(self.cf.streams):
-                log_vals += [stddev_avg[i_obs]]
+                metrics[_key_loss(st["name"], lf_name)] = loss[:, :, j].nanmean().item()
+
+                for k, ch_n in enumerate(st.train_target_channels):
+                    metrics[_key_loss_chn(st["name"], lf_name, ch_n)] = (
+                        loss[:, k, j].nanmean().item()
+                    )
+                log_vals += [loss[:, :, j].nanmean().item()]
+
+            metrics[_key_stddev(st_name)] = stddev.nanmean().item()
+
+            log_vals += [stddev.nanmean().item()]
 
         with open(self.path_run / f"{self.cf.run_id}_train_log.txt", "ab") as f:
             np.savetxt(f, log_vals)
@@ -114,24 +151,30 @@ class TrainLogger:
             np.savetxt(f, log_vals)
 
     #######################################
-    def add_val(self, samples, loss_avg, stddev_avg) -> None:
+    def add_val(
+        self, samples: int, losses_all: dict[str, Tensor], stddev_all: dict[str, Tensor]
+    ) -> None:
         """
         Log validation data
         """
 
-        metrics = dict(num_samples=int(samples))
+        metrics: dict[str, float] = dict(num_samples=int(samples))
 
-        log_vals = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
+        log_vals: list[float] = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
         log_vals += [samples]
 
-        for i_obs, st in enumerate(self.cf.streams):
-            for j, (l_n, _) in enumerate(self.cf.loss_fcts):
-                metrics[_key_loss(st["name"], l_n)] = loss_avg[j, i_obs]
-                log_vals += [loss_avg[j, i_obs]]
-        if len(stddev_avg) > 0:
-            for i_obs, st in enumerate(self.cf.streams):
-                metrics[_key_stddev(st["name"])] = stddev_avg[i_obs]
-                log_vals += [stddev_avg[i_obs]]
+        for st in self.cf.streams:
+            st_name = _clean_name(st["name"])
+            loss = losses_all[st_name]
+            stddev = stddev_all[st_name]
+            for j, (lf_name, _) in enumerate(self.cf.loss_fcts_val):
+                metrics[_key_loss(st_name, lf_name)] = loss[:, :, j].nanmean().item()
+                for k, ch_n in enumerate(st.val_target_channels):
+                    metrics[_key_loss_chn(st_name, lf_name, ch_n)] = loss[:, k, j].nanmean().item()
+                log_vals += [loss[:, :, j].nanmean().item()]
+
+            metrics[_key_stddev(st_name)] = stddev.nanmean().item()
+            log_vals += [stddev.nanmean().item()]
 
         self.log_metrics("val", metrics)
         with open(self.path_run / (self.cf.run_id + "_val_log.txt"), "ab") as f:
@@ -139,7 +182,7 @@ class TrainLogger:
 
     #######################################
     @staticmethod
-    def read(run_id, model_path: str, epoch=-1):
+    def read(run_id: str, model_path: str, epoch: int = -1) -> Metrics:
         """
         Read data for run_id
         """
@@ -157,9 +200,9 @@ class TrainLogger:
 
         # define cols for training
         cols_train = ["dtime", "samples", "mse", "lr"]
-        cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_0_mean", "learning_rate"]
+        cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
         for si in cf.streams:
-            for _j, lf in enumerate(cf.loss_fcts):
+            for lf in cf.loss_fcts:
                 cols1 += [_key_loss(si["name"], lf[0])]
                 cols_train += [
                     si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
@@ -178,7 +221,13 @@ class TrainLogger:
             with open(fname_log_train, "rb") as f:
                 log_train = np.loadtxt(f, delimiter=",")
             log_train = log_train.reshape((log_train.shape[0] // len(cols_train), len(cols_train)))
-        except (TypeError, AttributeError, IndexError, ZeroDivisionError, ValueError) as e:
+        except (
+            TypeError,
+            AttributeError,
+            IndexError,
+            ZeroDivisionError,
+            ValueError,
+        ) as e:
             _logger.warning(
                 (
                     f"Warning: no training data loaded for run_id={run_id}",
@@ -211,7 +260,7 @@ class TrainLogger:
         cols_val = ["dtime", "samples"]
         cols2 = [_weathergen_timestamp, "num_samples"]
         for si in cf.streams:
-            for _, lf in enumerate(cf.loss_fcts_val):
+            for lf in cf.loss_fcts_val:
                 cols_val += [
                     si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
                 ]
@@ -230,7 +279,13 @@ class TrainLogger:
             with open(fname_log_val, "rb") as f:
                 log_val = np.loadtxt(f, delimiter=",")
             log_val = log_val.reshape((log_val.shape[0] // len(cols_val), len(cols_val)))
-        except (TypeError, AttributeError, IndexError, ZeroDivisionError, ValueError) as e:
+        except (
+            TypeError,
+            AttributeError,
+            IndexError,
+            ZeroDivisionError,
+            ValueError,
+        ) as e:
             _logger.warning(
                 (
                     f"Warning: no validation data loaded for run_id={run_id}",
@@ -265,7 +320,13 @@ class TrainLogger:
             with open(fname_perf_val, "rb") as f:
                 log_perf = np.loadtxt(f, delimiter=",")
             log_perf = log_perf.reshape((log_perf.shape[0] // len(cols_perf), len(cols_perf)))
-        except (TypeError, AttributeError, IndexError, ZeroDivisionError, ValueError) as e:
+        except (
+            TypeError,
+            AttributeError,
+            IndexError,
+            ZeroDivisionError,
+            ValueError,
+        ) as e:
             _logger.warning(
                 (
                     f"Warning: no validation data loaded for run_id={run_id}",
@@ -301,26 +362,6 @@ class TrainLogger:
         return Metrics(run_id, "train", log_train_df, metrics_val_df, metrics_system_df)
 
 
-@dataclass
-class Metrics:
-    run_id: RunId
-    stage: Stage
-    train: pl.DataFrame
-    val: pl.DataFrame
-    system: pl.DataFrame
-
-    def by_mode(self, s: str) -> pl.DataFrame:
-        match s:
-            case "train":
-                return self.train
-            case "val":
-                return self.val
-            case "system":
-                return self.system
-            case _:
-                raise ValueError(f"Unknown mode {s}. Use 'train', 'val' or 'system'.")
-
-
 def read_metrics(
     cf: config.Config,
     run_id: RunId | None,
@@ -341,8 +382,9 @@ def read_metrics(
         run_id = cf.run_id
     assert run_id, "run_id must be provided"
 
+    metrics_path = get_train_metrics_path(base_path=results_path, run_id=run_id)
     # TODO: this should be a config option
-    df = read_metrics_file(results_path / run_id / "metrics.json")
+    df = read_metrics_file(metrics_path)
     if stage is not None:
         df = df.filter(pl.col("stage") == stage)
     df = df.drop("stage")
@@ -370,6 +412,11 @@ def clean_df(df, columns: list[str] | None):
 
     if columns:
         columns = list(set(columns))  # remove duplicates
+        # Backwards compatibility of "loss_avg_mean" (old) and "loss_avg_0_mean" (new) metric name
+        if "loss_avg_mean" not in df.columns:
+            idcs = [i for i in range(len(columns)) if columns[i] == "loss_avg_mean"]
+            if len(idcs) > 0:
+                columns[idcs[0]] = "loss_avg_0_mean"
         df = df.select(columns)
         # Remove all rows where all columns are null
         df = df.filter(~pl.all_horizontal(pl.col(c).is_null() for c in columns))
@@ -386,6 +433,13 @@ def _key_loss(st_name: str, lf_name: str) -> str:
     st_name = _clean_name(st_name)
     lf_name = _clean_name(lf_name)
     return f"stream.{st_name}.loss_{lf_name}.loss_avg"
+
+
+def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
+    st_name = _clean_name(st_name)
+    lf_name = _clean_name(lf_name)
+    ch_name = _clean_name(ch_name)
+    return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
 
 
 def _key_stddev(st_name: str) -> str:
