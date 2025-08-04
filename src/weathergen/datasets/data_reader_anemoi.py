@@ -229,9 +229,6 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         channels = self.stream_info.get(ch_type)
         channels_exclude = self.stream_info.get(ch_type + "_exclude", [])
-        # sanity check
-        not_empty = len(channels) > 0 if channels is not None else True
-        assert not_empty, "channels are empty; at least one channels must be present."
 
         chs_idx = np.sort(
             [
