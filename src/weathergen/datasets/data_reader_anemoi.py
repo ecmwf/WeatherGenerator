@@ -157,6 +157,7 @@ class DataReaderAnemoi(DataReaderTimestep):
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
+        assert t_idxs[0] >= 0, "index must be non-negative"
         didx_start = t_idxs[0]
         # End is inclusive
         didx_end = t_idxs[-1] + 1
@@ -202,7 +203,7 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         return rd
 
-    def select_channels(self, ds0: anemoi_datasets, ch_type: str) -> NDArray[np.int32]:
+    def select_channels(self, ds0: anemoi_datasets, ch_type: str) -> NDArray[np.int64]:
         """
         Select source or target channels
 

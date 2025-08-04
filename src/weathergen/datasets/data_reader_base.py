@@ -11,9 +11,9 @@ import datetime
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import TypeAlias
 
 import numpy as np
+import pandas as pd
 from numpy import datetime64, timedelta64
 from numpy.typing import NDArray
 
@@ -22,16 +22,16 @@ from weathergen.utils.better_abc import ABCMeta, abstract_attribute
 _logger = logging.getLogger(__name__)
 
 # The numpy date time 64 time (nanosecond precision)
-NPDT64: TypeAlias = datetime64
+type NPDT64 = datetime64
 # The numpy delta time 64 time (nanosecond precision)
-NPTDel64: TypeAlias = timedelta64
+type NPTDel64 = timedelta64
 
-DType: TypeAlias = np.float32  # The type for the data in the datasets.
+type DType = np.float32  # The type for the data in the datasets.
 
 """
 The type for indexing into datasets. It is a multiple of hours.
 """
-TIndex: TypeAlias = np.int32
+type TIndex = np.int64
 
 
 _DT_ZERO = np.datetime64("1850-01-01T00:00")
@@ -75,18 +75,29 @@ def str_to_datetime64(s: str | int | NPDT64) -> NPDT64:
     return np.datetime64(datetime.datetime.strptime(str(s), format_str))
 
 
-def str_to_timedelta(s: str | datetime.timedelta) -> datetime.timedelta:
+def str_to_timedelta(s: str | datetime.timedelta) -> pd.Timedelta:
     """
-    Convert a string to a timedelta object.
-    The format is expected to be "HH:MM:SS".
+    Convert a string or datetime.timedelta object to a pd.Timedelta object.
+    The string format is expected to be "HH:MM:SS".
+    Hours are not limited to two digits. Minutes and seconds must be in the range 0-59.
     """
 
+    if not isinstance(s, str) and not isinstance(s, datetime.timedelta):
+        raise TypeError("Input must be a string or a datetime.timedelta object")
     if isinstance(s, datetime.timedelta):
-        return s
-    format_str = "%H:%M:%S"
-    assert isinstance(s, str), type(s)
-    t = datetime.datetime.strptime(s, format_str)
-    return datetime.timedelta(hours=t.hour, minutes=t.minute, seconds=t.second)
+        # If input is a timedelta object, convert it directly to pd.Timedelta
+        return pd.Timedelta(s)
+    if isinstance(s, str):
+        # ensure that the string is in "HH:MM:SS" format
+        parts = s.split(":")
+        if not len(parts) == 3:
+            raise ValueError("String must be in 'HH:MM:SS' format")
+        if not all(part.isdigit() for part in parts):
+            raise ValueError("String must be in 'HH:MM:SS' format")
+        # ensure that minutes and seconds do not exceed 59
+        if int(parts[1]) > 59 or int(parts[2]) > 59:
+            raise ValueError("Minutes and seconds must be in the range 0-59")
+    return pd.to_timedelta(s)
 
 
 class TimeWindowHandler:
@@ -136,8 +147,8 @@ class TimeWindowHandler:
             start and end of temporal window
         """
 
-        idx_start: TIndex = np.int32(0)
-        idx_end = np.int32((self.t_end - self.t_start) // self.t_window_step)
+        idx_start: TIndex = np.int64(0)
+        idx_end = np.int64((self.t_end - self.t_start) // self.t_window_step)
         assert idx_start <= idx_end, f"time window idxs invalid: {idx_start} <= {idx_end}"
 
         return TimeIndexRange(idx_start, idx_end)
@@ -596,7 +607,7 @@ class DataReaderTimestep(DataReaderBase):
         self.data_end_time = data_end_time
         self.period = period
 
-    def _get_dataset_idxs(self, idx: TIndex) -> tuple[NDArray[np.int32], DTRange]:
+    def _get_dataset_idxs(self, idx: TIndex) -> tuple[NDArray[np.int64], DTRange]:
         """
         Get dataset indexes for a given time window index.
 
@@ -607,7 +618,7 @@ class DataReaderTimestep(DataReaderBase):
 
         Returns
         -------
-        NDArray[np.int32]
+        NDArray[np.int64]
             Array of dataset indexes corresponding to the time window.
         """
         return get_dataset_indexes_timestep(
@@ -631,7 +642,7 @@ def get_dataset_indexes_timestep(
     period: NPTDel64,
     idx: TIndex,
     tw_handler: TimeWindowHandler,
-) -> tuple[NDArray[np.int32], DTRange]:
+) -> tuple[NDArray[np.int64], DTRange]:
     """
     Get dataset indexes for a given time window index, when the dataset is periodic.
 
@@ -651,7 +662,7 @@ def get_dataset_indexes_timestep(
 
     Returns
     -------
-    NDArray[np.int32]
+    NDArray[np.int64]
         Array of dataset indexes corresponding to the time window.
     """
 
@@ -667,7 +678,7 @@ def get_dataset_indexes_timestep(
         or dtr.end > data_end_time
         or (data_end_time is not None and dtr.start > data_end_time)
     ):
-        return (np.array([], dtype=np.int32), dtr)
+        return (np.array([], dtype=np.int64), dtr)
 
     # relative time in dataset
     delta_t_start = dtr.start - data_start_time
@@ -680,9 +691,9 @@ def get_dataset_indexes_timestep(
     if (delta_t_start % period) > np.timedelta64(0, "s"):
         # empty window in between two timesteps
         if start_didx == end_didx:
-            return (np.array([], dtype=np.int32), dtr)
+            return (np.array([], dtype=np.int64), dtr)
         start_didx += 1
 
     end_didx = start_didx + int((dtr.end - dtr.start - t_epsilon) / period)
 
-    return (np.arange(start_didx, end_didx + 1, dtype=np.int32), dtr)
+    return (np.arange(start_didx, end_didx + 1, dtype=np.int64), dtr)

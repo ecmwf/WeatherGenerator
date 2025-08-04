@@ -17,7 +17,7 @@ from weathergen.model.norms import AdaLayerNorm, RMSNorm
 
 
 ####################################################################################################
-class MultiSelfAttentionHead_Varlen(torch.nn.Module):
+class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     #########################################
     def __init__(
         self,
@@ -25,6 +25,7 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
         num_heads,
         dim_head_proj=None,
         dropout_rate=0.0,
+        with_residual=True,
         with_qk_lnorm=True,
         with_flash=True,
         norm_type="LayerNorm",
@@ -33,11 +34,12 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
     ):
-        super(MultiSelfAttentionHead_Varlen, self).__init__()
+        super(MultiSelfAttentionHeadVarlen, self).__init__()
 
         self.num_heads = num_heads
         self.dropout_rate = dropout_rate
         self.with_flash = with_flash
+        self.with_residual = with_residual
         self.softcap = softcap
 
         assert dim_embed % num_heads == 0
@@ -50,8 +52,6 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
 
         if dim_aux is not None:
             self.lnorm = AdaLayerNorm(dim_embed, dim_aux, norm_eps=norm_eps)
-        else:
-            self.lnorm = norm(dim_embed, eps=norm_eps)
         self.proj_heads_q = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_k = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_v = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
@@ -71,7 +71,7 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
     #########################################
     def forward(self, x, x_lens, ada_ln_aux=None):
         x_in = x
-        x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+        x = x if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
 
         ## project onto heads and q,k,v and
         #  ensure these are 4D tensors as required for flash attention
@@ -94,12 +94,16 @@ class MultiSelfAttentionHead_Varlen(torch.nn.Module):
             dropout_p=self.dropout_rate,
         )
 
-        # return x_in + self.dropout( self.proj_out( outs.flatten( -2, -1)) )
-        return x_in + self.proj_out(outs.flatten(-2, -1))
+        x = self.proj_out(outs.flatten(-2, -1))
+
+        if self.with_residual:
+            x = x_in + x
+
+        return x
 
 
 ####################################################################################################
-class MultiSelfAttentionHead_Varlen_Flex(torch.nn.Module):
+class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
     #########################################
     def __init__(
         self,
@@ -107,6 +111,7 @@ class MultiSelfAttentionHead_Varlen_Flex(torch.nn.Module):
         num_heads,
         dim_head_proj=None,
         dropout_rate=0.0,
+        with_residual=True,
         with_qk_lnorm=True,
         with_flash=True,
         norm_type="LayerNorm",
@@ -114,7 +119,7 @@ class MultiSelfAttentionHead_Varlen_Flex(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
     ):
-        super(MultiSelfAttentionHead_Varlen_Flex, self).__init__()
+        super(MultiSelfAttentionHeadVarlenFlex, self).__init__()
 
         self.num_heads = num_heads
         self.with_flash = with_flash
@@ -167,11 +172,15 @@ class MultiSelfAttentionHead_Varlen_Flex(torch.nn.Module):
 
         outs = self.compiled_flex_attention(qs, ks, vs).transpose(1, 2).squeeze()
 
-        return x_in + self.dropout(self.proj_out(outs.flatten(-2, -1)))
+        x = self.proj_out(outs.flatten(-2, -1))
+        if self.with_residual:
+            x = x_in + x
+
+        return x
 
 
 ####################################################################################################
-class MultiSelfAttentionHead_Local(torch.nn.Module):
+class MultiSelfAttentionHeadLocal(torch.nn.Module):
     #########################################
     def __init__(
         self,
@@ -189,7 +198,7 @@ class MultiSelfAttentionHead_Local(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
     ):
-        super(MultiSelfAttentionHead_Local, self).__init__()
+        super(MultiSelfAttentionHeadLocal, self).__init__()
 
         self.num_heads = num_heads
         self.with_flash = with_flash
@@ -249,7 +258,7 @@ class MultiSelfAttentionHead_Local(torch.nn.Module):
 
 
 ####################################################################################################
-class MultiCrossAttentionHead_Varlen(torch.nn.Module):
+class MultiCrossAttentionHeadVarlen(torch.nn.Module):
     #########################################
     def __init__(
         self,
@@ -267,7 +276,7 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
     ):
-        super(MultiCrossAttentionHead_Varlen, self).__init__()
+        super(MultiCrossAttentionHeadVarlen, self).__init__()
 
         self.num_heads = num_heads
         self.dropout_rate = dropout_rate
@@ -284,9 +293,6 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
 
         if dim_aux is not None:
             self.lnorm_in_q = AdaLayerNorm(dim_embed_q, dim_aux, norm_eps=norm_eps)
-        else:
-            self.lnorm_in_q = norm(dim_embed_q, eps=norm_eps)
-        self.lnorm_in_kv = norm(dim_embed_kv, eps=norm_eps)
 
         self.proj_heads_q = torch.nn.Linear(dim_embed_q, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_k = torch.nn.Linear(
@@ -309,11 +315,10 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
         assert with_flash, "Only flash attention supported at the moment"
 
     #########################################
-    def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
+    def forward(self, x_q, x_kv, x_lens=None, x_kv_lens=None, ada_ln_aux=None):
         if self.with_residual:
             x_q_in = x_q
-        x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
-        x_kv = self.lnorm_in_kv(x_kv)
+        x_q = x_q if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
 
         ## project onto heads and q,k,v and
         #  ensure these are 4D tensors as required for flash attention
@@ -324,7 +329,7 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
         vs = self.proj_heads_v(x_kv).reshape(s)
 
         if x_kv_lens is not None:
-            cum_x_q_lens = torch.cumsum(x_q_lens, 0, dtype=torch.int32)
+            cum_x_q_lens = torch.cumsum(x_lens, 0, dtype=torch.int32)
             cum_x_kv_lens = torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
             outs = flash_attn_varlen_func(
                 qs,
@@ -332,7 +337,7 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
                 vs,
                 cum_x_q_lens,
                 cum_x_kv_lens,
-                x_q_lens.max(),
+                x_lens.max(),
                 x_kv_lens.max(),
                 softcap=self.softcap,
                 dropout_p=self.dropout_rate,
@@ -358,7 +363,7 @@ class MultiCrossAttentionHead_Varlen(torch.nn.Module):
 
 
 ####################################################################################################
-class MultiCrossAttentionHead_Varlen_SlicedQ(torch.nn.Module):
+class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
     #########################################
     def __init__(
         self,
@@ -377,7 +382,7 @@ class MultiCrossAttentionHead_Varlen_SlicedQ(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
     ):
-        super(MultiCrossAttentionHead_Varlen_SlicedQ, self).__init__()
+        super(MultiCrossAttentionHeadVarlenSlicedQ, self).__init__()
 
         self.num_slices_q = num_slices_q
         self.num_heads = num_heads
@@ -454,14 +459,13 @@ class MultiCrossAttentionHead_Varlen_SlicedQ(torch.nn.Module):
                     vs,
                     cum_x_q_lens,
                     cum_x_kv_lens,
-                    x_q_lens.max(),
-                    x_kv_lens.max(),
+                    x_q_lens.max().item(),
+                    x_kv_lens.max().item(),
                     softcap=self.softcap,
                     dropout_p=self.dropout_rate,
                 )
             ]
 
-        # outs = self.dropout( self.proj_out( torch.stack(outs).transpose(1,0).flatten( -2, -1)) )
         outs = self.proj_out(torch.stack(outs).transpose(1, 0).flatten(-2, -1))
         if self.with_residual:
             outs = x_q_in + outs.reshape(x_q_in.shape)
@@ -479,7 +483,9 @@ class MultiSelfAttentionHead(torch.nn.Module):
         dim_head_proj=None,
         dropout_rate=0.0,
         with_qk_lnorm=True,
+        with_residual=True,
         with_flash=True,
+        softcap=0.0,
         norm_type="LayerNorm",
         dim_aux=None,
         norm_eps=1e-5,
@@ -490,7 +496,10 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.num_heads = num_heads
         self.with_flash = with_flash
         self.dropout_rate = dropout_rate
+        self.with_residual = with_residual
+        self.softcap = softcap
 
+        assert with_flash, "You have to use flash attention"
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
 
@@ -502,57 +511,136 @@ class MultiSelfAttentionHead(torch.nn.Module):
         if dim_aux is not None:
             self.lnorm = AdaLayerNorm(dim_embed, dim_aux, norm_eps=norm_eps)
         else:
-            self.lnorm = norm(dim_embed, eps=norm_eps)
+            self.lnorm = norm(dim_embed)
         self.proj_heads_q = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_k = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_v = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_out = torch.nn.Linear(dim_embed, dim_embed, bias=False)
-        self.dropout = (
-            torch.nn.Dropout(p=dropout_rate) if dropout_rate > 0.0 else torch.nn.Identity()
-        )
 
         lnorm = norm if with_qk_lnorm else torch.nn.Identity
-        self.lnorm_q = lnorm(self.dim_head_proj, eps=norm_eps)
-        self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
+        self.lnorm_q = lnorm(self.dim_head_proj)
+        self.lnorm_k = lnorm(self.dim_head_proj)
 
         self.dtype = attention_dtype
-        if with_flash:
-            self.att = torch.nn.functional.scaled_dot_product_attention
-        else:
-            self.att = self.attention
-            self.softmax = torch.nn.Softmax(dim=-1)
 
     #########################################
     def forward(self, x, ada_ln_aux=None):
         x_in = x
-        # x = self.lnorm( x)
-        x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+        # x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
 
         ## project onto heads and q,k,v and
         #  ensure these are 4D tensors as required for flash attention
-        s = [*([x.shape[0], 1] if len(x.shape) == 2 else x.shape[:-1]), self.num_heads, -1]
-        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype)
-        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
-        vs = self.proj_heads_v(x).reshape(s).to(self.dtype)
+        q_shape = [*([x.shape[0], 1] if len(x.shape) == 2 else x.shape[:-1]), self.num_heads, -1]
+        kv_shape = [
+            *([x.shape[0], 1] if len(x.shape) == 2 else x.shape[:-1]),
+            self.num_heads,
+            -1,
+        ]
+        qs = self.lnorm_q(self.proj_heads_q(x).reshape(q_shape)).to(self.dtype)
+        ks = self.lnorm_k(self.proj_heads_k(x).reshape(kv_shape)).to(self.dtype)
+        vs = self.proj_heads_v(x).reshape(kv_shape).to(self.dtype)
 
         # ordering of tensors (seq, heads, embed) (which differs from torch's flash attention implt)
-        outs = flash_attn_func(qs, ks, vs, dropout_p=self.dropout_rate)
+        outs = flash_attn_func(qs, ks, vs, softcap=self.softcap, dropout_p=self.dropout_rate)
 
-        # return x_in + self.dropout( self.proj_out( outs.flatten( -2, -1)) )
-        return x_in + self.proj_out(outs.flatten(-2, -1))
+        if self.with_residual:
+            x = x_in + self.proj_out(outs.flatten(-2, -1))
+        else:
+            x = self.proj_out(outs.flatten(-2, -1))
 
-    #########################################
-    def attention(self, q, k, v):
-        scaling = 1.0 / torch.sqrt(torch.tensor(q.shape[-1]))
-        return torch.matmul(self.softmax(scaling * self.score(q, k)), v)
-
-    #########################################
-    def score(self, q, k):
-        return torch.matmul(q, torch.transpose(k, -2, -1))
+        return x
 
 
 ####################################################################################################
 class MultiCrossAttentionHead(torch.nn.Module):
+    #########################################
+    def __init__(
+        self,
+        dim_embed_q,
+        dim_embed_kv,
+        num_heads,
+        dim_head_proj=None,
+        dropout_rate=0.0,
+        with_qk_lnorm=True,
+        with_residual=True,
+        with_flash=True,
+        softcap=0.0,
+        norm_type="LayerNorm",
+        dim_aux=None,
+        norm_eps=1e-5,
+        attention_dtype=torch.bfloat16,
+    ):
+        super(MultiCrossAttentionHead, self).__init__()
+
+        self.num_heads = num_heads
+        self.with_flash = with_flash
+        self.dropout_rate = dropout_rate
+        self.with_residual = with_residual
+        self.softcap = softcap
+
+        assert with_flash, "You have to use flash attention"
+        assert dim_embed_kv % num_heads == 0
+        self.dim_head_proj_kv = (
+            dim_embed_kv // num_heads if dim_head_proj is None else dim_head_proj
+        )
+        self.dim_head_proj_q = dim_embed_q // num_heads if dim_head_proj is None else dim_head_proj
+
+        if norm_type == "LayerNorm":
+            norm = partial(torch.nn.LayerNorm, elementwise_affine=False, eps=norm_eps)
+        else:
+            norm = RMSNorm
+
+        if dim_aux is not None:
+            self.lnorm = AdaLayerNorm(dim_embed_kv, dim_aux, norm_eps=norm_eps)
+        else:
+            self.lnorm = norm(dim_embed_kv)
+        self.proj_heads_q = torch.nn.Linear(
+            dim_embed_q, num_heads * self.dim_head_proj_q, bias=False
+        )
+        self.proj_heads_k = torch.nn.Linear(
+            dim_embed_kv, num_heads * self.dim_head_proj_kv, bias=False
+        )
+        self.proj_heads_v = torch.nn.Linear(
+            dim_embed_kv, num_heads * self.dim_head_proj_kv, bias=False
+        )
+        self.proj_out = torch.nn.Linear(dim_embed_kv, dim_embed_kv, bias=False)
+
+        lnorm = norm if with_qk_lnorm else torch.nn.Identity
+        self.lnorm_q = lnorm(self.dim_head_proj_q)
+        self.lnorm_k = lnorm(self.dim_head_proj_kv)
+
+        self.dtype = attention_dtype
+
+    #########################################
+    def forward(self, q, x, ada_ln_aux=None):
+        x_in = x
+        # x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+
+        ## project onto heads and q,k,v and
+        #  ensure these are 4D tensors as required for flash attention
+        q_shape = [*([x.shape[0], 1] if len(x.shape) == 2 else x.shape[:-1]), self.num_heads, -1]
+        kv_shape = [
+            *([x.shape[0], 1] if len(x.shape) == 2 else x.shape[:-1]),
+            self.num_heads,
+            -1,
+        ]
+        qs = self.lnorm_q(self.proj_heads_q(x).reshape(q_shape)).to(self.dtype)
+        ks = self.lnorm_k(self.proj_heads_k(x).reshape(kv_shape)).to(self.dtype)
+        vs = self.proj_heads_v(x).reshape(kv_shape).to(self.dtype)
+
+        # ordering of tensors (seq, heads, embed) (which differs from torch's flash attention implt)
+        outs = flash_attn_func(qs, ks, vs, softcap=self.softcap, dropout_p=self.dropout_rate)
+
+        if self.with_residual:
+            x = x_in + self.proj_out(outs.flatten(-2, -1))
+        else:
+            x = self.proj_out(outs.flatten(-2, -1))
+
+        return x
+
+
+####################################################################################################
+class MultiCrossAttentionHeadSPDA(torch.nn.Module):
     #########################################
     def __init__(
         self,

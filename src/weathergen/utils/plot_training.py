@@ -10,6 +10,7 @@
 import argparse
 import logging
 import subprocess
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -20,6 +21,8 @@ import weathergen.utils.config as config
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
 _logger = logging.getLogger(__name__)
+
+DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
 
 
 ####################################################################################################
@@ -420,6 +423,10 @@ def plot_loss_per_stream(
             _logger.warning(f"Could not find any data for stream: {stream_name}")
             continue
 
+        # no valid data found
+        if (min_val >= max_val) or np.isnan(min_val) or np.isnan(max_val):
+            continue
+
         legend = plt.legend(legend_str, loc="upper right" if not x_scale_log else "lower left")
         for line in legend.get_lines():
             line.set(alpha=1.0)
@@ -556,7 +563,7 @@ def plot_loss_per_run(
     plt.close()
 
 
-def plot_train():
+def plot_train(args=None):
     # Example usage:
     # When providing a YAML for configuring the run IDs:
     # python plot_training.py -rf eval_run.yml -m ./trained_models -o ./training_plots
@@ -622,27 +629,24 @@ def plot_train():
 
     run_id_group = parser.add_mutually_exclusive_group()
     run_id_group.add_argument(
-        "-rs",
-        "--run_ids_dict",
+        "-fd",
+        "--from_dict",
         type=_read_str_config,
-        dest="rs",
-        help=(
-            "Dictionary-string of form '{run_id: [job_id, experiment_name]}'",
-            " for training runs to plot",
-        ),
+        dest="fd",
+        help="Dictionary-string of form '{run_id: [job_id, experiment_name]}'"
+        + "for training runs to plot",
     )
 
     run_id_group.add_argument(
-        "-rf",
-        "--run_ids_file",
-        dest="rf",
-        default="./config/runs_plot_train.yml",
+        "-fy",
+        "--from_yaml",
+        dest="fy",
         type=_read_yaml_config,
         help="YAML file configuring the training run ids to plot",
     )
 
     # parse the command line arguments
-    args = parser.parse_args()
+    args = parser.parse_args(args)
 
     model_base_dir = Path(args.model_base_dir)
     out_dir = Path(args.output_dir)
@@ -651,7 +655,17 @@ def plot_train():
     if args.x_type not in x_types_valid:
         raise ValueError(f"x_type must be one of {x_types_valid}, but got {args.x_type}")
 
-    runs_ids = args.rs if args.rs is not None else args.rf
+    # Post-processing default logic for config from YAML-file
+    if args.fd is None and args.fy is None:
+        if DEFAULT_RUN_FILE.exists():
+            args.fy = _read_yaml_config(DEFAULT_RUN_FILE)
+        else:
+            raise ValueError(
+                f"Please provide a run_id dictionary or a YAML file with run_ids, "
+                f"or create a default file at {DEFAULT_RUN_FILE}."
+            )
+
+    runs_ids = args.fd if args.fd is not None else args.fy
 
     if args.delete == "True":
         clean_plot_folder(out_dir)
@@ -725,3 +739,9 @@ def plot_train():
         get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
         plot_dir=out_dir,
     )
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]  # get CLI args
+
+    plot_train(args)

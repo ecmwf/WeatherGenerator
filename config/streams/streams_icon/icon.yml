@@ -12,6 +12,11 @@ ICON :
   filenames : ['icon-art-NWP_OH_CHEMISTRY-chem_DOM01_ML_daily_repeat_reduced_levels.zarr']
   source_channels : ['u_00', 'v_00', 'w_80', 'temp_00']
   target_channels : ['u_00', 'v_00', 'w_80', 'temp_00']
+  attributes:
+    lon: 'clon'
+    lat: 'clat'
+    grid: 'ncells'
+  variables: []
   loss_weight : 1.
   diagnostic : False
   masking_rate : 0.6
