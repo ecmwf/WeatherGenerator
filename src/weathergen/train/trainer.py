@@ -212,6 +212,7 @@ class Trainer(TrainerBase):
                 cpu_offload=None,
                 sync_module_states=(run_id_contd is not None),
                 mixed_precision=mp,
+                use_orig_params=True,
             )
 
         self.model_params = ModelParams().create(cf).to("cuda")
@@ -230,6 +231,7 @@ class Trainer(TrainerBase):
         )  # aiming for beta1 = 0.9 at one node, ie kappa=B=4
         beta2 = 1.0 - kappa * (1.0 - 0.9875)  # aiming for beta2 = 0.95 at one node, ie B=4
         eps = 2e-08 / np.sqrt(kappa)
+
         self.optimizer = torch.optim.AdamW(
             self.ddp_model.parameters(),
             lr=cf.lr_start,
@@ -502,8 +504,8 @@ class Trainer(TrainerBase):
             if bidx % log_interval == 0:
                 self._log(TRAIN)
 
-            # model checkpoint
-            if bidx % self.checkpoint_freq == 0:
+            # save checkpoint (with designation _latest)
+            if bidx % self.checkpoint_freq == 0 and bidx > 0:
                 self.save_model(-1)
 
             self.cf.istep += cf.batch_size_per_gpu
@@ -692,7 +694,7 @@ class Trainer(TrainerBase):
                     self.perf_mem,
                 )
 
-            self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
     def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
         if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:

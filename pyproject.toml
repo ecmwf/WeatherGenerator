@@ -105,7 +105,9 @@ ignore = [
   "SIM401",
   # To ignore, not relevant for us
   "SIM108", # in case additional norm layer supports are added in future
-  "N817" # we use heavy acronyms, e.g., allowing 'import LongModuleName as LMN' (LMN is accepted)
+  "N817", # we use heavy acronyms, e.g., allowing 'import LongModuleName as LMN' (LMN is accepted)
+  "E731", # overly restrictive and less readable code
+  "N812", # prevents us following the convention for importing torch.nn.functional as F
 ]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
