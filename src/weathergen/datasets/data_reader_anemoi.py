@@ -170,8 +170,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         try:
             data = self.ds[didx_start:didx_end][:, :, 0].astype(np.float32)
         except MissingDateError as e:
-            # _logger.debug( f"Date not present in anemoi dataset: {str(e)}. Skipping.")
-            print(f"\n\n\nDate not present in anemoi dataset: {str(e)}. Skipping.")
+            _logger.debug(f"Date not present in anemoi dataset: {str(e)}. Skipping.")
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
