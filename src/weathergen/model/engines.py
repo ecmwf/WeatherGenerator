@@ -23,7 +23,7 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
-from weathergen.model.utils import get_activation
+from weathergen.model.utils import ActivationFactory
 from weathergen.utils.config import Config, get_dtype
 
 
@@ -339,7 +339,7 @@ class EnsPredictionHead(torch.nn.Module):
         # norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
         enl = ens_num_layers
 
-        final_activation = get_activation(last_activation)
+        final_activation = ActivationFactory.get(last_activation)
 
         self.pred_heads = torch.nn.ModuleList()
         for i in range(ens_size):
@@ -358,7 +358,11 @@ class EnsPredictionHead(torch.nn.Module):
 
             # Add optional final non-linear activation
             if final_activation is not None and enl >= 1:
-                self.pred_heads[-1].append(final_activation)
+                if final_activation.lower() == "linear":
+                    # Don't append an activation since last layer is already linear
+                    self.pred_heads[-1].append("identity")           
+                else:
+                    self.pred_heads[-1].append(final_activation)
 
     #########################################
     @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
