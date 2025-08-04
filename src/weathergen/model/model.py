@@ -340,7 +340,7 @@ class Model(torch.nn.Module):
                 tr_mlp_hidden_factor,
                 softcap,
                 tro_type,
-            ).create()
+            )
 
             self.target_token_engines.append(tte)
 
@@ -728,7 +728,11 @@ class Model(torch.nn.Module):
 
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
         tokens_stream = (tokens.reshape(s) + model_params.pe_global).flatten(0, 1)
-        tokens_stream = tokens_stream[model_params.hp_nbours.flatten()].flatten(0, 1)
+        tokens_stream = (
+            tokens_stream[model_params.hp_nbours.flatten()]
+            .flatten(0, 1)
+            .reshape(self.num_healpix_cells, 9, -1)
+        )
 
         # pair with tokens from assimilation engine to obtain target tokens
         preds_tokens = []
@@ -781,20 +785,13 @@ class Model(torch.nn.Module):
                 [streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))]
             )
 
-            # apply prediction engine
-            for ib, block in enumerate(tte):
-                if self.cf.pred_self_attention and ib % 3 == 1:
-                    tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
-                else:
-                    tc_tokens = checkpoint(
-                        block,
-                        tc_tokens,
-                        tokens_stream,
-                        tcs_lens,
-                        model_params.tokens_lens,
-                        tcs_aux,
-                        use_reentrant=False,
-                    )
+            tc_tokens = tte(
+                latent=tokens_stream,
+                output=tc_tokens,
+                latent_lens=model_params.tokens_lens,
+                output_lens=tcs_lens,
+                coordinates=tcs_aux,
+            )
 
             # final prediction head to map back to physical space
             preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]

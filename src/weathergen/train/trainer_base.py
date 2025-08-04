@@ -175,9 +175,3 @@ class TrainerBase:
             perf_mem /= len(self.device_handles)
 
         return perf_gpu, perf_mem
-
-    def ddp_average(self, val):
-        assert self.cf is not None, "init() must be called before calling ddp_average."
-        if self.cf.with_ddp:
-            dist.all_reduce(val.cuda(), op=torch.distributed.ReduceOp.AVG)
-        return val.cpu()
