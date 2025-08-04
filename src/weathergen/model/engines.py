@@ -335,7 +335,7 @@ class EnsPredictionHead(torch.nn.Module):
         ens_size,
         norm_type="LayerNorm",
         hidden_factor=2,
-        last_activation: str = "Linear",
+        final_activation: None | str = None,
     ):
         """Constructor"""
 
@@ -344,8 +344,6 @@ class EnsPredictionHead(torch.nn.Module):
         dim_internal = dim_embed * hidden_factor
         # norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
         enl = ens_num_layers
-
-        final_activation = ActivationFactory.get(last_activation)
 
         self.pred_heads = torch.nn.ModuleList()
         for i in range(ens_size):
@@ -364,11 +362,8 @@ class EnsPredictionHead(torch.nn.Module):
 
             # Add optional final non-linear activation
             if final_activation is not None and enl >= 1:
-                if final_activation.lower() == "linear":
-                    # Don't append an activation since last layer is already linear
-                    self.pred_heads[-1].append("identity")
-                else:
-                    self.pred_heads[-1].append(final_activation)
+                fal = ActivationFactory.get(final_activation)
+                self.pred_heads[-1].append(fal)
 
     #########################################
     @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")

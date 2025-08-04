@@ -26,11 +26,11 @@ def freeze_weights(block):
 #########################################
 class ActivationFactory:
     _registry = {
+        "identity": nn.Identity,
         "tanh": nn.Tanh,
-        "softmax": lambda: nn.Softmax,
+        "softmax": nn.Softmax,
         "sigmoid": nn.Sigmoid,
         "gelu": nn.GELU,
-        "identity": nn.Identity,
         "relu": nn.ReLU,
         "leakyrelu": nn.LeakyReLU,
         "elu": nn.ELU,
