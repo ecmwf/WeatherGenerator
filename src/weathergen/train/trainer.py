@@ -506,8 +506,8 @@ class Trainer(TrainerBase):
             if bidx % log_interval == 0:
                 self._log(TRAIN)
 
-            # model checkpoint
-            if bidx % self.checkpoint_freq == 0:
+            # save checkpoint (with designation _latest)
+            if bidx % self.checkpoint_freq == 0 and bidx > 0:
                 self.save_model(-1)
 
             self.cf.istep += cf.batch_size_per_gpu
