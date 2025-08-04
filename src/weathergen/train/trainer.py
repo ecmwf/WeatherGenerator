@@ -528,13 +528,17 @@ class Trainer(TrainerBase):
 
         # training loop
         self.t_start = time.time()
+
+        t0 = time.perf_counter()  # initial timestamp
+
         for bidx, batch in enumerate(dataset_iter):
+            t1 = time.perf_counter()
             forecast_steps = batch[-1]
             batch = self.batch_to_device(batch)
 
             losses_all = torch.ones((len(self.loss_fcts_val), len(cf.streams))) * torch.nan
             stddev_all = torch.zeros(len(cf.streams)) * torch.nan
-
+            t2 = time.perf_counter()
             # evaluate model
             with torch.autocast(
                 device_type="cuda",
@@ -543,7 +547,7 @@ class Trainer(TrainerBase):
             ):
                 with ProfilerSection("forward", profile=True):
                     preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
-
+                t3 = time.perf_counter()
                 loss, _ = self.compute_loss(
                     self.loss_fcts,
                     cf.forecast_offset,
@@ -553,25 +557,25 @@ class Trainer(TrainerBase):
                     losses_all,
                     stddev_all,
                 )
-
+            t4 = time.perf_counter()
             # backward pass
             with ProfilerSection("backward", profile=True):
                 self.grad_scaler.scale(loss).backward()
-
+            t5 = time.perf_counter()
             # gradient clipping
             with ProfilerSection("gradient clipping", profile=True):
                 self.grad_scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), max_norm=cf.grad_clip)
-
+            t6 = time.perf_counter()
             # optimizer step
             with ProfilerSection("optimizer step", profile=True):
                 self.grad_scaler.step(self.optimizer)
                 self.grad_scaler.update()
                 self.optimizer.zero_grad()
-
+            t7 = time.perf_counter()
             # update learning rate
             self.lr_scheduler.step()
-
+            t8 = time.perf_counter()
             self.losses_hist += [losses_all]
             self.stddev_hist += [stddev_all]
 
@@ -587,7 +591,23 @@ class Trainer(TrainerBase):
                 self.save_model(-1)
 
             self.cf.istep += cf.batch_size_per_gpu
+            t9 = time.perf_counter()
 
+            print(
+                f"[Epoch {epoch}, Batch {bidx}] "
+                f"Data: {(t1 - t0)*1000:.1f}ms | "
+                f"BS_TO_DEVICE: {(t2 - t1)*1000:.1f}ms | "
+                f"Forward: {(t3 - t2)*1000:.1f}ms | "
+                f"Loss: {(t4 - t3)*1000:.1f}ms | "
+                f"Backward: {(t5 - t4)*1000:.1f}ms | "
+                f"Clipping: {(t6 - t5)*1000:.1f}ms | "
+                f"Optimizer: {(t7 - t6)*1000:.1f}ms | "
+                f"Scheduler: {(t8 - t7)*1000:.1f}ms | "
+                f"Rest: {(t9 - t8)*1000:.1f}ms | "
+                f"Total: {(t9 - t0)*1000:.1f}ms | "
+            )
+
+            t0 = time.perf_counter() 
         self.dataset.advance()
 
     ###########################################
