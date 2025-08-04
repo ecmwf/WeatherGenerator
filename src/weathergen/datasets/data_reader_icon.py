@@ -41,72 +41,46 @@ frequencies = {
 
 class DataReaderIconBase(DataReaderTimestep):
     "Wrapper for ICON data variables"
+
     def __init__(
         self,
         tw_handler: TimeWindowHandler,
         filename: Path,
         stream_info: dict,
     ) -> None:
-
         """
-        Construct data reader for ICON CMIP6 data variables
+        Parent class for ICON data variables
 
         Parameters
         ----------
-        tw_handler : TimeWindowHandler object
-            Handler for time windows and translation of indices to times
-        filename  : Path
-            filename (and path) of json kerchunk generated file
-        stream_info : Omega object
-            information about stream 
-
-        Attributes
-        ----------
-        self.filename
-        self.mesh_size
-        self.colnames
-        self.cols_idx
-        self.time
-        self.start_idx
-        self.end_idx
-        self.len
-        self.lat
-        self.lon
-        self.step_hrs
-        self.properties
-        self.mean
-        self.stdev
-        self.source_channels
-        self.source_idx
-        self.target_channels
-        self.target_idx
-        self.geoinfo_channels
-        self.geoinfo_idx
-
-        self.stats
-        self.ds
-        Returns
-        -------
-        None
+        tw_handler : TimeWindowHandler
+            Handles temporal slicing and mapping from time indices to datetime
+        filename : Path
+            Path to the data file
+        stream_info : dict
+            Stream metadata
         """
 
-        # retrieve variables names from stream file
+        # Extract key metadata from stream_info
         lon_attribute = stream_info["attributes"]["lon"]
         lat_attribute = stream_info["attributes"]["lat"]
         mesh_attribute = stream_info["attributes"]["grid"]
-    
+
         self.filename = filename
 
+        # Set mesh size based on spatial grid definition
         self.mesh_size = len(self.ds[mesh_attribute])
 
-        # variables
-        self.colnames = stream_info['variables']
+        # Column (variable) names and indices
+        self.colnames = list(self.ds) #  stream_info['variables']
         self.cols_idx = np.array(list(np.arange(len(self.colnames)))) 
 
+        # Time range in the dataset
         self.time = self.ds["time"].values
-        start_ds = np.datetime64( self.time[0])
+        start_ds = np.datetime64(self.time[0])
         end_ds = np.datetime64(self.time[-1])
 
+        # Skip stream if it doesn't intersect with time window
         if start_ds > tw_handler.t_end or end_ds < tw_handler.t_start:
             name = stream_info["name"]
             _logger.warning(f"{name} is not supported over data loader window. Stream is skipped.")
@@ -114,8 +88,10 @@ class DataReaderIconBase(DataReaderTimestep):
             self.init_empty()
             return
 
+        # Compute temporal resolution if not already defined
         self.temporal_frequency = self.time[1] - self.time[0] if self.temporal_frequency is None else self.temporal_frequency
 
+        # Initialize parent class with resolved time window
         super().__init__(
             tw_handler,
             stream_info,
@@ -124,53 +100,47 @@ class DataReaderIconBase(DataReaderTimestep):
             self.temporal_frequency,
         )
 
-        self.start_idx = (tw_handler.t_start - start_ds).astype("timedelta64[D]").astype(
-            int
-        ) * self.mesh_size
-        self.end_idx = (
-            (tw_handler.t_end - start_ds).astype("timedelta64[D]").astype(int) + 1
-        ) * self.mesh_size - 1
+        # Compute absolute start/end indices in the dataset based on time window
+        self.start_idx = (tw_handler.t_start - start_ds).astype("timedelta64[D]").astype(int) * self.mesh_size
+        self.end_idx = ((tw_handler.t_end - start_ds).astype("timedelta64[D]").astype(int) + 1) * self.mesh_size - 1
         
-
+        # Sanity check
         assert self.end_idx > self.start_idx, (
-            f"Abort: Final index of {self.end_idx} is the same of larger than start index {self.start_idx}"
+            f"Abort: Final index of {self.end_idx} is the same or smaller than start index {self.start_idx}"
         )
 
+        # Number of time steps in selected range
         self.len = int((self.end_idx - self.start_idx) // self.mesh_size)
 
-        # coordinates
-        coords_units = self.ds[lat_attribute].attrs['units']
+        # === Coordinates ===
 
+        # Convert to degrees if stored in radians
+        coords_units = self.ds[lat_attribute].attrs['units']
         if coords_units == "radian":
             self.lat = np.rad2deg(self.ds[lat_attribute][:].astype("f"))
             self.lon = np.rad2deg(self.ds[lon_attribute][:].astype("f"))
-
         else:
             self.lat = self.ds[lat_attribute][:].astype("f")
             self.lon = self.ds[lon_attribute][:].astype("f")
 
-        # Ignore step_hrs, idk how it supposed to work
-        # TODO, TODO, TODO:
+        # Placeholder; currently unused
         self.step_hrs = 1
 
+        # Stream metadata
         self.properties = {
             "stream_id": 0,
         }
 
+        # === Normalization statistics ===
+
+        # Ensure stats match dataset columns
         assert self.stats_vars == self.colnames, (
             f"Variables in normalization file {self.stats_vars} do not match dataset columns {self.colnames}"
         )
-    
-        # stats values
-        self.mean = np.array(
-            [self.stats[var]["mean"] for var in self.stats_vars],
-            dtype=np.float64
-        )
-        self.stdev = np.array(
-            [self.stats[var]["std"] for var in self.stats_vars],
-            dtype=np.float64
-        )
 
+        # === Channel selection ===
+
+        # Source channels
         source_channels = stream_info.get("source_channels")
         if source_channels:
             self.source_channels, self.source_idx = self.select(source_channels)
@@ -178,6 +148,7 @@ class DataReaderIconBase(DataReaderTimestep):
             self.source_channels = self.colnames
             self.source_idx = self.cols_idx
 
+        # Target channels
         target_channels = stream_info.get("target_channels")
         if target_channels:
             self.target_channels, self.target_idx = self.select(target_channels)
@@ -185,16 +156,17 @@ class DataReaderIconBase(DataReaderTimestep):
             self.target_channels = self.colnames
             self.target_idx = self.cols_idx
 
-        # Check if standard deviations are strictly positive for selected channels
+        # Ensure all selected channels have valid standard deviations
         selected_channel_indices = list(set(self.source_idx).union(set(self.target_idx)))
         non_positive_stds = np.where(self.stdev[selected_channel_indices] <= 0)[0]
         assert len(non_positive_stds) == 0, (
-            f"Abort: Encountered non-positive standard deviations for selected columns {[self.colnames[selected_channel_indices][i] for i in non_positive_stds]}."
+            f"Abort: Encountered non-positive standard deviations for selected columns "
+            f"{[self.colnames[selected_channel_indices][i] for i in non_positive_stds]}."
         )
 
+        # === Geo-info channels (currently unused) ===
         self.geoinfo_channels = []
         self.geoinfo_idx = []
-
 
     def select(self, ch_filters: list[str]) -> (np.array, list[str]):
         """
@@ -240,35 +212,6 @@ class DataReaderIconBase(DataReaderTimestep):
         """
         return self.len
         
-
-
-
-##########################
-class DataReaderIcon(DataReaderIconBase):
-    "Wrapper for ICON variables - This class reads zarr"
-    def __init__(
-        self,
-        tw_handler: TimeWindowHandler,
-        filename: Path,
-        stream_info: dict,
-    ) -> None:
-
-        self.ds = xr.open_zarr(filename, consolidated=True)
-
-        self.temporal_frequency = None
-
-        # stats
-        stats_filename = Path(filename).with_name(Path(filename).stem + "_stats.json")
-        with open(stats_filename) as stats_file:
-            self.stats = json.load(stats_file)
-
-        self.stats_vars = self.stats["metadata"]["variables"]
-        super().__init__(
-            tw_handler,
-            filename,
-            stream_info,            
-        )
-
     @override
     def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
         """
@@ -299,117 +242,7 @@ class DataReaderIcon(DataReaderIconBase):
         t_idxs_end = t_idxs[-1] + 1
 
         # datetime
-        datetimes = self.time[t_idxs_start:t_idxs_end].values
-
-        # lat/lon coordinates + tiling to match time steps
-        lat = self.lat.values[:, np.newaxis] # # commented out because of zarrified CMIP6
-        lon = self.lon.values[:, np.newaxis] # # commented out because of zarrified CMIP6
-
-        lat = np.tile(lat, len(datetimes))
-        lon = np.tile(lon, len(datetimes))
-
-        coords = np.concatenate([lat, lon], axis=1)
-
-        # time coordinate repeated to match grid points
-        datetimes = np.repeat(datetimes, self.mesh_size).reshape(-1, 1)
-        datetimes = np.squeeze(datetimes)
-
-        # expanding indexes for data
-        start_row = t_idxs_start * self.mesh_size
-        end_row = t_idxs_end * self.mesh_size
-
-        # data
-        channels = np.array(self.colnames)[channels_idx]
-
-        data_reshaped = [
-            np.asarray(self.ds[ch_]).reshape(-1, 1)[start_row:end_row] for ch_ in channels
-        ]
-        data = np.concatenate(data_reshaped, axis=1)
-
-        # empty geoinfos
-        geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
-
-        rd = ReaderData(
-            coords=coords,
-            geoinfos=geoinfos,
-            data=data,
-            datetimes=datetimes,
-        )
-        check_reader_data(rd, dtr)
-        
-        return rd
-
-
-##########################
-class DataReaderIconCmip6(DataReaderIconBase):
-    "Wrapper for ICON CMIP6 data variables - This class reads NetCDF4 using kerchunk"
-    def __init__(
-        self,
-        tw_handler: TimeWindowHandler,
-        filename: Path,
-        stream_info: dict,
-    ) -> None:
-
-        # Opening the dataset through kerchunk mapper
-        ref_path = Path(filename)
-        if not ref_path.exists():
-            raise FileNotFoundError(f"Kerchunk reference JSON not found: {ref_path}")
-
-        kerchunk_ref = json.loads(ref_path.read_text())
-        fs = fsspec.filesystem("reference", fo=kerchunk_ref)
-        mapper = fs.get_mapper("")
-        zarr.consolidate_metadata(mapper)
-
-        self.ds = xr.open_dataset(mapper, engine="zarr", consolidated=True)
-
-        frequency_attr = self.ds.attrs['frequency']
-        self.temporal_frequency = frequencies[frequency_attr] 
-
-        # stats
-        stats_filename = Path(filename).with_name(Path(filename).stem + "_stats.json")
-        with open(stats_filename) as stats_file:
-            self.stats = json.load(stats_file)
-
-        self.stats_vars = list(self.stats)
-
-        super().__init__(
-            tw_handler,
-            filename,
-            stream_info,
-        )
-
-
-    @override
-    def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
-        """
-        Get data for temporal window
-
-        Parameters
-        ----------
-        idx : int
-            Index of temporal window
-        channels_idx : np.array
-            Selection of channels
-
-        Returns
-        -------
-        data (coords, geoinfos, data, datetimes)
-        """
-
-        (t_idxs, dtr) = self._get_dataset_idxs(idx)
-
-        if self.ds is None or self.len == 0 or len(t_idxs) == 0:
-            return ReaderData.empty(
-                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
-            )
-
-        # TODO: handle sub-sampling
-
-        t_idxs_start = t_idxs[0]
-        t_idxs_end = t_idxs[-1] + 1
-
-        # datetime
-        datetimes = self.time[t_idxs_start:t_idxs_end].values
+        datetimes = np.asarray(self.time[t_idxs_start:t_idxs_end])
 
         # lat/lon coordinates + tiling to match time steps
         lat = self.lat.values[:, np.newaxis]
@@ -448,3 +281,99 @@ class DataReaderIconCmip6(DataReaderIconBase):
         check_reader_data(rd, dtr)
         
         return rd
+        
+
+
+
+##########################
+class DataReaderIcon(DataReaderIconBase):
+    "Wrapper for ICON variables - This class reads Zarr format datasets"
+
+    def __init__(
+        self,
+        tw_handler: TimeWindowHandler,
+        filename: Path,
+        stream_info: dict,
+    ) -> None:
+        # Open Zarr dataset with Xarray
+        self.ds = xr.open_zarr(filename, consolidated=True)
+
+        # Will be inferred later based on the dataset’s time variable
+        self.temporal_frequency = None
+
+        # Load associated statistics file for normalization
+        stats_filename = Path(filename).with_name(Path(filename).stem + "_stats.json")
+        with open(stats_filename) as stats_file:
+            self.stats = json.load(stats_file)
+
+        # Extract variable list from stats metadata
+        stats_vars_metadata = self.stats["metadata"]["variables"]
+        self.stats_vars = [v for v in stats_vars_metadata if v not in {'clat', 'clon', 'time'}]
+
+        # Load mean and standard deviation per variable
+        self.mean = np.array(self.stats["statistics"]["mean"], dtype="d")
+        self.stdev = np.array(self.stats["statistics"]["std"], dtype="d")
+
+        # Delegate further initialization to the base class
+        super().__init__(
+            tw_handler,
+            filename,
+            stream_info,            
+        )
+
+
+##########################
+class DataReaderIconCmip6(DataReaderIconBase):
+    "Wrapper for ICON CMIP6 data variables - This class reads NetCDF4 using kerchunk"
+
+    def __init__(
+        self,
+        tw_handler: TimeWindowHandler,
+        filename: Path,
+        stream_info: dict,
+    ) -> None:
+
+        # Open the kerchunk-generated reference JSON
+        ref_path = Path(filename)
+        if not ref_path.exists():
+            raise FileNotFoundError(f"Kerchunk reference JSON not found: {ref_path}")
+
+        # Load JSON references and initialize a virtual file system
+        kerchunk_ref = json.loads(ref_path.read_text())
+        fs = fsspec.filesystem("reference", fo=kerchunk_ref)
+        mapper = fs.get_mapper("")
+
+        # Ensure metadata is consolidated for zarr-style access
+        zarr.consolidate_metadata(mapper)
+
+        # Open the dataset using Xarray with Zarr engine
+        self.ds = xr.open_dataset(mapper, engine="zarr", consolidated=True)
+
+        # Determine temporal frequency from dataset metadata
+        frequency_attr = self.ds.attrs['frequency']
+        self.temporal_frequency = frequencies[frequency_attr] 
+
+        # Load associated statistics file for normalization
+        stats_filename = Path(filename).with_name(Path(filename).stem + "_stats.json")
+        with open(stats_filename) as stats_file:
+            self.stats = json.load(stats_file)
+
+        # Variables included in the stats
+        self.stats_vars = list(self.stats)
+
+        # Load mean and standard deviation per variable        
+        self.mean = np.array(
+            [self.stats[var]["mean"] for var in self.stats_vars],
+            dtype=np.float64
+        )
+        self.stdev = np.array(
+            [self.stats[var]["std"] for var in self.stats_vars],
+            dtype=np.float64
+        )
+
+        # Delegate further initialization to the base class
+        super().__init__(
+            tw_handler,
+            filename,
+            stream_info,
+        )

@@ -16,7 +16,11 @@ ICON :
     lon: 'clon'
     lat: 'clat'
     grid: 'ncells'
-  variables: []
+  variables: ['TRCH4_chemtr_00', 'TRCH4_chemtr_20', 'TRCH4_chemtr_40', 'TRCH4_chemtr_60', 'TRCH4_chemtr_80', 
+              'TRO3_chemtr_00', 'TRO3_chemtr_20', 'TRO3_chemtr_40', 'TRO3_chemtr_60', 'TRO3_chemtr_80', 'clat', 
+              'clon', 'pres_00', 'pres_20', 'pres_40', 'pres_60', 'pres_80', 'temp_00', 'temp_20', 'temp_40', 'temp_60', 
+              'temp_80', 'time', 'u_00', 'u_20', 'u_40', 'u_60', 'u_80', 'v_00', 'v_20', 'v_40', 'v_60', 'v_80', 'w_00', 
+              'w_20', 'w_40', 'w_60', 'w_80']
   loss_weight : 1.
   diagnostic : False
   masking_rate : 0.6
