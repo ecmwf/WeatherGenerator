@@ -22,6 +22,7 @@ def freeze_weights(block):
     for p in block.parameters():
         p.requires_grad = False
 
+
 #########################################
 class ActivationFactory:
     _registry = {

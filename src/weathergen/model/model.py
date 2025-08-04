@@ -347,7 +347,7 @@ class Model(torch.nn.Module):
             last_activation = si["pred_head"].get("last_activation", "Linear")
             logger.info(
                 f"Using {last_activation} activation for prediction head of {si['name']} stream"
-                )
+            )
             self.pred_heads.append(
                 EnsPredictionHead(
                     dims_embed[-1],

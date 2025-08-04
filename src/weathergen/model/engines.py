@@ -27,7 +27,6 @@ from weathergen.model.utils import ActivationFactory
 from weathergen.utils.config import Config, get_dtype
 
 
-
 class EmbeddingEngine:
     def __init__(self, cf: Config, sources_size) -> None:
         """
@@ -329,7 +328,14 @@ class ForecastingEngine:
 class EnsPredictionHead(torch.nn.Module):
     #########################################
     def __init__(
-        self, dim_embed, dim_out, ens_num_layers, ens_size, norm_type="LayerNorm", hidden_factor=2, last_activation: str ="Linear"
+        self,
+        dim_embed,
+        dim_out,
+        ens_num_layers,
+        ens_size,
+        norm_type="LayerNorm",
+        hidden_factor=2,
+        last_activation: str = "Linear",
     ):
         """Constructor"""
 
@@ -360,7 +366,7 @@ class EnsPredictionHead(torch.nn.Module):
             if final_activation is not None and enl >= 1:
                 if final_activation.lower() == "linear":
                     # Don't append an activation since last layer is already linear
-                    self.pred_heads[-1].append("identity")           
+                    self.pred_heads[-1].append("identity")
                 else:
                     self.pred_heads[-1].append(final_activation)
 
