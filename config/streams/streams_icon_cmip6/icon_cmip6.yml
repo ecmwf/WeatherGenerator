@@ -7,16 +7,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-ICON :
-  type : icon
-  filenames : ['icon-art-NWP_OH_CHEMISTRY-chem_DOM01_ML_daily_repeat_reduced_levels.zarr']
-  source_channels : ['u_00', 'v_00', 'w_80', 'temp_00']
-  target_channels : ['u_00', 'v_00', 'w_80', 'temp_00']
+ICONCMIP6 :
+  type : iconcmip6
+  filenames : ['1pctCO2_r1i1p1f1_day.json']
+  source_channels : ['clt', 'hfss',  'mrsos',   'pr'] 
+  target_channels : ['clt', 'hfss',  'mrsos',   'pr'] 
   attributes:
-    lon: 'clon'
-    lat: 'clat'
-    grid: 'ncells'
-  variables: []
+    lon: 'longitude'
+    lat: 'latitude'
+    grid: 'i' # i = grid indexes
+  variables: [
+        'clt',   'hfss',  'mrso',   'pr',   'rlds',  'rlut',  'rsus',     'snc',  'tas',  'vas',
+        'hfls',  'mrro',  'mrsos',  'psl',  'rlus',  'rsds',  'sfcWind',  'snw',  'uas'        
+  ]
   loss_weight : 1.
   diagnostic : False
   masking_rate : 0.6

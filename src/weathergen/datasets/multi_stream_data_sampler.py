@@ -23,7 +23,7 @@ from weathergen.datasets.data_reader_base import (
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
-from weathergen.datasets.icon_dataset import IconDataset
+from weathergen.datasets.data_reader_icon import DataReaderIcon, DataReaderIconCmip6
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
@@ -113,8 +113,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         dataset = DataReaderFesom
                         datapath = cf.data_path_fesom
                     case "icon":
-                        dataset = IconDataset
+                        dataset = DataReaderIcon
                         datapath = cf.data_path_icon
+                    case "iconcmip6":
+                        dataset = DataReaderIconCmip6
+                        datapath = cf.data_path_icon_cmip6
                     case _:
                         msg = f"Unsupported stream type {stream_info['type']}"
                         f"for stream name '{stream_info['name']}'."
