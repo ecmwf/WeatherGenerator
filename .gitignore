@@ -79,6 +79,14 @@ instance/
 # Scrapy stuff:
 .scrapy
 
+
+# Jupyter Notebook
+*.ipynb_checkpoints
+# Use the jupytext extension instead.
+*.ipynb
+
+*.zip
+
 # Sphinx documentation
 docs/_build/
 

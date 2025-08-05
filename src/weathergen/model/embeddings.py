@@ -30,6 +30,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         dim_out,
         num_blocks,
         num_heads,
+        dropout_rate=0.0,
         norm_type="LayerNorm",
         embed_size_centroids=64,
         unembed_mode="full",
@@ -64,7 +65,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                 MultiSelfAttentionHead(
                     self.dim_embed,
                     self.num_heads,
-                    dropout_rate=0.1,
+                    dropout_rate=dropout_rate,
                     with_qk_lnorm=True,
                     with_flash=True,
                 )
@@ -74,7 +75,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                     self.dim_embed,
                     self.dim_embed,
                     hidden_factor=2,
-                    dropout_rate=0.1,
+                    dropout_rate=dropout_rate,
                     with_residual=True,
                 )
             )
