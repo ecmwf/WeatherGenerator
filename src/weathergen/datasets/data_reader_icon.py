@@ -66,10 +66,6 @@ class DataReaderIconBase(DataReaderTimestep):
         # Set mesh size based on spatial grid definition
         self.mesh_size = len(self.ds[mesh_attribute])
 
-        # Column (variable) names and indices
-        self.colnames = list(self.ds) #  stream_info['variables']
-        self.cols_idx = np.array(list(np.arange(len(self.colnames)))) 
-
         # Time range in the dataset
         self.time = self.ds["time"].values
         start_ds = np.datetime64(self.time[0])
@@ -293,6 +289,10 @@ class DataReaderIcon(DataReaderIconBase):
         # Open Zarr dataset with Xarray
         self.ds = xr.open_zarr(filename, consolidated=True)
 
+        # Column (variable) names and indices
+        self.colnames = list(self.ds)
+        self.cols_idx = np.array(list(np.arange(len(self.colnames)))) 
+
         # Will be inferred later based on the dataset’s time variable
         self.temporal_frequency = None
 
@@ -342,6 +342,10 @@ class DataReaderIconCmip6(DataReaderIconBase):
 
         # Open the dataset using Xarray with Zarr engine
         self.ds = xr.open_dataset(mapper, engine="zarr", consolidated=True)
+
+        # Column (variable) names and indices
+        self.colnames = stream_info['variables']
+        self.cols_idx = np.array(list(np.arange(len(self.colnames)))) 
 
         # Determine temporal frequency from dataset metadata
         frequency_attr = self.ds.attrs['frequency']
