@@ -424,23 +424,14 @@ def clean_df(df, columns: list[str] | None):
     return df
 
 
-def clean_name(s):
-    """
-    Remove all characters from a string except letters, digits, and underscores.
-
-    Args:
-        s (str): The input string.
-
-    Returns:
-        str: A new string containing only alphanumeric characters and underscores,
-             in the same order and capitalization as they appeared in the input.
-    """
-    return "".join(c for c in s if c.isalnum() or c == "_")
+def _clean_name(n: str) -> str:
+    """Cleans the stream name to only retain alphanumeric characters"""
+    return "".join([c for c in n if c.isalnum()])
 
 
 def _key_loss(st_name: str, lf_name: str) -> str:
-    st_name = clean_name(st_name)
-    lf_name = clean_name(lf_name)
+    st_name = _clean_name(st_name)
+    lf_name = _clean_name(lf_name)
     return f"stream.{st_name}.loss_{lf_name}.loss_avg"
 
 
@@ -452,5 +443,5 @@ def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
 
 
 def _key_stddev(st_name: str) -> str:
-    st_name = clean_name(st_name)
+    st_name = _clean_name(st_name)
     return f"stream.{st_name}.stddev_avg"
