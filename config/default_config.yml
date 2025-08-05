@@ -23,13 +23,13 @@ ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
-ae_global_dim_embed: 2048
+ae_global_dim_embed: 1024
 ae_global_num_blocks: 8
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
 ae_global_att_dense_rate: 0.2
-ae_global_block_factor: 64
+ae_global_block_factor: 16
 ae_global_mlp_hidden_factor: 2
 
 decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
@@ -56,7 +56,7 @@ healpix_level: 5
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
-with_fsdp: True
+with_fsdp: False
 attention_dtype: bf16
 mlp_norm_eps: 1e-5
 norm_eps: 1e-4

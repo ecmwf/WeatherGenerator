@@ -12,6 +12,7 @@
 import logging
 import time
 from typing import Any
+import itertools
 
 import numpy as np
 import torch
@@ -23,13 +24,21 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     MixedPrecision,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import (
-    size_based_auto_wrap_policy,  # default_auto_wrap_policy,
-)
+
+# FSDP2
+from torch.distributed.fsdp import fully_shard, FSDPModule, MixedPrecisionPolicy
 
 import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
+from weathergen.model.layers import MLP
+from weathergen.model.attention import MultiSelfAttentionHead, MultiSelfAttentionHeadLocal
+from weathergen.model.engines import (
+    LocalAssimilationEngine,
+    Local2GlobalAssimilationEngine,
+    GlobalAssimilationEngine,
+    TargetPredictionEngine,
+)
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
@@ -115,7 +124,6 @@ class Trainer(TrainerBase):
         self.model = self.model.to(self.devices[0])
         self.model.load(run_id_trained, epoch)
         _logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
-        self.ddp_model = self.model
         self.model_params = ModelParams().create(cf).to(self.devices[0])
         _logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
 
@@ -171,7 +179,8 @@ class Trainer(TrainerBase):
         targets_num_channels = self.dataset.get_targets_num_channels()
         targets_coords_size = self.dataset.get_targets_coords_size()
 
-        self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+        with torch.device("meta"):
+            self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         # load model if specified
         if run_id_contd is not None:
             _logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
@@ -181,14 +190,8 @@ class Trainer(TrainerBase):
         if cf.forecast_freeze_model:
             self.model = self.model.freeze_weights_forecast()
 
-        self.model = self.model.to(self.devices[0])
-
-        if cf.compile_model:
-            self.model = torch.compile(self.model, dynamic=True)
-
-        self.ddp_model = self.model
         if cf.with_ddp and not cf.with_fsdp:
-            self.ddp_model = torch.nn.parallel.DistributedDataParallel(
+            self.model = torch.nn.parallel.DistributedDataParallel(
                 self.model,
                 broadcast_buffers=True,
                 find_unused_parameters=True,
@@ -197,25 +200,42 @@ class Trainer(TrainerBase):
             )
 
         if cf.with_ddp and cf.with_fsdp:
-            mp = (
-                None
-                if not cf.with_mixed_precision
-                else MixedPrecision(
-                    param_dtype=self.mixed_precision_dtype, cast_forward_inputs=True
+            fsdp_kwargs = {
+                "mp_policy": MixedPrecisionPolicy(
+                    param_dtype=self.mixed_precision_dtype,
+                    reduce_dtype=torch.float32,
                 )
+                if cf.with_mixed_precision
+                else None
+            }
+            global_engine_modules_to_shard = (
+                    MLP,
+                    MultiSelfAttentionHeadLocal,
+                    MultiSelfAttentionHead
             )
-            mp = None
-            self.ddp_model = FSDP(
-                self.model,
-                auto_wrap_policy=size_based_auto_wrap_policy,
-                sharding_strategy=ShardingStrategy.FULL_SHARD,
-                cpu_offload=None,
-                sync_module_states=(run_id_contd is not None),
-                mixed_precision=mp,
-                use_orig_params=True,
+            for module in self.model.modules():
+                if isinstance(module, global_engine_modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+            engines_to_shard = (
+                LocalAssimilationEngine,
+                Local2GlobalAssimilationEngine,
+                GlobalAssimilationEngine,
+                TargetPredictionEngine,
             )
+            for module in self.model.modules():
+                if isinstance(module, engines_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+            fully_shard(self.model, **fsdp_kwargs)
+            for tensor in itertools.chain(self.model.parameters(), self.model.buffers()):
+                assert tensor.device == torch.device("meta")
 
         self.model_params = ModelParams().create(cf).to("cuda")
+
+        self.model.to_empty(device="cuda")
+        # self.model.reset_parameters()
+
+        if cf.compile_model:
+            self.model = torch.compile(self.model, dynamic=True)
 
         # if with_fsdp then parameter count is unreliable
         if (is_root() and not cf.with_fsdp) or not cf.with_ddp:
@@ -233,7 +253,7 @@ class Trainer(TrainerBase):
         eps = 2e-08 / np.sqrt(kappa)
 
         self.optimizer = torch.optim.AdamW(
-            self.ddp_model.parameters(),
+            self.model.parameters(),
             lr=cf.lr_start,
             weight_decay=cf.weight_decay,
             betas=(beta1, beta2),
@@ -449,7 +469,7 @@ class Trainer(TrainerBase):
 
     def train(self, epoch):
         cf = self.cf
-        self.ddp_model.train()
+        self.model.train()
         log_interval = self.cf.train_log.log_interval
 
         dataset_iter = iter(self.data_loader)
@@ -471,7 +491,7 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
+                preds = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
                 loss_values = self.loss_calculator.compute_loss(
                     preds=preds,
                     streams_data=batch[0],
@@ -482,7 +502,7 @@ class Trainer(TrainerBase):
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), max_norm=cf.grad_clip)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=cf.grad_clip)
 
             # optimizer step
             self.grad_scaler.step(self.optimizer)
@@ -514,7 +534,7 @@ class Trainer(TrainerBase):
 
     def validate(self, epoch):
         cf = self.cf
-        self.ddp_model.eval()
+        self.model.eval()
 
         dataset_val_iter = iter(self.data_loader_validation)
         self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
@@ -534,7 +554,7 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds = self.ddp_model(
+                        preds = self.model(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
 
@@ -603,13 +623,13 @@ class Trainer(TrainerBase):
         assert epoch <= max_epoch, (epoch, max_epoch)
         if self.cf.with_ddp and self.cf.with_fsdp:
             with FSDP.state_dict_type(
-                self.ddp_model,
+                self.model,
                 StateDictType.FULL_STATE_DICT,
                 FullStateDictConfig(rank0_only=True, offload_to_cpu=True),
             ):
-                state = self.ddp_model.state_dict()
+                state = self.model.state_dict()
         else:
-            state = self.ddp_model.state_dict()
+            state = self.model.state_dict()
 
         if is_root():
             filename = "".join(

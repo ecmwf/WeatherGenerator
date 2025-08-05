@@ -156,7 +156,8 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
 
             return flex_attention(qs, ks, vs, score_mod=sparsity_mask)
 
-        self.compiled_flex_attention = torch.compile(att, dynamic=False)
+        # self.compiled_flex_attention = torch.compile(att, dynamic=False)
+        self.compiled_flex_attention = att
 
     #########################################
     def forward(self, x, x_lens=None):
@@ -239,7 +240,8 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
             mask_block_local, B=None, H=None, Q_LEN=qkv_len, KV_LEN=qkv_len
         )
         # compile for efficiency
-        self.flex_attention = torch.compile(flex_attention, dynamic=False)
+        # self.flex_attention = torch.compile(flex_attention, dynamic=False)
+        self.flex_attention = flex_attention
 
     #########################################
     def forward(self, x, ada_ln_aux=None):
