@@ -22,8 +22,11 @@ from weathergen.evaluate.utils import (
     plot_summary,
     retrieve_metric_from_json,
 )
+from weathergen.common import _REPO_ROOT
 
 _logger = logging.getLogger(__name__)
+
+print(__file__, _REPO_ROOT)
 
 
 def run_main(cfg: DictConfig) -> None:
