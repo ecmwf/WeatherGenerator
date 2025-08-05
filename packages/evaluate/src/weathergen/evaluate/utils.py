@@ -20,7 +20,7 @@ from tqdm import tqdm
 from weathergen.common.io import ZarrIO
 from weathergen.evaluate.plotter import DefaultMarkerSize, LinePlots, Plotter
 from weathergen.evaluate.score import VerifiedData, get_score
-from weathergen.evaluate.score_utils import to_list, RegionBoundingBox
+from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
