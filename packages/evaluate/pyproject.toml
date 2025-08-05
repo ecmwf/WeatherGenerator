@@ -21,6 +21,11 @@ dev = [
  "ruff==0.9.7",
 ]
 
+[tool.uv.cache-keys]
+files = [
+  "pyproject.toml",
+  "src/weathergen/evaluate",
+]
 
 
 [tool.ruff.lint]
