@@ -38,7 +38,7 @@ def run_main(cfg: DictConfig) -> None:
 
     # Relevant directories
     results_base_dir = Path(
-        cfg.get("results_dir", _DEFAULT_RESULT_PATH)
+        cfg.get("results_base_dir", _DEFAULT_RESULT_PATH)
     )  # base directory where inference results are stored
     runplot_base_dir = Path(
         cfg.get("runplot_base_dir", results_base_dir)
