@@ -15,6 +15,7 @@ from pathlib import Path
 
 from omegaconf import DictConfig, OmegaConf
 
+from weathergen.common import _REPO_ROOT
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
@@ -25,50 +26,36 @@ from weathergen.evaluate.utils import (
 
 _logger = logging.getLogger(__name__)
 
-_REPO_ROOT = Path(
-    __file__
-).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_RESULT_PATH = _REPO_ROOT / "results"
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Fast evaluation of WeatherGenerator runs."
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        help="Path to the configuration yaml file for plotting. e.g. config/plottig_config.yaml",
-    )
-
 def run_main(cfg: DictConfig) -> None:
+
     runs = cfg.run_ids
 
     _logger.info(f"Detected {len(runs)} runs")
 
     # Relevant directories
-    results_dir = Path(
+    results_base_dir = Path(
         cfg.get("results_dir", _DEFAULT_RESULT_PATH)
     )  # base directory where inference results are stored
     runplot_base_dir = Path(
-        cfg.get("runplot_base_dir", results_dir)
+        cfg.get("runplot_base_dir", results_base_dir)
     )  # base directory where map plots and histograms will be stored
     metric_base_dir = Path(
-        cfg.get("metric_base_dir", results_dir)
+        cfg.get("metric_base_dir", results_base_dir)
     )  # base directory where score files will be stored
     summary_dir = Path(
         cfg.get("summary_dir", _DEFAULT_PLOT_DIR)
     )  # base directory where summary plots will be stored
 
     metrics = cfg.evaluation.metrics
-    regions = cfg.evaluation.get("regions", ["global"])
 
     # to get a structure like: scores_dict[metric][region][stream][run_id] = plot
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
 
     for run_id, run in runs.items():
-        plotter = Plotter(cfg, run_id, runplot_base_dir)
         _logger.info(f"RUN {run_id}: Getting data...")
 
         streams = run["streams"].keys()
@@ -81,7 +68,7 @@ def run_main(cfg: DictConfig) -> None:
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                plots = plot_data(cfg, runplot_base_dir, run_id, stream, stream_dict)
+                _ = plot_data(cfg, results_base_dir, runplot_base_dir, run_id, stream, stream_dict)
 
             if stream_dict.get("evaluation"):
                 # Create output directory if it does not exist
@@ -106,7 +93,7 @@ def run_main(cfg: DictConfig) -> None:
 
                 if metrics_to_compute:
                     all_metrics, points_per_sample = calc_scores_per_stream(
-                        cfg, run_id, stream, metrics_to_compute
+                        cfg, results_base_dir, run_id, stream, metrics_to_compute
                     )
 
                     metric_list_to_json(

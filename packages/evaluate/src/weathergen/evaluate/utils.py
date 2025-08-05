@@ -25,11 +25,6 @@ from weathergen.evaluate.score_utils import to_list
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
-_REPO_ROOT = Path(
-    __file__
-).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
-_DEFAULT_RESULT_PATH = _REPO_ROOT / "results"
-
 
 @dataclass
 class WeatherGeneratorOutput:
@@ -40,6 +35,7 @@ class WeatherGeneratorOutput:
 
 def get_data(
     cfg: dict,
+    results_base_dir: Path,
     run_id: str,
     stream: str,
     samples: list[int] = None,
@@ -54,6 +50,8 @@ def get_data(
     ----------
     cfg :
         Configuration dictionary containing all information for the evaluation.
+    results_base_dir : Path
+        Base directory where the inference results are stored.
     run_id :
         Run identifier.
     stream :
@@ -77,9 +75,8 @@ def get_data(
     """
 
     run = cfg.run_ids[run_id]
-    results_dir = Path(cfg.get("results_dir", _DEFAULT_RESULT_PATH))
 
-    fname_zarr = results_dir.joinpath(
+    fname_zarr = results_base_dir.joinpath(
         f"{run_id}/validation_epoch{run['epoch']:05d}_rank{run['rank']:04d}.zarr"
     )
 
@@ -166,7 +163,7 @@ def get_data(
 
 
 def calc_scores_per_stream(
-    cfg: dict, run_id: str, stream: str, metrics: list[str]
+    cfg: dict, results_base_dir: Path, run_id: str, stream: str, metrics: list[str]
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -175,6 +172,8 @@ def calc_scores_per_stream(
     ----------
     cfg :
         Configuration dictionary containing all information for the evaluation.
+    results_base_dir : Path
+        Base directory where the results are stored.
     run_id :
         Run identifier.
     stream :
@@ -200,7 +199,7 @@ def calc_scores_per_stream(
     if fsteps == "all":
         fsteps = None
 
-    output_data = get_data(cfg, run_id, stream, return_counts=True)
+    output_data = get_data(cfg, results_base_dir, run_id, stream, return_counts=True)
 
     da_preds = output_data.prediction
     da_tars = output_data.target
@@ -264,7 +263,7 @@ def calc_scores_per_stream(
 
 
 def plot_data(
-    cfg: str, plot_dir: Path, run_id: str, stream: str, stream_dict: dict
+    cfg: str, results_base_dir: Path, plot_base_dir: Path, run_id: str, stream: str, stream_dict: dict
 ) -> list[str]:
     """
     Plot the data for a given run and stream.
@@ -273,7 +272,9 @@ def plot_data(
     ----------
     cfg :
         Configuration dictionary containing all information for the evaluation.
-    plot_dir :
+    results_base_dir :
+        Base directory where the inference results are stored.
+    plot_base_dir :
         Base directory where the plots will be saved.
     run_id :
         Run identifier.
@@ -297,7 +298,7 @@ def plot_data(
     ):
         return
 
-    plotter = Plotter(cfg, run_id, plot_dir)
+    plotter = Plotter(cfg, run_id, plot_base_dir)
 
     plot_samples = plot_settings.get("sample", None)
     plot_fsteps = plot_settings.get("forecast_step", None)
@@ -327,7 +328,7 @@ def plot_data(
     if plot_samples == "all":
         plot_samples = None
 
-    model_output = get_data(cfg, run_id, stream, plot_samples, plot_fsteps, plot_chs)
+    model_output = get_data(cfg, results_base_dir, run_id, stream, plot_samples, plot_fsteps, plot_chs)
 
     da_tars = model_output.target
     da_preds = model_output.prediction
