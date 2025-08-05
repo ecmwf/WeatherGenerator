@@ -60,7 +60,7 @@ class Trainer(TrainerBase):
 
         self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
-        self.devices = self.init_torch()
+        self.devices = self.init_torch(multiprocessing_method=cf.multiprocessing_method)
 
         # Get num_ranks of previous, to be continued run before
         # num_ranks gets overwritten by current setting during init_ddp()
