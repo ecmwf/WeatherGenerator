@@ -103,7 +103,8 @@ class DataReaderIconBase(DataReaderTimestep):
 
         # Sanity check
         assert self.end_idx > self.start_idx, (
-            f"Abort: Final index of {self.end_idx} is the same or smaller than start index {self.start_idx}"
+            f"Abort: Final index of {self.end_idx} is the same or smaller than "
+            f"start index {self.start_idx}"
         )
 
         # Number of time steps in selected range
@@ -132,7 +133,8 @@ class DataReaderIconBase(DataReaderTimestep):
 
         # Ensure stats match dataset columns
         assert self.stats_vars == self.colnames, (
-            f"Variables in normalization file {self.stats_vars} do not match dataset columns {self.colnames}"
+            f"Variables in normalization file {self.stats_vars} do not match "
+            f"dataset columns {self.colnames}"
         )
 
         # === Channel selection ===
