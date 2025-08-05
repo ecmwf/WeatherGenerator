@@ -25,7 +25,9 @@ class Plotter:
     Contains all basic plotting functions.
     """
 
-    def __init__(self, cfg: dict, run_id: str):
+    def __init__(
+        self, cfg: dict, run_id: str, output_basedir: str | Path = _DEFAULT_RESULT_PATH
+    ):
         """
         Initialize the Plotter class.
 
@@ -43,7 +45,7 @@ class Plotter:
         self.dpi_val = cfg.get("dpi_val")
         self.fig_size = cfg.get("fig_size", (8, 10))
 
-        self.out_plot_basedir = cfg.get("output_plotting_dir", _DEFAULT_RESULT_PATH) / run_id / "plots"
+        self.out_plot_basedir = output_basedir / run_id / "plots"
 
         if not os.path.exists(self.out_plot_basedir):
             _logger.info(f"Creating dir {self.out_plot_basedir}")
@@ -189,7 +191,7 @@ class Plotter:
             # TODO: make this nicer
             parts = [
                 "histogram",
-                self.model_id,
+                self.run_id,
                 tag,
                 str(self.sample),
                 self.stream,
@@ -230,7 +232,7 @@ class Plotter:
         select: dict
             Selection to be applied to the DataArray
         tag: str
-            Any tag you want to add to the plot
+            Any tag you want to add to the plot. Note: This is added to the plot directory.
         map_kwargs: dict
             Additional keyword arguments for the map.
             Known keys are:
@@ -252,7 +254,7 @@ class Plotter:
         self.update_data_selection(select)
 
         # Basic map output directory for this stream
-        map_output_dir = self.out_plot_basedir / self.stream / "maps"
+        map_output_dir = self.out_plot_basedir / self.stream / "maps" / tag
 
         if not os.path.exists(map_output_dir):
             _logger.info(f"Creating dir {map_output_dir}")
@@ -293,7 +295,7 @@ class Plotter:
             # TODO: make this nicer
             parts = [
                 "map",
-                self.model_id,
+                self.run_id,
                 tag,
                 str(self.sample),
                 self.stream,
@@ -302,7 +304,7 @@ class Plotter:
             ]
             name = "_".join(filter(None, parts))
 
-            fname = map_output_dir / tag / f"{name}.{self.image_format}"
+            fname = map_output_dir / f"{name}.{self.image_format}"
             _logger.debug(f"Saving map to {fname}")
             plt.savefig(fname)
             plt.close()
@@ -314,16 +316,14 @@ class Plotter:
 
 
 class LinePlots:
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, output_basedir: str | Path = _DEFAULT_RESULT_PATH):
         self.cfg = cfg
-        out_plot_dir = Path(cfg.output_plotting_dir)
         self.image_format = cfg.image_format
         self.dpi_val = cfg.get("dpi_val")
         self.fig_size = cfg.get("fig_size", (8, 10))
 
-        self.out_plot_dir = out_plot_dir.joinpath(self.image_format).joinpath(
-            "line_plots"
-        )
+        self.out_plot_dir = output_basedir / "line_plots"
+
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)

@@ -263,7 +263,9 @@ def calc_scores_per_stream(
     return metric_stream, points_per_sample
 
 
-def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str]:
+def plot_data(
+    cfg: str, plot_dir: Path, run_id: str, stream: str, stream_dict: dict
+) -> list[str]:
     """
     Plot the data for a given run and stream.
 
@@ -271,6 +273,8 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     ----------
     cfg :
         Configuration dictionary containing all information for the evaluation.
+    plot_dir :
+        Base directory where the plots will be saved.
     run_id :
         Run identifier.
     stream :
@@ -293,7 +297,7 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     ):
         return
 
-    plotter = Plotter(cfg, run_id)
+    plotter = Plotter(cfg, run_id, plot_dir)
 
     plot_samples = plot_settings.get("sample", None)
     plot_fsteps = plot_settings.get("forecast_step", None)
@@ -315,9 +319,7 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     # Check if histograms should be plotted
     plot_histograms = plot_settings.get("plot_histograms", False)
     if not isinstance(plot_settings.plot_histograms, bool):
-        raise TypeError(
-            "plot_histograms must be a boolean."
-        )
+        raise TypeError("plot_histograms must be a boolean.")
 
     if plot_fsteps == "all":
         plot_fsteps = None
@@ -353,7 +355,7 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
 
             if plot_maps:
                 map_tar = plotter.map(
-                    tars, plot_chs, data_selection, "target", maps_config
+                    tars, plot_chs, data_selection, "targets", maps_config
                 )
 
                 map_pred = plotter.map(
@@ -379,7 +381,6 @@ def metric_list_to_json(
     metric_dir: Path,
     run_id: str,
     epoch: int,
-    rank: int = 0,  # Add rank so it matches filename expectations
 ):
     """
     Write the evaluation results collected in a list of xarray DataArrays for the metrics
@@ -399,8 +400,6 @@ def metric_list_to_json(
         Identifier of the inference run.
     epoch : int
         Epoch number.
-    rank : int
-        Rank ID (default: 0), added to match retrieval expectations.
     """
     assert len(metrics_list) == len(npoints_sample_list) == len(streams), (
         "The lengths of metrics_list, npoints_sample_list, and streams must be the same."
@@ -436,14 +435,14 @@ def metric_list_to_json(
 
 
 def retrieve_metric_from_json(
-    dir: str, run_id: str, stream: str, metric: str, epoch: int, rank: int = 0
-):
+    metric_dir: str, run_id: str, stream: str, metric: str, epoch: int
+) -> xr.DataArray:
     """
     Retrieve the score for a given run, stream, metric, epoch, and rank from a JSON file.
 
     Parameters
     ----------
-    dir : str
+    metric_dir : str
         Directory where JSON files are stored.
     run_id : str
         Run identifier.
@@ -453,15 +452,13 @@ def retrieve_metric_from_json(
         Metric name.
     epoch : int
         Epoch number.
-    rank : int
-        Rank ID.
 
     Returns
     -------
     xr.DataArray
         The metric DataArray.
     """
-    score_path = Path(dir) / f"{run_id}_{stream}_{metric}_epoch{epoch:05d}.json"
+    score_path = Path(metric_dir) / f"{run_id}_{stream}_{metric}_epoch{epoch:05d}.json"
     _logger.debug(f"Looking for: {score_path}")
     if score_path.exists():
         with open(score_path) as f:
@@ -471,7 +468,7 @@ def retrieve_metric_from_json(
         raise FileNotFoundError(f"File {score_path} not found in the archive.")
 
 
-def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
+def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path, print_summary: bool):
     """
     Plot summary of the evaluation results.
     This function is a placeholder for future implementation.
@@ -490,7 +487,7 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
     runs = cfg.run_ids
     metrics = cfg.evaluation.metrics
 
-    plotter = LinePlots(cfg)
+    plotter = LinePlots(cfg, summary_dir)
 
     for metric in metrics:
         # get total list of streams

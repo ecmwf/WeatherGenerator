@@ -29,6 +29,7 @@ _REPO_ROOT = Path(
     __file__
 ).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_RESULT_PATH = _REPO_ROOT / "results"
+_DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
 
 if __name__ == "__main__":
@@ -52,11 +53,19 @@ if __name__ == "__main__":
 
     _logger.info(f"Detected {len(runs)} runs")
 
-    assert cfg.get("output_scores_dir"), (
-        "Please provide a path to the directory where the score files are stored or will be saved."
-    )
-
-    results_dir = Path(cfg.get("results_dir", _DEFAULT_RESULT_PATH))
+    # Relevant directories
+    results_dir = Path(
+        cfg.get("results_dir", _DEFAULT_RESULT_PATH)
+    )  # base directory where inference results are stored
+    runplot_base_dir = Path(
+        cfg.get("runplot_base_dir", results_dir)
+    )  # base directory where map plots and histograms will be stored
+    metric_base_dir = Path(
+        cfg.get("metric_base_dir", results_dir)
+    )  # base directory where score files will be stored
+    summary_dir = Path(
+        cfg.get("summary_dir", _DEFAULT_PLOT_DIR)
+    )  # base directory where summary plots will be stored
 
     metrics = cfg.evaluation.metrics
     regions = cfg.evaluation.get("regions", ["global"])
@@ -65,11 +74,11 @@ if __name__ == "__main__":
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
 
     for run_id, run in runs.items():
-        plotter = Plotter(cfg, run_id)
+        plotter = Plotter(cfg, run_id, runplot_base_dir)
         _logger.info(f"RUN {run_id}: Getting data...")
 
         streams = run["streams"].keys()
-        out_scores_dir = Path(cfg.output_scores_dir) / run_id / "evaluation"
+        metric_dir = metric_base_dir / run_id / "evaluation"
 
         for stream in streams:
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
@@ -78,52 +87,49 @@ if __name__ == "__main__":
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                plots = plot_data(cfg, run_id, stream, stream_dict)
+                plots = plot_data(cfg, runplot_base_dir, run_id, stream, stream_dict)
 
             if stream_dict.get("evaluation"):
                 # Create output directory if it does not exist
-                out_scores_dir.mkdir(parents=True, exist_ok=True)
+                metric_dir.mkdir(parents=True, exist_ok=True)
 
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
 
-                for region in regions:
-                    metrics_to_compute = []
-                    
-                    for metric in metrics:
-                        try:
-                            metric_data = retrieve_metric_from_json(
-                                out_scores_dir,
-                                run_id,
-                                stream,
-                                region,
-                                metric,
-                                run.epoch,
-                                )
-                            scores_dict[metric][region][stream][run_id] = metric_data
-                        except (FileNotFoundError, KeyError, ValueError):
-                            metrics_to_compute.append(metric)
+                metrics_to_compute = []
 
-                    if metrics_to_compute:
-                        all_metrics, points_per_sample = calc_scores_per_stream(
-                            cfg, run_id, stream, region, metrics_to_compute
-                        )
-
-                        metric_list_to_json(
-                            [all_metrics],
-                            [points_per_sample],
-                            [stream],
-                            region,
-                            out_scores_dir,
+                for metric in metrics:
+                    try:
+                        metric_data = retrieve_metric_from_json(
+                            metric_dir,
                             run_id,
+                            stream,
+                            metric,
                             run.epoch,
                         )
+                        scores_dict[metric][stream][run_id] = metric_data
+                    except (FileNotFoundError, KeyError, ValueError):
+                        metrics_to_compute.append(metric)
 
-                        for metric in metrics_to_compute:
-                            scores_dict[metric][region][stream][run_id] = all_metrics.sel(
-                                {"metric": metric}
-                            )
+                if metrics_to_compute:
+                    all_metrics, points_per_sample = calc_scores_per_stream(
+                        cfg, run_id, stream, metrics_to_compute
+                    )
+
+                    metric_list_to_json(
+                        [all_metrics],
+                        [points_per_sample],
+                        [stream],
+                        metric_dir,
+                        run_id,
+                        run.epoch,
+                    )
+
+                    for metric in metrics_to_compute:
+                        scores_dict[metric][stream][run_id] = all_metrics.sel(
+                            {"metric": metric}
+                        )
 
 
 # plot summary
 if scores_dict and cfg.summary_plots:
-    plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)
+    plot_summary(cfg, scores_dict, summary_dir, print_summary=cfg.print_summary)
