@@ -28,7 +28,6 @@ from torch.distributed.fsdp.wrap import (
 )
 
 import weathergen.common.config as config
-import weathergen.train.loss as losses
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
