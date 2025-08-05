@@ -3,7 +3,7 @@ import logging
 import numpy as np
 import torch
 
-from weathergen.utils.config import Config
+from weathergen.common.config import Config
 
 _logger = logging.getLogger(__name__)
 
