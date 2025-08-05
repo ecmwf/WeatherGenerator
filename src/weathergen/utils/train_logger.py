@@ -21,7 +21,7 @@ import numpy as np
 import polars as pl
 from torch import Tensor
 
-import weathergen.common.config as config
+import weathergen.utils.config as config
 from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 
 _weathergen_timestamp = "weathergen.timestamp"
@@ -123,7 +123,6 @@ class TrainLogger:
             stddev = stddev_all[st_name]
 
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts):
-                lf_name = clean_name(lf_name)
                 metrics[_key_loss(st["name"], lf_name)] = loss[:, :, j].nanmean().item()
 
                 for k, ch_n in enumerate(st.train_target_channels):
@@ -440,16 +439,13 @@ def clean_name(s):
 
 def _key_loss(st_name: str, lf_name: str) -> str:
     st_name = clean_name(st_name)
-    lf_name = clean_name(lf_name)
     return f"stream.{st_name}.loss_{lf_name}.loss_avg"
 
 
 def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
     st_name = clean_name(st_name)
-    lf_name = clean_name(lf_name)
     ch_name = clean_name(ch_name)
     return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
-
 
 def _key_stddev(st_name: str) -> str:
     st_name = clean_name(st_name)
