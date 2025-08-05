@@ -127,7 +127,7 @@ def load_config(
             c = _load_overwrite_conf(overwrite)
             c = _load_streams_in_config(c)
             overwrite_configs.append(c)
-    
+
     private_config = set_paths(private_config)
 
     if from_run_id is None:
