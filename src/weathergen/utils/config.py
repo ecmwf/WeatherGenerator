@@ -282,9 +282,6 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
             "WEATHERGEN_PRIVATE_CONF or provide a path."
         )
     private_cf = OmegaConf.load(private_home)
-    # private_cf["model_path"] = (
-    #     private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
-    # )
 
     if "secrets" in private_cf:
         del private_cf["secrets"]
