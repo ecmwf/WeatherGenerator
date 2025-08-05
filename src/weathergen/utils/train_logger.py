@@ -447,6 +447,7 @@ def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
     ch_name = clean_name(ch_name)
     return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
 
+
 def _key_stddev(st_name: str) -> str:
     st_name = clean_name(st_name)
     return f"stream.{st_name}.stddev_avg"
