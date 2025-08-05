@@ -310,9 +310,7 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     # Check if histograms should be plotted
     plot_histograms = plot_settings.get("plot_histograms", False)
     if not isinstance(plot_settings.plot_histograms, bool):
-        raise TypeError(
-            "plot_histograms must be a boolean."
-        )
+        raise TypeError("plot_histograms must be a boolean.")
 
     if plot_fsteps == "all":
         plot_fsteps = None

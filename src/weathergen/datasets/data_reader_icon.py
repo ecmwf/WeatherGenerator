@@ -7,17 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import json
 import logging
 from pathlib import Path
 from typing import override
-from cftime import num2date
 
+import fsspec
 import numpy as np
 import xarray as xr
-import json
-import fsspec
 import zarr
-
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
@@ -27,17 +25,17 @@ from weathergen.datasets.data_reader_base import (
     check_reader_data,
 )
 
-
 _logger = logging.getLogger(__name__)
 
 frequencies = {
-        '3hrPt': np.timedelta64(10800000000000, 'ns'),
-        'day': np.timedelta64(86400000000000, 'ns'),
-        'fx': np.timedelta64(0, 'ns'),
-        'mon': np.timedelta64(2548800000000000, 'ns'),
-        'monC': np.timedelta64(2505600000000000, 'ns'),
-        'yr': np.timedelta64(31536000000000000, 'ns'),
+    "3hrPt": np.timedelta64(10800000000000, "ns"),
+    "day": np.timedelta64(86400000000000, "ns"),
+    "fx": np.timedelta64(0, "ns"),
+    "mon": np.timedelta64(2548800000000000, "ns"),
+    "monC": np.timedelta64(2505600000000000, "ns"),
+    "yr": np.timedelta64(31536000000000000, "ns"),
 }
+
 
 class DataReaderIconBase(DataReaderTimestep):
     "Wrapper for ICON data variables"
@@ -80,7 +78,11 @@ class DataReaderIconBase(DataReaderTimestep):
             return
 
         # Compute temporal resolution if not already defined
-        self.temporal_frequency = self.time[1] - self.time[0] if self.temporal_frequency is None else self.temporal_frequency
+        self.temporal_frequency = (
+            self.time[1] - self.time[0]
+            if self.temporal_frequency is None
+            else self.temporal_frequency
+        )
 
         # Initialize parent class with resolved time window
         super().__init__(
@@ -92,9 +94,13 @@ class DataReaderIconBase(DataReaderTimestep):
         )
 
         # Compute absolute start/end indices in the dataset based on time window
-        self.start_idx = (tw_handler.t_start - start_ds).astype("timedelta64[D]").astype(int) * self.mesh_size
-        self.end_idx = ((tw_handler.t_end - start_ds).astype("timedelta64[D]").astype(int) + 1) * self.mesh_size - 1
-        
+        self.start_idx = (tw_handler.t_start - start_ds).astype("timedelta64[D]").astype(
+            int
+        ) * self.mesh_size
+        self.end_idx = (
+            (tw_handler.t_end - start_ds).astype("timedelta64[D]").astype(int) + 1
+        ) * self.mesh_size - 1
+
         # Sanity check
         assert self.end_idx > self.start_idx, (
             f"Abort: Final index of {self.end_idx} is the same or smaller than start index {self.start_idx}"
@@ -106,7 +112,7 @@ class DataReaderIconBase(DataReaderTimestep):
         # === Coordinates ===
 
         # Convert to degrees if stored in radians
-        coords_units = self.ds[lat_attribute].attrs['units']
+        coords_units = self.ds[lat_attribute].attrs["units"]
         if coords_units == "radian":
             self.lat = np.rad2deg(self.ds[lat_attribute][:].astype("f"))
             self.lon = np.rad2deg(self.ds[lon_attribute][:].astype("f"))
@@ -202,7 +208,7 @@ class DataReaderIconBase(DataReaderTimestep):
         length of dataset
         """
         return self.len
-        
+
     @override
     def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
         """
@@ -254,10 +260,10 @@ class DataReaderIconBase(DataReaderTimestep):
 
         # data
         channels = np.array(self.colnames)[channels_idx]
-        
+
         data_reshaped = [
             np.asarray(self.ds[ch_]).reshape(-1, 1)[start_row:end_row] for ch_ in channels
-        ]        
+        ]
         data = np.concatenate(data_reshaped, axis=1)
 
         # empty geoinfos
@@ -270,10 +276,8 @@ class DataReaderIconBase(DataReaderTimestep):
             datetimes=datetimes,
         )
         check_reader_data(rd, dtr)
-        
-        return rd
-        
 
+        return rd
 
 
 ##########################
@@ -291,7 +295,7 @@ class DataReaderIcon(DataReaderIconBase):
 
         # Column (variable) names and indices
         self.colnames = list(self.ds)
-        self.cols_idx = np.array(list(np.arange(len(self.colnames)))) 
+        self.cols_idx = np.array(list(np.arange(len(self.colnames))))
 
         # Will be inferred later based on the dataset’s time variable
         self.temporal_frequency = None
@@ -303,7 +307,7 @@ class DataReaderIcon(DataReaderIconBase):
 
         # Extract variable list from stats metadata
         stats_vars_metadata = self.stats["metadata"]["variables"]
-        self.stats_vars = [v for v in stats_vars_metadata if v not in {'clat', 'clon', 'time'}]
+        self.stats_vars = [v for v in stats_vars_metadata if v not in {"clat", "clon", "time"}]
 
         # Load mean and standard deviation per variable
         self.mean = np.array(self.stats["statistics"]["mean"], dtype="d")
@@ -312,7 +316,7 @@ class DataReaderIcon(DataReaderIconBase):
         # Delegate further initialization to the base class
         super().__init__(
             tw_handler,
-            stream_info,            
+            stream_info,
         )
 
 
@@ -326,7 +330,6 @@ class DataReaderIconCmip6(DataReaderIconBase):
         filename: Path,
         stream_info: dict,
     ) -> None:
-
         # Open the kerchunk-generated reference JSON
         ref_path = Path(filename)
         if not ref_path.exists():
@@ -344,12 +347,12 @@ class DataReaderIconCmip6(DataReaderIconBase):
         self.ds = xr.open_dataset(mapper, engine="zarr", consolidated=True)
 
         # Column (variable) names and indices
-        self.colnames = stream_info['variables']
-        self.cols_idx = np.array(list(np.arange(len(self.colnames)))) 
+        self.colnames = stream_info["variables"]
+        self.cols_idx = np.array(list(np.arange(len(self.colnames))))
 
         # Determine temporal frequency from dataset metadata
-        frequency_attr = self.ds.attrs['frequency']
-        self.temporal_frequency = frequencies[frequency_attr] 
+        frequency_attr = self.ds.attrs["frequency"]
+        self.temporal_frequency = frequencies[frequency_attr]
 
         # Load associated statistics file for normalization
         stats_filename = Path(filename).with_name(Path(filename).stem + "_stats.json")
@@ -359,15 +362,9 @@ class DataReaderIconCmip6(DataReaderIconBase):
         # Variables included in the stats
         self.stats_vars = list(self.stats)
 
-        # Load mean and standard deviation per variable        
-        self.mean = np.array(
-            [self.stats[var]["mean"] for var in self.stats_vars],
-            dtype=np.float64
-        )
-        self.stdev = np.array(
-            [self.stats[var]["std"] for var in self.stats_vars],
-            dtype=np.float64
-        )
+        # Load mean and standard deviation per variable
+        self.mean = np.array([self.stats[var]["mean"] for var in self.stats_vars], dtype=np.float64)
+        self.stdev = np.array([self.stats[var]["std"] for var in self.stats_vars], dtype=np.float64)
 
         # Delegate further initialization to the base class
         super().__init__(

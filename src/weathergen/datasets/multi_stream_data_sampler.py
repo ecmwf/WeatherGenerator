@@ -22,8 +22,8 @@ from weathergen.datasets.data_reader_base import (
     str_to_datetime64,
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
-from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.data_reader_icon import DataReaderIcon, DataReaderIconCmip6
+from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
