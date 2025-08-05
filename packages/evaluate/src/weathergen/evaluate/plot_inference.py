@@ -31,7 +31,6 @@ _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
 
 def run_main(cfg: DictConfig) -> None:
-
     runs = cfg.run_ids
 
     _logger.info(f"Detected {len(runs)} runs")
@@ -68,7 +67,9 @@ def run_main(cfg: DictConfig) -> None:
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                _ = plot_data(cfg, results_base_dir, runplot_base_dir, run_id, stream, stream_dict)
+                _ = plot_data(
+                    cfg, results_base_dir, runplot_base_dir, run_id, stream, stream_dict
+                )
 
             if stream_dict.get("evaluation"):
                 # Create output directory if it does not exist

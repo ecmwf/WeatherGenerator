@@ -263,7 +263,12 @@ def calc_scores_per_stream(
 
 
 def plot_data(
-    cfg: str, results_base_dir: Path, plot_base_dir: Path, run_id: str, stream: str, stream_dict: dict
+    cfg: str,
+    results_base_dir: Path,
+    plot_base_dir: Path,
+    run_id: str,
+    stream: str,
+    stream_dict: dict,
 ) -> list[str]:
     """
     Plot the data for a given run and stream.
@@ -328,7 +333,9 @@ def plot_data(
     if plot_samples == "all":
         plot_samples = None
 
-    model_output = get_data(cfg, results_base_dir, run_id, stream, plot_samples, plot_fsteps, plot_chs)
+    model_output = get_data(
+        cfg, results_base_dir, run_id, stream, plot_samples, plot_fsteps, plot_chs
+    )
 
     da_tars = model_output.target
     da_preds = model_output.prediction
