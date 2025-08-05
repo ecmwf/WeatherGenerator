@@ -22,8 +22,8 @@ from weathergen.train.utils import get_run_id
 
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
-_DEFAULT_MODEL_PATH = "./models"
-_DEFAULT_RESULT_PATH = "./results"
+_DEFAULT_MODEL_PATH = _REPO_ROOT / "models"
+_DEFAULT_RESULT_PATH = _REPO_ROOT / "results"
 
 _logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ def load_config(
     if from_run_id is None:
         base_config = _load_default_conf()
     else:
-        base_config = load_model_config(from_run_id, epoch, private_config["model_path"])
+        base_config = load_model_config(from_run_id, epoch, private_config.get("model_path", None))
 
     # use OmegaConf.unsafe_merge if too slow
     return OmegaConf.merge(base_config, private_config, *overwrite_configs)
@@ -283,7 +283,7 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
         )
     private_cf = OmegaConf.load(private_home)
     private_cf["model_path"] = (
-        private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
+        private_cf["model_path"] if "model_path" in private_cf.keys() else None
     )
 
     if "secrets" in private_cf:
@@ -345,8 +345,9 @@ def load_streams(streams_directory: Path) -> list[Config]:
 def set_paths(config: Config) -> Config:
     """Set the configs run_path model_path attributes to default values if not present."""
     config = config.copy()
-    config.run_path = config.get("run_path", None) or _DEFAULT_RESULT_PATH
-    config.model_path = config.get("model_path", None) or _DEFAULT_MODEL_PATH
+    # pathlib.Path are not json serializable, so we convert them to str
+    config.run_path = config.get("run_path", None) or str(_DEFAULT_RESULT_PATH)
+    config.model_path = config.get("model_path", None) or str(_DEFAULT_MODEL_PATH)
 
     return config
 
