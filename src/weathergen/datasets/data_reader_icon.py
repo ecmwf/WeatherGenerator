@@ -45,7 +45,6 @@ class DataReaderIconBase(DataReaderTimestep):
     def __init__(
         self,
         tw_handler: TimeWindowHandler,
-        filename: Path,
         stream_info: dict,
     ) -> None:
         """
@@ -55,8 +54,6 @@ class DataReaderIconBase(DataReaderTimestep):
         ----------
         tw_handler : TimeWindowHandler
             Handles temporal slicing and mapping from time indices to datetime
-        filename : Path
-            Path to the data file
         stream_info : dict
             Stream metadata
         """
@@ -65,8 +62,6 @@ class DataReaderIconBase(DataReaderTimestep):
         lon_attribute = stream_info["attributes"]["lon"]
         lat_attribute = stream_info["attributes"]["lat"]
         mesh_attribute = stream_info["attributes"]["grid"]
-
-        self.filename = filename
 
         # Set mesh size based on spatial grid definition
         self.mesh_size = len(self.ds[mesh_attribute])
@@ -317,7 +312,6 @@ class DataReaderIcon(DataReaderIconBase):
         # Delegate further initialization to the base class
         super().__init__(
             tw_handler,
-            filename,
             stream_info,            
         )
 
@@ -374,6 +368,5 @@ class DataReaderIconCmip6(DataReaderIconBase):
         # Delegate further initialization to the base class
         super().__init__(
             tw_handler,
-            filename,
             stream_info,
         )
