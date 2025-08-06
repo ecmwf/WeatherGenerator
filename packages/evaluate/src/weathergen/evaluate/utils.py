@@ -160,6 +160,135 @@ def get_data(
         )
 
 
+def get_clim(
+    cfg: dict,
+    run_id: str,
+    stream: str,
+    samples: list[int] = None,
+    fsteps: list[str] = None,
+    channels: list[str] = None,
+    return_counts: bool = False,
+) -> WeatherGeneratorOutput:
+    """
+    Retrieve climatology data for a given run from the Zarr store.
+    NOTE: This is a mock implementation that returns target data as climatology.
+
+    Parameters
+    ----------
+    cfg :
+        Configuration dictionary containing all information for the evaluation.
+    run_id :
+        Run identifier.
+    stream :
+        Stream name to retrieve data for.
+    samples :
+        List of sample indices to retrieve. If None, all samples are retrieved.
+    fsteps :
+        List of forecast steps to retrieve. If None, all forecast steps are retrieved.
+    channels :
+        List of channel names to retrieve. If None, all channels are retrieved.
+    return_counts :
+        If True, also return the number of points per sample.
+
+    Returns
+    -------
+    WeatherGeneratorOutput
+        A dataclass containing:
+        - target: Dictionary of xarray DataArrays for climatology (copied from targets), indexed by forecast step.
+        - prediction: Dictionary of xarray DataArrays for climatology (copied from targets), indexed by forecast step.
+        - points_per_sample: xarray DataArray containing the number of points per sample, if `return_counts` is True.
+    """
+
+    run = cfg.run_ids[run_id]
+    results_dir = Path(cfg.get("results_dir"))
+
+    fname_zarr = results_dir.joinpath(
+        f"{run_id}/validation_epoch{run['epoch']:05d}_rank{run['rank']:04d}.zarr"
+    )
+
+    if not fname_zarr.exists() or not fname_zarr.is_dir():
+        _logger.error(f"Zarr file {fname_zarr} does not exist or is not a directory.")
+        raise FileNotFoundError(
+            f"Zarr file {fname_zarr} does not exist or is not a directory."
+        )
+
+    with ZarrIO(fname_zarr) as zio:
+        zio_forecast_steps = zio.forecast_steps
+        stream_dict = run.streams[stream]
+        all_channels = peek_tar_channels(zio, stream, zio_forecast_steps[0])
+        _logger.info(f"RUN {run_id}: Processing climatology for stream {stream}...")
+
+        fsteps = zio_forecast_steps if fsteps is None else fsteps
+        # TODO: Avoid conversion of fsteps and sample to integers (as obtained from the ZarrIO)
+        fsteps = sorted([int(fstep) for fstep in fsteps])
+        samples = sorted(
+            [int(sample) for sample in zio.samples] if samples is None else samples
+        )
+        channels = channels or stream_dict.get("channels", all_channels)
+        channels = to_list(channels)
+
+        da_clims = []  # Store climatology data (copied from targets)
+
+        if return_counts:
+            points_per_sample = xr.DataArray(
+                np.full((len(fsteps), len(samples)), np.nan),
+                coords={"forecast_step": fsteps, "sample": samples},
+                dims=("forecast_step", "sample"),
+                name=f"points_per_sample_{stream}",
+            )
+        else:
+            points_per_sample = None
+
+        for fstep in fsteps:
+            _logger.info(
+                f"RUN {run_id} - {stream}: Processing climatology for fstep {fstep}..."
+            )
+            da_clims_fs = []
+            pps = []
+
+            for sample in tqdm(
+                samples, desc=f"Processing climatology {run_id} - {stream} - {fstep}"
+            ):
+                out = zio.get_data(sample, stream, fstep)
+                target = out.target.as_xarray()
+                # Mock climatology as a copy of target data
+                clim = target.copy()
+
+                da_clims_fs.append(clim.squeeze())
+                pps.append(len(target.ipoint))
+
+            _logger.debug(
+                f"Concatenating climatology data for stream {stream}, forecast_step {fstep}..."
+            )
+            da_clims_fs = xr.concat(da_clims_fs, dim="ipoint")
+
+            if set(channels) != set(all_channels):
+                _logger.debug(
+                    f"Restricting climatology to channels {channels} for stream {stream}..."
+                )
+                available_channels = da_clims_fs.channel.values
+                existing_channels = [ch for ch in channels if ch in available_channels]
+                if len(existing_channels) < len(channels):
+                    _logger.warning(
+                        f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
+                    )
+
+                da_clims_fs = da_clims_fs.sel(channel=existing_channels)
+
+            da_clims.append(da_clims_fs)
+            if return_counts:
+                points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
+
+        # Safer than a list - return climatology as both target and prediction
+        da_clims_dict = {fstep: da for fstep, da in zip(fsteps, da_clims, strict=False)}
+
+        return WeatherGeneratorOutput(
+            target=da_clims_dict,
+            prediction=da_clims_dict,
+            points_per_sample=points_per_sample,
+        )
+
+
 def calc_scores_per_stream(
     cfg: dict, run_id: str, stream: str, metrics: list[str]
 ) -> tuple[xr.DataArray, xr.DataArray]:
@@ -230,7 +359,7 @@ def calc_scores_per_stream(
     if "acc" in metrics:
         # Get stream-specific path
         clim_path = cfg.get(
-            "auxiliary_data_path" # update to match the expected key
+            "auxiliary_data_path"  # update to match the expected key
         )
         if clim_path:
             # this won't suffice, but it would be the correct location
@@ -328,9 +457,7 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     # Check if histograms should be plotted
     plot_histograms = plot_settings.get("plot_histograms", False)
     if not isinstance(plot_settings.plot_histograms, bool):
-        raise TypeError(
-            "plot_histograms must be a boolean."
-        )
+        raise TypeError("plot_histograms must be a boolean.")
 
     if plot_fsteps == "all":
         plot_fsteps = None
