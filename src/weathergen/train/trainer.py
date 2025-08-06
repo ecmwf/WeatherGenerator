@@ -493,7 +493,7 @@ class Trainer(TrainerBase):
                 self.last_grad_norm = total_norm.item()
                 for name, param in self.ddp_model.named_parameters():
                     if param.grad is not None:
-                        grad_norms[name] = param.grad.norm().item()
+                        grad_norms["grad_norm_" + name] = param.grad.norm().item()
                 self.train_logger.log_metrics(TRAIN, grad_norms)
 
 

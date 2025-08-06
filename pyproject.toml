@@ -28,6 +28,7 @@ dependencies = [
  "dask~=2025.5.1",
  "hatchling",
  "weathergen-common",
+ "seaborn>=0.13.2",
 ]
 
 [project.urls]
