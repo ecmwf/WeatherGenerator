@@ -14,13 +14,11 @@ import torch
 stat_loss_fcts = ["stats", "kernel_crps"]  # Names of loss functions that need std computed
 
 
-####################################################################################################
 def gaussian(x, mu=0.0, std_dev=1.0):
     # unnormalized Gaussian where maximum is one
     return torch.exp(-0.5 * (x - mu) * (x - mu) / (std_dev * std_dev))
 
 
-####################################################################################################
 def normalized_gaussian(x, mu=0.0, std_dev=1.0):
     return (1 / (std_dev * np.sqrt(2.0 * np.pi))) * torch.exp(
         -0.5 * (x - mu) * (x - mu) / (std_dev * std_dev)
@@ -35,7 +33,6 @@ def erf(x, mu=0.0, std_dev=1.0):
     return val
 
 
-####################################################################################################
 def gaussian_crps(target, ens, mu, stddev):
     # see Eq. A2 in S. Rasp and S. Lerch. Neural networks for postprocessing ensemble weather
     # forecasts. Monthly Weather Review, 146(11):3885 – 3900, 2018.
@@ -46,13 +43,11 @@ def gaussian_crps(target, ens, mu, stddev):
     return torch.mean(val)  # + torch.mean( torch.sqrt( stddev) )
 
 
-####################################################################################################
 def stats(target, ens, mu, stddev):
     diff = gaussian(target, mu, stddev) - 1.0
     return torch.mean(diff * diff) + torch.mean(torch.sqrt(stddev))
 
 
-####################################################################################################
 def stats_normalized(target, ens, mu, stddev):
     a = normalized_gaussian(target, mu, stddev)
     max = 1 / (np.sqrt(2 * np.pi) * stddev)
@@ -60,25 +55,21 @@ def stats_normalized(target, ens, mu, stddev):
     return torch.mean(d * d) + torch.mean(torch.sqrt(stddev))
 
 
-####################################################################################################
 def stats_normalized_erf(target, ens, mu, stddev):
     delta = -torch.abs(target - mu)
     d = 0.5 + torch.special.erf(delta / (np.sqrt(2.0) * stddev))
     return torch.mean(d * d)  # + torch.mean( torch.sqrt( stddev) )
 
 
-####################################################################################################
-def mse(target, ens, mu, *kwargs):
-    return torch.nn.functional.mse_loss(target, mu)
+# def mse(target, ens, mu, *kwargs):
+#     return torch.nn.functional.mse_loss(target, mu)
 
 
-####################################################################################################
 def mse_ens(target, ens, mu, stddev):
     mse_loss = torch.nn.functional.mse_loss
     return torch.stack([mse_loss(target, mem) for mem in ens], 0).mean()
 
 
-####################################################################################################
 def kernel_crps(target, ens, mu, stddev, fair=True):
     ens_size = ens.shape[0]
     mae = torch.stack([(target - mem).abs().mean() for mem in ens], 0).mean()
@@ -93,7 +84,8 @@ def kernel_crps(target, ens, mu, stddev, fair=True):
     return mae + ens_var
 
 
-def mse_channel_location_weighted(
+# def mse_channel_location_weighted(
+def mse(
     weights_channels: torch.Tensor | None,
     weights_locations: torch.Tensor | None,
     target: torch.Tensor,
@@ -116,6 +108,3 @@ def mse_channel_location_weighted(
     loss = torch.mean(loss_chs * weights_channels if weights_channels else loss_chs)
 
     return loss, loss_chs
-
-
-mse = mse_channel_location_weighted
