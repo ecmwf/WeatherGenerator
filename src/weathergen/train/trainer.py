@@ -32,7 +32,12 @@ import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.layers import MLP
-from weathergen.model.attention import MultiSelfAttentionHead, MultiSelfAttentionHeadLocal
+from weathergen.model.attention import (
+    MultiSelfAttentionHead,
+    MultiSelfAttentionHeadLocal,
+    MultiSelfAttentionHeadVarlen,
+    MultiCrossAttentionHeadVarlen
+)
 from weathergen.model.engines import (
     LocalAssimilationEngine,
     Local2GlobalAssimilationEngine,
@@ -208,23 +213,26 @@ class Trainer(TrainerBase):
                 if cf.with_mixed_precision
                 else None
             }
-            global_engine_modules_to_shard = (
-                    MLP,
-                    MultiSelfAttentionHeadLocal,
-                    MultiSelfAttentionHead
+            modules_to_shard = (
+                MLP,
+                MultiSelfAttentionHeadLocal,
+                MultiSelfAttentionHead,
+                MultiCrossAttentionHeadVarlen,
+                MultiSelfAttentionHeadVarlen
             )
+            import pdb; pdb.set_trace()
             for module in self.model.modules():
-                if isinstance(module, global_engine_modules_to_shard):
+                if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)
-            engines_to_shard = (
-                LocalAssimilationEngine,
-                Local2GlobalAssimilationEngine,
-                GlobalAssimilationEngine,
-                TargetPredictionEngine,
-            )
-            for module in self.model.modules():
-                if isinstance(module, engines_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
+            # engines_to_shard = (
+            #     LocalAssimilationEngine,
+            #     Local2GlobalAssimilationEngine,
+            #     GlobalAssimilationEngine,
+            #     TargetPredictionEngine,
+            # )
+            # for module in self.model.modules():
+            #     if isinstance(module, engines_to_shard):
+            #         fully_shard(module, **fsdp_kwargs)
             fully_shard(self.model, **fsdp_kwargs)
             for tensor in itertools.chain(self.model.parameters(), self.model.buffers()):
                 assert tensor.device == torch.device("meta")
