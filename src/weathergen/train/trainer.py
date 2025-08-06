@@ -76,6 +76,7 @@ class Trainer(TrainerBase):
 
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
+        self.last_grad_norm = 0.0
 
     def inference(self, cf, run_id_trained, epoch):
         # general initalization
@@ -482,7 +483,19 @@ class Trainer(TrainerBase):
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), max_norm=cf.grad_clip)
+            total_norm = torch.nn.utils.clip_grad_norm_(
+                self.ddp_model.parameters(), max_norm=cf.grad_clip
+            )
+
+            # log gradient norms
+            if bidx % log_interval == 0:
+                grad_norms = { "total_grad_norm" : total_norm.item() }
+                self.last_grad_norm = total_norm.item()
+                for name, param in self.ddp_model.named_parameters():
+                    if param.grad is not None:
+                        grad_norms[name] = param.grad.norm().item()
+                self.train_logger.log_metrics(TRAIN, grad_norms)
+
 
             # optimizer step
             self.grad_scaler.step(self.optimizer)
@@ -718,7 +731,7 @@ class Trainer(TrainerBase):
                     # samples per sec
                     dt = time.time() - self.t_start
                     pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
-                    pstr += "(lr={:.2E}, s/sec={:.3f})"
+                    pstr += "(lr={:.2E}, gradient norm={:.3f}, s/sec={:.3f})"
                     len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
                     print(
                         pstr.format(
@@ -728,6 +741,7 @@ class Trainer(TrainerBase):
                             self.cf.istep,
                             avg_loss.nanmean().item(),
                             self.lr_scheduler.get_lr(),
+                            self.last_grad_norm,
                             (self.print_freq * self.cf.batch_size_per_gpu) / dt,
                         ),
                         flush=True,
