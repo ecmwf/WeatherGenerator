@@ -414,6 +414,11 @@ def clean_df(df, columns: list[str] | None):
 
     if columns:
         columns = list(set(columns))  # remove duplicates
+        # Backwards compatibility of "loss_avg_mean" (old) and "loss_avg_0_mean" (new) metric name
+        if "loss_avg_mean" not in df.columns:
+            idcs = [i for i in range(len(columns)) if columns[i] == "loss_avg_mean"]
+            if len(idcs) > 0:
+                columns[idcs[0]] = "loss_avg_0_mean"
         df = df.select(columns)
         # Remove all rows where all columns are null
         df = df.filter(~pl.all_horizontal(pl.col(c).is_null() for c in columns))

@@ -28,6 +28,7 @@ dependencies = [
  "dask~=2025.5.1",
  "hatchling",
  "weathergen-common",
+ "numexpr>=2.11.0",
 ]
 
 [project.urls]
@@ -53,9 +54,12 @@ packages = ["src/weathergen"]
 [dependency-groups]
 # The development dependencies
 dev = [
+ "ipykernel>=6.30.0",
+ "jupytext>=1.17.2",
  "pytest~=8.3.5",
  "pytest-mock>=3.14.1",
  "ruff==0.9.7",
+ "tensorboard>=2.20.0",
 ]
 
 
@@ -105,7 +109,9 @@ ignore = [
   "SIM401",
   # To ignore, not relevant for us
   "SIM108", # in case additional norm layer supports are added in future
-  "N817" # we use heavy acronyms, e.g., allowing 'import LongModuleName as LMN' (LMN is accepted)
+  "N817", # we use heavy acronyms, e.g., allowing 'import LongModuleName as LMN' (LMN is accepted)
+  "E731", # overly restrictive and less readable code
+  "N812", # prevents us following the convention for importing torch.nn.functional as F
 ]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]

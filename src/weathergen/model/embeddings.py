@@ -30,6 +30,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         dim_out,
         num_blocks,
         num_heads,
+        dropout_rate=0.0,
         norm_type="LayerNorm",
         embed_size_centroids=64,
         unembed_mode="full",
@@ -64,7 +65,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                 MultiSelfAttentionHead(
                     self.dim_embed,
                     self.num_heads,
-                    dropout_rate=0.1,
+                    dropout_rate=dropout_rate,
                     with_qk_lnorm=True,
                     with_flash=True,
                 )
@@ -74,7 +75,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                     self.dim_embed,
                     self.dim_embed,
                     hidden_factor=2,
-                    dropout_rate=0.1,
+                    dropout_rate=dropout_rate,
                     with_residual=True,
                 )
             )
@@ -105,7 +106,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                     # ]
                 )
                 self.ln_final = torch.nn.ModuleList(
-                    [norm(dim_embed, eps=1e-03) for _ in range(num_channels)]
+                    [norm(dim_embed, eps=1e-6) for _ in range(num_channels)]
                 )
 
             else:
@@ -125,7 +126,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                 self.dim_embed,
                 self.num_tokens * ((self.dim_out - embed_size_centroids) // token_size),
             )
-            self.ln_final = norm(dim_out, eps=1e-03)
+            self.ln_final = norm(dim_out, eps=1e-6)
             self.forward = self.forward_columns
 
             # TODO: factorization when sqrt is not int
