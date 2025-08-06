@@ -355,22 +355,13 @@ def calc_scores_per_stream(
     )
 
     # Load climatological mean once if needed for ACC calculation
-    clim_mean = None
+    clim_data = None
     if "acc" in metrics:
-        # Get stream-specific path
-        clim_path = cfg.get(
-            "auxiliary_data_path"  # update to match the expected key
-        )
-        if clim_path:
-            # this won't suffice, but it would be the correct location
-            clim_mean = xr.open_dataarray(clim_path)
-            _logger.info(
-                f"Loaded climatological mean for stream {stream} from {clim_path}"
-            )
-        else:
-            _logger.warning(
-                f"ACC metric requested for stream {stream} but 'auxiliary_material' path not found in stream config or global config"
-            )
+        # Use get_clim to get mock climatology data (target data as climatology)
+        _logger.info(f"Loading mock climatology for stream {stream} using get_clim...")
+        clim_output = get_clim(cfg, run_id, stream, return_counts=False)
+        clim_data = clim_output.target
+        _logger.info(f"Loaded mock climatology for stream {stream}")
 
     for (fstep, tars), (_, preds) in zip(
         da_tars.items(), da_preds.items(), strict=False
@@ -381,8 +372,21 @@ def calc_scores_per_stream(
         # Build up computation graphs for all metrics
         _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
 
+        # Prepare kwargs for metrics that need climatology
+        metric_kwargs = {}
+        if "acc" in metrics and clim_data is not None:
+            # Get climatology for this fstep
+            clim_mean = clim_data[fstep]
+            metric_kwargs["clim_mean"] = clim_mean
+
         combined_metrics = [
-            get_score(score_data, metric, agg_dims="ipoint", group_by_coord="sample")
+            get_score(
+                score_data,
+                metric,
+                agg_dims="ipoint",
+                group_by_coord="sample",
+                **metric_kwargs if metric == "acc" else {},
+            )
             for metric in metrics
         ]
 
