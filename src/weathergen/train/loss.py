@@ -91,3 +91,31 @@ def kernel_crps(target, ens, mu, stddev, fair=True):
     ens_var /= ens.shape[1]
 
     return mae + ens_var
+
+
+def mse_channel_location_weighted(
+    weights_channels: torch.Tensor | None,
+    weights_locations: torch.Tensor | None,
+    target: torch.Tensor,
+    pred: torch.Tensor,
+):
+    """
+    Compute weighted MSE loss
+
+
+    Return:
+        loss : weight loss for gradient computation
+        loss_chs : losses per channel with location weighting but no channel weighting
+    """
+
+    mask_nan = ~torch.isnan(target)
+
+    diff2 = torch.square(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0)).mean(0)
+    wl = weights_locations
+    loss_chs = ((diff2.transpose(1, 0) * wl).transpose(1, 0) if wl else diff2).mean(0)
+    loss = torch.mean(loss_chs * weights_channels if weights_channels else loss_chs)
+
+    return loss, loss_chs
+
+
+mse = mse_channel_location_weighted

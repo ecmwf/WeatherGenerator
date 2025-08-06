@@ -80,130 +80,35 @@ class LossCalculator:
         self.loss_fcts = [[getattr(losses, name), w] for name, w in loss_fcts]
 
     @staticmethod
-    def _construct_masks(
-        target_times_raw: np.array, mask_nan: Tensor, tok_spacetime: bool
-    ) -> list[Tensor]:
-        """
-        Constructs a list of boolean masks for target data.
-
-        If 'tok_spacetime' is enabled, masks are generated for unique intermediate time steps
-        within a single forecast step and combined with a NaN mask. Otherwise, a single mask
-        for non-NaN values is returned. This is useful for datasets where targets might have
-        sub-timestep granularity.
-
-        Args:
-            target_times_raw: A NumPy array containing raw time values for targets
-                              within a single forecast step.
-            mask_nan: A PyTorch Tensor indicating non-NaN values for the specific channel.
-            tok_spacetime: A boolean flag indicating whether spacetime tokenization is active,
-                           which influences mask construction.
-
-        Returns:
-            A list of PyTorch boolean Tensors, where each tensor is a combined mask for
-            a unique time point or simply the non-NaN mask.
-        """
-        masks = []
-        if tok_spacetime:
-            t_unique = np.unique(target_times_raw)
-            for t in t_unique:
-                mask_t = Tensor(t == target_times_raw).to(mask_nan)
-                masks.append(torch.logical_and(mask_t, mask_nan))
-        else:
-            masks.append(mask_nan)
-        return masks
-
-    @staticmethod
-    def _compute_loss_with_mask(
-        target: Tensor, pred: Tensor, mask: np.array, i_ch: int, loss_fct: losses, ens: bool
-    ) -> Tensor:
-        """
-        Computes the loss for a specific channel using a given mask.
-
-        This helper function applies a chosen loss function to the masked target and prediction
-        data for a single channel, handling ensemble predictions by calculating mean and standard
-        deviation over the ensemble dimension.
-
-        Args:
-            target: The ground truth target tensor.
-            pred: The prediction tensor, potentially with an ensemble dimension.
-            mask: A boolean mask tensor, indicating which elements to consider for loss computation.
-            i_ch: The index of the channel for which to compute the loss.
-            loss_fct: The specific loss function to apply. It is expected to accept
-                      (masked_target, masked_pred, pred_mean, pred_std).
-            ens: A boolean flag indicating whether 'pred' contains an ensemble dimension.
-
-        Returns:
-            The computed loss value for the masked data, or a tensor with value 0 if no
-            valid data points are present under the mask.
-        """
-        if mask.sum().item() > 0:
-            # Only compute loss if there are non-NaN values
-            return loss_fct(
-                target[mask, i_ch],
-                pred[:, mask, i_ch],
-                pred[:, mask, i_ch].mean(0),
-                (pred[:, mask, i_ch].std(0) if ens else torch.zeros(1, device=pred.device)),
-            )
-        else:
-            # If no valid data under the mask, return 0 to avoid errors and not contribute to loss
-            return torch.tensor(0.0, device=pred.device)
-
-    def _compute_loss_per_loss_function(
-        self,
+    def _loss_per_loss_function(
         loss_fct,
-        i_lfct,
-        i_batch,
-        i_strm,
         strm,
-        fstep,
-        streams_data,
-        target,
-        pred,
-        mask_nan,
-        channel_loss_weight,
-        losses_all,
+        target: torch.Tensor,
+        pred: torch.Tensor,
+        target_times_masks: list[torch.Tensor],
+        weights_channels: torch.Tensor,
+        weights_locations: torch.Tensor,
     ):
-        tok_spacetime = strm["tokenize_spacetime"] if "tokenize_spacetime" in strm else False
-        ens = pred.shape[0] > 1
+        loss_lfct = torch.tensor(0.0, device=target.device, requires_grad=True)
+        losses_chs = torch.zeros(target.shape[-1], dtype=torch.float32)
 
-        # compute per channel loss
-        loss_lfct = torch.tensor(0.0, device=self.device, requires_grad=True)
-        ctr_chs = 0
-
-        # loop over all channels within the current stream and forecast step
-        for i_ch in range(target.shape[-1]):
-            # construct masks based on spacetime tokenization setting
-            masks = self._construct_masks(
-                target_times_raw=streams_data[i_batch][i_strm].target_times_raw[
-                    self.cf.forecast_offset + fstep
-                ],
-                mask_nan=mask_nan[:, i_ch],
-                tok_spacetime=tok_spacetime,
+        ctr_substeps = 0
+        for mask_t in target_times_masks:
+            loss, loss_chs = loss_fct(
+                weights_channels, weights_locations, target[mask_t], pred[:, mask_t]
             )
-            ctr_substeps = 0
-            for mask in masks:
-                loss_ch = self._compute_loss_with_mask(
-                    target=target,
-                    pred=pred,
-                    mask=mask,
-                    i_ch=i_ch,
-                    loss_fct=loss_fct,
-                    ens=ens,
-                )
-                # accumulate weighted loss for this loss function and channel
-                loss_lfct = loss_lfct + (channel_loss_weight[i_ch] * loss_ch)
-                ctr_chs += 1 if loss_ch > 0.0 else 0
-                ctr_substeps += 1 if loss_ch > 0.0 else 0
-                # for detailed logging
-                losses_all[strm.name][i_ch, i_lfct] += loss_ch.item()
+
+            loss_lfct = loss_lfct + loss
+            losses_chs += loss_chs.detach().cpu()
+            ctr_substeps += 1 if loss > 0.0 else 0
 
             # normalize over forecast steps in window
-            losses_all[strm.name][i_ch, i_lfct] /= ctr_substeps if ctr_substeps > 0 else 0.0
+            losses_chs /= ctr_substeps if ctr_substeps > 0 else 0.0
 
-        # normalize the accumulated loss for the current loss function
-        loss_lfct = loss_lfct / ctr_chs if (ctr_chs > 0) else loss_lfct
+        # TODO: substep weight
+        loss_lfct = loss_lfct / ctr_substeps if ctr_substeps > 0 else 1.0
 
-        return loss_lfct, losses_all
+        return loss_lfct, losses_chs
 
     def compute_loss(
         self,
@@ -262,6 +167,11 @@ class LossCalculator:
             # extract target tokens for current stream from the specified forecast offset onwards
             targets = streams_data[i_batch][i_strm].target_tokens[self.cf.forecast_offset :]
 
+            stream_data = streams_data[i_batch][i_strm]
+
+            # TODO: set
+            weights_locations = None
+
             loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
 
@@ -271,21 +181,21 @@ class LossCalculator:
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
                     continue
 
-                num_channels = len(strm[str(self.stage) + "_target_channels"])
-
                 # Determine stream and channel loss weights based on the current stage
                 if self.stage == TRAIN:
                     # set loss_weights to 1. when not specified
-                    strm_loss_weight = strm["loss_weight"] if "loss_weight" in strm else 1.0
+                    strm_loss_weight = strm.get("loss_weight", 1.0)
                     channel_loss_weight = (
-                        strm["channel_weight"]
+                        torch.tensor(strm["channel_weight"]).to(
+                            device=target.device, non_blocking=True
+                        )
                         if "channel_weight" in strm
-                        else np.ones(num_channels)
+                        else None
                     )
                 elif self.stage == VAL:
                     # in validation mode, always unweighted loss
                     strm_loss_weight = 1.0
-                    channel_loss_weight = np.ones(num_channels)
+                    channel_loss_weight = None
 
                 # reshape prediction tensor to match target's dimensions: extract data/coords and
                 # remove token dimension if it exists.
@@ -293,33 +203,29 @@ class LossCalculator:
                 pred = pred.reshape([pred.shape[0], *target.shape])
                 assert pred.shape[1] > 0
 
-                mask_nan = ~torch.isnan(target)
-                # if all valid predictions are masked out by NaNs, skip this forecast step
-                if pred[:, mask_nan].shape[1] == 0:
-                    continue
+                # find substeps and create corresponding masks (reuse across loss functions)
+                tok_spacetime = strm.get("tokenize_spacetime", None)
+                target_times = stream_data.target_times_raw[self.cf.forecast_offset + fstep]
+                target_times_unique = np.unique(target_times) if tok_spacetime else [target_times]
+                target_times_masks = []
+                for t in target_times_unique:
+                    # find substep
+                    mask_t = torch.tensor(t == target_times).to(target.device, non_blocking=True)
+                    assert mask_t.sum() == weights_locations if weights_locations else True
+                    target_times_masks.append(mask_t)
 
                 # accumulate loss from different loss functions and across channels
                 for i_lfct, (loss_fct, loss_fct_weight) in enumerate(self.loss_fcts):
-                    loss_lfct, losses_all = self._compute_loss_per_loss_function(
+                    loss_lfct, loss_lfct_chs = LossCalculator._loss_per_loss_function(
                         loss_fct,
-                        i_lfct,
-                        i_batch,
-                        i_strm,
                         strm,
-                        fstep,
-                        streams_data,
                         target,
                         pred,
-                        mask_nan,
+                        target_times_masks,
                         channel_loss_weight,
-                        losses_all,
+                        weights_locations,
                     )
-
-                    # Update statistical deviation metrics if the current loss function is
-                    # recognized as statistical
-                    if loss_fct.__name__ in stat_loss_fcts:
-                        indx = stat_loss_fcts.index(loss_fct.__name__)
-                        stddev_all[strm.name][indx] += pred[:, mask_nan].std(0).mean().item()
+                    losses_all[strm.name][:, i_lfct] = loss_lfct_chs
 
                     # Add the weighted and normalized loss from this loss function to the total
                     # batch loss
