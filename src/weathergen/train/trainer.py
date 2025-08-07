@@ -13,6 +13,8 @@ import logging
 import time
 from typing import Any
 
+from omegaconf import OmegaConf
+
 import numpy as np
 import torch
 import tqdm
@@ -54,6 +56,10 @@ class Trainer(TrainerBase):
     ):
         self.cf = cf
 
+        self.cf = OmegaConf.merge(
+            OmegaConf.create({"log_grad_norms": False}), self.cf
+        )
+
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
         assert cf.forecast_policy if cf.forecast_steps > 0 else True
@@ -76,7 +82,6 @@ class Trainer(TrainerBase):
 
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
-        self.last_grad_norm = 0.0
 
     def inference(self, cf, run_id_trained, epoch):
         # general initalization
@@ -459,6 +464,7 @@ class Trainer(TrainerBase):
 
         # Unweighted loss, real weighted loss, std for losses that need it
         self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+        self.last_grad_norm = 0.0
 
         # training loop
         self.t_start = time.time()
@@ -489,12 +495,7 @@ class Trainer(TrainerBase):
 
             # log gradient norms
             if bidx % log_interval == 0:
-                grad_norms = { "total_grad_norm" : total_norm.item() }
-                self.last_grad_norm = total_norm.item()
-                for name, param in self.ddp_model.named_parameters():
-                    if param.grad is not None:
-                        grad_norms["grad_norm_" + name] = param.grad.norm().item()
-                self.train_logger.log_metrics(TRAIN, grad_norms)
+                self._log_instant_grad_norms(TRAIN, total_norm)
 
 
             # optimizer step
@@ -708,6 +709,20 @@ class Trainer(TrainerBase):
                 )
 
             self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+
+    def _log_instant_grad_norms(self, stage: Stage, total_norm):
+        """
+        Log instantaneous grad norms, we do not average because of the cost and because we want to 
+        measure the actual values
+
+        TODO test DDP case
+        """
+        grad_norms = { "total_grad_norm" : total_norm.item() }
+        self.last_grad_norm = total_norm.item()
+        for name, param in self.ddp_model.named_parameters():
+            if param.grad is not None:
+                grad_norms["grad_norm_" + name] = param.grad.norm().item()
+        self.train_logger.log_metrics(TRAIN, grad_norms)
 
     def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
         if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:

@@ -480,4 +480,7 @@ def analyze_gradient_file(json_file_path):
     return analyzer
 
 # Example usage:
-analyzer = analyze_gradient_file('results/yvhxm2jc/yvhxm2jc_train_metrics.json')
+# uv run python src/weathergen/utils/plot_grad_norms.py results/yvhxm2jc/yvhxm2jc_train_metrics.json
+if __name__ == '__main__':
+    import sys
+    analyzer = analyze_gradient_file(sys.argv[1])
