@@ -515,8 +515,8 @@ class Trainer(TrainerBase):
             if bidx % log_interval == 0:
                 self._log(TRAIN)
 
-            # model checkpoint
-            if bidx % self.checkpoint_freq == 0:
+            # save checkpoint (with designation _latest)
+            if bidx % self.checkpoint_freq == 0 and bidx > 0:
                 self.save_model(-1)
 
             self.cf.istep += cf.batch_size_per_gpu
@@ -705,7 +705,7 @@ class Trainer(TrainerBase):
                     self.perf_mem,
                 )
 
-            self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
     def _log_instant_grad_norms(self, stage: Stage, total_norm):
         """

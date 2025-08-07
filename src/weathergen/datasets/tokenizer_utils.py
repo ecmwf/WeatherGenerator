@@ -8,6 +8,10 @@ from weathergen.datasets.utils import (
     s2tor3,
 )
 
+# on some clusters our numpy version is pinned to be 1.x.x where the np.argsort does not
+# the stable=True argument
+numpy_argsort_args = {"stable": True} if int(np.__version__.split(".")[0]) >= 2 else {}
+
 
 def arc_alpha(sin_alpha, cos_alpha):
     """Maps a point on the unit circle (np.array or torch.tensor), defined by its (cosine, sine)
@@ -100,7 +104,7 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
     posr3 = s2tor3(thetas, phis)
 
     # extract information to split according to cells by first sorting and then finding split idxs
-    hpy_idxs_ord = np.argsort(hpy_idxs, stable=True)
+    hpy_idxs_ord = np.argsort(hpy_idxs, **numpy_argsort_args)
     splits = np.flatnonzero(np.diff(hpy_idxs[hpy_idxs_ord]))
 
     # extract per cell data
