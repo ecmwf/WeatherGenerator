@@ -105,6 +105,19 @@ class LossCalculator:
 
         return stream_info_loss_weight, weights_channels
 
+    def _compute_cosine_latitude_weight(self, latitudes, min_value=1e-3, max_value=1.0):
+        return (max_value - min_value) * np.cos(latitudes) + min_value
+
+    def _get_location_weights(self, stream_info, stream_data):
+        stream_info_location_weight = stream_info.get("location_weight", None)
+
+        match stream_info_location_weight:
+            case None:
+                return 1.0
+            case "cosine_latitude":
+                latitudes_radian = stream_data.target_coords_raw[0][:, 0] * np.pi / 180
+                return self._compute_cosine_latitude_weight(latitudes_radian)
+
     def _get_substep_masks(self, stream_info, fstep, stream_data):
         """
         Find substeps and create corresponding masks (reused across loss functions)
@@ -221,7 +234,7 @@ class LossCalculator:
             stream_data = streams_data[i_batch][i_stream_info]
 
             # TODO: set from stream info
-            weights_locations = None
+            weights_locations = self._get_location_weights(stream_info, stream_data)
 
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
