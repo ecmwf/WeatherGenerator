@@ -13,8 +13,6 @@ import logging
 import time
 from typing import Any
 
-from omegaconf import OmegaConf
-
 import numpy as np
 import torch
 import tqdm
