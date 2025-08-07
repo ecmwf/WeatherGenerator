@@ -136,7 +136,7 @@ class LossCalculator:
         """
 
         loss_lfct = torch.tensor(0.0, device=target.device, requires_grad=True)
-        losses_chs = torch.zeros(target.shape[-1], dtype=torch.float32)
+        losses_chs = torch.zeros(target.shape[-1], device=target.device, dtype=torch.float32)
 
         ctr_substeps = 0
         for mask_t in substep_masks:
@@ -148,7 +148,7 @@ class LossCalculator:
 
             # accumulate loss
             loss_lfct = loss_lfct + loss
-            losses_chs += loss_chs.detach().cpu()
+            losses_chs += loss_chs.detach()
             ctr_substeps += 1 if loss > 0.0 else 0
 
             # normalize over forecast steps in window
@@ -203,12 +203,13 @@ class LossCalculator:
         # create tensor for each stream
         losses_all: dict[str, Tensor] = {
             st.name: torch.zeros(
-                (len(st[str(self.stage) + "_target_channels"]), len(self.loss_fcts))
+                (len(st[str(self.stage) + "_target_channels"]), len(self.loss_fcts)),
+                device=self.device,
             )
             for st in self.cf.streams
         }
         stddev_all: dict[str, Tensor] = {
-            st.name: torch.zeros(len(stat_loss_fcts)) for st in self.cf.streams
+            st.name: torch.zeros(len(stat_loss_fcts), device=self.device) for st in self.cf.streams
         }
 
         # TODO: iterate over batch dimension
