@@ -50,9 +50,6 @@ class Masker:
         # number of healpix cells
         self.healpix_num_cells = 12 * (4**self.healpix_level_data)
 
-        # masking_strategy_config is a dictionary that can hold any additional parameters
-        self.masking_strategy_config = masking_strategy_config
-
         # Initialize the mask, set to None initially,
         # until it is generated in mask_source.
         self.perm_sel: list[np.typing.NDArray] = None
