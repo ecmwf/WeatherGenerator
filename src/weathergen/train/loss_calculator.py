@@ -140,7 +140,7 @@ class LossCalculator:
 
         ctr_substeps = 0
         for mask_t in substep_masks:
-            assert mask_t.sum() == weights_locations if weights_locations else True
+            assert mask_t.sum() == len(weights_locations) if weights_locations else True
 
             loss, loss_chs = loss_fct(
                 target[mask_t], pred[:, mask_t], weights_channels, weights_locations
@@ -151,8 +151,8 @@ class LossCalculator:
             losses_chs += loss_chs.detach()
             ctr_substeps += 1 if loss > 0.0 else 0
 
-            # normalize over forecast steps in window
-            losses_chs /= ctr_substeps if ctr_substeps > 0 else 0.0
+        # normalize over forecast steps in window
+        losses_chs /= ctr_substeps if ctr_substeps > 0 else 1.0
 
         # TODO: substep weight
         loss_lfct = loss_lfct / (ctr_substeps if ctr_substeps > 0 else 1.0)

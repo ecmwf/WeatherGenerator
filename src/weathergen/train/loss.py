@@ -95,7 +95,7 @@ def mse_channel_location_weighted(
 
     The function implements:
 
-    loss = Mean_{channels}( weight_channels * Mean_{data_pts}( (target - pred) * weights_channels ))
+    loss = Mean_{channels}( weight_channels * Mean_{data_pts}( (target - pred) * weights_points ))
 
     Geometrically,
 
