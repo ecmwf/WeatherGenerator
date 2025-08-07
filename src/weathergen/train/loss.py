@@ -61,8 +61,8 @@ def stats_normalized_erf(target, ens, mu, stddev):
     return torch.mean(d * d)  # + torch.mean( torch.sqrt( stddev) )
 
 
-# def mse(target, ens, mu, *kwargs):
-#     return torch.nn.functional.mse_loss(target, mu)
+def mse(target, ens, mu, *kwargs):
+    return torch.nn.functional.mse_loss(target, mu)
 
 
 def mse_ens(target, ens, mu, stddev):
@@ -84,16 +84,48 @@ def kernel_crps(target, ens, mu, stddev, fair=True):
     return mae + ens_var
 
 
-# def mse_channel_location_weighted(
-def mse(
-    weights_channels: torch.Tensor | None,
-    weights_locations: torch.Tensor | None,
+def mse_channel_location_weighted(
     target: torch.Tensor,
     pred: torch.Tensor,
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
 ):
     """
-    Compute weighted MSE loss
+    Compute weighted MSE loss for one window or step
 
+    The function implements:
+
+    loss = Mean_{channels}( weight_channels * Mean_{data_pts}( (target - pred) * weights_channels ))
+
+    Geometrically,
+
+        ------------------------     -
+        |                      |    |  |
+        |                      |    |  |
+        |                      |    |  |
+        |     target - pred    | x  |wp|
+        |                      |    |  |
+        |                      |    |  |
+        |                      |    |  |
+        ------------------------     -
+                    x
+        ------------------------
+        |          wc          |
+        ------------------------
+
+    where wp = weights_points and wc = weights_channels and "x" denotes row/col-wise multiplication.
+
+    The computations are:
+    1. weight the rows of (target - pred) by wp = weights_points
+    2. take the mean over the row
+    3. weight the collapsed cols by wc = weights_channels
+    4. take the mean over the channel-weighted cols
+
+    Params:
+        target : shape ( num_data_points , num_channels )
+        target : shape ( ens_dim , num_data_points , num_channels)
+        weights_channels : shape = (num_channels,)
+        weights_points : shape = (num_data_points)
 
     Return:
         loss : weight loss for gradient computation
@@ -101,9 +133,10 @@ def mse(
     """
 
     mask_nan = ~torch.isnan(target)
+    pred = pred[0] if pred.shape[0] == 0 else pred.mean(0)
 
     diff2 = torch.square(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0)).mean(0)
-    wl = weights_locations
+    wl = weights_points
     loss_chs = ((diff2.transpose(1, 0) * wl).transpose(1, 0) if wl else diff2).mean(0)
     loss = torch.mean(loss_chs * weights_channels if weights_channels else loss_chs)
 
