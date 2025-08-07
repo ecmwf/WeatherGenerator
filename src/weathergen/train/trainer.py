@@ -56,10 +56,6 @@ class Trainer(TrainerBase):
     ):
         self.cf = cf
 
-        self.cf = OmegaConf.merge(
-            OmegaConf.create({"log_grad_norms": False}), self.cf
-        )
-
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
         assert cf.forecast_policy if cf.forecast_steps > 0 else True
@@ -71,6 +67,8 @@ class Trainer(TrainerBase):
         # Get num_ranks of previous, to be continued run before
         # num_ranks gets overwritten by current setting during init_ddp()
         self.num_ranks_original = cf.get("num_ranks", None)
+
+        self.log_grad_norms = cf.get("log_grad_norms", False)
 
         # TODO remove num_ranks, rank, with_with ddp from config
         self.init_ddp(cf)
@@ -494,9 +492,8 @@ class Trainer(TrainerBase):
             )
 
             # log gradient norms
-            if bidx % log_interval == 0:
+            if bidx % log_interval == 0 and self.log_grad_norms:
                 self._log_instant_grad_norms(TRAIN, total_norm)
-
 
             # optimizer step
             self.grad_scaler.step(self.optimizer)
@@ -712,12 +709,12 @@ class Trainer(TrainerBase):
 
     def _log_instant_grad_norms(self, stage: Stage, total_norm):
         """
-        Log instantaneous grad norms, we do not average because of the cost and because we want to 
+        Log instantaneous grad norms, we do not average because of the cost and because we want to
         measure the actual values
 
         TODO test DDP case
         """
-        grad_norms = { "total_grad_norm" : total_norm.item() }
+        grad_norms = {"total_grad_norm": total_norm.item()}
         self.last_grad_norm = total_norm.item()
         for name, param in self.ddp_model.named_parameters():
             if param.grad is not None:

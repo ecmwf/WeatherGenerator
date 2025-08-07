@@ -49,7 +49,7 @@ class GradientNormsAnalyzer:
             else:
                 # Assume all keys except step/epoch are gradient data
                 grad_data = {k: v for k, v in entry.items() 
-                           if 'stream' not in k and ('q_cells' in k or '0' in k)}
+                           if 'stream' not in k and ('grad_norm' in k)}
             
             for param_name, norm_value in grad_data.items():
                 rows.append({
@@ -65,7 +65,7 @@ class GradientNormsAnalyzer:
     
     def extract_layer_type(self, param_name):
         """Extract layer type from parameter name."""
-        param_name_lower = param_name.lower()
+        param_name_lower = param_name.lower()[10:]
         
         # Handle your specific naming patterns
         if param_name_lower.startswith('embeds.'):
@@ -180,13 +180,13 @@ class GradientNormsAnalyzer:
         # Look for patterns specific to your architecture
         patterns = [
             # embeds.0.layers.N.* (transformer layers within embeds)
-            r'embeds\.\d+\.layers\.(\d+)\.',
+            r'grad_norm_embeds\.\d+\.layers\.(\d+)\.',
             # embeds.0.unembed.N.* (unembedding layers)
-            r'embeds\.\d+\.unembed\.(\d+)\.',
+            r'grad_norm_embeds\.\d+\.unembed\.(\d+)\.',
             # embeds.0.ln_final.N.* (final layer norms)
-            r'embeds\.\d+\.ln_final\.(\d+)\.',
+            r'grad_norm_embeds\.\d+\.ln_final\.(\d+)\.',
             # ae_local_blocks.N.* (autoencoder local blocks)
-            r'ae_local_blocks\.(\d+)\.',
+            r'grad_norm_ae_local_blocks\.(\d+)\.',
             # ae_global_blocks.N.* (autoencoder global blocks)
             r'ae_global_blocks\.(\d+)\.',
             # ae_adapter.N.* (autoencoder adapter blocks)
@@ -240,7 +240,7 @@ class GradientNormsAnalyzer:
                 grad_data = entry['grad_norms']
             else:
                 grad_data = {k: v for k, v in entry.items() 
-                             if 'q_cells' in k or '0' in k}
+                             if 'grad_norm' in k}
 
             if len(grad_data) == 0:
                 continue
