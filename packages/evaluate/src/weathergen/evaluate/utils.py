@@ -155,6 +155,51 @@ def get_data(
         da_tars = {fstep: da for fstep, da in zip(fsteps, da_tars, strict=False)}
         da_preds = {fstep: da for fstep, da in zip(fsteps, da_preds, strict=False)}
 
+        # ==================== DETAILED LOGGING SECTION ====================
+        _logger.info("=" * 60)
+        _logger.info("XARRAY DATAARRAY OUTPUT DETAILS")
+        _logger.info("=" * 60)
+
+        # Log details for targets
+        _logger.info("TARGET DATA STRUCTURE:")
+        for fstep, da_tar in da_tars.items():
+            _logger.info(f"  Forecast Step {fstep}:")
+            _logger.info(f"    Shape: {da_tar.shape}")
+            _logger.info(f"    Dimensions: {da_tar.dims}")
+            _logger.info(f"    Coordinates: {list(da_tar.coords.keys())}")
+            _logger.info(f"    Data type: {da_tar.dtype}")
+            for coord_name, coord_data in da_tar.coords.items():
+                if coord_data.size <= 10:  # Only show small coordinate arrays
+                    _logger.info(f"      {coord_name}: {coord_data.values}")
+                else:
+                    _logger.info(
+                        f"      {coord_name}: shape={coord_data.shape}, range=[{coord_data.min().values:.3f}, {coord_data.max().values:.3f}]"
+                    )
+
+        # Log details for predictions (if different from targets)
+        if (
+            da_preds[list(da_preds.keys())[0]].dims
+            != da_tars[list(da_tars.keys())[0]].dims
+        ):
+            _logger.info("\nPREDICTION DATA STRUCTURE:")
+            for fstep, da_pred in da_preds.items():
+                _logger.info(f"  Forecast Step {fstep}:")
+                _logger.info(f"    Shape: {da_pred.shape}")
+                _logger.info(f"    Dimensions: {da_pred.dims}")
+                _logger.info(f"    Coordinates: {list(da_pred.coords.keys())}")
+        else:
+            _logger.info("\nPREDICTION DATA: Same structure as targets")
+
+        # Log points per sample if available
+        if points_per_sample is not None:
+            _logger.info("\nPOINTS PER SAMPLE:")
+            _logger.info(f"  Shape: {points_per_sample.shape}")
+            _logger.info(f"  Dimensions: {points_per_sample.dims}")
+            _logger.info(f"  Coordinates: {list(points_per_sample.coords.keys())}")
+
+        _logger.info("=" * 60)
+        # ==================== END LOGGING SECTION ====================
+
         return WeatherGeneratorOutput(
             target=da_tars, prediction=da_preds, points_per_sample=points_per_sample
         )
@@ -287,6 +332,65 @@ def get_clim(
             prediction=da_clims_dict,
             points_per_sample=points_per_sample,
         )
+
+
+def align_clim_data(
+    target_output: WeatherGeneratorOutput,
+    clim_data: xr.DataArray,
+) -> WeatherGeneratorOutput:
+    """
+    Align real climate data with target data structure.
+
+    Parameters
+    ----------
+    target_output :
+        Output from get_data() containing target data structure to match.
+    clim_data :
+        Climate data as xarray DataArray with dimensions (gridpoint,).
+        Should have lat, lon coordinates. Already averaged over time.
+
+    Returns
+    -------
+    WeatherGeneratorOutput
+        A dataclass containing climatology data in the same structure as target data.
+    """
+    _logger.info("Aligning climatological data with target structure...")
+
+    # Create climatology data using the target structure
+    da_clims_dict = {}
+
+    for fstep, target_data in target_output.target.items():
+        _logger.info(f"Aligning climatology for forecast step {fstep}...")
+
+        # Create climatology array with same structure as target
+        clim_data_fstep = target_data.copy(deep=True)
+
+        # Align gridpoints between climate and target data using coordinates
+        try:
+            # Select common gridpoints based on lat/lon coordinates
+            clim_aligned = clim_data.sel(
+                lat=target_data.lat, lon=target_data.lon, method="nearest"
+            )
+
+            # Broadcast climatology to all samples and assign using .loc
+            for sample in target_data.sample.values:
+                clim_data_fstep.loc[{"sample": sample}] = clim_aligned.values
+
+        except (KeyError, ValueError) as e:
+            _logger.warning(
+                f"Could not align coordinates for fstep {fstep}: {e}. Using zeros."
+            )
+            clim_data_fstep.loc[:] = 0.0
+
+        da_clims_dict[fstep] = clim_data_fstep
+
+    _logger.info("Generated climatology from pre-averaged climate data")
+
+    return WeatherGeneratorOutput(
+        target=da_clims_dict,
+        prediction=da_clims_dict,
+        points_per_sample=target_output.points_per_sample,
+    )
 
 
 def calc_scores_per_stream(
