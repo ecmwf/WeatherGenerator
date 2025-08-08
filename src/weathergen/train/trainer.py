@@ -81,6 +81,11 @@ class Trainer(Trainer_Base):
     ###########################################
     def inference(self, cf, run_id_trained, epoch):
         # general initalization
+
+        # Asma: This is a quick fix, won't be useful in the future
+        cf.batch_size_per_gpu = 1
+        cf.batch_size_validation_per_gpu = 1
+        ######## End of stupid code
         self.init(cf)
 
         self.dataset_val = MultiStreamDataSampler(
