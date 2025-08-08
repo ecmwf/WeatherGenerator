@@ -358,8 +358,7 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     da_tars = model_output.target
     da_preds = model_output.prediction
 
-    if plot_animations:
-        da_tars, da_preds = calc_lower_upper(da_tars, da_preds)
+    da_tars, da_preds = calc_lower_upper(da_tars, da_preds)
 
     plot_fsteps = da_tars.keys()
 
