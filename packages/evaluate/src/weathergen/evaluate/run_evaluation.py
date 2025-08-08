@@ -13,7 +13,7 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
@@ -27,7 +27,6 @@ _logger = logging.getLogger(__name__)
 
 
 def evaluate() -> None:
-
     parser = argparse.ArgumentParser(
         description="Fast evaluation of WeatherGenerator runs."
     )
@@ -121,5 +120,4 @@ def evaluate() -> None:
 
 
 if __name__ == "__main__":
-
-    run_main(cfg)
+    evaluate()
