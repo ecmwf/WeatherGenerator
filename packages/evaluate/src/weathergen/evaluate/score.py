@@ -14,7 +14,8 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 import xarray as xr
-from score_utils import to_list
+
+from weathergen.evaluate.score_utils import to_list
 
 # from common.io import MockIO
 
