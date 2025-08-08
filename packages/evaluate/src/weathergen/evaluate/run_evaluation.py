@@ -33,13 +33,20 @@ def evaluate() -> None:
     parser.add_argument(
         "--config",
         type=str,
-        help="Path to the configuration yaml file for plotting. e.g. config/plottig_config.yaml",
+        help="Path to the configuration yaml file for plotting. e.g. config/eval_config.yml",
+        default="config/eval_config.yml"
     )
 
     args = parser.parse_args()
 
     # configure logging
     logging.basicConfig(level=logging.INFO)
+
+    assert Path(args.config).exists(), (
+        "The evaluation configuration file does not exist. Its "
+        "default location would be 'config/eval_config.yml'. Either create it and restart "
+        "evaluation, or pass the config file with the --config argument."
+    )
 
     # load configuration
     cfg = OmegaConf.load(args.config)
