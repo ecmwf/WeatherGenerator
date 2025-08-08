@@ -609,6 +609,21 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
 
 
 def calc_lower_upper(data_tars: list[dict], data_preds: list[dict]) -> xr.DataArray:
+    """
+    Calculate the minimum and maximum values per variable for all forecasteps and
+    for target and prediction
+
+    Parameters
+    ----------
+    data_tars :
+        the (target) list of dictionaries with the forecasteps and respective xarray
+    data_preds :
+        the (prediction) list of dictionaries with the forecasteps and respective xarray
+    Returns
+    -------
+    data_tars_new, data_pred_new :
+        the same lists but also with common max and min as coordinates.
+    """
     list_max = []
     list_min = []
 

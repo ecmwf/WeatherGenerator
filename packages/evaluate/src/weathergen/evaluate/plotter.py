@@ -250,7 +250,6 @@ class Plotter:
             if scale_marker_size:
                 marker_size = (marker_size + 1.0) * np.cos(np.radians(da["lat"]))
 
-            # breakpoint()
             scatter_plt = ax.scatter(
                 da["lon"],
                 da["lat"],
