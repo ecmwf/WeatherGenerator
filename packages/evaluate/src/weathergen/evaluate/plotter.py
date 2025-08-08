@@ -14,11 +14,6 @@ logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
-_REPO_ROOT = Path(
-    __file__
-).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
-_DEFAULT_RESULT_PATH = _REPO_ROOT / "results"
-
 
 class Plotter:
     """
@@ -317,7 +312,7 @@ class Plotter:
 
 
 class LinePlots:
-    def __init__(self, cfg: dict, output_basedir: str | Path = _DEFAULT_RESULT_PATH):
+    def __init__(self, cfg: dict, output_basedir: str | Path):
         self.cfg = cfg
         self.image_format = cfg.image_format
         self.dpi_val = cfg.get("dpi_val")
