@@ -13,7 +13,7 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
 from weathergen.src.weathergen.utils.config import load_config, set_paths, _REPO_ROOT
 from weathergen.evaluate.utils import (
@@ -29,7 +29,24 @@ _logger = logging.getLogger(__name__)
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
 
-def run_main(cfg: DictConfig) -> None:
+def evaluate() -> None:
+    parser = argparse.ArgumentParser(
+        description="Fast evaluation of WeatherGenerator runs."
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        help="Path to the configuration yaml file for plotting. e.g. config/plottig_config.yaml",
+    )
+
+    args = parser.parse_args()
+
+    # configure logging
+    logging.basicConfig(level=logging.INFO)
+
+    # load configuration
+    cfg = OmegaConf.load(args.config)
+
     runs = cfg.run_ids
 
     _logger.info(f"Detected {len(runs)} runs")
@@ -132,20 +149,4 @@ def run_main(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Fast evaluation of WeatherGenerator runs."
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        help="Path to the configuration yaml file for plotting. e.g. config/plottig_config.yaml",
-    )
-
-    args = parser.parse_args()
-
-    # configure logging
-    logging.basicConfig(level=logging.INFO)
-
-    # load configuration
-    cfg = OmegaConf.load(args.config)
-    run_main(cfg)
+    evaluate()
