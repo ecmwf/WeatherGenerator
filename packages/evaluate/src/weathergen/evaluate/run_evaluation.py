@@ -14,8 +14,8 @@ from collections import defaultdict
 from pathlib import Path
 
 from omegaconf import OmegaConf
-from plotter import Plotter
-from utils import (
+
+from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
     plot_data,
@@ -25,7 +25,8 @@ from utils import (
 
 _logger = logging.getLogger(__name__)
 
-if __name__ == "__main__":
+
+def evaluate() -> None:
     parser = argparse.ArgumentParser(
         description="Fast evaluation of WeatherGenerator runs."
     )
@@ -42,6 +43,7 @@ if __name__ == "__main__":
 
     # load configuration
     cfg = OmegaConf.load(args.config)
+
     runs = cfg.run_ids
 
     _logger.info(f"Detected {len(runs)} runs")
@@ -52,15 +54,13 @@ if __name__ == "__main__":
     out_scores_dir = Path(cfg.output_scores_dir)
     out_scores_dir.mkdir(parents=True, exist_ok=True)
 
-    results_dir = Path(cfg.results_dir)
     metrics = cfg.evaluation.metrics
+    regions = cfg.evaluation.get("regions", ["global"])
 
-    # to get a structure like: scores_dict[metric][stream][run_id] = plot
-    scores_dict = defaultdict(lambda: defaultdict(dict))
+    # to get a structure like: scores_dict[metric][region][stream][run_id] = plot
+    scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
 
     for run_id, run in runs.items():
-
-        plotter = Plotter(cfg, run_id)
         _logger.info(f"RUN {run_id}: Getting data...")
 
         streams = run["streams"].keys()
@@ -69,50 +69,55 @@ if __name__ == "__main__":
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
 
             stream_dict = run["streams"][stream]
-           
+
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                plots = plot_data(cfg, run_id, stream, stream_dict)
+                plot_data(cfg, run_id, stream, stream_dict)
 
             if stream_dict.get("evaluation"):
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
 
-                metrics_to_compute = []
-                for metric in metrics:
-                    try:
-                        metric_data = retrieve_metric_from_json(
+                for region in regions:
+                    metrics_to_compute = []
+
+                    for metric in metrics:
+                        try:
+                            metric_data = retrieve_metric_from_json(
+                                out_scores_dir,
+                                run_id,
+                                stream,
+                                region,
+                                metric,
+                                run.epoch,
+                            )
+                            scores_dict[metric][region][stream][run_id] = metric_data
+                        except (FileNotFoundError, KeyError, ValueError):
+                            metrics_to_compute.append(metric)
+
+                    if metrics_to_compute:
+                        all_metrics, points_per_sample = calc_scores_per_stream(
+                            cfg, run_id, stream, region, metrics_to_compute
+                        )
+
+                        metric_list_to_json(
+                            [all_metrics],
+                            [points_per_sample],
+                            [stream],
+                            region,
                             out_scores_dir,
                             run_id,
-                            stream,
-                            metric,
                             run.epoch,
-                            run.rank,
                         )
-                        scores_dict[metric][stream][run_id] = metric_data
-                    except (FileNotFoundError, KeyError, ValueError):
-                        metrics_to_compute.append(metric)
-                if metrics_to_compute:
-                    all_metrics, points_per_sample = calc_scores_per_stream(
-                        cfg, run_id, stream, metrics_to_compute
-                    )
-
-                    metric_list_to_json(
-                        [all_metrics],
-                        [points_per_sample],
-                        [stream],
-                        out_scores_dir,
-                        run_id,
-                        run.epoch,
-                        run.rank,
-                    )
 
                     for metric in metrics_to_compute:
                         scores_dict[metric][stream][run_id] = all_metrics.sel(
                             {"metric": metric}
                         )
+    # plot summary
+    if scores_dict and cfg.summary_plots:
+        _logger.info("Started creating summary plots..")
+        plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)
 
 
-# plot summary
-if cfg.summary_plots:
-    _logger.info("Started creating summary plots..")
-    plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)
+if __name__ == "__main__":
+    evaluate()

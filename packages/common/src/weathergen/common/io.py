@@ -1,3 +1,12 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 import dataclasses
 import functools
 import itertools
@@ -297,15 +306,15 @@ class OutputBatchData:
         start = sum(lens[:sample])
         n_samples = lens[sample]
 
-        _logger.info(f"extracting subset: {key}")
-        _logger.info(
+        _logger.debug(f"extracting subset: {key}")
+        _logger.debug(
             f"sample: start:{self.sample_start} rel_idx:{sample} range:{start}-{start + n_samples}"
         )
-        _logger.info(
+        _logger.debug(
             f"forecast_step: {key.forecast_step} = {forecast_step} (rel_step) + "
             + f"{self.forecast_offset} (forecast_offset)"
         )
-        _logger.info(f"stream: {key.stream} with index: {stream_idx}")
+        _logger.debug(f"stream: {key.stream} with index: {stream_idx}")
 
         datapoints = slice(start, start + n_samples)
 
@@ -363,7 +372,7 @@ class OutputBatchData:
                 geoinfo_channels,
             )
 
-            _logger.info(f"source shape: {source_dataset.data.shape}")
+            _logger.debug(f"source shape: {source_dataset.data.shape}")
             assert len(channels) == source_dataset.data.shape[1], (
                 "Number of channel names does not align with data"
             )

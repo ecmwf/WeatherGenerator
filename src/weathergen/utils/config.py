@@ -22,6 +22,8 @@ from weathergen.train.utils import get_run_id
 
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
+# _DEFAULT_MODEL_PATH = _REPO_ROOT / "models"
+# _DEFAULT_RESULT_PATH = _REPO_ROOT / "results"
 
 _logger = logging.getLogger(__name__)
 
@@ -133,7 +135,7 @@ def load_config(
     if from_run_id is None:
         base_config = _load_default_conf()
     else:
-        base_config = load_model_config(from_run_id, epoch, private_config["model_path"])
+        base_config = load_model_config(from_run_id, epoch, private_config.get("model_path", None))
 
     # use OmegaConf.unsafe_merge if too slow
     return OmegaConf.merge(base_config, private_config, *overwrite_configs)
