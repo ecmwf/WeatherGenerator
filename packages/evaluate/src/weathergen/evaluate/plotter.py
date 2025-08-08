@@ -26,7 +26,7 @@ class Plotter:
     """
 
     def __init__(
-        self, cfg: dict, run_id: str, output_basedir: str | Path = _DEFAULT_RESULT_PATH
+        self, cfg: dict, output_basedir: str | Path
     ):
         """
         Initialize the Plotter class.
@@ -35,8 +35,9 @@ class Plotter:
         ----------
         cfg:
             Configuration dictionary containing all information for the plotting.
-        run_id:
-            Run identifier for the current plotting session.
+        output_basedir:
+            Base directory under which the plots will be saved.
+            Expected scheme `<results_base_dir>/<run_id>`.
         """
 
         self.cfg = cfg
@@ -44,8 +45,9 @@ class Plotter:
         self.image_format = cfg.image_format
         self.dpi_val = cfg.get("dpi_val")
         self.fig_size = cfg.get("fig_size", (8, 10))
+        self.run_id = output_basedir.name
 
-        self.out_plot_basedir = output_basedir / run_id / "plots"
+        self.out_plot_basedir = output_basedir / "plots"
 
         if not os.path.exists(self.out_plot_basedir):
             _logger.info(f"Creating dir {self.out_plot_basedir}")
@@ -54,7 +56,6 @@ class Plotter:
         self.sample = None
         self.stream = None
         self.fstep = None
-        self.run_id = run_id
         self.select = {}
 
     def update_data_selection(self, select: dict):

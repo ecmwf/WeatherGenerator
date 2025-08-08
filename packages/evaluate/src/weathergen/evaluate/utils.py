@@ -280,7 +280,7 @@ def calc_scores_per_stream(
 
         metric_stream.loc[{"forecast_step": int(fstep)}] = combined_metrics
 
-        _logger.info(f"Scores for run {} - {stream} calculated successfully.")
+    _logger.info(f"Scores for run {run_id} - {stream} calculated successfully.")
 
     metric_stream = xr.concat(metric_list, dim="forecast_step")
     metric_stream = metric_stream.assign_coords({"forecast_step": fsteps})
@@ -291,7 +291,7 @@ def calc_scores_per_stream(
 def plot_data(
     cfg: str,
     results_dir: Path,
-    plot_base_dir: Path,
+    plot_dir: Path,
     stream: str,
     stream_dict: dict,
 ) -> list[str]:
@@ -331,7 +331,7 @@ def plot_data(
     ):
         return
 
-    plotter = Plotter(cfg, run_id, plot_base_dir)
+    plotter = Plotter(cfg, plot_dir)
 
     plot_samples = plot_settings.get("sample", None)
     plot_fsteps = plot_settings.get("forecast_step", None)
@@ -362,7 +362,7 @@ def plot_data(
         plot_samples = None
 
     model_output = get_data(
-        cfg, results_dir, stream, plot_samples, plot_fsteps, plot_chs
+        cfg, results_dir, stream, samples=plot_samples, fsteps=plot_fsteps, channels=plot_chs
     )
 
     da_tars = model_output.target
@@ -477,14 +477,14 @@ def metric_list_to_json(
 
 
 def retrieve_metric_from_json(
-    metric_dir: str, run_id: str, stream: str, metric: str, epoch: int
-) -> xr.DataArray:
+    metric_dir: str, run_id: str, stream: str, region: str, metric: str, epoch: int
+):
     """
     Retrieve the score for a given run, stream, metric, epoch, and rank from a JSON file.
 
     Parameters
     ----------
-    metric_dir : str
+    metric_dir :
         Directory where JSON files are stored.
     run_id :
         Run identifier.
@@ -502,7 +502,9 @@ def retrieve_metric_from_json(
     xr.DataArray
         The metric DataArray.
     """
-    score_path = Path(metric_dir) / f"{run_id}_{stream}_{metric}_epoch{epoch:05d}.json"
+    score_path = (
+        Path(metric_dir) / f"{run_id}_{stream}_{region}_{metric}_epoch{epoch:05d}.json"
+    )
     _logger.debug(f"Looking for: {score_path}")
     if score_path.exists():
         with open(score_path) as f:

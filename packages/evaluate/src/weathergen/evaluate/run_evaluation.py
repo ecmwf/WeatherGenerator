@@ -15,7 +15,7 @@ from pathlib import Path
 
 from omegaconf import OmegaConf
 
-from weathergen.src.weathergen.utils.config import load_config, set_paths, _REPO_ROOT
+from weathergen.utils.config import load_config, set_paths, _REPO_ROOT
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
@@ -73,21 +73,24 @@ def evaluate() -> None:
         if results_base_dir is None:
             cf_run = load_config(private_paths, run_id, run["epoch"])
             cf_run = set_paths(cf_run)
-            results_dir = cf_run["run_path"]
-            logging.info(f"Results directory obtained automatically: {results_dir}")
+            results_base_dir = Path(cf_run["run_path"])
+
+            logging.info(f"Results directory obtained automatically: {results_base_dir}")
         else:
-            results_dir = Path(results_base_dir) / run_id
-            logging.info(f"Results directory parsed: {results_dir}")
+            logging.info(f"Results directory parsed: {results_base_dir}")
 
         runplot_base_dir = Path(
-            run.get("runplot_base_dir", results_base_dir.parent)
+            run.get("runplot_base_dir", results_base_dir)
         )  # base directory where map plots and histograms will be stored
-        metric_base_dir = Path(
-            run.get("metric_base_dir", results_base_dir)
+        metrics_base_dir = Path(
+            run.get("metrics_base_dir", results_base_dir)
         )  # base directory where score files will be stored
 
+        results_dir, runplot_dir = Path(results_base_dir) / run_id, Path(runplot_base_dir) / run_id
+        # for backward compatibility allow metric_dir to be specified in the run config
+        metrics_dir = Path(run.get("metrics_dir", metrics_base_dir / run_id / "evaluation"))
+
         streams = run["streams"].keys()
-        metric_dir = metric_base_dir / "evaluation"
 
         for stream in streams:
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
@@ -97,13 +100,10 @@ def evaluate() -> None:
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
                 _ = plot_data(
-                    cfg, results_dir, runplot_base_dir, stream, stream_dict
+                    cfg, results_dir, runplot_dir, stream, stream_dict
                 )
 
             if stream_dict.get("evaluation"):
-                # Create output directory if it does not exist
-                metric_dir.mkdir(parents=True, exist_ok=True)
-
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
 
                 for region in regions:
@@ -112,7 +112,7 @@ def evaluate() -> None:
                     for metric in metrics:
                         try:
                             metric_data = retrieve_metric_from_json(
-                                metric_base_dir,
+                                metrics_dir,
                                 run_id,
                                 stream,
                                 region,
@@ -133,7 +133,7 @@ def evaluate() -> None:
                             [points_per_sample],
                             [stream],
                             region,
-                            metric_base_dir,
+                            metrics_dir,
                             run_id,
                             run.epoch,
                         )
