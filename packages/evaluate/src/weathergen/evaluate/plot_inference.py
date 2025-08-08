@@ -15,7 +15,7 @@ from pathlib import Path
 
 from omegaconf import DictConfig, OmegaConf
 
-from weathergen.common import _REPO_ROOT
+from weathergen.utils.config import load_config, set_paths, _REPO_ROOT
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
@@ -26,7 +26,6 @@ from weathergen.evaluate.utils import (
 
 _logger = logging.getLogger(__name__)
 
-_DEFAULT_RESULT_PATH = _REPO_ROOT / "results"
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
 
@@ -35,16 +34,8 @@ def run_main(cfg: DictConfig) -> None:
 
     _logger.info(f"Detected {len(runs)} runs")
 
-    # Relevant directories
-    results_base_dir = Path(
-        cfg.get("results_base_dir", _DEFAULT_RESULT_PATH)
-    )  # base directory where inference results are stored
-    runplot_base_dir = Path(
-        cfg.get("runplot_base_dir", results_base_dir)
-    )  # base directory where map plots and histograms will be stored
-    metric_base_dir = Path(
-        cfg.get("metric_base_dir", results_base_dir)
-    )  # base directory where score files will be stored
+    # Directory to store the summary plots
+    private_paths = cfg.get("private_paths", None)
     summary_dir = Path(
         cfg.get("summary_dir", _DEFAULT_PLOT_DIR)
     )  # base directory where summary plots will be stored
@@ -56,6 +47,24 @@ def run_main(cfg: DictConfig) -> None:
 
     for run_id, run in runs.items():
         _logger.info(f"RUN {run_id}: Getting data...")
+
+        # Allow for run ID specific directories 
+        # If results_base_dir is not provided, default paths are used 
+        results_base_dir = run.get("results_base_dir", None)
+
+        if results_base_dir is None:
+            cf_run = load_config(private_paths, run_id, run["epoch"])
+            cf_run = set_paths(cf_run)
+            results_base_dir = cf_run["run_path"]
+        else:
+            results_base_dir = Path(results_base_dir)
+
+        runplot_base_dir = Path(
+            run.get("runplot_base_dir", results_base_dir)
+        )  # base directory where map plots and histograms will be stored
+        metric_base_dir = Path(
+            run.get("metric_base_dir", results_base_dir)
+        )  # base directory where score files will be stored
 
         streams = run["streams"].keys()
         metric_dir = metric_base_dir / run_id / "evaluation"
