@@ -20,9 +20,7 @@ class Plotter:
     Contains all basic plotting functions.
     """
 
-    def __init__(
-        self, cfg: dict, output_basedir: str | Path
-    ):
+    def __init__(self, cfg: dict, output_basedir: str | Path):
         """
         Initialize the Plotter class.
 

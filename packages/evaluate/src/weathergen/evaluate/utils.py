@@ -303,7 +303,7 @@ def plot_data(
     cfg :
         Configuration dictionary containing all information for the evaluation.
     results_dir :
-        Directory where the inference results are stored. 
+        Directory where the inference results are stored.
         Expected scheme `<results_base_dir>/<run_id>`.
     plot_base_dir :
         Base directory where the plots will be saved.
@@ -317,7 +317,7 @@ def plot_data(
     -------
     List of plot names generated during the plotting process.
     """
-    run_id = results_dir.name 
+    run_id = results_dir.name
 
     # handle plotting settings
     plot_settings = stream_dict.get("plotting", {})
@@ -362,7 +362,12 @@ def plot_data(
         plot_samples = None
 
     model_output = get_data(
-        cfg, results_dir, stream, samples=plot_samples, fsteps=plot_fsteps, channels=plot_chs
+        cfg,
+        results_dir,
+        stream,
+        samples=plot_samples,
+        fsteps=plot_fsteps,
+        channels=plot_chs,
     )
 
     da_tars = model_output.target

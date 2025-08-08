@@ -15,7 +15,6 @@ from pathlib import Path
 
 from omegaconf import OmegaConf
 
-from weathergen.utils.config import load_config, set_paths, _REPO_ROOT
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
@@ -23,6 +22,7 @@ from weathergen.evaluate.utils import (
     plot_summary,
     retrieve_metric_from_json,
 )
+from weathergen.utils.config import _REPO_ROOT, load_config, set_paths
 
 _logger = logging.getLogger(__name__)
 
@@ -66,8 +66,8 @@ def evaluate() -> None:
     for run_id, run in runs.items():
         _logger.info(f"RUN {run_id}: Getting data...")
 
-        # Allow for run ID specific directories 
-        # If results_base_dir is not provided, default paths are used 
+        # Allow for run ID specific directories
+        # If results_base_dir is not provided, default paths are used
         results_base_dir = run.get("results_base_dir", None)
 
         if results_base_dir is None:
@@ -75,7 +75,9 @@ def evaluate() -> None:
             cf_run = set_paths(cf_run)
             results_base_dir = Path(cf_run["run_path"])
 
-            logging.info(f"Results directory obtained automatically: {results_base_dir}")
+            logging.info(
+                f"Results directory obtained automatically: {results_base_dir}"
+            )
         else:
             logging.info(f"Results directory parsed: {results_base_dir}")
 
@@ -86,9 +88,14 @@ def evaluate() -> None:
             run.get("metrics_base_dir", results_base_dir)
         )  # base directory where score files will be stored
 
-        results_dir, runplot_dir = Path(results_base_dir) / run_id, Path(runplot_base_dir) / run_id
+        results_dir, runplot_dir = (
+            Path(results_base_dir) / run_id,
+            Path(runplot_base_dir) / run_id,
+        )
         # for backward compatibility allow metric_dir to be specified in the run config
-        metrics_dir = Path(run.get("metrics_dir", metrics_base_dir / run_id / "evaluation"))
+        metrics_dir = Path(
+            run.get("metrics_dir", metrics_base_dir / run_id / "evaluation")
+        )
 
         streams = run["streams"].keys()
 
@@ -99,9 +106,7 @@ def evaluate() -> None:
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                _ = plot_data(
-                    cfg, results_dir, runplot_dir, stream, stream_dict
-                )
+                _ = plot_data(cfg, results_dir, runplot_dir, stream, stream_dict)
 
             if stream_dict.get("evaluation"):
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
