@@ -28,7 +28,7 @@ dependencies = [
  "dask~=2025.5.1",
  "hatchling",
  "weathergen-common",
- "weathergen-evaluate"
+ "weathergen-evaluate",
  "numexpr>=2.11.0",
 ]
 
