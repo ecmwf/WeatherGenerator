@@ -9,10 +9,13 @@
 
 import argparse
 import logging
+from pathlib import Path
 
-import dictdiffer
-from obslearn.utils.config import Config
+from dictdiffer import diff
 
+from config import load_model_config
+
+logging.basicConfig(level=logging.INFO)
 _logger = logging.getLogger(__name__)
 
 
@@ -20,19 +23,26 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-r1", "--run_id_1", required=True)
     parser.add_argument("-r2", "--run_id_2", required=True)
+    parser.add_argument(
+        "-m1",
+        "--model_directory_1",
+        type=Path,
+        default=None,
+        help="Path to model directory for -r1/--run_id_1",
+    )
+    parser.add_argument(
+        "-m2",
+        "--model_directory_2",
+        type=Path,
+        default=None,
+        help="Path to model directory for -r2/--run_id_2",
+    )
     args = parser.parse_args()
 
-    cf1 = Config.load(args.run_id_1)
-    cf2 = Config.load(args.run_id_2)
-    # print(cf1.__dict__)
-    result = dictdiffer.diff(cf1.__dict__, cf2.__dict__)
-    for item in list(result):
-        # TODO: if streams_directory differs than we need to manually compare streams using name
-        # since index-based comparison by dictdiffer is meaningless
+    cf1 = load_model_config(args.run_id_1, None, args.model_directory_1)
+    cf2 = load_model_config(args.run_id_2, None, args.model_directory_2)
 
-        # # for streams, translate index in list of streams to stream name
-        # if item[1][0] == 'streams' :
-        #   name = cf1.streams[item[1][1]]['name']
-        #   item[1][1] = name
+    result = list(diff(cf1.__dict__, cf2.__dict__))
 
-        _logger.info(f"Difference {item[1]} :: {item[2]}")
+    for tag, path, details in result:
+        _logger.info(f"{tag.upper()} at {path}: {details}")
