@@ -189,9 +189,10 @@ def align_clim_data(
     aligned_clim_data = {}
     for fstep, target_data in target_output.items():
         aligned_clim_data[fstep] = xr.DataArray(
-            np.ones_like(
-                target_output[fstep].values
-            ),  # Create empty array with same shape
+            np.full_like(
+                target_output[fstep].values,
+                np.nan,  # Create array with same shape filled with NaNs
+            ),
             coords=target_output[fstep].coords,  # Use the same coordinates as target
             dims=target_output[fstep].dims,  # Use the same dimensions as target
         )
@@ -229,6 +230,7 @@ def calc_scores_per_stream(
     stream: str,
     region: str,
     metrics: list[str],
+    assume_matching_coords: bool = True,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -275,7 +277,7 @@ def calc_scores_per_stream(
 
     if "acc" in metrics:
         aligned_clim_data = align_clim_data(
-            da_tars, clim_data, assume_matching_coords=True
+            da_tars, clim_data, assume_matching_coords=assume_matching_coords
         )
     else:
         aligned_clim_data = None
