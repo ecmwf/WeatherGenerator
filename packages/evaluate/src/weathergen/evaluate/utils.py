@@ -329,13 +329,13 @@ def get_clim(
 
         return WeatherGeneratorOutput(
             target=da_clims_dict,
-            prediction=da_clims_dict,
+            prediction={},
             points_per_sample=points_per_sample,
         )
 
 
 def align_clim_data(
-    target_output: WeatherGeneratorOutput,
+    target_output: dict,
     clim_data: xr.DataArray,
 ) -> WeatherGeneratorOutput:
     """
@@ -386,11 +386,7 @@ def align_clim_data(
 
     _logger.info("Generated climatology from pre-averaged climate data")
 
-    return WeatherGeneratorOutput(
-        target=da_clims_dict,
-        prediction=da_clims_dict,
-        points_per_sample=target_output.points_per_sample,
-    )
+    return da_clims_dict
 
 
 def calc_scores_per_stream(
