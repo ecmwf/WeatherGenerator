@@ -627,14 +627,16 @@ class Scores:
 
         fcst_ano, obs_ano = p - clim_mean, gt - clim_mean
 
+        # Calculate ACC over spatial dimensions first (this is mathematically required)
         acc = (fcst_ano * obs_ano).sum(spatial_dims) / np.sqrt(
-            fcst_ano.sum(spatial_dims) * obs_ano.sum(spatial_dims)
+            (fcst_ano**2).sum(spatial_dims) * (obs_ano**2).sum(spatial_dims)
         )
 
-        # Exclude spatial dimensions from averaging since ACC is always calculated over them
-        if group_by_coord:
+        # Apply groupby after calculating ACC (if the coordinate still exists)
+        if group_by_coord and group_by_coord in acc.coords:
             acc = acc.groupby(group_by_coord)
 
+        # Exclude spatial dimensions from averaging since ACC is always calculated over them
         if self._agg_dims is not None:
             mean_dims = [x for x in self._agg_dims if x not in spatial_dims]
             if len(mean_dims) > 0:

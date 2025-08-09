@@ -19,6 +19,7 @@ import xarray as xr
 from tqdm import tqdm
 
 from weathergen.common.io import ZarrIO
+from weathergen.evaluate.clim_utils import match_climatology_time
 from weathergen.evaluate.plotter import DefaultMarkerSize, LinePlots, Plotter
 from weathergen.evaluate.score import VerifiedData, get_score
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
@@ -174,101 +175,60 @@ def get_data(
             target=da_tars, prediction=da_preds, points_per_sample=points_per_sample
         )
 
+
 def align_clim_data(
     target_output: dict,
     clim_data: xr.Dataset,
-) -> WeatherGeneratorOutput:
+    assume_matching_coords: bool = True,
+) -> dict:
     """
-    Align real climate data with target data structure.
-
-    Parameters
-    ----------
-    target_output :
-        Output from get_data() containing target data structure to match.
-    clim_data :
-        Climate data as xarray Dataset with dimensions (channels, time, grid_points).
-        Should have latitude, longitude coordinates and data variable.
-
-    Returns
-    -------
-    dict
-        A dictionary containing aligned climatology data.
+    Align climatology data with target data structure.
     """
     _logger.info("Aligning climatological data with target structure...")
-
-    # Create climatology data using the target structure
-    da_clims_dict = {}
-
+    # create empty climatology data for each forecast step
+    aligned_clim_data = {}
     for fstep, target_data in target_output.items():
-        _logger.info(f"Aligning climatology for forecast step {fstep}...")
+        aligned_clim_data[fstep] = xr.DataArray(
+            np.ones_like(
+                target_output[fstep].values
+            ),  # Create empty array with same shape
+            coords=target_output[fstep].coords,  # Use the same coordinates as target
+            dims=target_output[fstep].dims,  # Use the same dimensions as target
+        )
+        samples = np.unique(target_data.sample.values)
+        # Prepare climatology data for each sample
+        matching_time_idx = match_climatology_time(
+            target_data.valid_time.values[0], clim_data
+        )
+        prepared_clim_data = clim_data.data.isel(
+            time=matching_time_idx,
+        ).sel(
+            channels=target_data.channel.values,
+        ).transpose('grid_points', 'channels')
 
-        # Create climatology array with same structure as target
-        clim_data_fstep = target_data.copy(deep=True)
+        clim_values = prepared_clim_data.values
 
-        # Get target valid_time to find matching climatology time
-        target_valid_time = target_data.valid_time.values[
-            0
-        ]  # All points have same valid_time
-        target_datetime = pd.to_datetime(target_valid_time)
-
-        # Create day-of-year and hour matching for climatology
-        target_doy = target_datetime.dayofyear
-        target_hour = target_datetime.hour
-
-        try:
-            # Select climatology data for matching day-of-year and hour
-            clim_times = pd.to_datetime(clim_data.time.values)
-            matching_time_idx = None
-
-            for i, clim_time in enumerate(clim_times):
-                if clim_time.dayofyear == target_doy and clim_time.hour == target_hour:
-                    matching_time_idx = i
-                    break
-
-            if matching_time_idx is None:
-                _logger.warning(
-                    f"No matching climatology time found for {target_datetime}"
-                )
-                clim_data_fstep.values[:] = 0.0
+        for sample in tqdm(samples):
+            sample_mask = target_data.sample.values == sample
+            if assume_matching_coords:
+                # If coordinates match, we can directly assign
+                aligned_clim_data[fstep].loc[{"ipoint": sample_mask}] = clim_values
             else:
-                # Select climatology data for the matching time
-                clim_time_slice = clim_data.data.isel(
-                    time=matching_time_idx
-                )  # Shape: (channels, grid_points)
-
-                # Align channels between climatology and target
-                target_channels = target_data.channel.values
-                clim_channels = clim_data.channels.values
-
-                # Map target channels to climatology channels
-                for i, target_ch in enumerate(target_channels):
-                    if target_ch in clim_channels:
-                        clim_ch_idx = list(clim_channels).index(target_ch)
-                        # Assign climatology values to all ipoints for this channel
-                        clim_data_fstep.values[:, i] = clim_time_slice.values[
-                            clim_ch_idx, :
-                        ]
-                    else:
-                        _logger.warning(
-                            f"Channel {target_ch} not found in climatology, using zeros"
-                        )
-                        clim_data_fstep.values[:, i] = 0.0
-
-        except (KeyError, ValueError, IndexError) as e:
-            _logger.warning(
-                f"Could not align climatology for fstep {fstep}: {e}. Using zeros."
-            )
-            clim_data_fstep.values[:] = 0.0
-
-        da_clims_dict[fstep] = clim_data_fstep
-
-    _logger.info("Generated climatology from climate dataset")
-
-    return da_clims_dict
-
+                # not implemented error and falling back to True
+                _logger.warning(
+                    "Coordinate alignment not implemented. Falling back to direct assignment."
+                )
+                # to do: change this to a gridpoint mapping approach
+                aligned_clim_data[fstep].loc[{"ipoint": sample_mask}] = clim_values
+            
+    return aligned_clim_data
 
 def calc_scores_per_stream(
-    cfg: dict, run_id: str, stream: str, region: str, metrics: list[str]
+    cfg: dict,
+    run_id: str,
+    stream: str,
+    region: str,
+    metrics: list[str],
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -285,6 +245,9 @@ def calc_scores_per_stream(
         Region name to calculate scores for.
     metrics :
         List of metric names to calculate.
+    assume_matching_coords : bool, default False
+        If True, assume coordinate grids match between target and climatology data.
+        This skips expensive coordinate matching and speeds up processing.
 
     Returns
     -------
@@ -304,13 +267,18 @@ def calc_scores_per_stream(
     if fsteps == "all":
         fsteps = None
 
-    clim_data = xr.open_dataset("/p/scratch/hclimrep/polz1/test_clim_v2.zarr")
+    clim_data = xr.open_dataset("/p/scratch/hclimrep/polz1/test_clim_v3.zarr")
     output_data = get_data(cfg, run_id, stream, region=region, return_counts=True)
     da_preds = output_data.prediction
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
 
-    clim_data = align_clim_data(da_tars, clim_data)
+    if "acc" in metrics:
+        aligned_clim_data = align_clim_data(
+            da_tars, clim_data, assume_matching_coords=True
+        )
+    else:
+        aligned_clim_data = None
 
     # get coordinate information from retrieved data
 
@@ -349,9 +317,22 @@ def calc_scores_per_stream(
                 f"Build computation graphs for metrics for stream {stream}..."
             )
 
+            # Prepare kwargs for metrics that need climatology data
+            if aligned_clim_data is not None and fstep in aligned_clim_data:
+                metrics_kwargs = {
+                    "clim_mean": aligned_clim_data[fstep],
+                    "spatial_dims": [],  # No spatial dims when grouping by sample in flattened data
+                    "group_by_coord": "sample",  # Group by sample for metrics
+                }
+            else:
+                metrics_kwargs = {"group_by_coord": "sample"}
+
             combined_metrics = [
                 get_score(
-                    score_data, metric, agg_dims="ipoint", group_by_coord="sample"
+                    score_data,
+                    metric,
+                    agg_dims="ipoint",
+                    **metrics_kwargs,
                 )
                 for metric in metrics
             ]
