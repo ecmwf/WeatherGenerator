@@ -1,12 +1,17 @@
 train : 
   plot :
-    g12p39n6:
-      slurm_id: 0
-      description: "predict pl from ml"
-    o4s1izuj:
-      slurm_id: 0
-      description: "predict pl control"
+    # g12p39n6:
+    #   slurm_id: 0
+    #   description: "predict pl from ml"
+    # o4s1izuj:
+    #   slurm_id: 0
+    #   description: "predict pl control"
     uht31qd4:
       slurm_id: 0
-      description: "predict pl control after rebase"
-    
+      description: "predict pl control after rebase, in==out"
+    h0i6mca2:
+      slurm_id: 0
+      description: "predict pl from ml after rebase"
+    vixjzshw:
+      slurm_id: 0
+      description: "predict pl control 2 after rebase, surface sources"

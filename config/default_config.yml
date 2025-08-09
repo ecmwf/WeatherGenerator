@@ -42,11 +42,11 @@ pred_mlp_adaln: True
 # one is training an auto-encoder
 forecast_offset : 1
 forecast_delta_hrs: 0
-forecast_steps: 0
+forecast_steps: 2
 forecast_policy: null
 forecast_freeze_model: False
 forecast_att_dense_rate: 0.25
-fe_num_blocks: 0
+fe_num_blocks: 12
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -124,7 +124,7 @@ val_initial: False
 
 loader_num_workers: 8
 log_validation: 0
-analysis_streams_output: ["ERA5"]
+analysis_streams_output: ["ERA5ml", "ERA5pl"]
 
 istep: 0
 run_history: []
