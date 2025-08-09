@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 import omegaconf as oc
+import pandas as pd
 import xarray as xr
 from tqdm import tqdm
 
@@ -169,188 +170,13 @@ def get_data(
         da_tars = {fstep: da for fstep, da in zip(fsteps, da_tars, strict=False)}
         da_preds = {fstep: da for fstep, da in zip(fsteps, da_preds, strict=False)}
 
-        # ==================== DETAILED LOGGING SECTION ====================
-        _logger.info("=" * 60)
-        _logger.info("XARRAY DATAARRAY OUTPUT DETAILS")
-        _logger.info("=" * 60)
-
-        # Log details for targets
-        _logger.info("TARGET DATA STRUCTURE:")
-        for fstep, da_tar in da_tars.items():
-            _logger.info(f"  Forecast Step {fstep}:")
-            _logger.info(f"    Shape: {da_tar.shape}")
-            _logger.info(f"    Dimensions: {da_tar.dims}")
-            _logger.info(f"    Coordinates: {list(da_tar.coords.keys())}")
-            _logger.info(f"    Data type: {da_tar.dtype}")
-            for coord_name, coord_data in da_tar.coords.items():
-                if coord_data.size <= 10:  # Only show small coordinate arrays
-                    _logger.info(f"      {coord_name}: {coord_data.values}")
-                else:
-                    _logger.info(
-                        f"      {coord_name}: shape={coord_data.shape}, range=[{coord_data.min().values:.3f}, {coord_data.max().values:.3f}]"
-                    )
-
-        # Log details for predictions (if different from targets)
-        if (
-            da_preds[list(da_preds.keys())[0]].dims
-            != da_tars[list(da_tars.keys())[0]].dims
-        ):
-            _logger.info("\nPREDICTION DATA STRUCTURE:")
-            for fstep, da_pred in da_preds.items():
-                _logger.info(f"  Forecast Step {fstep}:")
-                _logger.info(f"    Shape: {da_pred.shape}")
-                _logger.info(f"    Dimensions: {da_pred.dims}")
-                _logger.info(f"    Coordinates: {list(da_pred.coords.keys())}")
-        else:
-            _logger.info("\nPREDICTION DATA: Same structure as targets")
-
-        # Log points per sample if available
-        if points_per_sample is not None:
-            _logger.info("\nPOINTS PER SAMPLE:")
-            _logger.info(f"  Shape: {points_per_sample.shape}")
-            _logger.info(f"  Dimensions: {points_per_sample.dims}")
-            _logger.info(f"  Coordinates: {list(points_per_sample.coords.keys())}")
-
-        _logger.info("=" * 60)
-        # ==================== END LOGGING SECTION ====================
-
         return WeatherGeneratorOutput(
             target=da_tars, prediction=da_preds, points_per_sample=points_per_sample
         )
 
-
-def get_clim(
-    cfg: dict,
-    run_id: str,
-    stream: str,
-    samples: list[int] = None,
-    fsteps: list[str] = None,
-    channels: list[str] = None,
-    return_counts: bool = False,
-) -> WeatherGeneratorOutput:
-    """
-    Retrieve climatology data for a given run from the Zarr store.
-    NOTE: This is a mock implementation that returns target data as climatology.
-
-    Parameters
-    ----------
-    cfg :
-        Configuration dictionary containing all information for the evaluation.
-    run_id :
-        Run identifier.
-    stream :
-        Stream name to retrieve data for.
-    samples :
-        List of sample indices to retrieve. If None, all samples are retrieved.
-    fsteps :
-        List of forecast steps to retrieve. If None, all forecast steps are retrieved.
-    channels :
-        List of channel names to retrieve. If None, all channels are retrieved.
-    return_counts :
-        If True, also return the number of points per sample.
-
-    Returns
-    -------
-    WeatherGeneratorOutput
-        A dataclass containing:
-        - target: Dictionary of xarray DataArrays for climatology (copied from targets), indexed by forecast step.
-        - prediction: Dictionary of xarray DataArrays for climatology (copied from targets), indexed by forecast step.
-        - points_per_sample: xarray DataArray containing the number of points per sample, if `return_counts` is True.
-    """
-
-    run = cfg.run_ids[run_id]
-    results_dir = Path(cfg.get("results_dir"))
-
-    fname_zarr = results_dir.joinpath(
-        f"{run_id}/validation_epoch{run['epoch']:05d}_rank{run['rank']:04d}.zarr"
-    )
-
-    if not fname_zarr.exists() or not fname_zarr.is_dir():
-        _logger.error(f"Zarr file {fname_zarr} does not exist or is not a directory.")
-        raise FileNotFoundError(
-            f"Zarr file {fname_zarr} does not exist or is not a directory."
-        )
-
-    with ZarrIO(fname_zarr) as zio:
-        zio_forecast_steps = zio.forecast_steps
-        stream_dict = run.streams[stream]
-        all_channels = peek_tar_channels(zio, stream, zio_forecast_steps[0])
-        _logger.info(f"RUN {run_id}: Processing climatology for stream {stream}...")
-
-        fsteps = zio_forecast_steps if fsteps is None else fsteps
-        # TODO: Avoid conversion of fsteps and sample to integers (as obtained from the ZarrIO)
-        fsteps = sorted([int(fstep) for fstep in fsteps])
-        samples = sorted(
-            [int(sample) for sample in zio.samples] if samples is None else samples
-        )
-        channels = channels or stream_dict.get("channels", all_channels)
-        channels = to_list(channels)
-
-        da_clims = []  # Store climatology data (copied from targets)
-
-        if return_counts:
-            points_per_sample = xr.DataArray(
-                np.full((len(fsteps), len(samples)), np.nan),
-                coords={"forecast_step": fsteps, "sample": samples},
-                dims=("forecast_step", "sample"),
-                name=f"points_per_sample_{stream}",
-            )
-        else:
-            points_per_sample = None
-
-        for fstep in fsteps:
-            _logger.info(
-                f"RUN {run_id} - {stream}: Processing climatology for fstep {fstep}..."
-            )
-            da_clims_fs = []
-            pps = []
-
-            for sample in tqdm(
-                samples, desc=f"Processing climatology {run_id} - {stream} - {fstep}"
-            ):
-                out = zio.get_data(sample, stream, fstep)
-                target = out.target.as_xarray()
-                # Mock climatology as a copy of target data
-                clim = target.copy()
-
-                da_clims_fs.append(clim.squeeze())
-                pps.append(len(target.ipoint))
-
-            _logger.debug(
-                f"Concatenating climatology data for stream {stream}, forecast_step {fstep}..."
-            )
-            da_clims_fs = xr.concat(da_clims_fs, dim="ipoint")
-
-            if set(channels) != set(all_channels):
-                _logger.debug(
-                    f"Restricting climatology to channels {channels} for stream {stream}..."
-                )
-                available_channels = da_clims_fs.channel.values
-                existing_channels = [ch for ch in channels if ch in available_channels]
-                if len(existing_channels) < len(channels):
-                    _logger.warning(
-                        f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
-                    )
-
-                da_clims_fs = da_clims_fs.sel(channel=existing_channels)
-
-            da_clims.append(da_clims_fs)
-            if return_counts:
-                points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
-
-        # Safer than a list - return climatology as both target and prediction
-        da_clims_dict = {fstep: da for fstep, da in zip(fsteps, da_clims, strict=False)}
-
-        return WeatherGeneratorOutput(
-            target=da_clims_dict,
-            prediction={},
-            points_per_sample=points_per_sample,
-        )
-
-
 def align_clim_data(
     target_output: dict,
-    clim_data: xr.DataArray,
+    clim_data: xr.Dataset,
 ) -> WeatherGeneratorOutput:
     """
     Align real climate data with target data structure.
@@ -360,45 +186,83 @@ def align_clim_data(
     target_output :
         Output from get_data() containing target data structure to match.
     clim_data :
-        Climate data as xarray DataArray with dimensions (gridpoint,).
-        Should have lat, lon coordinates. Already averaged over time.
+        Climate data as xarray Dataset with dimensions (channels, time, grid_points).
+        Should have latitude, longitude coordinates and data variable.
 
     Returns
     -------
-    WeatherGeneratorOutput
-        A dataclass containing climatology data in the same structure as target data.
+    dict
+        A dictionary containing aligned climatology data.
     """
     _logger.info("Aligning climatological data with target structure...")
 
     # Create climatology data using the target structure
     da_clims_dict = {}
 
-    for fstep, target_data in target_output.target.items():
+    for fstep, target_data in target_output.items():
         _logger.info(f"Aligning climatology for forecast step {fstep}...")
 
         # Create climatology array with same structure as target
         clim_data_fstep = target_data.copy(deep=True)
 
-        # Align gridpoints between climate and target data using coordinates
+        # Get target valid_time to find matching climatology time
+        target_valid_time = target_data.valid_time.values[
+            0
+        ]  # All points have same valid_time
+        target_datetime = pd.to_datetime(target_valid_time)
+
+        # Create day-of-year and hour matching for climatology
+        target_doy = target_datetime.dayofyear
+        target_hour = target_datetime.hour
+
         try:
-            # Select common gridpoints based on lat/lon coordinates
-            clim_aligned = clim_data.sel(
-                lat=target_data.lat, lon=target_data.lon, method="nearest"
-            )
+            # Select climatology data for matching day-of-year and hour
+            clim_times = pd.to_datetime(clim_data.time.values)
+            matching_time_idx = None
 
-            # Broadcast climatology to all samples and assign using .loc
-            for sample in target_data.sample.values:
-                clim_data_fstep.loc[{"sample": sample}] = clim_aligned.values
+            for i, clim_time in enumerate(clim_times):
+                if clim_time.dayofyear == target_doy and clim_time.hour == target_hour:
+                    matching_time_idx = i
+                    break
 
-        except (KeyError, ValueError) as e:
+            if matching_time_idx is None:
+                _logger.warning(
+                    f"No matching climatology time found for {target_datetime}"
+                )
+                clim_data_fstep.values[:] = 0.0
+            else:
+                # Select climatology data for the matching time
+                clim_time_slice = clim_data.data.isel(
+                    time=matching_time_idx
+                )  # Shape: (channels, grid_points)
+
+                # Align channels between climatology and target
+                target_channels = target_data.channel.values
+                clim_channels = clim_data.channels.values
+
+                # Map target channels to climatology channels
+                for i, target_ch in enumerate(target_channels):
+                    if target_ch in clim_channels:
+                        clim_ch_idx = list(clim_channels).index(target_ch)
+                        # Assign climatology values to all ipoints for this channel
+                        clim_data_fstep.values[:, i] = clim_time_slice.values[
+                            clim_ch_idx, :
+                        ]
+                    else:
+                        _logger.warning(
+                            f"Channel {target_ch} not found in climatology, using zeros"
+                        )
+                        clim_data_fstep.values[:, i] = 0.0
+
+        except (KeyError, ValueError, IndexError) as e:
             _logger.warning(
-                f"Could not align coordinates for fstep {fstep}: {e}. Using zeros."
+                f"Could not align climatology for fstep {fstep}: {e}. Using zeros."
             )
-            clim_data_fstep.loc[:] = 0.0
+            clim_data_fstep.values[:] = 0.0
 
         da_clims_dict[fstep] = clim_data_fstep
 
-    _logger.info("Generated climatology from pre-averaged climate data")
+    _logger.info("Generated climatology from climate dataset")
 
     return da_clims_dict
 
@@ -440,11 +304,13 @@ def calc_scores_per_stream(
     if fsteps == "all":
         fsteps = None
 
+    clim_data = xr.open_dataset("/p/scratch/hclimrep/polz1/test_clim_v2.zarr")
     output_data = get_data(cfg, run_id, stream, region=region, return_counts=True)
-
     da_preds = output_data.prediction
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
+
+    clim_data = align_clim_data(da_tars, clim_data)
 
     # get coordinate information from retrieved data
 
@@ -470,15 +336,6 @@ def calc_scores_per_stream(
         },
     )
 
-    # Load climatological mean once if needed for ACC calculation
-    clim_data = None
-    if "acc" in metrics:
-        # Use get_clim to get mock climatology data (target data as climatology)
-        _logger.info(f"Loading mock climatology for stream {stream} using get_clim...")
-        clim_output = get_clim(cfg, run_id, stream, return_counts=False)
-        clim_data = clim_output.target
-        _logger.info(f"Loaded mock climatology for stream {stream}")
-
     for (fstep, tars), (_, preds) in zip(
         da_tars.items(), da_preds.items(), strict=False
     ):
@@ -486,7 +343,7 @@ def calc_scores_per_stream(
 
         if preds.ipoint.size > 0:
             score_data = VerifiedData(preds, tars)
-            
+
             # Build up computation graphs for all metrics
             _logger.debug(
                 f"Build computation graphs for metrics for stream {stream}..."
