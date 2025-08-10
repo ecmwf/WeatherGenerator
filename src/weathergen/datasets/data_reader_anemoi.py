@@ -13,6 +13,7 @@ from typing import override
 
 import anemoi.datasets as anemoi_datasets
 import numpy as np
+from anemoi.datasets.data import MissingDateError
 from anemoi.datasets.data.dataset import Dataset
 from numpy.typing import NDArray
 
@@ -157,6 +158,7 @@ class DataReaderAnemoi(DataReaderTimestep):
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
+        assert t_idxs[0] >= 0, "index must be non-negative"
         didx_start = t_idxs[0]
         # End is inclusive
         didx_end = t_idxs[-1] + 1
@@ -165,7 +167,13 @@ class DataReaderAnemoi(DataReaderTimestep):
         # ds is a wrapper around zarr with get_coordinate_selection not being exposed since
         # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
         # sampling is required here
-        data = self.ds[didx_start:didx_end][:, :, 0].astype(np.float32)
+        try:
+            data = self.ds[didx_start:didx_end][:, :, 0].astype(np.float32)
+        except MissingDateError as e:
+            _logger.debug(f"Date not present in anemoi dataset: {str(e)}. Skipping.")
+            return ReaderData.empty(
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
 
         # extract channels
         data = (
