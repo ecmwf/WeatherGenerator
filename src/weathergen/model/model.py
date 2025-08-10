@@ -332,12 +332,12 @@ class Model(torch.nn.Module):
                 self.pred_adapter_kv.append(torch.nn.Identity())
 
             # target prediction engines
-            TTE = (
+            tte_version = (
                 TargetPredictionEngine
                 if cf.decoder_type != "PerceiverIOCoordConditioning"
                 else TargetPredictionEngineClassic
             )
-            tte = TTE(
+            tte = tte_version(
                 cf,
                 dims_embed,
                 dim_coord_in,
