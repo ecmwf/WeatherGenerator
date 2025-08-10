@@ -23,6 +23,7 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
+from weathergen.model.utils import ActivationFactory
 from weathergen.utils.config import Config, get_dtype
 
 
@@ -327,7 +328,14 @@ class ForecastingEngine:
 class EnsPredictionHead(torch.nn.Module):
     #########################################
     def __init__(
-        self, dim_embed, dim_out, ens_num_layers, ens_size, norm_type="LayerNorm", hidden_factor=2
+        self,
+        dim_embed,
+        dim_out,
+        ens_num_layers,
+        ens_size,
+        norm_type="LayerNorm",
+        hidden_factor=2,
+        final_activation: None | str = None,
     ):
         """Constructor"""
 
@@ -351,6 +359,11 @@ class EnsPredictionHead(torch.nn.Module):
                 self.pred_heads[-1].append(
                     torch.nn.Linear(dim_internal, dim_out if enl - 2 == i else dim_internal)
                 )
+
+            # Add optional final non-linear activation
+            if final_activation is not None and enl >= 1:
+                fal = ActivationFactory.get(final_activation)
+                self.pred_heads[-1].append(fal)
 
     #########################################
     @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
