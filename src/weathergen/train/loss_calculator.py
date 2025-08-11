@@ -222,6 +222,10 @@ class LossCalculator:
 
             # TODO: set from stream info
             weights_locations = None
+            
+            if self.cf.encode_targets_latent:
+                # take only the preds_all, ignore the latent tokens
+                preds = preds[0]
 
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
