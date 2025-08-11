@@ -9,12 +9,12 @@
 
 import argparse
 import fnmatch
-import json
 import logging
 import os
 
 import pandas as pd
 import yaml
+from omegaconf import OmegaConf
 
 from config import load_model_config
 
@@ -29,55 +29,6 @@ def truncate_value(value, max_length=50):
     if isinstance(value, str) and len(value) > max_length:
         return value[: max_length - 3] + "..."
     return value
-
-
-def read_configs_from_list(list_yml):
-    """
-    - Reads a YAML file containing config file paths and always show patterns,
-    loads and flattens each config.
-    - Special-cases the 'streams' key to unpack its contents into separate rows.
-    - Returns a tuple of (configs dict, always_show_patterns list).
-    """
-    with open(list_yml) as f:
-        yaml_data = yaml.safe_load(f)
-
-    # Expect dict format with run_ids key
-    if not isinstance(yaml_data, dict):
-        raise ValueError("YAML file must contain a dict with 'run_ids' key.")
-
-    if "run_ids" not in yaml_data:
-        raise ValueError("YAML file must contain 'run_ids' key with list of config file paths.")
-
-    config_files = yaml_data["run_ids"]
-    always_show_patterns = yaml_data.get("always_show_patterns", [])
-
-    if not isinstance(config_files, list):
-        raise ValueError("'run_ids' must be a list of config file paths.")
-
-    configs = {}
-    for path in config_files:
-        with open(path) as f:
-            cfg = json.load(f)
-        # Use run_id from config file, fallback to filename if not present
-        run_id = cfg.get("run_id", os.path.splitext(os.path.basename(path))[0])
-        flat_cfg = flatten_dict(cfg)
-        # Special case: if 'streams' is a key and is a dict or list, unpack it
-        # if "streams" in cfg:
-        #     streams_val = cfg["streams"]
-        #     # If it's a list, unpack each dict in the list
-        #     if isinstance(streams_val, list):
-        #         for i, stream in enumerate(streams_val):
-        #             if isinstance(stream, dict):
-        #                 for k, v in stream.items():
-        #                     flat_cfg[f"streams[{i}].{k}"] = v
-        #     elif isinstance(streams_val, dict):
-        #         for k, v in streams_val.items():
-        #             flat_cfg[f"streams.{k}"] = v
-        #     # Remove the original 'streams' key if present
-        #     if "streams" in flat_cfg:
-        #         del flat_cfg["streams"]
-        configs[run_id] = flat_cfg
-    return configs, always_show_patterns
 
 
 def flatten_dict(d, parent_key="", sep="."):
@@ -181,7 +132,7 @@ def main():
         "output", nargs="?", default="configs.md", help="Output markdown file path."
     )
     parser.add_argument(
-        "--max-length", type=int, default=50, help="Maximum length for config values."
+        "--max-length", type=int, default=30, help="Maximum length for config values."
     )
     parser.add_argument(
         "--always-show",
@@ -201,11 +152,60 @@ def main():
 
     # Load configs using load_model_config from config module
     configs = {}
-    for path in config_files:
-        cfg = load_model_config(path)
-        run_id = cfg.get("run_id", os.path.splitext(os.path.basename(path))[0])
+    for item in config_files:
+        # Handle both formats: [run_id, path] or just path
+        if isinstance(item, list) and len(item) == 2:
+            run_id, path = item
+        else:
+            # If it's just a path, extract run_id from filename
+            path = item
+            run_id = os.path.splitext(os.path.basename(path))[0]
+
+        _logger.info(f"Loading config for run_id: {run_id} from {path}")
+        cfg = load_model_config(run_id, None, path)
+
+        # Override run_id if present in config, otherwise use the one we determined
+        actual_run_id = cfg.get("run_id", run_id)
+
+        # Debug: log the original config structure
+        _logger.debug(f"Original config keys: {list(cfg.keys())}")
+        if "streams" in cfg:
+            _logger.debug(f"Streams type: {type(cfg['streams'])}, value: {cfg['streams']}")
+
+        # Special case: if 'streams' is a key and is a dict or list, unpack it BEFORE flattening
+        if "streams" in cfg:
+            streams_val = cfg["streams"]
+            _logger.debug(f"Streams type: {type(streams_val)}")
+
+            # Convert OmegaConf objects to regular Python objects
+            if hasattr(streams_val, "_content"):  # OmegaConf object
+                streams_val = OmegaConf.to_object(streams_val)
+                _logger.debug(f"Converted streams to Python object: {type(streams_val)}")
+
+            # If it's a list, unpack each dict in the list
+            if isinstance(streams_val, list):
+                for i, stream in enumerate(streams_val):
+                    if isinstance(stream, dict):
+                        for k, v in stream.items():
+                            cfg[f"streams[{i}].{k}"] = v
+                    else:
+                        cfg[f"streams[{i}]"] = stream
+            elif isinstance(streams_val, dict):
+                for k, v in streams_val.items():
+                    cfg[f"streams.{k}"] = v
+            else:
+                # If streams is not a dict or list, keep it as is
+                cfg["streams.value"] = streams_val
+            # Remove the original 'streams' key
+            del cfg["streams"]
+            streams_keys = [k for k in cfg.keys() if k.startswith("streams")]
+            _logger.debug(f"After streams processing: {streams_keys}")
+
+        # Now flatten the modified config
         flat_cfg = flatten_dict(cfg)
-        configs[run_id] = flat_cfg
+        flattened_streams_keys = [k for k in flat_cfg.keys() if "streams" in k]
+        _logger.debug(f"Final flattened keys with 'streams': {flattened_streams_keys}")
+        configs[actual_run_id] = flat_cfg
 
     # CLI patterns override YAML patterns if provided
     final_patterns = args.always_show if args.always_show else yaml_always_show_patterns
