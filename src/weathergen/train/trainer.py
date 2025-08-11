@@ -127,7 +127,7 @@ class Trainer(TrainerBase):
         _logger.info(f"Starting inference with id={self.cf.run_id}.")
 
         # inference validation set
-        self.validate(epoch=0)
+        self.validate(epoch=epoch)
         _logger.info(f"Finished inference run with id: {cf.run_id}")
 
     def run(self, cf, run_id_contd=None, epoch_contd=None):
