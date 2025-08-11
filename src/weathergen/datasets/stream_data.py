@@ -64,7 +64,7 @@ class StreamData:
         # processing after embedding
         self.source_idxs_embed = torch.tensor([])
         self.source_idxs_embed_pe = torch.tensor([])
-        
+
         # below are for targets which are tokenized like sources
         self.target_srclk_raw = [[] for _ in range(forecast_steps + 1)]
         self.target_srclk_tokens_lens = [[] for _ in range(forecast_steps + 1)]
@@ -95,11 +95,17 @@ class StreamData:
 
         self.source_idxs_embed = self.source_idxs_embed.to(device, non_blocking=True)
         self.source_idxs_embed_pe = self.source_idxs_embed_pe.to(device, non_blocking=True)
-        
+
         self.target_srclk_raw = [t.to(device, non_blocking=True) for t in self.target_srclk_raw]
-        self.target_srclk_tokens_lens = [t.to(device, non_blocking=True) for t in self.target_srclk_tokens_lens]
-        self.target_srclk_tokens_cells = [t.to(device, non_blocking=True) for t in self.target_srclk_tokens_cells]
-        self.target_srclk_centroids = [t.to(device, non_blocking=True) for t in self.target_srclk_centroids]
+        self.target_srclk_tokens_lens = [
+            t.to(device, non_blocking=True) for t in self.target_srclk_tokens_lens
+        ]
+        self.target_srclk_tokens_cells = [
+            t.to(device, non_blocking=True) for t in self.target_srclk_tokens_cells
+        ]
+        self.target_srclk_centroids = [
+            t.to(device, non_blocking=True) for t in self.target_srclk_centroids
+        ]
 
         return self
 
@@ -120,7 +126,7 @@ class StreamData:
         self.source_tokens_lens += [torch.zeros([self.nhc_source], dtype=torch.int32)]
         self.source_tokens_cells += [torch.tensor([])]
         self.source_centroids += [torch.tensor([])]
-        
+
     def add_empty_target_srclk(self, fstep: int) -> None:
         """
         Add an empty target for an input encoded like source.
@@ -133,7 +139,7 @@ class StreamData:
         -------
         None
         """
-        
+
         self.target_srclk_raw[fstep] += [torch.tensor([])]
         self.target_srclk_tokens_lens[fstep] += [torch.zeros([self.nhc_source], dtype=torch.int32)]
         self.target_srclk_tokens_cells[fstep] += [torch.tensor([])]
@@ -143,7 +149,7 @@ class StreamData:
         # self.source_tokens_lens += [torch.zeros([self.nhc_source], dtype=torch.int32)]
         # self.source_tokens_cells += [torch.tensor([])]
         # self.source_centroids += [torch.tensor([])]
-        
+
         # self.target_tokens[fstep] += [[torch.tensor([], dtype=torch.int32)]]
         # self.target_tokens_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
         # self.target_coords[fstep] += [[torch.zeros((0, 106)) for _ in range(self.nhc_target)]]
@@ -200,9 +206,14 @@ class StreamData:
         self.source_tokens_lens += [ss_lens]
         self.source_tokens_cells += [ss_cells]
         self.source_centroids += [ss_centroids]
-        
+
     def add_target_srclk(
-        self, fstep: int, tt_raw: torch.tensor, tt_lens: torch.tensor, tt_cells: list, tt_centroids: list
+        self,
+        fstep: int,
+        tt_raw: torch.tensor,
+        tt_lens: torch.tensor,
+        tt_cells: list,
+        tt_centroids: list,
     ) -> None:
         """
         Add data for source for one input.
@@ -262,7 +273,6 @@ class StreamData:
         self.target_coords[fstep] += [target_coords]
         self.target_coords_raw[fstep] += [target_coords_raw]
         self.target_times_raw[fstep] += [times_raw]
-        
 
     def target_empty(self) -> bool:
         """
@@ -380,7 +390,7 @@ class StreamData:
             self.source_tokens_lens = torch.zeros([self.nhc_source])
             self.source_tokens_cells = torch.tensor([])
             self.source_centroids = torch.tensor([])
-        
+
         # >>>>>>>
         # collect all source like tokens in current stream and add to batch sample list when non-empty
         for fstep in range(len(self.target_srclk_tokens_cells)):
@@ -388,10 +398,16 @@ class StreamData:
                 self.target_srclk_raw[fstep] = torch.cat(self.target_srclk_raw[fstep])
 
                 # collect by merging entries per cells, preserving cell structure
-                self.target_srclk_tokens_cells[fstep] = self._merge_cells(self.target_srclk_tokens_cells[fstep], self.nhc_source)
-                self.target_srclk_centroids[fstep] = self._merge_cells(self.target_srclk_centroids[fstep], self.nhc_source)
+                self.target_srclk_tokens_cells[fstep] = self._merge_cells(
+                    self.target_srclk_tokens_cells[fstep], self.nhc_source
+                )
+                self.target_srclk_centroids[fstep] = self._merge_cells(
+                    self.target_srclk_centroids[fstep], self.nhc_source
+                )
                 # lens can be stacked and summed
-                self.target_srclk_tokens_lens[fstep] = torch.stack(self.target_srclk_tokens_lens[fstep]).sum(0)
+                self.target_srclk_tokens_lens[fstep] = torch.stack(
+                    self.target_srclk_tokens_lens[fstep]
+                ).sum(0)
 
                 # remove NaNs
                 idx = torch.isnan(self.target_srclk_tokens_cells[fstep])
@@ -405,7 +421,7 @@ class StreamData:
                 self.target_srclk_tokens_cells[fstep] = torch.tensor([])
                 self.target_srclk_centroids[fstep] = torch.tensor([])
         # <<<<<
-        
+
         # targets
         for fstep in range(len(self.target_coords)):
             # collect all targets in current stream and add to batch sample list when non-empty

@@ -246,7 +246,7 @@ class GlobalAssimilationEngine:
                     norm_eps=self.cf.mlp_norm_eps,
                 )
             )
-            
+
         return self.ae_global_blocks
 
 

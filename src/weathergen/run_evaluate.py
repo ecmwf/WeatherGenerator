@@ -63,7 +63,7 @@ def inference_from_args(argl: list[str]):
     cf.run_history += [(args.from_run_id, cf.istep)]
     cf.streams = config.load_streams(Path(cf.streams_directory))
     cf = config.set_paths(cf)
-    
+
     cf.batch_size_validation_per_gpu = 1
     cf.batch_size_per_gpu = 1
 

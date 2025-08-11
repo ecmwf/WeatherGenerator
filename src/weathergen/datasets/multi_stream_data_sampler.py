@@ -386,17 +386,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 target_raw_srclk = torch.from_numpy(
                                     np.concatenate((rdata.coords, rdata.geoinfos, rdata.data), 1)
                                 )
-                                (tt_cells_srclk, tt_lens_srclk, tt_centroids_srclk) = self.tokenizer.batchify_source(
-                                    stream_info,
-                                    torch.from_numpy(rdata.coords),
-                                    torch.from_numpy(rdata.geoinfos),
-                                    torch.from_numpy(rdata.data),
-                                    rdata.datetimes,
-                                    (time_win1.start, time_win1.end),
-                                    ds,
+                                (tt_cells_srclk, tt_lens_srclk, tt_centroids_srclk) = (
+                                    self.tokenizer.batchify_source(
+                                        stream_info,
+                                        torch.from_numpy(rdata.coords),
+                                        torch.from_numpy(rdata.geoinfos),
+                                        torch.from_numpy(rdata.data),
+                                        rdata.datetimes,
+                                        (time_win1.start, time_win1.end),
+                                        ds,
+                                    )
                                 )
 
-                                '''
+                                """
                                 targets: list,
                                 target_coords: torch.tensor,
                                 target_coords_raw: torch.tensor,
@@ -406,11 +408,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 self.target_coords[fstep] += [target_coords]
                                 self.target_coords_raw[fstep] += [target_coords_raw]
                                 self.target_times_raw[fstep] += [times_raw]
-                                '''
-                                
+                                """
+
                                 stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t)
                                 # stream_data.add_empty_target_srclk(fstep)
-                                stream_data.add_target_srclk(fstep, target_raw_srclk, tt_lens_srclk, tt_cells_srclk, tt_centroids_srclk)
+                                stream_data.add_target_srclk(
+                                    fstep,
+                                    target_raw_srclk,
+                                    tt_lens_srclk,
+                                    tt_cells_srclk,
+                                    tt_centroids_srclk,
+                                )
 
                     # merge inputs for sources and targets for current stream
                     stream_data.merge_inputs()
