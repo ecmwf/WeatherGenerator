@@ -323,7 +323,7 @@ def calc_scores_per_stream(
             if aligned_clim_data is not None and fstep in aligned_clim_data:
                 metrics_kwargs = {
                     "clim_mean": aligned_clim_data[fstep],
-                    "spatial_dims": [],  # No spatial dims when grouping by sample in flattened data
+                    "spatial_dims": ["ipoint"],  # No spatial dims when grouping by sample in flattened data
                     "group_by_coord": "sample",  # Group by sample for metrics
                 }
             else:

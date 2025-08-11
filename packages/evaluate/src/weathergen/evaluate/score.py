@@ -627,15 +627,39 @@ class Scores:
 
         fcst_ano, obs_ano = p - clim_mean, gt - clim_mean
 
-        # Calculate ACC over spatial dimensions first (this is mathematically required)
-        acc = (fcst_ano * obs_ano).sum(spatial_dims) / np.sqrt(
-            (fcst_ano**2).sum(spatial_dims) * (obs_ano**2).sum(spatial_dims)
-        )
+        if group_by_coord:
+            # Define a function to calculate ACC for each group
+            def calc_acc_group(fcst_group, obs_group):
+                return (fcst_group * obs_group).sum(spatial_dims) / np.sqrt(
+                    (fcst_group**2).sum(spatial_dims) * (obs_group**2).sum(spatial_dims)
+                )
 
-        # Apply groupby after calculating ACC (if the coordinate still exists)
-        if group_by_coord and group_by_coord in acc.coords:
+            # Apply groupby and calculate ACC within each group
+            fcst_grouped = fcst_ano.groupby(group_by_coord)
+            obs_grouped = obs_ano.groupby(group_by_coord)
+
+            # Calculate ACC for each group and collect results
+            acc_results = []
+            coord_values = []
+
+            for group_label, fcst_group in fcst_grouped:
+                obs_group = obs_grouped[group_label]
+                group_acc = calc_acc_group(fcst_group, obs_group)
+                acc_results.append(group_acc)
+                coord_values.append(group_label)
+
+            # Concatenate results and assign coordinate values
+            acc = xr.concat(acc_results, dim=group_by_coord)
+
+            acc[group_by_coord] = coord_values
+        else:
+            # Calculate ACC over spatial dimensions (no grouping)
+            acc = (fcst_ano * obs_ano).sum(spatial_dims) / np.sqrt(
+                (fcst_ano**2).sum(spatial_dims) * (obs_ano**2).sum(spatial_dims)
+            )
+
+        if group_by_coord:
             acc = acc.groupby(group_by_coord)
-
         # Exclude spatial dimensions from averaging since ACC is always calculated over them
         if self._agg_dims is not None:
             mean_dims = [x for x in self._agg_dims if x not in spatial_dims]
