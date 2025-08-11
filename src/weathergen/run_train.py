@@ -59,7 +59,9 @@ def inference_from_args(argl: list[str]):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    init_loggers(logging_level=logging.DEBUG, debug_output_streams=f"./logs/debug_log_{cf.run_id}.txt")
+    init_loggers(
+        logging_level=logging.DEBUG, debug_output_streams=f"./logs/debug_log_{cf.run_id}.txt"
+    )
 
     cf.run_history += [(args.from_run_id, cf.istep)]
     cf = config.set_paths(cf)
