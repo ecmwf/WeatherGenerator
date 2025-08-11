@@ -1,0 +1,5 @@
+run_ids:
+  - [run_id1, /path/to/WeatherGenerator/models/]
+  - [run_id2, /alt/path/to/WeatherGenerator/models/]
+always_show_patterns: # put '*' to show all parameters or nothing to only show changed parameters
+  - '*'
