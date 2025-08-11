@@ -28,6 +28,7 @@ from weathergen.model.engines import (
     Local2GlobalAssimilationEngine,
     LocalAssimilationEngine,
     TargetPredictionEngine,
+    TargetPredictionEngineClassic,
 )
 from weathergen.model.layers import MLP
 from weathergen.model.utils import get_num_parameters
@@ -331,7 +332,12 @@ class Model(torch.nn.Module):
                 self.pred_adapter_kv.append(torch.nn.Identity())
 
             # target prediction engines
-            tte = TargetPredictionEngine(
+            tte_version = (
+                TargetPredictionEngine
+                if cf.decoder_type != "PerceiverIOCoordConditioning"
+                else TargetPredictionEngineClassic
+            )
+            tte = tte_version(
                 cf,
                 dims_embed,
                 dim_coord_in,
@@ -725,18 +731,13 @@ class Model(torch.nn.Module):
             Prediction output tokens in physical representation for each target_coords.
         """
 
-        # fp32, i32 = torch.float32, torch.int32
         batch_size = (
             self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
         )
 
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
         tokens_stream = (tokens.reshape(s) + model_params.pe_global).flatten(0, 1)
-        tokens_stream = (
-            tokens_stream[model_params.hp_nbours.flatten()]
-            .flatten(0, 1)
-            .reshape(self.num_healpix_cells, 9, -1)
-        )
+        tokens_stream = tokens_stream[model_params.hp_nbours.flatten()].flatten(0, 1)
 
         # pair with tokens from assimilation engine to obtain target tokens
         preds_tokens = []
@@ -764,6 +765,7 @@ class Model(torch.nn.Module):
                     ]
                 )
 
+            # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
                 nn = si["name"]
                 logger.warning(
@@ -774,6 +776,8 @@ class Model(torch.nn.Module):
                 )
                 preds_tokens += [torch.tensor([], device=tc_tokens.device)]
                 continue
+
+            # skip empty lengths
             if tc_tokens.shape[0] == 0:
                 preds_tokens += [torch.tensor([], device=tc_tokens.device)]
                 continue
