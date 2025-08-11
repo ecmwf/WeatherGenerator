@@ -473,6 +473,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         with_residual=True,
         with_qk_lnorm=True,
         with_flash=True,
+        softcap=0.0,
         norm_type="LayerNorm",
         dim_aux=None,
         norm_eps=1e-5,
