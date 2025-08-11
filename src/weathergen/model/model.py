@@ -350,6 +350,10 @@ class Model(torch.nn.Module):
             self.target_token_engines.append(tte)
 
             # ensemble prediction heads to provide probabilistic prediction
+            final_activation = si["pred_head"].get("final_activation", "Identity")
+            logger.debug(
+                f"{final_activation} activation as prediction head output of {si['name']} stream"
+            )
             self.pred_heads.append(
                 EnsPredictionHead(
                     dims_embed[-1],
@@ -357,6 +361,7 @@ class Model(torch.nn.Module):
                     si["pred_head"]["num_layers"],
                     si["pred_head"]["ens_size"],
                     norm_type=cf.norm_type,
+                    final_activation=final_activation,
                 )
             )
 

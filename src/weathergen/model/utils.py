@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import torch
+import torch.nn as nn
 
 
 #########################################
@@ -20,3 +21,32 @@ def get_num_parameters(block):
 def freeze_weights(block):
     for p in block.parameters():
         p.requires_grad = False
+
+
+#########################################
+class ActivationFactory:
+    _registry = {
+        "identity": nn.Identity,
+        "tanh": nn.Tanh,
+        "softmax": nn.Softmax,
+        "sigmoid": nn.Sigmoid,
+        "gelu": nn.GELU,
+        "relu": nn.ReLU,
+        "leakyrelu": nn.LeakyReLU,
+        "elu": nn.ELU,
+        "selu": nn.SELU,
+        "prelu": nn.PReLU,
+        "softplus": nn.Softplus,
+        "linear": nn.Linear,
+        "logsoftmax": nn.LogSoftmax,
+        "silu": nn.SiLU,
+        "swish": nn.SiLU,
+    }
+
+    @classmethod
+    def get(cls, name: str, **kwargs):
+        name = name.lower()
+        if name not in cls._registry:
+            raise ValueError(f"Unsupported activation type: '{name}'")
+        fn = cls._registry[name]
+        return fn(**kwargs) if callable(fn) else fn
