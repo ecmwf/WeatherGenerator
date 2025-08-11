@@ -17,6 +17,7 @@ import astropy_healpix as hp
 import astropy_healpix.healpy
 import numpy as np
 import torch
+import torch.nn as nn
 from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
 
@@ -38,10 +39,70 @@ from weathergen.utils.logger import logger
 class ModelParams(torch.nn.Module):
     """Creation of query and embedding parameters of the model."""
 
-    def __init__(self) -> None:
+    def __init__(self, cf) -> None:
         super(ModelParams, self).__init__()
 
+        self.cf = cf
+
+        self.healpix_level = cf.healpix_level
+        self.num_healpix_cells = 12 * 4**cf.healpix_level
+        self.dtype = get_dtype(cf.attention_dtype)
+
+        bs = cf.batch_size_per_gpu
+        nqs = 9
+        s = [bs, self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed]
+
+        ### POSITIONAL EMBEDDINGS ###
+        len_token_seq = 1024
+        self.pe_embed = torch.nn.Parameter(
+            torch.zeros(len_token_seq, cf.ae_local_dim_embed, dtype=self.dtype), requires_grad=False
+        )
+        # self.pe_embed = torch.zeros(len_token_seq, cf.ae_local_dim_embed, dtype=self.dtype)
+
+        pe = torch.zeros(
+            self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed, dtype=self.dtype
+        )
+        self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
+        # self.pe_global = pe
+
+        ### HEALPIX NEIGHBOURS ###
+        hlc = self.healpix_level
+        with warnings.catch_warnings(action="ignore"):
+            temp = hp.neighbours(
+                np.arange(self.num_healpix_cells), 2**hlc, order="nested"
+            ).transpose()
+        # fix missing nbors with references to self
+        for i, row in enumerate(temp):
+            temp[i][row == -1] = i
+        self.hp_nbours = torch.nn.Parameter(
+            torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32),
+            requires_grad=False,
+        )
+        # self.hp_nbours = torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32)
+
+        if cf.target_cell_local_prediction:
+            tokens_lens_value = nqs * s[2]
+        else:
+            tokens_lens_value = nqs * s[1] * s[2]
+        self.tokens_lens = torch.nn.Parameter(
+            tokens_lens_value * torch.ones(bs * s[1]+ 1, dtype=torch.int32), requires_grad=False
+        )
+        self.tokens_lens.data[0] = 0
+        # self.tokens_lens = tokens_lens_value * torch.ones(bs * s[1], dtype=torch.int32)
+        # self.tokens_lens[0] = 0
+
+        self.q_cells_lens = torch.nn.Parameter(
+            torch.ones(self.num_healpix_cells + 1, dtype=torch.int32), requires_grad=False
+        )
+        self.q_cells_lens.data[0] = 0
+        # self.q_cells_lens = torch.ones(self.num_healpix_cells + 1, dtype=torch.int32)
+        # self.q_cells_lens[0] = 0
+
     def create(self, cf: Config) -> "ModelParams":
+        self.reset_parameters(cf)
+        return self
+
+    def reset_parameters(self, cf: Config) -> "ModelParams":
         """Creates positional embedding for each grid point for each stream used after stream
         embedding, positional embedding for all stream assimilated cell-level local embedding,
         initializing queries for local-to-global adapters, HEALPix neighbourhood based parameter
@@ -60,39 +121,43 @@ class ModelParams(torch.nn.Module):
         Args:
             cf : Configuration
         """
-        self.healpix_level = cf.healpix_level
-        self.num_healpix_cells = 12 * 4**cf.healpix_level
-        self.dtype = get_dtype(cf.attention_dtype)
 
         # positional encodings
 
         dim_embed = cf.ae_local_dim_embed
         len_token_seq = 1024
-        position = torch.arange(0, len_token_seq).unsqueeze(1)
-        div = torch.exp(torch.arange(0, dim_embed, 2) * -(math.log(len_token_seq) / dim_embed))
-        pe_embed = torch.zeros(len_token_seq, dim_embed, dtype=self.dtype)
-        pe_embed[:, 0::2] = torch.sin(position * div[: pe_embed[:, 0::2].shape[1]])
-        pe_embed[:, 1::2] = torch.cos(position * div[: pe_embed[:, 1::2].shape[1]])
-        self.pe_embed = torch.nn.Parameter(pe_embed, requires_grad=False)
+        self.pe_embed.data.fill_(0.0)
+        position = torch.arange(0, len_token_seq,device=self.pe_embed.device).unsqueeze(1)
+        div = torch.exp(
+            torch.arange(0, dim_embed, 2, device=self.pe_embed.device)
+            * -(math.log(len_token_seq) / dim_embed),
+        )
+        self.pe_embed.data[:, 0::2] = torch.sin(position * div[: self.pe_embed[:, 0::2].shape[1]])
+        self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
 
         dim_embed = cf.ae_global_dim_embed
-        pe = torch.zeros(
-            self.num_healpix_cells, cf.ae_local_num_queries, dim_embed, dtype=self.dtype
+        self.pe_global.data.fill_(0.0)
+        xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
+        self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
+            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
         )
-        xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2) / dim_embed
-        pe[..., 0::2] = 0.5 * torch.sin(torch.outer(8 * torch.arange(cf.ae_local_num_queries), xs))
-        pe[..., 0::2] += (
-            torch.sin(torch.outer(torch.arange(self.num_healpix_cells), xs))
+        self.pe_global.data[..., 0::2] += (
+            torch.sin(
+                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+            )
             .unsqueeze(1)
             .repeat((1, cf.ae_local_num_queries, 1))
         )
-        pe[..., 1::2] = 0.5 * torch.cos(torch.outer(8 * torch.arange(cf.ae_local_num_queries), xs))
-        pe[..., 1::2] += (
-            torch.cos(torch.outer(torch.arange(self.num_healpix_cells), xs))
+        self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
+            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
+        )
+        self.pe_global.data[..., 1::2] += (
+            torch.cos(
+                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+            )
             .unsqueeze(1)
             .repeat((1, cf.ae_local_num_queries, 1))
         )
-        self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
         # healpix neighborhood structure
 
@@ -104,31 +169,28 @@ class ModelParams(torch.nn.Module):
         for i, row in enumerate(temp):
             temp[i][row == -1] = i
         # nbors *and* self
-        nbours = torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32)
-        nbours[:, 0] = torch.arange(temp.shape[0])
-        nbours[:, 1:] = torch.from_numpy(temp)
-        self.hp_nbours = torch.nn.Parameter(nbours, requires_grad=False)
+        self.hp_nbours.data[:, 0] = torch.arange(temp.shape[0], device=self.hp_nbours.device)
+        self.hp_nbours.data[:, 1:] = torch.from_numpy(temp).to(self.hp_nbours.device)
 
         # varlen index set for tokens
         assert cf.batch_size_per_gpu == cf.batch_size_validation_per_gpu
         bs = cf.batch_size_per_gpu
         nqs = 9
         s = [bs, self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed]
-        pad = torch.zeros(1, dtype=torch.int32)
         if cf.target_cell_local_prediction:
-            tokens_lens = torch.cat([pad, nqs * s[2] * torch.ones(bs * s[1], dtype=torch.int32)])
+            tokens_lens_value = nqs * s[2]
         else:
-            tokens_lens = torch.cat([pad, nqs * s[1] * s[2] * torch.ones(bs, dtype=torch.int32)])
-        self.tokens_lens = torch.nn.Parameter(tokens_lens, requires_grad=False)
+            tokens_lens_value = nqs * s[1] * s[2]
+        self.tokens_lens.data.fill_(tokens_lens_value)
+        self.tokens_lens.data[0] = 0
 
         # precompute for varlen attention
-        s = (self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed)
-        # q_cells_lens = s[1] * torch.ones( s[0], dtype=torch.int32)
-        q_cells_lens = torch.ones(s[0], dtype=torch.int32)
-        q_cells_lens = torch.cat([torch.zeros(1, dtype=torch.int32), q_cells_lens])
-        self.q_cells_lens = torch.nn.Parameter(q_cells_lens, requires_grad=False)
+        self.q_cells_lens.data.fill_(1)
+        self.q_cells_lens.data[0] = 0
 
-        return self
+        #ensure all params have grad set to False
+
+        return
 
 
 ####################################################################################################
@@ -356,6 +418,16 @@ class Model(torch.nn.Module):
 
         return self
 
+    def reset_parameters(self):
+        def _reset_params(module):
+            if isinstance(module, nn.Linear):
+                module.reset_parameters()
+            elif isinstance(module, nn.LayerNorm):
+                module.reset_parameters()
+            else:
+                pass
+        self.apply(_reset_params)
+
     #########################################
     def freeze_weights_forecast(self) -> "Model":
         """Freezes core model weights and makes forecasting engine weights trainable"""
@@ -537,15 +609,16 @@ class Model(torch.nn.Module):
             ]
         )
         offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
+        device = next(self.parameters()).device
         tokens_all = torch.empty(
-            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=self.dtype, device="cuda"
+            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=self.dtype, device=device
         )
 
         for _, sb in enumerate(streams_data):
             for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
                 if not s.source_empty():
-                    idxs = s.source_idxs_embed
-                    idxs_pe = s.source_idxs_embed_pe
+                    idxs = s.source_idxs_embed.to(device)
+                    idxs_pe = s.source_idxs_embed_pe.to(device)
 
                     # create full scatter index
                     # (there's no broadcasting which is likely highly inefficient)
@@ -620,7 +693,7 @@ class Model(torch.nn.Module):
         cell_lens = cell_lens[1:]
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_all = []
-        zero_pad = torch.zeros(1, device="cuda", dtype=torch.int32)
+        zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
         for i in range((cell_lens.shape[0]) // clen):
             # make sure we properly catch all elements in last chunk
             i_end = (i + 1) * clen if i < (cell_lens.shape[0] // clen) - 1 else cell_lens.shape[0]
@@ -719,8 +792,7 @@ class Model(torch.nn.Module):
         Returns:
             Prediction output tokens in physical representation for each target_coords.
         """
-        
-        import pdb; pdb.set_trace()
+
         # fp32, i32 = torch.float32, torch.int32
         batch_size = (
             self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu

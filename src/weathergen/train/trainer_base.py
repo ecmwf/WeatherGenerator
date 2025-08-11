@@ -23,7 +23,7 @@ from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
 
 _logger = logging.getLogger(__name__)
-
+PORT=1345
 
 class TrainerBase:
     def __init__(self):
@@ -82,20 +82,41 @@ class TrainerBase:
             _logger.info(f"rank: {rank} has run_id: {cf.run_id}")
             return
 
-        local_rank = int(os.environ.get("SLURM_LOCALID"))
-        ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
-        rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
-        num_ranks = int(os.environ.get("SLURM_NTASKS"))
-        _logger.info(
-            f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, "
-            f"rank={rank}, num_ranks={num_ranks}"
-        )
+        rank = int(os.environ["LOCAL_RANK"])
+        if torch.accelerator.is_available():
+            device_type = torch.accelerator.current_accelerator()
+            device = torch.device(f"{device_type}:{rank}")
+            torch.accelerator.set_device_index(rank)
+            print(f"Running on rank {rank} on device {device}")
+        else:
+            device = torch.device("cpu")
+            print(f"Running on device {device}")
+
+        backend = torch.distributed.get_default_backend_for_device(device)
+        torch.distributed.init_process_group(backend=backend, world_size=2, device_id=device)
+
+
+        # local_rank = int(os.environ.get("SLURM_LOCALID"))
+        # ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
+        # rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
+        # num_ranks = int(os.environ.get("SLURM_NTASKS"))
+        # _logger.info(
+        #     f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, "
+        #     f"rank={rank}, num_ranks={num_ranks}"
+        # )
+        # print(
+        #     f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, "
+        #     f"rank={rank}, num_ranks={num_ranks}"
+        # )
+        # print(rank)
+        # rank = int(os.environ["LOCAL_RANK"])
+        # print(rank)
 
         if rank == 0:
             # Check that port 1345 is available, raise an error if not
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 try:
-                    s.bind((master_node, 1345))
+                    s.bind((master_node, PORT))
                 except OSError as e:
                     if e.errno == errno.EADDRINUSE:
                         _logger.error(
@@ -109,42 +130,42 @@ class TrainerBase:
                         _logger.error(f"Error while binding to port 1345 on {master_node}: {e}")
                         raise
 
-        _logger.info(
-            f"Initializing DDP with rank {rank} out of {num_ranks} on master_node:{master_node}."
-        )
+        # _logger.info(
+        #     f"Initializing DDP with rank {rank} out of {num_ranks} on master_node:{master_node}."
+        # )
 
-        dist.init_process_group(
-            backend="nccl",
-            init_method="tcp://" + master_node + ":1345",
-            timeout=datetime.timedelta(seconds=240),
-            world_size=num_ranks,
-            rank=rank,
-            device_id=torch.device("cuda", local_rank),
-        )
+        # dist.init_process_group(
+        #     backend="nccl",
+        #     init_method=f"tcp://{master_node}:{PORT}",
+        #     timeout=datetime.timedelta(seconds=240),
+        #     world_size=num_ranks,
+        #     rank=rank,
+        #     device_id=torch.device("cuda", rank),
+        # )
         if is_root():
             _logger.info("DDP initialized: root.")
         # Wait for all ranks to reach this point
         dist.barrier()
 
-        # communicate run id to all nodes
-        len_run_id = len(cf.run_id)
-        run_id_int = torch.zeros(len_run_id, dtype=torch.int32).cuda()
-        if is_root():
-            _logger.info(f"Communicating run_id to all nodes: {cf.run_id}")
-            run_id_int = str_to_tensor(cf.run_id).cuda()
-        dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
-        if not is_root():
-            cf.run_id = tensor_to_str(run_id_int)
-        _logger.info(f"rank: {rank} has run_id: {cf.run_id}")
+        # # communicate run id to all nodes
+        # len_run_id = len(cf.run_id)
+        # run_id_int = torch.zeros(len_run_id, dtype=torch.int32).to(device)
+        # if is_root():
+        #     _logger.info(f"Communicating run_id to all nodes: {cf.run_id}")
+        #     run_id_int = str_to_tensor(cf.run_id).to(device)
+        # dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
+        # if not is_root():
+        #     cf.run_id = tensor_to_str(run_id_int)
+        # _logger.info(f"rank: {rank} has run_id: {cf.run_id}")
 
-        # communicate data_loader_rng_seed
-        if hasattr(cf, "data_loader_rng_seed"):
-            if cf.data_loader_rng_seed is not None:
-                l_seed = torch.tensor(
-                    [cf.data_loader_rng_seed if rank == 0 else 0], dtype=torch.int32
-                ).cuda()
-                dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
-                cf.data_loader_rng_seed = l_seed.item()
+        # # communicate data_loader_rng_seed
+        # if hasattr(cf, "data_loader_rng_seed"):
+        #     if cf.data_loader_rng_seed is not None:
+        #         l_seed = torch.tensor(
+        #             [cf.data_loader_rng_seed if rank == 0 else 0], dtype=torch.int32
+        #         ).to(device)
+        #         dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
+        #         cf.data_loader_rng_seed = l_seed.item()
 
         # TODO: move outside of the config
         cf.rank = rank

@@ -8,6 +8,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+import os
 
 import logging
 import time
@@ -18,6 +19,7 @@ import numpy as np
 import torch
 import tqdm
 from torch import Tensor
+import torch.nn as nn
 from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
@@ -36,7 +38,8 @@ from weathergen.model.attention import (
     MultiSelfAttentionHead,
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
-    MultiCrossAttentionHeadVarlen
+    MultiCrossAttentionHeadVarlen,
+    MultiCrossAttentionHeadVarlenSlicedQ
 )
 from weathergen.model.engines import (
     LocalAssimilationEngine,
@@ -125,12 +128,15 @@ class Trainer(TrainerBase):
         targets_num_channels = self.dataset_val.get_targets_num_channels()
         targets_coords_size = self.dataset_val.get_targets_coords_size()
 
+
         self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         self.model = self.model.to(self.devices[0])
         self.model.load(run_id_trained, epoch)
         _logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
-        self.model_params = ModelParams().create(cf).to(self.devices[0])
+        self.model_params = ModelParams().create(cf)
+        self.model_params = self.model_params.to(self.devices[0])
         _logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
+
 
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
@@ -184,6 +190,9 @@ class Trainer(TrainerBase):
         targets_num_channels = self.dataset.get_targets_num_channels()
         targets_coords_size = self.dataset.get_targets_coords_size()
 
+        device_type = torch.accelerator.current_accelerator()
+        device = torch.device(f"{device_type}:{cf.rank}")
+
         with torch.device("meta"):
             self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         # load model if specified
@@ -211,16 +220,17 @@ class Trainer(TrainerBase):
                     reduce_dtype=torch.float32,
                 )
                 if cf.with_mixed_precision
-                else None
+                else None,
             }
             modules_to_shard = (
                 MLP,
                 MultiSelfAttentionHeadLocal,
                 MultiSelfAttentionHead,
                 MultiCrossAttentionHeadVarlen,
-                MultiSelfAttentionHeadVarlen
+                MultiCrossAttentionHeadVarlenSlicedQ,
+                MultiSelfAttentionHeadVarlen,
+                
             )
-            import pdb; pdb.set_trace()
             for module in self.model.modules():
                 if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)
@@ -233,14 +243,24 @@ class Trainer(TrainerBase):
             # for module in self.model.modules():
             #     if isinstance(module, engines_to_shard):
             #         fully_shard(module, **fsdp_kwargs)
+
+        self.model_params = ModelParams(cf).create(cf)# .to(device)
+
+        self.test_lin = nn.Linear(128,256)
+        fully_shard(self.test_lin,**fsdp_kwargs)
+        print(self.test_lin)
+        print(isinstance(self.test_lin,nn.Linear))
+
+        if cf.with_ddp and cf.with_fsdp:
             fully_shard(self.model, **fsdp_kwargs)
             for tensor in itertools.chain(self.model.parameters(), self.model.buffers()):
                 assert tensor.device == torch.device("meta")
 
-        self.model_params = ModelParams().create(cf).to("cuda")
-
         self.model.to_empty(device="cuda")
-        # self.model.reset_parameters()
+        self.model.reset_parameters()
+        self.model_params.reset_parameters(cf)
+        self.model_params = self.model_params.to(device)
+        print(self.model)
 
         if cf.compile_model:
             self.model = torch.compile(self.model, dynamic=True)
@@ -316,8 +336,8 @@ class Trainer(TrainerBase):
             _logger.info(str)
 
         # Instantiate loss calculator modules to compute losses
-        self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=self.devices[0])
-        self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
+        self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=device)
+        self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=device)
 
         # recover epoch when continuing run
         if self.num_ranks_original is None:
@@ -493,9 +513,10 @@ class Trainer(TrainerBase):
             forecast_steps = batch[-1]
             batch = self.batch_to_device(batch)
 
+            device = f"cuda:{self.cf.rank}"
             # evaluate model
             with torch.autocast(
-                device_type="cuda",
+                device_type=device,
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
@@ -507,6 +528,8 @@ class Trainer(TrainerBase):
 
             # backward pass
             self.grad_scaler.scale(loss_values.loss).backward()
+            # if device == "cuda:0":
+            #     import pdb; pdb.set_trace()
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
@@ -525,16 +548,17 @@ class Trainer(TrainerBase):
             self.stdev_unweighted_hist += [loss_values.stddev_all]
 
             perf_gpu, perf_mem = self.get_perf()
-            self.perf_gpu = ddp_average(torch.tensor([perf_gpu])).item()
-            self.perf_mem = ddp_average(torch.tensor([perf_mem])).item()
+            self.perf_gpu = 0 # ddp_average(torch.tensor([perf_gpu])).item()
+            self.perf_mem = 0 # ddp_average(torch.tensor([perf_mem])).item()
 
             self._log_terminal(bidx, epoch, TRAIN)
             if bidx % log_interval == 0:
                 self._log(TRAIN)
 
             # model checkpoint
-            if bidx % self.checkpoint_freq == 0:
-                self.save_model(-1)
+            if bidx % self.checkpoint_freq == (bidx - 1):
+                # self.save_model(-1)
+                pass
 
             self.cf.istep += cf.batch_size_per_gpu
 
@@ -557,8 +581,9 @@ class Trainer(TrainerBase):
                     batch = self.batch_to_device(batch)
 
                     # evaluate model
+                    device = f"cuda:{self.cf.rank}"
                     with torch.autocast(
-                        device_type="cuda",
+                        device_type=device,
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
@@ -619,10 +644,11 @@ class Trainer(TrainerBase):
 
     def batch_to_device(self, batch):
         # forecast_steps is dropped here from the batch
+        device = f"cuda:{self.cf.rank}"
         return (
-            [[d.to_device() for d in db] for db in batch[0]],
-            batch[1].to("cuda"),
-            [[b.to("cuda") for b in bf] for bf in batch[2]],
+            [[d.to_device(device) for d in db] for db in batch[0]],
+            batch[1].to(device),
+            [[b.to(device) for b in bf] for bf in batch[2]],
         )
 
     def save_model(self, epoch: int, name=None):
@@ -676,8 +702,10 @@ class Trainer(TrainerBase):
         losses_all: dict[str, Tensor] = {}
         stddev_all: dict[str, Tensor] = {}
 
+        device_type = torch.accelerator.current_accelerator()
+        device = torch.device(f"{device_type}:{self.cf.rank}")
         # Make list of losses into a tensor. This is individual tensor per rank
-        real_loss = torch.tensor(self.loss_model_hist, device=self.devices[0])
+        real_loss = torch.tensor(self.loss_model_hist, device=device)
         # Gather all tensors from all ranks into a list and stack them into one tensor again
         real_loss = torch.cat(all_gather_vlen(real_loss))
 

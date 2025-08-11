@@ -120,7 +120,8 @@ class StreamEmbedTransformer(torch.nn.Module):
             assert self.unembed_mode == "block"  # only supported mode at the moment
             # padding needed if the unembedded columns cannot be concatenated to dim_out (e.g GPSRO)
             self.pad = self.dim_out % token_size
-            self.out_pad = torch.nn.Parameter(torch.zeros(self.pad))
+            self.out_pad = torch.nn.Parameter(torch.zeros(self.pad)) # Why is this a parameter? why should this get
+            # gradients?
             self.unembed = torch.nn.Linear(
                 self.dim_embed,
                 self.num_tokens * ((self.dim_out - embed_size_centroids) // token_size),
@@ -148,7 +149,8 @@ class StreamEmbedTransformer(torch.nn.Module):
         x = peh(checkpoint(self.embed, x_in.transpose(-2, -1), use_reentrant=False))
 
         for layer in self.layers:
-            x = checkpoint(layer, x, use_reentrant=False)
+            # x = checkpoint(layer, x, use_reentrant=False)
+            x = layer(x)
 
         # read out
         if self.unembed_mode == "full":
