@@ -135,9 +135,10 @@ def mse_channel_location_weighted(
     mask_nan = ~torch.isnan(target)
     pred = pred[0] if pred.shape[0] == 0 else pred.mean(0)
 
-    diff2 = torch.square(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0)).mean(0)
-    wl = weights_points
-    loss_chs = ((diff2.transpose(1, 0) * wl).transpose(1, 0) if wl else diff2).mean(0)
+    diff2 = torch.square(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0))
+    if weights_points is not None:
+        loss_chs = (diff2.transpose(1, 0) * weights_points).transpose(1, 0)
+    loss_chs = loss_chs.mean(0)
     loss = torch.mean(loss_chs * weights_channels if weights_channels else loss_chs)
 
     return loss, loss_chs

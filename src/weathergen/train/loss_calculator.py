@@ -105,18 +105,19 @@ class LossCalculator:
 
         return stream_info_loss_weight, weights_channels
 
-    def _compute_cosine_latitude_weight(self, latitudes, min_value=1e-3, max_value=1.0):
-        return (max_value - min_value) * np.cos(latitudes) + min_value
+    def cosine_latitude(self, stream_data, min_value=1e-3, max_value=1.0):
+        latitudes_radian = stream_data.target_coords_raw[0][:, 0] * np.pi / 180
+        return (max_value - min_value) * np.cos(latitudes_radian) + min_value
 
     def _get_location_weights(self, stream_info, stream_data):
         stream_info_location_weight = stream_info.get("location_weight", None)
+        weights_locations_fct = (
+            getattr(self, stream_info_location_weight) if stream_info_location_weight else None
+        )
+        weights_locations = weights_locations_fct(stream_data) if weights_locations_fct else None
+        weights_locations = weights_locations.to(device=self.device, non_blocking=True)
 
-        match stream_info_location_weight:
-            case None:
-                return 1.0
-            case "cosine_latitude":
-                latitudes_radian = stream_data.target_coords_raw[0][:, 0] * np.pi / 180
-                return self._compute_cosine_latitude_weight(latitudes_radian)
+        return weights_locations
 
     def _get_substep_masks(self, stream_info, fstep, stream_data):
         """
@@ -153,7 +154,8 @@ class LossCalculator:
 
         ctr_substeps = 0
         for mask_t in substep_masks:
-            assert mask_t.sum() == len(weights_locations) if weights_locations else True
+            if weights_locations is not None:
+                assert mask_t.sum() == len(weights_locations)
 
             loss, loss_chs = loss_fct(
                 target[mask_t], pred[:, mask_t], weights_channels, weights_locations
@@ -233,7 +235,6 @@ class LossCalculator:
 
             stream_data = streams_data[i_batch][i_stream_info]
 
-            # TODO: set from stream info
             weights_locations = self._get_location_weights(stream_info, stream_data)
 
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
