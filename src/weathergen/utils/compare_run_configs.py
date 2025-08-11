@@ -20,6 +20,8 @@ _logger = logging.getLogger(__name__)
 
 
 if __name__ == "__main__":
+    # switch to yml config based arg parsing to facilitate comparison between more than two runs
+    # Think about compatibility with the plot train config
     parser = argparse.ArgumentParser()
     parser.add_argument("-r1", "--run_id_1", required=True)
     parser.add_argument("-r2", "--run_id_2", required=True)
@@ -38,10 +40,11 @@ if __name__ == "__main__":
         help="Path to model directory for -r2/--run_id_2",
     )
     args = parser.parse_args()
-
+    #  retain this way of loading configs
     cf1 = load_model_config(args.run_id_1, None, args.model_directory_1)
     cf2 = load_model_config(args.run_id_2, None, args.model_directory_2)
 
+    # Integrate new comparison code from here
     result = list(diff(cf1.__dict__, cf2.__dict__))
 
     for tag, path, details in result:
