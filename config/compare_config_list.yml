@@ -1,5 +1,10 @@
+# This YAML file controls which model runs are compared in utils/compare_run_configs.py.
+# Specify run_ids and their model directories below.
+# Use always_show_patterns to control which parameters are always shown in the output table.
+# Put '*' to show all parameters, or leave empty to only show changed parameters.
+# Use for example 'ae_global' to show all parameters starting with 'ae_global'.
 run_ids:
   - [run_id1, /path/to/WeatherGenerator/models/]
   - [run_id2, /alt/path/to/WeatherGenerator/models/]
-always_show_patterns: # put '*' to show all parameters or nothing to only show changed parameters
+always_show_patterns:
   - '*'
