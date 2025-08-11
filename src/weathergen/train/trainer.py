@@ -591,11 +591,26 @@ class Trainer(TrainerBase):
 
     def batch_to_device(self, batch):
         # forecast_steps is dropped here from the batch
-        return (
-            [[d.to_device() for d in db] for db in batch[0]],
-            batch[1].to("cuda"),
-            [[b.to("cuda") for b in bf] for bf in batch[2]],
-        )
+        # Move each element in batch[0] to device using its .to_device() method
+        sources_on_device = []
+        for db in batch[0]:
+            db_on_device = []
+            for d in db:
+                db_on_device.append(d.to_device())
+            sources_on_device.append(db_on_device)
+
+        # Move batch[1] to cuda
+        targets_on_device = batch[1].to("cuda")
+
+        # Move each element in batch[2] to cuda
+        features_on_device = []
+        for bf in batch[2]:
+            bf_on_device = []
+            for b in bf:
+                bf_on_device.append(b.to("cuda"))
+            features_on_device.append(bf_on_device)
+
+        return (sources_on_device, targets_on_device, features_on_device)
 
     def save_model(self, epoch: int, name=None):
         # Saving at epoch == max_epoch means that we are saving the latest checkpoint.
