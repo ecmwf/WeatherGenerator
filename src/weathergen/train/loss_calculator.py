@@ -264,7 +264,10 @@ class LossCalculator:
 
             loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
-
+            
+            if isinstance(preds, tuple):
+                preds = preds[0]
+                
             for fstep, target in enumerate(targets):
                 # skip if either target or prediction has no data points
                 pred = preds[fstep][i_strm]
