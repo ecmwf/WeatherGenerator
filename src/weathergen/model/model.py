@@ -499,6 +499,7 @@ class Model(torch.nn.Module):
 
         # roll-out in latent space
         preds_all = []
+        tokens_all = [tokens]
         for fstep in range(forecast_offset, forecast_offset + forecast_steps):
             # prediction
             preds_all += [
@@ -512,6 +513,7 @@ class Model(torch.nn.Module):
             ]
 
             tokens = self.forecast(model_params, tokens)
+            tokens_all += [tokens]
 
         # prediction for final step
         preds_all += [
@@ -524,7 +526,22 @@ class Model(torch.nn.Module):
             )
         ]
 
-        return preds_all
+        # now encode the targets into the latent space for all fsteps
+        if self.cf.encode_targets_latent:
+            with torch.no_grad():
+                tokens_targets = []
+                tokens_targets_srclk = self.embed_cells_targets_srclk(model_params, streams_data)
+                for fstep in range(len(tokens_targets_srclk)):
+                    tokens_target = self.assimilate_local(
+                        model_params, tokens_targets_srclk[fstep], source_cell_lens
+                    )
+                    tokens_target = self.assimilate_global(model_params, tokens_target)
+                    tokens_targets.append(tokens_target)
+
+        if self.cf.encode_targets_latent:
+            return preds_all, tokens_all, tokens_targets
+        else:
+            return preds_all
 
     #########################################
     def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
@@ -578,6 +595,72 @@ class Model(torch.nn.Module):
                     tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
 
         return tokens_all
+    
+    def embed_cells_targets_srclk(self, model_params: ModelParams, streams_data) -> torch.Tensor:
+        """Embeds target data similar to source tokens for each fstep and stream separately and rearranges it to cell-wise order
+        Args:
+            model_params : Query and embedding parameters
+            streams_data : Used to initialize first tokens for pre-processing
+        Returns:
+            Tokens for local assimilation
+        """
+        with torch.no_grad():
+            target_srclk_tokens_lens = torch.stack(
+                [
+                    torch.stack(
+                        [
+                            torch.stack(
+                                [
+                                    s.target_srclk_tokens_lens[fstep]
+                                    if len(s.target_srclk_tokens_lens[fstep]) > 0
+                                    else torch.tensor([])
+                                    for fstep in range(len(s.target_srclk_tokens_lens))
+                                ]
+                            )
+                            for s in stl_b
+                        ]
+                    )
+                    for stl_b in streams_data
+                ]
+            )
+            offsets_base = target_srclk_tokens_lens.sum(1).sum(0).cumsum(1)
+            num_fsteps = target_srclk_tokens_lens.shape[
+                2
+            ]  # TODO: KCT, if there are diff no of tokens per fstep, this may fail
+            tokens_all = []
+            for fstep in range(num_fsteps):
+                tokens_all.append(
+                    torch.empty(
+                        (int(offsets_base[fstep][-1]), self.cf.ae_local_dim_embed),
+                        dtype=self.dtype,
+                        device="cuda",
+                    )
+                )
+
+            tokens_all_scattered = []
+            for _, sb in enumerate(streams_data):
+                for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
+                    for fstep in range(num_fsteps):
+                        if not (s.target_srclk_tokens_lens[fstep].sum() == 0):
+                            idxs = s.source_idxs_embed  # TODO: KCT, do this properly.
+                            idxs_pe = s.source_idxs_embed_pe
+
+                            # create full scatter index
+                            # (there's no broadcasting which is likely highly inefficient)
+                            idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+
+                            x_embed = embed(
+                                s.target_srclk_tokens_cells[fstep], s.source_centroids
+                            ).flatten(0, 1)
+
+                            # scatter write to reorder from per stream to per cell ordering
+                            tokens_all_fstep = tokens_all[fstep]
+                            tokens_all_fstep.scatter_(
+                                0, idxs, x_embed + model_params.pe_embed[idxs_pe]
+                            )
+                            tokens_all_scattered.append(tokens_all_fstep)
+
+        return tokens_all_scattered
 
     #########################################
     def assimilate_local(
