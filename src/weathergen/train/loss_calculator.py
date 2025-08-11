@@ -164,8 +164,8 @@ class LossCalculator:
             losses_chs += loss_chs.detach()
             ctr_substeps += 1 if loss > 0.0 else 0
 
-            # normalize over forecast steps in window
-            losses_chs /= ctr_substeps if ctr_substeps > 0 else 0.0
+        # normalize over forecast steps in window
+        losses_chs /= ctr_substeps if ctr_substeps > 0 else 1.0
 
         # TODO: substep weight
         loss_lfct = loss_lfct / (ctr_substeps if ctr_substeps > 0 else 1.0)
