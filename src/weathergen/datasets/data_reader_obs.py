@@ -238,8 +238,9 @@ class DataReaderObs(DataReaderBase):
         data = self.data.oindex[start_row:end_row, channels_idx]
         datetimes = self.dt[start_row:end_row][:, 0]
 
-        # indices_start, indices_end work with [t_start, t_end]
-        # compute mask to enforce the convention [t_start, t_end)
+        # indices_start, indices_end above work with [t_start, t_end] and violate
+        # our convention [t_start, t_end) where endpoint is excluded
+        # compute mask to enforce it
         t_win = self.time_window_handler.window(idx)
         t_mask = np.logical_and(datetimes >= t_win.start, datetimes < t_win.end)
 
