@@ -527,7 +527,7 @@ class Model(torch.nn.Module):
         ]
 
         # now encode the targets into the latent space for all fsteps
-        if self.cf.encode_targets_latent:
+        if self.cf.get("encode_targets_latent", False):
             with torch.no_grad():
                 tokens_targets = []
                 tokens_targets_srclk = self.embed_cells_targets_srclk(model_params, streams_data)
@@ -538,7 +538,7 @@ class Model(torch.nn.Module):
                     tokens_target = self.assimilate_global(model_params, tokens_target)
                     tokens_targets.append(tokens_target)
 
-        if self.cf.encode_targets_latent:
+        if self.cf.get("encode_targets_latent", False):
             return preds_all, tokens_all, tokens_targets
         else:
             return preds_all

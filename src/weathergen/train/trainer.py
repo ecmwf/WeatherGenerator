@@ -749,11 +749,13 @@ class Trainer(TrainerBase):
                             + f" : {losses_all[st['name']].nanmean():0.4E} \t",
                             end="",
                         )
-                        print(
-                            "{} latent".format(st["name"])
-                            + f" : {losses_all_lat[st['name']].nanmean():0.4E} \t",
-                            end="",
-                        )
+                        if losses_all_lat:
+                            # print latent losses if available
+                            print(
+                                "{} latent".format(st["name"])
+                                + f" : {losses_all_lat[st['name']].nanmean():0.4E} \t",
+                                end="",
+                            )
                     print("\n", flush=True)
 
             self.t_start = time.time()

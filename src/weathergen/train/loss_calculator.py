@@ -260,7 +260,7 @@ class LossCalculator:
             # TODO: set from stream info
             weights_locations = None
 
-            if self.cf.encode_targets_latent:
+            if self.cf.get("encode_targets_latent", False):
                 # unpack the predictions/tokens from the latent space if the latent space tokens are encoded
                 preds, tokens_all, tokens_targets = preds
 
@@ -335,8 +335,16 @@ class LossCalculator:
                     
                 
             loss = loss + (loss_fsteps / (ctr_fsteps if ctr_fsteps > 0 else 1.0))
-            loss = loss + (loss_fsteps_lat / (ctr_fsteps_lat if ctr_fsteps_lat > 0 else 1.0))
-            ctr_streams += 1 if (ctr_fsteps > 0 or ctr_fsteps_lat > 0) else 0 # TODO: check the logic here
+            
+            if self.loss_fcts_lat:
+                # if applicable, add the latent space loss and increment the counter with physical and latent loss
+                loss = loss + (loss_fsteps_lat / (ctr_fsteps_lat if ctr_fsteps_lat > 0 else 1.0))
+                ctr_streams += 1 if (ctr_fsteps > 0 or ctr_fsteps_lat > 0) else 0 # TODO: check the logic here
+            else:
+                # increment the counter only based on the physical space loss
+                ctr_streams += 1 if ctr_fsteps > 0 else 0
+                #set a dummy value for ctr_fsteps_lat
+                ctr_fsteps_lat = 1
 
             # normalize by forecast step
             losses_all[stream_info.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
