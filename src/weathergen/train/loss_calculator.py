@@ -224,8 +224,8 @@ class LossCalculator:
             weights_locations = None
             
             if self.cf.encode_targets_latent:
-                # take only the preds_all, ignore the latent tokens
-                preds = preds[0]
+                # unpack the predictions/tokens from the latent space
+                preds, tokens_all, tokens_targets = preds
 
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
