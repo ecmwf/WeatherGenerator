@@ -217,3 +217,5 @@ models
 results
 playground/
 .config/
+*.code-workspace
+*.sh
