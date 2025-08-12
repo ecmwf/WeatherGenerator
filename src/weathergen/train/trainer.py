@@ -749,7 +749,8 @@ class Trainer(TrainerBase):
                             + f" : {losses_all[st['name']].nanmean():0.4E} \t",
                             end="",
                         )
-                        if losses_all_lat:
+                        # if the latent loss tensor is not empty:
+                        if losses_all_lat[st['name']].numel():
                             # print latent losses if available
                             print(
                                 "{} latent".format(st["name"])
