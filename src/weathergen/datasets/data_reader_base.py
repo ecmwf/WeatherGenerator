@@ -254,11 +254,9 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
         f"{rdata.datetimes.shape[0]}"
     )
 
-    assert np.logical_and(
-        rdata.datetimes >= dtr.start,
-        # rdata.datetimes < dtr.end  # TODO: enforce monotonicty also for obs
-        rdata.datetimes <= dtr.end,
-    ).all(), f"datetimes for data points violate window {dtr}."
+    assert np.logical_and(rdata.datetimes >= dtr.start, rdata.datetimes < dtr.end).all(), (
+        f"datetimes for data points violate window {dtr}."
+    )
 
 
 class DataReaderBase(metaclass=ABCMeta):
