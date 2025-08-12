@@ -90,6 +90,8 @@ def evaluate() -> None:
                                 metric,
                                 run.epoch,
                             )
+
+                            # check if channels unchanged from previous commit
                             channels = cfg["run_ids"][run_id]["streams"][stream].get(
                                 "channels"
                             )
@@ -100,7 +102,6 @@ def evaluate() -> None:
                                     )
                                     raise ValueError()
                             scores_dict[metric][region][stream][run_id] = metric_data
-                            # scores_dict[metric][region][stream][run_id] = metric_data
                         except (FileNotFoundError, KeyError, ValueError):
                             _logger.info("Exception caught...")
                             metrics_to_compute.append(metric)
