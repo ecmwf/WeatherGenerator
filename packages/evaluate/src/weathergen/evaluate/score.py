@@ -446,7 +446,7 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         group_by_coord: str | None = None,
-        scale_dims: list = None,
+        scale_dims: list | None = None,
     ):
         """
         Calculate the L1 error norm of forecast data w.r.t. reference data.
@@ -477,14 +477,14 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         group_by_coord: str | None = None,
-        scale_dims: list = None,
+        scale_dims: list | None = None,
     ):
         """
         Calculate the L2 error norm of forecast data w.r.t. reference data.
         Note that the L2 error norm is calculated as the sum of absolute differences.
         If scale_dims is not None, the L2 will scaled by the number of elements in the average dimensions.
         """
-        l2 = np.sqrt(np.square(p - gt))
+        l2 = np.square(p - gt)
 
         if group_by_coord:
             l2 = l2.groupby(group_by_coord)
