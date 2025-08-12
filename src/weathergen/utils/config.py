@@ -63,14 +63,16 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
     Load a configuration file from a given run_id and epoch.
     If run_id is a full path, loads it from the full path.
     """
-
     if Path(run_id).exists():  # load from the full path if a full path is provided
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
     else:
-        path_models = Path(model_path)
-        fname = path_models / run_id / _get_model_config_file_name(run_id, epoch)
-
+        # Load private config here...
+        shared_model_path = Path(_load_private_conf(
+            private_home=Path(model_path) if model_path else None
+        ).get("path_shared_working_dir")) / "models"
+        fname = shared_model_path / run_id / _get_model_config_file_name(run_id, epoch)
+        
     _logger.info(f"Loading config from specified run_id and epoch: {fname}")
 
     with fname.open() as f:
