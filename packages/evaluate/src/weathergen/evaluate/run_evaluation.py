@@ -84,7 +84,6 @@ def evaluate() -> None:
                     for metric in metrics:
                 
                         try:
-                            
                             metric_data = retrieve_metric_from_json(
                                 out_scores_dir,
                                 run_id,
@@ -93,19 +92,15 @@ def evaluate() -> None:
                                 metric,
                                 run.epoch,
                             )
-                            scores_dict[metric][region][stream][run_id] = metric_data
-                            # print(cfg[run_id][stream]["channels"].values)
-                            # print(metric_data["channel"].values)
-                            print(cfg[run_id][stream]["channels"].values)
-                            exit()
-                            for ch in cfg[run_id][stream]["channels"].values:
-                                print(file=f'assessing channel {ch}')
-                                exit()
+                            channels = cfg["run_ids"][run_id]["streams"][stream].get("channels")
+                            for ch in channels:
                                 if ch not in metric_data["channel"].values:
-                                    print(f'channel {ch} not present')
-                                    raise ValueError(f"Channel {ch} does not appear in saved scores. Scores will be recomputed.")
+                                    _logger.info(f'Channel {ch} does not appear in saved scores. Scores will be recomputed.')
+                                    raise ValueError()
+                            scores_dict[metric][region][stream][run_id] = metric_data
                             # scores_dict[metric][region][stream][run_id] = metric_data
                         except (FileNotFoundError, KeyError, ValueError):
+                            _logger.info('Exception caught...')
                             metrics_to_compute.append(metric)
 
                     print(f'metrics to compute: {metrics_to_compute}')
@@ -126,10 +121,14 @@ def evaluate() -> None:
                         )
 
                     for metric in metrics_to_compute:
-                        scores_dict[metric][stream][run_id] = all_metrics.sel(
+                        scores_dict[metric][region][stream][run_id] = all_metrics.sel(
                             {"metric": metric}
                         )
+                    print(scores_dict)
     # plot summary
+    
+
+
     if scores_dict and cfg.summary_plots:
         _logger.info("Started creating summary plots..")
         plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)
