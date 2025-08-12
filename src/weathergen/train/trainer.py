@@ -528,12 +528,16 @@ class Trainer(TrainerBase):
 
         # training loop
         self.t_start = time.time()
+        data_loading_avg = torch.tensor(0.0, device="cuda")
+        gpu_compute_avg = torch.tensor(0.0, device="cuda")
+
         for bidx in range(len(self.data_loader)):
 
             with ExecutionTimer(name=f"Data Loading Time # {bidx}", profile=True) as data_loading_timer:
                 batch = next(dataset_iter)
 
-            _logger.info(f"Data Loading Time # {bidx}: {data_loading_timer.time_elapsed()}")
+            data_loading_avg += torch.tensor(data_loading_timer.time_elapsed(), device="cuda")
+            #_logger.info(f"Data Loading Time # {bidx}: {data_loading_timer.time_elapsed()}")
 
             forecast_steps = batch[-1]
             batch = self.batch_to_device(batch)
@@ -566,7 +570,8 @@ class Trainer(TrainerBase):
                 # update learning rate
                 self.lr_scheduler.step()
             
-            _logger.info(f"GPU Compute Time # {bidx}: {GPU_compute_timer.time_elapsed()}")
+            gpu_compute_avg += torch.tensor(GPU_compute_timer.time_elapsed(), device="cuda")
+            #_logger.info(f"GPU Compute Time # {bidx}: {GPU_compute_timer.time_elapsed()}")
 
             self.loss_unweighted_hist += [loss_values.losses_all]
             self.loss_model_hist += [loss_values.loss.item()]
@@ -585,6 +590,12 @@ class Trainer(TrainerBase):
                 self.save_model(-1)
 
             self.cf.istep += cf.batch_size_per_gpu
+
+            if bidx == 127:
+                avg_data = data_loading_avg / (bidx+1)
+                avg_gpu = gpu_compute_avg / (bidx+1)
+                _logger.info(f"Average Data Loading Time (first {bidx+1} batches): {avg_data.item():.6f} s")
+                _logger.info(f"Average GPU Compute Time (first {bidx+1} batches): {avg_gpu.item():.6f} s")
 
         self.dataset.advance()
 
