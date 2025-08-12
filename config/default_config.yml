@@ -144,10 +144,10 @@ encode_targets_latent: true
 latent_loss_fcts:
   -
     - "mse"
-    - 10.0 
+    - 0.01 
 latent_loss_fcts_val:
   -
     - "mse"
-    - 10.0
+    - 0.01
 
 path_shared_working_dir: ""
