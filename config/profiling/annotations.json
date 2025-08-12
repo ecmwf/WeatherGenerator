@@ -8,14 +8,28 @@
     },
     {
         "domain": "WeatherGen",
-        "module": "weathergen.datasets.batchifyer",
+        "module": "weathergen.datasets.tokenizer_forecast", 
         "functions": [
             "encode_times_source",
             "encode_times_target",
             "tokenize_window_space",
             "tokenize_window_spacetime",
-            "Batchifyer.batchify_source",
-            "Batchifyer.batchify_target"
+            "TokenizerForecast.batchify_source",
+            "TokenizerForecast.batchify_target",
+            "TokenizerForecast.reset"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
+        "module": "weathergen.datasets.tokenizer_masking", 
+        "functions": [
+            "encode_times_source",
+            "encode_times_target",
+            "tokenize_window_space",
+            "tokenize_window_spacetime",
+            "TokenizerMasking.batchify_source",
+            "TokenizerMasking.batchify_target",
+            "TokenizerMasking.reset"
         ]
     },
     {
@@ -31,13 +45,33 @@
         "domain": "WeatherGen",
         "module": "weathergen.train.trainer",
         "functions": [
-            "Trainer.inference",
+            "Trainer.evaluate",
             "Trainer.train",
             "Trainer.validate",
             "Trainer.compute_loss",
             "Trainer.run"
         ]
 
+    },
+    {
+        "domain": "WeatherGen",
+        "module": "weathergen.model.model",
+        "functions": [
+            "ModelParams.__init__",
+            "ModelParams.create",
+            "Model.__init__",
+            "Model.create",
+            "Model.freeze_weights_forecast",
+            "Model.print_num_parameters",
+            "Model.load",
+            "Model.forward_jac",
+            "Model.forward",
+            "Model.embed_cells",
+            "Model.assimilate_local",
+            "Model.assimilate_global",
+            "Model.forecast",
+            "Model.predict"
+        ]
     },
     {
         "domain": "WeatherGen",
