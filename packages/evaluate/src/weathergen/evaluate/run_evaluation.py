@@ -110,7 +110,7 @@ def evaluate() -> None:
                         )
 
                     for metric in metrics_to_compute:
-                        scores_dict[metric][stream][run_id] = all_metrics.sel(
+                        scores_dict[metric][region][stream][run_id] = all_metrics.sel(
                             {"metric": metric}
                         )
     # plot summary
