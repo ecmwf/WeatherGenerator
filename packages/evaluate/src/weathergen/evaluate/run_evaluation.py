@@ -10,6 +10,7 @@
 
 import argparse
 import logging
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -27,6 +28,11 @@ _logger = logging.getLogger(__name__)
 
 
 def evaluate() -> None:
+    # By default, arguments from the command line are read.
+    evaluate_from_args(sys.argv[1:])
+
+
+def evaluate_from_args(argl: list[str]) -> None:
     parser = argparse.ArgumentParser(
         description="Fast evaluation of WeatherGenerator runs."
     )
@@ -36,7 +42,7 @@ def evaluate() -> None:
         help="Path to the configuration yaml file for plotting. e.g. config/plottig_config.yaml",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argl)
 
     # configure logging
     logging.basicConfig(level=logging.INFO)
