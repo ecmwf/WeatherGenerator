@@ -457,7 +457,7 @@ class Trainer(TrainerBase):
         self.optimizer.zero_grad()
 
         # Unweighted loss, real weighted loss, std for losses that need it
-        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist, self.loss_unweighted_lat_hist = [], [], [], []
 
         # training loop
         self.t_start = time.time()
@@ -519,7 +519,7 @@ class Trainer(TrainerBase):
         self.ddp_model.eval()
 
         dataset_val_iter = iter(self.data_loader_validation)
-        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist, self.loss_unweighted_lat_hist = [], [], [], []
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
@@ -582,6 +582,8 @@ class Trainer(TrainerBase):
                     self.loss_unweighted_hist += [loss_values.losses_all]
                     self.loss_model_hist += [loss_values.loss.item()]
                     self.stdev_unweighted_hist += [loss_values.stddev_all]
+                    
+                    self.loss_unweighted_lat_hist += [loss_values.losses_all_lat]
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
@@ -649,21 +651,27 @@ class Trainer(TrainerBase):
         """
         losses_all: dict[str, Tensor] = {}
         stddev_all: dict[str, Tensor] = {}
+        losses_all_lat: dict[str, Tensor] = {}
 
         # Make list of losses into a tensor. This is individual tensor per rank
         real_loss = torch.tensor(self.loss_model_hist, device=self.devices[0])
         # Gather all tensors from all ranks into a list and stack them into one tensor again
         real_loss = torch.cat(all_gather_vlen(real_loss))
 
-        for stream in self.cf.streams:  # Loop over all steams
+        for stream in self.cf.streams:  # Loop over all streams
             stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
             stream_all = torch.stack(stream_hist).to(torch.float64)
             losses_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
+            
             stream_hist = [stddev_all[stream.name] for stddev_all in self.stdev_unweighted_hist]
             stream_all = torch.stack(stream_hist).to(torch.float64)
             stddev_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
+            
+            stream_hist = [losses_all_lat[stream.name] for losses_all_lat in self.loss_unweighted_lat_hist]
+            stream_all = torch.stack(stream_hist).to(torch.float64)
+            losses_all_lat[stream.name] = torch.cat(all_gather_vlen(stream_all))
 
-        return real_loss, losses_all, stddev_all
+        return real_loss, losses_all, stddev_all, losses_all_lat
 
     def _log(self, stage: Stage):
         """
@@ -677,7 +685,7 @@ class Trainer(TrainerBase):
             - This method only executes logging on the main process (rank 0).
             - After logging, historical loss and standard deviation records are cleared.
         """
-        avg_loss, losses_all, stddev_all = self._prepare_losses_for_logging()
+        avg_loss, losses_all, stddev_all, losses_all_lat = self._prepare_losses_for_logging()
         samples = self.cf.istep * self.cf.batch_size_per_gpu * self.cf.num_ranks
 
         if is_root():
@@ -701,7 +709,7 @@ class Trainer(TrainerBase):
     def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
         if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
-            avg_loss, losses_all, _ = self._prepare_losses_for_logging()
+            avg_loss, losses_all, _, losses_all_lat = self._prepare_losses_for_logging()
 
             if is_root():
                 if stage == VAL:
@@ -739,6 +747,11 @@ class Trainer(TrainerBase):
                         print(
                             "{}".format(st["name"])
                             + f" : {losses_all[st['name']].nanmean():0.4E} \t",
+                            end="",
+                        )
+                        print(
+                            "{} latent".format(st["name"])
+                            + f" : {losses_all_lat[st['name']].nanmean():0.4E} \t",
                             end="",
                         )
                     print("\n", flush=True)
