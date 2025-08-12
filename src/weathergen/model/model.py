@@ -595,7 +595,7 @@ class Model(torch.nn.Module):
                     tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
 
         return tokens_all
-    
+
     def embed_cells_targets_srclk(self, model_params: ModelParams, streams_data) -> torch.Tensor:
         """Embeds target data similar to source tokens for each fstep and stream separately and rearranges it to cell-wise order
         Args:

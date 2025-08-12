@@ -222,7 +222,7 @@ class LossCalculator:
 
             # TODO: set from stream info
             weights_locations = None
-            
+
             if self.cf.encode_targets_latent:
                 # unpack the predictions/tokens from the latent space
                 preds, tokens_all, tokens_targets = preds

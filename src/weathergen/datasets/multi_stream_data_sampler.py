@@ -382,7 +382,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                     (time_win2.start, time_win2.end),
                                     ds,
                                 )
-                                
+
                                 target_raw_srclk = torch.from_numpy(
                                     np.concatenate((rdata.coords, rdata.geoinfos, rdata.data), 1)
                                 )
