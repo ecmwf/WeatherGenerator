@@ -22,8 +22,6 @@ from weathergen.train.utils import get_run_id
 
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
-_DEFAULT_MODEL_PATH = _REPO_ROOT / "models"
-_DEFAULT_RESULT_PATH = _REPO_ROOT / "results"
 
 _logger = logging.getLogger(__name__)
 
@@ -65,13 +63,20 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
     Load a configuration file from a given run_id and epoch.
     If run_id is a full path, loads it from the full path.
     """
-
     if Path(run_id).exists():  # load from the full path if a full path is provided
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
     else:
-        path_models = Path(model_path or _DEFAULT_MODEL_PATH)
-        fname = path_models / run_id / _get_model_config_file_name(run_id, epoch)
+        # Load private config here...
+        shared_model_path = (
+            Path(
+                _load_private_conf(private_home=Path(model_path) if model_path else None).get(
+                    "path_shared_working_dir"
+                )
+            )
+            / "models"
+        )
+        fname = shared_model_path / run_id / _get_model_config_file_name(run_id, epoch)
 
     _logger.info(f"Loading config from specified run_id and epoch: {fname}")
 
@@ -129,6 +134,8 @@ def load_config(
             c = _load_overwrite_conf(overwrite)
             c = _load_streams_in_config(c)
             overwrite_configs.append(c)
+
+    private_config = set_paths(private_config)
 
     if from_run_id is None:
         base_config = _load_default_conf()
@@ -282,9 +289,6 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
             "WEATHERGEN_PRIVATE_CONF or provide a path."
         )
     private_cf = OmegaConf.load(private_home)
-    private_cf["model_path"] = (
-        private_cf["model_path"] if "model_path" in private_cf.keys() else None
-    )
 
     if "secrets" in private_cf:
         del private_cf["secrets"]
@@ -345,9 +349,8 @@ def load_streams(streams_directory: Path) -> list[Config]:
 def set_paths(config: Config) -> Config:
     """Set the configs run_path model_path attributes to default values if not present."""
     config = config.copy()
-    # pathlib.Path are not json serializable, so we convert them to str
-    config.run_path = config.get("run_path", None) or str(_DEFAULT_RESULT_PATH)
-    config.model_path = config.get("model_path", None) or str(_DEFAULT_MODEL_PATH)
+    config.run_path = config.get("run_path", config.get("path_shared_working_dir") + "results")
+    config.model_path = config.get("model_path", config.get("path_shared_working_dir") + "models")
 
     return config
 
