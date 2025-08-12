@@ -36,6 +36,7 @@ from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
+from weathergen.utils.profiler import ExecutionTimer
 #from weathergen.utils.validation_io import write_output
 
 _logger = logging.getLogger(__name__)
@@ -447,7 +448,7 @@ class Trainer(TrainerBase):
             targets_lens,
         )
 
-    def train(self, epoch):
+    def train_ne(self, epoch):
         cf = self.cf
         self.ddp_model.train()
         log_interval = self.cf.train_log.log_interval
@@ -491,6 +492,81 @@ class Trainer(TrainerBase):
 
             # update learning rate
             self.lr_scheduler.step()
+
+            self.loss_unweighted_hist += [loss_values.losses_all]
+            self.loss_model_hist += [loss_values.loss.item()]
+            self.stdev_unweighted_hist += [loss_values.stddev_all]
+
+            perf_gpu, perf_mem = self.get_perf()
+            self.perf_gpu = ddp_average(torch.tensor([perf_gpu])).item()
+            self.perf_mem = ddp_average(torch.tensor([perf_mem])).item()
+
+            self._log_terminal(bidx, epoch, TRAIN)
+            if bidx % log_interval == 0:
+                self._log(TRAIN)
+
+            # save checkpoint (with designation _latest)
+            if bidx % self.checkpoint_freq == 0 and bidx > 0:
+                self.save_model(-1)
+
+            self.cf.istep += cf.batch_size_per_gpu
+
+        self.dataset.advance()
+
+
+    def train(self, epoch):
+        cf = self.cf
+        self.ddp_model.train()
+        log_interval = self.cf.train_log.log_interval
+
+        dataset_iter = iter(self.data_loader)
+
+        self.optimizer.zero_grad()
+
+        # Unweighted loss, real weighted loss, std for losses that need it
+        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+
+        # training loop
+        self.t_start = time.time()
+        for bidx in range(len(self.data_loader)):
+
+            with ExecutionTimer(name=f"Data Loading Time # {bidx}", profile=True) as data_loading_timer:
+                batch = next(dataset_iter)
+
+            _logger.info(f"Data Loading Time # {bidx}: {data_loading_timer.time_elapsed()}")
+
+            forecast_steps = batch[-1]
+            batch = self.batch_to_device(batch)
+
+            with ExecutionTimer(name=f"GPU Compute Time # {bidx}", profile=True) as GPU_compute_timer:
+                # evaluate model
+                with torch.autocast(
+                    device_type="cuda",
+                    dtype=self.mixed_precision_dtype,
+                    enabled=cf.with_mixed_precision,
+                ):
+                    preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
+                    loss_values = self.loss_calculator.compute_loss(
+                        preds=preds,
+                        streams_data=batch[0],
+                    )
+
+                # backward pass
+                self.grad_scaler.scale(loss_values.loss).backward()
+
+                # gradient clipping
+                self.grad_scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), max_norm=cf.grad_clip)
+
+                # optimizer step
+                self.grad_scaler.step(self.optimizer)
+                self.grad_scaler.update()
+                self.optimizer.zero_grad()
+
+                # update learning rate
+                self.lr_scheduler.step()
+            
+            _logger.info(f"GPU Compute Time # {bidx}: {GPU_compute_timer.time_elapsed()}")
 
             self.loss_unweighted_hist += [loss_values.losses_all]
             self.loss_model_hist += [loss_values.loss.item()]
