@@ -10,40 +10,98 @@
 import logging
 import os
 import pathlib
+import sys
 from functools import cache
 
 
-class RelPathFormatter(logging.Formatter):
-    def __init__(self, fmt, datefmt=None):
-        super().__init__(fmt, datefmt)
+class ColoredRelPathFormatter(logging.Formatter):
+    COLOR_CODES = {
+        logging.CRITICAL: "\033[1;35m",  # bright/bold magenta
+        logging.ERROR: "\033[1;31m",  # bright/bold red
+        logging.WARNING: "\033[1;33m",  # bright/bold yellow
+        logging.INFO: "\033[0;37m",  # white / light gray
+        logging.DEBUG: "\033[1;30m",  # bright/bold dark gray
+    }
+
+    RESET_CODE = "\033[0m"
+
+    def __init__(self, color, *args, **kwargs):
+        super(ColoredRelPathFormatter, self).__init__(*args, **kwargs)
+        self.color = color
         self.root_path = pathlib.Path(__file__).parent.parent.parent.resolve()
 
-    def format(self, record):
-        # Replace the full pathname with the relative path
+    def format(self, record, *args, **kwargs):
+        if self.color and record.levelno in self.COLOR_CODES:
+            record.color_on = self.COLOR_CODES[record.levelno]
+            record.color_off = self.RESET_CODE
+        else:
+            record.color_on = ""
+            record.color_off = ""
         record.pathname = os.path.relpath(record.pathname, self.root_path)
-        return super().format(record)
+        return super(ColoredRelPathFormatter, self).format(record, *args, **kwargs)
+
+
+def init_logger_per_stream(logger, stream_handle, output_streams):
+    for ostr in output_streams if type(output_streams) is tuple else [output_streams]:
+        # determine correct stream handler
+        with_color = True
+        if ostr == sys.stdout or ostr == sys.stderr:
+            handler = logging.StreamHandler(sys.stdout)
+        elif ostr == "null":
+            handler = logging.NullHandler()
+        else:
+            # path + file are specified as string or already path object
+            assert type(ostr) is str or type(ostr) is pathlib.Path
+            handler = logging.FileHandler(pathlib.Path(ostr))
+            with_color = False
+
+        format_str = (
+            "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
+        )
+        formatter = ColoredRelPathFormatter(fmt=format_str, color=with_color)
+
+        handler.setLevel(stream_handle)
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+    return logger
 
 
 @cache
-def init_loggers():
+def init_loggers(
+    logging_level=logging.DEBUG,
+    critical_output_streams=sys.stderr,
+    error_output_streams=sys.stderr,
+    warning_output_streams=sys.stderr,
+    info_output_streams=sys.stdout,
+    debug_output_streams=sys.stdout,
+):
     """
-    Initialize the logger for the package.
+    Initialize the logger for the package and set output streams/files.
 
     WARNING: this function resets all the logging handlers.
 
     This function follows a singleton pattern, it will only operate once per process
     and will be a no-op if called again.
+
+    Valid arguements for streams: tuple of
+      sys.stdout, sys.stderr : standard out and err streams
+      null : /dev/null
+      string/pathlib.Path : specifies path and outfile to be used for stream
+
     """
-    formatter = RelPathFormatter(
-        "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
-    )
-    for package in ["obslearn", "weathergen"]:
-        logger = logging.getLogger(package)
-        logger.handlers.clear()
-        logger.setLevel(logging.DEBUG)
-        ch = logging.StreamHandler()
-        ch.setFormatter(formatter)
-        logger.addHandler(ch)
+
+    package = "weathergen"
+
+    logger = logging.getLogger(package)
+    logger.handlers.clear()
+    logger.setLevel(logging_level)
+
+    logger = init_logger_per_stream(logger, logging.CRITICAL, critical_output_streams)
+    logger = init_logger_per_stream(logger, logging.ERROR, error_output_streams)
+    logger = init_logger_per_stream(logger, logging.WARNING, warning_output_streams)
+    logger = init_logger_per_stream(logger, logging.INFO, info_output_streams)
+    logger = init_logger_per_stream(logger, logging.DEBUG, debug_output_streams)
 
 
 # TODO: remove, it should be module-level loggers
