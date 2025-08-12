@@ -39,7 +39,7 @@ class LossValues:
     losses_all: dict[str, Tensor]
     stddev_all: dict[str, Tensor]
     
-    losses_all_lat: dict[str, Tensor]
+    losses_all_lat: Tensor
 
 
 class LossCalculator:
@@ -238,14 +238,16 @@ class LossCalculator:
             st.name: torch.zeros(len(stat_loss_fcts), device=self.device) for st in self.cf.streams
         }
         
-        losses_all_lat: dict[str, Tensor] = {
-            st.name: torch.zeros(
+        losses_all_lat: Tensor= torch.zeros(
                 len(self.loss_fcts_lat),
                 device=self.device,
             )
-            for st in self.cf.streams
-        }
+        
 
+        if self.cf.get("encode_targets_latent", False):
+            # unpack the predictions/tokens from the latent space if the latent space tokens are encoded
+            preds, tokens_all, tokens_targets = preds
+                
         # TODO: iterate over batch dimension
         i_batch = 0
         for i_stream_info, stream_info in enumerate(self.cf.streams):
@@ -259,10 +261,6 @@ class LossCalculator:
 
             # TODO: set from stream info
             weights_locations = None
-
-            if self.cf.get("encode_targets_latent", False):
-                # unpack the predictions/tokens from the latent space if the latent space tokens are encoded
-                preds, tokens_all, tokens_targets = preds
 
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
@@ -308,55 +306,51 @@ class LossCalculator:
                 loss_fsteps = loss_fsteps + (loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0)
                 ctr_fsteps += 1 if ctr_loss_fcts > 0 else 0
                 
-            # 2. Now go through the losses in the latent space, if applicable
-            if self.loss_fcts_lat:
-                loss_fsteps_lat = torch.tensor(0.0, device=self.device, requires_grad=True)
-                ctr_fsteps_lat = 0
-                for fstep in range(len(tokens_all)):
-                    loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
-                    ctr_loss_fcts = 0
-                    for i_lfct, (loss_fct, loss_fct_weight) in enumerate(self.loss_fcts_lat):
-                        loss_lfct = LossCalculator._loss_per_loss_function_lat(
-                            loss_fct,
-                            stream_info=None,
-                            target=tokens_all[fstep],
-                            pred=tokens_targets[fstep]
-                        )
-                        
-                        losses_all_lat[stream_info.name][i_lfct] += loss_lfct # TODO: break into fsteps
-                        
-                        # Add the weighted and normalized loss from this loss function to the total
-                        # batch loss
-                        loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct * stream_loss_weight) # TODO: maybe use diff stream weights for the latent space?
-                        ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
-                        
-                    loss_fsteps_lat = loss_fsteps_lat + (loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0)
-                    ctr_fsteps_lat += 1 if ctr_loss_fcts > 0 else 0
-                    
-                
+        
+                      
             loss = loss + (loss_fsteps / (ctr_fsteps if ctr_fsteps > 0 else 1.0))
+            ctr_streams += 1 if ctr_fsteps > 0 else 0
             
-            if self.loss_fcts_lat:
-                # if applicable, add the latent space loss and increment the counter with physical and latent loss
-                loss = loss + (loss_fsteps_lat / (ctr_fsteps_lat if ctr_fsteps_lat > 0 else 1.0))
-                ctr_streams += 1 if (ctr_fsteps > 0 or ctr_fsteps_lat > 0) else 0 # TODO: check the logic here
-            else:
-                # increment the counter only based on the physical space loss
-                ctr_streams += 1 if ctr_fsteps > 0 else 0
-                #set a dummy value for ctr_fsteps_lat
-                ctr_fsteps_lat = 1
 
             # normalize by forecast step
             losses_all[stream_info.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
             stddev_all[stream_info.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
-            
-            losses_all_lat[stream_info.name] /= ctr_fsteps_lat if ctr_fsteps_lat > 0 else 1.0
 
             # replace channels without information by nan to exclude from further computations
             losses_all[stream_info.name][losses_all[stream_info.name] == 0.0] = torch.nan
             stddev_all[stream_info.name][stddev_all[stream_info.name] == 0.0] = torch.nan
             
-            losses_all_lat[stream_info.name][losses_all_lat[stream_info.name] == 0.0] = torch.nan
+        
+        # 2. Now go through the losses in the latent space, if applicable
+        if self.loss_fcts_lat:
+            loss_fsteps_lat = torch.tensor(0.0, device=self.device, requires_grad=True)
+            ctr_fsteps_lat = 0
+            for fstep in range(len(tokens_all)):
+                loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
+                ctr_loss_fcts = 0
+                for i_lfct, (loss_fct, loss_fct_weight) in enumerate(self.loss_fcts_lat):
+                    loss_lfct = LossCalculator._loss_per_loss_function_lat(
+                        loss_fct,
+                        stream_info=None,
+                        target=tokens_all[fstep],
+                        pred=tokens_targets[fstep]
+                    )
+                    
+                    losses_all_lat[i_lfct] += loss_lfct # TODO: break into fsteps
+                    
+                    # Add the weighted and normalized loss from this loss function to the total
+                    # batch loss
+                    loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct) # TODO: maybe use diff stream weights for the latent space?
+                    ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
+                    
+                loss_fsteps_lat = loss_fsteps_lat + (loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0)
+                ctr_fsteps_lat += 1 if ctr_loss_fcts > 0 else 0
+                
+            loss = loss + (loss_fsteps_lat / (ctr_fsteps_lat if ctr_fsteps_lat > 0 else 1.0))
+            ctr_streams =  ctr_streams  if ctr_streams > 0 else 1 # TODO: check the logic here
+            
+            losses_all_lat /= ctr_fsteps_lat if ctr_fsteps_lat > 0 else 1.0
+            losses_all_lat[losses_all_lat == 0.0] = torch.nan
 
         if loss == 0.0:
             # streams_data[i] are samples in batch

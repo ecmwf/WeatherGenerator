@@ -349,8 +349,8 @@ def load_streams(streams_directory: Path) -> list[Config]:
 def set_paths(config: Config) -> Config:
     """Set the configs run_path model_path attributes to default values if not present."""
     config = config.copy()
-    config.run_path = config.get("run_path", config.get("path_shared_working_dir") + "results")
-    config.model_path = config.get("model_path", config.get("path_shared_working_dir") + "models")
+    config.run_path = config.get("run_path", config.get("path_shared_working_dir", "") + "results")
+    config.model_path = config.get("model_path", config.get("path_shared_working_dir", "") + "models")
 
     return config
 

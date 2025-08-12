@@ -140,12 +140,14 @@ train_log:
 
 
 # additions for the latent loss
-# encode_targets_latent: true
-# latent_loss_fcts:
-#   -
-#     - "mse"
-#     - 10.0 
-# latent_loss_fcts_val:
-#   -
-#     - "mse"
-#     - 10.0
+encode_targets_latent: true
+latent_loss_fcts:
+  -
+    - "mse"
+    - 10.0 
+latent_loss_fcts_val:
+  -
+    - "mse"
+    - 10.0
+
+path_shared_working_dir: ""
