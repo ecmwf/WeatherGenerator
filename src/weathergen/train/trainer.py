@@ -495,6 +495,8 @@ class Trainer(TrainerBase):
             self.loss_unweighted_hist += [loss_values.losses_all]
             self.loss_model_hist += [loss_values.loss.item()]
             self.stdev_unweighted_hist += [loss_values.stddev_all]
+            
+            self.loss_unweighted_lat_hist += [loss_values.losses_all_lat]
 
             perf_gpu, perf_mem = self.get_perf()
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu])).item()

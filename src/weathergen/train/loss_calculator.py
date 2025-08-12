@@ -38,6 +38,8 @@ class LossValues:
     # well as standard deviations when operating with ensembles (e.g., when training with CRPS).
     losses_all: dict[str, Tensor]
     stddev_all: dict[str, Tensor]
+    
+    losses_all_lat: dict[str, Tensor]
 
 
 class LossCalculator:
@@ -81,6 +83,16 @@ class LossCalculator:
             [getattr(losses, name if name != "mse" else "mse_channel_location_weighted"), w]
             for name, w in loss_fcts
         ]
+        
+        loss_fcts_lat = cf.get("latent_loss_fcts") if stage == TRAIN else cf.get("latent_loss_fcts_val")
+        if loss_fcts_lat:
+            self.loss_fcts_lat = [
+                [getattr(losses, name), w]
+                for name, w in loss_fcts_lat
+            ]
+        else:
+            self.loss_fcts_lat = []
+
 
     def _get_weights(self, stream_info):
         """
@@ -158,6 +170,20 @@ class LossCalculator:
         loss_lfct = loss_lfct / (ctr_substeps if ctr_substeps > 0 else 1.0)
 
         return loss_lfct, losses_chs
+    
+    def _loss_per_loss_function_lat(
+        loss_fct,
+        stream_info,
+        target: torch.Tensor,
+        pred: torch.Tensor,
+    ):
+        """
+        Compute loss for given loss function
+        """
+
+        loss_val = loss_fct(target=target, ens=None, mu=pred)
+
+        return loss_val
 
     def compute_loss(
         self,
@@ -211,10 +237,21 @@ class LossCalculator:
         stddev_all: dict[str, Tensor] = {
             st.name: torch.zeros(len(stat_loss_fcts), device=self.device) for st in self.cf.streams
         }
+        
+        losses_all_lat: dict[str, Tensor] = {
+            st.name: torch.zeros(
+                len(self.loss_fcts_lat),
+                device=self.device,
+            )
+            for st in self.cf.streams
+        }
 
         # TODO: iterate over batch dimension
         i_batch = 0
         for i_stream_info, stream_info in enumerate(self.cf.streams):
+            
+            # 1. First go through the losses in the physical space
+            
             # extract target tokens for current stream from the specified forecast offset onwards
             targets = streams_data[i_batch][i_stream_info].target_tokens[self.cf.forecast_offset :]
 
@@ -224,7 +261,7 @@ class LossCalculator:
             weights_locations = None
 
             if self.cf.encode_targets_latent:
-                # unpack the predictions/tokens from the latent space
+                # unpack the predictions/tokens from the latent space if the latent space tokens are encoded
                 preds, tokens_all, tokens_targets = preds
 
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
@@ -270,17 +307,48 @@ class LossCalculator:
 
                 loss_fsteps = loss_fsteps + (loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0)
                 ctr_fsteps += 1 if ctr_loss_fcts > 0 else 0
-
+                
+            # 2. Now go through the losses in the latent space, if applicable
+            if self.loss_fcts_lat:
+                loss_fsteps_lat = torch.tensor(0.0, device=self.device, requires_grad=True)
+                ctr_fsteps_lat = 0
+                for fstep in range(len(tokens_all)):
+                    loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
+                    ctr_loss_fcts = 0
+                    for i_lfct, (loss_fct, loss_fct_weight) in enumerate(self.loss_fcts_lat):
+                        loss_lfct = LossCalculator._loss_per_loss_function_lat(
+                            loss_fct,
+                            stream_info=None,
+                            target=tokens_all[fstep],
+                            pred=tokens_targets[fstep]
+                        )
+                        
+                        losses_all_lat[stream_info.name][i_lfct] += loss_lfct # TODO: break into fsteps
+                        
+                        # Add the weighted and normalized loss from this loss function to the total
+                        # batch loss
+                        loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct * stream_loss_weight) # TODO: maybe use diff stream weights for the latent space?
+                        ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
+                        
+                    loss_fsteps_lat = loss_fsteps_lat + (loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0)
+                    ctr_fsteps_lat += 1 if ctr_loss_fcts > 0 else 0
+                    
+                
             loss = loss + (loss_fsteps / (ctr_fsteps if ctr_fsteps > 0 else 1.0))
-            ctr_streams += 1 if ctr_fsteps > 0 else 0
+            loss = loss + (loss_fsteps_lat / (ctr_fsteps_lat if ctr_fsteps_lat > 0 else 1.0))
+            ctr_streams += 1 if (ctr_fsteps > 0 or ctr_fsteps_lat > 0) else 0 # TODO: check the logic here
 
             # normalize by forecast step
             losses_all[stream_info.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
             stddev_all[stream_info.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
+            
+            losses_all_lat[stream_info.name] /= ctr_fsteps_lat if ctr_fsteps_lat > 0 else 1.0
 
             # replace channels without information by nan to exclude from further computations
             losses_all[stream_info.name][losses_all[stream_info.name] == 0.0] = torch.nan
             stddev_all[stream_info.name][stddev_all[stream_info.name] == 0.0] = torch.nan
+            
+            losses_all_lat[stream_info.name][losses_all_lat[stream_info.name] == 0.0] = torch.nan
 
         if loss == 0.0:
             # streams_data[i] are samples in batch
@@ -295,4 +363,4 @@ class LossCalculator:
         loss = loss / ctr_streams
 
         # Return all computed loss components encapsulated in a ModelLoss dataclass
-        return LossValues(loss=loss, losses_all=losses_all, stddev_all=stddev_all)
+        return LossValues(loss=loss, losses_all=losses_all, stddev_all=stddev_all, losses_all_lat=losses_all_lat)
