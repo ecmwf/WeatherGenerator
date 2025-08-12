@@ -184,12 +184,15 @@ class TrainLogger:
 
     #######################################
     @staticmethod
-    def read(run_id: str, model_path: str, epoch: int = -1) -> Metrics:
+    def read(run_id: str, model_path: str = None, epoch: int = -1) -> Metrics:
         """
         Read data for run_id
         """
-
-        cf = config.load_model_config(run_id, epoch, model_path)
+        # Load config from given model_path if provided, otherwise use path from private config
+        if model_path:
+            cf = config.load_model_config(run_id=run_id, epoch=epoch, model_path=model_path)
+        else:
+            cf = config.load_config(private_home=None, from_run_id=run_id, epoch=epoch)
         run_id = cf.run_id
 
         result_dir_base = Path(cf.run_path)
