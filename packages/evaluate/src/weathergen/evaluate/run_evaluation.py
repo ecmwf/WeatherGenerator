@@ -78,10 +78,13 @@ def evaluate() -> None:
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
 
                 for region in regions:
+                    
                     metrics_to_compute = []
 
                     for metric in metrics:
+                
                         try:
+                            
                             metric_data = retrieve_metric_from_json(
                                 out_scores_dir,
                                 run_id,
@@ -91,8 +94,21 @@ def evaluate() -> None:
                                 run.epoch,
                             )
                             scores_dict[metric][region][stream][run_id] = metric_data
+                            # print(cfg[run_id][stream]["channels"].values)
+                            # print(metric_data["channel"].values)
+                            print(cfg[run_id][stream]["channels"].values)
+                            exit()
+                            for ch in cfg[run_id][stream]["channels"].values:
+                                print(file=f'assessing channel {ch}')
+                                exit()
+                                if ch not in metric_data["channel"].values:
+                                    print(f'channel {ch} not present')
+                                    raise ValueError(f"Channel {ch} does not appear in saved scores. Scores will be recomputed.")
+                            # scores_dict[metric][region][stream][run_id] = metric_data
                         except (FileNotFoundError, KeyError, ValueError):
                             metrics_to_compute.append(metric)
+
+                    print(f'metrics to compute: {metrics_to_compute}')
 
                     if metrics_to_compute:
                         all_metrics, points_per_sample = calc_scores_per_stream(
