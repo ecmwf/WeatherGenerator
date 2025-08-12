@@ -194,7 +194,84 @@ class Plotter:
 
         return plot_names
 
-    def map(
+    def scatter_plot_map(self, data: xr.DataArray, varname: str, tag: str = "", map_kwargs: dict | None = None):
+        """
+        Plot a 2D map for a dataset using scatter plot.
+        
+        Parameters
+        ----------
+        data: xr.DataArray
+            DataArray to be plotted
+        varname: str
+            Name of the variable to be plotted
+        tag: str
+            Any tag you want to add to the plot
+        map_kwargs: dict | None
+            Additional keyword arguments for the map.
+
+        Returns
+        -------
+            Name of the saved plot file.
+        """
+        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
+        # check for known keys in map_kwargs
+        marker_size_base = map_kwargs_save.pop("marker_size", 1)
+        scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
+        marker = map_kwargs_save.pop("marker", "o")
+
+        # Create figure and axis objects
+        fig = plt.figure(dpi=self.dpi_val)
+        ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
+        ax.coastlines()
+
+        marker_size = marker_size_base
+        if scale_marker_size:
+            marker_size = (marker_size + 1.0) * np.cos(np.radians(data["lat"]))
+
+        valid_time = data['valid_time'][0].values.astype('datetime64[s]')
+
+        scatter_plt = ax.scatter(
+            data["lon"],
+            data["lat"],
+            c=data,
+            cmap="coolwarm",
+            s=marker_size,
+            marker=marker,
+            transform=ccrs.PlateCarree(),
+            linewidths=0.0,  # only markers, avoids aliasing for very small markers
+            **map_kwargs_save,
+        )
+        plt.colorbar(
+            scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}"
+        )
+        plt.title(
+            f"{self.stream}, {varname} : fstep = {self.fstep:03} ({valid_time})"
+        )
+        ax.set_global()
+        ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
+
+        # TODO: make this nicer
+        parts = [
+            "map",
+            self.model_id,
+            tag,
+            str(self.sample),
+            valid_time,
+            self.stream,
+            varname,
+            str(self.fstep).zfill(3),
+        ]
+
+        name = "_".join(filter(None, parts))
+        fname = f"{self.out_plot_dir.joinpath(name)}.{self.image_format}"
+
+        _logger.debug(f"Saving map to {fname}")
+        plt.savefig(fname)
+        plt.close()
+
+        return name
+
+    def create_maps_per_sample(
         self,
         data: xr.DataArray,
         variables: list,
@@ -229,62 +306,25 @@ class Plotter:
         -------
             List of plot names for the saved maps.
         """
-        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
-        # check for known keys in map_kwargs
-        marker_size_base = map_kwargs_save.pop("marker_size", 1)
-        scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
-        marker = map_kwargs_save.pop("marker", "o")
-
         self.update_data_selection(select)
 
         plot_names = []
         for var in variables:
             select_var = self.select | {"channel": var}
-            fig = plt.figure(dpi=self.dpi_val)
-            ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
-            ax.coastlines()
             da = self.select_from_da(data, select_var).compute()
 
-            marker_size = marker_size_base
-            if scale_marker_size:
-                marker_size = (marker_size + 1.0) * np.cos(np.radians(da["lat"]))
+            da = da.groupby("valid_time")
 
-            scatter_plt = ax.scatter(
-                da["lon"],
-                da["lat"],
-                c=da,
-                cmap="coolwarm",
-                s=marker_size,
-                marker=marker,
-                transform=ccrs.PlateCarree(),
-                linewidths=0.0,  # only markers, avoids aliasing for very small markers
-                **map_kwargs_save,
-            )
-            plt.colorbar(
-                scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {var}"
-            )
-            plt.title(
-                f"{self.stream}, {var} : fstep = {self.fstep:03} ({da['valid_time'][0].values.astype('datetime64[s]')})"
-            )
-            ax.set_global()
-            ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
+            for valid_time, da_t in da: 
+                _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
+                name = self.scatter_plot_map(
+                    da_t,
+                    var,
+                    tag=tag,
+                    map_kwargs=map_kwargs,
+                )
 
-            # TODO: make this nicer
-            parts = [
-                "map",
-                self.model_id,
-                tag,
-                str(self.sample),
-                self.stream,
-                var,
-                str(self.fstep).zfill(3),
-            ]
-            name = "_".join(filter(None, parts))
-            fname = f"{self.out_plot_dir.joinpath(name)}.{self.image_format}"
-            _logger.debug(f"Saving map to {fname}")
-            plt.savefig(fname)
-            plt.close()
-            plot_names.append(name)
+                plot_names.append(name)
 
         self.clean_data_selection()
 
