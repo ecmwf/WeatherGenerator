@@ -64,7 +64,6 @@ def inference_from_args(argl: list[str]):
     )
 
     cf.run_history += [(args.from_run_id, cf.istep)]
-    cf = config.set_paths(cf)
 
     trainer = Trainer()
     trainer.inference(cf, args.from_run_id, args.epoch)
@@ -117,7 +116,6 @@ def train_continue() -> None:
 
     # track history of run to ensure traceability of results
     cf.run_history += [(args.from_run_id, cf.istep)]
-    cf = config.set_paths(cf)
 
     if args.finetune_forecast:
         if cf.forecast_freeze_model:
@@ -153,11 +151,11 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     init_loggers()
 
     cli_overwrite = config.from_cli_arglist(args.options)
+
     cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
     cf = config.set_run_id(cf, args.run_id, False)
 
     cf.streams = config.load_streams(Path(cf.streams_directory))
-    cf = config.set_paths(cf)
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
