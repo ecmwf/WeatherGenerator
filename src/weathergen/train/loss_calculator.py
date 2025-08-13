@@ -325,7 +325,7 @@ class LossCalculator:
         if self.loss_fcts_lat:
             loss_fsteps_lat = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps_lat = 0
-            for fstep in range(len(tokens_all)):
+            for fstep in range(len(tokens_all)): # TODO: KCT, do we need this per fstep?
                 loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
                 ctr_loss_fcts = 0
                 for i_lfct, (loss_fct, loss_fct_weight) in enumerate(self.loss_fcts_lat):
@@ -340,14 +340,14 @@ class LossCalculator:
                     
                     # Add the weighted and normalized loss from this loss function to the total
                     # batch loss
-                    loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct) # TODO: maybe use diff stream weights for the latent space?
+                    loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct)
                     ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
                     
                 loss_fsteps_lat = loss_fsteps_lat + (loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0)
                 ctr_fsteps_lat += 1 if ctr_loss_fcts > 0 else 0
                 
             loss = loss + (loss_fsteps_lat / (ctr_fsteps_lat if ctr_fsteps_lat > 0 else 1.0))
-            ctr_streams =  ctr_streams  if ctr_streams > 0 else 1 # TODO: check the logic here
+            ctr_streams =  ctr_streams  if ctr_streams > 0 else 1 # TODO: KCT, check the logic here
             
             losses_all_lat /= ctr_fsteps_lat if ctr_fsteps_lat > 0 else 1.0
             losses_all_lat[losses_all_lat == 0.0] = torch.nan
