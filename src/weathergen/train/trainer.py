@@ -317,9 +317,16 @@ class Trainer(TrainerBase):
         if cf.val_initial:
             self.validate(-1)
 
+        # Decide which training method to use before the loop (profiling or normal training)
+        if cf.profiling:
+            train_fn = self.train_profiling
+
+        else:
+            train_fn = self.train
+
         for epoch in range(epoch_base, cf.num_epochs):
             _logger.info(f"Epoch {epoch} of {cf.num_epochs}: train.")
-            self.train(epoch)
+            train_fn(epoch)
 
             _logger.info(f"Epoch {epoch} of {cf.num_epochs}: validate.")
             self.validate(epoch)
@@ -448,7 +455,7 @@ class Trainer(TrainerBase):
             targets_lens,
         )
 
-    def train_ne(self, epoch):
+    def train (self, epoch):
         cf = self.cf
         self.ddp_model.train()
         log_interval = self.cf.train_log.log_interval
@@ -514,7 +521,7 @@ class Trainer(TrainerBase):
         self.dataset.advance()
 
 
-    def train(self, epoch):
+    def train_profiling(self, epoch):
         cf = self.cf
         self.ddp_model.train()
         log_interval = self.cf.train_log.log_interval
