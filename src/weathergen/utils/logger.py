@@ -52,7 +52,10 @@ def init_logger_per_stream(logger, stream_handle, output_streams):
         else:
             # path + file are specified as string or already path object
             assert type(ostr) is str or type(ostr) is pathlib.Path
-            handler = logging.FileHandler(pathlib.Path(ostr))
+            ofile = pathlib.Path(ostr)
+            # make sure the parent directory exists
+            pathlib.Path(ofile.parent).mkdir(parents=True, exist_ok=True)
+            handler = logging.FileHandler(ofile)
             with_color = False
 
         format_str = (
