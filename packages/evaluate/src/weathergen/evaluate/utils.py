@@ -177,7 +177,6 @@ def get_data(
 def align_clim_data(
     target_output: dict,
     clim_data: xr.Dataset,
-    assume_matching_coords: bool = True,
 ) -> dict:
     """
     Align climatology data with target data structure.
@@ -213,16 +212,18 @@ def align_clim_data(
 
         for sample in tqdm(samples):
             sample_mask = target_data.sample.values == sample
-            if assume_matching_coords:
-                # If coordinates match, we can directly assign
+            try:
+                # Assuming that coordinates match, we can directly assign
+                # TODO: implement check if coords match
                 aligned_clim_data[fstep].loc[{"ipoint": sample_mask}] = clim_values
-            else:
-                # not implemented error and falling back to True
-                _logger.warning(
-                    "Coordinate alignment not implemented. Falling back to direct assignment."
-                )
-                # to do: change this to a gridpoint mapping approach
-                aligned_clim_data[fstep].loc[{"ipoint": sample_mask}] = clim_values
+            except (ValueError, IndexError) as e:
+                raise ValueError(
+                    f"Failed to align climatology data with target data for ACC calculation. "
+                    f"This error typically occurs when the number of points per sample varies between samples. "
+                    f"ACC metric is currently only supported for forecasting data with constant points per sample. "
+                    f"Please ensure all samples have the same spatial coverage and grid points. "
+                    f"Original error: {e}"
+                ) from e
 
     return aligned_clim_data
 
@@ -233,7 +234,6 @@ def calc_scores_per_stream(
     stream: str,
     region: str,
     metrics: list[str],
-    assume_matching_coords: bool = True,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -251,9 +251,6 @@ def calc_scores_per_stream(
         Region name to calculate scores for.
     metrics :
         List of metric names to calculate.
-    assume_matching_coords : bool, default False
-        If True, assume coordinate grids match between target and climatology data.
-        This skips expensive coordinate matching and speeds up processing.
 
     Returns
     -------
@@ -275,7 +272,6 @@ def calc_scores_per_stream(
     if fsteps == "all":
         fsteps = None
 
-
     output_data = get_data(cfg, results_dir, stream, region=region, return_counts=True)
     da_preds = output_data.prediction
     da_tars = output_data.target
@@ -290,9 +286,7 @@ def calc_scores_per_stream(
         if "climatology_path" in stream_dict:
             clim_data_path = stream_dict["climatology_path"]
             clim_data = xr.open_dataset(clim_data_path)
-            aligned_clim_data = align_clim_data(
-                da_tars, clim_data, assume_matching_coords=assume_matching_coords
-            )
+            aligned_clim_data = align_clim_data(da_tars, clim_data)
         else:
             _logger.warning(
                 f"No climatology path specified for stream {stream}. Removing ACC from metrics"
@@ -343,9 +337,7 @@ def calc_scores_per_stream(
             if aligned_clim_data is not None and fstep in aligned_clim_data:
                 metrics_kwargs = {
                     "clim_mean": aligned_clim_data[fstep],
-                    "spatial_dims": [
-                        "ipoint"
-                    ], 
+                    "spatial_dims": ["ipoint"],
                 }
             else:
                 metrics_kwargs = {}
