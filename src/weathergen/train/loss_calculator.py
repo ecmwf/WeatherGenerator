@@ -106,7 +106,9 @@ class LossCalculator:
         return stream_info_loss_weight, weights_channels
 
     def cosine_latitude(self, stream_data, forecast_offset, fstep, min_value=1e-3, max_value=1.0):
-        latitudes_radian = stream_data.target_coords_raw[forecast_offset+fstep][:, 0] * np.pi / 180
+        latitudes_radian = (
+            stream_data.target_coords_raw[forecast_offset + fstep][:, 0] * np.pi / 180
+        )
         return (max_value - min_value) * np.cos(latitudes_radian) + min_value
 
     def _get_location_weights(self, stream_info, stream_data, forecast_offset, fstep):
@@ -114,7 +116,11 @@ class LossCalculator:
         weights_locations_fct = (
             getattr(self, stream_info_location_weight) if stream_info_location_weight else None
         )
-        weights_locations = weights_locations_fct(stream_data, forecast_offset, fstep) if weights_locations_fct else None
+        weights_locations = (
+            weights_locations_fct(stream_data, forecast_offset, fstep)
+            if weights_locations_fct
+            else None
+        )
         weights_locations = weights_locations.to(device=self.device, non_blocking=True)
 
         return weights_locations
@@ -253,7 +259,9 @@ class LossCalculator:
                 stream_loss_weight, weights_channels = self._get_weights(stream_info)
 
                 # get weights for locations
-                weights_locations = self._get_location_weights(stream_info, stream_data, self.cf.forecast_offset, fstep)
+                weights_locations = self._get_location_weights(
+                    stream_info, stream_data, self.cf.forecast_offset, fstep
+                )
 
                 # get masks for sub-time steps
                 substep_masks = self._get_substep_masks(stream_info, fstep, stream_data)
