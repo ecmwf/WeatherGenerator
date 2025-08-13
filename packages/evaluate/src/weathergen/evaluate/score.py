@@ -646,19 +646,12 @@ class Scores:
                 ],
                 dim=group_by_coord,
             ).assign_coords({group_by_coord: list(fcst_grouped.groups.keys())})
+
         else:
             # Calculate ACC over spatial dimensions (no grouping)
             acc = (fcst_ano * obs_ano).sum(spatial_dims) / np.sqrt(
                 (fcst_ano**2).sum(spatial_dims) * (obs_ano**2).sum(spatial_dims)
             )
-
-        if group_by_coord:
-            acc = acc.groupby(group_by_coord)
-        # Exclude spatial dimensions from averaging since ACC is always calculated over them
-        if self._agg_dims is not None:
-            mean_dims = [x for x in self._agg_dims if x not in spatial_dims]
-            if len(mean_dims) > 0:
-                acc = acc.mean(mean_dims)
 
         return acc
 
