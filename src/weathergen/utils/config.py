@@ -345,10 +345,27 @@ def load_streams(streams_directory: Path) -> list[Config]:
 def set_paths(config: Config) -> Config:
     """Set the configs run_path model_path attributes to default values if not present."""
     config = config.copy()
-    config.run_path = config.get("run_path", config.get("path_shared_working_dir") + "results")
-    config.model_path = config.get("model_path", config.get("path_shared_working_dir") + "models")
+    config.run_path = _get_config_attribute(
+        config=config, attribute_name="run_path", fallback="results"
+    )
+    config.model_path = _get_config_attribute(
+        config=config, attribute_name="model_path", fallback="models"
+    )
 
     return config
+
+
+def _get_config_attribute(config: Config, attribute_name: str, fallback: str) -> str:
+    """Get an attribute from a Config. If not, fall back to path_shared_working_dir concatenated
+    with the desired fallback path. Raise an error if neither the attribute nor
+    is specified."""
+    attribute = OmegaConf.select(config, attribute_name)
+    fallback_root = OmegaConf.select(config, "path_shared_working_dir")
+    assert attribute is not None or fallback_root is not None, (
+        f"Must specify `{attribute_name}` in config if `path_shared_working_dir` is None in config"
+    )
+    attribute = attribute if attribute else fallback_root + fallback
+    return attribute
 
 
 def get_path_run(config: Config) -> Path:
