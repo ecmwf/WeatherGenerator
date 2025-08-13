@@ -131,4 +131,4 @@ train_log:
   # The period to log metrics (in number of batch steps)
   log_interval: 20
 
-profiling: False
+profiling: True
