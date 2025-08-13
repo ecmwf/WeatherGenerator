@@ -353,7 +353,7 @@ def _get_config_attribute(config: Config, attribute_name: str, fallback: str):
     attribute = OmegaConf.select(config, attribute_name)
     fallback_root = OmegaConf.select(config, "path_shared_working_dir")
     assert attribute is not None or fallback_root is not None, (
-       f"Must specify `{attribute_name}` in config if `path_shared_working_dir` is None in config"
+        f"Must specify `{attribute_name}` in config if `path_shared_working_dir` is None in config"
     )
     attribute = attribute if attribute else fallback_root + fallback
     return attribute
