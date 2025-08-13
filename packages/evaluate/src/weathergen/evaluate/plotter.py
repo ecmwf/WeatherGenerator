@@ -9,7 +9,6 @@ import xarray as xr
 
 from weathergen.utils.config import _load_private_conf
 work_dir = Path( _load_private_conf(None)['path_shared_working_dir']) / 'assets/cartopy'
-print(work_dir)
 import cartopy
 cartopy.config['data_dir'] = str(work_dir)
 cartopy.config['pre_existing_data_dir'] = str(work_dir)
@@ -21,6 +20,8 @@ logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
+
+_logger.info(f"Taking cartopy paths from {work_dir}")
 
 
 class Plotter:
@@ -39,6 +40,8 @@ class Plotter:
         model_id:
             If a model_id is given, the output will be saved in a folder called as the model_id.
         """
+
+        _logger.info(f"Taking cartopy paths from {work_dir}")
 
         self.cfg = cfg
 
