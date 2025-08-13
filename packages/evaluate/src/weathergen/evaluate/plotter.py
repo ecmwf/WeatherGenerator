@@ -7,6 +7,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
+from weathergen.utils.config import _load_private_conf
+work_dir = Path( _load_private_conf(None)['path_shared_working_dir']) / 'assets/cartopy'
+print(work_dir)
+import cartopy
+cartopy.config['data_dir'] = str(work_dir)
+cartopy.config['pre_existing_data_dir'] = str(work_dir)
+os.environ["CARTOPY_DATA_DIR"] = str(work_dir)
+
 np.seterr(divide="ignore", invalid="ignore")
 
 logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
