@@ -617,7 +617,7 @@ class Scores:
         """
 
         # Check if spatial_dims are in the data
-        spatial_dims = ["lat", "lon"] if spatial_dims is None else to_list(spatial_dims)
+        spatial_dims = ["ipoint"] if spatial_dims is None else to_list(spatial_dims)
 
         for dim in spatial_dims:
             if dim not in p.dims:
@@ -634,24 +634,18 @@ class Scores:
                     (fcst_group**2).sum(spatial_dims) * (obs_group**2).sum(spatial_dims)
                 )
 
-            # Apply groupby and calculate ACC within each group
+            # Apply groupby and calculate ACC within each group using apply
             fcst_grouped = fcst_ano.groupby(group_by_coord)
             obs_grouped = obs_ano.groupby(group_by_coord)
 
-            # Calculate ACC for each group and collect results
-            acc_results = []
-            coord_values = []
-
-            for group_label, fcst_group in fcst_grouped:
-                obs_group = obs_grouped[group_label]
-                group_acc = calc_acc_group(fcst_group, obs_group)
-                acc_results.append(group_acc)
-                coord_values.append(group_label)
-
-            # Concatenate results and assign coordinate values
-            acc = xr.concat(acc_results, dim=group_by_coord)
-
-            acc[group_by_coord] = coord_values
+            # Use apply to calculate ACC for each group - this preserves the coordinate structure
+            acc = xr.concat(
+                [
+                    calc_acc_group(fcst_group, obs_grouped[group_label])
+                    for group_label, fcst_group in fcst_grouped
+                ],
+                dim=group_by_coord,
+            ).assign_coords({group_by_coord: list(fcst_grouped.groups.keys())})
         else:
             # Calculate ACC over spatial dimensions (no grouping)
             acc = (fcst_ano * obs_ano).sum(spatial_dims) / np.sqrt(

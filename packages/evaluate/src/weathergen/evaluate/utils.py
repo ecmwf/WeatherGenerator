@@ -14,7 +14,6 @@ from pathlib import Path
 
 import numpy as np
 import omegaconf as oc
-import pandas as pd
 import xarray as xr
 from tqdm import tqdm
 
@@ -200,11 +199,15 @@ def align_clim_data(
         matching_time_idx = match_climatology_time(
             target_data.valid_time.values[0], clim_data
         )
-        prepared_clim_data = clim_data.data.isel(
-            time=matching_time_idx,
-        ).sel(
-            channels=target_data.channel.values,
-        ).transpose('grid_points', 'channels')
+        prepared_clim_data = (
+            clim_data.data.isel(
+                time=matching_time_idx,
+            )
+            .sel(
+                channels=target_data.channel.values,
+            )
+            .transpose("grid_points", "channels")
+        )
 
         clim_values = prepared_clim_data.values
 
@@ -220,8 +223,9 @@ def align_clim_data(
                 )
                 # to do: change this to a gridpoint mapping approach
                 aligned_clim_data[fstep].loc[{"ipoint": sample_mask}] = clim_values
-            
+
     return aligned_clim_data
+
 
 def calc_scores_per_stream(
     cfg: dict,
@@ -271,16 +275,30 @@ def calc_scores_per_stream(
     if fsteps == "all":
         fsteps = None
 
-    clim_data = xr.open_dataset("/p/scratch/hclimrep/polz1/test_clim_v3.zarr")
+
     output_data = get_data(cfg, results_dir, stream, region=region, return_counts=True)
     da_preds = output_data.prediction
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
 
     if "acc" in metrics:
-        aligned_clim_data = align_clim_data(
-            da_tars, clim_data, assume_matching_coords=assume_matching_coords
-        )
+        # Get climatology data path from configuration
+        run = cfg.run_ids[run_id]
+        stream_dict = run.streams[stream]
+
+        # Check if climatology path is specified in the stream configuration
+        if "climatology_path" in stream_dict:
+            clim_data_path = stream_dict["climatology_path"]
+            clim_data = xr.open_dataset(clim_data_path)
+            aligned_clim_data = align_clim_data(
+                da_tars, clim_data, assume_matching_coords=assume_matching_coords
+            )
+        else:
+            _logger.warning(
+                f"No climatology path specified for stream {stream}. Removing ACC from metrics"
+                "Add 'climatology_path' to evaluation config to keep ACC."
+            )
+            metrics.remove("acc")
     else:
         aligned_clim_data = None
 
@@ -325,17 +343,19 @@ def calc_scores_per_stream(
             if aligned_clim_data is not None and fstep in aligned_clim_data:
                 metrics_kwargs = {
                     "clim_mean": aligned_clim_data[fstep],
-                    "spatial_dims": ["ipoint"],  # No spatial dims when grouping by sample in flattened data
-                    "group_by_coord": "sample",  # Group by sample for metrics
+                    "spatial_dims": [
+                        "ipoint"
+                    ], 
                 }
             else:
-                metrics_kwargs = {"group_by_coord": "sample"}
+                metrics_kwargs = {}
 
             combined_metrics = [
                 get_score(
                     score_data,
                     metric,
                     agg_dims="ipoint",
+                    group_by_coord="sample",
                     **metrics_kwargs,
                 )
                 for metric in metrics
