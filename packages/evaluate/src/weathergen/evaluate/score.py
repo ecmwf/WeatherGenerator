@@ -482,8 +482,23 @@ class Scores:
     ):
         """
         Calculate the L2 error norm of forecast data w.r.t. reference data.
-        Note that the L2 error norm is calculated as the sum of absolute differences.
-        If scale_dims is not None, the L2 will scaled by the number of elements in the average dimensions.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the L2 score.
+        scale_dims: list | None
+            List of dimensions over which the L2 score will be scaled.
+            If provided, the L2 score will be divided by the product of the sizes of these dimensions.
+        squared_l2: bool
+            If True, the L2 score will be returned as the sum of squared differences.
+            If False, the L2 score will be returned as the square root of the sum of squared differences.
+            Default is False, i.e. the L2 score is returned as the square root of the sum of squared differences.
         """
         l2 = np.square(p - gt)
 
