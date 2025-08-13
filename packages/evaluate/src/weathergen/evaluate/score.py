@@ -478,6 +478,7 @@ class Scores:
         gt: xr.DataArray,
         group_by_coord: str | None = None,
         scale_dims: list | None = None,
+        squared_l2: bool = False,
     ):
         """
         Calculate the L2 error norm of forecast data w.r.t. reference data.
@@ -490,6 +491,9 @@ class Scores:
             l2 = l2.groupby(group_by_coord)
 
         l2 = self._sum(l2)
+
+        if not squared_l2:
+            l2 = np.sqrt(l2)
 
         if scale_dims:
             scale_dims = to_list(scale_dims)
