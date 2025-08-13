@@ -107,16 +107,18 @@ def evaluate_from_args(argl: list[str]) -> None:
                                     missing_channels.append(ch)
                             if missing_channels:
                                 _logger.info(
-                                            f"Channels {missing_channels} do not appear in saved scores for {metric}. Recomputing."
-                                        )
+                                    f"Channels {missing_channels} do not appear in saved scores for {metric}. Recomputing."
+                                )
                                 metrics_to_compute.append(metric)
                             else:
-                                scores_dict[metric][region][stream][run_id] = metric_data
+                                scores_dict[metric][region][stream][run_id] = (
+                                    metric_data
+                                )
 
-                        #TODO update retrieve_metric_from_json to avoid having to catch errors
+                        # TODO update retrieve_metric_from_json to avoid having to catch errors
                         except (FileNotFoundError, KeyError, ValueError):
                             metrics_to_compute.append(metric)
-                            
+
                     if metrics_to_compute:
                         all_metrics, points_per_sample = calc_scores_per_stream(
                             cfg, run_id, stream, region, metrics_to_compute
@@ -141,6 +143,7 @@ def evaluate_from_args(argl: list[str]) -> None:
     if scores_dict and cfg.summary_plots:
         _logger.info("Started creating summary plots..")
         plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)
+
 
 if __name__ == "__main__":
     evaluate()
