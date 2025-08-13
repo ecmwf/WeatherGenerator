@@ -17,7 +17,7 @@ import numpy as np
 import torch
 import tqdm
 from torch import Tensor
-from torch.distributed.fsdp import FullStateDictConfig, StateDictType
+from torch.distributed.fsdp import FullOptimStateDictConfig, FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     MixedPrecision,
@@ -178,7 +178,9 @@ class Trainer(TrainerBase):
             self.model.load(run_id_contd, epoch_contd)
             if cf.with_ddp and cf.with_fsdp:
                 FSDP.set_state_dict_type(
-                    self.model, StateDictType.FULL_STATE_DICT, FullStateDictConfig(rank0_only=False)
+                    self.model,
+                    StateDictType.FULL_STATE_DICT,
+                    FullStateDictConfig(rank0_only=False),
                 )
             _logger.info(f"Loaded model id={run_id_contd}.")
 
@@ -635,6 +637,15 @@ class Trainer(TrainerBase):
 
             # save config
             config.save(self.cf, epoch)
+
+        if self.cf.with_ddp and self.cf.with_fsdp:
+            with FSDP.state_dict_type(
+                self.ddp_model,
+                StateDictType.FULL_STATE_DICT,
+                FullStateDictConfig(rank0_only=False),
+                FullOptimStateDictConfig(rank0_only=False),
+            ):
+                state = self.ddp_model.state_dict()
 
     def _prepare_losses_for_logging(
         self,
