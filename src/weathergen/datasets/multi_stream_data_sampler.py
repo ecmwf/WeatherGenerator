@@ -385,7 +385,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                         torch.from_numpy(rdata.geoinfos),
                                         torch.from_numpy(rdata.data),
                                         rdata.datetimes,
-                                        (time_win1.start, time_win1.end),
+                                        (time_win2.start, time_win2.end),
                                         ds,
                                     )
                                 )
