@@ -176,7 +176,7 @@ class Trainer(TrainerBase):
         if run_id_contd is not None:
             _logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
             self.model.load(run_id_contd, epoch_contd)
-            if cf.with_fsdp:
+            if cf.with_ddp and cf.with_fsdp:
                 FSDP.set_state_dict_type(
                     self.model, StateDictType.FULL_STATE_DICT, FullStateDictConfig(rank0_only=False)
                 )
