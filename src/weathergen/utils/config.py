@@ -67,16 +67,9 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
     else:
-        # Load private config here...
-        shared_model_path = (
-            Path(
-                _load_private_conf(private_home=Path(model_path) if model_path else None).get(
-                    "path_shared_working_dir"
-                )
-            )
-            / "models"
-        )
-        fname = shared_model_path / run_id / _get_model_config_file_name(run_id, epoch)
+        # Load model config here...
+        model_path = Path(model_path)
+        fname = model_path / run_id / _get_model_config_file_name(run_id, epoch)
 
     _logger.info(f"Loading config from specified run_id and epoch: {fname}")
 
