@@ -98,7 +98,7 @@ shuffle: True
 
 lr_scaling_policy: "sqrt"
 lr_start: 1e-6
-lr_max: 5e-5
+lr_max: 1e-5 # 5e-5
 lr_final_decay: 1e-6
 lr_final: 0.0
 lr_steps_warmup: 512 
@@ -144,10 +144,10 @@ encode_targets_latent: true
 latent_loss_fcts:
   -
     - "mse"
-    - 0.01 
+    - 1 
 latent_loss_fcts_val:
   -
     - "mse"
-    - 0.01
+    - 1
 
 path_shared_working_dir: ""
