@@ -122,7 +122,7 @@ class Plotter:
                 da = da.sel({key: value})
         return da
 
-    def histogram(
+    def create_histograms_per_sample(
         self,
         target: xr.DataArray,
         preds: xr.DataArray,
@@ -131,7 +131,7 @@ class Plotter:
         tag: str = "",
     ) -> list[str]:
         """
-        Plot histogram of target vs predictions for a set of variables.
+        Plot histogram of target vs predictions for each variable and valid time in the DataArray.
 
         Parameters
         ----------
@@ -157,38 +157,149 @@ class Plotter:
         for var in variables:
             select_var = self.select | {"channel": var}
 
-            # get common bin edges
             targ, prd = (
                 self.select_from_da(target, select_var),
                 self.select_from_da(preds, select_var),
             )
-            vals = np.concatenate([targ, prd])
-            bins = np.histogram_bin_edges(vals, bins=50)
-            plt.hist(targ, bins=bins, alpha=0.7, label="Target")
-            plt.hist(prd, bins=bins, alpha=0.7, label="Prediction")
 
-            # set labels and title
-            plt.xlabel(f"Variable: {var}")
-            plt.ylabel("Frequency")
-            plt.title(
-                f"Histogram of Target and Prediction: {self.stream}, {var} : fstep = {self.fstep:03}"
+            ntimes_unique = len(np.unique(targ.valid_time))
+            _logger.info(
+                f"Creating histograms for {ntimes_unique} valid times for variable {var}."
             )
-            plt.legend(frameon=False)
 
-            # TODO: make this nicer
-            parts = [
-                "histogram",
-                self.model_id,
-                tag,
-                str(self.sample),
-                self.stream,
-                var,
-                str(self.fstep).zfill(3),
-            ]
-            name = "_".join(filter(None, parts))
-            plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
-            plt.close()
-            plot_names.append(name)
+            targ, prd = targ.groupby("valid_time"), prd.groupby("valid_time")
+
+            for valid_time, (targ_t, prd_t) in zip(targ, prd): 
+                _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
+                name = self.plot_histogram(
+                    targ_t,
+                    prd_t,
+                    var,
+                    tag=tag,
+                )
+
+                plot_names.append(name)
+
+        self.clean_data_selection()
+
+        return plot_names
+    
+    def plot_histogram(self, target_data: xr.DataArray, pred_data: xr.DataArray, varname: str, tag: str = "") -> str:
+        """
+        Plot a histogram comparing target and prediction data for a specific variable.
+        
+        Parameters
+        ----------
+        target_data: xr.DataArray
+            DataArray containing the target data for the variable.
+        pred_data: xr.DataArray
+            DataArray containing the prediction data for the variable.
+        varname: str
+            Name of the variable to be plotted.
+        tag: str
+            Any tag you want to add to the plot.
+        
+        Returns
+        -------
+            Name of the saved plot file.
+        """
+
+        # Get common bin edges
+        vals = np.concatenate([target_data, pred_data])
+        bins = np.histogram_bin_edges(vals, bins=50)
+        
+        # Plot histograms
+        plt.hist(target_data, bins=bins, alpha=0.7, label="Target")
+        plt.hist(pred_data, bins=bins, alpha=0.7, label="Prediction")
+
+        # set labels and title
+        plt.xlabel(f"Variable: {varname}")
+        plt.ylabel("Frequency")
+        plt.title(
+            f"Histogram of Target and Prediction: {self.stream}, {varname} : fstep = {self.fstep:03}"
+        )
+        plt.legend(frameon=False)
+
+        # TODO: make this nicer
+        parts = [
+            "histogram",
+            self.model_id,
+            tag,
+            str(self.sample),
+            self.stream,
+            varname,
+            str(self.fstep).zfill(3),
+        ]
+        name = "_".join(filter(None, parts))
+
+        fname = self.out_plot_dir / f"{name}.{self.image_format}"
+        logging.debug(f"Saving histogram to {fname}")
+        plt.savefig(fname)
+        plt.close()
+        
+        return name
+
+    def create_maps_per_sample(
+        self,
+        data: xr.DataArray,
+        variables: list,
+        select: dict,
+        tag: str = "",
+        map_kwargs: dict | None = None,
+    ) -> list[str]:
+        """
+        Plot 2D map for each variable and valid time in the DataArray.
+
+        Parameters
+        ----------
+        data: xr.DataArray
+            DataArray for a specific (stream, sample, fstep)
+        variables: list
+            List of variables to be plotted
+        label: str
+            Any tag you want to add to the plot
+        select: dict
+            Selection to be applied to the DataArray
+        tag: str
+            Any tag you want to add to the plot
+        map_kwargs: dict
+            Additional keyword arguments for the map.
+            Known keys are:
+                - marker_size: base size of the marker (default is 1)
+                - scale_marker_size: if True, the marker size will be scaled based on latitude (default is False)
+                - marker: marker style (default is 'o')
+            Unknown keys will be passed to the scatter plot function.
+
+        Returns
+        -------
+            List of plot names for the saved maps.
+        """
+        self.update_data_selection(select)
+
+        plot_names = []
+        for var in variables:
+            select_var = self.select | {"channel": var}
+            da = self.select_from_da(data, select_var).compute()
+
+
+            ntimes_unique = len(np.unique(da.valid_time))
+            _logger.info(
+                f"Creating histograms for {ntimes_unique} valid times for variable {var}."
+            )
+            
+
+            da = da.groupby("valid_time")
+
+            for valid_time, da_t in da: 
+                _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
+                name = self.scatter_plot_map(
+                    da_t,
+                    var,
+                    tag=tag,
+                    map_kwargs=map_kwargs,
+                )
+
+                plot_names.append(name)
 
         self.clean_data_selection()
 
@@ -196,7 +307,7 @@ class Plotter:
 
     def scatter_plot_map(self, data: xr.DataArray, varname: str, tag: str = "", map_kwargs: dict | None = None):
         """
-        Plot a 2D map for a dataset using scatter plot.
+        Plot a 2D map for a data array using scatter plot.
         
         Parameters
         ----------
@@ -270,65 +381,6 @@ class Plotter:
         plt.close()
 
         return name
-
-    def create_maps_per_sample(
-        self,
-        data: xr.DataArray,
-        variables: list,
-        select: dict,
-        tag: str = "",
-        map_kwargs: dict | None = None,
-    ) -> list[str]:
-        """
-        Plot 2D map for a dataset
-
-        Parameters
-        ----------
-        data: xr.DataArray
-            DataArray for a specific (stream, sample, fstep)
-        variables: list
-            List of variables to be plotted
-        label: str
-            Any tag you want to add to the plot
-        select: dict
-            Selection to be applied to the DataArray
-        tag: str
-            Any tag you want to add to the plot
-        map_kwargs: dict
-            Additional keyword arguments for the map.
-            Known keys are:
-                - marker_size: base size of the marker (default is 1)
-                - scale_marker_size: if True, the marker size will be scaled based on latitude (default is False)
-                - marker: marker style (default is 'o')
-            Unknown keys will be passed to the scatter plot function.
-
-        Returns
-        -------
-            List of plot names for the saved maps.
-        """
-        self.update_data_selection(select)
-
-        plot_names = []
-        for var in variables:
-            select_var = self.select | {"channel": var}
-            da = self.select_from_da(data, select_var).compute()
-
-            da = da.groupby("valid_time")
-
-            for valid_time, da_t in da: 
-                _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
-                name = self.scatter_plot_map(
-                    da_t,
-                    var,
-                    tag=tag,
-                    map_kwargs=map_kwargs,
-                )
-
-                plot_names.append(name)
-
-        self.clean_data_selection()
-
-        return plot_names
 
 
 class LinePlots:

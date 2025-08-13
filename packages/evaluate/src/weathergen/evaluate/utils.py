@@ -355,13 +355,13 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
 
     plot_fsteps = da_tars.keys()
 
+    plot_names = []
+
     for (fstep, tars), (_, preds) in zip(
         da_tars.items(), da_preds.items(), strict=False
     ):
         plot_chs = list(np.atleast_1d(tars.channel.values))
         plot_samples = list(np.unique(tars.sample.values))
-
-        plot_names = []
 
         for sample in tqdm(
             plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"
@@ -375,17 +375,17 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
             }
 
             if plot_maps:
-                map_tar = plotter.map(
+                map_tar = plotter.create_maps_per_sample(
                     tars, plot_chs, data_selection, "target", maps_config
                 )
 
-                map_pred = plotter.map(
+                map_pred = plotter.create_maps_per_sample(
                     preds, plot_chs, data_selection, "preds", maps_config
                 )
                 plots.extend([map_tar, map_pred])
 
             if plot_histograms:
-                h = plotter.histogram(tars, preds, plot_chs, data_selection)
+                h = plotter.create_histograms_per_sample(tars, preds, plot_chs, data_selection)
                 plots.append(h)
 
             plotter = plotter.clean_data_selection()
