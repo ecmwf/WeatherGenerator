@@ -96,7 +96,26 @@ def evaluate_from_args(argl: list[str]) -> None:
                                 metric,
                                 run.epoch,
                             )
-                            scores_dict[metric][region][stream][run_id] = metric_data
+
+                            # check if channels unchanged from previous config
+                            channels = cfg["run_ids"][run_id]["streams"][stream].get(
+                                "channels"
+                            )
+                            missing_channels = []
+                            for ch in channels:
+                                if ch not in metric_data["channel"].values:
+                                    missing_channels.append(ch)
+                            if missing_channels:
+                                _logger.info(
+                                    f"Channels {missing_channels} do not appear in saved scores for {metric}. Recomputing."
+                                )
+                                metrics_to_compute.append(metric)
+                            else:
+                                scores_dict[metric][region][stream][run_id] = (
+                                    metric_data
+                                )
+
+                        # TODO update retrieve_metric_from_json to avoid having to catch errors
                         except (FileNotFoundError, KeyError, ValueError):
                             metrics_to_compute.append(metric)
 
@@ -120,6 +139,7 @@ def evaluate_from_args(argl: list[str]) -> None:
                             {"metric": metric}
                         )
     # plot summary
+
     if scores_dict and cfg.summary_plots:
         _logger.info("Started creating summary plots..")
         plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)

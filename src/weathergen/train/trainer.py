@@ -9,7 +9,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import logging
 import time
 from typing import Any
 
@@ -35,10 +34,9 @@ from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
+from weathergen.utils.logger import logger
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.validation_io import write_output
-
-_logger = logging.getLogger(__name__)
 
 
 class Trainer(TrainerBase):
@@ -89,7 +87,6 @@ class Trainer(TrainerBase):
             cf.end_date_val,
             cf.batch_size_validation_per_gpu,
             cf.samples_per_validation,
-            train_logger=self.train_logger,
             stage=VAL,
             shuffle=cf.shuffle,
         )
@@ -114,21 +111,21 @@ class Trainer(TrainerBase):
         self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         self.model = self.model.to(self.devices[0])
         self.model.load(run_id_trained, epoch)
-        _logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
+        logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
         self.ddp_model = self.model
         self.model_params = ModelParams().create(cf).to(self.devices[0])
-        _logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
+        logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
 
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
         if is_root():
             config.save(self.cf, epoch=0)
 
-        _logger.info(f"Starting inference with id={self.cf.run_id}.")
+        logger.info(f"Starting inference with id={self.cf.run_id}.")
 
         # inference validation set
         self.validate(epoch=0)
-        _logger.info(f"Finished inference run with id: {cf.run_id}")
+        logger.info(f"Finished inference run with id: {cf.run_id}")
 
     def run(self, cf, run_id_contd=None, epoch_contd=None):
         # general initalization
@@ -140,7 +137,6 @@ class Trainer(TrainerBase):
             cf.end_date,
             cf.batch_size_per_gpu,
             cf.samples_per_epoch,
-            train_logger=self.train_logger,
             stage=TRAIN,
             shuffle=cf.shuffle,
         )
@@ -150,7 +146,6 @@ class Trainer(TrainerBase):
             cf.end_date_val,
             cf.batch_size_validation_per_gpu,
             cf.samples_per_validation,
-            train_logger=self.train_logger,
             stage=VAL,
             shuffle=True,
         )
@@ -174,7 +169,7 @@ class Trainer(TrainerBase):
         self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         # load model if specified
         if run_id_contd is not None:
-            _logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
+            logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
             self.model.load(run_id_contd, epoch_contd)
             if cf.with_ddp and cf.with_fsdp:
                 FSDP.set_state_dict_type(
@@ -182,7 +177,7 @@ class Trainer(TrainerBase):
                     StateDictType.FULL_STATE_DICT,
                     FullStateDictConfig(rank0_only=False),
                 )
-            _logger.info(f"Loaded model id={run_id_contd}.")
+            logger.info(f"Loaded model id={run_id_contd}.")
 
         if cf.forecast_freeze_model:
             self.model = self.model.freeze_weights_forecast()
@@ -254,7 +249,7 @@ class Trainer(TrainerBase):
         cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size_per_gpu)
 
         steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
-        _logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
+        logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
         # ensure that steps_decay has a reasonable value
         if steps_decay < int(0.2 * cf.lr_steps):
             cf.lr_steps_warmup = int(0.1 * cf.lr_steps)
@@ -270,7 +265,7 @@ class Trainer(TrainerBase):
             s += (
                 f" cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}.",
             )
-            _logger.warning(s)
+            logger.warning(s)
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             cf.batch_size_per_gpu,
@@ -291,7 +286,7 @@ class Trainer(TrainerBase):
 
         if self.cf.istep > 0 and is_root():
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
-            _logger.info(str)
+            logger.info(str)
 
         # Instantiate loss calculator modules to compute losses
         self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=self.devices[0])
@@ -314,7 +309,7 @@ class Trainer(TrainerBase):
 
         if is_root():
             config.save(self.cf, None)
-            _logger.info(config.format_cf(self.cf))
+            logger.info(config.format_cf(self.cf))
 
         # training loop
 
@@ -323,13 +318,13 @@ class Trainer(TrainerBase):
             self.validate(-1)
 
         for epoch in range(epoch_base, cf.num_epochs):
-            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: train.")
+            logger.info(f"Epoch {epoch} of {cf.num_epochs}: train.")
             self.train(epoch)
 
-            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: validate.")
+            logger.info(f"Epoch {epoch} of {cf.num_epochs}: validate.")
             self.validate(epoch)
 
-            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
+            logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
             self.save_model(epoch)
 
         # log final model
@@ -633,7 +628,7 @@ class Trainer(TrainerBase):
             torch.save(state, file_tmp)
             # move file (which is changing the link in the file system and very fast)
             file_tmp.replace(file_out)
-            _logger.info(f"Saved model to {file_out}")
+            logger.info(f"Saved model to {file_out}")
 
             # save config
             config.save(self.cf, epoch)
