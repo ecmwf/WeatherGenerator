@@ -599,7 +599,7 @@ def plot_train(args=None):
     parser.add_argument(
         "-m",
         "--model_base_dir",
-        default="./models/",
+        default=None,
         type=Path,
         help="Base-directory where models are saved",
     )
@@ -650,7 +650,7 @@ def plot_train(args=None):
     # parse the command line arguments
     args = parser.parse_args(args)
 
-    model_base_dir = Path(args.model_base_dir)
+    model_base_dir = Path(args.model_base_dir) if args.model_base_dir else None
     out_dir = Path(args.output_dir)
     streams = list(args.streams)
     x_types_valid = ["step"]  # TODO: add "reltime" support when fix available
