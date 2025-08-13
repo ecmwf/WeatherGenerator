@@ -92,6 +92,7 @@ class AdaLayerNorm(torch.nn.Module):
 def modulate(x, shift, scale):
     return x * (1 + scale) + shift
 
+
 class SwiGLU(nn.Module):
     def __init__(self):
         super(SwiGLU, self).__init__()

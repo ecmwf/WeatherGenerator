@@ -7,12 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from functools import partial
-
-import torch
-import torch.nn as nn
 
 import numpy as np
+import torch
+import torch.nn as nn
 
 
 class DiagonalGaussianDistribution:
@@ -83,7 +81,7 @@ class InterpolatedLatents(nn.Module):
         self.diag_gaussian = DiagonalGaussianDistribution(
             deterministic=deterministic, channel_dim=-1
         )
-        self.mean_and_var = nn.Linear(dim, 2*dim, bias=False)
+        self.mean_and_var = nn.Linear(dim, 2 * dim, bias=False)
 
     def interpolate_with_noise(self, z, sampling=False, noise_level=-1):
         self.diag_gaussian.reset_parameters(self.mean_and_var(z))
@@ -99,7 +97,7 @@ class InterpolatedLatents(nn.Module):
                 noise_level_tensor = torch.rand(bsz, device=device)
             # TODO: make this deal with batchsize > 1
             # noise_level_tensor = (
-            #     noise_level_tensor[torch.repeat_interleave(z_lens)].unsqueeze(-1).expand(-1, s[-1])
+            #    noise_level_tensor[torch.repeat_interleave(z_lens)].unsqueeze(-1).expand(-1, s[-1])
             # )
             noise = torch.randn(s, device=device) * self.gamma
             if self.use_additive_noise:

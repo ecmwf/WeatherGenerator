@@ -554,7 +554,6 @@ class TargetPredictionEngine(nn.Module):
         dim_aux = self.cf.ae_global_dim_embed
 
         for ith, dim in enumerate(self.dims_embed[:-1]):
-            next_dim = self.dims_embed[ith + 1]
             if self.cf.decoder_type == "PerceiverIO":
                 # a single cross attention layer as per https://arxiv.org/pdf/2107.14795
                 self.tte.append(

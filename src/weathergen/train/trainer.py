@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 import torch
 import tqdm
+from omegaconf import OmegaConf
 from torch import Tensor
 from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -50,7 +51,18 @@ class Trainer(TrainerBase):
         self,
         cf: Config,
     ):
-        self.cf = cf
+        self.cf = OmegaConf.merge(
+            OmegaConf.create(
+                {
+                    "kl_weight": 0.0,
+                    "noise_gamma": 2.0,
+                    "use_additive_noise": False,
+                    "deterministic_latents": False,
+                }
+            ),
+            cf,
+        )
+        cf = self.cf
 
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
@@ -78,6 +90,8 @@ class Trainer(TrainerBase):
     def inference(self, cf, run_id_trained, epoch):
         # general initalization
         self.init(cf)
+
+        cf = self.cf
 
         # !! modifies config: adds config.streams[i].<stage>_source_channels
         # and config.streams[i].<stage>_target_channels !!
@@ -130,6 +144,7 @@ class Trainer(TrainerBase):
     def run(self, cf, run_id_contd=None, epoch_contd=None):
         # general initalization
         self.init(cf)
+        cf = self.cf
 
         self.dataset = MultiStreamDataSampler(
             cf,
@@ -473,7 +488,8 @@ class Trainer(TrainerBase):
                     preds=preds,
                     streams_data=batch[0],
                 )
-                loss_values.loss += cf.kl_weight * posteriors.kl().mean()
+                if cf.kl_weight > 0.0:
+                    loss_values.loss += cf.kl_weight * posteriors.kl().mean()
 
             # backward pass
             self.grad_scaler.scale(loss_values.loss).backward()
