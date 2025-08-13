@@ -100,15 +100,18 @@ class SwiGLU(nn.Module):
         x1, x2 = x.chunk(2, dim=-1)
         return x2 * F.silu(x1)
 
+
 class AdaLayerNormLayer(torch.nn.Module):
     """
-    AdaLayerNorm for embedding auxiliary information as done in DiT (Peebles & Xie) with zero initialisation
-    https://arxiv.org/pdf/2212.09748
+    AdaLayerNorm for embedding auxiliary information as done in DiT (Peebles & Xie) with zero
+    initialisation https://arxiv.org/pdf/2212.09748
 
-    This module thus wraps a layer (e.g. self-attention or feedforward nn) and applies LayerNorm followed by scale and
-    shift before the layer and a final scaling after the layer as well as the final residual layer.
+    This module thus wraps a layer (e.g. self-attention or feedforward nn) and applies LayerNorm
+    followed by scale and shift before the layer and a final scaling after the layer as well as the
+    final residual layer.
 
-    layer is a function that takes 2 arguments the first the latent and the second is the conditioning signal
+    layer is a function that takes 2 arguments the first the latent and the second is the
+    conditioning signal
     """
 
     def __init__(
@@ -122,10 +125,7 @@ class AdaLayerNormLayer(torch.nn.Module):
         super().__init__()
 
         self.dim = dim
-        self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(dim_aux, 3 * dim, bias=True)
-        )
+        self.adaLN_modulation = nn.Sequential(nn.SiLU(), nn.Linear(dim_aux, 3 * dim, bias=True))
 
         self.ln = nn.LayerNorm(dim, elementwise_affine=False, eps=norm_eps)
         self.layer = layer
@@ -138,8 +138,8 @@ class AdaLayerNormLayer(torch.nn.Module):
         nn.init.zeros_(self.adaLN_modulation[-1].bias)
 
     def forward(self, x: torch.Tensor, c: torch.Tensor, x_lens, **kwargs) -> torch.Tensor:
-        # the -1 in torch.repeat_interleave(..) is because x_lens is designed for use with flash attention and
-        # thus has a spurious 0 at the beginning to satisfy the flash attention api
+        # the -1 in torch.repeat_interleave(..) is because x_lens is designed for use with flash
+        # attention and thus has a spurious 0 at the beginning to satisfy the flash attention api
         shift, scale, gate = self.adaLN_modulation(c)[torch.repeat_interleave(x_lens) - 1].chunk(
             3, dim=1
         )

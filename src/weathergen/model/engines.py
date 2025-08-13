@@ -12,17 +12,12 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.model.attention import (
-    MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
     MultiSelfAttentionHead,
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
-
-from weathergen.model.blocks import (
-    SelfAttentionBlock,
-    CrossAttentionBlock,
-)
+from weathergen.model.blocks import CrossAttentionBlock, OriginalPredictionBlock, SelfAttentionBlock
 from weathergen.model.embeddings import (
     StreamEmbedLinear,
     StreamEmbedTransformer,
@@ -392,6 +387,16 @@ class TargetPredictionEngine(nn.Module):
         :param tr_mlp_hidden_factor: Hidden factor for the MLP layers.
         :param softcap: Softcap value for the attention layers.
         :param tro_type: Type of target readout (e.g., "obs_value").
+
+        the decoder_type decides the how the conditioning is done
+
+        PerceiverIO: is a simple CrossAttention layer with no MLP or Adaptive LayerNorm
+        AdaLayerNormConditioning: only conditions via the Adaptive LayerNorm
+        CrossAttentionConditioning: conditions via the CrossAttention layer but also uses an MLP
+        CrossAttentionAdaNormConditioning: conditions via the CrossAttention layer and
+            Adaptive LayerNorm
+        PerceiverIOCoordConditioning: The conditioning is the coordinates and is a modified Adaptive
+            LayerNorm that does not scale after the layer is applied
         """
         super(TargetPredictionEngine, self).__init__()
 
@@ -414,7 +419,9 @@ class TargetPredictionEngine(nn.Module):
             "attention_dtype": get_dtype(self.cf.attention_dtype),
         }
         self.tte = nn.ModuleList()
-        self.in_norm = nn.LayerNorm(self.cf.ae_global_dim_embed)
+        self.output_in_norm = nn.LayerNorm(self.dims_embed[0])
+        self.latent_in_norm = nn.LayerNorm(self.cf.ae_global_dim_embed)
+        self.final_norm = nn.Identity()  # nn.RMSNorm(self.dims_embed[-1])
         self.dropout = nn.Dropout(0.2)
         self.pos_embed = nn.Parameter(torch.zeros(1, 9, self.cf.ae_global_dim_embed))
         dim_aux = self.cf.ae_global_dim_embed
@@ -442,6 +449,7 @@ class TargetPredictionEngine(nn.Module):
                         num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
                         attention_kwargs=attention_kwargs,
                         with_adanorm=True,
+                        dropout_rate=0.1,
                     )
                 )
             elif self.cf.decoder_type == "CrossAttentionConditioning":
@@ -454,6 +462,7 @@ class TargetPredictionEngine(nn.Module):
                         with_self_attn=True,
                         with_adanorm=False,
                         with_mlp=True,
+                        dropout_rate=0.1,
                         attention_kwargs=attention_kwargs,
                     )
                 )
@@ -467,7 +476,24 @@ class TargetPredictionEngine(nn.Module):
                         with_self_attn=True,
                         with_adanorm=True,
                         with_mlp=True,
+                        dropout_rate=0.1,
                         attention_kwargs=attention_kwargs,
+                    )
+                )
+            elif self.cf.decoder_type == "PerceiverIOCoordConditioning":
+                self.tte.append(
+                    OriginalPredictionBlock(
+                        config=self.cf,
+                        dim_in=dim,
+                        dim_out=self.dims_embed[ith + 1],
+                        dim_kv=dim_aux,
+                        dim_aux=self.dim_coord_in,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        attention_kwargs=attention_kwargs,
+                        tr_dim_head_proj=tr_dim_head_proj,
+                        tr_mlp_hidden_factor=tr_mlp_hidden_factor,
+                        tro_type=tro_type,
+                        mlp_norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
             else:
@@ -475,16 +501,30 @@ class TargetPredictionEngine(nn.Module):
                     f"{self.cf.decoder_type} is not implemented for prediction heads"
                 )
 
-    def forward(self, latent, output, latent_lens, output_lens):
-        latent = self.dropout(self.in_norm(latent+self.pos_embed))
+    def forward(self, latent, output, latent_lens, output_lens, coordinates):
+        latent = (
+            self.dropout(self.latent_in_norm(latent + self.pos_embed))
+            if self.cf.decoder_type != "PerceiverIOCoordConditioning"
+            else latent
+        )
         for layer in self.tte:
-            if isinstance(layer, CrossAttentionBlock):
+            if isinstance(layer, OriginalPredictionBlock):
+                output = checkpoint(
+                    layer,
+                    latent=latent.flatten(0, 1),
+                    output=output,
+                    coords=coordinates,
+                    latent_lens=latent_lens,
+                    output_lens=output_lens,
+                    use_reentrant=False,
+                )
+            elif isinstance(layer, CrossAttentionBlock):
                 output = checkpoint(
                     layer,
                     x=output,
-                    x_kv=(latent).flatten(0,1),
+                    x_kv=(latent).flatten(0, 1),
                     x_lens=output_lens,
-                    aux=latent[:,0],
+                    aux=latent[:, 0],
                     x_kv_lens=latent_lens,
                     use_reentrant=False,
                 )
@@ -493,7 +533,12 @@ class TargetPredictionEngine(nn.Module):
                     layer,
                     x=output,
                     x_lens=output_lens,
-                    aux=latent[:,0],
+                    aux=latent[:, 0],
                     use_reentrant=False,
                 )
+        output = (
+            self.final_norm(output)
+            if self.cf.decoder_type != "PerceiverIOCoordConditioning"
+            else output
+        )
         return output
