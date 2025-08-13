@@ -91,23 +91,26 @@ def evaluate() -> None:
                                 run.epoch,
                             )
 
-                            # check if channels unchanged from previous commit
+                            # check if channels unchanged from previous config
                             channels = cfg["run_ids"][run_id]["streams"][stream].get(
                                 "channels"
                             )
+                            missing_channels = []
                             for ch in channels:
                                 if ch not in metric_data["channel"].values:
-                                    _logger.info(
-                                        f"Channel {ch} does not appear in saved scores. Scores will be recomputed."
-                                    )
-                                    raise ValueError()
-                            scores_dict[metric][region][stream][run_id] = metric_data
+                                    missing_channels.append(ch)
+                            if missing_channels:
+                                _logger.info(
+                                            f"Channels {missing_channels} do not appear in saved scores for {metric}. Recomputing."
+                                        )
+                                metrics_to_compute.append(metric)
+                            else:
+                                scores_dict[metric][region][stream][run_id] = metric_data
+
+                        #TODO update retrieve_metric_from_json to avoid having to catch errors
                         except (FileNotFoundError, KeyError, ValueError):
-                            _logger.info("Exception caught...")
                             metrics_to_compute.append(metric)
-
-                    print(f"metrics to compute: {metrics_to_compute}")
-
+                            
                     if metrics_to_compute:
                         all_metrics, points_per_sample = calc_scores_per_stream(
                             cfg, run_id, stream, region, metrics_to_compute
@@ -127,13 +130,11 @@ def evaluate() -> None:
                         scores_dict[metric][region][stream][run_id] = all_metrics.sel(
                             {"metric": metric}
                         )
-                    print(scores_dict)
     # plot summary
 
     if scores_dict and cfg.summary_plots:
         _logger.info("Started creating summary plots..")
         plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)
-
 
 if __name__ == "__main__":
     evaluate()
