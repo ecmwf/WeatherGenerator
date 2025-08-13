@@ -45,7 +45,7 @@ def init_logger_per_stream(logger, stream_handle, output_streams):
     for ostr in output_streams if type(output_streams) is tuple else [output_streams]:
         # determine correct stream handler
         with_color = True
-        if ostr == sys.stdout or ostr == sys.stderr:
+        if getattr(ostr, 'name', None) == '<stdout>' or getattr(ostr, 'name', None) == '<stderr>':
             handler = logging.StreamHandler(ostr)
         elif ostr == "null":
             handler = logging.NullHandler()
