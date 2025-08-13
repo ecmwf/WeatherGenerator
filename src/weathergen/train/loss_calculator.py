@@ -325,15 +325,18 @@ class LossCalculator:
         if self.loss_fcts_lat:
             loss_fsteps_lat = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps_lat = 0
-            for fstep in range(len(tokens_all)): # TODO: KCT, do we need this per fstep?
+            # TODO: KCT, do we need the below per fstep?
+            for fstep in range(1, len(tokens_all)): # the first entry in tokens_all is the source itself, so skip it
                 loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
                 ctr_loss_fcts = 0
+                # if forecast_offset==0, then the timepoints correspond. Otherwise targets don't encode the source timestep, so we don't need to skip
+                fstep_targs = fstep if self.cf.forecast_offset == 0 else fstep -1
                 for i_lfct, (loss_fct, loss_fct_weight) in enumerate(self.loss_fcts_lat):
                     loss_lfct = LossCalculator._loss_per_loss_function_lat(
                         loss_fct,
                         stream_info=None,
                         target=tokens_all[fstep],
-                        pred=tokens_targets[fstep]
+                        pred=tokens_targets[fstep_targs]
                     )
                     
                     losses_all_lat[i_lfct] += loss_lfct # TODO: break into fsteps
