@@ -59,7 +59,7 @@ def inference_from_args(argl: list[str]):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    fname_debug_logging = "./logs/debug_log_{cf.run_id}.txt"
+    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
     init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
 
     cf.run_history += [(args.from_run_id, cf.istep)]
@@ -114,7 +114,7 @@ def train_continue() -> None:
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    fname_debug_logging = "./logs/debug_log_{cf.run_id}.txt"
+    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
     init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
 
     # track history of run to ensure traceability of results
@@ -156,7 +156,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
     cf = config.set_run_id(cf, args.run_id, False)
 
-    fname_debug_logging = "./logs/debug_log_{cf.run_id}.txt"
+    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
     init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
 
     cf.streams = config.load_streams(Path(cf.streams_directory))
