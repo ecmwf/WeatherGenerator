@@ -536,9 +536,10 @@ class Model(torch.nn.Module):
                         model_params, tokens_targets_srclk[fstep], source_cell_lens
                     )
                     tokens_target = self.assimilate_global(model_params, tokens_target)
-                    tokens_targets.append(tokens_target)
+                    tokens_target_det = tokens_target.detach() # explicitly detach as well
+                    tokens_targets.append(tokens_target_det)
 
-        if self.cf.get("encode_targets_latent", False):
+        if self.cf.get("encode_targets_latent", False): #TODO: KCT, put a safeguard: if there is a latent loss, encode_targets_latent has to be True
             return preds_all, tokens_all, tokens_targets
         else:
             return preds_all
