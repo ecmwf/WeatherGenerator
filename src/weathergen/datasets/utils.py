@@ -19,7 +19,7 @@ from weathergen.datasets.stream_data import StreamData
 
 ####################################################################################################
 def arc_alpha(sin_alpha, cos_alpha):
-    """Invert cosine/sine for alpha \in [0,2pi] using both functions"""
+    """Invert cosine/sine for alpha in [0,2pi] using both functions"""
     t = torch.arccos(cos_alpha)
     mask = sin_alpha < 0.0
     t[mask] = (2.0 * np.pi) - t[mask]
@@ -56,7 +56,7 @@ def s2tor3(lats, lons):
     """
     Convert from spherical to Cartesion R^3 coordinates
 
-    Note: mathematics convention with lats \in [0,pi] and lons \in [0,2pi] is used
+    Note: mathematics convention with lats in [0,pi] and lons in [0,2pi] is used
           (which is not problematic for lons but for lats care is required)
     """
     x = torch.sin(lats) * torch.cos(lons)
@@ -71,7 +71,7 @@ def r3tos2(pos):
     """
     Convert from spherical to Cartesion R^3 coordinates
 
-    Note: mathematics convention with lats \in [0,pi] and lons \in [0,2pi] is used
+    Note: mathematics convention with lats in [0,pi] and lons in [0,2pi] is used
           (which is not problematic for lons but for lats care is required)
     """
     norm2 = torch.square(pos[..., 0]) + torch.square(pos[..., 1])
@@ -607,6 +607,76 @@ def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
             # advance offsets
             offsets += source_tokens_lens[ib][itype]
             offsets_pe += source_tokens_lens[ib][itype]
+
+    return batch
+
+def compute_offsets_scatter_embed_target_srclk(batch: StreamData) -> StreamData:
+    """
+    Compute auxiliary information for scatter operation that changes from stream-centric to
+    cell-centric computations
+
+    Parameters
+    ----------
+    batch : str
+        batch of stream data information for which offsets have to be computed
+
+    Returns
+    -------
+    StreamData
+        stream data with offsets added as members
+    """
+
+    # collect source_tokens_lens for all stream datas
+    target_srclk_tokens_lens = torch.stack(
+                [
+                    torch.stack(
+                        [
+                            torch.stack(
+                                [
+                                    s.target_srclk_tokens_lens[fstep]
+                                    if len(s.target_srclk_tokens_lens[fstep]) > 0
+                                    else torch.tensor([])
+                                    for fstep in range(len(s.target_srclk_tokens_lens))
+                                ]
+                            )
+                            for s in stl_b
+                        ]
+                    )
+                    for stl_b in batch
+                ]
+            )
+
+    # precompute index sets for scatter operation after embed
+    offsets_base = target_srclk_tokens_lens.sum(1).sum(0).cumsum(1)
+    #take offset_base up to last col and append a 0 in the beginning per fstep
+    zeros_col = torch.zeros((offsets_base.shape[0], 1), dtype=offsets_base.dtype, device=offsets_base.device)
+    offsets = torch.cat([zeros_col, offsets_base[:,:-1]], dim=1)
+    offsets_pe = torch.zeros_like(offsets)
+
+    for ib, sb in enumerate(batch):
+        for itype, s in enumerate(sb):
+            for fstep in range(offsets.shape[0]):
+                if not (target_srclk_tokens_lens[ib, itype, fstep].sum() == 0): # if not empty
+                    s.target_srclk_idxs_embed[fstep] = torch.cat(
+                        [
+                            torch.arange(offset, offset + token_len, dtype=torch.int64)
+                            for offset, token_len in zip(
+                                offsets[fstep], target_srclk_tokens_lens[ib, itype, fstep], strict=False
+                            )
+                        ]
+                    )
+                    s.target_srclk_idxs_embed_pe[fstep] = torch.cat(
+                        [
+                            torch.arange(offset, offset + token_len, dtype=torch.int32)
+                            for offset, token_len in zip(
+                                offsets_pe[fstep], target_srclk_tokens_lens[ib][itype][fstep], strict=False
+                            )
+                        ]
+                    )
+
+                # advance offsets
+                offsets[fstep] += target_srclk_tokens_lens[ib][itype][fstep]
+                offsets_pe[fstep] += target_srclk_tokens_lens[ib][itype][fstep]
 
     return batch
 

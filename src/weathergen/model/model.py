@@ -624,9 +624,7 @@ class Model(torch.nn.Module):
                 ]
             )
             offsets_base = target_srclk_tokens_lens.sum(1).sum(0).cumsum(1)
-            num_fsteps = target_srclk_tokens_lens.shape[
-                2
-            ]  # TODO: KCT, if there are diff no of tokens per fstep, this may fail
+            num_fsteps = target_srclk_tokens_lens.shape[2]  # TODO: KCT, if there are diff no of tokens per fstep, this may fail
             tokens_all = []
             for fstep in range(num_fsteps):
                 tokens_all.append(
@@ -642,15 +640,15 @@ class Model(torch.nn.Module):
                 for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
                     for fstep in range(num_fsteps):
                         if not (s.target_srclk_tokens_lens[fstep].sum() == 0):
-                            idxs = s.source_idxs_embed  # TODO: KCT, do this properly.
-                            idxs_pe = s.source_idxs_embed_pe
+                            idxs = s.target_srclk_idxs_embed[fstep]  
+                            idxs_pe = s.target_srclk_idxs_embed_pe[fstep]
 
                             # create full scatter index
                             # (there's no broadcasting which is likely highly inefficient)
                             idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
                             x_embed = embed(
-                                s.target_srclk_tokens_cells[fstep], s.source_centroids
+                                s.target_srclk_tokens_cells[fstep], s.source_centroids # TODO: KCT, get this from the srclk targets
                             ).flatten(0, 1)
 
                             # scatter write to reorder from per stream to per cell ordering

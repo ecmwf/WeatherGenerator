@@ -30,6 +30,7 @@ from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
     compute_idxs_predict,
     compute_offsets_scatter_embed,
+    compute_offsets_scatter_embed_target_srclk,
     compute_source_cell_lens,
 )
 from weathergen.utils.logger import logger
@@ -411,6 +412,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # compute offsets for scatter computation after embedding
             batch = compute_offsets_scatter_embed(batch)
+            batch = compute_offsets_scatter_embed_target_srclk(batch)
 
             # compute offsets and auxiliary data needed for prediction computation
             # (info is not per stream so separate data structure)

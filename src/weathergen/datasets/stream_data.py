@@ -70,6 +70,9 @@ class StreamData:
         self.target_srclk_tokens_lens = [[] for _ in range(forecast_steps + 1)]
         self.target_srclk_tokens_cells = [[] for _ in range(forecast_steps + 1)]
         self.target_srclk_centroids = [[] for _ in range(forecast_steps + 1)]
+        
+        self.target_srclk_idxs_embed = [[] for _ in range(forecast_steps + 1)]
+        self.target_srclk_idxs_embed_pe = [[] for _ in range(forecast_steps + 1)]
 
     def to_device(self, device="cuda") -> None:
         """
@@ -105,6 +108,13 @@ class StreamData:
         ]
         self.target_srclk_centroids = [
             t.to(device, non_blocking=True) for t in self.target_srclk_centroids
+        ]
+        
+        self.target_srclk_idxs_embed = [
+            t.to(device, non_blocking=True) for t in self.target_srclk_idxs_embed
+        ]
+        self.target_srclk_idxs_embed_pe = [
+            t.to(device, non_blocking=True) for t in self.target_srclk_idxs_embed_pe
         ]
 
         return self
