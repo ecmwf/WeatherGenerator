@@ -67,7 +67,10 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
     else:
-        # Load model config here...
+        # Load model config here. In case model_path is not provided, get it from private conf
+        if model_path is None:
+            pconf = _load_private_conf(private_home=None)
+            model_path = pconf.get("model_path", pconf.get("path_shared_working_dir") + "models")
         model_path = Path(model_path)
         fname = model_path / run_id / _get_model_config_file_name(run_id, epoch)
 
