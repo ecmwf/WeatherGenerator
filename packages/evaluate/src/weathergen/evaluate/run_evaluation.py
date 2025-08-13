@@ -10,6 +10,7 @@
 
 import argparse
 import logging
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -27,6 +28,11 @@ _logger = logging.getLogger(__name__)
 
 
 def evaluate() -> None:
+    # By default, arguments from the command line are read.
+    evaluate_from_args(sys.argv[1:])
+
+
+def evaluate_from_args(argl: list[str]) -> None:
     parser = argparse.ArgumentParser(
         description="Fast evaluation of WeatherGenerator runs."
     )
@@ -36,7 +42,7 @@ def evaluate() -> None:
         help="Path to the configuration yaml file for plotting. e.g. config/plottig_config.yaml",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argl)
 
     # configure logging
     logging.basicConfig(level=logging.INFO)
@@ -90,7 +96,26 @@ def evaluate() -> None:
                                 metric,
                                 run.epoch,
                             )
-                            scores_dict[metric][region][stream][run_id] = metric_data
+
+                            # check if channels unchanged from previous config
+                            channels = cfg["run_ids"][run_id]["streams"][stream].get(
+                                "channels"
+                            )
+                            missing_channels = []
+                            for ch in channels:
+                                if ch not in metric_data["channel"].values:
+                                    missing_channels.append(ch)
+                            if missing_channels:
+                                _logger.info(
+                                    f"Channels {missing_channels} do not appear in saved scores for {metric}. Recomputing."
+                                )
+                                metrics_to_compute.append(metric)
+                            else:
+                                scores_dict[metric][region][stream][run_id] = (
+                                    metric_data
+                                )
+
+                        # TODO update retrieve_metric_from_json to avoid having to catch errors
                         except (FileNotFoundError, KeyError, ValueError):
                             metrics_to_compute.append(metric)
 
@@ -110,10 +135,11 @@ def evaluate() -> None:
                         )
 
                     for metric in metrics_to_compute:
-                        scores_dict[metric][stream][run_id] = all_metrics.sel(
+                        scores_dict[metric][region][stream][run_id] = all_metrics.sel(
                             {"metric": metric}
                         )
     # plot summary
+
     if scores_dict and cfg.summary_plots:
         _logger.info("Started creating summary plots..")
         plot_summary(cfg, scores_dict, print_summary=cfg.print_summary)

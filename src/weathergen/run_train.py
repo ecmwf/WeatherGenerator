@@ -59,12 +59,10 @@ def inference_from_args(argl: list[str]):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    init_loggers(
-        logging_level=logging.DEBUG, debug_output_streams=f"./logs/debug_log_{cf.run_id}.txt"
-    )
+    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
+    init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
 
     cf.run_history += [(args.from_run_id, cf.istep)]
-    cf = config.set_paths(cf)
 
     trainer = Trainer()
     trainer.inference(cf, args.from_run_id, args.epoch)
@@ -115,9 +113,11 @@ def train_continue() -> None:
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
+    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
+    init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
+
     # track history of run to ensure traceability of results
     cf.run_history += [(args.from_run_id, cf.istep)]
-    cf = config.set_paths(cf)
 
     if args.finetune_forecast:
         if cf.forecast_freeze_model:
@@ -150,14 +150,15 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     parser = cli.get_train_parser()
     args = parser.parse_args(argl)
 
-    init_loggers()
-
     cli_overwrite = config.from_cli_arglist(args.options)
+
     cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
     cf = config.set_run_id(cf, args.run_id, False)
 
+    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
+    init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
+
     cf.streams = config.load_streams(Path(cf.streams_directory))
-    cf = config.set_paths(cf)
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
