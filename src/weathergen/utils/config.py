@@ -347,14 +347,16 @@ def set_paths(config: Config) -> Config:
 
     return config
 
+
 def get_private_config_attribute(config: Config, attribute: str, fallback: str):
     # Check if attribute is available in config and fall back to "path_shared_working_dir" if not
     attribute = OmegaConf.select(config, attribute)
-    fallback_root =  OmegaConf.select(config, "path_shared_working_dir")
-    assert attribute is not None or fallback_root is not None, ("Must specify `attribute` "
-    "in config if `path_shared_working_dir` is None in config")
+    fallback_root = OmegaConf.select(config, "path_shared_working_dir")
+    assert attribute is not None or fallback_root is not None, (
+        "Must specify `attribute` in config if `path_shared_working_dir` is None in config"
+    )
     attribute = attribute if attribute else fallback_root + fallback
-    
+
 
 def get_path_run(config: Config) -> Path:
     """Get the current runs run_path for storing run results and logs."""
