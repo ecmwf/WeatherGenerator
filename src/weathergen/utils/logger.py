@@ -13,6 +13,8 @@ import pathlib
 import sys
 from functools import cache
 
+from weathergen.utils.config import _load_private_conf
+
 
 class ColoredRelPathFormatter(logging.Formatter):
     COLOR_CODES = {
@@ -45,14 +47,21 @@ def init_logger_per_stream(logger, stream_handle, output_streams):
     for ostr in output_streams if type(output_streams) is tuple else [output_streams]:
         # determine correct stream handler
         with_color = True
-        if getattr(ostr, 'name', None) == '<stdout>' or getattr(ostr, 'name', None) == '<stderr>':
+        if getattr(ostr, "name", None) == "<stdout>" or getattr(ostr, "name", None) == "<stderr>":
             handler = logging.StreamHandler(ostr)
         elif ostr == "null":
             handler = logging.NullHandler()
         else:
             # path + file are specified as string or already path object
             assert type(ostr) is str or type(ostr) is pathlib.Path
-            handler = logging.FileHandler(pathlib.Path(ostr))
+            ofile = pathlib.Path(ostr)
+            # make sure the path is independent of path where job is launched
+            if not ofile.is_absolute():
+                work_dir = pathlib.Path(_load_private_conf().get("path_shared_working_dir"))
+                ofile = work_dir / ofile
+            # make sure the parent directory exists
+            pathlib.Path(ofile.parent).mkdir(parents=True, exist_ok=True)
+            handler = logging.FileHandler(ofile)
             with_color = False
 
         format_str = (
