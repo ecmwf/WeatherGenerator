@@ -105,22 +105,12 @@ class LossCalculator:
 
         return stream_info_loss_weight, weights_channels
 
-    def cosine_latitude(self, stream_data, forecast_offset, fstep, min_value=1e-3, max_value=1.0):
-        latitudes_radian = (
-            stream_data.target_coords_raw[forecast_offset + fstep][:, 0] * np.pi / 180
-        )
-        return (max_value - min_value) * np.cos(latitudes_radian) + min_value
-
     def _get_location_weights(self, stream_info, stream_data, forecast_offset, fstep):
-        stream_info_location_weight = stream_info.get("location_weight", None)
-        weights_locations_fct = (
-            getattr(self, stream_info_location_weight) if stream_info_location_weight else None
-        )
-        weights_locations = (
-            weights_locations_fct(stream_data, forecast_offset, fstep)
-            if weights_locations_fct
-            else None
-        )
+        location_weight_type = stream_info.get("location_weight", None)
+        if location_weight_type is None:
+            return None
+        weights_locations_fct = getattr(losses, location_weight_type)
+        weights_locations = weights_locations_fct(stream_data, forecast_offset, fstep)
         weights_locations = weights_locations.to(device=self.device, non_blocking=True)
 
         return weights_locations
@@ -160,8 +150,7 @@ class LossCalculator:
 
         ctr_substeps = 0
         for mask_t in substep_masks:
-            if weights_locations is not None:
-                assert mask_t.sum() == len(weights_locations)
+            assert mask_t.sum() == len(weights_locations) if weights_locations is not None else True
 
             loss, loss_chs = loss_fct(
                 target[mask_t], pred[:, mask_t], weights_channels, weights_locations
