@@ -67,9 +67,17 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
     else:
-        # Load model config here...
+        # Load model config here. In case model_path is not provided, get it from private conf
+        if model_path is None:
+            pconf = _load_private_conf()
+            model_path = _get_config_attribute(
+                config=pconf, attribute_name="model_path", fallback="models"
+            )
         model_path = Path(model_path)
         fname = model_path / run_id / _get_model_config_file_name(run_id, epoch)
+        assert fname.exists(), (
+            "The fallback path to the model does not exist. Please provide a `model_path`."
+        )
 
     _logger.info(f"Loading config from specified run_id and epoch: {fname}")
 
@@ -235,7 +243,7 @@ def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
     return overwrite_config
 
 
-def _load_private_conf(private_home: Path | None) -> DictConfig:
+def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     "Return the private configuration."
     "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
 
@@ -246,7 +254,7 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
 
     elif "WEATHERGEN_PRIVATE_CONF" in os.environ:
         private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
-        _logger.info(f"Loading private config fromWEATHERGEN_PRIVATE_CONF:{private_home}.")
+        _logger.info(f"Loading private config from WEATHERGEN_PRIVATE_CONF:{private_home}.")
 
     elif env_script_path.is_file():
         _logger.info(f"Loading private config from platform-env.py: {env_script_path}.")
@@ -353,9 +361,9 @@ def set_paths(config: Config) -> Config:
 
 
 def _get_config_attribute(config: Config, attribute_name: str, fallback: str) -> str:
-    """Get an attribute from a Config. If not, fall back to path_shared_working_dir concatenated
-    with the desired fallback path. Raise an error if neither the attribute nor
-    is specified."""
+    """Get an attribute from a Config. If not available, fall back to path_shared_working_dir
+    concatenated with the desired fallback path. Raise an error if neither the attribute nor a
+    fallback is specified."""
     attribute = OmegaConf.select(config, attribute_name)
     fallback_root = OmegaConf.select(config, "path_shared_working_dir")
     assert attribute is not None or fallback_root is not None, (
