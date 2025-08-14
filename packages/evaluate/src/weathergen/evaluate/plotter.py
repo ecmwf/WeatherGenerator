@@ -8,10 +8,12 @@ import numpy as np
 import xarray as xr
 
 from weathergen.utils.config import _load_private_conf
-work_dir = Path( _load_private_conf(None)['path_shared_working_dir']) / 'assets/cartopy'
+
+work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 import cartopy
-cartopy.config['data_dir'] = str(work_dir)
-cartopy.config['pre_existing_data_dir'] = str(work_dir)
+
+cartopy.config["data_dir"] = str(work_dir)
+cartopy.config["pre_existing_data_dir"] = str(work_dir)
 os.environ["CARTOPY_DATA_DIR"] = str(work_dir)
 
 np.seterr(divide="ignore", invalid="ignore")

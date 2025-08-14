@@ -105,6 +105,16 @@ class LossCalculator:
 
         return stream_info_loss_weight, weights_channels
 
+    def _get_location_weights(self, stream_info, stream_data, forecast_offset, fstep):
+        location_weight_type = stream_info.get("location_weight", None)
+        if location_weight_type is None:
+            return None
+        weights_locations_fct = getattr(losses, location_weight_type)
+        weights_locations = weights_locations_fct(stream_data, forecast_offset, fstep)
+        weights_locations = weights_locations.to(device=self.device, non_blocking=True)
+
+        return weights_locations
+
     def _get_substep_masks(self, stream_info, fstep, stream_data):
         """
         Find substeps and create corresponding masks (reused across loss functions)
@@ -140,7 +150,7 @@ class LossCalculator:
 
         ctr_substeps = 0
         for mask_t in substep_masks:
-            assert mask_t.sum() == len(weights_locations) if weights_locations else True
+            assert mask_t.sum() == len(weights_locations) if weights_locations is not None else True
 
             loss, loss_chs = loss_fct(
                 target[mask_t], pred[:, mask_t], weights_channels, weights_locations
@@ -220,9 +230,6 @@ class LossCalculator:
 
             stream_data = streams_data[i_batch][i_stream_info]
 
-            # TODO: set from stream info
-            weights_locations = None
-
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
             for fstep, target in enumerate(targets):
@@ -239,6 +246,11 @@ class LossCalculator:
 
                 # get weigths for current streams
                 stream_loss_weight, weights_channels = self._get_weights(stream_info)
+
+                # get weights for locations
+                weights_locations = self._get_location_weights(
+                    stream_info, stream_data, self.cf.forecast_offset, fstep
+                )
 
                 # get masks for sub-time steps
                 substep_masks = self._get_substep_masks(stream_info, fstep, stream_data)
