@@ -621,66 +621,76 @@ class Model(torch.nn.Module):
             + [model_params.q_cells_lens[1:] for _ in range(batch_size)]
         )
 
-        # local assimilation model
-        for block in self.ae_local_blocks:
-            tokens = checkpoint(block, tokens, cell_lens, use_reentrant=False)
+        # # local assimilation model
+        # for block in self.ae_local_blocks:
+        #     tokens = checkpoint(block, tokens, cell_lens, use_reentrant=False)
 
-        if self.cf.kl_weight > 0.0:
-            tokens, posteriors = self.interpolate_latents.interpolate_with_noise(
-                tokens, sampling=self.training
-            )
-        else:
-            tokens, posteriors = tokens, 0.0
+        # if self.cf.kl_weight > 0.0:
+        #     tokens, posteriors = self.interpolate_latents.interpolate_with_noise(
+        #         tokens, sampling=self.training
+        #     )
+        # else:
+        #     tokens, posteriors = tokens, 0.0
 
-        for block in self.ae_adapter:
-            tokens_global = checkpoint(
-                block,
-                tokens_global,
-                tokens,
-                q_cells_lens,
-                cell_lens,
-                use_reentrant=False,
-            )
-
-        # # work around to bug in flash attention for hl>=5
-
-        # cell_lens = cell_lens[1:]
-        # clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
-        # tokens_global_all = []
-        # zero_pad = torch.zeros(1, device="cuda", dtype=torch.int32)
-        # for i in range((cell_lens.shape[0]) // clen):
-        #     # make sure we properly catch all elements in last chunk
-        #     i_end = (i + 1) * clen if i < (cell_lens.shape[0] // clen) - 1 else cell_lens.shape[0]
-        #     l0, l1 = (
-        #         (0 if i == 0 else cell_lens[: i * clen].cumsum(0)[-1]),
-        #         cell_lens[:i_end].cumsum(0)[-1],
+        # for block in self.ae_adapter:
+        #     tokens_global = checkpoint(
+        #         block,
+        #         tokens_global,
+        #         tokens,
+        #         q_cells_lens,
+        #         cell_lens,
+        #         use_reentrant=False,
         #     )
 
-        #     tokens_c = tokens[l0:l1]
-        #     tokens_global_c = tokens_global[i * clen : i_end]
-        #     cell_lens_c = torch.cat([zero_pad, cell_lens[i * clen : i_end]])
-        #     q_cells_lens_c = q_cells_lens[: cell_lens_c.shape[0]]
+        # work around to bug in flash attention for hl>=5
 
-        #     if l0 == l1 or tokens_c.shape[0] == 0:
-        #         tokens_global_all += [tokens_global_c]
-        #         continue
+        cell_lens = cell_lens[1:]
+        clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
+        tokens_global_all = []
+        posteriors = []
+        zero_pad = torch.zeros(1, device="cuda", dtype=torch.int32)
+        for i in range((cell_lens.shape[0]) // clen):
+            # make sure we properly catch all elements in last chunk
+            i_end = (i + 1) * clen if i < (cell_lens.shape[0] // clen) - 1 else cell_lens.shape[0]
+            l0, l1 = (
+                (0 if i == 0 else cell_lens[: i * clen].cumsum(0)[-1]),
+                cell_lens[:i_end].cumsum(0)[-1],
+            )
 
-        #     for block in self.ae_local_blocks:
-        #         tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=False)
+            tokens_c = tokens[l0:l1]
+            tokens_global_c = tokens_global[i * clen : i_end]
+            cell_lens_c = torch.cat([zero_pad, cell_lens[i * clen : i_end]])
+            q_cells_lens_c = q_cells_lens[: cell_lens_c.shape[0]]
 
-        #     for block in self.ae_adapter:
-        #         tokens_global_c = checkpoint(
-        #             block,
-        #             tokens_global_c,
-        #             tokens_c,
-        #             q_cells_lens_c,
-        #             cell_lens_c,
-        #             use_reentrant=False,
-        #         )
+            if l0 == l1 or tokens_c.shape[0] == 0:
+                tokens_global_all += [tokens_global_c]
+                continue
 
-        #     tokens_global_all += [tokens_global_c]
+            for block in self.ae_local_blocks:
+                tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=False)
 
-        # tokens_global = torch.cat(tokens_global_all)
+            if self.cf.kl_weight > 0.0:
+                tokens_c, posteriors_c = self.interpolate_latents.interpolate_with_noise(
+                    tokens_c, sampling=self.training
+                )
+                posteriors += [posteriors_c]
+            else:
+                tokens_c, posteriors = tokens_c, 0.0
+
+
+            for block in self.ae_adapter:
+                tokens_global_c = checkpoint(
+                    block,
+                    tokens_global_c,
+                    tokens_c,
+                    q_cells_lens_c,
+                    cell_lens_c,
+                    use_reentrant=False,
+                )
+
+            tokens_global_all += [tokens_global_c]
+
+        tokens_global = torch.cat(tokens_global_all)
 
         # recover batch dimension and build global token list
         tokens_global = (
