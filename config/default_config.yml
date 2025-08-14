@@ -150,4 +150,3 @@ train_log:
 #     - "mse"
 #     - 1
 
-path_shared_working_dir: ""
