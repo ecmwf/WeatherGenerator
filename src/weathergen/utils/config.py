@@ -235,7 +235,7 @@ def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
     return overwrite_config
 
 
-def _load_private_conf(private_home: Path | None) -> DictConfig:
+def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     "Return the private configuration."
     "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
 

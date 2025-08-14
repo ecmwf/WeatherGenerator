@@ -57,7 +57,7 @@ def init_logger_per_stream(logger, stream_handle, output_streams):
             ofile = pathlib.Path(ostr)
             # make sure the path is independent of path where job is launched
             if not ofile.is_absolute():
-                work_dir = pathlib.Path(_load_private_conf(None).get("path_shared_working_dir"))
+                work_dir = pathlib.Path(_load_private_conf().get("path_shared_working_dir"))
                 ofile = work_dir / ofile
             # make sure the parent directory exists
             pathlib.Path(ofile.parent).mkdir(parents=True, exist_ok=True)
