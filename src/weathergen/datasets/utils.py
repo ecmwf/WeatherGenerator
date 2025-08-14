@@ -69,7 +69,7 @@ def s2tor3(lats, lons):
 ####################################################################################################
 def r3tos2(pos: torch.Tensor) -> torch.Tensor:
     """
-    Convert from Cartesian R^3 to spherical coordinates.
+    Convert from spherical to Cartesion R^3 coordinates
 
     This optimized version is faster and more numerically stable by:
     1. Unbinding the input tensor to get x, y, and z components directly.
