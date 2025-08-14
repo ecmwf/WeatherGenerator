@@ -94,8 +94,10 @@ class LossCalculator:
             # set loss_weights to 1. when not specified
             stream_info_loss_weight = stream_info.get("loss_weight", 1.0)
             weights_channels = (
-                torch.tensor(stream_info["channel_weight"]).to(device=device, non_blocking=True)
-                if "channel_weight" in stream_info
+                torch.tensor(stream_info["target_channel_weights"]).to(
+                    device=device, non_blocking=True
+                )
+                if "target_channel_weights" in stream_info
                 else None
             )
         elif self.stage == VAL:

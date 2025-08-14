@@ -143,6 +143,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
                 stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
 
+                stream_info["target_channel_weights"] = [
+                    stream_info["channel_weights"].get(ch)
+                    if stream_info["channel_weights"].get(ch, None)
+                    else 1.0
+                    for ch in ds.target_channels
+                ]
+
                 self.streams_datasets[-1] += [ds]
 
         index_range = self.time_window_handler.get_index_range()
