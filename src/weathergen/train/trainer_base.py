@@ -22,6 +22,9 @@ from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
 
+import socket
+import time
+
 _logger = logging.getLogger(__name__)
 
 
@@ -98,6 +101,7 @@ class TrainerBase:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 try:
                     s.bind((master_node, 1345))
+                    print("Port 1345 is available for DDP initialization.")
                 except OSError as e:
                     if e.errno == errno.EADDRINUSE:
                         _logger.error(
@@ -114,6 +118,25 @@ class TrainerBase:
         _logger.info(
             f"Initializing DDP with rank {rank} out of {num_ranks} on master_node:{master_node}."
         )
+        
+        # def check_port_open(host, port, timeout=5):
+        #     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        #     s.settimeout(timeout)
+        #     try:
+        #         s.connect((host, port))
+        #         s.close()
+        #         return True
+        #     except Exception:
+        #         return False
+
+        # if rank != 0:
+        #     # Wait for master to bind the port
+        #     time.sleep(2)
+        #     port_open = check_port_open(master_node, 1345)
+        #     if not port_open:
+        #         raise RuntimeError(f"Rank {rank} cannot connect to {master_node}:1345")
+        #     else:   
+        #         _logger.info(f"Rank {rank} port open") 
 
         dist.init_process_group(
             backend="nccl",
