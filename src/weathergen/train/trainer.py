@@ -491,7 +491,8 @@ class Trainer(TrainerBase):
             self.loss_model_hist += [loss_values.loss.item()]
             self.stdev_unweighted_hist += [loss_values.stddev_all]
             
-            self.loss_unweighted_lat_hist += [loss_values.losses_all_lat.item()]
+            if loss_values.losses_all_lat.numel() > 0:
+                self.loss_unweighted_lat_hist += [loss_values.losses_all_lat.item()]
 
             perf_gpu, perf_mem = self.get_perf()
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu])).item()
@@ -578,7 +579,8 @@ class Trainer(TrainerBase):
                     self.loss_model_hist += [loss_values.loss.item()]
                     self.stdev_unweighted_hist += [loss_values.stddev_all]
                     
-                    self.loss_unweighted_lat_hist += [loss_values.losses_all_lat.item()]
+                    if loss_values.losses_all_lat.numel() > 0:
+                        self.loss_unweighted_lat_hist += [loss_values.losses_all_lat.item()]
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
@@ -663,7 +665,7 @@ class Trainer(TrainerBase):
             stddev_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
             
         lat_hist = [losses_all_lat for losses_all_lat in self.loss_unweighted_lat_hist]
-        lat_all = torch.tensor(lat_hist).to(torch.float64).to(torch.device("cuda"))
+        lat_all = torch.tensor(lat_hist, device=self.devices[0]).to(torch.float64)
         losses_all_lat = torch.cat(all_gather_vlen(lat_all))
 
         return real_loss, losses_all, stddev_all, losses_all_lat
