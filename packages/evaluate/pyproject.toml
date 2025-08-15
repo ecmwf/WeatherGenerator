@@ -6,8 +6,12 @@ readme = "../../README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "cartopy>=0.24.1",
-    "plotly>=6.1.2",
+    "xskillscore",
+    "xhistogram",
+    "panel",
+    "omegaconf",
     "weathergen-common",
+    "plotly>=6.2.0",
 ]
 
 [dependency-groups]
@@ -17,6 +21,8 @@ dev = [
  "ruff==0.9.7",
 ]
 
+[project.scripts]
+evaluation = "weathergen.evaluate.run_evaluation:evaluate"
 
 
 [tool.ruff.lint]

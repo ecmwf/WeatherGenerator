@@ -13,6 +13,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 
 import numpy as np
+import pandas as pd
 from numpy import datetime64, timedelta64
 from numpy.typing import NDArray
 
@@ -74,18 +75,29 @@ def str_to_datetime64(s: str | int | NPDT64) -> NPDT64:
     return np.datetime64(datetime.datetime.strptime(str(s), format_str))
 
 
-def str_to_timedelta(s: str | datetime.timedelta) -> datetime.timedelta:
+def str_to_timedelta(s: str | datetime.timedelta) -> pd.Timedelta:
     """
-    Convert a string to a timedelta object.
-    The format is expected to be "HH:MM:SS".
+    Convert a string or datetime.timedelta object to a pd.Timedelta object.
+    The string format is expected to be "HH:MM:SS".
+    Hours are not limited to two digits. Minutes and seconds must be in the range 0-59.
     """
 
+    if not isinstance(s, str) and not isinstance(s, datetime.timedelta):
+        raise TypeError("Input must be a string or a datetime.timedelta object")
     if isinstance(s, datetime.timedelta):
-        return s
-    format_str = "%H:%M:%S"
-    assert isinstance(s, str), type(s)
-    t = datetime.datetime.strptime(s, format_str)
-    return datetime.timedelta(hours=t.hour, minutes=t.minute, seconds=t.second)
+        # If input is a timedelta object, convert it directly to pd.Timedelta
+        return pd.Timedelta(s)
+    if isinstance(s, str):
+        # ensure that the string is in "HH:MM:SS" format
+        parts = s.split(":")
+        if not len(parts) == 3:
+            raise ValueError("String must be in 'HH:MM:SS' format")
+        if not all(part.isdigit() for part in parts):
+            raise ValueError("String must be in 'HH:MM:SS' format")
+        # ensure that minutes and seconds do not exceed 59
+        if int(parts[1]) > 59 or int(parts[2]) > 59:
+            raise ValueError("Minutes and seconds must be in the range 0-59")
+    return pd.to_timedelta(s)
 
 
 class TimeWindowHandler:
@@ -225,7 +237,6 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     )
     assert rdata.geoinfos.ndim == 2, f"geoinfos must be 2D, got {rdata.geoinfos.shape}"
     assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
-    assert rdata.data.shape[1] > 0, f"data must have at least one channel {rdata.data.shape}"
     assert rdata.datetimes.ndim == 1, f"datetimes must be 1D {rdata.datetimes.shape}"
 
     assert rdata.coords.shape[0] == rdata.data.shape[0], "coords and data must have same length"
@@ -243,11 +254,9 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
         f"{rdata.datetimes.shape[0]}"
     )
 
-    assert np.logical_and(
-        rdata.datetimes >= dtr.start,
-        # rdata.datetimes < dtr.end  # TODO: enforce monotonicty also for obs
-        rdata.datetimes <= dtr.end,
-    ).all(), f"datetimes for data points violate window {dtr}."
+    assert np.logical_and(rdata.datetimes >= dtr.start, rdata.datetimes < dtr.end).all(), (
+        f"datetimes for data points violate window {dtr}."
+    )
 
 
 class DataReaderBase(metaclass=ABCMeta):
@@ -662,8 +671,8 @@ def get_dataset_indexes_timestep(
         or not data_end_time
         or dtr.end < data_start_time
         or dtr.start > data_end_time
-        or (dtr.start + period) < data_start_time
-        or (dtr.end - period) > data_end_time
+        or dtr.start < data_start_time
+        or dtr.end > data_end_time
         or (data_end_time is not None and dtr.start > data_end_time)
     ):
         return (np.array([], dtype=np.int64), dtr)

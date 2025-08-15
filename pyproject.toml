@@ -28,6 +28,8 @@ dependencies = [
  "dask~=2025.5.1",
  "hatchling",
  "weathergen-common",
+ "weathergen-evaluate",
+ "numexpr>=2.11.0",
 ]
 
 [project.urls]
@@ -40,7 +42,7 @@ Issues = "https://github.com/ecmwf/WeatherGenerator/issues"
 train = "weathergen.run_train:train"
 train_continue = "weathergen.run_train:train_continue"
 inference = "weathergen.run_train:inference"
-plot = "weathergen.evaluate.plot:plot"
+evaluate = "weathergen.evaluate.run_evaluation:evaluate"
 plot_train = "weathergen.utils.plot_training:plot_train"
 
 [build-system]
@@ -53,9 +55,12 @@ packages = ["src/weathergen"]
 [dependency-groups]
 # The development dependencies
 dev = [
+ "ipykernel>=6.30.0",
+ "jupytext>=1.17.2",
  "pytest~=8.3.5",
  "pytest-mock>=3.14.1",
  "ruff==0.9.7",
+ "tensorboard>=2.20.0",
 ]
 
 
@@ -87,7 +92,11 @@ select = [
     # isort
     "I",
     # Banned imports
-    "TID"
+    "TID",
+    # Naming conventions
+    "N",
+    # print
+    "T201"
 ]
 
 # These rules are sensible and should be enabled at a later stage.
@@ -100,7 +109,10 @@ ignore = [
   "SIM102",
   "SIM401",
   # To ignore, not relevant for us
-  "SIM108" # in case additional norm layer supports are added in future  
+  "SIM108", # in case additional norm layer supports are added in future
+  "N817", # we use heavy acronyms, e.g., allowing 'import LongModuleName as LMN' (LMN is accepted)
+  "E731", # overly restrictive and less readable code
+  "N812", # prevents us following the convention for importing torch.nn.functional as F
 ]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
@@ -112,6 +124,9 @@ line-ending = "lf"
 
 
 [tool.uv]
+# Most work is done a distributed filesystem, where hardlink is not always possible.
+# Also, trying to resolve some permissions issue, see #344.
+link-mode = "symlink"
 # This guarantees that the build is deterministic and will not be impacted 
 # by future releases of dependencies or sub-dependencies. 
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer

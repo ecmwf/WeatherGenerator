@@ -413,14 +413,20 @@ def plot_loss_per_stream(
                             + col
                         ]
 
-                        min_val = np.min([min_val, np.nanmin(y_data)])
-                        max_val = np.max([max_val, np.nanmax(y_data)])
+                        # skip all-nan slices
+                        if (~np.isnan(y_data)).sum() > 0:
+                            min_val = np.min([min_val, np.nanmin(y_data)])
+                            max_val = np.max([max_val, np.nanmax(y_data)])
 
         # TODO: ensure that legend is plotted with full opacity
         legend_str = legend_strs[0]
         if len(legend_str) < 1:
             plt.close()
             _logger.warning(f"Could not find any data for stream: {stream_name}")
+            continue
+
+        # no valid data found
+        if (min_val >= max_val) or np.isnan(min_val) or np.isnan(max_val):
             continue
 
         legend = plt.legend(legend_str, loc="upper right" if not x_scale_log else "lower left")
@@ -593,7 +599,7 @@ def plot_train(args=None):
     parser.add_argument(
         "-m",
         "--model_base_dir",
-        default="./models/",
+        default=None,
         type=Path,
         help="Base-directory where models are saved",
     )
@@ -644,7 +650,7 @@ def plot_train(args=None):
     # parse the command line arguments
     args = parser.parse_args(args)
 
-    model_base_dir = Path(args.model_base_dir)
+    model_base_dir = Path(args.model_base_dir) if args.model_base_dir else None
     out_dir = Path(args.output_dir)
     streams = list(args.streams)
     x_types_valid = ["step"]  # TODO: add "reltime" support when fix available
