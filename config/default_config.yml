@@ -96,7 +96,7 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
 
 num_epochs: 32
 samples_per_epoch: 4096
-samples_per_validation: 2
+samples_per_validation: 512
 shuffle: True
 
 lr_scaling_policy: "sqrt"
