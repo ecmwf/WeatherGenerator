@@ -17,6 +17,7 @@ ERA5 :
   masking_rate_none : 0.05
   token_size : 8
   tokenize_spacetime : True
+  target_fraction: 0.15
   max_num_targets: -1
   embed : 
     net : transformer
