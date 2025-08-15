@@ -132,9 +132,7 @@ def evaluate_from_args(argl: list[str]) -> None:
                             )
 
                             # check if channels unchanged from previous config
-                            channels = cfg["run_ids"][run_id]["streams"][stream].get(
-                                "channels"
-                            )
+                            channels = stream_dict.get("channels")
                             missing_channels = []
                             for ch in channels:
                                 if ch not in metric_data["channel"].values:
@@ -142,6 +140,18 @@ def evaluate_from_args(argl: list[str]) -> None:
                             if missing_channels:
                                 _logger.info(
                                     f"Channels {missing_channels} do not appear in saved scores for {metric}. Recomputing."
+                                )
+                                metrics_to_compute.append(metric)
+                            elif sorted(
+                                [
+                                    int(fstep)
+                                    for fstep in stream_dict["evaluation"].get(
+                                        "forecast_step"
+                                    )
+                                ]
+                            ) != sorted(metric_data["forecast_step"].values):
+                                _logger.info(
+                                    "Forecast steps different from previous config. Recomputing, if all Forecast steps are available in the Zarr file."
                                 )
                                 metrics_to_compute.append(metric)
                             else:

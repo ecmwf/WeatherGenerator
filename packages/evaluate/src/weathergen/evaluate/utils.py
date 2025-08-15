@@ -95,6 +95,7 @@ def get_data(
         _logger.info(f"RUN {run_id}: Processing stream {stream}...")
 
         fsteps = zio_forecast_steps if fsteps is None else fsteps
+
         # TODO: Avoid conversion of fsteps and sample to integers (as obtained from the ZarrIO)
         fsteps = sorted([int(fstep) for fstep in fsteps])
         samples = sorted(
@@ -203,8 +204,12 @@ def calc_scores_per_stream(
         f"RUN {run_id} - {stream}: Calculating scores for metrics {metrics}..."
     )
 
-    samples = cfg.evaluation.get("sample", None)
-    fsteps = cfg.evaluation.get("forecast_step", None)
+    samples = cfg.run_ids.get(run_id).streams.get(stream).evaluation.get("sample", None)
+    fsteps = (
+        cfg.run_ids.get(run_id)
+        .streams.get(stream)
+        .evaluation.get("forecast_step", None)
+    )
     channels = cfg.get("channels")
 
     if samples == "all":
@@ -213,7 +218,9 @@ def calc_scores_per_stream(
     if fsteps == "all":
         fsteps = None
 
-    output_data = get_data(cfg, results_dir, stream, region=region, return_counts=True)
+    output_data = get_data(
+        cfg, results_dir, stream, region=region, fsteps=fsteps, return_counts=True
+    )
 
     da_preds = output_data.prediction
     da_tars = output_data.target
@@ -222,6 +229,7 @@ def calc_scores_per_stream(
     # get coordinate information from retrieved data
 
     fsteps = [int(k) for k in da_tars.keys()]
+
     first_da = list(da_preds.values())[0]
 
     # TODO: improve the way we handle samples.
