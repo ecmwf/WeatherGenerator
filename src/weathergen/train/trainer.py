@@ -30,10 +30,10 @@ from torch.distributed.fsdp.wrap import (
 import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
+from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
-from weathergen.model.utils import freeze_weights
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.logger import logger
@@ -185,7 +185,6 @@ class Trainer(TrainerBase):
 
         if cf.forecast_freeze_model:
             self.model = self.model.freeze_weights_forecast()
-
 
         for name, module in self.model.named_modules():
             name = module.name if hasattr(module, "name") else None
