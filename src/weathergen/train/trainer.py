@@ -33,6 +33,7 @@ from weathergen.model.model import Model, ModelParams
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
+from weathergen.train.utils import freeze_weights
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.logger import logger
@@ -53,7 +54,6 @@ class Trainer(TrainerBase):
     ):
         self.cf = cf
 
-        # for testing
         self.freeze_modules = cf.get("freeze_modules", "")
 
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
@@ -186,12 +186,8 @@ class Trainer(TrainerBase):
         if cf.forecast_freeze_model:
             self.model = self.model.freeze_weights_forecast()
 
-        def freeze_weights(module):
-            for param in module.parameters():
-                param.requires_grad_(False)
 
         for name, module in self.model.named_modules():
-            print(f"{name}: {module}")
             name = module.name if hasattr(module, "name") else None
             if name is not None and re.fullmatch(self.freeze_modules, name):
                 freeze_weights(module)
