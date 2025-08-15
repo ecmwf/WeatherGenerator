@@ -39,6 +39,7 @@ class Masker:
     def __init__(self, cf: Config):
         self.masking_rate = cf.masking_rate
         self.masking_strategy = cf.masking_strategy
+        self.original_masking_strategy = cf.masking_strategy
         self.masking_rate_sampling = cf.masking_rate_sampling
         # masking_strategy_config is a dictionary that can hold any additional parameters
         self.healpix_level_data = cf.healpix_level
@@ -129,6 +130,17 @@ class Masker:
             self.perm_sel = [np.ones(tl, dtype=bool) for tl in token_lens]
             source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
             return source_data
+
+        # if we have masking_strategy "combination"
+        # at each pass we will sample a different masking_strategy
+        # according to some probability distribution
+        if self.original_masking_strategy == "combination":
+            # Sample a masking strategy from the config
+            strategy = self.rng.choice(
+                self.masking_strategy_config["strategies"],
+                p=self.masking_strategy_config["probabilities"],
+            )
+            self.masking_strategy = strategy
 
         # Implementation of different masking strategies.
         # Generate a flat boolean mask for random, block, or healpix masking at cell level.
