@@ -9,9 +9,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import re
 import time
 from typing import Any
-import re
 
 import numpy as np
 import torch
@@ -53,7 +53,7 @@ class Trainer(TrainerBase):
     ):
         self.cf = cf
 
-        # for testing 
+        # for testing
         self.freeze_modules = cf.get("freeze_modules", "")
 
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
