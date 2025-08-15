@@ -33,7 +33,7 @@ from weathergen.model.model import Model, ModelParams
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
-from weathergen.train.utils import freeze_weights
+from weathergen.model.utils import freeze_weights
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.logger import logger
