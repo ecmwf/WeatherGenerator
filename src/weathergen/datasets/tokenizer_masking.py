@@ -287,12 +287,12 @@ class TokenizerMasking:
         target_fraction = stream_info.get("target_fraction", -1)
         max_num_targets = stream_info.get("max_num_targets", -1)
 
-        if target_fraction > 0:
+        if target_fraction >= 0:
             target_tokens = self.sample_tensors_by_fraction(
                 target_tokens, torch.tensor(tt_lens), target_fraction
             )
 
-        elif max_num_targets > 0:
+        elif max_num_targets >= 0:
             target_tokens = self.sample_tensors_uniform_vectorized(
                 target_tokens, torch.tensor(tt_lens), max_num_targets
             )
