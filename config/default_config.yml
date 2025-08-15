@@ -73,6 +73,11 @@ loss_fcts_val:
 batch_size_per_gpu: 1
 batch_size_validation_per_gpu: 1
 
+# a regex that needs to fully match the name of the modules you want to freeze
+# e.g. ".*ERA5" will match any module whose name ends in ERA5\
+# encoders and decoders that exist per stream have the stream name attached at the end
+freeze_modules: ""
+
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
 training_mode: "masking"

@@ -11,6 +11,7 @@
 
 import time
 from typing import Any
+import re
 
 import numpy as np
 import torch
@@ -51,6 +52,9 @@ class Trainer(TrainerBase):
         cf: Config,
     ):
         self.cf = cf
+
+        # for testing 
+        self.freeze_modules = cf.get("freeze_modules", "")
 
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
@@ -181,6 +185,16 @@ class Trainer(TrainerBase):
 
         if cf.forecast_freeze_model:
             self.model = self.model.freeze_weights_forecast()
+
+        def freeze_weights(module):
+            for param in module.parameters():
+                param.requires_grad_(False)
+
+        for name, module in self.model.named_modules():
+            print(f"{name}: {module}")
+            name = module.name if hasattr(module, "name") else None
+            if name is not None and re.fullmatch(self.freeze_modules, name):
+                freeze_weights(module)
 
         self.model = self.model.to(self.devices[0])
 
