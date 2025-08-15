@@ -413,8 +413,10 @@ def plot_loss_per_stream(
                             + col
                         ]
 
-                        min_val = np.min([min_val, np.nanmin(y_data)])
-                        max_val = np.max([max_val, np.nanmax(y_data)])
+                        # skip all-nan slices
+                        if (~np.isnan(y_data)).sum() > 0:
+                            min_val = np.min([min_val, np.nanmin(y_data)])
+                            max_val = np.max([max_val, np.nanmax(y_data)])
 
         # TODO: ensure that legend is plotted with full opacity
         legend_str = legend_strs[0]
