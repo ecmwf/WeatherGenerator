@@ -286,17 +286,17 @@ class TokenizerMasking:
         # Sample by fraction if specified, otherwise by max count
         target_fraction = stream_info.get("target_fraction", -1)
         max_num_targets = stream_info.get("max_num_targets", -1)
-        
+
         if target_fraction > 0:
             target_tokens = self.sample_tensors_by_fraction(
                 target_tokens, torch.tensor(tt_lens), target_fraction
             )
-        
+
         elif max_num_targets > 0:
             target_tokens = self.sample_tensors_uniform_vectorized(
                 target_tokens, torch.tensor(tt_lens), max_num_targets
             )
-        
+
         tt_lin = torch.cat(target_tokens)
         target_tokens_lens = [len(t) for t in target_tokens]
         tt_lens = target_tokens_lens
@@ -340,27 +340,26 @@ class TokenizerMasking:
 
         return (target_tokens, target_coords, target_coords_raw, target_times_raw)
 
-
-    def sample_tensors_by_fraction(
-        self, tensor_list: list, lengths: list, fraction: float
-    ):
+    def sample_tensors_by_fraction(self, tensor_list: list, lengths: list, fraction: float):
         """
-        This function randomly selects tensors to achieve approximately the given fraction of total points
-        
+        This function randomly samples to achieve
+        approximately the specified fraction of total target tokens
+        using sample_tensors_uniform_vectorised
+
         tensor_list: List[torch.tensor] the list to select from
-        lengths: List[int] the length of each tensor in tensor_list  
+        lengths: List[int] the length of each tensor in tensor_list
         fraction: float between 0.0 and 1.0, the fraction of total points to sample
         """
         if not tensor_list or fraction >= 1.0:
             return tensor_list
-        
+
         if fraction <= 0.0:
             return [t[:0] for t in tensor_list]
 
         # Calculate target number of points
         total_points = torch.sum(lengths).item()
         target_points = int(total_points * fraction)
-        
+
         # Use existing vectorized sampling with calculated target
         return self.sample_tensors_uniform_vectorized(tensor_list, lengths, target_points)
 
@@ -378,7 +377,7 @@ class TokenizerMasking:
             return [], 0
 
         # Create random permutation
-        #perm = self.rng.permutation(len(tensor_list))
+        # perm = self.rng.permutation(len(tensor_list))
         perm = torch.from_numpy(self.rng.permutation(len(tensor_list)))
 
         # Vectorized cumulative sum
