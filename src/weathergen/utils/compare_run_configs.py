@@ -163,6 +163,15 @@ def main():
     parser.add_argument(
         "--max-length", type=int, default=30, help="Maximum length for config values."
     )
+    parser.add_argument(
+        "--show", 
+        type=int, 
+        default=[], 
+        help=(
+            "Put '*' to show all parameters, or leave empty to only show changed parameters. "
+            "Use for example 'ae_global' to show all parameters starting with 'ae_global'."
+        )
+    )
 
     args = parser.parse_args()
 
@@ -178,7 +187,7 @@ def main():
             [args.run_id_1, args.model_directory_1],
             [args.run_id_2, args.model_directory_2],
         ]
-        yaml_always_show_patterns = []
+        yaml_always_show_patterns = args.show if args.show else []
     else:
         # error: pass config or command line arguments
         _logger.error("Please provide a config or specify two run IDs and their model directories.")
