@@ -153,7 +153,9 @@ def main():
         help="Path to model directory for -r2/--run_id_2",
     )
     parser.add_argument(
-        "config", help="Path to YAML file listing run_ids and always_show_patterns."
+        "--config", 
+        default=None,
+        help="Path to YAML file listing run_ids and always_show_patterns.",
     )
     parser.add_argument(
         "output", nargs="?", default="reports/compare_configs.md", help="Output markdown file path."
@@ -173,8 +175,8 @@ def main():
         yaml_always_show_patterns = yaml_data.get("always_show_patterns", [])
     elif args.run_id_1 and args.model_directory_1 and args.run_id_2 and args.model_directory_2:
         config_files = [
-            (args.run_id_1, args.model_directory_1),
-            (args.run_id_2, args.model_directory_2),
+            [args.run_id_1, args.model_directory_1],
+            [args.run_id_2, args.model_directory_2],
         ]
         yaml_always_show_patterns = []
     else:
