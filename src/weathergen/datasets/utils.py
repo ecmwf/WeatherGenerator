@@ -19,7 +19,7 @@ from weathergen.datasets.stream_data import StreamData
 
 ####################################################################################################
 def arc_alpha(sin_alpha, cos_alpha):
-    """Invert cosine/sine for alpha \in [0,2pi] using both functions"""
+    """Invert cosine/sine for alpha in [0,2pi] using both functions"""
     t = torch.arccos(cos_alpha)
     mask = sin_alpha < 0.0
     t[mask] = (2.0 * np.pi) - t[mask]
@@ -56,7 +56,7 @@ def s2tor3(lats, lons):
     """
     Convert from spherical to Cartesion R^3 coordinates
 
-    Note: mathematics convention with lats \in [0,pi] and lons \in [0,2pi] is used
+    Note: mathematics convention with lats in [0,pi] and lons in [0,2pi] is used
           (which is not problematic for lons but for lats care is required)
     """
     x = torch.sin(lats) * torch.cos(lons)
@@ -71,7 +71,7 @@ def r3tos2(pos):
     """
     Convert from spherical to Cartesion R^3 coordinates
 
-    Note: mathematics convention with lats \in [0,pi] and lons \in [0,2pi] is used
+    Note: mathematics convention with lats in [0,pi] and lons in [0,2pi] is used
           (which is not problematic for lons but for lats care is required)
     """
     norm2 = torch.square(pos[..., 0]) + torch.square(pos[..., 1])
