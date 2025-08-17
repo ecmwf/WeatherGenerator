@@ -173,15 +173,13 @@ def main():
         yaml_always_show_patterns = yaml_data.get("always_show_patterns", [])
     elif args.run_id_1 and args.model_directory_1 and args.run_id_2 and args.model_directory_2:
         config_files = [
-            (args.run_id_1, args.model_directory_1), 
-            (args.run_id_2, args.model_directory_2)
-            ]
+            (args.run_id_1, args.model_directory_1),
+            (args.run_id_2, args.model_directory_2),
+        ]
         yaml_always_show_patterns = []
     else:
         # error: pass config or command line arguments
-        _logger.error(
-            "Please provide a config or specify two run IDs and their model directories."
-        )
+        _logger.error("Please provide a config or specify two run IDs and their model directories.")
     # Load configs using load_model_config from config module
     configs = {}
     for item in config_files:
