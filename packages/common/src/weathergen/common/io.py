@@ -59,7 +59,7 @@ class OutputDataset:
     item_key: ItemKey
 
     # (datapoints, channels, ens)
-    data: zarr.Array  # wrong type => arary like
+    data: zarr.Array  # wrong type => array like
 
     # (datapoints,)
     times: zarr.Array
@@ -125,16 +125,16 @@ class OutputDataset:
 class OutputItem:
     def __init__(
         self,
-        target: OutputDataset,
-        prediction: OutputDataset,
+        key: ItemKey,
+        target: OutputDataset | None = None,
+        prediction: OutputDataset | None = None,
         source: OutputDataset | None = None,
     ):
         """Collection of possible datasets for one output item."""
+        self.key = key
         self.target = target
         self.prediction = prediction
         self.source = source
-
-        self.key = self.target.item_key
 
         self.datasets = [self.target, self.prediction]
 
@@ -181,6 +181,7 @@ class ZarrIO:
             name: OutputDataset(name, key, **dict(dataset.arrays()), **dataset.attrs)
             for name, dataset in group.groups()
         }
+        datasets["key"] = key
 
         return OutputItem(**datasets)
 
@@ -303,8 +304,14 @@ class OutputBatchData:
         forecast_step = key.forecast_step - self.forecast_offset
         stream_idx = self.streams[key.stream]
         lens = self.targets_lens[forecast_step][stream_idx]
-        start = sum(lens[:sample])
-        n_samples = lens[sample]
+
+        # empty target/prediction
+        if len(lens) == 0:
+            start = 0
+            n_samples = 0
+        else:
+            start = sum(lens[:sample])
+            n_samples = lens[sample]
 
         _logger.debug(f"extracting subset: {key}")
         _logger.debug(
@@ -318,19 +325,25 @@ class OutputBatchData:
 
         datapoints = slice(start, start + n_samples)
 
-        target_data = self.targets[forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
-        preds_data = (
-            self.predictions[forecast_step][stream_idx][0]
-            .transpose(1, 0)
-            .transpose(1, 2)[datapoints]
-            .cpu()
-            .detach()
-            .numpy()
-        )
+        if n_samples == 0:
+            target_data = np.zeros((0, len(self.channels[stream_idx])), dtype=np.float32)
+            preds_data = np.zeros((0, len(self.channels[stream_idx])), dtype=np.float32)
+        else:
+            target_data = (
+                self.targets[forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
+            )
+            preds_data = (
+                self.predictions[forecast_step][stream_idx][0]
+                .transpose(1, 0)
+                .transpose(1, 2)[datapoints]
+                .cpu()
+                .detach()
+                .numpy()
+            )
 
         _coords = self.targets_coords[forecast_step][stream_idx][datapoints].numpy()
-        coords = _coords[:, :2]  # first two columns are lat,lon
-        geoinfo = _coords[:, 2:]  # the rest is geoinfo => potentially empty
+        coords = _coords[..., :2]  # first two columns are lat,lon
+        geoinfo = _coords[..., 2:]  # the rest is geoinfo => potentially empty
         if geoinfo.size > 0:  # TODO: set geoinfo to be empty for now
             geoinfo = np.empty((geoinfo.shape[0], 0))
             _logger.warning(
@@ -381,6 +394,7 @@ class OutputBatchData:
             source_dataset = None
 
         return OutputItem(
+            key=key,
             source=source_dataset,
             target=OutputDataset(
                 "target",
