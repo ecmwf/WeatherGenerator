@@ -153,7 +153,7 @@ def main():
         help="Path to model directory for -r2/--run_id_2",
     )
     parser.add_argument(
-        "--config", 
+        "--config",
         default=None,
         help="Path to YAML file listing run_ids and always_show_patterns.",
     )
@@ -164,13 +164,13 @@ def main():
         "--max-length", type=int, default=30, help="Maximum length for config values."
     )
     parser.add_argument(
-        "--show", 
-        type=int, 
-        default=[], 
+        "--show",
+        type=int,
+        default=[],
         help=(
             "Put '*' to show all parameters, or leave empty to only show changed parameters. "
             "Use for example 'ae_global' to show all parameters starting with 'ae_global'."
-        )
+        ),
     )
 
     args = parser.parse_args()
