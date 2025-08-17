@@ -11,6 +11,7 @@ import argparse
 import fnmatch
 import logging
 import os
+from pathlib import Path
 
 import pandas as pd
 import yaml
@@ -135,6 +136,22 @@ def main():
     parser = argparse.ArgumentParser(
         description="Compare WeatherGenerator configs and output markdown table."
     )
+    parser.add_argument("-r1", "--run_id_1", required=False)
+    parser.add_argument("-r2", "--run_id_2", required=False)
+    parser.add_argument(
+        "-m1",
+        "--model_directory_1",
+        type=Path,
+        default=None,
+        help="Path to model directory for -r1/--run_id_1",
+    )
+    parser.add_argument(
+        "-m2",
+        "--model_directory_2",
+        type=Path,
+        default=None,
+        help="Path to model directory for -r2/--run_id_2",
+    )
     parser.add_argument(
         "config", help="Path to YAML file listing run_ids and always_show_patterns."
     )
@@ -147,13 +164,24 @@ def main():
 
     args = parser.parse_args()
 
-    # Read YAML config list
-    with open(args.config) as f:
-        yaml_data = yaml.safe_load(f)
+    # Read YAML config list if exists
+    if args.config:
+        with open(args.config) as f:
+            yaml_data = yaml.safe_load(f)
 
-    config_files = yaml_data["run_ids"]
-    yaml_always_show_patterns = yaml_data.get("always_show_patterns", [])
-
+        config_files = yaml_data["run_ids"]
+        yaml_always_show_patterns = yaml_data.get("always_show_patterns", [])
+    elif args.run_id_1 and args.model_directory_1 and args.run_id_2 and args.model_directory_2:
+        config_files = [
+            (args.run_id_1, args.model_directory_1), 
+            (args.run_id_2, args.model_directory_2)
+            ]
+        yaml_always_show_patterns = []
+    else:
+        # error: pass config or command line arguments
+        _logger.error(
+            "Please provide a config or specify two run IDs and their model directories."
+        )
     # Load configs using load_model_config from config module
     configs = {}
     for item in config_files:
