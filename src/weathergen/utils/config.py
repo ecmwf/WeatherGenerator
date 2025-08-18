@@ -67,16 +67,9 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
     else:
-        # Load private config here...
-        shared_model_path = (
-            Path(
-                _load_private_conf(private_home=Path(model_path) if model_path else None).get(
-                    "path_shared_working_dir"
-                )
-            )
-            / "models"
-        )
-        fname = shared_model_path / run_id / _get_model_config_file_name(run_id, epoch)
+        # Load model config here...
+        model_path = Path(model_path)
+        fname = model_path / run_id / _get_model_config_file_name(run_id, epoch)
 
     _logger.info(f"Loading config from specified run_id and epoch: {fname}")
 
@@ -349,10 +342,27 @@ def load_streams(streams_directory: Path) -> list[Config]:
 def set_paths(config: Config) -> Config:
     """Set the configs run_path model_path attributes to default values if not present."""
     config = config.copy()
-    config.run_path = config.get("run_path", config.get("path_shared_working_dir") + "results")
-    config.model_path = config.get("model_path", config.get("path_shared_working_dir") + "models")
+    config.run_path = _get_config_attribute(
+        config=config, attribute_name="run_path", fallback="results"
+    )
+    config.model_path = _get_config_attribute(
+        config=config, attribute_name="model_path", fallback="models"
+    )
 
     return config
+
+
+def _get_config_attribute(config: Config, attribute_name: str, fallback: str) -> str:
+    """Get an attribute from a Config. If not, fall back to path_shared_working_dir concatenated
+    with the desired fallback path. Raise an error if neither the attribute nor
+    is specified."""
+    attribute = OmegaConf.select(config, attribute_name)
+    fallback_root = OmegaConf.select(config, "path_shared_working_dir")
+    assert attribute is not None or fallback_root is not None, (
+        f"Must specify `{attribute_name}` in config if `path_shared_working_dir` is None in config"
+    )
+    attribute = attribute if attribute else fallback_root + fallback
+    return attribute
 
 
 def get_path_run(config: Config) -> Path:

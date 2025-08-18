@@ -35,7 +35,7 @@ class WeatherGeneratorOutput:
 
 def get_data(
     cfg: dict,
-    run_id: str,
+    results_dir: Path,
     stream: str,
     region: str = "global",
     samples: list[int] = None,
@@ -50,8 +50,8 @@ def get_data(
     ----------
     cfg :
         Configuration dictionary containing all information for the evaluation.
-    run_id :
-        Run identifier.
+    results_dir : Path
+        Directory where the inference results are stored. Expected scheme `<results_base_dir>/<run_id>`.
     stream :
         Stream name to retrieve data for.
     region :
@@ -73,12 +73,11 @@ def get_data(
         - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast step.
         - points_per_sample: xarray DataArray containing the number of points per sample, if `return_counts` is True.
     """
-
+    run_id = results_dir.name
     run = cfg.run_ids[run_id]
-    results_dir = Path(cfg.get("results_dir"))
 
     fname_zarr = results_dir.joinpath(
-        f"{run_id}/validation_epoch{run['epoch']:05d}_rank{run['rank']:04d}.zarr"
+        f"validation_epoch{run['epoch']:05d}_rank{run['rank']:04d}.zarr"
     )
 
     if not fname_zarr.exists() or not fname_zarr.is_dir():
@@ -175,7 +174,7 @@ def get_data(
 
 
 def calc_scores_per_stream(
-    cfg: dict, run_id: str, stream: str, region: str, metrics: list[str]
+    cfg: dict, results_dir: Path, stream: str, region: str, metrics: list[str]
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -184,8 +183,9 @@ def calc_scores_per_stream(
     ----------
     cfg :
         Configuration dictionary containing all information for the evaluation.
-    run_id :
-        Run identifier.
+    results_dir : Path
+        Directory where the results are stored.
+        Expected scheme `<results_base_dir>/<run_id>`.
     stream :
         Stream name to calculate scores for.
     region :
@@ -197,6 +197,8 @@ def calc_scores_per_stream(
     -------
     Tuple of xarray DataArray containing the scores and the number of points per sample.
     """
+    run_id = results_dir.name
+
     _logger.info(
         f"RUN {run_id} - {stream}: Calculating scores for metrics {metrics}..."
     )
@@ -211,7 +213,7 @@ def calc_scores_per_stream(
     if fsteps == "all":
         fsteps = None
 
-    output_data = get_data(cfg, run_id, stream, region=region, return_counts=True)
+    output_data = get_data(cfg, results_dir, stream, region=region, return_counts=True)
 
     da_preds = output_data.prediction
     da_tars = output_data.target
@@ -278,7 +280,7 @@ def calc_scores_per_stream(
 
         metric_stream.loc[{"forecast_step": int(fstep)}] = combined_metrics
 
-        _logger.info(f"Scores for run {run_id} - {stream} calculated successfully.")
+    _logger.info(f"Scores for run {run_id} - {stream} calculated successfully.")
 
     metric_stream = xr.concat(metric_list, dim="forecast_step")
     metric_stream = metric_stream.assign_coords({"forecast_step": fsteps})
@@ -286,7 +288,13 @@ def calc_scores_per_stream(
     return metric_stream, points_per_sample
 
 
-def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str]:
+def plot_data(
+    cfg: str,
+    results_dir: Path,
+    plot_dir: Path,
+    stream: str,
+    stream_dict: dict,
+) -> list[str]:
     """
     Plot the data for a given run and stream.
 
@@ -294,6 +302,11 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     ----------
     cfg :
         Configuration dictionary containing all information for the evaluation.
+    results_dir :
+        Directory where the inference results are stored.
+        Expected scheme `<results_base_dir>/<run_id>`.
+    plot_base_dir :
+        Base directory where the plots will be saved.
     run_id :
         Run identifier.
     stream :
@@ -304,6 +317,8 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     -------
     List of plot names generated during the plotting process.
     """
+    run_id = results_dir.name
+
     # handle plotting settings
     plot_settings = stream_dict.get("plotting", {})
 
@@ -316,7 +331,7 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
     ):
         return
 
-    plotter = Plotter(cfg, run_id)
+    plotter = Plotter(cfg, plot_dir)
 
     plot_samples = plot_settings.get("sample", None)
     plot_fsteps = plot_settings.get("forecast_step", None)
@@ -347,7 +362,12 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
         plot_samples = None
 
     model_output = get_data(
-        cfg, run_id, stream, samples=plot_samples, fsteps=plot_fsteps, channels=plot_chs
+        cfg,
+        results_dir,
+        stream,
+        samples=plot_samples,
+        fsteps=plot_fsteps,
+        channels=plot_chs,
     )
 
     da_tars = model_output.target
@@ -376,7 +396,7 @@ def plot_data(cfg: str, run_id: str, stream: str, stream_dict: dict) -> list[str
 
             if plot_maps:
                 map_tar = plotter.create_maps_per_sample(
-                    tars, plot_chs, data_selection, "target", maps_config
+                    tars, plot_chs, data_selection, "targets", maps_config
                 )
 
                 map_pred = plotter.create_maps_per_sample(
@@ -462,14 +482,14 @@ def metric_list_to_json(
 
 
 def retrieve_metric_from_json(
-    dir: str, run_id: str, stream: str, region: str, metric: str, epoch: int
+    metric_dir: str, run_id: str, stream: str, region: str, metric: str, epoch: int
 ):
     """
     Retrieve the score for a given run, stream, metric, epoch, and rank from a JSON file.
 
     Parameters
     ----------
-    dir :
+    metric_dir :
         Directory where JSON files are stored.
     run_id :
         Run identifier.
@@ -488,7 +508,7 @@ def retrieve_metric_from_json(
         The metric DataArray.
     """
     score_path = (
-        Path(dir) / f"{run_id}_{stream}_{region}_{metric}_epoch{epoch:05d}.json"
+        Path(metric_dir) / f"{run_id}_{stream}_{region}_{metric}_epoch{epoch:05d}.json"
     )
     _logger.debug(f"Looking for: {score_path}")
     if score_path.exists():
@@ -499,7 +519,7 @@ def retrieve_metric_from_json(
         raise FileNotFoundError(f"File {score_path} not found in the archive.")
 
 
-def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
+def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path, print_summary: bool):
     """
     Plot summary of the evaluation results.
     This function is a placeholder for future implementation.
@@ -520,7 +540,7 @@ def plot_summary(cfg: dict, scores_dict: dict, print_summary: bool):
 
     regions = cfg.evaluation.get("regions", ["global"])
 
-    plotter = LinePlots(cfg)
+    plotter = LinePlots(cfg, summary_dir)
 
     for region in regions:
         for metric in metrics:

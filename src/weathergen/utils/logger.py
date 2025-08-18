@@ -45,14 +45,17 @@ def init_logger_per_stream(logger, stream_handle, output_streams):
     for ostr in output_streams if type(output_streams) is tuple else [output_streams]:
         # determine correct stream handler
         with_color = True
-        if ostr == sys.stdout or ostr == sys.stderr:
-            handler = logging.StreamHandler(sys.stdout)
+        if getattr(ostr, "name", None) == "<stdout>" or getattr(ostr, "name", None) == "<stderr>":
+            handler = logging.StreamHandler(ostr)
         elif ostr == "null":
             handler = logging.NullHandler()
         else:
             # path + file are specified as string or already path object
             assert type(ostr) is str or type(ostr) is pathlib.Path
-            handler = logging.FileHandler(pathlib.Path(ostr))
+            ofile = pathlib.Path(ostr)
+            # make sure the parent directory exists
+            pathlib.Path(ofile.parent).mkdir(parents=True, exist_ok=True)
+            handler = logging.FileHandler(ofile)
             with_color = False
 
         format_str = (
@@ -89,6 +92,9 @@ def init_loggers(
       null : /dev/null
       string/pathlib.Path : specifies path and outfile to be used for stream
 
+    Limitation: Using the same stream in a non-contiguous manner across logging levels, e.g.
+                the same file for CRITICAL and WARNING but a different than for ERROR is currently
+                not supported
     """
 
     package = "weathergen"
@@ -97,11 +103,25 @@ def init_loggers(
     logger.handlers.clear()
     logger.setLevel(logging_level)
 
-    logger = init_logger_per_stream(logger, logging.CRITICAL, critical_output_streams)
-    logger = init_logger_per_stream(logger, logging.ERROR, error_output_streams)
-    logger = init_logger_per_stream(logger, logging.WARNING, warning_output_streams)
-    logger = init_logger_per_stream(logger, logging.INFO, info_output_streams)
-    logger = init_logger_per_stream(logger, logging.DEBUG, debug_output_streams)
+    # collect for further processing
+    log_streams = [
+        [logging.CRITICAL, critical_output_streams],
+        [logging.ERROR, error_output_streams],
+        [logging.WARNING, warning_output_streams],
+        [logging.INFO, info_output_streams],
+        [logging.DEBUG, debug_output_streams],
+    ]
+
+    # find the unique streams
+    streams_unique = set([s[1] for s in log_streams])
+    # collect for each unique one all logging levels
+    streams_collected = [
+        [ls[0] for ls in log_streams if ls[1] == stream] for stream in streams_unique
+    ]
+
+    # set the logging
+    for streams, stream_handle in zip(streams_collected, streams_unique, strict=True):
+        logger = init_logger_per_stream(logger, min(streams), stream_handle)
 
 
 # TODO: remove, it should be module-level loggers
