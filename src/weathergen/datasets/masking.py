@@ -148,6 +148,8 @@ class Masker:
         # Generate a flat boolean mask for random, block, or healpix masking at cell level.
         # Generate a 3D mask to apply to each cell for channel masking.
 
+        print("What masking strategy am I using today!", self.masking_strategy)
+
         if self.masking_strategy == "random":
             flat_mask = self.rng.uniform(0, 1, num_tokens) < rate
 
