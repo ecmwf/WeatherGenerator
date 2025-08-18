@@ -154,11 +154,6 @@ def _load_streams_in_config(config: Config) -> Config:
     config = config.copy()
     if streams_directory is not None:
         streams_directory = Path(streams_directory)
-        if not streams_directory.is_dir():
-            msg = f"Streams directory {streams_directory} does not exist."
-            raise FileNotFoundError(msg)
-
-        _logger.info(f"Loading streams from {streams_directory}")
         config.streams = load_streams(streams_directory)
     return config
 
@@ -303,9 +298,17 @@ def _load_default_conf() -> Config:
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
+    #TODO: might want to put this into config later instead of hardcoding it here...
+    streams_history = {'streams_anemoi':'era5_1deg',
+                    'streams_anemoi_era5_split':'era5_1deg_split'}
     if not streams_directory.is_dir():
-        msg = f"Streams directory {streams_directory} does not exist."
-        raise FileNotFoundError(msg)
+        dirs = [streams_directory]
+        while streams_directory.name in streams_history and not streams_directory.is_dir():
+            streams_directory = streams_directory.with_name(streams_history[streams_directory.name])
+            dirs.append(streams_directory)
+        if not streams_directory.is_dir():
+            msg = f"None of the tested stream directories exist: {dirs}"
+            raise FileNotFoundError(msg)
 
     # read all reportypes from directory, append to existing ones
     streams_directory = streams_directory.absolute()
