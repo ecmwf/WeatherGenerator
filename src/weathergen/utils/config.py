@@ -298,9 +298,11 @@ def _load_default_conf() -> Config:
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
-    #TODO: might want to put this into config later instead of hardcoding it here...
-    streams_history = {'streams_anemoi':'era5_1deg',
-                    'streams_anemoi_era5_split':'era5_1deg_split'}
+    # TODO: might want to put this into config later instead of hardcoding it here...
+    streams_history = {
+        "streams_anemoi": "era5_1deg",
+        "streams_anemoi_era5_split": "era5_1deg_split",
+    }
     if not streams_directory.is_dir():
         dirs = [streams_directory]
         while streams_directory.name in streams_history and not streams_directory.is_dir():
