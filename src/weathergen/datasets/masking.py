@@ -184,7 +184,7 @@ class Masker:
                     source_data.append(data)
 
         elif self.masking_strategy == "causal":
-            # TODO: we don't set to 0, we just throw away
+            # we don't set to 0, we just throw away
             self.perm_sel = mask
             source_data = []
             for data, p in zip(tokenized_data, self.perm_sel, strict=True):
