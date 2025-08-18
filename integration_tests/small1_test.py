@@ -59,24 +59,26 @@ def test_train(setup, test_run_id):
     )
 
 
-    logger.info("run inference")
-    inference_from_args(
-        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--epoch", "0"]
-        + [
-            "--from_run_id",
-            test_run_id,
-            "--run_id",
-            test_run_id,
-            "--config",
-            f"{WEATHERGEN_HOME}/integration_tests/small1.yaml",
-        ]
-    )
-    logger.info("run evaluation")
+    infer_with_missing(test_run_id)
     evaluate_results(test_run_id)
     assert_missing_metrics_file(test_run_id)
     assert_train_loss_below_threshold(test_run_id)
     assert_val_loss_below_threshold(test_run_id)
     logger.info("end test_train")
+
+def infer(run_id):
+    logger.info("run inference")
+    inference_from_args(
+        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--epoch", "0"]
+        + [
+            "--from_run_id",
+            run_id,
+            "--run_id",
+            run_id,
+            "--config",
+            f"{WEATHERGEN_HOME}/integration_tests/small1.yaml",
+        ]
+    )
 
 
 def evaluate_results(run_id):
