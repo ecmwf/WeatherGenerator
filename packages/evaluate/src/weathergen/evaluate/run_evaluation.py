@@ -46,12 +46,13 @@ def evaluate_from_args(argl: list[str]) -> None:
     )
 
     args = parser.parse_args(argl)
+    evaluate_from_config(OmegaConf.load(args.config))
 
+def evaluate_from_config(cfg):
     # configure logging
     logging.basicConfig(level=logging.INFO)
 
     # load configuration
-    cfg = OmegaConf.load(args.config)
 
     runs = cfg.run_ids
 

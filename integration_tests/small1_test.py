@@ -14,10 +14,12 @@ import shutil
 from pathlib import Path
 
 import pytest
+import omegaconf
 
 import weathergen.common.io as io
 import weathergen.utils.config as config
 from weathergen.run_train import inference_from_args, train_with_args
+from weathergen.evaluate.run_evaluation import evaluate_from_config
 from weathergen.utils.metrics import get_train_metrics_path
 
 logger = logging.getLogger(__name__)
@@ -82,24 +84,33 @@ def infer(run_id):
 
 
 def evaluate_results(run_id):
-    cf = config.load_model_config(run_id, None, None)
-    data_root = config.get_path_output(cf, 0)
-
-    with io.ZarrIO(data_root) as reader:
-        samples = reader.samples
-        fsteps = reader.forecast_steps
-        streams = reader.streams
-
-        item = reader.get_data(samples[0], streams[0], fsteps[0])
-        ds = item.prediction.as_xarray()
-        logger.info(ds)
-        item.target.as_xarray()
-        logger.info(ds)
-        if item.key.with_source:
-            ds = item.source.as_xarray()
-            logger.info(ds)
-
-    # TODO: test concat multiple samples
+    logger.info("run evaluation")
+    cfg = omegaconf.OmegaConf.create({
+        "verbose" : True,
+        "results_dir" : "./results/",
+        "output_plotting_dir": "./plots/",
+        "output_scores_dir" : "./jsons/",
+        "image_format" : "png",
+        "dpi_val" : 300,
+        "summary_plots" : False,
+        "print_summary": True,
+        "evaluation" : {"metrics": ["rmse", "l1", "mse"]},
+        "run_ids": {
+            run_id: { # would be nice if this could be done with option
+                "streams": {
+                    "ERA5": {
+                        "channels": ["10v", "10u"], # "all" indicator would be nice
+                        "evaluation": {"forecast_steps": "all", "sample": "all"},
+                        "plotting": {"sample": [0, 1], "forecast_step": [0], "plot_maps": True, "plot_histograms": True},
+                    }
+                },
+                "label": "MTM ERA5",
+                "epoch": 0,
+                "rank": 0
+            }
+        }
+    })
+    evaluate_from_config(cfg)
 
 
 def load_metrics(run_id):
