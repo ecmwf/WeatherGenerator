@@ -237,7 +237,6 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     )
     assert rdata.geoinfos.ndim == 2, f"geoinfos must be 2D, got {rdata.geoinfos.shape}"
     assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
-    assert rdata.data.shape[1] > 0, f"data must have at least one channel {rdata.data.shape}"
     assert rdata.datetimes.ndim == 1, f"datetimes must be 1D {rdata.datetimes.shape}"
 
     assert rdata.coords.shape[0] == rdata.data.shape[0], "coords and data must have same length"
@@ -255,11 +254,9 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
         f"{rdata.datetimes.shape[0]}"
     )
 
-    assert np.logical_and(
-        rdata.datetimes >= dtr.start,
-        # rdata.datetimes < dtr.end  # TODO: enforce monotonicty also for obs
-        rdata.datetimes <= dtr.end,
-    ).all(), f"datetimes for data points violate window {dtr}."
+    assert np.logical_and(rdata.datetimes >= dtr.start, rdata.datetimes < dtr.end).all(), (
+        f"datetimes for data points violate window {dtr}."
+    )
 
 
 class DataReaderBase(metaclass=ABCMeta):
@@ -674,8 +671,8 @@ def get_dataset_indexes_timestep(
         or not data_end_time
         or dtr.end < data_start_time
         or dtr.start > data_end_time
-        or (dtr.start + period) < data_start_time
-        or (dtr.end - period) > data_end_time
+        or dtr.start < data_start_time
+        or dtr.end > data_end_time
         or (data_end_time is not None and dtr.start > data_end_time)
     ):
         return (np.array([], dtype=np.int64), dtr)

@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import logging
 import pathlib
 
 import numpy as np
@@ -33,15 +32,10 @@ from weathergen.datasets.utils import (
     compute_offsets_scatter_embed,
     compute_source_cell_lens,
 )
-from weathergen.utils.logger import init_loggers, logger
-from weathergen.utils.train_logger import Stage, TrainLogger
+from weathergen.utils.logger import logger
+from weathergen.utils.train_logger import Stage
 
-_logger = logging.getLogger(__name__)
-
-type AnyDataReader = (
-    DataReaderBase | DataReaderAnemoi | DataReaderObs
-    # | FesomDataset | AtmorepDataset
-)
+type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 
 
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
@@ -53,7 +47,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         end_date_,
         batch_size,
         samples_per_epoch,
-        train_logger: TrainLogger,
         stage: Stage,
         shuffle=True,
     ):
@@ -65,13 +58,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         assert end_date > start_date, (end_date, start_date)
 
         self.mask_value = 0.0
-        self._train_logger = train_logger
         self._stage = stage
 
         self.len_hrs: int = cf.len_hrs
         self.step_hrs: int = cf.step_hrs
         self.time_window_handler = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
-        _logger.info(
+        logger.info(
             f"Time window handler: start={start_date}, end={end_date},"
             f"len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
         )
@@ -159,7 +151,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len // cf.num_ranks) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)
-        _logger.info(f"index_range={index_range}, len={self.len}, len_chunk={len_chunk}")
+        logger.info(f"index_range={index_range}, len={self.len}, len_chunk={len_chunk}")
 
         self.rank = cf.rank
         self.num_ranks = cf.num_ranks
@@ -190,7 +182,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         if cf.training_mode == "forecast":
             self.tokenizer = TokenizerForecast(cf.healpix_level)
         elif cf.training_mode == "masking":
-            masker = Masker(cf.masking_rate, cf.masking_strategy, cf.masking_rate_sampling)
+            masker = Masker(cf)
             self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
             msg = "masked token modeling does not support self.input_window_steps > 1; "
@@ -294,9 +286,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             len : number of batch items
             len[*] : number of streams
         """
-        init_loggers()
         iter_start, iter_end = self.worker_workset()
-        _logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={self.len}")
+        logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={self.len}")
 
         # create new shuffeling
         self.reset()
@@ -440,7 +431,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             iter_end = iter_start + per_worker
             if worker_info.id + 1 == worker_info.num_workers:
                 iter_end = local_end
-            _logger.info(
+            logger.info(
                 f"{self.rank}::{worker_info.id}"
                 + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
             )
