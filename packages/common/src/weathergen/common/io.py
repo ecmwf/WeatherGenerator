@@ -381,10 +381,10 @@ class OutputBatchData:
         data_coords = self._extract_coordinates(stream_idx, offest_key, datapoints)
 
         assert len(data_coords.channels) == target_data.shape[1], (
-            "Number of channel names does not align with data"
+            "Number of channel names does not align with target data."
         )
         assert len(data_coords.channels) == preds_data.shape[1], (
-            "Number of channel names does not align with data"
+            "Number of channel names does not align with prediction data."
         )
 
         if key.with_source:
