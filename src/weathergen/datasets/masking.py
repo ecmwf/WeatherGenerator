@@ -75,7 +75,9 @@ class Masker:
                 # check explicit includes
                 source_include = stream.get("source_include", [])
                 target_include = stream.get("target_include", [])
-                assert set(source_include) == set(target_include), ()
+                assert set(source_include) == set(target_include), (
+                    "Source and target channels not identical. Required for masking_mode=channel"
+                )
                 # check excludes
                 source_exclude = stream.get("source_exclude", [])
                 target_exclude = stream.get("target_exclude", [])
