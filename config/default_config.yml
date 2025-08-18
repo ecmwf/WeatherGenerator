@@ -1,4 +1,4 @@
-streams_directory: "./config/streams/streams_mixed/"
+streams_directory: "./config/streams/streams_anemoi/"
 
 embed_orientation: "channels"
 embed_local_coords: True
@@ -122,7 +122,7 @@ input_window_steps: 1
 
 val_initial: False
 
-loader_num_workers: 0
+loader_num_workers: 8
 log_validation: 0
 analysis_streams_output: ["ERA5"]
 
