@@ -213,41 +213,6 @@ class TokenizerMasking:
 
         return (source_tokens_cells, source_tokens_lens, source_centroids)
 
-    def sample_tensors_uniform_vectorized(
-        self, tensor_list: list, lengths: list, max_total_points: int
-    ):
-        """
-        This function randomly selects tensors up to a maximum number of total points
-
-        tensor_list: List[torch.tensor] the list to select from
-        lengths: List[int] the length of each tensor in tensor_list
-        max_total_points: the maximum number of total points to sample from
-        """
-        if not tensor_list:
-            return [], 0
-
-        # Create random permutation
-        perm = self.rng.permutation(len(tensor_list))
-
-        # Vectorized cumulative sum
-        cumsum = torch.cumsum(lengths[perm], dim=0)
-
-        # Find cutoff point
-        valid_mask = cumsum <= max_total_points
-        if not valid_mask.any():
-            return [], 0
-
-        num_selected = valid_mask.sum().item()
-        selected_indices = perm[:num_selected]
-        selected_indices = torch.zeros_like(perm).scatter(0, selected_indices, 1)
-
-        selected_tensors = [
-            t if mask.item() == 1 else t[:0]
-            for t, mask in zip(tensor_list, selected_indices, strict=False)
-        ]
-
-        return selected_tensors
-
     def batchify_target(
         self,
         stream_info: dict,
@@ -303,7 +268,10 @@ class TokenizerMasking:
         target_tokens_lens = [len(t) for t in target_tokens]
         total_target = sum(target_tokens_lens)
 
-        # sampling the number of targets according to sampling_rate_target
+        # sampling the number of targets according to per-stream sampling_rate_target
+        # otherwise take global sampling_rate_target from config
+        sampling_rate_target = stream_info.get("sampling_rate_target", sampling_rate_target)
+        
         samples = (torch.empty(total_target).uniform_() < sampling_rate_target).split(
             target_tokens_lens
         )
@@ -364,3 +332,38 @@ class TokenizerMasking:
             target_coords = list(target_coords.split(tt_lens))
         
         return (target_tokens, target_coords, target_coords_raw, target_times_raw)
+
+    def sample_tensors_uniform_vectorized(
+        self, tensor_list: list, lengths: list, max_total_points: int
+    ):
+        """
+        This function randomly selects tensors up to a maximum number of total points
+
+        tensor_list: List[torch.tensor] the list to select from
+        lengths: List[int] the length of each tensor in tensor_list
+        max_total_points: the maximum number of total points to sample from
+        """
+        if not tensor_list:
+            return [], 0
+
+        # Create random permutation
+        perm = self.rng.permutation(len(tensor_list))
+
+        # Vectorized cumulative sum
+        cumsum = torch.cumsum(lengths[perm], dim=0)
+
+        # Find cutoff point
+        valid_mask = cumsum <= max_total_points
+        if not valid_mask.any():
+            return [], 0
+
+        num_selected = valid_mask.sum().item()
+        selected_indices = perm[:num_selected]
+        selected_indices = torch.zeros_like(perm).scatter(0, selected_indices, 1)
+
+        selected_tensors = [
+            t if mask.item() == 1 else t[:0]
+            for t, mask in zip(tensor_list, selected_indices, strict=False)
+        ]
+
+        return selected_tensors
