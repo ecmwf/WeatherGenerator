@@ -8,6 +8,10 @@ from weathergen.datasets.utils import (
     s2tor3,
 )
 
+# on some clusters our numpy version is pinned to be 1.x.x where the np.argsort does not
+# the stable=True argument
+numpy_argsort_args = {"stable": True} if int(np.__version__.split(".")[0]) >= 2 else {}
+
 
 def arc_alpha(sin_alpha, cos_alpha):
     """Maps a point on the unit circle (np.array or torch.tensor), defined by its (cosine, sine)
@@ -100,7 +104,7 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
     posr3 = s2tor3(thetas, phis)
 
     # extract information to split according to cells by first sorting and then finding split idxs
-    hpy_idxs_ord = np.argsort(hpy_idxs, stable=True)
+    hpy_idxs_ord = np.argsort(hpy_idxs, **numpy_argsort_args)
     splits = np.flatnonzero(np.diff(hpy_idxs[hpy_idxs_ord]))
 
     # extract per cell data
@@ -166,7 +170,7 @@ def tokenize_window_space(
     time_win,
     token_size,
     hl,
-    hpy_verts_Rs,
+    hpy_verts_rots,
     n_coords,
     n_geoinfos,
     n_data,
@@ -190,14 +194,15 @@ def tokenize_window_space(
     source_padded = torch.cat([torch.zeros_like(source[0]).unsqueeze(0), n_data(source)])
 
     # convert to local coordinates
-    # TODO: how to vectorize it so that there's no list comprhension (and the Rs are not duplicated)
+    # TODO: how to vectorize it so that there's no list comprhension (and the rots are not
+    # duplicated)
     # TODO: avoid that padded lists are rotated, which means potentially a lot of zeros
     if local_coords:
         fp32 = torch.float32
         posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])
         coords_local = [
             n_coords(r3tos2(torch.matmul(R, posr3[idxs].transpose(1, 0)).transpose(1, 0)).to(fp32))
-            for R, idxs in zip(hpy_verts_Rs, idxs_ord, strict=True)
+            for R, idxs in zip(hpy_verts_rots, idxs_ord, strict=True)
         ]
     else:
         coords_local = torch.cat([torch.zeros_like(coords[0]).unsqueeze(0), coords])
@@ -206,23 +211,25 @@ def tokenize_window_space(
     # reorder based on cells (except for coords_local) and then cat along
     # (time,coords,geoinfos,source) dimension and then split based on cells
     tokens_cells = [
-        list(
-            torch.split(
-                torch.cat(
-                    (
-                        torch.full([len(idxs), 1], stream_id, dtype=torch.float32),
-                        times_enc_padded[idxs],
-                        coords_local[i],
-                        geoinfos_padded[idxs],
-                        source_padded[idxs],
+        (
+            list(
+                torch.split(
+                    torch.cat(
+                        (
+                            torch.full([len(idxs), 1], stream_id, dtype=torch.float32),
+                            times_enc_padded[idxs],
+                            coords_local[i],
+                            geoinfos_padded[idxs],
+                            source_padded[idxs],
+                        ),
+                        1,
                     ),
-                    1,
-                ),
-                idxs_lens,
+                    idxs_lens,
+                )
             )
+            if idxs_lens[0] > 0
+            else []
         )
-        if idxs_lens[0] > 0
-        else []
         for i, (idxs, idxs_lens) in enumerate(zip(idxs_ord, idxs_ord_lens, strict=True))
     ]
 
@@ -238,7 +245,7 @@ def tokenize_window_spacetime(
     time_win,
     token_size,
     hl,
-    hpy_verts_Rs,
+    hpy_verts_rots,
     n_coords,
     n_geoinfos,
     n_data,
@@ -265,7 +272,7 @@ def tokenize_window_spacetime(
             time_win,
             token_size,
             hl,
-            hpy_verts_Rs,
+            hpy_verts_rots,
             n_coords,
             n_geoinfos,
             n_data,

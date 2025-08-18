@@ -22,7 +22,6 @@ from weathergen.train.utils import get_run_id
 
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
-_DEFAULT_MODEL_PATH = "./models"
 
 _logger = logging.getLogger(__name__)
 
@@ -64,13 +63,21 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
     Load a configuration file from a given run_id and epoch.
     If run_id is a full path, loads it from the full path.
     """
-
     if Path(run_id).exists():  # load from the full path if a full path is provided
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
     else:
-        path_models = Path(model_path or _DEFAULT_MODEL_PATH)
-        fname = path_models / run_id / _get_model_config_file_name(run_id, epoch)
+        # Load model config here. In case model_path is not provided, get it from private conf
+        if model_path is None:
+            pconf = _load_private_conf()
+            model_path = _get_config_attribute(
+                config=pconf, attribute_name="model_path", fallback="models"
+            )
+        model_path = Path(model_path)
+        fname = model_path / run_id / _get_model_config_file_name(run_id, epoch)
+        assert fname.exists(), (
+            "The fallback path to the model does not exist. Please provide a `model_path`."
+        )
 
     _logger.info(f"Loading config from specified run_id and epoch: {fname}")
 
@@ -120,18 +127,40 @@ def load_config(
             # all the paths may be concatenated with ":"
             p = str(overwrite).split(":")
             for path in p:
-                overwrite_configs.append(_load_overwrite_conf(Path(path)))
+                c = _load_overwrite_conf(Path(path))
+                c = _load_streams_in_config(c)
+                overwrite_configs.append(c)
         else:
             # If it is a dict or DictConfig, we can directly use it
-            overwrite_configs.append(_load_overwrite_conf(overwrite))
+            c = _load_overwrite_conf(overwrite)
+            c = _load_streams_in_config(c)
+            overwrite_configs.append(c)
+
+    private_config = set_paths(private_config)
 
     if from_run_id is None:
         base_config = _load_default_conf()
     else:
-        base_config = load_model_config(from_run_id, epoch, private_config["model_path"])
+        base_config = load_model_config(from_run_id, epoch, private_config.get("model_path", None))
 
     # use OmegaConf.unsafe_merge if too slow
     return OmegaConf.merge(base_config, private_config, *overwrite_configs)
+
+
+def _load_streams_in_config(config: Config) -> Config:
+    """If the config contains a streams_directory, loads the streams and returns the config with
+    the streams set."""
+    streams_directory = config.get("streams_directory", None)
+    config = config.copy()
+    if streams_directory is not None:
+        streams_directory = Path(streams_directory)
+        if not streams_directory.is_dir():
+            msg = f"Streams directory {streams_directory} does not exist."
+            raise FileNotFoundError(msg)
+
+        _logger.info(f"Loading streams from {streams_directory}")
+        config.streams = load_streams(streams_directory)
+    return config
 
 
 def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config:
@@ -214,7 +243,7 @@ def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
     return overwrite_config
 
 
-def _load_private_conf(private_home: Path | None) -> DictConfig:
+def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     "Return the private configuration."
     "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
 
@@ -225,7 +254,7 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
 
     elif "WEATHERGEN_PRIVATE_CONF" in os.environ:
         private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
-        _logger.info(f"Loading private config fromWEATHERGEN_PRIVATE_CONF:{private_home}.")
+        _logger.info(f"Loading private config from WEATHERGEN_PRIVATE_CONF:{private_home}.")
 
     elif env_script_path.is_file():
         _logger.info(f"Loading private config from platform-env.py: {env_script_path}.")
@@ -261,9 +290,6 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
             "WEATHERGEN_PRIVATE_CONF or provide a path."
         )
     private_cf = OmegaConf.load(private_home)
-    private_cf["model_path"] = (
-        private_cf["model_path"] if "model_path" in private_cf.keys() else "./models"
-    )
 
     if "secrets" in private_cf:
         del private_cf["secrets"]
@@ -319,6 +345,49 @@ def load_streams(streams_directory: Path) -> list[Config]:
             continue
 
     return list(streams.values())
+
+
+def set_paths(config: Config) -> Config:
+    """Set the configs run_path model_path attributes to default values if not present."""
+    config = config.copy()
+    config.run_path = _get_config_attribute(
+        config=config, attribute_name="run_path", fallback="results"
+    )
+    config.model_path = _get_config_attribute(
+        config=config, attribute_name="model_path", fallback="models"
+    )
+
+    return config
+
+
+def _get_config_attribute(config: Config, attribute_name: str, fallback: str) -> str:
+    """Get an attribute from a Config. If not available, fall back to path_shared_working_dir
+    concatenated with the desired fallback path. Raise an error if neither the attribute nor a
+    fallback is specified."""
+    attribute = OmegaConf.select(config, attribute_name)
+    fallback_root = OmegaConf.select(config, "path_shared_working_dir")
+    assert attribute is not None or fallback_root is not None, (
+        f"Must specify `{attribute_name}` in config if `path_shared_working_dir` is None in config"
+    )
+    attribute = attribute if attribute else fallback_root + fallback
+    return attribute
+
+
+def get_path_run(config: Config) -> Path:
+    """Get the current runs run_path for storing run results and logs."""
+    return Path(config.run_path) / config.run_id
+
+
+def get_path_model(config: Config) -> Path:
+    """Get the current runs model_path for storing model checkpoints."""
+    return Path(config.model_path) / config.run_id
+
+
+def get_path_output(config: Config, epoch: int) -> Path:
+    base_path = get_path_run(config)
+    fname = f"validation_epoch{epoch:05d}_rank{config.rank:04d}.zarr"
+
+    return base_path / fname
 
 
 def get_dtype(value: str) -> torch.dtype:

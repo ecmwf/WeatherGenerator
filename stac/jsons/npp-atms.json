@@ -62,6 +62,7 @@
          "satellite"
       ],
       "name": "NPP-ATMS",
+      "processing_level": "1C",
       "providers": [
          {
             "name": "ECMWF",
@@ -71,9 +72,16 @@
             "url": "https://ecmwf.int"
          },
          {
-            "name": "EUMETSAT",
+            "name": "NASA",
             "roles": [
                "provider"
+            ],
+            "url": "https://www.nasa.gov"
+         },
+         {
+            "name": "EUMETSAT",
+            "roles": [
+               "processor"
             ],
             "url": "https://eumetsat.int"
          }

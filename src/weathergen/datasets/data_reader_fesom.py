@@ -94,13 +94,17 @@ class DataReaderFesom(DataReaderTimestep):
             self.init_empty()
             return
 
-        # TODO: why the case to [D]?
-        self.start_idx = (tw_handler.t_start - start_ds).astype("timedelta64[D]").astype(
-            int
-        ) * self.mesh_size
-        self.end_idx = (
-            (tw_handler.t_end - start_ds).astype("timedelta64[D]").astype(int) + 1
-        ) * self.mesh_size - 1
+        period = self.time[self.mesh_size][0] - self.time[0][0]
+
+        if tw_handler.t_start > start_ds:
+            self.start_idx = ((tw_handler.t_start - start_ds) // period + 1) * self.mesh_size
+        else:
+            self.start_idx = 0
+
+        self.end_idx = ((tw_handler.t_end - start_ds) // period + 1) * self.mesh_size
+
+        if self.end_idx > len(self.time):
+            self.end_idx = len(self.time) - 1
 
         self.len = (self.end_idx - self.start_idx) // self.mesh_size
 
@@ -108,8 +112,6 @@ class DataReaderFesom(DataReaderTimestep):
             f"Abort: Final index of {self.end_idx} is the same"
             f"of larger than start index {self.start_idx}"
         )
-
-        period = self.time[self.mesh_size][0] - self.time[0][0]
 
         super().__init__(
             tw_handler,
@@ -141,7 +143,7 @@ class DataReaderFesom(DataReaderTimestep):
 
         self.mean = np.concatenate((np.array([0, 0]), np.array(self.ds.data.attrs["means"])))
         self.stdev = np.sqrt(
-            np.concatenate((np.array([1, 1]), np.array(self.ds.data.attrs["vars"])))
+            np.concatenate((np.array([1, 1]), np.array(self.ds.data.attrs["std"])))
         )
 
         source_channels = stream_info.get("source")
