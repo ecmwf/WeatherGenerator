@@ -1,0 +1,48 @@
+ae_local_dim_embed: 1024
+ae_local_num_blocks: 0
+ae_local_num_queries: 1
+ae_global_num_blocks: 4
+
+forecast_offset: 1
+forecast_steps: 2
+forecast_policy: "fixed"
+forecast_att_dense_rate: 1.0
+
+fe_num_blocks: 8
+
+len_hrs: 6
+step_hrs: 6
+
+grad_clip: 1.0
+lr_max: 0.00005
+
+istep: 12288
+data_loader_rng_seed: 1752001227
+run_id: "d4fcwk5b"
+
+### The following was in path: WeatherGenerator-private/hpc/levante/config/era5_d4fcwk5b_config.yml
+### Which I deleted (for cleaning)
+# ae_local_dim_embed: 1024
+# ae_local_num_blocks: 0
+# ae_local_num_queries: 1
+# # ae_global_num_blocks: 4
+
+# ae_global_num_blocks: 12
+
+
+# forecast_offset: 1
+# forecast_steps: 2
+# forecast_policy: "fixed"
+# forecast_att_dense_rate: 1.0
+
+# fe_num_blocks: 8
+
+# len_hrs: 6
+# step_hrs: 6
+
+# grad_clip: 1.0
+# lr_max: 0.00005
+
+# istep: 12288
+# data_loader_rng_seed: 1752001227
+# run_id: "d4fcwk5b"

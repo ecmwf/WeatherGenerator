@@ -1,0 +1,21 @@
+streams_directory: "./config/streams/streams_cams_eac4/"
+
+start_date: 201710010000
+end_date: 202112312100 
+start_date_val: 202201010000 
+end_date_val: 202205312100 
+
+num_epochs: 1 # 10
+token_size: 64
+
+step_hrs: 1
+
+samples_per_epoch: 17 #  works # 100 works
+samples_per_validation: 17 
+shuffle: True
+
+loader_num_workers: 16
+
+masking_rate: 0.8
+
+with_mixed_precision: True
