@@ -362,5 +362,5 @@ class TokenizerMasking:
             )
             target_coords.requires_grad = False
             target_coords = list(target_coords.split(tt_lens))
-
+        
         return (target_tokens, target_coords, target_coords_raw, target_times_raw)

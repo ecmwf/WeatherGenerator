@@ -150,6 +150,9 @@ class Masker:
         elif self.masking_strategy == "channel":
             mask = self._generate_channel_mask(tokenized_data, rate, coords, geoinfos, source)
 
+        elif self.masking_strategy == "causal":
+            mask = self._generate_causal_mask(tokenized_data, rate, coords, geoinfos, source)
+
         else:
             assert False, f"Unknown masking strategy: {self.masking_strategy}"
 
@@ -168,6 +171,17 @@ class Masker:
                 else:
                     source_data.append(data)
 
+        elif self.masking_strategy == "causal":
+            self.perm_sel = mask
+            source_data = []
+            for data, p in zip(tokenized_data, self.perm_sel, strict=True):
+                if len(data) > 0:
+                    data[p] = self.mask_value
+                    #import pdb; pdb.set_trace()
+                    source_data.append(data)
+                else:
+                    source_data.append(data)
+
         else:
             # Split the flat mask to match the structure of the tokenized data (list of lists)
             # This will be perm_sel, as a class attribute, used to mask the target data.
@@ -177,6 +191,9 @@ class Masker:
             # Apply the mask to get the source data (where mask is False)
             source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
 
+        #print("what is the length of source_data", len(source_data))
+        #print("What is the shape of first element of source_data", source_data[0].shape)
+        
         return source_data
 
     def mask_target(
@@ -212,8 +229,7 @@ class Masker:
 
         processed_target_tokens = []
 
-        # process all healpix cells used for embedding
-        for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
+        for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):    
             if self.masking_strategy == "channel":
                 # If masking strategy is channel, handle target tokens differently.
                 # We don't have Booleans per cell, instead per channel per cell,
@@ -228,6 +244,24 @@ class Masker:
                     ] = torch.nan
                     selected_tensors.append(c)
 
+            if self.masking_strategy == "causal":
+                selected_tensors = []
+                for i, c in enumerate(cc):
+                    #print("What is i", i)
+                    if i < pp.shape[0]:  # Check if we have a mask for this time window
+                        if not pp[i]:  # If this time window should be masked
+                            #print("i, and if not pp[i]:", i)
+                            # Clone the tensor to avoid modifying the original
+                            c_masked = c.clone()
+                            # Only set the weather data channels to NaN, preserve time/coords/geoinfos
+                            num_fixed_channels = self.dim_time_enc + coords.shape[-1] + geoinfos.shape[-1]
+                            c_masked[:, num_fixed_channels :] = torch.nan
+                            selected_tensors.append(c_masked)
+                        else:
+                            selected_tensors.append(c)
+                    else:
+                        selected_tensors.append(c)
+
             else:
                 # For other masking strategies, we simply select the tensors where the mask is True.
                 selected_tensors = [c for c, p in zip(cc, pp, strict=True) if p]
@@ -239,6 +273,10 @@ class Masker:
                 processed_target_tokens.append(
                     torch.empty(0, feature_dim, dtype=coords.dtype, device=coords.device)
                 )
+
+        # check if the whole of process_target_tokens is NaN:
+        if all(torch.all(torch.isnan(tensor)) for tensor in processed_target_tokens):
+            warnings.warn("All processed target tokens are NaN.")
 
         return processed_target_tokens
 
@@ -384,3 +422,37 @@ class Masker:
         full_mask = np.split(full_mask, np.cumsum(tokenized_data_lens[:-1]))
 
         return full_mask
+
+    def _generate_causal_mask(self,
+        tokenized_data: list[torch.Tensor],
+        rate: float,
+        coords: torch.Tensor,
+        geoinfos: torch.Tensor,
+        source: torch.Tensor,
+    ) -> list[np.typing.NDArray]:
+
+        '''
+        For spatiotemporal tokenization, we want to mask out the final time window.
+
+        tokenized_data has shape [time_windows, token_size, channels] for source
+
+
+        '''
+
+        if not tokenized_data:
+            return []
+
+        # masking rate sampling, to be refactored as shared between methods
+        rate = self._get_sampling_rate()
+
+        # create a mask that masks out the final 'fraction' of the time windows
+        # which has shape len_tokenized_data, time_windows, token_size, channels]
+
+        mask = np.zeros((len(tokenized_data), len(tokenized_data[0])), dtype=bool)
+
+        mask[:, 2:] = True
+
+        #print("What is the mask generated: ", mask)
+        #print("What is the shape of the mask generated", mask.shape)
+
+        return mask
