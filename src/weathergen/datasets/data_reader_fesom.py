@@ -162,7 +162,7 @@ class DataReaderFesom(DataReaderTimestep):
         self.stdev = np.sqrt(
             np.concatenate((np.array([1, 1]), np.array(first_group.data.attrs["std"])))
         )
-        self.stdev[self.stdev == 0.0] = 1.0
+        self.stdev[self.stdev <= 1e-5] = 1.0
 
         source_channels = self._stream_info.get("source")
         self.source_channels, self.source_idx = (
