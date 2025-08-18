@@ -148,8 +148,6 @@ class Masker:
         # Generate a flat boolean mask for random, block, or healpix masking at cell level.
         # Generate a 3D mask to apply to each cell for channel masking.
 
-        print("What masking strategy am I using today!", self.masking_strategy)
-
         if self.masking_strategy == "random":
             flat_mask = self.rng.uniform(0, 1, num_tokens) < rate
 
@@ -258,10 +256,11 @@ class Masker:
                     ] = torch.nan
                     selected_tensors.append(c)
 
-            if self.masking_strategy == "causal":
+            elif self.masking_strategy == "causal":
                 # select only the target time windows
                 #selected_tensors = [c for i, c in enumerate(cc) if i < len(pp) and pp[i]]
                 selected_tensors = [c for i, c in enumerate(cc) if pp[i]]
+                
             else:
                 # For other masking strategies, we simply select the tensors where the mask is True.
                 selected_tensors = [c for c, p in zip(cc, pp, strict=True) if p]
