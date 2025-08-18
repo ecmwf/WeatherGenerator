@@ -319,7 +319,6 @@ class DataReaderBase(metaclass=ABCMeta):
         -------
         length of dataset
         """
-
         return self.length()
 
     def get_source(self, idx: TIndex) -> ReaderData:
