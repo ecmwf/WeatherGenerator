@@ -13,13 +13,11 @@ import os
 import shutil
 from pathlib import Path
 
-import pytest
 import omegaconf
+import pytest
 
-import weathergen.common.io as io
-import weathergen.utils.config as config
-from weathergen.run_train import inference_from_args, train_with_args
 from weathergen.evaluate.run_evaluation import evaluate_from_config
+from weathergen.run_train import inference_from_args, train_with_args
 from weathergen.utils.metrics import get_train_metrics_path
 
 logger = logging.getLogger(__name__)
@@ -60,13 +58,13 @@ def test_train(setup, test_run_id):
         f"{WEATHERGEN_HOME}/config/streams/streams_test/",
     )
 
-
     infer_with_missing(test_run_id)
     evaluate_results(test_run_id)
     assert_missing_metrics_file(test_run_id)
     assert_train_loss_below_threshold(test_run_id)
     assert_val_loss_below_threshold(test_run_id)
     logger.info("end test_train")
+
 
 def infer(run_id):
     logger.info("run inference")
@@ -83,33 +81,55 @@ def infer(run_id):
     )
 
 
+def infer_with_missing(run_id):
+    logger.info("run inference")
+    inference_from_args(
+        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--epoch", "0"]
+        + [
+            "--from_run_id",
+            run_id,
+            "--run_id",
+            run_id,
+            "--config",
+            f"{WEATHERGEN_HOME}/integration_tests/small1.yaml",
+        ]
+    )
+
+
 def evaluate_results(run_id):
     logger.info("run evaluation")
-    cfg = omegaconf.OmegaConf.create({
-        "verbose" : True,
-        "results_dir" : "./results/",
-        "output_plotting_dir": "./plots/",
-        "output_scores_dir" : "./jsons/",
-        "image_format" : "png",
-        "dpi_val" : 300,
-        "summary_plots" : False,
-        "print_summary": True,
-        "evaluation" : {"metrics": ["rmse", "l1", "mse"]},
-        "run_ids": {
-            run_id: { # would be nice if this could be done with option
-                "streams": {
-                    "ERA5": {
-                        "channels": ["10v", "10u"], # "all" indicator would be nice
-                        "evaluation": {"forecast_steps": "all", "sample": "all"},
-                        "plotting": {"sample": [0, 1], "forecast_step": [0], "plot_maps": True, "plot_histograms": True},
-                    }
-                },
-                "label": "MTM ERA5",
-                "epoch": 0,
-                "rank": 0
-            }
+    cfg = omegaconf.OmegaConf.create(
+        {
+            "verbose": True,
+            "results_dir": "./results/",
+            "output_plotting_dir": "./plots/",
+            "output_scores_dir": "./jsons/",
+            "image_format": "png",
+            "dpi_val": 300,
+            "summary_plots": False,
+            "print_summary": True,
+            "evaluation": {"metrics": ["rmse", "l1", "mse"]},
+            "run_ids": {
+                run_id: {  # would be nice if this could be done with option
+                    "streams": {
+                        "ERA5": {
+                            "channels": ["10v", "10u"],  # "all" indicator would be nice
+                            "evaluation": {"forecast_steps": "all", "sample": "all"},
+                            "plotting": {
+                                "sample": [0, 1],
+                                "forecast_step": [0],
+                                "plot_maps": True,
+                                "plot_histograms": True,
+                            },
+                        }
+                    },
+                    "label": "MTM ERA5",
+                    "epoch": 0,
+                    "rank": 0,
+                }
+            },
         }
-    })
+    )
     evaluate_from_config(cfg)
 
 
