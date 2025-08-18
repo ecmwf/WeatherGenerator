@@ -33,30 +33,31 @@ except Exception as e:
     commit_hash = "unknown"
     logger.warning(f"Could not get commit hash: {e}")
 
-weathergen_home = Path(__file__).parent.parent
+WEATHERGEN_HOME = Path(__file__).parent.parent
 
 
 @pytest.fixture()
 def setup(test_run_id):
     logger.info(f"setup fixture with {test_run_id}")
-    shutil.rmtree(weathergen_home / "results" / test_run_id, ignore_errors=True)
-    shutil.rmtree(weathergen_home / "models" / test_run_id, ignore_errors=True)
+    shutil.rmtree(WEATHERGEN_HOME / "results" / test_run_id, ignore_errors=True)
+    shutil.rmtree(WEATHERGEN_HOME / "models" / test_run_id, ignore_errors=True)
     yield
     logger.info("end fixture")
 
 
 @pytest.mark.parametrize("test_run_id", ["test_small1_" + commit_hash])
 def test_train(setup, test_run_id):
-    logger.info(f"test_train with run_id {test_run_id} {weathergen_home}")
+    logger.info(f"test_train with run_id {test_run_id} {WEATHERGEN_HOME}")
 
     train_with_args(
-        f"--config={weathergen_home}/integration_tests/small1.yaml".split()
+        f"--config={WEATHERGEN_HOME}/integration_tests/small1.yaml".split()
         + [
             "--run_id",
             test_run_id,
         ],
-        f"{weathergen_home}/config/streams/streams_test/",
+        f"{WEATHERGEN_HOME}/config/streams/streams_test/",
     )
+
 
     logger.info("run inference")
     inference_from_args(
@@ -67,7 +68,7 @@ def test_train(setup, test_run_id):
             "--run_id",
             test_run_id,
             "--config",
-            f"{weathergen_home}/integration_tests/small1.yaml",
+            f"{WEATHERGEN_HOME}/integration_tests/small1.yaml",
         ]
     )
     logger.info("run evaluation")
@@ -101,7 +102,7 @@ def evaluate_results(run_id):
 
 def load_metrics(run_id):
     """Helper function to load metrics"""
-    file_path = get_train_metrics_path(base_path=weathergen_home / "results", run_id=run_id)
+    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results", run_id=run_id)
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Metrics file not found for run_id: {run_id}")
     with open(file_path) as f:
@@ -111,7 +112,7 @@ def load_metrics(run_id):
 
 def assert_missing_metrics_file(run_id):
     """Test that a missing metrics file raises FileNotFoundError."""
-    file_path = get_train_metrics_path(base_path=weathergen_home / "results", run_id=run_id)
+    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results", run_id=run_id)
     assert os.path.exists(file_path), f"Metrics file does not exist for run_id: {run_id}"
     metrics = load_metrics(run_id)
     logger.info(f"Loaded metrics for run_id: {run_id}: {metrics}")
