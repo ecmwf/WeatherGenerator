@@ -151,7 +151,7 @@ def evaluate_from_args(argl: list[str]) -> None:
                                 ]
                             ) != sorted(metric_data["forecast_step"].values):
                                 _logger.info(
-                                    "Forecast steps different from previous config. Recomputing if all Forecast steps are available in the Zarr file."
+                                    "Forecast steps different from previous config. Recomputing if all forecast steps are available in the Zarr file."
                                 )
                                 metrics_to_compute.append(metric)
                             else:

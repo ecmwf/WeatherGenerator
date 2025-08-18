@@ -117,53 +117,61 @@ def get_data(
             points_per_sample = None
 
         for fstep in fsteps:
-            _logger.info(f"RUN {run_id} - {stream}: Processing fstep {fstep}...")
-            da_tars_fs, da_preds_fs = [], []
-            pps = []
+            try:
+                _logger.info(f"RUN {run_id} - {stream}: Processing fstep {fstep}...")
+                da_tars_fs, da_preds_fs = [], []
+                pps = []
 
-            for sample in tqdm(
-                samples, desc=f"Processing {run_id} - {stream} - {fstep}"
-            ):
-                out = zio.get_data(sample, stream, fstep)
-                target, pred = out.target.as_xarray(), out.prediction.as_xarray()
+                for sample in tqdm(
+                    samples, desc=f"Processing {run_id} - {stream} - {fstep}"
+                ):
+                    out = zio.get_data(sample, stream, fstep)
 
-                if region != "global":
-                    _logger.debug(
-                        f"Applying bounding box mask for region '{region}' to targets and predictions..."
-                    )
-                    target = bbox.apply_mask(target)
-                    pred = bbox.apply_mask(pred)
+                    target, pred = out.target.as_xarray(), out.prediction.as_xarray()
 
-                npoints = len(target.ipoint)
+                    if region != "global":
+                        _logger.debug(
+                            f"Applying bounding box mask for region '{region}' to targets and predictions..."
+                        )
+                        target = bbox.apply_mask(target)
+                        pred = bbox.apply_mask(pred)
 
-                da_tars_fs.append(target.squeeze())
-                da_preds_fs.append(pred.squeeze())
-                pps.append(npoints)
+                    npoints = len(target.ipoint)
 
-            _logger.debug(
-                f"Concatenating targets and predictions for stream {stream}, forecast_step {fstep}..."
-            )
-            da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
-            da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
+                    da_tars_fs.append(target.squeeze())
+                    da_preds_fs.append(pred.squeeze())
+                    pps.append(npoints)
 
-            if set(channels) != set(all_channels):
                 _logger.debug(
-                    f"Restricting targets and predictions to channels {channels} for stream {stream}..."
+                    f"Concatenating targets and predictions for stream {stream}, forecast_step {fstep}..."
                 )
-                available_channels = da_tars_fs.channel.values
-                existing_channels = [ch for ch in channels if ch in available_channels]
-                if len(existing_channels) < len(channels):
-                    _logger.warning(
-                        f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
+                da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
+                da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
+
+                if set(channels) != set(all_channels):
+                    _logger.debug(
+                        f"Restricting targets and predictions to channels {channels} for stream {stream}..."
                     )
+                    available_channels = da_tars_fs.channel.values
+                    existing_channels = [
+                        ch for ch in channels if ch in available_channels
+                    ]
+                    if len(existing_channels) < len(channels):
+                        _logger.warning(
+                            f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
+                        )
 
-                da_tars_fs = da_tars_fs.sel(channel=existing_channels)
-                da_preds_fs = da_preds_fs.sel(channel=existing_channels)
+                    da_tars_fs = da_tars_fs.sel(channel=existing_channels)
+                    da_preds_fs = da_preds_fs.sel(channel=existing_channels)
 
-            da_tars.append(da_tars_fs)
-            da_preds.append(da_preds_fs)
-            if return_counts:
-                points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
+                da_tars.append(da_tars_fs)
+                da_preds.append(da_preds_fs)
+                if return_counts:
+                    points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
+
+            except AssertionError as e:
+                print("Caught error:", e)
+                print("Proceding with next forecast step if necessary.")
 
         # Safer than a list
         da_tars = {fstep: da for fstep, da in zip(fsteps, da_tars, strict=False)}
