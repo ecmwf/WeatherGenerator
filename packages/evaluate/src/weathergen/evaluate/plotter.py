@@ -8,6 +8,15 @@ import numpy as np
 import xarray as xr
 from PIL import Image
 
+from weathergen.utils.config import _load_private_conf
+
+work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
+import cartopy
+
+cartopy.config["data_dir"] = str(work_dir)
+cartopy.config["pre_existing_data_dir"] = str(work_dir)
+os.environ["CARTOPY_DATA_DIR"] = str(work_dir)
+
 np.seterr(divide="ignore", invalid="ignore")
 
 logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
@@ -15,13 +24,15 @@ logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
+_logger.info(f"Taking cartopy paths from {work_dir}")
+
 
 class Plotter:
     """
     Contains all basic plotting functions.
     """
 
-    def __init__(self, cfg: dict, model_id: str = ""):
+    def __init__(self, cfg: dict, output_basedir: str | Path):
         """
         Initialize the Plotter class.
 
@@ -29,27 +40,29 @@ class Plotter:
         ----------
         cfg:
             Configuration dictionary containing all information for the plotting.
-        model_id:
-            If a model_id is given, the output will be saved in a folder called as the model_id.
+        output_basedir:
+            Base directory under which the plots will be saved.
+            Expected scheme `<results_base_dir>/<run_id>`.
         """
+
+        _logger.info(f"Taking cartopy paths from {work_dir}")
 
         self.cfg = cfg
 
-        out_plot_dir = Path(cfg.output_plotting_dir)
         self.image_format = cfg.image_format
         self.dpi_val = cfg.get("dpi_val")
         self.fig_size = cfg.get("fig_size", (8, 10))
+        self.run_id = output_basedir.name
 
-        self.out_plot_dir = out_plot_dir.joinpath(self.image_format).joinpath(model_id)
+        self.out_plot_basedir = output_basedir / "plots"
 
-        if not os.path.exists(self.out_plot_dir):
-            _logger.info(f"Creating dir {self.out_plot_dir}")
-            os.makedirs(self.out_plot_dir, exist_ok=True)
+        if not os.path.exists(self.out_plot_basedir):
+            _logger.info(f"Creating dir {self.out_plot_basedir}")
+            os.makedirs(self.out_plot_basedir, exist_ok=True)
 
         self.sample = None
         self.stream = None
         self.fstep = None
-        self.model_id = model_id
         self.select = {}
 
     def update_data_selection(self, select: dict):
@@ -155,6 +168,13 @@ class Plotter:
 
         self.update_data_selection(select)
 
+        # Basic map output directory for this stream
+        hist_output_dir = self.out_plot_basedir / self.stream / "histograms"
+
+        if not os.path.exists(hist_output_dir):
+            _logger.info(f"Creating dir {hist_output_dir}")
+            os.makedirs(hist_output_dir)
+
         for var in variables:
             select_var = self.select | {"channel": var}
 
@@ -179,15 +199,18 @@ class Plotter:
             # TODO: make this nicer
             parts = [
                 "histogram",
-                self.model_id,
+                self.run_id,
                 tag,
                 str(self.sample),
                 self.stream,
                 var,
                 str(self.fstep).zfill(3),
             ]
+
             name = "_".join(filter(None, parts))
-            plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
+            fname = hist_output_dir / tag / f"{name}.{self.image_format}"
+            _logger.debug(f"Saving map to {fname}")
+            plt.savefig(fname)
             plt.close()
             plot_names.append(name)
 
@@ -217,7 +240,7 @@ class Plotter:
         select: dict
             Selection to be applied to the DataArray
         tag: str
-            Any tag you want to add to the plot
+            Any tag you want to add to the plot. Note: This is added to the plot directory.
         map_kwargs: dict
             Additional keyword arguments for the map.
             Known keys are:
@@ -237,6 +260,13 @@ class Plotter:
         marker = map_kwargs_save.pop("marker", "o")
 
         self.update_data_selection(select)
+
+        # Basic map output directory for this stream
+        map_output_dir = self.out_plot_basedir / self.stream / "maps" / tag
+
+        if not os.path.exists(map_output_dir):
+            _logger.info(f"Creating dir {map_output_dir}")
+            os.makedirs(map_output_dir)
 
         plot_names = []
         for var in variables:
@@ -275,7 +305,7 @@ class Plotter:
             # TODO: make this nicer
             parts = [
                 "map",
-                self.model_id,
+                self.run_id,
                 tag,
                 str(self.sample),
                 self.stream,
@@ -283,7 +313,8 @@ class Plotter:
                 str(self.fstep).zfill(3),
             ]
             name = "_".join(filter(None, parts))
-            fname = f"{self.out_plot_dir.joinpath(name)}.{self.image_format}"
+
+            fname = map_output_dir / f"{name}.{self.image_format}"
             _logger.debug(f"Saving map to {fname}")
             plt.savefig(fname)
             plt.close()
@@ -339,16 +370,14 @@ class Plotter:
 
 
 class LinePlots:
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, output_basedir: str | Path):
         self.cfg = cfg
-        out_plot_dir = Path(cfg.output_plotting_dir)
         self.image_format = cfg.image_format
         self.dpi_val = cfg.get("dpi_val")
         self.fig_size = cfg.get("fig_size", (8, 10))
 
-        self.out_plot_dir = out_plot_dir.joinpath(self.image_format).joinpath(
-            "line_plots"
-        )
+        self.out_plot_dir = output_basedir / "line_plots"
+
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
