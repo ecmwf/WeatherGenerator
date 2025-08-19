@@ -31,7 +31,7 @@ class Plotter:
     Contains all basic plotting functions.
     """
 
-    def __init__(self, cfg: dict, output_basedir: str | Path):
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
         """
         Initialize the Plotter class.
 
@@ -46,11 +46,10 @@ class Plotter:
 
         _logger.info(f"Taking cartopy paths from {work_dir}")
 
-        self.cfg = cfg
-
-        self.image_format = cfg.image_format
-        self.dpi_val = cfg.get("dpi_val")
-        self.fig_size = cfg.get("fig_size", (8, 10))
+        self.image_format = plotter_cfg.image_format
+        self.dpi_val = plotter_cfg.get("dpi_val")
+        self.fig_size = plotter_cfg.get("fig_size")
+        self.bulk_plot = plotter_cfg.get("tokenize_spacetime", False)     # True if we want to plot all valid times in one plot 
         self.run_id = output_basedir.name
 
         self.out_plot_basedir = Path(output_basedir) / "plots"
@@ -182,24 +181,36 @@ class Plotter:
                 self.select_from_da(preds, select_var),
             )
 
-            ntimes_unique = len(np.unique(targ.valid_time))
-            _logger.info(
-                f"Creating histograms for {ntimes_unique} valid times for variable {var}."
-            )
 
-            targ, prd = targ.groupby("valid_time"), prd.groupby("valid_time")
+            if self.bulk_plot:
+                    name = self.plot_histogram(
+                        targ,
+                        prd,
+                        hist_output_dir,
+                        var,
+                        tag=tag,
+                    )
 
-            for valid_time, (targ_t, prd_t) in zip(targ, prd): 
-                _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
-                name = self.plot_histogram(
-                    targ_t,
-                    prd_t,
-                    hist_output_dir,
-                    var,
-                    tag=tag,
+                    plot_names.append(name)
+            else:
+                ntimes_unique = len(np.unique(targ.valid_time))
+                _logger.info(
+                    f"Creating histograms for {ntimes_unique} valid times for variable {var}."
                 )
 
-                plot_names.append(name)
+                targ, prd = targ.groupby("valid_time"), prd.groupby("valid_time")
+
+                for valid_time, (targ_t, prd_t) in zip(targ, prd): 
+                    _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
+                    name = self.plot_histogram(
+                        targ_t,
+                        prd_t,
+                        hist_output_dir,
+                        var,
+                        tag=tag,
+                    )
+
+                    plot_names.append(name)
 
         self.clean_data_selection()
 
@@ -311,19 +322,10 @@ class Plotter:
             select_var = self.select | {"channel": var}
             da = self.select_from_da(data, select_var).compute()
 
-
-            ntimes_unique = len(np.unique(da.valid_time))
-            _logger.info(
-                f"Creating histograms for {ntimes_unique} valid times for variable {var}."
-            )
-            
-
-            da = da.groupby("valid_time")
-
-            for valid_time, da_t in da: 
-                _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
+            if self.bulk_plot:
+                _logger.info(f"Plotting map for {var}")
                 name = self.scatter_plot_map(
-                    da_t,
+                    da,
                     map_output_dir,
                     var,
                     tag=tag,
@@ -331,6 +333,26 @@ class Plotter:
                 )
 
                 plot_names.append(name)
+            else:
+                ntimes_unique = len(np.unique(da.valid_time))
+                _logger.info(
+                    f"Creating maps for {ntimes_unique} valid times for variable {var}."
+                )
+                
+                da = da.groupby("valid_time")
+
+                for valid_time, da_t in da: 
+                    _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
+                    name = self.scatter_plot_map(
+                        da_t,
+                        map_output_dir,
+                        var,
+                        tag=tag,
+                        map_kwargs=map_kwargs,
+                    )
+
+                    plot_names.append(name)
+
 
         self.clean_data_selection()
 

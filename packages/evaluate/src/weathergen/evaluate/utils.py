@@ -289,11 +289,11 @@ def calc_scores_per_stream(
 
 
 def plot_data(
-    cfg: str,
+    cfg: dict,
+    run_config: oc.DictConfig,
     results_dir: Path,
     plot_dir: Path,
     stream: str,
-    stream_dict: dict,
 ) -> list[str]:
     """
     Plot the data for a given run and stream.
@@ -302,22 +302,23 @@ def plot_data(
     ----------
     cfg :
         Configuration dictionary containing all information for the evaluation.
+    run_config :
+        Configuration for the run, including stream information.
     results_dir :
         Directory where the inference results are stored.
         Expected scheme `<results_base_dir>/<run_id>`.
     plot_base_dir :
         Base directory where the plots will be saved.
-    run_id :
-        Run identifier.
     stream :
         Stream name to plot data for.
-    stream_dict :
-        Dictionary containing stream configuration.
     Returns
     -------
     List of plot names generated during the plotting process.
     """
     run_id = results_dir.name
+
+    # get stream dict from evaluation config (assumed to be part of cfg at this point)
+    stream_dict = cfg["run_ids"][run_id]["streams"][stream]
 
     # handle plotting settings
     plot_settings = stream_dict.get("plotting", {})
@@ -330,8 +331,13 @@ def plot_data(
         )
     ):
         return
+    
+    plotter_cfg = {"image_format": cfg.get("image_format", "png"), 
+                   "dpi_val": cfg.get("dpi_val", 300),
+                   "fig_size": cfg.get("fig_size", (8, 10)),
+                   "tokenize_spacetime": run_config.get("tokenize_spacetime", False)}
 
-    plotter = Plotter(cfg, plot_dir)
+    plotter = Plotter(plotter_cfg, plot_dir)
 
     plot_samples = plot_settings.get("sample", None)
     plot_fsteps = plot_settings.get("forecast_step", None)
