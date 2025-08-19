@@ -304,7 +304,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
         "streams_mixed": "era5_nppatms_synop",
         "streams_ocean": "fesom",
         "streams_icon": "icon",
-        "streams_mixed_experimental": "cerra_geos_1"
+        "streams_mixed_experimental": "cerra_geos_1",
     }
     if not streams_directory.is_dir():
         streams_directory_config = streams_directory
@@ -315,10 +315,12 @@ def load_streams(streams_directory: Path) -> list[Config]:
         if not streams_directory.is_dir():
             msg = f"Could not find stream directory, nor its history: {[str(dir) for dir in dirs]}"
             raise FileNotFoundError(msg)
-        _logger.info(f"Streams directory {streams_directory} found in " \
-        f"history for {streams_directory_config}. " \
-        "Note: This change will not be reflected in the config. " \
-        "Please update the 'streams_directory' variable manually.")
+        _logger.info(
+            f"Streams directory {streams_directory} found in "
+            f"history for {streams_directory_config}. "
+            "Note: This change will not be reflected in the config. "
+            "Please update the 'streams_directory' variable manually."
+        )
 
     # read all reportypes from directory, append to existing ones
     streams_directory = streams_directory.absolute()
