@@ -1,4 +1,4 @@
-streams_directory: "./config/streams/streams_anemoi/"
+streams_directory: "./config/streams/era5_1deg/"
 
 embed_orientation: "channels"
 embed_local_coords: True

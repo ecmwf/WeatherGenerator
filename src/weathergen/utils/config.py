@@ -301,16 +301,22 @@ def load_streams(streams_directory: Path) -> list[Config]:
     # TODO: might want to put this into config later instead of hardcoding it here...
     streams_history = {
         "streams_anemoi": "era5_1deg",
-        "streams_anemoi_era5_split": "era5_1deg_split",
+        "streams_mixed": "era5_nppatms_synop",
+        "streams_ocean": "fesom"
     }
     if not streams_directory.is_dir():
+        streams_directory_config = streams_directory
         dirs = [streams_directory]
         while streams_directory.name in streams_history and not streams_directory.is_dir():
             streams_directory = streams_directory.with_name(streams_history[streams_directory.name])
             dirs.append(streams_directory)
         if not streams_directory.is_dir():
-            msg = f"None of the tested stream directories exist: {dirs}"
+            msg = f"Could not find stream directory, nor its history: {[str(dir) for dir in dirs]}"
             raise FileNotFoundError(msg)
+        _logger.info(f"Streams directory {streams_directory} found in " \
+        f"history for {streams_directory_config}. " \
+        "Note: This change will not be reflected in the config. " \
+        "Please update the 'streams_directory' variable manually.")
 
     # read all reportypes from directory, append to existing ones
     streams_directory = streams_directory.absolute()
@@ -320,7 +326,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
     streams = {}
     # exclude temp files starting with "." or "#" (eg. emacs, vim, macos savefiles)
     stream_files = sorted(streams_directory.rglob("[!.#]*.yml"))
-    _logger.info(f"discover stream configs: {', '.join(map(str, stream_files))}")
+    _logger.info(f"Discover stream configs: {', '.join(map(str, stream_files))}")
     for config_file in stream_files:
         try:
             config = OmegaConf.load(config_file)
