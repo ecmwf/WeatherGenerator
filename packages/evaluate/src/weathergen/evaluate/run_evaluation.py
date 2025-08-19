@@ -118,48 +118,27 @@ def evaluate_from_args(argl: list[str]) -> None:
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
 
                 for region in regions:
+
                     metrics_to_compute = []
 
                     for metric in metrics:
+                        metric_data = retrieve_metric_from_json(
+                            metrics_dir,
+                            run_id,
+                            stream,
+                            region,
+                            metric,
+                            run.epoch,
+                        )
                         try:
-                            metric_data = retrieve_metric_from_json(
-                                metrics_dir,
-                                run_id,
-                                stream,
-                                region,
-                                metric,
-                                run.epoch,
-                            )
-
-                            # check if channels unchanged from previous config
-                            channels = stream_dict.get("channels")
-                            missing_channels = []
-                            for ch in channels:
-                                if ch not in metric_data["channel"].values:
-                                    missing_channels.append(ch)
-                            if missing_channels:
-                                _logger.info(
-                                    f"Channels {missing_channels} do not appear in saved scores for {metric}. Recomputing."
-                                )
-                                metrics_to_compute.append(metric)
-                            elif sorted(
-                                [
-                                    int(fstep)
-                                    for fstep in stream_dict["evaluation"].get(
-                                        "forecast_step"
-                                    )
-                                ]
-                            ) != sorted(metric_data["forecast_step"].values):
-                                _logger.info(
-                                    "Forecast steps different from previous config. Recomputing if all forecast steps are available in the Zarr file."
-                                )
+                            if not _check_metric(metric, metric_data, stream_dict):
+                                _logger.info("check failed")
                                 metrics_to_compute.append(metric)
                             else:
+                                _logger.info("check passed")
                                 scores_dict[metric][region][stream][run_id] = (
                                     metric_data
                                 )
-
-                        # TODO update retrieve_metric_from_json to avoid having to catch errors
                         except (FileNotFoundError, KeyError, ValueError):
                             metrics_to_compute.append(metric)
 
@@ -187,6 +166,46 @@ def evaluate_from_args(argl: list[str]) -> None:
     if scores_dict and cfg.summary_plots:
         _logger.info("Started creating summary plots..")
         plot_summary(cfg, scores_dict, summary_dir, print_summary=cfg.print_summary)
+
+
+def _check_metric(metric: str, metric_data: dict, stream_dict: dict):
+
+    channels_config = stream_dict.get("channels")
+    if channels_config is None:
+        _logger.info(
+                f"No channels specified for {metric}. Recomputing."
+            )
+        return False
+    else:
+        #check channels
+        channels_data = metric_data["channel"].values
+        missing_config_channels, missing_data_channels = [], []
+        for ch in channels_config:
+            if ch not in channels_data:
+                missing_config_channels.append(ch)
+        for ch in channels_data:
+            if ch not in channels_config:
+                missing_data_channels.append(ch)
+        if missing_config_channels or missing_data_channels:
+            _logger.info(
+                "Channels different from previous config. Recomputing if channels are available in the Zarr file."
+            )
+            return False
+        #check forecast steps
+        elif sorted(
+            [
+                int(fstep)
+                for fstep in stream_dict["evaluation"].get(
+                    "forecast_step"
+                )
+            ]
+        ) != sorted(metric_data["forecast_step"].values):
+            _logger.info(
+                "Forecast steps different from previous config. Recomputing for forecast steps available in the Zarr file."
+            )
+            return False
+        else:
+            return True
 
 
 if __name__ == "__main__":
