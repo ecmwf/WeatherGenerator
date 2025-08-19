@@ -17,9 +17,11 @@ import astropy_healpix as hp
 import astropy_healpix.healpy
 import numpy as np
 import torch
+import torch.nn as nn
 from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
 
+from weathergen.model.positional_encoding import FourierEmbedding, PositionalEmbedding
 from weathergen.model.engines import (
     EmbeddingEngine,
     EnsPredictionHead,
@@ -249,7 +251,21 @@ class Model(torch.nn.Module):
                 "Empty forecast engine (fe_num_blocks = 0), but forecast_steps[i] > 0 for some i"
             )
 
-        self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells).create()
+        fe_aux_encoding_type = cf.get("fe_aux_encoding_type", "identity")
+        if fe_aux_encoding_type == "identity":
+            self.fe_aux_info = nn.Identity()
+            fe_aux_channels = 1
+        elif fe_aux_encoding_type == "positional":
+            fe_aux_channels = cf.get("fe_aux_channels", 64)
+            self.fe_aux_info = PositionalEmbedding(fe_aux_channels)
+        elif fe_aux_encoding_type == "fourier":
+            fe_aux_channels = cf.get("fe_aux_channels", 64)
+            self.fe_aux_info = FourierEmbedding(fe_aux_channels)
+        else:
+            raise NotImplemented(
+                f"{fe_aux_encoding_type} is not known, options are identity, positional, or fourier"
+            )
+        self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells, fe_aux_channels).create()
 
         ###############
         # embed coordinates yielding one query token for each target token
@@ -704,7 +720,8 @@ class Model(torch.nn.Module):
         """
 
         for it, block in enumerate(self.fe_blocks):
-            aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
+            aux_info = self.fe_aux_info(torch.tensor([it], dtype=torch.float32, device="cuda"))
+            # aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
             tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
 
         return tokens
