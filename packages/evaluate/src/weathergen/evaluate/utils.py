@@ -357,7 +357,7 @@ def plot_data(
         raise TypeError("plot_histograms must be a boolean.")
 
     plot_animations = plot_settings.get("plot_animations", False)
-    if not isinstance(plot_settings.plot_histograms, bool):
+    if not isinstance(plot_settings.plot_animations, bool):
         raise TypeError("plot_animations must be a boolean.")
 
     if plot_fsteps == "all":
@@ -377,8 +377,6 @@ def plot_data(
 
     da_tars = model_output.target
     da_preds = model_output.prediction
-
-    da_tars, da_preds = calc_lower_upper(da_tars, da_preds)
 
     plot_fsteps = da_tars.keys()
 

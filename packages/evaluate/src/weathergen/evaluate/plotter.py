@@ -285,8 +285,6 @@ class Plotter:
                 da["lat"],
                 c=da,
                 cmap="coolwarm",
-                vmin=da["min"].item(),
-                vmax=da["max"].item(),
                 s=marker_size,
                 marker=marker,
                 transform=ccrs.PlateCarree(),
