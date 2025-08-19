@@ -217,6 +217,14 @@ class TokenizerForecast:
         target_coords = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
         target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
 
+        sampling_rate_target = stream_info.get("sampling_rate_target", sampling_rate_target)
+        if sampling_rate_target < 1.0:
+            mask = self.rng.uniform(0.0, 1.0, source.shape[0]) < sampling_rate_target
+            coords = coords[mask]
+            geoinfos = geoinfos[mask]
+            source = source[mask]
+            times = times[mask]
+
         # TODO: currently treated as empty to avoid special case handling
         if len(source) < 2:
             return (target_tokens, target_coords, torch.tensor([]), torch.tensor([]))
@@ -228,8 +236,7 @@ class TokenizerForecast:
         with_perm_target = True
         if with_perm_target:
             hpy_idxs_ord_split = [
-                idx[self.rng.permutation(len(idx))[: int(len(idx) * sampling_rate_target)]]
-                for idx in hpy_idxs_ord_split
+                idx[self.rng.permutation(len(idx))[: int(len(idx))]] for idx in hpy_idxs_ord_split
             ]
 
         # helper variables to split according to cells
