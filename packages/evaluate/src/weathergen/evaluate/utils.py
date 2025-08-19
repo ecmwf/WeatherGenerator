@@ -117,8 +117,6 @@ def get_data(
         else:
             points_per_sample = None
 
-        _logger.info(fsteps)
-        _logger.info(zio_forecast_steps)
         for fstep in [fstep for fstep in fsteps if fstep in zio_forecast_steps]:
             _logger.info(f"RUN {run_id} - {stream}: Processing fstep {fstep}...")
             da_tars_fs, da_preds_fs = [], []
@@ -224,7 +222,7 @@ def calc_scores_per_stream(
         fsteps = None
 
     output_data = get_data(
-        cfg, results_dir, stream, region=region, fsteps=fsteps, return_counts=True
+        cfg, results_dir, stream, region=region, fsteps=fsteps, samples=samples, return_counts=True
     )
 
     da_preds = output_data.prediction
