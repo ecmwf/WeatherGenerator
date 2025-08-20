@@ -39,7 +39,7 @@ from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.logger import logger
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 #from weathergen.utils.validation_io import write_output
-
+from weathergen.utils.profiler import ExecutionTimer
 
 class Trainer(TrainerBase):
     def __init__(self, checkpoint_freq=250, print_freq=10):
@@ -471,36 +471,50 @@ class Trainer(TrainerBase):
 
         # training loop
         self.t_start = time.time()
-        for bidx, batch in enumerate(dataset_iter):
+        data_loading_avg = torch.tensor(0.0, device="cuda")
+        gpu_compute_avg = torch.tensor(0.0, device="cuda")
+
+        for bidx in range(len(self.data_loader)):
+
+            with ExecutionTimer(name=f"Data Loading Time # {bidx}", profile=True) as data_loading_timer:
+                batch = next(dataset_iter)
+
+            data_loading_avg += torch.tensor(data_loading_timer.time_elapsed(), device="cuda")
+            #_logger.info(f"Data Loading Time # {bidx}: {data_loading_timer.time_elapsed()}")
+
             forecast_steps = batch[-1]
             batch = self.batch_to_device(batch)
 
-            # evaluate model
-            with torch.autocast(
-                device_type="cuda",
-                dtype=self.mixed_precision_dtype,
-                enabled=cf.with_mixed_precision,
-            ):
-                preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
-                loss_values = self.loss_calculator.compute_loss(
-                    preds=preds,
-                    streams_data=batch[0],
-                )
+            with ExecutionTimer(name=f"GPU Compute Time # {bidx}", profile=True) as GPU_compute_timer:
+                # evaluate model
+                with torch.autocast(
+                    device_type="cuda",
+                    dtype=self.mixed_precision_dtype,
+                    enabled=cf.with_mixed_precision,
+                ):
+                    preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
+                    loss_values = self.loss_calculator.compute_loss(
+                        preds=preds,
+                        streams_data=batch[0],
+                    )
 
-            # backward pass
-            self.grad_scaler.scale(loss_values.loss).backward()
+                # backward pass
+                self.grad_scaler.scale(loss_values.loss).backward()
 
-            # gradient clipping
-            self.grad_scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), max_norm=cf.grad_clip)
+                # gradient clipping
+                self.grad_scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), max_norm=cf.grad_clip)
 
-            # optimizer step
-            self.grad_scaler.step(self.optimizer)
-            self.grad_scaler.update()
-            self.optimizer.zero_grad()
+                # optimizer step
+                self.grad_scaler.step(self.optimizer)
+                self.grad_scaler.update()
+                self.optimizer.zero_grad()
 
-            # update learning rate
-            self.lr_scheduler.step()
+                # update learning rate
+                self.lr_scheduler.step()
+            
+            gpu_compute_avg += torch.tensor(GPU_compute_timer.time_elapsed(), device="cuda")
+            #_logger.info(f"GPU Compute Time # {bidx}: {GPU_compute_timer.time_elapsed()}")
 
             self.loss_unweighted_hist += [loss_values.losses_all]
             self.loss_model_hist += [loss_values.loss.item()]
@@ -519,6 +533,12 @@ class Trainer(TrainerBase):
                 self.save_model(-1)
 
             self.cf.istep += cf.batch_size_per_gpu
+
+            if bidx == 127:
+                avg_data = data_loading_avg / (bidx+1)
+                avg_gpu = gpu_compute_avg / (bidx+1)
+                print(f"Average Data Loading Time (first {bidx+1} batches): {avg_data.item():.6f} s")
+                print(f"Average GPU Compute Time (first {bidx+1} batches): {avg_gpu.item():.6f} s")
 
         self.dataset.advance()
 
