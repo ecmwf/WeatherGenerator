@@ -353,11 +353,11 @@ def plot_data(
 
     # Check if histograms should be plotted
     plot_histograms = plot_settings.get("plot_histograms", False)
-    if not isinstance(plot_settings.plot_histograms, bool):
+    if not isinstance(plot_histograms, bool):
         raise TypeError("plot_histograms must be a boolean.")
 
     plot_animations = plot_settings.get("plot_animations", False)
-    if not isinstance(plot_settings.plot_animations, bool):
+    if not isinstance(plot_animations, bool):
         raise TypeError("plot_animations must be a boolean.")
 
     if plot_fsteps == "all":
