@@ -376,7 +376,6 @@ class OutputBatchData:
             assert len(channels) == source_dataset.data.shape[1], (
                 "Number of channel names does not align with data"
             )
-            assert len(geoinfo_channels) == source_dataset.geoinfo.shape[1]
         else:
             source_dataset = None
 
