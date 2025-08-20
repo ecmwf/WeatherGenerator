@@ -304,7 +304,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
         "streams_mixed": "era5_nppatms_synop",
         "streams_ocean": "fesom",
         "streams_icon": "icon",
-        "streams_mixed_experimental": "cerra_geos_1",
+        "streams_mixed_experimental": "cerra_seviri",
     }
     if not streams_directory.is_dir():
         streams_directory_config = streams_directory
