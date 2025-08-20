@@ -37,8 +37,13 @@ class Plotter:
 
         Parameters
         ----------
-        cfg:
-            Configuration dictionary containing all information for the plotting.
+        plotter_cfg:
+            Configuration dictionary containing basic information for plotting.
+            Expected keys are:
+                - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
+                - dpi_val: DPI value for the saved images
+                - fig_size: Size of the figure (width, height) in inches
+                - tokenize_spacetime: If True, all valid times will be plotted in one plot 
         output_basedir:
             Base directory under which the plots will be saved.
             Expected scheme `<results_base_dir>/<run_id>`.
@@ -46,10 +51,10 @@ class Plotter:
 
         _logger.info(f"Taking cartopy paths from {work_dir}")
 
-        self.image_format = plotter_cfg.image_format
+        self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
-        self.bulk_plot = plotter_cfg.get("tokenize_spacetime", False)     # True if we want to plot all valid times in one plot 
+        self.bulk_plot = not plotter_cfg.get("tokenize_spacetime", False)     # True if we want to plot all valid times in one plot 
         self.run_id = output_basedir.name
 
         self.out_plot_basedir = Path(output_basedir) / "plots"
