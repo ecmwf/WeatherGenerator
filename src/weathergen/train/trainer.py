@@ -187,8 +187,11 @@ class Trainer(TrainerBase):
             self.model = self.model.freeze_weights_forecast()
 
         for name, module in self.model.named_modules():
-            name = module.name if hasattr(module, "name") else None
-            if name is not None and re.fullmatch(self.freeze_modules, name):
+            name = module.name if hasattr(module, "name") else name
+            # avoid the whole model element which has name ''
+            if name == "":
+                continue
+            if re.fullmatch(self.freeze_modules, name) is not None:
                 freeze_weights(module)
 
         self.model = self.model.to(self.devices[0])
