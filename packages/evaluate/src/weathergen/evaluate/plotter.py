@@ -7,11 +7,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from PIL import Image
+import cartopy
 
 from weathergen.utils.config import _load_private_conf
 
+
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
-import cartopy
 
 cartopy.config["data_dir"] = str(work_dir)
 cartopy.config["pre_existing_data_dir"] = str(work_dir)
@@ -24,7 +25,7 @@ logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
-_logger.info(f"Taking cartopy paths from {work_dir}")
+_logger.debug(f"Taking cartopy paths from {work_dir}")
 
 
 class Plotter:
@@ -44,7 +45,7 @@ class Plotter:
                 - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
                 - dpi_val: DPI value for the saved images
                 - fig_size: Size of the figure (width, height) in inches
-                - tokenize_spacetime: If True, all valid times will be plotted in one plot 
+                - tokenize_spacetime: If True, all valid times will be plotted in one plot
         output_basedir:
             Base directory under which the plots will be saved.
             Expected scheme `<results_base_dir>/<run_id>`.
@@ -55,7 +56,9 @@ class Plotter:
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
-        self.bulk_plot = not plotter_cfg.get("tokenize_spacetime", False)     # True if we want to plot all valid times in one plot 
+        self.bulk_plot = not plotter_cfg.get(
+            "tokenize_spacetime", False
+        )  # True if we want to plot all valid times in one plot
         self.run_id = output_basedir.name
 
         self.out_plot_basedir = Path(output_basedir) / "plots"
@@ -187,17 +190,16 @@ class Plotter:
                 self.select_from_da(preds, select_var),
             )
 
-
             if self.bulk_plot:
-                    name = self.plot_histogram(
-                        targ,
-                        prd,
-                        hist_output_dir,
-                        var,
-                        tag=tag,
-                    )
+                name = self.plot_histogram(
+                    targ,
+                    prd,
+                    hist_output_dir,
+                    var,
+                    tag=tag,
+                )
 
-                    plot_names.append(name)
+                plot_names.append(name)
             else:
                 ntimes_unique = len(np.unique(targ.valid_time))
                 _logger.info(
@@ -206,7 +208,7 @@ class Plotter:
 
                 targ, prd = targ.groupby("valid_time"), prd.groupby("valid_time")
 
-                for valid_time, (targ_t, prd_t) in zip(targ, prd): 
+                for valid_time, (targ_t, prd_t) in zip(targ, prd, strict=False):
                     _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
                     name = self.plot_histogram(
                         targ_t,
@@ -222,10 +224,17 @@ class Plotter:
 
         return plot_names
 
-    def plot_histogram(self, target_data: xr.DataArray, pred_data: xr.DataArray, hist_output_dir: Path, varname: str, tag: str = "") -> str:
+    def plot_histogram(
+        self,
+        target_data: xr.DataArray,
+        pred_data: xr.DataArray,
+        hist_output_dir: Path,
+        varname: str,
+        tag: str = "",
+    ) -> str:
         """
         Plot a histogram comparing target and prediction data for a specific variable.
-        
+
         Parameters
         ----------
         target_data: xr.DataArray
@@ -238,7 +247,7 @@ class Plotter:
             Name of the variable to be plotted.
         tag: str
             Any tag you want to add to the plot.
-        
+
         Returns
         -------
             Name of the saved plot file.
@@ -247,7 +256,7 @@ class Plotter:
         # Get common bin edges
         vals = np.concatenate([target_data, pred_data])
         bins = np.histogram_bin_edges(vals, bins=50)
-        
+
         # Plot histograms
         plt.hist(target_data, bins=bins, alpha=0.7, label="Target")
         plt.hist(pred_data, bins=bins, alpha=0.7, label="Prediction")
@@ -276,7 +285,7 @@ class Plotter:
         logging.debug(f"Saving histogram to {fname}")
         plt.savefig(fname)
         plt.close()
-        
+
         return name
 
     def create_maps_per_sample(
@@ -344,10 +353,10 @@ class Plotter:
                 _logger.info(
                     f"Creating maps for {ntimes_unique} valid times for variable {var}."
                 )
-                
+
                 da = da.groupby("valid_time")
 
-                for valid_time, da_t in da: 
+                for valid_time, da_t in da:
                     _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
                     name = self.scatter_plot_map(
                         da_t,
@@ -359,15 +368,21 @@ class Plotter:
 
                     plot_names.append(name)
 
-
         self.clean_data_selection()
 
         return plot_names
 
-    def scatter_plot_map(self, data: xr.DataArray, map_output_dir: Path, varname: str, tag: str = "", map_kwargs: dict | None = None):
+    def scatter_plot_map(
+        self,
+        data: xr.DataArray,
+        map_output_dir: Path,
+        varname: str,
+        tag: str = "",
+        map_kwargs: dict | None = None,
+    ):
         """
         Plot a 2D map for a data array using scatter plot.
-        
+
         Parameters
         ----------
         data: xr.DataArray
@@ -400,7 +415,7 @@ class Plotter:
         if scale_marker_size:
             marker_size = (marker_size + 1.0) * np.cos(np.radians(data["lat"]))
 
-        valid_time = str(data['valid_time'][0].values.astype('datetime64[s]'))
+        valid_time = str(data["valid_time"][0].values.astype("datetime64[s]"))
 
         scatter_plt = ax.scatter(
             data["lon"],
@@ -416,9 +431,7 @@ class Plotter:
         plt.colorbar(
             scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}"
         )
-        plt.title(
-            f"{self.stream}, {varname} : fstep = {self.fstep:03} ({valid_time})"
-        )
+        plt.title(f"{self.stream}, {varname} : fstep = {self.fstep:03} ({valid_time})")
         ax.set_global()
         ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
 
@@ -442,8 +455,7 @@ class Plotter:
         plt.close()
 
         return name
-    
-    
+
     def animation(self, samples, fsteps, variables, select, tag) -> list[str]:
         """
         Plot 2D animations for a dataset

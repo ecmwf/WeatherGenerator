@@ -76,7 +76,7 @@ def evaluate_from_config(cfg):
 
         # Load model configuration and set (run-id specific) directories
         # If results_base_dir and model_base_dir are not provided, default paths are used
-        model_base_dir = run.get("model_base_dir", None) 
+        model_base_dir = run.get("model_base_dir", None)
 
         if private_paths:
             _logger.info(
@@ -84,12 +84,16 @@ def evaluate_from_config(cfg):
             )
             cf_run = load_config(private_paths, run_id, run["epoch"])
         else:
-            _logger.info(f"Loading config for run {run_id} from model directory: {model_base_dir}")
+            _logger.info(
+                f"Loading config for run {run_id} from model directory: {model_base_dir}"
+            )
             cf_run = load_model_config(run_id, run["epoch"], model_base_dir)
 
-        results_base_dir = run.get("results_base_dir", None)  # base directory where results will be stored
+        results_base_dir = run.get(
+            "results_base_dir", None
+        )  # base directory where results will be stored
         if not results_base_dir:
-            results_base_dir = Path(cf_run["run_path"]) 
+            results_base_dir = Path(cf_run["run_path"])
             logging.info(
                 f"Results directory obtained from model config: {results_base_dir}"
             )

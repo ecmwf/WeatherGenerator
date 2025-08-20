@@ -17,11 +17,11 @@ import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
 
-from weathergen.utils.config import Config
 from weathergen.common.io import ZarrIO
 from weathergen.evaluate.plotter import DefaultMarkerSize, LinePlots, Plotter
 from weathergen.evaluate.score import VerifiedData, get_score
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
+from weathergen.utils.config import Config
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -335,14 +335,17 @@ def plot_data(
         )
     ):
         return
-    
+
     # get plotter configuration
-    plotter_cfg = {"image_format": cfg.get("image_format", "png"), 
-                   "dpi_val": cfg.get("dpi_val", 300),
-                   "fig_size": cfg.get("fig_size", (8, 10)),
-                   "tokenize_spacetime": get_stream_attr(run_config, stream, "tokenize_spacetime", False)
-                    }
-    
+    plotter_cfg = {
+        "image_format": cfg.get("image_format", "png"),
+        "dpi_val": cfg.get("dpi_val", 300),
+        "fig_size": cfg.get("fig_size", (8, 10)),
+        "tokenize_spacetime": get_stream_attr(
+            run_config, stream, "tokenize_spacetime", False
+        ),
+    }
+
     plotter = Plotter(plotter_cfg, plot_dir)
 
     plot_samples = plot_settings.get("sample", None)
@@ -421,7 +424,9 @@ def plot_data(
                 plots.extend([map_tar, map_pred])
 
             if plot_histograms:
-                h = plotter.create_histograms_per_sample(tars, preds, plot_chs, data_selection)
+                h = plotter.create_histograms_per_sample(
+                    tars, preds, plot_chs, data_selection
+                )
                 plots.append(h)
 
             plotter = plotter.clean_data_selection()
@@ -736,13 +741,14 @@ def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataA
         da = da.expand_dims({name: [val]}, axis=axis)
     return da
 
+
 def get_stream_attr(config: Config, stream_name: str, key: str, default=None):
     """
     Get the value of a key for a specific stream from the a model config.
-    
+
     Parameters:
     ------------
-        config: dict 
+        config: dict
             The full configuration dictionary.
         stream_name: str
             The name of the stream (e.g. 'ERA5').
