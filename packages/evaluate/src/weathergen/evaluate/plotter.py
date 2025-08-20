@@ -345,9 +345,8 @@ class Plotter:
 
         """
 
-        map_output_dir = self.get_map_output_dir(tag)
-
         self.update_data_selection(select)
+        map_output_dir = self.get_map_output_dir(tag)
 
         for _, sa in enumerate(samples):
             for _, var in enumerate(variables):
