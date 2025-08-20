@@ -101,25 +101,25 @@ def evaluate_results(run_id):
     cfg = omegaconf.OmegaConf.create(
         {
             "verbose": True,
-            "results_dir": "./results/",
-            "output_plotting_dir": "./plots/",
-            "output_scores_dir": "./jsons/",
             "image_format": "png",
             "dpi_val": 300,
-            "summary_plots": False,
+            "summary_plots": True,
+            "summary_dir": "./plots/",
             "print_summary": True,
             "evaluation": {"metrics": ["rmse", "l1", "mse"]},
             "run_ids": {
                 run_id: {  # would be nice if this could be done with option
                     "streams": {
                         "ERA5": {
-                            "channels": ["10v", "10u"],  # "all" indicator would be nice
+                            "results_base_dir": "./results/",
+                            "channels": ["10v"],  # "all" indicator would be nice
                             "evaluation": {"forecast_steps": "all", "sample": "all"},
                             "plotting": {
                                 "sample": [0, 1],
                                 "forecast_step": [0],
                                 "plot_maps": True,
                                 "plot_histograms": True,
+                                "plot_animations": True,
                             },
                         }
                     },
