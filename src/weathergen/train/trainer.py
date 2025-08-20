@@ -9,6 +9,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import re
 import time
 from typing import Any
 
@@ -29,6 +30,7 @@ from torch.distributed.fsdp.wrap import (
 import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
+from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
@@ -51,6 +53,8 @@ class Trainer(TrainerBase):
         cf: Config,
     ):
         self.cf = cf
+
+        self.freeze_modules = cf.get("freeze_modules", "")
 
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
@@ -181,6 +185,11 @@ class Trainer(TrainerBase):
 
         if cf.forecast_freeze_model:
             self.model = self.model.freeze_weights_forecast()
+
+        for name, module in self.model.named_modules():
+            name = module.name if hasattr(module, "name") else None
+            if name is not None and re.fullmatch(self.freeze_modules, name):
+                freeze_weights(module)
 
         self.model = self.model.to(self.devices[0])
 
