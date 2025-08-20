@@ -18,16 +18,55 @@ import dask.array as da
 import numpy as np
 import xarray as xr
 import zarr
+from numpy import datetime64
 from numpy.typing import NDArray
 
 # experimental value, should be inferred more intelligently
 CHUNK_N_SAMPLES = 16392
 DType: typing.TypeAlias = np.float32
+type NPDT64 = datetime64
+
 
 _logger = logging.getLogger(__name__)
 
 
 np.ndarray(3)
+
+
+@dataclasses.dataclass
+class IOReaderData:
+    """
+    Equivalent to data_reader_base.ReaderData
+
+    This class needs to exist since otherwise the common package would
+    have a dependecy on the core model. Ultimately a unified data model
+    should be implemented in the common package.
+    """
+
+    coords: NDArray[DType]
+    geoinfos: NDArray[DType]
+    data: NDArray[DType]
+    datetimes: NDArray[NPDT64]
+
+    @classmethod
+    def create(cls, other: typing.Any) -> typing.Self:
+        """
+        create an instance from data_reader_base.ReaderData instance.
+
+        other should be such an instance.
+        """
+        coords = other.coords
+        geoinfos = other.geoinfos
+        data = other.data
+        datetimes = other.datetimes
+
+        n_datapoints = len(data)
+
+        assert coords.shape == (n_datapoints, 2), "number of datapoints do not match data"
+        assert geoinfos.shape[0] == n_datapoints, "number of datapoints do not match data"
+        assert datetimes.shape[0] == n_datapoints, "number of datapoints do not match data"
+
+        return cls(**dataclasses.asdict(other))
 
 
 @dataclasses.dataclass
@@ -251,7 +290,7 @@ class OutputBatchData:
 
     # sample, stream, tensor(datapoint, channel+coords)
     # => datapoints is accross all datasets per stream
-    sources: list[list]
+    sources: list[list[IOReaderData]]
 
     # fstep, stream, redundant dim (size 1), tensor(sample x datapoint, channel)
     targets: list[list[list]]
@@ -351,31 +390,25 @@ class OutputBatchData:
         )
 
         if key.with_source:
-            source_data = self.sources[sample][stream_idx].cpu().detach().numpy()
+            source = self.sources[sample][stream_idx]
 
-            # split data into coords, geoinfo, channels
-            _source_coords = source_data[:, : -len(channels)]
-            source_coords = _source_coords[:, :2]
-            source_times = _source_coords[:, 2]
-            source_geoinfo = _source_coords[:, 2 : -len(channels)]
-
-            # TODO asserts that times, coords, geoinfos should match?
+            # currently fails since no separate channels for source/target implemented
+            # assert source.data.shape[1] == len(channels), (
+            #     "Number of channel names does not align with data"
+            # )
 
             source_dataset = OutputDataset(
                 "source",
                 key,
-                source_data[:, -len(channels) :],
-                source_times,
-                source_coords,
-                source_geoinfo,
+                source.data,
+                source.datetimes,
+                source.coords,
+                source.geoinfos,
                 channels,
                 geoinfo_channels,
             )
 
             _logger.debug(f"source shape: {source_dataset.data.shape}")
-            assert len(channels) == source_dataset.data.shape[1], (
-                "Number of channel names does not align with data"
-            )
         else:
             source_dataset = None
 
