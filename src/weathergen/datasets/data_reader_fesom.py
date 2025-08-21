@@ -93,10 +93,7 @@ class DataReaderFesom(DataReaderTimestep):
         # Each worker now opens its own file handles safely
         groups: list[zarr.Group] = [zarr.open_group(name, mode="r") for name in self.filenames]
         times: list[zarr.Array] = [group["dates"] for group in groups]
-        data: list[zarr.Array] = [group["data"] for group in groups]
-
         self.time = da.concatenate(times, axis=0)
-        self.data = da.concatenate(data, axis=0)
 
         # Use the first group for metadata
         first_group = groups[0]
@@ -144,6 +141,23 @@ class DataReaderFesom(DataReaderTimestep):
         self.lat_index = self.colnames.index("lat")
         self.lon_index = self.colnames.index("lon")
 
+        reordered_data_arrays: list[zarr.Group] = []
+
+        for group in groups:
+            local_colnames = group["data"].attrs["colnames"]
+
+            # If the order is already correct, no need to do anything.
+            if local_colnames == self.colnames:
+                reordered_data_arrays.append(da.from_zarr(group["data"]))
+            else:
+                # Create the list of indices to re-shuffle the columns.
+                reorder_indices = [local_colnames.index(name) for name in self.colnames]
+
+                # Lazily re-index the dask array. This operation is not executed immediately.
+                dask_array = da.from_zarr(group["data"])
+                reordered_array = dask_array[:, reorder_indices]
+                reordered_data_arrays.append(reordered_array)
+
         # Modify a copy, not the original list while iterating
         temp_colnames = list(self.colnames)
         temp_colnames.remove("lat")
@@ -164,14 +178,22 @@ class DataReaderFesom(DataReaderTimestep):
         )
         self.stdev[self.stdev <= 1e-5] = 1.0
 
+        self.data = da.concatenate(reordered_data_arrays, axis=0)
+
         source_channels = self._stream_info.get("source")
+        source_excl = self._stream_info.get("source_exclude")
         self.source_channels, self.source_idx = (
-            self.select(source_channels) if source_channels else (self.colnames, self.cols_idx)
+            self.select(source_channels, source_excl)
+            if source_channels or source_excl
+            else (self.colnames, self.cols_idx)
         )
 
         target_channels = self._stream_info.get("target")
+        target_excl = self._stream_info.get("target_exclude")
         self.target_channels, self.target_idx = (
-            self.select(target_channels) if target_channels else (self.colnames, self.cols_idx)
+            self.select(target_channels, target_excl)
+            if target_channels or target_excl
+            else (self.colnames, self.cols_idx)
         )
 
         self.geoinfo_channels = []
@@ -179,8 +201,21 @@ class DataReaderFesom(DataReaderTimestep):
 
         self._initialized = True
 
-    def select(self, ch_filters: list[str]) -> tuple[list[str], NDArray]:
-        mask = [any(f in c for f in ch_filters) for c in self.colnames]
+    def select(
+        self, ch_filters: list[str] | None, excl: list[str] | None = None
+    ) -> tuple[list[str], NDArray]:
+        if excl and ch_filters:
+            mask = [
+                any(f == c for f in ch_filters) and all(ex not in c for ex in excl)
+                for c in self.colnames
+            ]
+        elif ch_filters:
+            mask = [any(f == c for f in ch_filters) for c in self.colnames]
+        elif excl:
+            mask = [all(ex not in c for ex in excl) for c in self.colnames]
+        else:
+            assert False, "Cannot use select with both ch_filters and excl as None"
+
         selected_cols_idx = self.cols_idx[np.where(mask)[0]]
         selected_colnames = [self.colnames[i] for i in np.where(mask)[0]]
         return selected_colnames, selected_cols_idx
@@ -225,6 +260,23 @@ class DataReaderFesom(DataReaderTimestep):
         data, lat, lon, datetimes = dask.compute(
             data_lazy, lat_lazy, lon_lazy, datetimes_lazy, scheduler="single-threaded"
         )
+
+        # is_finite = np.all(np.isfinite(data))
+        # has_extreme_vals = np.any(np.abs(data) > self.corruption_threshold)
+
+        # if not is_finite or has_extreme_vals:
+        #     reason = (
+        #         "non-finite values (NaN/inf)"
+        #         if not is_finite
+        #         else f"values exceeding threshold {self.corruption_threshold}"
+        #     )
+        #     print(
+        #         f"Corrupted data detected at index {t_idxs[0]} on time {datetimes[0]} from channel {channels_idx} (reason: {reason})."
+        #     )
+        # else:
+        #     print(
+        #         f"Corrupted data NOT detected at index {t_idxs[0]} on time {datetimes[0]} from channel {channels_idx}. Max value {np.max(data)} min value {np.min(data)}"
+        #     )
 
         coords = np.stack([lat, lon], axis=1)
         geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
