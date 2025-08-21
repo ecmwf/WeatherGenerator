@@ -6,6 +6,7 @@ import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+from PIL import Image
 
 from weathergen.utils.config import _load_private_conf
 
@@ -261,7 +262,7 @@ class Plotter:
         self.update_data_selection(select)
 
         # Basic map output directory for this stream
-        map_output_dir = self.out_plot_basedir / self.stream / "maps" / tag
+        map_output_dir = self.get_map_output_dir(tag)
 
         if not os.path.exists(map_output_dir):
             _logger.info(f"Creating dir {map_output_dir}")
@@ -320,6 +321,54 @@ class Plotter:
         self.clean_data_selection()
 
         return plot_names
+
+    def animation(self, samples, fsteps, variables, select, tag) -> list[str]:
+        """
+        Plot 2D animations for a dataset
+
+        Parameters
+        ----------
+        samples: list
+            List of the samples to be plotted
+        fsteps: list
+            List of the forecast steps to be plotted
+        variables: list
+            List of variables to be plotted
+        select: dict
+            Selection to be applied to the DataArray
+        tag: str
+            Any tag you want to add to the plot
+
+        Returns
+        -------
+            List of plot names for the saved animations.
+
+        """
+
+        self.update_data_selection(select)
+        map_output_dir = self.get_map_output_dir(tag)
+
+        for _, sa in enumerate(samples):
+            for _, var in enumerate(variables):
+                image_paths = []
+                for _, fstep in enumerate(fsteps):
+                    image_paths.append(
+                        f"{map_output_dir}/map_{self.run_id}_{tag}_{sa}_{self.stream}_{var}_{fstep:03d}.png"
+                    )
+
+                images = [Image.open(path) for path in image_paths]
+                images[0].save(
+                    f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{var}.gif",
+                    save_all=True,
+                    append_images=images[1:],
+                    duration=500,
+                    loop=0,
+                )
+
+        return image_paths
+
+    def get_map_output_dir(self, tag):
+        return self.out_plot_basedir / self.stream / "maps" / tag
 
 
 class LinePlots:
