@@ -261,23 +261,6 @@ class DataReaderFesom(DataReaderTimestep):
             data_lazy, lat_lazy, lon_lazy, datetimes_lazy, scheduler="single-threaded"
         )
 
-        # is_finite = np.all(np.isfinite(data))
-        # has_extreme_vals = np.any(np.abs(data) > self.corruption_threshold)
-
-        # if not is_finite or has_extreme_vals:
-        #     reason = (
-        #         "non-finite values (NaN/inf)"
-        #         if not is_finite
-        #         else f"values exceeding threshold {self.corruption_threshold}"
-        #     )
-        #     print(
-        #         f"Corrupted data detected at index {t_idxs[0]} on time {datetimes[0]} from channel {channels_idx} (reason: {reason})."
-        #     )
-        # else:
-        #     print(
-        #         f"Corrupted data NOT detected at index {t_idxs[0]} on time {datetimes[0]} from channel {channels_idx}. Max value {np.max(data)} min value {np.min(data)}"
-        #     )
-
         coords = np.stack([lat, lon], axis=1)
         geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
         datetimes = np.squeeze(datetimes)
