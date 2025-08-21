@@ -13,19 +13,15 @@ import logging
 import sys
 from collections import defaultdict
 from pathlib import Path
-from weathergen.common.io import ZarrIO
+
 from omegaconf import OmegaConf
-import xarray as xr
-
-
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
     plot_data,
     plot_summary,
     retrieve_metric_from_json,
-    peek_tar_channels,
-    check_metric,
+    check_availability,
 )
 from weathergen.utils.config import _REPO_ROOT, load_config, set_paths
 
@@ -116,13 +112,12 @@ def evaluate_from_args(argl: list[str]) -> None:
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                _ = plot_data(cfg, results_dir, runplot_dir, stream, stream_dict)
+                _ = plot_data(cfg, run_id, run, results_dir, runplot_dir, stream, stream_dict)
 
             if stream_dict.get("evaluation"):
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
 
                 for region in regions:
-
                     metrics_to_compute = []
 
                     for metric in metrics:
@@ -135,7 +130,7 @@ def evaluate_from_args(argl: list[str]) -> None:
                                 metric,
                                 run.epoch,
                             )
-                            checked, (channels, fsteps, samples) =  check_metric(cfg, metric, run, stream, results_dir, metric_data)
+                            checked, (channels, fsteps, samples) =  check_availability(cfg, run_id, run, stream, results_dir, metric_data)
                             if not checked:
                                 metrics_to_compute.append(metric)
                             else:
@@ -148,7 +143,7 @@ def evaluate_from_args(argl: list[str]) -> None:
                             
                     if metrics_to_compute:
 
-                        checked, _ = check_metric(cfg, metric, run, stream, results_dir)
+                        checked, _ = check_availability(cfg, run_id, run, stream, results_dir)
 
                         all_metrics, points_per_sample = calc_scores_per_stream(
                             cfg, results_dir, stream, region, metrics_to_compute
@@ -163,9 +158,6 @@ def evaluate_from_args(argl: list[str]) -> None:
                             run_id,
                             run.epoch,
                         )
-
-                        _logger.info('recomputed...')
-                        _logger.info(all_metrics)
 
                     for metric in metrics_to_compute:
                         scores_dict[metric][region][stream][run_id] = all_metrics.sel(
