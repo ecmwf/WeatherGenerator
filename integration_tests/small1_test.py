@@ -112,7 +112,7 @@ def evaluate_results(run_id):
                     "streams": {
                         "ERA5": {
                             "results_base_dir": "./results/",
-                            "channels": ["10v"],  # "all" indicator would be nice
+                            "channels": ["t_850"],  # "all" indicator would be nice
                             "evaluation": {"forecast_steps": "all", "sample": "all"},
                             "plotting": {
                                 "sample": [0, 1],
