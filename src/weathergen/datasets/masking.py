@@ -132,7 +132,7 @@ class Masker:
             self.perm_sel = [np.ones(tl, dtype=bool) for tl in token_lens]
             source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
             return source_data
-        
+
         # if we have masking_strategy "combination"
         # at each pass we will sample a different masking_strategy
         # according to some probability distribution
@@ -143,7 +143,7 @@ class Masker:
                 p=self.masking_strategy_config["probabilities"],
             )
             self.masking_strategy = strategy
-        
+
         # Implementation of different masking strategies.
         # Generate a flat boolean mask for random, block, or healpix masking at cell level.
         # Generate a 3D mask to apply to each cell for channel masking.
@@ -186,13 +186,11 @@ class Masker:
                     source_data.append(data)
 
         elif self.masking_strategy == "causal":
-            # we don't set to 0, we just throw away
+            # Only select unmasked timesteps
             self.perm_sel = mask
             source_data = []
             for data, p in zip(tokenized_data, self.perm_sel, strict=True):
                 if len(data) > 0:
-                    #data[p] = self.mask_value
-                    #import pdb; pdb.set_trace()
                     source_data.append(data[~p])
                 else:
                     source_data.append(data)
@@ -205,7 +203,7 @@ class Masker:
 
             # Apply the mask to get the source data (where mask is False)
             source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
-        
+
         return source_data
 
     def mask_target(
@@ -241,7 +239,7 @@ class Masker:
 
         processed_target_tokens = []
 
-        for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):    
+        for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
             if self.masking_strategy == "channel":
                 # If masking strategy is channel, handle target tokens differently.
                 # We don't have Booleans per cell, instead per channel per cell,
@@ -257,10 +255,9 @@ class Masker:
                     selected_tensors.append(c)
 
             elif self.masking_strategy == "causal":
-                # select only the target time windows
-                #selected_tensors = [c for i, c in enumerate(cc) if i < len(pp) and pp[i]]
+                # select only the target times where mask is True
                 selected_tensors = [c for i, c in enumerate(cc) if pp[i]]
-                
+
             else:
                 # For other masking strategies, we simply select the tensors where the mask is True.
                 selected_tensors = [c for c, p in zip(cc, pp, strict=True) if p]
@@ -418,35 +415,56 @@ class Masker:
 
         return full_mask
 
-    
-    def _generate_causal_mask(self, tokenized_data, rate, coords, geoinfos, source):
+    def _generate_causal_mask(
+        self,
+        tokenized_data: list[torch.Tensor],
+        rate: float,
+        coords: torch.Tensor,
+        geoinfos: torch.Tensor,
+        source: torch.Tensor,
+    ) -> list[np.typing.NDArray]:
+        
+        """
+        Generates a causal mask, masking the latest times 
+        in each tokenized_data according to the masking rate.
+        
+        Args:
+            tokenized_data (list[torch.Tensor]): A list of tensors. Most will have a shape of
+                                                (time, num_tokens, num_channels), but some may
+                                            be empty with a shape of (0,), no data in cell
+            rate (float): The desired masking rate.
+            coords (torch.Tensor): The coordinates tensor.
+            geoinfos (torch.Tensor): The geoinfos tensor.
 
-        '''
-        Generates a causal mask, masking the latest time windows according to the 
-        masking rate.
-        '''
-
+        Returns:
+            list[np.ndarray]: A list of boolean masks. Each mask corresponds to a tensor
+                            in tokenized_data.
+        """
 
         if not tokenized_data:
             return []
 
         rate = self._get_sampling_rate()
-        
+
         full_mask = []
-        for cell_data in tokenized_data:
-            if len(cell_data) == 0:
-                # Empty cell - return empty mask
+        for token_data in tokenized_data:
+            if len(token_data) == 0:
+                # empty - return empty mask
                 full_mask.append(np.array([], dtype=bool))
+            elif len(token_data) == 1:
+                # for 1 timestep, don't mask target
+                full_mask.append(np.zeros(1, dtype=bool))
             else:
-                # Normal cell - create temporal mask for this cell
-                num_time_windows = len(cell_data)
-                cell_mask = np.zeros(num_time_windows, dtype=bool)
-                # Mask the final time windows based on rate
-                start_mask_idx = int(rate * num_time_windows)
-                # force start_mask_idx to be within bounds (1, num_time_windows) exclusive
-                start_mask_idx = max(1, min(start_mask_idx, num_time_windows - 1))
-                # Set the mask to True for the final time windows
-                cell_mask[start_mask_idx : ] = True
-                full_mask.append(cell_mask)
+                # create temporal mask
+                num_time_windows = len(token_data)
+                mask = np.zeros(num_time_windows, dtype=bool)
+                # mask the final time windows based on rate
+                num_future_to_mask = int(rate * num_time_windows)
+                # set the mask to True for the final time windows
+                start_mask_idx = num_time_windows - num_future_to_mask
+                # force start_mask_idx is at least 1, keep one source time
+                start_mask_idx = max(1, start_mask_idx)
+                mask[start_mask_idx:] = True
+                full_mask.append(mask)
 
         return full_mask
