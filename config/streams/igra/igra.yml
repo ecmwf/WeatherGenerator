@@ -10,7 +10,7 @@
 IGRA :
   type : obs
   filenames : ['igra.zarr']
-  base_yyyymmddhhmm : 175001010000
+  base_datetime : '1750-01-01T00:00:00'
   loss_weight : 1.0
   #masking_rate_none : 0.05
   token_size : 64
