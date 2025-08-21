@@ -329,6 +329,7 @@ def plot_data(
         and (
             plot_settings.get("plot_maps", False)
             or plot_settings.get("plot_histograms", False)
+            or plot_settings.get("plot_animations", False)
         )
     ):
         return
@@ -356,8 +357,12 @@ def plot_data(
 
     # Check if histograms should be plotted
     plot_histograms = plot_settings.get("plot_histograms", False)
-    if not isinstance(plot_settings.plot_histograms, bool):
+    if not isinstance(plot_histograms, bool):
         raise TypeError("plot_histograms must be a boolean.")
+
+    plot_animations = plot_settings.get("plot_animations", False)
+    if not isinstance(plot_animations, bool):
+        raise TypeError("plot_animations must be a boolean.")
 
     if plot_fsteps == "all":
         plot_fsteps = None
@@ -415,6 +420,11 @@ def plot_data(
             plotter = plotter.clean_data_selection()
 
             plot_names.append(plots)
+
+    if plot_animations:
+        h = plotter.animation(
+            plot_samples, plot_fsteps, plot_chs, data_selection, "preds"
+        )
 
     return plot_names
 
@@ -617,6 +627,53 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path, print_summary:
 
 
 ############# Utility functions ############
+
+
+def calc_lower_upper(data_tars: list[dict], data_preds: list[dict]) -> xr.DataArray:
+    """
+    Calculate the minimum and maximum values per variable for all forecasteps and
+    for target and prediction
+
+    Parameters
+    ----------
+    data_tars :
+        the (target) list of dictionaries with the forecasteps and respective xarray
+    data_preds :
+        the (prediction) list of dictionaries with the forecasteps and respective xarray
+    Returns
+    -------
+    data_tars_new, data_pred_new :
+        the same lists but also with common max and min as coordinates.
+    """
+    list_max = []
+    list_min = []
+
+    for da_tars, da_preds in zip(data_tars.values(), data_preds.values(), strict=False):
+        list_max.extend(
+            (da_tars.max(dim=("ipoint")).values, da_preds.max(dim=("ipoint")).values)
+        )
+        list_min.extend(
+            (da_tars.min(dim=("ipoint")).values, da_preds.min(dim=("ipoint")).values)
+        )
+
+    max_values = [max(values) for values in zip(*list_max, strict=False)]
+    min_values = [min(values) for values in zip(*list_min, strict=False)]
+
+    data_tars_new = {
+        fstep: da.assign_coords(
+            {"max": ("channel", max_values), "min": ("channel", min_values)}
+        )
+        for fstep, da in data_tars.items()
+    }
+
+    data_preds_new = {
+        fstep: da.assign_coords(
+            {"max": ("channel", max_values), "min": ("channel", min_values)}
+        )
+        for fstep, da in data_preds.items()
+    }
+
+    return data_tars_new, data_preds_new
 
 
 def peek_tar_channels(zio: ZarrIO, stream: str, fstep: int = 0) -> list[str]:

@@ -27,10 +27,14 @@ class MLP(torch.nn.Module):
         norm_type="LayerNorm",
         dim_aux=None,
         norm_eps=1e-5,
+        name: str | None = None,
     ):
         """Constructor"""
 
         super(MLP, self).__init__()
+
+        if name is not None:
+            self.name = name
 
         assert num_layers >= 2
 
