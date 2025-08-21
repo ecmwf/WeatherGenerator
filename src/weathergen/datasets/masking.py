@@ -423,11 +423,10 @@ class Masker:
         geoinfos: torch.Tensor,
         source: torch.Tensor,
     ) -> list[np.typing.NDArray]:
-        
         """
-        Generates a causal mask, masking the latest times 
+        Generates a causal mask, masking the latest times
         in each tokenized_data according to the masking rate.
-        
+
         Args:
             tokenized_data (list[torch.Tensor]): A list of tensors. Most will have a shape of
                                                 (time, num_tokens, num_channels), but some may
