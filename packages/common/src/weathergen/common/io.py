@@ -458,10 +458,9 @@ class OutputBatchData:
 
         source = self.sources[sample][stream_idx]
 
-        # currently fails since no separate channels for source/target implemented
-        # assert source.data.shape[1] == len(channels), (
-        #     "Number of channel names does not align with data"
-        # )
+        assert source.data.shape[1] == len(channels), (
+            "Number of source channel names does not align with source data"
+        )
 
         source_dataset = OutputDataset(
             "source",
