@@ -33,7 +33,8 @@ class DataReaderObs(DataReaderBase):
         self.z = zarr.open(filename, mode="r")
         self.data = self.z["data"]
         self.dt = self.z["dates"]  # datetime only
-        self.hrly_index = self.z["idx_197001010000_1"]
+        self.base_yyyymmddhhmm = stream_info.get("base_yyyymmddhhmm", 197001010000)
+        self.hrly_index = self.z[f"idx_{self.base_yyyymmddhhmm}_1"]
         self.colnames = self.data.attrs["colnames"]
 
         data_colnames = [col for col in self.colnames if "obsvalue" in col]
@@ -63,7 +64,7 @@ class DataReaderObs(DataReaderBase):
         self.geoinfo_idx = list(range(self.coords_idx[-1] + 1, data_idx[0]))
         self.geoinfo_channels = [self.colnames[i] for i in self.geoinfo_idx]
 
-        # load additional properties (mean, var, obs_id)
+        # load additional properties (mean, var)
         self._load_properties()
         self.mean = np.array(self.properties["means"])  # [data_idx]
         self.stdev = np.sqrt(np.array(self.properties["vars"]))  # [data_idx])
@@ -140,12 +141,9 @@ class DataReaderObs(DataReaderBase):
         )
         step_hrs = int(self.time_window_handler.t_window_step.item().total_seconds()) // 3600
 
-        # TODO: move to ctor
-        base_yyyymmddhhmm = 197001010000
-
         # Derive new index based on hourly backbone index
         format_str = "%Y%m%d%H%M%S"
-        base_dt = datetime.datetime.strptime(str(base_yyyymmddhhmm), format_str)
+        base_dt = datetime.datetime.strptime(str(self.base_yyyymmddhhmm), format_str)
         self.start_dt = self.time_window_handler.t_start.item()
         self.end_dt = self.time_window_handler.t_end.item()
 
@@ -201,7 +199,6 @@ class DataReaderObs(DataReaderBase):
 
         self.properties["means"] = self.data.attrs["means"]
         self.properties["vars"] = self.data.attrs["vars"]
-        self.properties["obs_id"] = self.data.attrs["obs_id"]
 
     @override
     def _get(self, idx: int, channels_idx: list[int]) -> ReaderData:
