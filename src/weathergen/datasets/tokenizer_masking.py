@@ -271,7 +271,7 @@ class TokenizerMasking:
         # sampling the number of targets according to per-stream sampling_rate_target
         # otherwise take global sampling_rate_target from config
         sampling_rate_target = stream_info.get("sampling_rate_target", sampling_rate_target)
-        
+
         samples = (torch.empty(total_target).uniform_() < sampling_rate_target).split(
             target_tokens_lens
         )
@@ -330,7 +330,7 @@ class TokenizerMasking:
             )
             target_coords.requires_grad = False
             target_coords = list(target_coords.split(tt_lens))
-        
+
         return (target_tokens, target_coords, target_coords_raw, target_times_raw)
 
     def sample_tensors_uniform_vectorized(
