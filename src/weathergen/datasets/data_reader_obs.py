@@ -33,7 +33,12 @@ class DataReaderObs(DataReaderBase):
         self.z = zarr.open(filename, mode="r")
         self.data = self.z["data"]
         self.dt = self.z["dates"]  # datetime only
-        self.hrly_index = self.z["idx_197001010000_1"]
+        self.base_datetime = stream_info.get("base_datetime", "1970-01-01T00:00:00")
+        format_str = "%Y-%m-%dT%H:%M:%S"
+        self.base_datetime = datetime.datetime.strptime(str(self.base_datetime), format_str)
+        # To read idx convert to a string, format e.g.: 197001010000
+        base_date_str = self.base_datetime.strftime("%Y%m%d%H%M")
+        self.hrly_index = self.z[f"idx_{base_date_str}_1"]
         self.colnames = self.data.attrs["colnames"]
 
         data_colnames = [col for col in self.colnames if "obsvalue" in col]
@@ -63,7 +68,7 @@ class DataReaderObs(DataReaderBase):
         self.geoinfo_idx = list(range(self.coords_idx[-1] + 1, data_idx[0]))
         self.geoinfo_channels = [self.colnames[i] for i in self.geoinfo_idx]
 
-        # load additional properties (mean, var, obs_id)
+        # load additional properties (mean, var)
         self._load_properties()
         self.mean = np.array(self.properties["means"])  # [data_idx]
         self.stdev = np.sqrt(np.array(self.properties["vars"]))  # [data_idx])
@@ -140,19 +145,13 @@ class DataReaderObs(DataReaderBase):
         )
         step_hrs = int(self.time_window_handler.t_window_step.item().total_seconds()) // 3600
 
-        # TODO: move to ctor
-        base_yyyymmddhhmm = 197001010000
-
-        # Derive new index based on hourly backbone index
-        format_str = "%Y%m%d%H%M%S"
-        base_dt = datetime.datetime.strptime(str(base_yyyymmddhhmm), format_str)
         self.start_dt = self.time_window_handler.t_start.item()
         self.end_dt = self.time_window_handler.t_end.item()
 
         ## Calculate the number of hours between start of hourly base index
         #  and the requested sample index
-        diff_in_hours_start = int((self.start_dt - base_dt).total_seconds() / 3600)
-        diff_in_hours_end = int((self.end_dt - base_dt).total_seconds() / 3600)
+        diff_in_hours_start = int((self.start_dt - self.base_datetime).total_seconds() / 3600)
+        diff_in_hours_end = int((self.end_dt - self.base_datetime).total_seconds() / 3600)
 
         end_range_1 = min(diff_in_hours_end, self.hrly_index.shape[0] - 1)
         self.indices_start = self.hrly_index[diff_in_hours_start:end_range_1:step_hrs]
@@ -201,7 +200,6 @@ class DataReaderObs(DataReaderBase):
 
         self.properties["means"] = self.data.attrs["means"]
         self.properties["vars"] = self.data.attrs["vars"]
-        self.properties["obs_id"] = self.data.attrs["obs_id"]
 
     @override
     def _get(self, idx: int, channels_idx: list[int]) -> ReaderData:

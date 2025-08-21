@@ -290,6 +290,7 @@ class TokenizerMasking:
             target_tokens = self.sample_tensors_uniform_vectorized(
                 target_tokens, torch.tensor(tt_lens), max_num_targets
             )
+
         tt_lin = torch.cat(target_tokens)
         target_tokens_lens = [len(t) for t in target_tokens]
         tt_lens = target_tokens_lens

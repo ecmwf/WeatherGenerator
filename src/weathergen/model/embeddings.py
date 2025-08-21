@@ -34,6 +34,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         norm_type="LayerNorm",
         embed_size_centroids=64,
         unembed_mode="full",
+        stream_name="stream_embed",
     ):
         """Constructor
 
@@ -45,6 +46,8 @@ class StreamEmbedTransformer(torch.nn.Module):
         """
 
         super(StreamEmbedTransformer, self).__init__()
+
+        self.name = f"StreamEmbedder_{stream_name}"
 
         self.num_tokens = num_tokens
         self.token_size = token_size
@@ -194,11 +197,12 @@ class StreamEmbedTransformer(torch.nn.Module):
 
 
 class StreamEmbedLinear(torch.nn.Module):
-    def __init__(self, dim_in, dim_out):
+    def __init__(self, dim_in, dim_out, stream_name="stream_embed"):
         """Constructor"""
 
         super(StreamEmbedLinear, self).__init__()
 
+        self.name = f"StreamEmbedder_{stream_name}"
         self.layer = torch.nn.Linear(dim_in, dim_out)
 
     def forward(self, x):
