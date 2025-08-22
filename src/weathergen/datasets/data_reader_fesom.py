@@ -16,14 +16,13 @@ import dask
 import dask.array as da
 import numpy as np
 import zarr
-
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
+    DTRange,
+    NDArray,
     ReaderData,
     TimeWindowHandler,
     TIndex,
-    NDArray,
-    DTRange,
     t_epsilon,
 )
 
