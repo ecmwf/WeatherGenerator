@@ -22,7 +22,9 @@ from weathergen.datasets.data_reader_base import (
     ReaderData,
     TimeWindowHandler,
     TIndex,
-    check_reader_data,
+    NDArray,
+    DTRange,
+    t_epsilon,
 )
 
 _logger = logging.getLogger(__name__)
@@ -168,8 +170,6 @@ class DataReaderFesom(DataReaderTimestep):
         self.cols_idx.remove(self.lon_index)
         self.cols_idx = np.array(self.cols_idx)
 
-        self.step_hrs = 1  # TODO
-
         self.properties = {"stream_id": first_group.data.attrs["obs_id"]}
 
         self.mean = np.concatenate((np.array([0, 0]), np.array(first_group.data.attrs["means"])))
@@ -232,11 +232,61 @@ class DataReaderFesom(DataReaderTimestep):
         return self.len
 
     @override
+    def _get_dataset_idxs(self, idx: TIndex) -> tuple[NDArray, DTRange]:
+        """
+        Get dataset indexes for a given time window index, when the dataset is periodic.
+
+        This function assumes state of a variable is persistent, thus if no data is found
+        in the time window, last measurement is used before the beggining of the windows is used.
+
+        Parameters
+        ----------
+        idx : TIndex
+            Index of the time window.
+
+        Returns
+        -------
+        NDArray[np.int64]
+            Array of dataset indexes corresponding to the time window.
+        """
+        tw_handler = self.time_window_handler
+
+        # Function is separated from the class to allow testing without instantiating the class.
+        dtr = tw_handler.window(idx)
+        # If there is no or only marginal overlap with the dataset, return empty index ranges
+        if (
+            not self.data_start_time
+            or not self.data_end_time
+            or dtr.end < self.data_start_time
+            or dtr.start > self.data_end_time
+            or dtr.start < self.data_start_time
+            or dtr.end > self.data_end_time
+            or (self.data_end_time is not None and dtr.start > self.data_end_time)
+        ):
+            return (np.array([], dtype=np.int64), dtr)
+
+        # relative time in dataset
+        delta_t_start = dtr.start - self.data_start_time
+        delta_t_end = dtr.end - self.data_start_time - t_epsilon
+        assert isinstance(delta_t_start, np.timedelta64), "delta_t_start must be timedelta64"
+        start_didx = delta_t_start // self.period
+        end_didx = delta_t_end // self.period
+
+        # adjust start_idx if not exactly on start time
+        if (delta_t_start % self.period) > np.timedelta64(0, "s"):
+            # empty window in between two timesteps
+            if start_didx == end_didx:
+                return (np.array([start_didx], dtype=np.int64), dtr)
+            start_didx += 1
+
+        end_didx = start_didx + int((dtr.end - dtr.start - t_epsilon) / self.period)
+
+        return (np.arange(start_didx, end_didx + 1, dtype=np.int64), dtr)
+
+    @override
     def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
         self._lazy_init()
-
         (t_idxs, dtr) = self._get_dataset_idxs(idx)
-
         if self.len == 0 or len(t_idxs) == 0:
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
@@ -271,6 +321,5 @@ class DataReaderFesom(DataReaderTimestep):
             data=data,
             datetimes=datetimes,
         )
-        check_reader_data(rd, dtr)
 
         return rd

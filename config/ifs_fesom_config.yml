@@ -1,4 +1,4 @@
-streams_directory: "./config/streams/streams_ocean/"
+streams_directory: "./config/streams/fesom/"
 
 ae_local_num_queries: 2
 ae_adapter_embed: 128
