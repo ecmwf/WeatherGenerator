@@ -6,14 +6,11 @@ class ExecutionTimer(object):
         self._profile = profile
 
     def __enter__(self):
-        self.start()
+        self._start_time = time.time()
         return self
 
     def __exit__(self, *args, **kwargs):
         self._stop_time = time.time()
-
-    def start(self):
-        self._start_time = time.time()
 
     def time_elapsed(self) -> float:
         if not hasattr(self, "_stop_time"):
