@@ -2,15 +2,14 @@ import logging
 import os
 from pathlib import Path
 
+import cartopy
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from PIL import Image
-import cartopy
 
 from weathergen.utils.config import _load_private_conf
-
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
@@ -56,9 +55,9 @@ class Plotter:
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
-        self.bulk_plot = not plotter_cfg.get(
-            "tokenize_spacetime", False
-        )  # True if we want to plot all valid times in one plot
+        self.plot_subtimesteps = plotter_cfg.get(
+            "plot_subtimesteps", False
+        )  # True if plots are created for each valid time separately
         self.run_id = output_basedir.name
 
         self.out_plot_basedir = Path(output_basedir) / "plots"
@@ -190,35 +189,26 @@ class Plotter:
                 self.select_from_da(preds, select_var),
             )
 
-            if self.bulk_plot:
-                name = self.plot_histogram(
-                    targ,
-                    prd,
-                    hist_output_dir,
-                    var,
-                    tag=tag,
-                )
-
-                plot_names.append(name)
-            else:
+            if self.plot_subtimesteps:
                 ntimes_unique = len(np.unique(targ.valid_time))
                 _logger.info(
-                    f"Creating histograms for {ntimes_unique} valid times for variable {var}."
+                    f"Creating histograms for {ntimes_unique} valid times of variable {var}."
                 )
 
-                targ, prd = targ.groupby("valid_time"), prd.groupby("valid_time")
+                groups = zip(
+                    targ.groupby("valid_time"), prd.groupby("valid_time"), strict=False
+                )
+            else:
+                _logger.info(f"Plotting histogram for all valid times of {var}")
 
-                for valid_time, (targ_t, prd_t) in zip(targ, prd, strict=False):
+                groups = [(None, (targ, prd))]  # wrap once with dummy valid_time
+
+            for valid_time, (targ_t, prd_t) in groups:
+                if valid_time is not None:
                     _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
-                    name = self.plot_histogram(
-                        targ_t,
-                        prd_t,
-                        hist_output_dir,
-                        var,
-                        tag=tag,
-                    )
 
-                    plot_names.append(name)
+                name = self.plot_histogram(targ_t, prd_t, hist_output_dir, var, tag=tag)
+                plot_names.append(name)
 
         self.clean_data_selection()
 
@@ -337,42 +327,35 @@ class Plotter:
             select_var = self.select | {"channel": var}
             da = self.select_from_da(data, select_var).compute()
 
-            if self.bulk_plot:
-                _logger.info(f"Plotting map for {var}")
-                name = self.scatter_plot_map(
-                    da,
+            if self.plot_subtimesteps:
+                ntimes_unique = len(np.unique(da.valid_time))
+                _logger.info(
+                    f"Creating maps for {ntimes_unique} valid times of variable {var} - {tag}"
+                )
+
+                groups = da.groupby("valid_time")
+            else:
+                _logger.info(f"Creating maps for all valid times of {var} - {tag}")
+                groups = [(None, da)]  # single dummy group
+
+            for valid_time, da_t in groups:
+                if valid_time is not None:
+                    _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
+
+                name = self.scatter_plot(
+                    da_t,
                     map_output_dir,
                     var,
                     tag=tag,
                     map_kwargs=map_kwargs,
                 )
-
                 plot_names.append(name)
-            else:
-                ntimes_unique = len(np.unique(da.valid_time))
-                _logger.info(
-                    f"Creating maps for {ntimes_unique} valid times for variable {var}."
-                )
-
-                da = da.groupby("valid_time")
-
-                for valid_time, da_t in da:
-                    _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
-                    name = self.scatter_plot_map(
-                        da_t,
-                        map_output_dir,
-                        var,
-                        tag=tag,
-                        map_kwargs=map_kwargs,
-                    )
-
-                    plot_names.append(name)
 
         self.clean_data_selection()
 
         return plot_names
 
-    def scatter_plot_map(
+    def scatter_plot(
         self,
         data: xr.DataArray,
         map_output_dir: Path,

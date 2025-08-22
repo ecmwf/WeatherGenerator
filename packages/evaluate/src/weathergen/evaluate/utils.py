@@ -341,7 +341,7 @@ def plot_data(
         "image_format": cfg.get("image_format", "png"),
         "dpi_val": cfg.get("dpi_val", 300),
         "fig_size": cfg.get("fig_size", (8, 10)),
-        "tokenize_spacetime": get_stream_attr(
+        "plot_subtimesteps": get_stream_attr(
             run_config, stream, "tokenize_spacetime", False
         ),
     }
