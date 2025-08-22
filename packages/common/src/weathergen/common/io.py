@@ -410,7 +410,7 @@ class OutputBatchData:
             n_samples = 0
         else:
             start = sum(lens[: offset_key.sample])
-            n_samples = lens[: offset_key.sample]
+            n_samples = lens[offset_key.sample]
 
         _logger.debug(
             f"sample: start:{self.sample_start} rel_idx:{offset_key.sample}"
