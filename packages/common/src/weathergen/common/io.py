@@ -349,12 +349,12 @@ class OutputBatchData:
     def extract(self, key: ItemKey) -> OutputItem:
         """Extract datasets from lists for one output item."""
         _logger.debug(f"extracting subset: {key}")
-        offest_key = self._offset_key(key)
+        offset_key = self._offset_key(key)
         stream_idx = self.streams[key.stream]
-        datapoints = self._get_datapoints_per_sample(offest_key, stream_idx)
+        datapoints = self._get_datapoints_per_sample(offset_key, stream_idx)
 
         _logger.debug(
-            f"forecast_step: {key.forecast_step} = {offest_key.forecast_step} (rel_step) + "
+            f"forecast_step: {key.forecast_step} = {offset_key.forecast_step} (rel_step) + "
             + f"{self.forecast_offset} (forecast_offset)"
         )
         _logger.debug(f"stream: {key.stream} with index: {stream_idx}")
@@ -364,13 +364,13 @@ class OutputBatchData:
             preds_data = np.zeros((0, len(self.channels[stream_idx])), dtype=np.float32)
         else:
             target_data = (
-                self.targets[offest_key.forecast_step][stream_idx][0][datapoints]
+                self.targets[offset_key.forecast_step][stream_idx][0][datapoints]
                 .cpu()
                 .detach()
                 .numpy()
             )
             preds_data = (
-                self.predictions[offest_key.forecast_step][stream_idx][0]
+                self.predictions[offset_key.forecast_step][stream_idx][0]
                 .transpose(1, 0)
                 .transpose(1, 2)[datapoints]
                 .cpu()
@@ -378,7 +378,7 @@ class OutputBatchData:
                 .numpy()
             )
 
-        data_coords = self._extract_coordinates(stream_idx, offest_key, datapoints)
+        data_coords = self._extract_coordinates(stream_idx, offset_key, datapoints)
 
         assert len(data_coords.channels) == target_data.shape[1], (
             "Number of channel names does not align with target data."
@@ -388,7 +388,7 @@ class OutputBatchData:
         )
 
         if key.with_source:
-            source_dataset = self._extract_sources(offest_key.sample, stream_idx, key)
+            source_dataset = self._extract_sources(offset_key.sample, stream_idx, key)
         else:
             source_dataset = None
 
@@ -401,19 +401,19 @@ class OutputBatchData:
             ),
         )
 
-    def _get_datapoints_per_sample(self, offest_key, stream_idx):
-        lens = self.targets_lens[offest_key.forecast_step][stream_idx]
+    def _get_datapoints_per_sample(self, offset_key, stream_idx):
+        lens = self.targets_lens[offset_key.forecast_step][stream_idx]
 
         # empty target/prediction
         if len(lens) == 0:
             start = 0
             n_samples = 0
         else:
-            start = sum(lens[: offest_key.sample])
-            n_samples = lens[: offest_key.sample]
+            start = sum(lens[: offset_key.sample])
+            n_samples = lens[: offset_key.sample]
 
         _logger.debug(
-            f"sample: start:{self.sample_start} rel_idx:{offest_key.sample}"
+            f"sample: start:{self.sample_start} rel_idx:{offset_key.sample}"
             + f"range:{start}-{start + n_samples}"
         )
 
@@ -434,8 +434,8 @@ class OutputBatchData:
             key.sample - self.sample_start, key.forecast_step - self.forecast_offset, key.stream
         )
 
-    def _extract_coordinates(self, stream_idx, offest_key, datapoints) -> DataCoordinates:
-        _coords = self.targets_coords[offest_key.forecast_step][stream_idx][datapoints].numpy()
+    def _extract_coordinates(self, stream_idx, offset_key, datapoints) -> DataCoordinates:
+        _coords = self.targets_coords[offset_key.forecast_step][stream_idx][datapoints].numpy()
         coords = _coords[:, :2]  # first two columns are lat,lon
         geoinfo = _coords[:, 2:]  # the rest is geoinfo => potentially empty
         if geoinfo.size > 0:  # TODO: set geoinfo to be empty for now
@@ -444,7 +444,7 @@ class OutputBatchData:
                 "geoinformation channels are not implemented yet."
                 + "will be truncated to be of size 0."
             )
-        times = self.targets_times[offest_key.forecast_step][stream_idx][
+        times = self.targets_times[offset_key.forecast_step][stream_idx][
             datapoints
         ]  # make conversion to datetime64[ns] here?
         channels = self.target_channels[stream_idx]
