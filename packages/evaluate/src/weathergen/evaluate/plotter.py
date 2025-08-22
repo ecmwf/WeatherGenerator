@@ -253,13 +253,29 @@ class Plotter:
         -------
             List of plot names for the saved maps.
         """
-        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
-        # check for known keys in map_kwargs
-        marker_size_base = map_kwargs_save.pop("marker_size", 1)
-        scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
-        marker = map_kwargs_save.pop("marker", "o")
 
         self.update_data_selection(select)
+
+        map_kwargs_save = (
+            {
+                key: value
+                for key, value in map_kwargs.copy().items()
+                if key not in variables
+            }
+            if map_kwargs is not None
+            else {}
+        )
+
+        if not hasattr(map_kwargs_save, "marker_size"):
+            # Set default marker size if not specified in maps_config
+            map_kwargs_save["marker_size"] = DefaultMarkerSize.get_marker_size(
+                self.stream
+            )
+
+        # check for known keys in map_kwargs
+        marker_size_base = map_kwargs_save.pop("marker_size", 1)
+        scale_marker_size = map_kwargs_save.pop("scale_marker_size", True)
+        marker = map_kwargs_save.pop("marker", "o")
 
         # Basic map output directory for this stream
         map_output_dir = self.get_map_output_dir(tag)
@@ -278,7 +294,11 @@ class Plotter:
 
             marker_size = marker_size_base
             if scale_marker_size:
-                marker_size = (marker_size + 1.0) * np.cos(np.radians(da["lat"]))
+                marker_size = np.clip(
+                    marker_size / np.cos(np.radians(da["lat"])) ** 2,
+                    a_max=marker_size * 10.0,
+                    a_min=marker_size,
+                )
 
             scatter_plt = ax.scatter(
                 da["lon"],
@@ -288,6 +308,8 @@ class Plotter:
                 s=marker_size,
                 marker=marker,
                 transform=ccrs.PlateCarree(),
+                vmin=map_kwargs[var]["vmin"],
+                vmax=map_kwargs[var]["vmax"],
                 linewidths=0.0,  # only markers, avoids aliasing for very small markers
                 **map_kwargs_save,
             )

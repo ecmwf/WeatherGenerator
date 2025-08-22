@@ -18,7 +18,7 @@ import xarray as xr
 from tqdm import tqdm
 
 from weathergen.common.io import ZarrIO
-from weathergen.evaluate.plotter import DefaultMarkerSize, LinePlots, Plotter
+from weathergen.evaluate.plotter import LinePlots, Plotter
 from weathergen.evaluate.score import VerifiedData, get_score
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
 
@@ -340,16 +340,20 @@ def plot_data(
 
     # Check if maps should be plotted and handle configuration if provided
     plot_maps = plot_settings.get("plot_maps", False)
-    if not isinstance(plot_maps, bool | oc.dictconfig.DictConfig):
-        raise TypeError(
-            "plot_maps must be a boolean or a dictionary with configuration."
-        )
+    if not isinstance(plot_maps, bool):
+        raise TypeError("plot_maps must be a boolean.")
 
-    maps_config = plot_maps if isinstance(plot_maps, oc.dictconfig.DictConfig) else {}
-
-    if not hasattr(maps_config, "marker_size"):
-        # Set default marker size if not specified in maps_config
-        maps_config["marker_size"] = DefaultMarkerSize.get_marker_size(stream)
+    if isinstance(cfg.get("global_plotting_options", False), oc.dictconfig.DictConfig):
+        if isinstance(
+            cfg.global_plotting_options.get(stream), oc.dictconfig.DictConfig
+        ):
+            maps_config = cfg.global_plotting_options.get(stream)
+        else:
+            cfg["global_plotting_options"][stream] = {}
+            maps_config = cfg.global_plotting_options.get(stream)
+    else:
+        cfg["global_plotting_options"] = {stream: {}}
+        maps_config = cfg.global_plotting_options.get(stream)
 
     # Check if histograms should be plotted
     plot_histograms = plot_settings.get("plot_histograms", False)
@@ -378,7 +382,7 @@ def plot_data(
     da_tars = model_output.target
     da_preds = model_output.prediction
 
-    plot_fsteps = da_tars.keys()
+    maps_config = common_ranges(da_tars, da_preds, plot_chs, maps_config)
 
     for (fstep, tars), (_, preds) in zip(
         da_tars.items(), da_preds.items(), strict=False
@@ -418,8 +422,12 @@ def plot_data(
             plot_names.append(plots)
 
     if plot_animations:
+        plot_fsteps = da_tars.keys()
         h = plotter.animation(
             plot_samples, plot_fsteps, plot_chs, data_selection, "preds"
+        )
+        h = plotter.animation(
+            plot_samples, plot_fsteps, plot_chs, data_selection, "targets"
         )
 
     return plot_names
@@ -625,10 +633,63 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path, print_summary:
 ############# Utility functions ############
 
 
-def calc_lower_upper(data_tars: list[dict], data_preds: list[dict]) -> xr.DataArray:
+def common_ranges(
+    data_tars: list[dict],
+    data_preds: list[dict],
+    plot_chs: list[str],
+    maps_config: oc.dictconfig.DictConfig,
+) -> oc.dictconfig.DictConfig:
     """
-    Calculate the minimum and maximum values per variable for all forecasteps and
-    for target and prediction
+    Calculate common ranges per stream and variables.
+
+    Parameters
+    ----------
+    data_tars :
+        the (target) list of dictionaries with the forecasteps and respective xarray
+    data_preds :
+        the (prediction) list of dictionaries with the forecasteps and respective xarray
+    plot_chs:
+        the variables to be plotted as given by the configuration file
+    maps_config:
+        the global plotting configuration
+    Returns
+    -------
+    maps_config :
+        the global plotting configuration with the ranges added and included for each variable (and for each stream).
+    """
+
+    for var in plot_chs:
+        if var in maps_config:
+            if not isinstance(maps_config[var].get("vmax"), (int | float)):
+                list_max = calc_bounds(data_tars, data_preds, var, "max")
+
+                maps_config[var].update({"vmax": float(max(list_max))})
+
+            if not isinstance(maps_config[var].get("vmin"), (int | float)):
+                list_min = calc_bounds(data_tars, data_preds, var, "min")
+
+                maps_config[var].update({"vmin": float(min(list_min))})
+
+        else:
+            list_max = calc_bounds(data_tars, data_preds, var, "max")
+
+            list_min = calc_bounds(data_tars, data_preds, var, "min")
+
+            maps_config.update(
+                {var: {"vmax": float(max(list_max)), "vmin": float(min(list_min))}}
+            )
+
+    return maps_config
+
+
+def calc_bounds(
+    data_tars,
+    data_preds,
+    var,
+    bound,
+):
+    """
+    Calculate the minimum and maximum values per variable for all forecasteps for both targets and predictions
 
     Parameters
     ----------
@@ -638,38 +699,29 @@ def calc_lower_upper(data_tars: list[dict], data_preds: list[dict]) -> xr.DataAr
         the (prediction) list of dictionaries with the forecasteps and respective xarray
     Returns
     -------
-    data_tars_new, data_pred_new :
-        the same lists but also with common max and min as coordinates.
+    list_bound :
+        a list with the maximum or minimum values for a specific variable.
     """
-    list_max = []
-    list_min = []
+    list_bound = []
+
+    if bound == "max":
+
+        def calc_val(x):
+            return x.max(dim=("ipoint")).values
+    else:
+
+        def calc_val(x):
+            return x.min(dim=("ipoint")).values
 
     for da_tars, da_preds in zip(data_tars.values(), data_preds.values(), strict=False):
-        list_max.extend(
-            (da_tars.max(dim=("ipoint")).values, da_preds.max(dim=("ipoint")).values)
-        )
-        list_min.extend(
-            (da_tars.min(dim=("ipoint")).values, da_preds.min(dim=("ipoint")).values)
+        list_bound.extend(
+            (
+                calc_val(da_tars.where(da_tars.channel == var, drop=True)),
+                calc_val(da_preds.where(da_preds.channel == var, drop=True)),
+            )
         )
 
-    max_values = [max(values) for values in zip(*list_max, strict=False)]
-    min_values = [min(values) for values in zip(*list_min, strict=False)]
-
-    data_tars_new = {
-        fstep: da.assign_coords(
-            {"max": ("channel", max_values), "min": ("channel", min_values)}
-        )
-        for fstep, da in data_tars.items()
-    }
-
-    data_preds_new = {
-        fstep: da.assign_coords(
-            {"max": ("channel", max_values), "min": ("channel", min_values)}
-        )
-        for fstep, da in data_preds.items()
-    }
-
-    return data_tars_new, data_preds_new
+    return list_bound
 
 
 def peek_tar_channels(zio: ZarrIO, stream: str, fstep: int = 0) -> list[str]:
