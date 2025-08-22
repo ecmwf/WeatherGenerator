@@ -28,8 +28,6 @@ from weathergen.datasets.data_reader_base import (
 
 _logger = logging.getLogger(__name__)
 
-type NDArray = np.typing.NDArray
-
 
 class DataReaderFesom(DataReaderTimestep):
     """
