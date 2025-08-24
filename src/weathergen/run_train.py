@@ -127,10 +127,6 @@ def train_continue_from_args(argl: list[str]):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    print("-----------------")
-    print(f"Continue training with run_id: {cf.run_id}")
-    print("-----------------")
-
     fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
     init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
 
