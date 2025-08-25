@@ -12,8 +12,8 @@ from functools import partial
 import numpy as np
 import torch
 
-from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.masking import Masker
+from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
     arc_alpha,
     encode_times_source,
