@@ -19,10 +19,12 @@ from weathergen.datasets.utils import (
     locs_to_cell_coords_ctrs,
 )
 
+
 class Tokenizer(ABC):
     """
     Base class for tokenizers.
     """
+
     def __init__(self, healpix_level: int):
         ref = torch.tensor([1.0, 0.0, 0.0])
 
@@ -119,7 +121,7 @@ class Tokenizer(ABC):
         Get size of time embedding
         """
         return self.size_time_embedding
-    
+
     @abstractmethod
     def reset_rng(self, rng) -> None:
         """
