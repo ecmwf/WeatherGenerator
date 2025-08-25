@@ -28,6 +28,7 @@ from weathergen.model.engines import (
     Local2GlobalAssimilationEngine,
     LocalAssimilationEngine,
     TargetPredictionEngine,
+    TargetPredictionEngineClassic,
 )
 from weathergen.model.layers import MLP
 from weathergen.model.utils import get_num_parameters
@@ -259,6 +260,8 @@ class Model(torch.nn.Module):
         self.pred_heads = torch.nn.ModuleList()
 
         for i_obs, si in enumerate(cf.streams):
+            stream_name = si.get("name", i_obs)
+
             # extract and setup relevant parameters
             etc = si["embed_target_coords"]
             tro_type = si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
@@ -309,6 +312,7 @@ class Model(torch.nn.Module):
                         with_residual=False,
                         dropout_rate=dropout_rate,
                         norm_eps=self.cf.mlp_norm_eps,
+                        stream_name=f"embed_target_coords_{stream_name}",
                     )
                 )
             else:
@@ -325,13 +329,19 @@ class Model(torch.nn.Module):
                         dropout_rate=dropout_rate,
                         norm_type=cf.norm_type,
                         norm_eps=self.cf.mlp_norm_eps,
+                        stream_name=f"pred_adapter_kv_{stream_name}",
                     )
                 )
             else:
                 self.pred_adapter_kv.append(torch.nn.Identity())
 
             # target prediction engines
-            tte = TargetPredictionEngine(
+            tte_version = (
+                TargetPredictionEngine
+                if cf.decoder_type != "PerceiverIOCoordConditioning"
+                else TargetPredictionEngineClassic
+            )
+            tte = tte_version(
                 cf,
                 dims_embed,
                 dim_coord_in,
@@ -339,11 +349,16 @@ class Model(torch.nn.Module):
                 tr_mlp_hidden_factor,
                 softcap,
                 tro_type,
-            ).create()
+                stream_name=stream_name,
+            )
 
             self.target_token_engines.append(tte)
 
             # ensemble prediction heads to provide probabilistic prediction
+            final_activation = si["pred_head"].get("final_activation", "Identity")
+            logger.debug(
+                f"{final_activation} activation as prediction head output of {si['name']} stream"
+            )
             self.pred_heads.append(
                 EnsPredictionHead(
                     dims_embed[-1],
@@ -351,6 +366,8 @@ class Model(torch.nn.Module):
                     si["pred_head"]["num_layers"],
                     si["pred_head"]["ens_size"],
                     norm_type=cf.norm_type,
+                    final_activation=final_activation,
+                    stream_name=stream_name,
                 )
             )
 
@@ -720,7 +737,6 @@ class Model(torch.nn.Module):
             Prediction output tokens in physical representation for each target_coords.
         """
 
-        # fp32, i32 = torch.float32, torch.int32
         batch_size = (
             self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
         )
@@ -755,6 +771,7 @@ class Model(torch.nn.Module):
                     ]
                 )
 
+            # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
                 nn = si["name"]
                 logger.warning(
@@ -765,6 +782,8 @@ class Model(torch.nn.Module):
                 )
                 preds_tokens += [torch.tensor([], device=tc_tokens.device)]
                 continue
+
+            # skip empty lengths
             if tc_tokens.shape[0] == 0:
                 preds_tokens += [torch.tensor([], device=tc_tokens.device)]
                 continue
@@ -780,20 +799,13 @@ class Model(torch.nn.Module):
                 [streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))]
             )
 
-            # apply prediction engine
-            for ib, block in enumerate(tte):
-                if self.cf.pred_self_attention and ib % 3 == 1:
-                    tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
-                else:
-                    tc_tokens = checkpoint(
-                        block,
-                        tc_tokens,
-                        tokens_stream,
-                        tcs_lens,
-                        model_params.tokens_lens,
-                        tcs_aux,
-                        use_reentrant=False,
-                    )
+            tc_tokens = tte(
+                latent=tokens_stream,
+                output=tc_tokens,
+                latent_lens=model_params.tokens_lens,
+                output_lens=tcs_lens,
+                coordinates=tcs_aux,
+            )
 
             # final prediction head to map back to physical space
             preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
