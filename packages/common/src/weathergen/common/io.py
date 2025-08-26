@@ -360,8 +360,8 @@ class OutputBatchData:
         _logger.debug(f"stream: {key.stream} with index: {stream_idx}")
 
         if (datapoints.stop - datapoints.start) == 0:
-            target_data = np.zeros((0, len(self.channels[stream_idx])), dtype=np.float32)
-            preds_data = np.zeros((0, len(self.channels[stream_idx])), dtype=np.float32)
+            target_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
+            preds_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
         else:
             target_data = (
                 self.targets[offset_key.forecast_step][stream_idx][0][datapoints]
@@ -436,8 +436,8 @@ class OutputBatchData:
 
     def _extract_coordinates(self, stream_idx, offset_key, datapoints) -> DataCoordinates:
         _coords = self.targets_coords[offset_key.forecast_step][stream_idx][datapoints].numpy()
-        coords = _coords[:, :2]  # first two columns are lat,lon
-        geoinfo = _coords[:, 2:]  # the rest is geoinfo => potentially empty
+        coords = _coords[..., :2]  # first two columns are lat,lon
+        geoinfo = _coords[..., 2:]  # the rest is geoinfo => potentially empty
         if geoinfo.size > 0:  # TODO: set geoinfo to be empty for now
             geoinfo = np.empty((geoinfo.shape[0], 0))
             _logger.warning(
