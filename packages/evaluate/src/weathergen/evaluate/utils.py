@@ -445,7 +445,7 @@ def plot_data(
         h = plotter.animation(
             plot_samples, plot_fsteps, plot_chs, data_selection, "targets"
         )
-
+        
     return plot_names
 
 
@@ -697,6 +697,26 @@ def common_ranges(
 
     return maps_config
 
+def calc_val(x: xr.DataArray, bound: str) -> list[float]:
+    """
+    Calculate the maximum or minimum value per variable for all forecasteps.
+    Parameters
+    ----------
+    x :
+        the xarray DataArray with the forecasteps and respective values
+    bound :
+        the bound to be calculated, either "max" or "min"
+    Returns
+    -------
+        a list with the maximum or minimum values for a specific variable.
+    """ 
+
+    if bound == "max":
+        return x.max(dim=("ipoint")).values
+    elif bound == "min":
+        return x.min(dim=("ipoint")).values
+    else:
+        raise ValueError("bound must be either 'max' or 'min'")
 
 def calc_bounds(
     data_tars,
@@ -719,21 +739,12 @@ def calc_bounds(
         a list with the maximum or minimum values for a specific variable.
     """
     list_bound = []
-
-    if bound == "max":
-
-        def calc_val(x):
-            return x.max(dim=("ipoint")).values
-    else:
-
-        def calc_val(x):
-            return x.min(dim=("ipoint")).values
-
+    
     for da_tars, da_preds in zip(data_tars.values(), data_preds.values(), strict=False):
         list_bound.extend(
             (
-                calc_val(da_tars.where(da_tars.channel == var, drop=True)),
-                calc_val(da_preds.where(da_preds.channel == var, drop=True)),
+                calc_val(da_tars.where(da_tars.channel == var, drop=True), bound),
+                calc_val(da_preds.where(da_preds.channel == var, drop=True), bound),
             )
         )
 
