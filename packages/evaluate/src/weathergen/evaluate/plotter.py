@@ -1,3 +1,4 @@
+import glob
 import logging
 import os
 from pathlib import Path
@@ -8,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from PIL import Image
-import glob
+
 from weathergen.utils.config import _load_private_conf
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
@@ -340,10 +341,6 @@ class Plotter:
                 self.stream
             )
 
-        # check for known keys in map_kwargs
-        marker_size_base = map_kwargs_save.pop("marker_size", 1)
-        scale_marker_size = map_kwargs_save.pop("scale_marker_size", True)
-        marker = map_kwargs_save.pop("marker", "o")
 
         # Basic map output directory for this stream
         map_output_dir = self.get_map_output_dir(tag)
@@ -429,13 +426,13 @@ class Plotter:
         marker_size = marker_size_base
         if scale_marker_size:
             marker_size = np.clip(
-                marker_size / np.cos(np.radians(da["lat"])) ** 2,
+                marker_size / np.cos(np.radians(data["lat"])) ** 2,
                 a_max=marker_size * 10.0,
                 a_min=marker_size,
             )
 
         valid_time = str(data["valid_time"][0].values.astype("datetime64[m]"))
-        
+
         scatter_plt = ax.scatter(
             data["lon"],
             data["lat"],
@@ -509,8 +506,7 @@ class Plotter:
                 _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
                 image_paths = []
                 for _, fstep in enumerate(fsteps):
-                  
-                    #TODO: refactor to avoid code duplication with scatter_plot
+                    # TODO: refactor to avoid code duplication with scatter_plot
                     parts = [
                         "map",
                         self.run_id,
@@ -520,14 +516,14 @@ class Plotter:
                         self.stream,
                         var,
                         str(fstep).zfill(3),
-                    ]    
+                    ]
 
                     name = "_".join(filter(None, parts))
                     fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
-                    
+
                     names = glob.glob(fname)
                     image_paths += names
-      
+
                 images = [Image.open(path) for path in image_paths]
                 images[0].save(
                     f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{var}.gif",
