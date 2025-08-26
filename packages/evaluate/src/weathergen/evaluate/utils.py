@@ -400,6 +400,8 @@ def plot_data(
 
     plot_names = []
 
+    plot_names = []
+
     for (fstep, tars), (_, preds) in zip(
         da_tars.items(), da_preds.items(), strict=False
     ):
