@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from PIL import Image
-
+import glob
 from weathergen.utils.config import _load_private_conf
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
@@ -320,6 +320,27 @@ class Plotter:
         """
         self.update_data_selection(select)
 
+        map_kwargs_save = (
+            {
+                key: value
+                for key, value in map_kwargs.copy().items()
+                if key not in variables
+            }
+            if map_kwargs is not None
+            else {}
+        )
+
+        if not hasattr(map_kwargs_save, "marker_size"):
+            # Set default marker size if not specified in maps_config
+            map_kwargs_save["marker_size"] = DefaultMarkerSize.get_marker_size(
+                self.stream
+            )
+
+        # check for known keys in map_kwargs
+        marker_size_base = map_kwargs_save.pop("marker_size", 1)
+        scale_marker_size = map_kwargs_save.pop("scale_marker_size", True)
+        marker = map_kwargs_save.pop("marker", "o")
+
         # Basic map output directory for this stream
         map_output_dir = self.get_map_output_dir(tag)
 
@@ -352,7 +373,7 @@ class Plotter:
                     map_output_dir,
                     var,
                     tag=tag,
-                    map_kwargs=map_kwargs,
+                    map_kwargs=map_kwargs[var],
                 )
                 plot_names.append(name)
 
@@ -393,6 +414,8 @@ class Plotter:
         marker_size_base = map_kwargs_save.pop("marker_size", 1)
         scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
         marker = map_kwargs_save.pop("marker", "o")
+        vmin = map_kwargs_save.pop("vmin", None)
+        vmax = map_kwargs_save.pop("vmax", None)
 
         # Create figure and axis objects
         fig = plt.figure(dpi=self.dpi_val)
@@ -401,10 +424,14 @@ class Plotter:
 
         marker_size = marker_size_base
         if scale_marker_size:
-            marker_size = (marker_size + 1.0) * np.cos(np.radians(data["lat"]))
+            marker_size = np.clip(
+                marker_size / np.cos(np.radians(da["lat"])) ** 2,
+                a_max=marker_size * 10.0,
+                a_min=marker_size,
+            )
 
         valid_time = str(data["valid_time"][0].values.astype("datetime64[m]"))
-
+        
         scatter_plt = ax.scatter(
             data["lon"],
             data["lat"],
@@ -413,9 +440,12 @@ class Plotter:
             s=marker_size,
             marker=marker,
             transform=ccrs.PlateCarree(),
+            vmin=vmin,
+            vmax=vmax,
             linewidths=0.0,  # only markers, avoids aliasing for very small markers
             **map_kwargs_save,
         )
+
         plt.colorbar(
             scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}"
         )
@@ -472,12 +502,28 @@ class Plotter:
 
         for _, sa in enumerate(samples):
             for _, var in enumerate(variables):
+                _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
                 image_paths = []
                 for _, fstep in enumerate(fsteps):
-                    image_paths.append(
-                        f"{map_output_dir}/map_{self.run_id}_{tag}_{sa}_{self.stream}_{var}_{fstep:03d}.png"
-                    )
+                  
+                    #TODO: refactor to avoid code duplication with scatter_plot
+                    parts = [
+                        "map",
+                        self.run_id,
+                        tag,
+                        str(sa),
+                        "*",
+                        self.stream,
+                        var,
+                        str(fstep).zfill(3),
+                    ]    
 
+                    name = "_".join(filter(None, parts))
+                    fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
+                    
+                    names = glob.glob(fname)
+                    image_paths += names
+      
                 images = [Image.open(path) for path in image_paths]
                 images[0].save(
                     f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{var}.gif",
