@@ -447,7 +447,7 @@ def plot_data(
         h = plotter.animation(
             plot_samples, plot_fsteps, plot_chs, data_selection, "targets"
         )
-        
+
     return plot_names
 
 
@@ -699,6 +699,7 @@ def common_ranges(
 
     return maps_config
 
+
 def calc_val(x: xr.DataArray, bound: str) -> list[float]:
     """
     Calculate the maximum or minimum value per variable for all forecasteps.
@@ -711,7 +712,7 @@ def calc_val(x: xr.DataArray, bound: str) -> list[float]:
     Returns
     -------
         a list with the maximum or minimum values for a specific variable.
-    """ 
+    """
 
     if bound == "max":
         return x.max(dim=("ipoint")).values
@@ -719,6 +720,7 @@ def calc_val(x: xr.DataArray, bound: str) -> list[float]:
         return x.min(dim=("ipoint")).values
     else:
         raise ValueError("bound must be either 'max' or 'min'")
+
 
 def calc_bounds(
     data_tars,
@@ -741,7 +743,7 @@ def calc_bounds(
         a list with the maximum or minimum values for a specific variable.
     """
     list_bound = []
-    
+
     for da_tars, da_preds in zip(data_tars.values(), data_preds.values(), strict=False):
         list_bound.extend(
             (
