@@ -286,6 +286,15 @@ class ZarrIO:
 
 
 @dataclasses.dataclass
+class DataCoordinates:
+    times: typing.Any
+    coords: typing.Any
+    geoinfo: typing.Any
+    channels: typing.Any
+    geoinfo_channels: typing.Any
+
+
+@dataclasses.dataclass
 class OutputBatchData:
     """Provide convenient access to adapt existing output data structures."""
 
@@ -312,7 +321,8 @@ class OutputBatchData:
     streams: dict[str, int]
 
     # stream, channel name
-    channels: list[list[str]]
+    target_channels: list[list[str]]
+    source_channels: list[list[str]]
     geoinfo_channels: list[list[str]]
 
     sample_start: int
@@ -338,41 +348,29 @@ class OutputBatchData:
 
     def extract(self, key: ItemKey) -> OutputItem:
         """Extract datasets from lists for one output item."""
-        # adjust shifted values in ItemMeta
-        sample = key.sample - self.sample_start
-        forecast_step = key.forecast_step - self.forecast_offset
-        stream_idx = self.streams[key.stream]
-        lens = self.targets_lens[forecast_step][stream_idx]
-
-        # empty target/prediction
-        if len(lens) == 0:
-            start = 0
-            n_samples = 0
-        else:
-            start = sum(lens[:sample])
-            n_samples = lens[sample]
-
         _logger.debug(f"extracting subset: {key}")
+        offset_key = self._offset_key(key)
+        stream_idx = self.streams[key.stream]
+        datapoints = self._get_datapoints_per_sample(offset_key, stream_idx)
+
         _logger.debug(
-            f"sample: start:{self.sample_start} rel_idx:{sample} range:{start}-{start + n_samples}"
-        )
-        _logger.debug(
-            f"forecast_step: {key.forecast_step} = {forecast_step} (rel_step) + "
+            f"forecast_step: {key.forecast_step} = {offset_key.forecast_step} (rel_step) + "
             + f"{self.forecast_offset} (forecast_offset)"
         )
         _logger.debug(f"stream: {key.stream} with index: {stream_idx}")
 
-        datapoints = slice(start, start + n_samples)
-
-        if n_samples == 0:
+        if (datapoints.stop - datapoints.start) == 0:
             target_data = np.zeros((0, len(self.channels[stream_idx])), dtype=np.float32)
             preds_data = np.zeros((0, len(self.channels[stream_idx])), dtype=np.float32)
         else:
             target_data = (
-                self.targets[forecast_step][stream_idx][0][datapoints].cpu().detach().numpy()
+                self.targets[offset_key.forecast_step][stream_idx][0][datapoints]
+                .cpu()
+                .detach()
+                .numpy()
             )
             preds_data = (
-                self.predictions[forecast_step][stream_idx][0]
+                self.predictions[offset_key.forecast_step][stream_idx][0]
                 .transpose(1, 0)
                 .transpose(1, 2)[datapoints]
                 .cpu()
@@ -380,72 +378,101 @@ class OutputBatchData:
                 .numpy()
             )
 
-        _coords = self.targets_coords[forecast_step][stream_idx][datapoints].numpy()
-        coords = _coords[..., :2]  # first two columns are lat,lon
-        geoinfo = _coords[..., 2:]  # the rest is geoinfo => potentially empty
-        if geoinfo.size > 0:  # TODO: set geoinfo to be empty for now
-            geoinfo = np.empty((geoinfo.shape[0], 0))
-            _logger.warning(
-                "geoinformation channels are not implemented yet."
-                + "will be truncated to be of size 0."
-            )
-        times = self.targets_times[forecast_step][stream_idx][
-            datapoints
-        ]  # make conversion to datetime64[ns] here?
-        channels = self.channels[stream_idx]
-        geoinfo_channels = self.geoinfo_channels[stream_idx]
+        data_coords = self._extract_coordinates(stream_idx, offset_key, datapoints)
 
-        assert len(channels) == target_data.shape[1], (
-            "Number of channel names does not align with data"
+        assert len(data_coords.channels) == target_data.shape[1], (
+            "Number of channel names does not align with target data."
         )
-        assert len(channels) == preds_data.shape[1], (
-            "Number of channel names does not align with data"
+        assert len(data_coords.channels) == preds_data.shape[1], (
+            "Number of channel names does not align with prediction data."
         )
 
         if key.with_source:
-            source = self.sources[sample][stream_idx]
-
-            # currently fails since no separate channels for source/target implemented
-            # assert source.data.shape[1] == len(channels), (
-            #     "Number of channel names does not align with data"
-            # )
-
-            source_dataset = OutputDataset(
-                "source",
-                key,
-                source.data,
-                source.datetimes,
-                source.coords,
-                source.geoinfos,
-                channels,
-                geoinfo_channels,
-            )
-
-            _logger.debug(f"source shape: {source_dataset.data.shape}")
+            source_dataset = self._extract_sources(offset_key.sample, stream_idx, key)
         else:
             source_dataset = None
 
         return OutputItem(
             key=key,
             source=source_dataset,
-            target=OutputDataset(
-                "target",
-                key,
-                target_data,
-                times,
-                coords,
-                geoinfo,
-                channels,
-                geoinfo_channels,
-            ),
+            target=OutputDataset("target", key, target_data, **dataclasses.asdict(data_coords)),
             prediction=OutputDataset(
-                "prediction",
-                key,
-                preds_data,
-                times,
-                coords,
-                geoinfo,
-                channels,
-                geoinfo_channels,
+                "prediction", key, preds_data, **dataclasses.asdict(data_coords)
             ),
         )
+
+    def _get_datapoints_per_sample(self, offset_key, stream_idx):
+        lens = self.targets_lens[offset_key.forecast_step][stream_idx]
+
+        # empty target/prediction
+        if len(lens) == 0:
+            start = 0
+            n_samples = 0
+        else:
+            start = sum(lens[: offset_key.sample])
+            n_samples = lens[offset_key.sample]
+
+        _logger.debug(
+            f"sample: start:{self.sample_start} rel_idx:{offset_key.sample}"
+            + f"range:{start}-{start + n_samples}"
+        )
+
+        return slice(start, start + n_samples)
+
+    def _offset_key(self, key: ItemKey):
+        """
+        Correct indices in key to be useable for data extraction.
+
+        `key` contains indices that are adjusted to have better output semantics.
+        To be useable in extraction these have to be adjusted to bridge the differences
+        compared to the semantics of the data.
+            - `sample` is adjusted from a global continous index to a per batch index
+            - `forecast_step` is adjusted from including `forecast_offset` to indexing
+               the data (always starts at 0)
+        """
+        return ItemKey(
+            key.sample - self.sample_start, key.forecast_step - self.forecast_offset, key.stream
+        )
+
+    def _extract_coordinates(self, stream_idx, offset_key, datapoints) -> DataCoordinates:
+        _coords = self.targets_coords[offset_key.forecast_step][stream_idx][datapoints].numpy()
+        coords = _coords[:, :2]  # first two columns are lat,lon
+        geoinfo = _coords[:, 2:]  # the rest is geoinfo => potentially empty
+        if geoinfo.size > 0:  # TODO: set geoinfo to be empty for now
+            geoinfo = np.empty((geoinfo.shape[0], 0))
+            _logger.warning(
+                "geoinformation channels are not implemented yet."
+                + "will be truncated to be of size 0."
+            )
+        times = self.targets_times[offset_key.forecast_step][stream_idx][
+            datapoints
+        ]  # make conversion to datetime64[ns] here?
+        channels = self.target_channels[stream_idx]
+        geoinfo_channels = self.geoinfo_channels[stream_idx]
+
+        return DataCoordinates(times, coords, geoinfo, channels, geoinfo_channels)
+
+    def _extract_sources(self, sample, stream_idx, key):
+        channels = self.source_channels[stream_idx]
+        geoinfo_channels = self.geoinfo_channels[stream_idx]
+
+        source = self.sources[sample][stream_idx]
+
+        assert source.data.shape[1] == len(channels), (
+            "Number of source channel names does not align with source data"
+        )
+
+        source_dataset = OutputDataset(
+            "source",
+            key,
+            source.data,
+            source.datetimes,
+            source.coords,
+            source.geoinfos,
+            channels,
+            geoinfo_channels,
+        )
+
+        _logger.debug(f"source shape: {source_dataset.data.shape}")
+
+        return source_dataset

@@ -21,6 +21,7 @@ from weathergen.common.io import ZarrIO
 from weathergen.evaluate.plotter import LinePlots, Plotter
 from weathergen.evaluate.score import VerifiedData, get_score
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
+from weathergen.utils.config import Config
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -289,11 +290,11 @@ def calc_scores_per_stream(
 
 
 def plot_data(
-    cfg: str,
+    cfg: dict,
+    run_config: oc.DictConfig,
     results_dir: Path,
     plot_dir: Path,
     stream: str,
-    stream_dict: dict,
 ) -> list[str]:
     """
     Plot the data for a given run and stream.
@@ -302,26 +303,29 @@ def plot_data(
     ----------
     cfg :
         Configuration dictionary containing all information for the evaluation.
+        Must provide a stream configuration under `cfg['run_ids'][run_id]["streams"][stream]`.
+    run_config :
+        Configuration for the run, including stream information.
     results_dir :
         Directory where the inference results are stored.
         Expected scheme `<results_base_dir>/<run_id>`.
     plot_base_dir :
         Base directory where the plots will be saved.
-    run_id :
-        Run identifier.
     stream :
         Stream name to plot data for.
-    stream_dict :
-        Dictionary containing stream configuration.
     Returns
     -------
     List of plot names generated during the plotting process.
     """
     run_id = results_dir.name
 
+    # get stream dict from evaluation config (assumed to be part of cfg at this point)
+    stream_dict = cfg["run_ids"][run_id]["streams"][stream]
+
     # handle plotting settings
     plot_settings = stream_dict.get("plotting", {})
 
+    # return early if no plotting is requested
     if not (
         plot_settings
         and (
@@ -332,7 +336,17 @@ def plot_data(
     ):
         return
 
-    plotter = Plotter(cfg, plot_dir)
+    # get plotter configuration
+    plotter_cfg = {
+        "image_format": cfg.get("image_format", "png"),
+        "dpi_val": cfg.get("dpi_val", 300),
+        "fig_size": cfg.get("fig_size", (8, 10)),
+        "plot_subtimesteps": get_stream_attr(
+            run_config, stream, "tokenize_spacetime", False
+        ),
+    }
+
+    plotter = Plotter(plotter_cfg, plot_dir)
 
     plot_samples = plot_settings.get("sample", None)
     plot_fsteps = plot_settings.get("forecast_step", None)
@@ -384,13 +398,13 @@ def plot_data(
 
     maps_config = common_ranges(da_tars, da_preds, plot_chs, maps_config)
 
+    plot_names = []
+
     for (fstep, tars), (_, preds) in zip(
         da_tars.items(), da_preds.items(), strict=False
     ):
         plot_chs = list(np.atleast_1d(tars.channel.values))
         plot_samples = list(np.unique(tars.sample.values))
-
-        plot_names = []
 
         for sample in tqdm(
             plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"
@@ -404,17 +418,19 @@ def plot_data(
             }
 
             if plot_maps:
-                map_tar = plotter.map(
+                map_tar = plotter.create_maps_per_sample(
                     tars, plot_chs, data_selection, "targets", maps_config
                 )
 
-                map_pred = plotter.map(
+                map_pred = plotter.create_maps_per_sample(
                     preds, plot_chs, data_selection, "preds", maps_config
                 )
                 plots.extend([map_tar, map_pred])
 
             if plot_histograms:
-                h = plotter.histogram(tars, preds, plot_chs, data_selection)
+                h = plotter.create_histograms_per_sample(
+                    tars, preds, plot_chs, data_selection
+                )
                 plots.append(h)
 
             plotter = plotter.clean_data_selection()
@@ -776,3 +792,27 @@ def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataA
         da = da.drop_vars(name)
         da = da.expand_dims({name: [val]}, axis=axis)
     return da
+
+
+def get_stream_attr(config: Config, stream_name: str, key: str, default=None):
+    """
+    Get the value of a key for a specific stream from the a model config.
+
+    Parameters:
+    ------------
+        config: dict
+            The full configuration dictionary.
+        stream_name: str
+            The name of the stream (e.g. 'ERA5').
+        key: str
+            The key to look up (e.g. 'tokenize_spacetime').
+        default: Optional
+            Value to return if not found (default: None).
+
+    Returns:
+        The parameter value if found, otherwise the default.
+    """
+    for stream in config.get("streams", []):
+        if stream.get("name") == stream_name:
+            return stream.get(key, default)
+    return default
