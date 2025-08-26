@@ -187,7 +187,7 @@ def evaluate_from_config(cfg):
                         )
     # plot summary
     summary_plots = cfg.get("summary_plots", True)
-    if scores_dict and cfg.summary_plots:
+    if scores_dict and summary_plots:
         _logger.info("Started creating summary plots..")
         plot_summary(cfg, scores_dict, summary_dir, print_summary=cfg.print_summary)
 

@@ -195,16 +195,20 @@ class Plotter:
                     f"Creating histograms for {ntimes_unique} valid times of variable {var}."
                 )
 
-                groups = zip(targ.groupby("valid_time"), prd.groupby("valid_time"), strict=False)
+                groups = zip(
+                    targ.groupby("valid_time"), prd.groupby("valid_time"), strict=False
+                )
             else:
                 _logger.info(f"Plotting histogram for all valid times of {var}")
 
-                groups = [((None, targ), (None, prd))]   # wrap once with dummy valid_time
-            
+                groups = [
+                    ((None, targ), (None, prd))
+                ]  # wrap once with dummy valid_time
+
             for (valid_time, targ_t), (_, prd_t) in groups:
                 if valid_time is not None:
                     _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
-               
+
                 name = self.plot_histogram(targ_t, prd_t, hist_output_dir, var, tag=tag)
                 plot_names.append(name)
 
@@ -265,7 +269,7 @@ class Plotter:
             self.run_id,
             tag,
             str(self.sample),
-            valid_time, 
+            valid_time,
             self.stream,
             varname,
             str(self.fstep).zfill(3),
@@ -339,7 +343,7 @@ class Plotter:
                 _logger.info(f"Creating maps for all valid times of {var} - {tag}")
                 groups = [(None, da)]  # single dummy group
 
-            for (valid_time, da_t) in groups:
+            for valid_time, da_t in groups:
                 if valid_time is not None:
                     _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
 
