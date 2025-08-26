@@ -195,18 +195,16 @@ class Plotter:
                     f"Creating histograms for {ntimes_unique} valid times of variable {var}."
                 )
 
-                groups = zip(
-                    targ.groupby("valid_time"), prd.groupby("valid_time"), strict=False
-                )
+                groups = zip(targ.groupby("valid_time"), prd.groupby("valid_time"), strict=False)
             else:
                 _logger.info(f"Plotting histogram for all valid times of {var}")
 
-                groups = [(None, (targ, prd))]  # wrap once with dummy valid_time
-
-            for valid_time, (targ_t, prd_t) in groups:
+                groups = [((None, targ), (None, prd))]   # wrap once with dummy valid_time
+            
+            for (valid_time, targ_t), (_, prd_t) in groups:
                 if valid_time is not None:
                     _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
-
+               
                 name = self.plot_histogram(targ_t, prd_t, hist_output_dir, var, tag=tag)
                 plot_names.append(name)
 
@@ -259,12 +257,15 @@ class Plotter:
         )
         plt.legend(frameon=False)
 
+        valid_time = str(target_data["valid_time"][0].values.astype("datetime64[m]"))
+
         # TODO: make this nicer
         parts = [
             "histogram",
             self.run_id,
             tag,
             str(self.sample),
+            valid_time, 
             self.stream,
             varname,
             str(self.fstep).zfill(3),
@@ -338,7 +339,7 @@ class Plotter:
                 _logger.info(f"Creating maps for all valid times of {var} - {tag}")
                 groups = [(None, da)]  # single dummy group
 
-            for valid_time, da_t in groups:
+            for (valid_time, da_t) in groups:
                 if valid_time is not None:
                     _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
 
@@ -398,7 +399,7 @@ class Plotter:
         if scale_marker_size:
             marker_size = (marker_size + 1.0) * np.cos(np.radians(data["lat"]))
 
-        valid_time = str(data["valid_time"][0].values.astype("datetime64[s]"))
+        valid_time = str(data["valid_time"][0].values.astype("datetime64[m]"))
 
         scatter_plt = ax.scatter(
             data["lon"],
