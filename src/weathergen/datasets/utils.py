@@ -195,11 +195,40 @@ def locs_to_cell_coords_ctrs(healpix_centers_rots, locs: list) -> list:
 
     ## express each centroid in local coordinates w.r.t to healpix center
     #  by rotating center to origin
-    local_locs = [
-        torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1) if len(s) > 0 else torch.tensor([])
-        for i, (R, s) in enumerate(zip(healpix_centers_rots, locs, strict=False))
-    ]
-
+    # Handle empty case
+    if not locs:
+        return []
+    
+    # Concatenate all non-empty locations
+    all_points = torch.cat(locs, dim=0)  # [N_total, 3]
+    lengths = [len(s) for s in locs]
+    total_points = all_points.shape[0]
+    
+    # Create batch indices efficiently
+    device = all_points.device
+    batch_indices = torch.empty(total_points, dtype=torch.long, device=device)
+    
+    # Fill batch indices in-place (faster than repeat_interleave)
+    idx = 0
+    for batch_id, length in enumerate(lengths):
+        if length > 0:
+            batch_indices[idx:idx+length].fill_(batch_id)
+            idx += length
+    
+    # Select rotation matrices for each point
+    rotations_selected = healpix_centers_rots[batch_indices]  # [N_total, 3, 3]
+    
+    # Vectorized matrix multiplication
+    # all_points: [N_total, 3] -> [N_total, 3, 1]
+    # rotations_selected: [N_total, 3, 3]
+    rotated_points = torch.bmm(
+        rotations_selected,
+        all_points.unsqueeze(-1)
+    ).squeeze(-1)
+    
+    # Split back to original structure
+    local_locs = list(torch.split(rotated_points, lengths))
+    
     return local_locs
 
 
