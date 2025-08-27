@@ -343,7 +343,6 @@ class Plotter:
                 self.stream
             )
 
-
         # Basic map output directory for this stream
         map_output_dir = self.get_map_output_dir(tag)
 
