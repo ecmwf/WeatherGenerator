@@ -65,7 +65,7 @@ class Trainer(TrainerBase):
         elif isinstance(cf.forecast_steps, ListConfig):
             assert cf.forecast_policy if len(cf.forecast_steps) > 0 else True
         else:
-            raise TypeError("Forecast steps must either an integer or a non-empty list of integers")
+            raise TypeError("Forecast steps must an integer or a non-empty list of integers")
 
         self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
