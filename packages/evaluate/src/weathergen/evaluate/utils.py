@@ -116,7 +116,7 @@ def get_data(
         else:
             points_per_sample = None
 
-        fsteps_final = fsteps
+        fsteps_final = []
 
         for fstep in fsteps:
             _logger.info(f"RUN {run_id} - {stream}: Processing fstep {fstep}...")
@@ -141,9 +141,9 @@ def get_data(
                     _logger.info(
                         f"Skipping {stream} sample {sample} forecast step: {fstep}. Dataset is empty."
                     )
-                    fsteps_final.remove(fstep)
                     continue
-
+                
+                fsteps_final.append(fstep)
                 da_tars_fs.append(target.squeeze())
                 da_preds_fs.append(pred.squeeze())
                 pps.append(npoints)
@@ -172,11 +172,11 @@ def get_data(
                     da_tars_fs = da_tars_fs.sel(channel=existing_channels)
                     da_preds_fs = da_preds_fs.sel(channel=existing_channels)
 
-            da_tars.append(da_tars_fs)
-            da_preds.append(da_preds_fs)
+                da_tars.append(da_tars_fs)
+                da_preds.append(da_preds_fs)
             if return_counts:
                 points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
-
+        
         # Safer than a list
         da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=False)}
         da_preds = {
