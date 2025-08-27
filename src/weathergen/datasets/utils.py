@@ -446,7 +446,7 @@ def get_target_coords_local_fast(hlc, target_coords, geoinfo_offset):
     return a
 
 ####################################################################################################
-def tcs_optimized(target_coords: List[torch.Tensor], s2tor3) -> Tuple[List[torch.Tensor], torch.Tensor]:
+def tcs_optimized(target_coords, s2tor3):
     """
     Returns:
         tcs: List of transformed coordinates
@@ -464,15 +464,13 @@ def tcs_optimized(target_coords: List[torch.Tensor], s2tor3) -> Tuple[List[torch
     # Extract indices and tensors
     valid_indices, valid_tensors = zip(*non_empty_info)
     
-    # Ultra-vectorized approach: stack all valid tensors
-    stacked_coords = torch.cat(valid_tensors, dim=0)  # [total_points, 2]
+    stacked_coords = torch.cat(valid_tensors, dim=0)  
     
     # Single vectorized coordinate transformation
     theta_all = torch.deg2rad(90.0 - stacked_coords[..., 0])
     phi_all = torch.deg2rad(180.0 + stacked_coords[..., 1])
     
-    # Use your existing s2tor3 function (unchanged)
-    transformed_all = s2tor3(theta_all, phi_all)  # [total_points, 3]
+    transformed_all = s2tor3(theta_all, phi_all)  
     
     # Split back to original structure using cumulative sizes
     sizes = [t.shape[0] for _, t in non_empty_info]
@@ -495,7 +493,7 @@ def get_target_coords_local_ffast(
 
     # target_coords_lens = [len(t) for t in target_coords]
     tcs, target_coords = tcs_optimized(target_coords, s2tor3)
-    
+
     if target_coords.shape[0] == 0:
         return torch.tensor([])
     target_geoinfos = torch.cat(target_geoinfos)
