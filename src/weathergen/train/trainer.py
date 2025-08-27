@@ -16,7 +16,6 @@ from typing import Any
 import numpy as np
 import torch
 import tqdm
-import weathergen.utils.config as config
 from omegaconf import ListConfig
 from torch import Tensor
 from torch.distributed.fsdp import FullOptimStateDictConfig, FullStateDictConfig, StateDictType
@@ -28,6 +27,8 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 from torch.distributed.fsdp.wrap import (
     size_based_auto_wrap_policy,  # default_auto_wrap_policy,
 )
+
+import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
