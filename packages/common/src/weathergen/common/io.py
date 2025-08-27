@@ -436,9 +436,11 @@ class OutputBatchData:
 
     def _extract_coordinates(self, stream_idx, offset_key, datapoints) -> DataCoordinates:
         _coords = self.targets_coords[offset_key.forecast_step][stream_idx][datapoints].numpy()
+
         # ensure _coords has size (?,2)
         if len(_coords) == 0:
             _coords = np.zeros((0, 2), dtype=np.float32)
+
         coords = _coords[..., :2]  # first two columns are lat,lon
         geoinfo = _coords[..., 2:]  # the rest is geoinfo => potentially empty
         if geoinfo.size > 0:  # TODO: set geoinfo to be empty for now
