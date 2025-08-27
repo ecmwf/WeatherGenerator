@@ -63,7 +63,11 @@ class Trainer(TrainerBase):
         if isinstance(cf.forecast_steps, int):
             assert cf.forecast_policy if cf.forecast_steps > 0 else True
         elif isinstance(cf.forecast_steps, ListConfig):
-            assert cf.forecast_policy if len(cf.forecast_steps) > 0 else True
+            assert (
+                cf.forecast_policy and all(step > 0 for step in cf.forecast_steps)
+                if len(cf.forecast_steps) > 0
+                else True
+            )
         else:
             raise TypeError("Forecast steps must be an integer or a non-empty list of integers")
 
