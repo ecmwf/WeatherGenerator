@@ -190,6 +190,10 @@ class Plotter:
                 self.select_from_da(preds, select_var),
             )
 
+            # Remove NaNs
+            targ = targ.dropna(dim="ipoint")
+            prd = prd.dropna(dim="ipoint")
+
             if self.plot_subtimesteps:
                 ntimes_unique = len(np.unique(targ.valid_time))
                 _logger.info(
@@ -338,6 +342,7 @@ class Plotter:
             map_kwargs_save["marker_size"] = DefaultMarkerSize.get_marker_size(
                 self.stream
             )
+
 
         # Basic map output directory for this stream
         map_output_dir = self.get_map_output_dir(tag)
