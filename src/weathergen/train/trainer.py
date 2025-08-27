@@ -16,6 +16,8 @@ from typing import Any
 import numpy as np
 import torch
 import tqdm
+import weathergen.utils.config as config
+from omegaconf import ListConfig
 from torch import Tensor
 from torch.distributed.fsdp import FullOptimStateDictConfig, FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -26,8 +28,6 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 from torch.distributed.fsdp.wrap import (
     size_based_auto_wrap_policy,  # default_auto_wrap_policy,
 )
-
-import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
@@ -58,7 +58,13 @@ class Trainer(TrainerBase):
 
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
-        assert cf.forecast_policy if cf.forecast_steps > 0 else True
+
+        if isinstance(cf.forecast_steps, int):
+            assert cf.forecast_policy if cf.forecast_steps > 0 else True
+        elif isinstance(cf.forecast_steps, ListConfig):
+            assert cf.forecast_policy if len(cf.forecast_steps) > 0 else True
+        else:
+            raise TypeError("Forecast steps must either an integer or a non-empty list of integers")
 
         self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
