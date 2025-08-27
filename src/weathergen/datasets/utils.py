@@ -445,6 +445,45 @@ def get_target_coords_local_fast(hlc, target_coords, geoinfo_offset):
 
     return a
 
+####################################################################################################
+def tcs_optimized(target_coords: List[torch.Tensor], s2tor3) -> Tuple[List[torch.Tensor], torch.Tensor]:
+    """
+    Returns:
+        tcs: List of transformed coordinates
+        concatenated_coords: All original coords concatenated
+    """
+    if not target_coords:
+        return [], torch.tensor([])
+    
+    # Filter non-empty tensors and get their info in one pass
+    non_empty_info = [(i, t) for i, t in enumerate(target_coords) if len(t) > 0]
+    
+    if not non_empty_info:
+        return [torch.tensor([]) for _ in target_coords], torch.tensor([])
+    
+    # Extract indices and tensors
+    valid_indices, valid_tensors = zip(*non_empty_info)
+    
+    # Ultra-vectorized approach: stack all valid tensors
+    stacked_coords = torch.cat(valid_tensors, dim=0)  # [total_points, 2]
+    
+    # Single vectorized coordinate transformation
+    theta_all = torch.deg2rad(90.0 - stacked_coords[..., 0])
+    phi_all = torch.deg2rad(180.0 + stacked_coords[..., 1])
+    
+    # Use your existing s2tor3 function (unchanged)
+    transformed_all = s2tor3(theta_all, phi_all)  # [total_points, 3]
+    
+    # Split back to original structure using cumulative sizes
+    sizes = [t.shape[0] for _, t in non_empty_info]
+    split_transformed = torch.split(transformed_all, sizes, dim=0)
+    
+    # Reconstruct tcs list with correct positioning
+    tcs = [torch.tensor([]) for _ in target_coords]
+    for idx, transformed in zip(valid_indices, split_transformed):
+        tcs[idx] = transformed
+    
+    return tcs, stacked_coords
 
 ####################################################################################################
 def get_target_coords_local_ffast(
@@ -455,18 +494,8 @@ def get_target_coords_local_ffast(
     """
 
     # target_coords_lens = [len(t) for t in target_coords]
-    tcs = [
-        (
-            s2tor3(
-                torch.deg2rad(90.0 - t[..., 0]),
-                torch.deg2rad(180.0 + t[..., 1]),
-            )
-            if len(t) > 0
-            else torch.tensor([])
-        )
-        for t in target_coords
-    ]
-    target_coords = torch.cat(target_coords)
+    tcs, target_coords = tcs_optimized(target_coords, s2tor3)
+    
     if target_coords.shape[0] == 0:
         return torch.tensor([])
     target_geoinfos = torch.cat(target_geoinfos)
