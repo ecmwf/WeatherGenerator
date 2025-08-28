@@ -156,11 +156,6 @@ def _load_streams_in_config(config: Config) -> Config:
     config = config.copy()
     if streams_directory is not None:
         streams_directory = Path(streams_directory)
-        if not streams_directory.is_dir():
-            msg = f"Streams directory {streams_directory} does not exist."
-            raise FileNotFoundError(msg)
-
-        _logger.info(f"Loading streams from {streams_directory}")
         config.streams = load_streams(streams_directory)
     return config
 
@@ -305,9 +300,29 @@ def _load_default_conf() -> Config:
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
+    # TODO: might want to put this into config later instead of hardcoding it here...
+    streams_history = {
+        "streams_anemoi": "era5_1deg",
+        "streams_mixed": "era5_nppatms_synop",
+        "streams_ocean": "fesom",
+        "streams_icon": "icon",
+        "streams_mixed_experimental": "cerra_seviri",
+    }
     if not streams_directory.is_dir():
-        msg = f"Streams directory {streams_directory} does not exist."
-        raise FileNotFoundError(msg)
+        streams_directory_config = streams_directory
+        dirs = [streams_directory]
+        while streams_directory.name in streams_history and not streams_directory.is_dir():
+            streams_directory = streams_directory.with_name(streams_history[streams_directory.name])
+            dirs.append(streams_directory)
+        if not streams_directory.is_dir():
+            msg = f"Could not find stream directory, nor its history: {[str(dir) for dir in dirs]}"
+            raise FileNotFoundError(msg)
+        _logger.info(
+            f"Streams directory {streams_directory} found in "
+            f"history for {streams_directory_config}. "
+            "Note: This change will not be reflected in the config. "
+            "Please update the 'streams_directory' variable manually."
+        )
 
     # read all reportypes from directory, append to existing ones
     streams_directory = streams_directory.absolute()
@@ -317,7 +332,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
     streams = {}
     # exclude temp files starting with "." or "#" (eg. emacs, vim, macos savefiles)
     stream_files = sorted(streams_directory.rglob("[!.#]*.yml"))
-    _logger.info(f"discover stream configs: {', '.join(map(str, stream_files))}")
+    _logger.info(f"Discover stream configs: {', '.join(map(str, stream_files))}")
     for config_file in stream_files:
         try:
             config = OmegaConf.load(config_file)
