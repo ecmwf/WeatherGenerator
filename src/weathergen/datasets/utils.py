@@ -67,7 +67,7 @@ def s2tor3(lats, lons):
 
 
 ####################################################################################################
-def r3tos2(pos):
+def r3tos2(pos: torch.Tensor) -> torch.Tensor:
     """
     Convert from spherical to Cartesion R^3 coordinates
 
@@ -528,37 +528,42 @@ def get_target_coords_local_ffast(
     vls = vls.transpose(0, 1)
 
     zi = 0
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts00_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = (
+        ref - locs_to_cell_coords_ctrs(verts00_rots, tcs)
     )
+
     zi = 3
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[0]
 
     zi = 15
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts10_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = (
+        ref - locs_to_cell_coords_ctrs(verts10_rots, tcs)
     )
+
     zi = 18
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[1]
 
     zi = 30
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts11_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = (
+        ref - locs_to_cell_coords_ctrs(verts11_rots, tcs)
     )
+
     zi = 33
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[2]
 
     zi = 45
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts01_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = (
+        ref - locs_to_cell_coords_ctrs(verts01_rots, tcs)
     )
+
     zi = 48
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[3]
 
     zi = 60
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(vertsmm_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = (
+        ref - locs_to_cell_coords_ctrs(vertsmm_rots, tcs)
     )
+    
     zi = 63
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[4]
 
