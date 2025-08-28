@@ -65,7 +65,7 @@ class Trainer(TrainerBase):
         elif isinstance(cf.forecast_steps, ListConfig):
             assert (
                 cf.forecast_policy and all(step > 0 for step in cf.forecast_steps)
-                if len(cf.forecast_steps) > 0
+                if any(n > 0 for n in cf.forecast_steps)
                 else True
             )
         else:
