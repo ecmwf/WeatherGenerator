@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import torch
+from torch.nn.utils.rnn import pad_sequence
 from astropy_healpix.healpy import ang2pix
 
 from weathergen.datasets.utils import (
