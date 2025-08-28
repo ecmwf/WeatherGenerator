@@ -13,10 +13,10 @@ import os
 import shutil
 from pathlib import Path
 
+import omegaconf
 import pytest
 
-import weathergen.common.io as io
-import weathergen.utils.config as config
+from weathergen.evaluate.run_evaluation import evaluate_from_config
 from weathergen.run_train import inference_from_args, train_with_args
 from weathergen.utils.metrics import get_train_metrics_path
 
@@ -33,44 +33,32 @@ except Exception as e:
     commit_hash = "unknown"
     logger.warning(f"Could not get commit hash: {e}")
 
-weathergen_home = Path(__file__).parent.parent
+WEATHERGEN_HOME = Path(__file__).parent.parent
 
 
 @pytest.fixture()
 def setup(test_run_id):
     logger.info(f"setup fixture with {test_run_id}")
-    shutil.rmtree(weathergen_home / "results" / test_run_id, ignore_errors=True)
-    shutil.rmtree(weathergen_home / "models" / test_run_id, ignore_errors=True)
+    shutil.rmtree(WEATHERGEN_HOME / "results" / test_run_id, ignore_errors=True)
+    shutil.rmtree(WEATHERGEN_HOME / "models" / test_run_id, ignore_errors=True)
     yield
     logger.info("end fixture")
 
 
 @pytest.mark.parametrize("test_run_id", ["test_small1_" + commit_hash])
 def test_train(setup, test_run_id):
-    logger.info(f"test_train with run_id {test_run_id} {weathergen_home}")
+    logger.info(f"test_train with run_id {test_run_id} {WEATHERGEN_HOME}")
 
     train_with_args(
-        f"--config={weathergen_home}/integration_tests/small1.yaml".split()
+        f"--config={WEATHERGEN_HOME}/integration_tests/small1.yaml".split()
         + [
             "--run_id",
             test_run_id,
         ],
-        f"{weathergen_home}/config/streams/streams_test/",
+        f"{WEATHERGEN_HOME}/config/streams/streams_test/",
     )
 
-    logger.info("run inference")
-    inference_from_args(
-        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--epoch", "0"]
-        + [
-            "--from_run_id",
-            test_run_id,
-            "--run_id",
-            test_run_id,
-            "--config",
-            f"{weathergen_home}/integration_tests/small1.yaml",
-        ]
-    )
-    logger.info("run evaluation")
+    infer_with_missing(test_run_id)
     evaluate_results(test_run_id)
     assert_missing_metrics_file(test_run_id)
     assert_train_loss_below_threshold(test_run_id)
@@ -78,30 +66,76 @@ def test_train(setup, test_run_id):
     logger.info("end test_train")
 
 
+def infer(run_id):
+    logger.info("run inference")
+    inference_from_args(
+        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--epoch", "0"]
+        + [
+            "--from_run_id",
+            run_id,
+            "--run_id",
+            run_id,
+            "--config",
+            f"{WEATHERGEN_HOME}/integration_tests/small1.yaml",
+        ]
+    )
+
+
+def infer_with_missing(run_id):
+    logger.info("run inference")
+    inference_from_args(
+        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--epoch", "0"]
+        + [
+            "--from_run_id",
+            run_id,
+            "--run_id",
+            run_id,
+            "--config",
+            f"{WEATHERGEN_HOME}/integration_tests/small1.yaml",
+        ]
+    )
+
+
 def evaluate_results(run_id):
-    cf = config.load_model_config(run_id, None, None)
-    data_root = config.get_path_output(cf, 0)
-
-    with io.ZarrIO(data_root) as reader:
-        samples = reader.samples
-        fsteps = reader.forecast_steps
-        streams = reader.streams
-
-        item = reader.get_data(samples[0], streams[0], fsteps[0])
-        ds = item.prediction.as_xarray()
-        logger.info(ds)
-        item.target.as_xarray()
-        logger.info(ds)
-        if item.key.with_source:
-            ds = item.source.as_xarray()
-            logger.info(ds)
-
-    # TODO: test concat multiple samples
+    logger.info("run evaluation")
+    cfg = omegaconf.OmegaConf.create(
+        {
+            "verbose": True,
+            "image_format": "png",
+            "dpi_val": 300,
+            "summary_plots": True,
+            "summary_dir": "./plots/",
+            "print_summary": True,
+            "evaluation": {"metrics": ["rmse", "l1", "mse"]},
+            "run_ids": {
+                run_id: {  # would be nice if this could be done with option
+                    "streams": {
+                        "ERA5": {
+                            "results_base_dir": "./results/",
+                            "channels": ["t_850"],  # "all" indicator would be nice
+                            "evaluation": {"forecast_steps": "all", "sample": "all"},
+                            "plotting": {
+                                "sample": [0, 1],
+                                "forecast_step": [0],
+                                "plot_maps": True,
+                                "plot_histograms": True,
+                                "plot_animations": True,
+                            },
+                        }
+                    },
+                    "label": "MTM ERA5",
+                    "epoch": 0,
+                    "rank": 0,
+                }
+            },
+        }
+    )
+    evaluate_from_config(cfg)
 
 
 def load_metrics(run_id):
     """Helper function to load metrics"""
-    file_path = get_train_metrics_path(base_path=weathergen_home / "results", run_id=run_id)
+    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results", run_id=run_id)
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Metrics file not found for run_id: {run_id}")
     with open(file_path) as f:
@@ -111,7 +145,7 @@ def load_metrics(run_id):
 
 def assert_missing_metrics_file(run_id):
     """Test that a missing metrics file raises FileNotFoundError."""
-    file_path = get_train_metrics_path(base_path=weathergen_home / "results", run_id=run_id)
+    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results", run_id=run_id)
     assert os.path.exists(file_path), f"Metrics file does not exist for run_id: {run_id}"
     metrics = load_metrics(run_id)
     logger.info(f"Loaded metrics for run_id: {run_id}: {metrics}")
