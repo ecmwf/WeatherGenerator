@@ -93,6 +93,7 @@ class OutputDataset:
 
         # maybe do dask conversion earlier? => usefull for parallel writing?
         data = da.from_zarr(self.data, chunks=chunks)  # dont call compute to lazy load
+        print(data.shape)
         # include pseudo ens dim so all data arrays have same dimensionality
         # TODO: does it make sense for target and source to have ens dim?
         additional_dims = (0, 1, 2) if len(data.shape) == 3 else (0, 1, 2, 5)
@@ -100,7 +101,8 @@ class OutputDataset:
         coords = da.from_zarr(self.coords).compute()
         times = da.from_zarr(self.times).compute()
         geoinfo = da.from_zarr(self.geoinfo).compute()
-
+        print(f'number of channels: {len(self.channels)}')
+        print(f'number of coors: {self.coords.shape}')
         geoinfo = {name: ("ipoint", geoinfo[:, i]) for i, name in enumerate(self.geoinfo_channels)}
         # TODO: make sample, stream, forecast_step DataArray attribute, test how it
         # interacts with concatenating
