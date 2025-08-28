@@ -462,7 +462,7 @@ def tcs_optimized(target_coords, s2tor3):
         return [torch.tensor([]) for _ in target_coords], torch.tensor([])
     
     # Extract indices and tensors
-    valid_indices, valid_tensors = zip(*non_empty_info)
+    valid_indices, valid_tensors = zip(*non_empty_info, strict=True)
     
     stacked_coords = torch.cat(valid_tensors, dim=0)  
     
@@ -478,7 +478,7 @@ def tcs_optimized(target_coords, s2tor3):
     
     # Reconstruct tcs list with correct positioning
     tcs = [torch.tensor([]) for _ in target_coords]
-    for idx, transformed in zip(valid_indices, split_transformed):
+    for idx, transformed in zip(valid_indices, split_transformed, strict=True):
         tcs[idx] = transformed
     
     return tcs, stacked_coords
