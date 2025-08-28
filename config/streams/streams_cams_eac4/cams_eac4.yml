@@ -9,108 +9,47 @@
 
 CAMSEAC4 :
   type : camseac4
-  filenames : ['cams_eac4_2017_2022.zarr']
+  filenames : ['cams_eac4_2003_2024.zarr']
   source : [
       # Surface variables
-      '2t', 'u10', 'v10', 'msl', 'pm1', 'pm2p5', 'pm10',
+      'pm1', 'pm2p5', 'pm10',
       'tc_co', 'tc_no', 'tc_no2', 'tc_o3', 'tc_so2',
 
-      # Specific humidity (q)
-      'q_1000',  'q_700', 'q_400',
-      'q_250',  'q_150',  'q_50',
-
-      # Temperature (t)
-      't_1000',  't_700', 't_400',
-      't_250',  't_150',  't_50',
-
-      # U wind (u)
-      'u_1000',  'u_700', 'u_400',
-      'u_250',  'u_150',  'u_50',
-
-      # V wind (v)
-      'v_1000',  'v_700', 'v_400',
-      'v_250',  'v_150',  'v_50',
-
       # Ozone (o3)
-      'o3_1000',  'o3_700', 'o3_400',
-      'o3_250',  'o3_150',  'o3_50',
+      'go3_1000', 'go3_925', 'go3_850', 'go3_700', 'go3_600', 'go3_500',
+      'go3_400', 'go3_300', 'go3_250', 'go3_200', 'go3_150', 'go3_100', 'go3_50',
 
       # Sulfur dioxide (so2)
-      'so2_1000',  'so2_700', 'so2_400',
-      'so2_250',  'so2_150',  'so2_50',
-
-      # Geopotential height (z)
-      'z_1000',  'z_700', 'z_400',
-      'z_250',  'z_150',  'z_50',
+      'so2_1000', 'so2_925', 'so2_850', 'so2_700', 'so2_600', 'so2_500',
+      'so2_400', 'so2_300', 'so2_250', 'so2_200', 'so2_150', 'so2_100', 'so2_50',
   ]
   target : [
       # Surface variables
-      '2t', 'u10', 'v10', 'msl', 'pm1', 'pm2p5', 'pm10',
+      'pm1', 'pm2p5', 'pm10',
       'tc_co', 'tc_no', 'tc_no2', 'tc_o3', 'tc_so2',
 
-      # Specific humidity (q)
-      'q_1000',  'q_700', 'q_400',
-      'q_250',  'q_150',  'q_50',
-
-      # Temperature (t)
-      't_1000',  't_700', 't_400',
-      't_250',  't_150',  't_50',
-
-      # U wind (u)
-      'u_1000',  'u_700', 'u_400',
-      'u_250',  'u_150',  'u_50',
-
-      # V wind (v)
-      'v_1000',  'v_700', 'v_400',
-      'v_250',  'v_150',  'v_50',
-
       # Ozone (o3)
-      'o3_1000',  'o3_700', 'o3_400',
-      'o3_250',  'o3_150',  'o3_50',
+      'go3_1000', 'go3_925', 'go3_850', 'go3_700', 'go3_600', 'go3_500',
+      'go3_400', 'go3_300', 'go3_250', 'go3_200', 'go3_150', 'go3_100', 'go3_50',
 
       # Sulfur dioxide (so2)
-      'so2_1000',  'so2_700', 'so2_400',
-      'so2_250',  'so2_150',  'so2_50',
-
-      # Geopotential height (z)
-      'z_1000',  'z_700', 'z_400',
-      'z_250',  'z_150',  'z_50',
-
+      'so2_1000', 'so2_925', 'so2_850', 'so2_700', 'so2_600', 'so2_500',
+      'so2_400', 'so2_300', 'so2_250', 'so2_200', 'so2_150', 'so2_100', 'so2_50',
   ]
   # source_exclude : []
   # target_exclude : []
   variables: [
       # Surface variables
-      '2t', 'u10', 'v10', 'msl', 'pm1', 'pm2p5', 'pm10',
+      'pm1', 'pm2p5', 'pm10',
       'tc_co', 'tc_no', 'tc_no2', 'tc_o3', 'tc_so2',
 
-      # Specific humidity (q)
-      'q_1000', 'q_925', 'q_850', 'q_700', 'q_600', 'q_500',
-      'q_400', 'q_300', 'q_250', 'q_200', 'q_150', 'q_100', 'q_50',
-
-      # Temperature (t)
-      't_1000', 't_925', 't_850', 't_700', 't_600', 't_500',
-      't_400', 't_300', 't_250', 't_200', 't_150', 't_100', 't_50',
-
-      # U wind (u)
-      'u_1000', 'u_925', 'u_850', 'u_700', 'u_600', 'u_500',
-      'u_400', 'u_300', 'u_250', 'u_200', 'u_150', 'u_100', 'u_50',
-
-      # V wind (v)
-      'v_1000', 'v_925', 'v_850', 'v_700', 'v_600', 'v_500',
-      'v_400', 'v_300', 'v_250', 'v_200', 'v_150', 'v_100', 'v_50',
-
       # Ozone (o3)
-      'o3_1000', 'o3_925', 'o3_850', 'o3_700', 'o3_600', 'o3_500',
-      'o3_400', 'o3_300', 'o3_250', 'o3_200', 'o3_150', 'o3_100', 'o3_50',
+      'go3_1000', 'go3_925', 'go3_850', 'go3_700', 'go3_600', 'go3_500',
+      'go3_400', 'go3_300', 'go3_250', 'go3_200', 'go3_150', 'go3_100', 'go3_50',
 
       # Sulfur dioxide (so2)
       'so2_1000', 'so2_925', 'so2_850', 'so2_700', 'so2_600', 'so2_500',
       'so2_400', 'so2_300', 'so2_250', 'so2_200', 'so2_150', 'so2_100', 'so2_50',
-
-      # Geopotential height (z)
-      'z_1000', 'z_925', 'z_850', 'z_700', 'z_600', 'z_500',
-      'z_400', 'z_250', 'z_200', 'z_150', 'z_100', 'z_50',
   ]
   loss_weight : 1.
   masking_rate : 0.6
@@ -121,11 +60,11 @@ CAMSEAC4 :
     net : transformer
     num_tokens : 1
     num_heads : 8
-    dim_embed : 256
-    num_blocks : 2
+    dim_embed : 512
+    num_blocks : 4
   embed_target_coords :
     net : linear
-    dim_embed : 256 
+    dim_embed : 512 
   target_readout :
     type : 'obs_value'  # token or obs_value
     num_layers : 2

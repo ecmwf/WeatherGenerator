@@ -63,6 +63,7 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
     Load a configuration file from a given run_id and epoch.
     If run_id is a full path, loads it from the full path.
     """
+    print(f"model_path = {model_path}")
     if Path(run_id).exists():  # load from the full path if a full path is provided
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
@@ -75,6 +76,7 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
             )
         model_path = Path(model_path)
         fname = model_path / run_id / _get_model_config_file_name(run_id, epoch)
+        print(f"fname = {fname}")
         assert fname.exists(), (
             "The fallback path to the model does not exist. Please provide a `model_path`."
         )

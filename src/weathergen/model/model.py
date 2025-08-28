@@ -431,31 +431,95 @@ class Model(torch.nn.Module):
         print("-----------------")
 
     #########################################
-    def load(self, run_id: str, epoch: str = -1) -> None:
-        """Loads model state from checkpoint and checks for missing and unused keys.
-        Args:
-            run_id : model_id of the trained model
-            epoch : The epoch to load. Default (-1) is the latest epoch
-        """
+    ### original version
+    # def load(self, run_id: str, epoch: str = -1) -> None:
+    #     """Loads model state from checkpoint and checks for missing and unused keys.
+    #     Args:
+    #         run_id : model_id of the trained model
+    #         epoch : The epoch to load. Default (-1) is the latest epoch
+    #     """
 
+    #     path_run = Path(self.cf.model_path) / run_id
+    #     epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"
+    #     filename = f"{run_id}_{epoch_id}.chkpt"
+
+    #     params = torch.load(
+    #         path_run / filename, map_location=torch.device("cpu"), weights_only=True
+    #     )
+    #     params_renamed = {}
+    #     for k in params.keys():
+    #         params_renamed[k.replace("module.", "")] = params[k]
+    #     mkeys, ukeys = self.load_state_dict(params_renamed, strict=False)
+    #     # mkeys, ukeys = self.load_state_dict( params, strict=False)
+
+    #     if len(mkeys) > 0:
+    #         logger.warning(f"Missing keys when loading model: {mkeys}")
+
+    #     if len(ukeys) > 0:
+    #         logger.warning(f"Unused keys when loading model: {mkeys}")
+
+    ### Version 2
+    def load(self, run_id: str, epoch: str = -1) -> None:
+        """Loads model state from checkpoint, matching weights by size 
+        and partially copying overlapping dimensions if needed.
+        """
         path_run = Path(self.cf.model_path) / run_id
         epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"
         filename = f"{run_id}_{epoch_id}.chkpt"
 
-        params = torch.load(
+        checkpoint = torch.load(
             path_run / filename, map_location=torch.device("cpu"), weights_only=True
         )
-        params_renamed = {}
-        for k in params.keys():
-            params_renamed[k.replace("module.", "")] = params[k]
-        mkeys, ukeys = self.load_state_dict(params_renamed, strict=False)
-        # mkeys, ukeys = self.load_state_dict( params, strict=False)
+
+        # remove "module." prefix
+        params_renamed = {k.replace("module.", ""): v for k, v in checkpoint.items()}
+
+        model_dict = self.state_dict()
+        updated_dict = {}
+
+        skipped_params = []
+        partial_params = []
+
+        for k, v in params_renamed.items():
+            if k not in model_dict:
+                continue
+
+            target = model_dict[k]
+
+            if target.shape == v.shape:
+                # exact match → copy fully
+                updated_dict[k] = v
+
+            else:
+                # try partial overlap
+                min_shape = tuple(min(s1, s2) for s1, s2 in zip(target.shape, v.shape))
+
+                if all(m > 0 for m in min_shape):
+                    # copy overlapping region only
+                    new_tensor = target.clone()
+                    slices = tuple(slice(0, m) for m in min_shape)
+                    new_tensor[slices] = v[slices]
+                    updated_dict[k] = new_tensor
+                    partial_params.append((k, v.shape, target.shape))
+                else:
+                    skipped_params.append((k, v.shape, target.shape))
+
+        # actually load
+        mkeys, ukeys = self.load_state_dict(updated_dict, strict=False)
 
         if len(mkeys) > 0:
-            logger.warning(f"Missing keys when loading model: {mkeys}")
+            logger.warning(f"Missing keys (random init kept): {mkeys}")
 
         if len(ukeys) > 0:
-            logger.warning(f"Unused keys when loading model: {mkeys}")
+            logger.warning(f"Unused keys (not in model): {ukeys}")
+
+        if len(skipped_params) > 0:
+            for k, old_shape, new_shape in skipped_params:
+                logger.warning(f"Skipped {k}: checkpoint {old_shape} vs model {new_shape}")
+
+        if len(partial_params) > 0:
+            for k, old_shape, new_shape in partial_params:
+                logger.warning(f"Partially loaded {k}: {old_shape} → {new_shape}")
 
     #########################################
     def forward_jac(self, *args):
@@ -575,10 +639,22 @@ class Model(torch.nn.Module):
                     # )
 
                     # scatter write to reorder from per stream to per cell ordering
+                    ################################################################
+                    # scatter write to reorder from per stream to per cell ordering
+                    # but first ensure pe_embed is big enough
+                    if idxs_pe.max() >= model_params.pe_embed.shape[0]:
+                        old_size, emb_dim = model_params.pe_embed.shape
+                        new_size = int(idxs_pe.max().item()) + 1
+                        new_pe = model_params.pe_embed.new_empty((new_size, emb_dim))
+                        new_pe[:old_size] = model_params.pe_embed
+                        torch.nn.init.normal_(new_pe[old_size:], mean=0.0, std=0.02)
+                        model_params.pe_embed = torch.nn.Parameter(new_pe, requires_grad=True)
+                        print(f"[INFO] Resized pe_embed from {old_size} → {new_size}", flush=True)
+
+                    ################################################################
                     tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
 
         return tokens_all
-
     #########################################
     def assimilate_local(
         self, model_params: ModelParams, tokens: torch.Tensor, cell_lens: torch.Tensor

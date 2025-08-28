@@ -345,6 +345,7 @@ class EnsPredictionHead(torch.nn.Module):
         dim_internal = dim_embed * hidden_factor
         # norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
         enl = ens_num_layers
+        # dim_out = 72
 
         self.pred_heads = torch.nn.ModuleList()
         for i in range(ens_size):
