@@ -126,7 +126,10 @@ def locs_to_ctr_coords(ctrs_r3, locs: list) -> list:
     all_points = torch.cat(locs, dim=0) 
     
     lengths = torch.tensor([len(s) for s in locs], device=all_points.device)
-    batch_indices = torch.repeat_interleave(torch.arange(len(locs), device=all_points.device), lengths)
+    batch_indices = torch.repeat_interleave(
+    torch.arange(len(locs), device=all_points.device),
+    lengths
+    )
     
     point_rotations = ctrs_rots[batch_indices]
     
