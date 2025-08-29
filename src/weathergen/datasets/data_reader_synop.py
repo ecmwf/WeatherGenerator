@@ -11,11 +11,8 @@ import logging
 from pathlib import Path
 from typing import override
 
-import anemoi.datasets as anemoi_datasets
 import numpy as np
 import xarray as xr
-from anemoi.datasets.data import MissingDateError
-from anemoi.datasets.data.dataset import Dataset
 from numpy.typing import NDArray
 
 from weathergen.datasets.data_reader_base import (
@@ -56,10 +53,6 @@ class DataReaderSynop(DataReaderTimestep):
         # open  dataset to peak that it is compatible with requested parameters
         ds = xr.open_dataset(filename, engine="netcdf4")
 
-        import code
-
-        code.interact(local=locals())
-
         # If there is no overlap with the time range, the dataset will be empty
         if tw_handler.t_start >= ds.time.max() or tw_handler.t_end <= ds.time.min():
             name = stream_info["name"]
@@ -72,13 +65,10 @@ class DataReaderSynop(DataReaderTimestep):
         if "frequency" in stream_info:
             # kwargs["frequency"] = str_to_timedelta(stream_info["frequency"])
             assert False, "Frequency sub-sampling currently not supported"
-        ds: Dataset = anemoi_datasets.open_dataset(
-            ds0, **kwargs, start=tw_handler.t_start, end=tw_handler.t_end
-        )
 
         period = (ds.time[1] - ds.time[0]).values
-        data_start_time = ds.dates[0]
-        data_end_time = ds.dates[-1]
+        data_start_time = ds.time[0].values
+        data_end_time = ds.time[-1].values
         assert data_start_time is not None and data_end_time is not None, (
             data_start_time,
             data_end_time,
@@ -98,20 +88,26 @@ class DataReaderSynop(DataReaderTimestep):
             self.ds = ds
             self.len = len(ds)
 
+        self.offset_data_channels = 4
+        self.fillvalue = ds["air_temperature"][0, 0].values.item()
+
         # caches lats and lons
-        self.latitudes = _clip_lat(ds.latitude)
-        self.longitudes = _clip_lon(ds.longitude)
+        self.latitudes = _clip_lat(np.array(ds.latitude, dtype=np.float32))
+        self.longitudes = _clip_lon(np.array(ds.longitude, dtype=np.float32))
+
+        self.geoinfos = np.array(ds.altitude, dtype=np.float32)
+        self.geoinfo_channels = []  # ["altitude"]
+        self.geoinfo_idx = []  # [2]
+
+        self.channels_file = [k for k in self.ds.keys()]
 
         # select/filter requested source channels
         self.source_idx = self.select_channels(ds, "source")
-        self.source_channels = [ds.variables[i] for i in self.source_idx]
+        self.source_channels = [self.channels_file[i] for i in self.source_idx]
 
         # select/filter requested target channels
         self.target_idx = self.select_channels(ds, "target")
-        self.target_channels = [ds.variables[i] for i in self.target_idx]
-
-        self.geoinfo_channels = ["altitude"]
-        self.geoinfo_idx = [2]
+        self.target_channels = [self.channels_file[i] for i in self.target_idx]
 
         ds_name = stream_info["name"]
         _logger.info(f"{ds_name}: source channels: {self.source_channels}")
@@ -121,8 +117,29 @@ class DataReaderSynop(DataReaderTimestep):
         self.properties = {
             "stream_id": 0,
         }
-        self.mean = ds.statistics["mean"]
-        self.stdev = ds.statistics["stdev"]
+
+        self.mean, self.stdev = self.compute_mean_stdev()
+
+    def compute_mean_stdev(self) -> (np.array, np.array):
+        _logger.info("Starting computation of mean and stdev.")
+
+        mean = [0.0 for _ in range(self.offset_data_channels)]
+        stdev = [1.0 for _ in range(self.offset_data_channels)]
+
+        data_channels_file = [k for k in self.ds.keys()][self.offset_data_channels :]
+        for ch in data_channels_file:
+            data = np.array(self.ds[ch], np.float64)
+            mask = data == self.fillvalue
+            data[mask] = np.nan
+            mean += [np.nanmean(data.flatten())]
+            stdev += [np.nanstd(data.flatten())]
+
+        mean = np.array(mean)
+        stdev = np.array(stdev)
+
+        _logger.info("Finished computation of mean and stdev.")
+
+        return mean, stdev
 
     @override
     def init_empty(self) -> None:
@@ -167,20 +184,11 @@ class DataReaderSynop(DataReaderTimestep):
         # ds is a wrapper around zarr with get_coordinate_selection not being exposed since
         # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
         # sampling is required here
-        try:
-            data = self.ds[didx_start:didx_end][:, :, 0].astype(np.float32)
-        except MissingDateError as e:
-            _logger.debug(f"Date not present in anemoi dataset: {str(e)}. Skipping.")
-            return ReaderData.empty(
-                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
-            )
-
-        # extract channels
-        data = (
-            data[:, list(channels_idx)]
-            .transpose([0, 2, 1])
-            .reshape((data.shape[0] * data.shape[2], -1))
-        )
+        sel_channels = [self.channels_file[i] for i in channels_idx]
+        data = np.stack([self.ds[ch].isel(time=slice(didx_start, didx_end)) for ch in sel_channels])
+        data = data.transpose([1, 2, 0]).reshape((data.shape[1] * data.shape[2], data.shape[0]))
+        mask = data == self.fillvalue
+        data[mask] = np.nan
 
         # construct lat/lon coords
         latlon = np.concatenate(
@@ -193,12 +201,16 @@ class DataReaderSynop(DataReaderTimestep):
         # repeat latlon len(t_idxs) times
         coords = np.vstack((latlon,) * len(t_idxs))
 
+        # import code
+        # code.interact( local=locals())
+
         # empty geoinfos for anemoi
+        # TODO: altitudes
         geoinfos = np.zeros((len(data), 0), dtype=data.dtype)
 
         # date time matching #data points of data
         # Assuming a fixed frequency for the dataset
-        datetimes = np.repeat(self.ds.dates[didx_start:didx_end], len(data) // len(t_idxs))
+        datetimes = np.repeat(self.ds.time[didx_start:didx_end].values, len(data) // len(t_idxs))
 
         rd = ReaderData(
             coords=coords,
@@ -227,7 +239,9 @@ class DataReaderSynop(DataReaderTimestep):
 
         """
 
-        channels = self.stream_info.get(ch_type)
+        channels_file = [k for k in ds.keys()][self.offset_data_channels :]
+
+        channels = self.stream_info.get(ch_type, channels_file)
         channels_exclude = self.stream_info.get(ch_type + "_exclude", [])
         # sanity check
         is_empty = len(channels) == 0 if channels is not None else False
@@ -235,23 +249,11 @@ class DataReaderSynop(DataReaderTimestep):
             stream_name = self.stream_info["name"]
             _logger.warning(f"No channel for {stream_name} for {ch_type}.")
 
-        channels = list(ds.keys())
-        chs_idx = np.sort(
-            [
-                ds.name_to_index[k]
-                for (k, v) in ds0.typed_variables.items()
-                if (
-                    not v.is_computed_forcing
-                    and not v.is_constant_in_time
-                    and (
-                        np.array([f in k for f in channels]).any() if channels is not None else True
-                    )
-                    and not np.array([f in k for f in channels_exclude]).any()
-                )
-            ]
-        )
+        chs_idx = np.sort([channels_file.index(ch) for ch in channels])
+        chs_idx_exclude = np.sort([channels_file.index(ch) for ch in channels_exclude])
+        chs_idx = [idx for idx in chs_idx if idx not in chs_idx_exclude]
 
-        return chs_idx
+        return np.array(chs_idx) + self.offset_data_channels
 
 
 def _clip_lat(lats: NDArray) -> NDArray[np.float32]:
