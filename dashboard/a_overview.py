@@ -1,3 +1,5 @@
+import logging
+
 import plotly.express as px
 import plotly.graph_objects as go
 import polars as pl
@@ -5,7 +7,6 @@ import polars.selectors as ps
 import streamlit as st
 from plotly.subplots import make_subplots
 from polars import col as C
-import logging
 
 from weathergen.dashboard.metrics import all_runs, latest_runs, setup_mflow
 

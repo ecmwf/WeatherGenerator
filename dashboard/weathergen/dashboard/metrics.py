@@ -2,13 +2,13 @@
 Downloads metrics from MLFlow.
 """
 
+import logging
 from functools import lru_cache
 
 import mlflow
 import mlflow.client
 import polars as pl
 import simple_cache
-import logging
 
 _logger = logging.getLogger(__name__)
 
