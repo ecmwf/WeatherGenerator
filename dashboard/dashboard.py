@@ -32,7 +32,14 @@ except Exception as e:
 
 
 if st.session_state.get("authentication_status"):
-    pg = st.navigation([st.Page("a_overview.py"), st.Page("b_data.py")])
+    pg = st.navigation(
+        [
+            # The overview page
+            st.Page("a_overview.py"),
+            # The data page
+            st.Page("b_data.py"),
+        ]
+    )
     pg.run()
     authenticator.logout()
 elif st.session_state.get("authentication_status") is False:
