@@ -85,7 +85,7 @@ class DataReaderCams(DataReaderTimestep):
 
         if start_ds > tw_handler.t_end or end_ds < tw_handler.t_start:
             # print("inside skipping stream")
-            name = "plop" # stream_info["name"]
+            name = stream_info["name"]
             _logger.warning(f"{name} is not supported over data loader window. Stream is skipped.")
             super().__init__(tw_handler, stream_info)
             self.init_empty()
@@ -207,15 +207,10 @@ class DataReaderCams(DataReaderTimestep):
     def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
         """
         Get data for temporal window
-        Parameters
-        ----------
-        idx : int
-            Index of temporal window
-        channels_idx : np.array
-            Selection of channels
+
         Returns
         -------
-        data (coords, geoinfos, data, datetimes)
+        ReaderData providing coords, geoinfos, data, datetimes
         """
 
         (t_idxs, dtr) = self._get_dataset_idxs(idx)
@@ -225,50 +220,54 @@ class DataReaderCams(DataReaderTimestep):
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
-        # TODO: handle sub-sampling
-        # print(f"#2.5.1 inside DataReaderCams._get()", flush=True)
-        t_idxs_start = t_idxs[0]
-        t_idxs_end = t_idxs[-1] + 1
+        assert t_idxs[0] >= 0, "index must be non-negative"
+        t0 = t_idxs[0]
+        t1 = t_idxs[-1] + 1  # end is exclusive
+        T = t1 - t0
 
-        # datetime
-        datetimes = self.time[t_idxs_start:t_idxs_end]
+        # channels to read
+        channels = np.array(self.colnames)[channels_idx].tolist()
 
-        # =========== lat/lon coordinates + tiling to match time steps ==========
+        # --- read & shape data to match anemoi path: (T, C, G) -> (T, G, C) -> (T*G, C)
+        try:
+            data_per_channel = []
+            for ch in channels:
+                # expect ds[ch] with shape (time, lat, lon) for this dataset
+                arr = np.asarray(self.ds[ch][t0:t1, :, :], dtype=np.float32)  # (T, nlat, nlon)
+                if arr.ndim != 3:
+                    raise ValueError(f"Expected 3D array (time, lat, lon) for '{ch}', got shape {arr.shape}")
+                _, nlat, nlon = arr.shape
+                data_per_channel.append(arr.reshape(T, nlat * nlon))  # (T, G)
 
-        # making lon, lat like a mesh for easier flattening later
-        lon2d, lat2d = np.meshgrid(self.lon, self.lat)
+            # stack channels to (T, C, G)
+            data_TCG = np.stack(data_per_channel, axis=1)  # (T, C, G)
+            # move channels to last and flatten time: (T, G, C) -> (T*G, C)
+            data = np.transpose(data_TCG, (0, 2, 1)).reshape(T * (nlat * nlon), len(channels)).astype(np.float32)
 
-        # Flatten to match (lat, lon) storage order in your array
-        lat = lat2d.flatten()[:, np.newaxis]   # shape (241*480,)
-        lon = lon2d.flatten()[:, np.newaxis]
+        except MissingDateError as e:
+            _logger.debug(f"Date not present in CAMS dataset: {str(e)}. Skipping.")
+            return ReaderData.empty(
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
 
-        lat = np.tile(lat, len(datetimes))
-        lon = np.tile(lon, len(datetimes))
+        # --- coords: build flattened [lat, lon] once, then repeat for each time
+        lon2d, lat2d = np.meshgrid(np.asarray(self.lon), np.asarray(self.lat))  # shapes (nlat, nlon)
+        G = lon2d.size
+        latlon_flat = np.column_stack([lat2d.ravel(order="C"), lon2d.ravel(order="C")])  # (G, 2); LAT first, LON second
+        coords = np.vstack([latlon_flat] * T)  # (T*G, 2)
 
-        coords = np.concatenate([lat, lon], axis=0)
+        # --- datetimes: repeat each timestamp for all grid points
+        datetimes = np.repeat(self.time[t0:t1], G)
 
-        # data
-        channels = np.array(self.colnames)[channels_idx]
-        # print(f"#2.5.2 inside DataReaderCams._get() before data", flush=True)
-        # for ch_ in channels:
-        #     print(f"self.ds[{ch_}] = {self.ds[ch_].shape}", flush=True)
-        data_reshaped = [
-            np.asarray(self.ds[ch_][t_idxs_start:t_idxs_end, :, :]).reshape(-1, 1) for ch_ in channels
-        ]
-        # print(f"#2.5.3 inside DataReaderCams._get() after data", flush=True)
-        data = np.concatenate(data_reshaped, axis=1)
+        # --- empty geoinfos (match anemoi)
+        geoinfos = np.zeros((data.shape[0], 0), dtype=np.float32)
 
-        # time coordinate repeated to match grid points
-        datetimes = np.repeat(datetimes, len(data) // len(t_idxs))
-
-        # empty geoinfos
-        geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
-        # print(f"self.lon.shape = {self.lon.shape} self.lat.shape = {self.lat.shape}",flush=True)
-        # print(f"lon.shape = {lon.shape} lat.shape = {lat.shape}",flush=True)
-        # print(f"datetimes.shape = {datetimes.shape}",flush=True)
-        # print(f"data.shape = {data.shape}",flush=True)
-        # print(f"coords.shape = {coords.shape}",flush=True)
-
+        # debug (optional)
+        print(f"from CAMS, T={T}, nlat={nlat}, nlon={nlon}, G={G}")
+        print(f"data_TCG.shape = {(T, len(channels), G)}")
+        print(f"final data.shape = {data.shape}")
+        print(f"coords.shape = {coords.shape}")
+        print(f"len(datetimes) = {len(datetimes)}")
 
         rd = ReaderData(
             coords=coords,
@@ -277,5 +276,76 @@ class DataReaderCams(DataReaderTimestep):
             datetimes=datetimes,
         )
         check_reader_data(rd, dtr)
-
         return rd
+
+    # def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
+    #     """
+    #     Get data for temporal window
+    #     Parameters
+    #     ----------
+    #     idx : int
+    #         Index of temporal window
+    #     channels_idx : np.array
+    #         Selection of channels
+    #     Returns
+    #     -------
+    #     data (coords, geoinfos, data, datetimes)
+    #     """
+
+    #     (t_idxs, dtr) = self._get_dataset_idxs(idx)
+
+    #     if self.ds is None or self.len == 0 or len(t_idxs) == 0:
+    #         return ReaderData.empty(
+    #             num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+    #         )
+
+    #     # TODO: handle sub-sampling
+    #     # print(f"#2.5.1 inside DataReaderCams._get()", flush=True)
+    #     t_idxs_start = t_idxs[0]
+    #     t_idxs_end = t_idxs[-1] + 1
+
+    #     # datetime
+    #     datetimes = self.time[t_idxs_start:t_idxs_end]
+
+    #     # =========== lat/lon coordinates + tiling to match time steps ==========
+
+    #     # making lon, lat like a mesh for easier flattening later
+    #     lon2d, lat2d = np.meshgrid(self.lon, self.lat)
+
+    #     print(f"len(self.lon) = {len(self.lon)}")
+    #     print(f"len(self.lat) = {len(self.lat)}")
+    #     print(f"len(datetimes) = {len(datetimes)}")
+
+    #     # Flatten to match (lat, lon) storage order in your array
+    #     lat = lat2d.flatten()[:, np.newaxis]   # shape (241*480,)
+    #     lon = lon2d.flatten()[:, np.newaxis]
+
+    #     lat = np.tile(lat, len(datetimes))
+    #     lon = np.tile(lon, len(datetimes))
+
+    #     coords = np.concatenate([lat, lon], axis=0)
+
+    #     # data
+    #     channels = np.array(self.colnames)[channels_idx]
+
+    #     data_reshaped = [
+    #         np.asarray(self.ds[ch_][t_idxs_start:t_idxs_end, :, :]).reshape(-1, 1) for ch_ in channels
+    #     ]
+    #     data = np.concatenate(data_reshaped, axis=1)
+
+    #     # time coordinate repeated to match grid points
+    #     datetimes = np.repeat(datetimes, len(data) // len(t_idxs))
+    #     print(f"len(datetimes) = {len(datetimes)}")
+
+    #     # empty geoinfos
+    #     geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
+
+    #     rd = ReaderData(
+    #         coords=coords,
+    #         geoinfos=geoinfos,
+    #         data=data,
+    #         datetimes=datetimes,
+    #     )
+    #     check_reader_data(rd, dtr)
+
+    #     return rd
