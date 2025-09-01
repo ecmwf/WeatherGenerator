@@ -438,94 +438,94 @@ class Model(torch.nn.Module):
 
     #########################################
     ### original version
-    # def load(self, run_id: str, epoch: str = -1) -> None:
-    #     """Loads model state from checkpoint and checks for missing and unused keys.
-    #     Args:
-    #         run_id : model_id of the trained model
-    #         epoch : The epoch to load. Default (-1) is the latest epoch
-    #     """
-
-    #     path_run = Path(self.cf.model_path) / run_id
-    #     epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"
-    #     filename = f"{run_id}_{epoch_id}.chkpt"
-
-    #     params = torch.load(
-    #         path_run / filename, map_location=torch.device("cpu"), weights_only=True
-    #     )
-    #     params_renamed = {}
-    #     for k in params.keys():
-    #         params_renamed[k.replace("module.", "")] = params[k]
-    #     mkeys, ukeys = self.load_state_dict(params_renamed, strict=False)
-    #     # mkeys, ukeys = self.load_state_dict( params, strict=False)
-
-    #     if len(mkeys) > 0:
-    #         logger.warning(f"Missing keys when loading model: {mkeys}")
-
-    #     if len(ukeys) > 0:
-    #         logger.warning(f"Unused keys when loading model: {mkeys}")
-
-    ### Version 2
     def load(self, run_id: str, epoch: str = -1) -> None:
-        """Loads model state from checkpoint, matching weights by size 
-        and partially copying overlapping dimensions if needed.
+        """Loads model state from checkpoint and checks for missing and unused keys.
+        Args:
+            run_id : model_id of the trained model
+            epoch : The epoch to load. Default (-1) is the latest epoch
         """
+
         path_run = Path(self.cf.model_path) / run_id
         epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"
         filename = f"{run_id}_{epoch_id}.chkpt"
 
-        checkpoint = torch.load(
+        params = torch.load(
             path_run / filename, map_location=torch.device("cpu"), weights_only=True
         )
-
-        # remove "module." prefix
-        params_renamed = {k.replace("module.", ""): v for k, v in checkpoint.items()}
-
-        model_dict = self.state_dict()
-        updated_dict = {}
-
-        skipped_params = []
-        partial_params = []
-
-        for k, v in params_renamed.items():
-            if k not in model_dict:
-                continue
-
-            target = model_dict[k]
-
-            if target.shape == v.shape:
-                # exact match → copy fully
-                updated_dict[k] = v
-
-            else:
-                # try partial overlap
-                min_shape = tuple(min(s1, s2) for s1, s2 in zip(target.shape, v.shape))
-
-                if all(m > 0 for m in min_shape):
-                    # copy overlapping region only
-                    new_tensor = target.clone()
-                    slices = tuple(slice(0, m) for m in min_shape)
-                    new_tensor[slices] = v[slices]
-                    updated_dict[k] = new_tensor
-                    partial_params.append((k, v.shape, target.shape))
-                else:
-                    skipped_params.append((k, v.shape, target.shape))
-
-        # actually load
-        mkeys, ukeys = self.load_state_dict(updated_dict, strict=False)
+        params_renamed = {}
+        for k in params.keys():
+            params_renamed[k.replace("module.", "")] = params[k]
+        mkeys, ukeys = self.load_state_dict(params_renamed, strict=False)
+        # mkeys, ukeys = self.load_state_dict( params, strict=False)
 
         if len(mkeys) > 0:
-            logger.warning(f"Missing keys (random init kept): {mkeys}")
+            logger.warning(f"Missing keys when loading model: {mkeys}")
 
         if len(ukeys) > 0:
-            logger.warning(f"Unused keys (not in model): {ukeys}")
+            logger.warning(f"Unused keys when loading model: {mkeys}")
 
-        if len(skipped_params) > 0:
-            for k, old_shape, new_shape in skipped_params:
-                logger.warning(f"Skipped {k}: checkpoint {old_shape} vs model {new_shape}")
+    # ### Version 2
+    # def load(self, run_id: str, epoch: str = -1) -> None:
+    #     """Loads model state from checkpoint, matching weights by size 
+    #     and partially copying overlapping dimensions if needed.
+    #     """
+    #     path_run = Path(self.cf.model_path) / run_id
+    #     epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"
+    #     filename = f"{run_id}_{epoch_id}.chkpt"
 
-        if len(partial_params) > 0:
-            for k, old_shape, new_shape in partial_params:
-                logger.warning(f"Partially loaded {k}: {old_shape} → {new_shape}")
+    #     checkpoint = torch.load(
+    #         path_run / filename, map_location=torch.device("cpu"), weights_only=True
+    #     )
+
+    #     # remove "module." prefix
+    #     params_renamed = {k.replace("module.", ""): v for k, v in checkpoint.items()}
+
+    #     model_dict = self.state_dict()
+    #     updated_dict = {}
+
+    #     skipped_params = []
+    #     partial_params = []
+
+    #     for k, v in params_renamed.items():
+    #         if k not in model_dict:
+    #             continue
+
+    #         target = model_dict[k]
+
+    #         if target.shape == v.shape:
+    #             # exact match → copy fully
+    #             updated_dict[k] = v
+
+    #         else:
+    #             # try partial overlap
+    #             min_shape = tuple(min(s1, s2) for s1, s2 in zip(target.shape, v.shape))
+
+    #             if all(m > 0 for m in min_shape):
+    #                 # copy overlapping region only
+    #                 new_tensor = target.clone()
+    #                 slices = tuple(slice(0, m) for m in min_shape)
+    #                 new_tensor[slices] = v[slices]
+    #                 updated_dict[k] = new_tensor
+    #                 partial_params.append((k, v.shape, target.shape))
+    #             else:
+    #                 skipped_params.append((k, v.shape, target.shape))
+
+    #     # actually load
+    #     mkeys, ukeys = self.load_state_dict(updated_dict, strict=False)
+
+    #     if len(mkeys) > 0:
+    #         logger.warning(f"Missing keys (random init kept): {mkeys}")
+
+    #     if len(ukeys) > 0:
+    #         logger.warning(f"Unused keys (not in model): {ukeys}")
+
+    #     if len(skipped_params) > 0:
+    #         for k, old_shape, new_shape in skipped_params:
+    #             logger.warning(f"Skipped {k}: checkpoint {old_shape} vs model {new_shape}")
+
+    #     if len(partial_params) > 0:
+    #         for k, old_shape, new_shape in partial_params:
+    #             logger.warning(f"Partially loaded {k}: {old_shape} → {new_shape}")
 
     #########################################
     def forward_jac(self, *args):
