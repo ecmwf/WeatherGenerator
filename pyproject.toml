@@ -117,6 +117,7 @@ ignore = [
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "numpy.ndarray".msg = "Do not use 'ndarray' to describe a numpy array type, it is a function. Use numpy.typing.NDArray or numpy.typing.NDArray[np.float32] for example"
+"np.ndarray" = {msg = "test"}
 
 [tool.ruff.format]
 # Use Unix `\n` line endings for all files

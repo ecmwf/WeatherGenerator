@@ -142,7 +142,7 @@ def get_data(
                         f"Skipping {stream} sample {sample} forecast step: {fstep}. Dataset is empty."
                     )
                     continue
-                
+
                 fsteps_final.append(fstep)
                 da_tars_fs.append(target.squeeze())
                 da_preds_fs.append(pred.squeeze())
@@ -176,7 +176,7 @@ def get_data(
                 da_preds.append(da_preds_fs)
             if return_counts:
                 points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
-        
+
         # Safer than a list
         da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=False)}
         da_preds = {
