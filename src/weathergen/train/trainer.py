@@ -477,6 +477,14 @@ class Trainer(TrainerBase):
                     preds=preds,
                     streams_data=batch[0],
                 )
+                
+            if bidx == 0 and is_root():
+                if self.cf.get("encode_targets_latent", False):
+                    # unpack the predictions/tokens from the latent space if the latent space tokens are encoded
+                    preds, tokens_all, tokens_targets = preds
+                    save_dir = "/users/ktezcan/projects/Meteoswiss/WeatherGenerator/personal/clariden/experiments_ecscs/tokens/"
+                    np.save(save_dir + self.cf.run_id + "_tokens_all_epoch" + str(epoch) + ".npy", [t.detach().cpu().numpy() for t in tokens_all])
+                    np.save(save_dir + self.cf.run_id + "_tokens_targets_epoch" + str(epoch) + ".npy", [t.detach().cpu().numpy() for t in tokens_targets])
 
             # backward pass
             self.grad_scaler.scale(loss_values.loss).backward()
