@@ -134,6 +134,8 @@ class Tokenizer:
         )
         source_centroids = torch.split(source_centroids, source_means_lens)
 
+        return source_centroids
+
     def get_size_time_embedding(self) -> int:
         """
         Get size of time embedding
