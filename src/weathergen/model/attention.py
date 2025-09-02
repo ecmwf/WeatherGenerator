@@ -94,7 +94,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
             dropout_p=self.dropout_rate,
         )
 
-        out = self.dropout(self.proj_out(outs.flatten(-2, -1)))
+        out = self.proj_out(outs.flatten(-2, -1))
 
         if self.with_residual:
             out = out + x_in
