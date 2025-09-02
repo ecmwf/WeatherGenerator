@@ -17,7 +17,7 @@ ae_local_with_qk_lnorm: True
 
 ae_local_num_queries: 1
 ae_local_queries_per_cell: False
-ae_adapter_num_heads: 8
+ae_adapter_num_heads: 16
 ae_adapter_embed: 128
 ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True

@@ -90,11 +90,11 @@ class InterpolatedLatents(nn.Module):
         if self.training and self.gamma > 0.0:
             device = z_latents.device
             s = z_latents.shape
-            bsz = 1
+            batch_size = 1
             if noise_level > 0.0:
-                noise_level_tensor = torch.full(bsz, noise_level, device=device)
+                noise_level_tensor = torch.full(batch_size, noise_level, device=device)
             else:
-                noise_level_tensor = torch.rand(bsz, device=device)
+                noise_level_tensor = torch.rand(batch_size, device=device)
             # TODO: make this deal with batchsize > 1
             # noise_level_tensor = (
             #    noise_level_tensor[torch.repeat_interleave(z_lens)].unsqueeze(-1).expand(-1, s[-1])

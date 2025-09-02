@@ -508,7 +508,7 @@ class Trainer(TrainerBase):
                 )
                 if cf.kl_weight > 0.0:
                     kl = torch.cat([posterior.kl() for posterior in posteriors])
-                    loss_values.loss += cf.kl_weight * kl.mean() 
+                    loss_values.loss += cf.kl_weight * kl.mean()
 
             # backward pass
             self.grad_scaler.scale(loss_values.loss).backward()

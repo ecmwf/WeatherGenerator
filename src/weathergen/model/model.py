@@ -370,7 +370,7 @@ class Model(torch.nn.Module):
             )
             self.pred_heads.append(
                 EnsPredictionHead(
-                    dims_embed[0],
+                    dims_embed[-1],
                     self.targets_num_channels[i_obs],
                     si["pred_head"]["num_layers"],
                     si["pred_head"]["ens_size"],
@@ -682,7 +682,6 @@ class Model(torch.nn.Module):
                 posteriors += [posteriors_c]
             else:
                 tokens_c, posteriors = tokens_c, 0.0
-
 
             for block in self.ae_adapter:
                 tokens_global_c = checkpoint(
