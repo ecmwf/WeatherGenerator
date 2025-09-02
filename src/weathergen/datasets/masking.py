@@ -42,7 +42,9 @@ class Masker:
         self.masking_strategy = cf.masking_strategy
         self.original_masking_strategy = cf.masking_strategy
         self.masking_rate_sampling = cf.masking_rate_sampling
-        self.causal_masking_rate_sampling = cf.get("causal_masking_rate_sampling", cf.masking_rate_sampling)
+        self.causal_masking_rate_sampling = cf.get(
+            "causal_masking_rate_sampling", cf.masking_rate_sampling
+        )
         # masking_strategy_config is a dictionary that can hold any additional parameters
         self.healpix_level_data = cf.healpix_level
         self.masking_strategy_config = cf.get("masking_strategy_config", {})
@@ -280,7 +282,7 @@ class Masker:
         Get the sampling rate, if requested by sampling it itself.
         For causal masking, uses causal_masking_rate; otherwise uses masking_rate.
         """
-        
+
         # Determine which rate and sampling setting to use
         if self.masking_strategy == "causal":
             base_rate = self.causal_masking_rate
@@ -298,7 +300,7 @@ class Masker:
             )
         else:
             rate = base_rate
-            
+
         return rate
 
     def _generate_healpix_mask(self, token_lens: list[int], rate: float) -> np.typing.NDArray:
