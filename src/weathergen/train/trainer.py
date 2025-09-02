@@ -9,6 +9,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import re
 import time
 from typing import Any
 
@@ -17,7 +18,7 @@ import torch
 import tqdm
 from omegaconf import OmegaConf
 from torch import Tensor
-from torch.distributed.fsdp import FullStateDictConfig, StateDictType
+from torch.distributed.fsdp import FullOptimStateDictConfig, FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     MixedPrecision,
@@ -30,6 +31,7 @@ from torch.distributed.fsdp.wrap import (
 import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
+from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
@@ -63,6 +65,8 @@ class Trainer(TrainerBase):
             cf,
         )
         cf = self.cf
+
+        self.freeze_modules = cf.get("freeze_modules", "")
 
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
@@ -186,10 +190,24 @@ class Trainer(TrainerBase):
         if run_id_contd is not None:
             logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
             self.model.load(run_id_contd, epoch_contd)
+            if cf.with_ddp and cf.with_fsdp:
+                FSDP.set_state_dict_type(
+                    self.model,
+                    StateDictType.FULL_STATE_DICT,
+                    FullStateDictConfig(rank0_only=False),
+                )
             logger.info(f"Loaded model id={run_id_contd}.")
 
         if cf.forecast_freeze_model:
             self.model = self.model.freeze_weights_forecast()
+
+        for name, module in self.model.named_modules():
+            name = module.name if hasattr(module, "name") else name
+            # avoid the whole model element which has name ''
+            if name == "":
+                continue
+            if re.fullmatch(self.freeze_modules, name) is not None:
+                freeze_weights(module)
 
         self.model = self.model.to(self.devices[0])
 
@@ -646,6 +664,15 @@ class Trainer(TrainerBase):
 
             # save config
             config.save(self.cf, epoch)
+
+        if self.cf.with_ddp and self.cf.with_fsdp:
+            with FSDP.state_dict_type(
+                self.ddp_model,
+                StateDictType.FULL_STATE_DICT,
+                FullStateDictConfig(rank0_only=False),
+                FullOptimStateDictConfig(rank0_only=False),
+            ):
+                state = self.ddp_model.state_dict()
 
     def _prepare_losses_for_logging(
         self,
