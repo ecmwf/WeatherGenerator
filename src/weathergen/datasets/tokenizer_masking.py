@@ -93,7 +93,7 @@ class TokenizerMasking(Tokenizer):
 
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
         if source_tokens_lens.sum() > 0:
-            source_centroids = self.calc_centroids(source_tokens_cells)
+            source_centroids = self.compute_source_centroids(source_tokens_cells)
         else:
             source_centroids = torch.tensor([])
 

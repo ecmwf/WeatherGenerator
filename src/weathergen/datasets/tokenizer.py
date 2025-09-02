@@ -116,7 +116,7 @@ class Tokenizer():
             .to(torch.float32)
         )
 
-    def calc_centroids(self, source_tokens_cells: list[torch.Tensor]) -> torch.Tensor:
+    def compute_source_centroids(self, source_tokens_cells: list[torch.Tensor]) -> torch.Tensor:
         source_means = [
             (
                 self.hpy_verts[-1][i].unsqueeze(0).repeat(len(s), 1)
