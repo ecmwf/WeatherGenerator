@@ -35,6 +35,8 @@ class Tokenizer(ABC):
         self.num_healpix_cells_source = 12 * 4**self.hl_source
         self.num_healpix_cells_target = 12 * 4**self.hl_target
 
+        self.size_time_embedding = 6
+
         verts00, verts00_rots = healpix_verts_rots(self.hl_source, 0.0, 0.0)
         verts10, verts10_rots = healpix_verts_rots(self.hl_source, 1.0, 0.0)
         verts11, verts11_rots = healpix_verts_rots(self.hl_source, 1.0, 1.0)
@@ -114,8 +116,6 @@ class Tokenizer(ABC):
             .transpose(1, 0)
             .to(torch.float32)
         )
-
-        self.size_time_embedding = 6
 
     def calc_centroids(self, source_tokens_cells: list[torch.Tensor]) -> torch.Tensor:
         source_means = [
