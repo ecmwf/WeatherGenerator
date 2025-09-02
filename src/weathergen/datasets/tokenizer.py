@@ -20,7 +20,7 @@ from weathergen.datasets.utils import (
 )
 
 
-class Tokenizer():
+class Tokenizer:
     """
     Base class for tokenizers.
     """
