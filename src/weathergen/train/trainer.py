@@ -482,7 +482,7 @@ class Trainer(TrainerBase):
                 if self.cf.get("encode_targets_latent", False):
                     # unpack the predictions/tokens from the latent space if the latent space tokens are encoded
                     preds, tokens_all, tokens_targets = preds
-                    save_dir = "/users/ktezcan/projects/Meteoswiss/WeatherGenerator/personal/clariden/experiments_ecscs/tokens/"
+                    save_dir = "/iopsstor/scratch/cscs/ktezcan/weathergen/tokens/"
                     np.save(save_dir + self.cf.run_id + "_tokens_all_epoch" + str(epoch) + ".npy", [t.detach().cpu().numpy() for t in tokens_all])
                     np.save(save_dir + self.cf.run_id + "_tokens_targets_epoch" + str(epoch) + ".npy", [t.detach().cpu().numpy() for t in tokens_targets])
 
