@@ -134,13 +134,17 @@ class Plotter:
         -------
             xarray DataArray with selected data.
         """
+        _logger.info(f"Selecting from DataArray {da.name} with selection {selection}")
         for key, value in selection.items():
+            _logger.info(f" - {key}: {value}")
             if key in da.coords and key not in da.dims:
                 # Coordinate like 'sample' aligned to another dim
                 da = da.where(da[key] == value, drop=True)
             else:
                 # Scalar coord or dim coord (e.g., 'forecast_step', 'channel')
+                _logger.info(f'key {key} was processed as a scalar or dim coord')
                 da = da.sel({key: value})
+        _logger.info(f'Returned da is: {da}')
         return da
 
     def create_histograms_per_sample(
@@ -185,14 +189,24 @@ class Plotter:
         for var in variables:
             select_var = self.select | {"channel": var}
 
+            _logger.info(f' before select from da: {target}')
+            _logger.info(target.isel(ipoint=slice(0, 10)).values)
+
             targ, prd = (
-                self.select_from_da(target, select_var),
-                self.select_from_da(preds, select_var),
+                self.select_from_da(target, select_var).compute(),
+                self.select_from_da(preds, select_var).compute(),
             )
 
+            _logger.info(f' before dropping na: {targ}')
+            _logger.info(targ.isel(ipoint=slice(0, 10)).values) 
+
+            
             # Remove NaNs
             targ = targ.dropna(dim="ipoint")
             prd = prd.dropna(dim="ipoint")
+
+            _logger.info(f' after dropping na: {targ}')
+            _logger.info(f' after dropping na: {prd}')
 
             if self.plot_subtimesteps:
                 ntimes_unique = len(np.unique(targ.valid_time))
@@ -215,7 +229,6 @@ class Plotter:
                     _logger.debug(
                         f"Plotting histogram for {var} at valid_time {valid_time}"
                     )
-
                 name = self.plot_histogram(targ_t, prd_t, hist_output_dir, var, tag=tag)
                 plot_names.append(name)
 

@@ -125,7 +125,7 @@ def evaluate_from_config(cfg):
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                _ = plot_data(cfg, cf_run, results_dir, runplot_dir, stream)
+                _ = plot_data(cfg, run_id, run, results_dir, runplot_dir, stream, stream_dict)
 
             if stream_dict.get("evaluation"):
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
@@ -151,7 +151,7 @@ def evaluate_from_config(cfg):
                                 scores_dict[metric][region][stream][run_id] = (
                                     metric_data.sel(sample=list(samples),channel=list(channels), forecast_step=list(fsteps))
                                 )
-                        except FileNotFoundError:
+                        except (FileNotFoundError, KeyError):
                             metrics_to_compute.append(metric)
                             
                     if metrics_to_compute:

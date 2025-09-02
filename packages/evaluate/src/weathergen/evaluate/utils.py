@@ -92,7 +92,7 @@ def get_data(
 
     with ZarrIO(fname_zarr) as zio:
         zio_forecast_steps = zio.forecast_steps
-        stream_dict = run.streams[stream]
+        stream_cfg = run.streams[stream]
         all_channels = peek_tar_channels(zio, stream, zio_forecast_steps[0])
         _logger.info(f"RUN {run_id}: Processing stream {stream}...")
 
@@ -103,7 +103,7 @@ def get_data(
         samples = sorted(
             [int(sample) for sample in zio.samples] if samples is None else samples
         )
-        channels = channels or stream_dict.get("channels", all_channels)
+        channels = channels or stream_cfg.get("channels", all_channels)
         channels = to_list(channels)
 
         da_tars, da_preds = [], []
@@ -130,6 +130,9 @@ def get_data(
             ):
                 out = zio.get_data(sample, stream, fstep)
                 target, pred = out.target.as_xarray(), out.prediction.as_xarray()
+
+                _logger.info(f'target in get_data is: {target}')
+                _logger.info(f'target values are: {target.isel(ipoint=slice(0, 10)).values}')
 
                 if region != "global":
                     _logger.debug(
@@ -178,6 +181,9 @@ def get_data(
                 da_preds.append(da_preds_fs)
             if return_counts:
                 points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
+
+        _logger.info(f'da_tars_fs in get_data is: {da_tars_fs}')
+        _logger.info(f'da_tars_fs values are: {da_tars_fs.isel(ipoint=slice(0, 10)).values}')
         
         # Safer than a list
         da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=False)}
@@ -303,10 +309,11 @@ def calc_scores_per_stream(
 def plot_data(
     cfg: str,
     run_id: str,
-    run: dict,
+    run_cfg: dict,
     results_dir: Path,
     plot_dir: Path,
     stream: str,
+    stream_cfg: dict
 ) -> list[str]:
     """
     Plot the data for a given run and stream.
@@ -332,7 +339,7 @@ def plot_data(
     """
 
     # handle plotting settings
-    plot_settings = stream_dict.get("plotting", {})
+    plot_settings = stream_cfg.get("plotting", {})
 
     # return early if no plotting is requested
     if not (
@@ -350,18 +357,18 @@ def plot_data(
         "image_format": cfg.get("image_format", "png"),
         "dpi_val": cfg.get("dpi_val", 300),
         "fig_size": cfg.get("fig_size", (8, 10)),
-        "plot_subtimesteps": get_stream_attr(
-            run_config, stream, "tokenize_spacetime", False
-        ),
+        "plot_subtimesteps": stream_cfg.get("tokenize_spacetime", False)
     }
 
     plotter = Plotter(plotter_cfg, plot_dir)
 
-    check, (plot_chs, plot_fsteps, plot_samples) = check_availability(cfg, run_id, run, stream, results_dir, eval=False)
+    check, (plot_chs, plot_fsteps, plot_samples) = check_availability(cfg, run_id, run_cfg, stream, results_dir, eval=False)
+
+    _logger.info(f'plot channels are {plot_chs}')
 
     # plot_samples = plot_settings.get("sample", None)
     # plot_fsteps = plot_settings.get("forecast_step", None)
-    # plot_chs = stream_dict.get("channels")
+    # plot_chs = stream_cfg.get("channels")
 
     # Check if maps should be plotted and handle configuration if provided
     plot_maps = plot_settings.get("plot_maps", False)
@@ -407,6 +414,7 @@ def plot_data(
     da_tars = model_output.target
     da_preds = model_output.prediction
 
+
     if not da_tars:
         _logger.info(f"Skipping Plot Data for {stream}. Targets are empty.")
         return
@@ -445,6 +453,10 @@ def plot_data(
                 plots.extend([map_tar, map_pred])
 
             if plot_histograms:
+
+                _logger.info(f'tars before passing to plotter: {tars}')
+                _logger.info(f'da_tars values are: {tars.isel(ipoint=slice(0, 10)).values}')
+                
                 h = plotter.create_histograms_per_sample(
                     tars, preds, plot_chs, data_selection
                 )
@@ -561,10 +573,14 @@ def retrieve_metric_from_json(
     score_path = (
         Path(metric_dir) / f"{run_id}_{stream}_{region}_{metric}_epoch{epoch:05d}.json"
     )
-    _logger.debug(f"Looking for: {score_path}")
+    _logger.info(f"Looking for: {score_path}")
+
     if score_path.exists():
         with open(score_path) as f:
             data_dict = json.load(f)
+            print("data shape:", np.array(data_dict["data"]).shape)
+            print("dims:", data_dict.get("dims"))
+            print("coords keys:", list(data_dict.get("coords", {}).keys()))
             return xr.DataArray.from_dict(data_dict)
     else:
         raise FileNotFoundError(f"File {score_path} not found in the archive.")
@@ -690,7 +706,7 @@ def common_ranges(
     maps_config :
         the global plotting configuration with the ranges added and included for each variable (and for each stream).
     """
-
+    
     for var in plot_chs:
         if var in maps_config:
             if not isinstance(maps_config[var].get("vmax"), (int | float)):
@@ -848,7 +864,7 @@ def get_stream_attr(config: Config, stream_name: str, key: str, default=None):
     return default
 
 
-def check_availability(cfg: dict, run_id: str, run: dict, stream: str, results_dir: Path, metric_data: dict=None, eval: bool=True):
+def check_availability(cfg: dict, run_id: str, run_cfg: dict, stream: str, results_dir: Path, metric_data: dict=None, eval: bool=True):
     """
     Check if requested channels, forecast steps and samples are
     i) available in the previously saved json if metric data is specified (return False otherwise)
@@ -893,7 +909,7 @@ def check_availability(cfg: dict, run_id: str, run: dict, stream: str, results_d
         available_samples = set(metric_data.coords["sample"].values.ravel())
 
     fname_zarr = results_dir.joinpath(
-        f"validation_epoch{run['epoch']:05d}_rank{run['rank']:04d}.zarr"
+        f"validation_epoch{run_cfg['epoch']:05d}_rank{run_cfg['rank']:04d}.zarr"
     )
 
     if not fname_zarr.exists() or not fname_zarr.is_dir():
@@ -964,7 +980,7 @@ def _get_channels_fsteps_samples(cfg: dict, run_id: str, stream: str, eval: bool
     ----------
     cfg: dict
         The plot config.
-    run: str, 
+    run: str,
         The run considered.
     stream: str
         The stream considered.
