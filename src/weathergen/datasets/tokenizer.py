@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import warnings
-from abc import ABC, abstractmethod
 
 import astropy_healpix as hp
 import numpy as np
@@ -21,7 +20,7 @@ from weathergen.datasets.utils import (
 )
 
 
-class Tokenizer(ABC):
+class Tokenizer():
     """
     Base class for tokenizers.
     """
@@ -140,44 +139,3 @@ class Tokenizer(ABC):
         Get size of time embedding
         """
         return self.size_time_embedding
-
-    @abstractmethod
-    def reset_rng(self, rng) -> None:
-        """
-        Abstract method that all subclasses must implement.
-        Reset rng after epoch to ensure proper randomization
-        """
-        pass
-
-    @abstractmethod
-    def batchify_source(
-        self,
-        stream_info: dict,
-        coords: np.array,
-        geoinfos: np.array,
-        source: np.array,
-        times: np.array,
-        time_win: tuple,
-        normalizer,  # dataset
-    ):
-        """
-        Abstract method that all subclasses must implement.
-        """
-        pass
-
-    @abstractmethod
-    def batchify_target(
-        self,
-        stream_info: dict,
-        sampling_rate_target: float,
-        coords: np.array,
-        geoinfos: np.array,
-        source: np.array,
-        times: np.array,
-        time_win: tuple,
-        normalizer,  # dataset
-    ):
-        """
-        Abstract method that all subclasses must implement.
-        """
-        pass

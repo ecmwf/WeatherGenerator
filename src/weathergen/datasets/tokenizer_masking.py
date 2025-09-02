@@ -23,7 +23,6 @@ from weathergen.datasets.tokenizer_utils import (
 )
 from weathergen.datasets.utils import (
     get_target_coords_local_ffast,
-    r3tos2,
 )
 from weathergen.utils.logger import init_loggers
 
