@@ -38,9 +38,11 @@ class Masker:
 
     def __init__(self, cf: Config):
         self.masking_rate = cf.masking_rate
+        self.causal_masking_rate = cf.get("causal_masking_rate", cf.masking_rate)
         self.masking_strategy = cf.masking_strategy
         self.original_masking_strategy = cf.masking_strategy
         self.masking_rate_sampling = cf.masking_rate_sampling
+        self.causal_masking_rate_sampling = cf.get("causal_masking_rate_sampling", cf.masking_rate_sampling)
         # masking_strategy_config is a dictionary that can hold any additional parameters
         self.healpix_level_data = cf.healpix_level
         self.masking_strategy_config = cf.get("masking_strategy_config", {})
@@ -239,6 +241,7 @@ class Masker:
 
         processed_target_tokens = []
 
+        # process all tokens used for embedding
         for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
             if self.masking_strategy == "channel":
                 # If masking strategy is channel, handle target tokens differently.
@@ -274,19 +277,28 @@ class Masker:
 
     def _get_sampling_rate(self):
         """
-        Get the sampling, if requested by sampling it itself
+        Get the sampling rate, if requested by sampling it itself.
+        For causal masking, uses causal_masking_rate; otherwise uses masking_rate.
         """
+        
+        # Determine which rate and sampling setting to use
+        if self.masking_strategy == "causal":
+            base_rate = self.causal_masking_rate
+            rate_sampling = self.causal_masking_rate_sampling
+        else:
+            base_rate = self.masking_rate
+            rate_sampling = self.masking_rate_sampling
 
-        # if masking_rate_sampling is enabled, sample the rate from a normal distribution.
-        if self.masking_rate_sampling:
+        # Apply sampling if enabled
+        if rate_sampling:
             rate = np.clip(
-                np.abs(self.rng.normal(loc=self.masking_rate, scale=1.0 / (2.5 * np.pi))),
+                np.abs(self.rng.normal(loc=base_rate, scale=1.0 / (2.5 * np.pi))),
                 0.01,
                 0.99,
             )
         else:
-            rate = self.masking_rate
-
+            rate = base_rate
+            
         return rate
 
     def _generate_healpix_mask(self, token_lens: list[int], rate: float) -> np.typing.NDArray:
