@@ -80,25 +80,10 @@ class TokenizerForecast(Tokenizer):
         source_tokens_cells = [
             torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in source_tokens_cells
         ]
-        source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
 
+        source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
         if source_tokens_lens.sum() > 0:
-            source_means = [
-                (
-                    self.hpy_verts[-1][i].unsqueeze(0).repeat(len(s), 1)
-                    if len(s) > 0
-                    else torch.tensor([])
-                )
-                for i, s in enumerate(source_tokens_cells)
-            ]
-            source_means_lens = [len(s) for s in source_means]
-            # merge and split to vectorize computations
-            source_means = torch.cat(source_means)
-            # TODO: precompute also source_means_r3 and then just cat
-            source_centroids = torch.cat(
-                [source_means.to(torch.float32), r3tos2(source_means).to(torch.float32)], -1
-            )
-            source_centroids = torch.split(source_centroids, source_means_lens)
+            source_centroids = self.calc_centroids(source_tokens_cells)
 
         return (source_tokens_cells, source_tokens_lens, source_centroids)
 

@@ -17,6 +17,7 @@ import torch
 from weathergen.datasets.utils import (
     healpix_verts_rots,
     locs_to_cell_coords_ctrs,
+    r3tos2,
 )
 
 
@@ -115,6 +116,24 @@ class Tokenizer(ABC):
         )
 
         self.size_time_embedding = 6
+
+    def calc_centroids(self, source_tokens_cells: list[torch.Tensor]) -> torch.Tensor:
+        source_means = [
+            (
+                self.hpy_verts[-1][i].unsqueeze(0).repeat(len(s), 1)
+                if len(s) > 0
+                else torch.tensor([])
+            )
+            for i, s in enumerate(source_tokens_cells)
+        ]
+        source_means_lens = [len(s) for s in source_means]
+        # merge and split to vectorize computations
+        source_means = torch.cat(source_means)
+        # TODO: precompute also source_means_r3 and then just cat
+        source_centroids = torch.cat(
+            [source_means.to(torch.float32), r3tos2(source_means).to(torch.float32)], -1
+        )
+        source_centroids = torch.split(source_centroids, source_means_lens)
 
     def get_size_time_embedding(self) -> int:
         """
