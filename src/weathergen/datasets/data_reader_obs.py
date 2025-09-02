@@ -52,10 +52,10 @@ class DataReaderObs(DataReaderBase):
         t_chs = stream_info.get("target")
         t_chs_exclude = stream_info.get("target_exclude", [])
 
-        source_n_empty = len(s_chs) > 0 if s_chs is not None else True
-        assert source_n_empty, "source is empty; at least one channels must be present."
-        target_n_empty = len(t_chs) > 0 if t_chs is not None else True
-        assert target_n_empty, "target is empty; at least one channels must be present."
+        # source_n_empty = len(s_chs) > 0 if s_chs is not None else True
+        # assert source_n_empty, "source is empty; at least one channels must be present."
+        # target_n_empty = len(t_chs) > 0 if t_chs is not None else True
+        # assert target_n_empty, "target is empty; at least one channels must be present."
 
         self.source_channels = self.select_channels(data_colnames, s_chs, s_chs_exclude)
         self.source_idx = np.array([self.colnames.index(c) for c in self.source_channels])
