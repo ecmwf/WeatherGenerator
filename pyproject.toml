@@ -30,6 +30,7 @@ dependencies = [
  "weathergen-common",
  "weathergen-evaluate",
  "numexpr>=2.11.0",
+ "pyrefly>=0.31.0",
 ]
 
 [project.urls]
@@ -125,7 +126,7 @@ line-ending = "lf"
 
 [tool.uv]
 # Most work is done a distributed filesystem, where hardlink is not always possible.
-# Also, trying to resolve some permissions issue, see #344.
+# Also, trying to resolve some permissions issue, see 44.
 link-mode = "symlink"
 # This guarantees that the build is deterministic and will not be impacted 
 # by future releases of dependencies or sub-dependencies. 
@@ -148,6 +149,28 @@ required-version = ">=0.7.0"
 name = "pytorch-cu124"
 url = "https://download.pytorch.org/whl/cu124"
 explicit = true
+
+
+# uv run --all-packages pyrefly check
+[tool.pyrefly]
+project-includes = ["src/"]
+project-excludes = [
+]
+
+[tool.pyrefly.errors]
+bad-argument-type = false
+unsupported-operation = false
+missing-attribute = false
+no-matching-overload = false
+bad-context-manager = false
+
+# To do:
+bad-assignment = false
+bad-return = false
+index-error = false
+not-iterable = false
+not-callable = false
+
 
 
 [[tool.uv.index]]

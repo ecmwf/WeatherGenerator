@@ -1782,6 +1782,22 @@ wheels = [
 ]
 
 [[package]]
+name = "pyrefly"
+version = "0.31.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8b/99/15d98f9a3f471562e647af5041c06fb5b4cfe8255b3de748e4021d3de67a/pyrefly-0.31.0.tar.gz", hash = "sha256:116902ea92ac5b4a1c091170b30946d59c81c5a00e48cf15b2c1628605dd5587", size = 1337950, upload-time = "2025-09-02T13:05:48.816Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/7d/cc165e89584c31712dbccd4ef85b9620197fcf368295ea7e3939f685cc0b/pyrefly-0.31.0-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:f5ae148109c728a63b63ede23b5a6a5a5798c322b95022ccaf8ede5c4053d7a2", size = 6593144, upload-time = "2025-09-02T13:05:33.137Z" },
+    { url = "https://files.pythonhosted.org/packages/25/56/4ca56a1104780ff1c0bac493102a2598b507051421c92a0994e775e45683/pyrefly-0.31.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:b5a8d025c3190dddbc017b733689e2caee4e5eaaff8087659595a1810e8cde02", size = 6149568, upload-time = "2025-09-02T13:05:35.314Z" },
+    { url = "https://files.pythonhosted.org/packages/53/ea/c78a4b64607ab340fafe0157d16b6b475951d963ebbb48d911a71dd78d22/pyrefly-0.31.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f129437db7eecacccb99014c562155069579791a28d33a0baba334d79e58c4ac", size = 6388897, upload-time = "2025-09-02T13:05:36.992Z" },
+    { url = "https://files.pythonhosted.org/packages/68/33/b0ed55febaf0067716008a7e5e752747dfca57454b0dc10f5204371c3cf6/pyrefly-0.31.0-py3-none-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:5fdaf31cdd0631785f40427e0ea41cb0ce5a193e53af9f84c1a3843ad3294680", size = 7188161, upload-time = "2025-09-02T13:05:38.88Z" },
+    { url = "https://files.pythonhosted.org/packages/04/6c/086d681436ec6a3fa62e654280bedfa84e1ac623bdc9c018089e727cb26b/pyrefly-0.31.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:33f475de48a2e60c8e5ac64eb70fde25df489da2f99ea034bf761684d0117ed0", size = 6873171, upload-time = "2025-09-02T13:05:40.55Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/07/9de05a073cf48b9591eb2d7a624a26b7481080573555aaa282ac407b9203/pyrefly-0.31.0-py3-none-win32.whl", hash = "sha256:0cc25f4454e8c5a3c33b5675c981ae5ab3c4884aa4762df4c149c330cb7c824a", size = 6349810, upload-time = "2025-09-02T13:05:42.701Z" },
+    { url = "https://files.pythonhosted.org/packages/34/ae/4e30b8ed76c2a382f6add8a17cf55450ca3a52757f0363900dec83bff2ad/pyrefly-0.31.0-py3-none-win_amd64.whl", hash = "sha256:04dbec47176bb4b511bbcd0b365ca03af51c732335844c6a73ffa77d888c22e6", size = 6769982, upload-time = "2025-09-02T13:05:44.855Z" },
+    { url = "https://files.pythonhosted.org/packages/42/7c/81376c77a650d83ff86544776a67f91ba69f6e4efe7edcdc3ad209460ac3/pyrefly-0.31.0-py3-none-win_arm64.whl", hash = "sha256:501bc806d61275b529b50583445e0827e5bbd699efb127eda5951e1536d6f17b", size = 6387719, upload-time = "2025-09-02T13:05:47.076Z" },
+]
+
+[[package]]
 name = "pyshp"
 version = "2.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2340,6 +2356,7 @@ dependencies = [
     { name = "polars" },
     { name = "psutil" },
     { name = "pynvml" },
+    { name = "pyrefly" },
     { name = "torch", version = "2.6.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'macosx' and sys_platform != 'win32'" },
     { name = "torch", version = "2.6.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'macosx'" },
     { name = "torch", version = "2.6.0+cu124", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
@@ -2376,6 +2393,7 @@ requires-dist = [
     { name = "polars", specifier = "~=1.25.2" },
     { name = "psutil" },
     { name = "pynvml" },
+    { name = "pyrefly", specifier = ">=0.31.0" },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'macosx' and sys_platform != 'win32'", specifier = "==2.6.0" },
     { name = "torch", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = "==2.6.0", index = "https://download.pytorch.org/whl/cu124" },
     { name = "torch", marker = "sys_platform == 'macosx'", specifier = "==2.6.0", index = "https://download.pytorch.org/whl/cpu" },
