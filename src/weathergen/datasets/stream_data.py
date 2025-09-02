@@ -127,7 +127,7 @@ class StreamData:
 
         self.target_tokens[fstep] += [[torch.tensor([], dtype=torch.int32)]]
         self.target_tokens_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
-        self.target_coords[fstep] += [[torch.zeros((0, 106)) for _ in range(self.nhc_target)]]
+        self.target_coords[fstep] += [[torch.zeros((0, 105)) for _ in range(self.nhc_target)]]
         self.target_coords_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
         self.target_coords_raw[fstep] += [[torch.tensor([]) for _ in range(self.nhc_target)]]
         self.target_times_raw[fstep] += [
