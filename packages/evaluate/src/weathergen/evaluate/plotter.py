@@ -1,7 +1,9 @@
+import glob
 import logging
 import os
 from pathlib import Path
 
+import cartopy
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,7 +13,6 @@ from PIL import Image
 from weathergen.utils.config import _load_private_conf
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
-import cartopy
 
 cartopy.config["data_dir"] = str(work_dir)
 cartopy.config["pre_existing_data_dir"] = str(work_dir)
@@ -24,7 +25,7 @@ logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
-_logger.info(f"Taking cartopy paths from {work_dir}")
+_logger.debug(f"Taking cartopy paths from {work_dir}")
 
 
 class Plotter:
@@ -32,14 +33,19 @@ class Plotter:
     Contains all basic plotting functions.
     """
 
-    def __init__(self, cfg: dict, output_basedir: str | Path):
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
         """
         Initialize the Plotter class.
 
         Parameters
         ----------
-        cfg:
-            Configuration dictionary containing all information for the plotting.
+        plotter_cfg:
+            Configuration dictionary containing basic information for plotting.
+            Expected keys are:
+                - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
+                - dpi_val: DPI value for the saved images
+                - fig_size: Size of the figure (width, height) in inches
+                - tokenize_spacetime: If True, all valid times will be plotted in one plot
         output_basedir:
             Base directory under which the plots will be saved.
             Expected scheme `<results_base_dir>/<run_id>`.
@@ -47,14 +53,15 @@ class Plotter:
 
         _logger.info(f"Taking cartopy paths from {work_dir}")
 
-        self.cfg = cfg
-
-        self.image_format = cfg.image_format
-        self.dpi_val = cfg.get("dpi_val")
-        self.fig_size = cfg.get("fig_size", (8, 10))
+        self.image_format = plotter_cfg.get("image_format")
+        self.dpi_val = plotter_cfg.get("dpi_val")
+        self.fig_size = plotter_cfg.get("fig_size")
+        self.plot_subtimesteps = plotter_cfg.get(
+            "plot_subtimesteps", False
+        )  # True if plots are created for each valid time separately
         self.run_id = output_basedir.name
 
-        self.out_plot_basedir = output_basedir / "plots"
+        self.out_plot_basedir = Path(output_basedir) / "plots"
 
         if not os.path.exists(self.out_plot_basedir):
             _logger.info(f"Creating dir {self.out_plot_basedir}")
@@ -136,7 +143,7 @@ class Plotter:
                 da = da.sel({key: value})
         return da
 
-    def histogram(
+    def create_histograms_per_sample(
         self,
         target: xr.DataArray,
         preds: xr.DataArray,
@@ -145,7 +152,7 @@ class Plotter:
         tag: str = "",
     ) -> list[str]:
         """
-        Plot histogram of target vs predictions for a set of variables.
+        Plot histogram of target vs predictions for each variable and valid time in the DataArray.
 
         Parameters
         ----------
@@ -178,47 +185,112 @@ class Plotter:
         for var in variables:
             select_var = self.select | {"channel": var}
 
-            # get common bin edges
             targ, prd = (
                 self.select_from_da(target, select_var),
                 self.select_from_da(preds, select_var),
             )
-            vals = np.concatenate([targ, prd])
-            bins = np.histogram_bin_edges(vals, bins=50)
-            plt.hist(targ, bins=bins, alpha=0.7, label="Target")
-            plt.hist(prd, bins=bins, alpha=0.7, label="Prediction")
 
-            # set labels and title
-            plt.xlabel(f"Variable: {var}")
-            plt.ylabel("Frequency")
-            plt.title(
-                f"Histogram of Target and Prediction: {self.stream}, {var} : fstep = {self.fstep:03}"
-            )
-            plt.legend(frameon=False)
+            # Remove NaNs
+            targ = targ.dropna(dim="ipoint")
+            prd = prd.dropna(dim="ipoint")
 
-            # TODO: make this nicer
-            parts = [
-                "histogram",
-                self.run_id,
-                tag,
-                str(self.sample),
-                self.stream,
-                var,
-                str(self.fstep).zfill(3),
-            ]
+            if self.plot_subtimesteps:
+                ntimes_unique = len(np.unique(targ.valid_time))
+                _logger.info(
+                    f"Creating histograms for {ntimes_unique} valid times of variable {var}."
+                )
 
-            name = "_".join(filter(None, parts))
-            fname = hist_output_dir / tag / f"{name}.{self.image_format}"
-            _logger.debug(f"Saving map to {fname}")
-            plt.savefig(fname)
-            plt.close()
-            plot_names.append(name)
+                groups = zip(
+                    targ.groupby("valid_time"), prd.groupby("valid_time"), strict=False
+                )
+            else:
+                _logger.info(f"Plotting histogram for all valid times of {var}")
+
+                groups = [
+                    ((None, targ), (None, prd))
+                ]  # wrap once with dummy valid_time
+
+            for (valid_time, targ_t), (_, prd_t) in groups:
+                if valid_time is not None:
+                    _logger.debug(
+                        f"Plotting histogram for {var} at valid_time {valid_time}"
+                    )
+
+                name = self.plot_histogram(targ_t, prd_t, hist_output_dir, var, tag=tag)
+                plot_names.append(name)
 
         self.clean_data_selection()
 
         return plot_names
 
-    def map(
+    def plot_histogram(
+        self,
+        target_data: xr.DataArray,
+        pred_data: xr.DataArray,
+        hist_output_dir: Path,
+        varname: str,
+        tag: str = "",
+    ) -> str:
+        """
+        Plot a histogram comparing target and prediction data for a specific variable.
+
+        Parameters
+        ----------
+        target_data: xr.DataArray
+            DataArray containing the target data for the variable.
+        pred_data: xr.DataArray
+            DataArray containing the prediction data for the variable.
+        hist_output_dir: Path
+            Directory where the histogram will be saved.
+        varname: str
+            Name of the variable to be plotted.
+        tag: str
+            Any tag you want to add to the plot.
+
+        Returns
+        -------
+            Name of the saved plot file.
+        """
+
+        # Get common bin edges
+        vals = np.concatenate([target_data, pred_data])
+        bins = np.histogram_bin_edges(vals, bins=50)
+
+        # Plot histograms
+        plt.hist(target_data, bins=bins, alpha=0.7, label="Target")
+        plt.hist(pred_data, bins=bins, alpha=0.7, label="Prediction")
+
+        # set labels and title
+        plt.xlabel(f"Variable: {varname}")
+        plt.ylabel("Frequency")
+        plt.title(
+            f"Histogram of Target and Prediction: {self.stream}, {varname} : fstep = {self.fstep:03}"
+        )
+        plt.legend(frameon=False)
+
+        valid_time = str(target_data["valid_time"][0].values.astype("datetime64[m]"))
+
+        # TODO: make this nicer
+        parts = [
+            "histogram",
+            self.run_id,
+            tag,
+            str(self.sample),
+            valid_time,
+            self.stream,
+            varname,
+            str(self.fstep).zfill(3),
+        ]
+        name = "_".join(filter(None, parts))
+
+        fname = hist_output_dir / f"{name}.{self.image_format}"
+        logging.debug(f"Saving histogram to {fname}")
+        plt.savefig(fname)
+        plt.close()
+
+        return name
+
+    def create_maps_per_sample(
         self,
         data: xr.DataArray,
         variables: list,
@@ -227,7 +299,7 @@ class Plotter:
         map_kwargs: dict | None = None,
     ) -> list[str]:
         """
-        Plot 2D map for a dataset
+        Plot 2D map for each variable and valid time in the DataArray.
 
         Parameters
         ----------
@@ -253,13 +325,23 @@ class Plotter:
         -------
             List of plot names for the saved maps.
         """
-        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
-        # check for known keys in map_kwargs
-        marker_size_base = map_kwargs_save.pop("marker_size", 1)
-        scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
-        marker = map_kwargs_save.pop("marker", "o")
-
         self.update_data_selection(select)
+
+        map_kwargs_save = (
+            {
+                key: value
+                for key, value in map_kwargs.copy().items()
+                if key not in variables
+            }
+            if map_kwargs is not None
+            else {}
+        )
+
+        if not hasattr(map_kwargs_save, "marker_size"):
+            # Set default marker size if not specified in maps_config
+            map_kwargs_save["marker_size"] = DefaultMarkerSize.get_marker_size(
+                self.stream
+            )
 
         # Basic map output directory for this stream
         map_output_dir = self.get_map_output_dir(tag)
@@ -271,56 +353,128 @@ class Plotter:
         plot_names = []
         for var in variables:
             select_var = self.select | {"channel": var}
-            fig = plt.figure(dpi=self.dpi_val)
-            ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
-            ax.coastlines()
             da = self.select_from_da(data, select_var).compute()
 
-            marker_size = marker_size_base
-            if scale_marker_size:
-                marker_size = (marker_size + 1.0) * np.cos(np.radians(da["lat"]))
+            if self.plot_subtimesteps:
+                ntimes_unique = len(np.unique(da.valid_time))
+                _logger.info(
+                    f"Creating maps for {ntimes_unique} valid times of variable {var} - {tag}"
+                )
 
-            scatter_plt = ax.scatter(
-                da["lon"],
-                da["lat"],
-                c=da,
-                cmap="coolwarm",
-                s=marker_size,
-                marker=marker,
-                transform=ccrs.PlateCarree(),
-                linewidths=0.0,  # only markers, avoids aliasing for very small markers
-                **map_kwargs_save,
-            )
-            plt.colorbar(
-                scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {var}"
-            )
-            plt.title(
-                f"{self.stream}, {var} : fstep = {self.fstep:03} ({da['valid_time'][0].values.astype('datetime64[s]')})"
-            )
-            ax.set_global()
-            ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
+                groups = da.groupby("valid_time")
+            else:
+                _logger.info(f"Creating maps for all valid times of {var} - {tag}")
+                groups = [(None, da)]  # single dummy group
 
-            # TODO: make this nicer
-            parts = [
-                "map",
-                self.run_id,
-                tag,
-                str(self.sample),
-                self.stream,
-                var,
-                str(self.fstep).zfill(3),
-            ]
-            name = "_".join(filter(None, parts))
+            for valid_time, da_t in groups:
+                if valid_time is not None:
+                    _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
 
-            fname = map_output_dir / f"{name}.{self.image_format}"
-            _logger.debug(f"Saving map to {fname}")
-            plt.savefig(fname)
-            plt.close()
-            plot_names.append(name)
+                name = self.scatter_plot(
+                    da_t,
+                    map_output_dir,
+                    var,
+                    tag=tag,
+                    map_kwargs=map_kwargs[var],
+                )
+                plot_names.append(name)
 
         self.clean_data_selection()
 
         return plot_names
+
+    def scatter_plot(
+        self,
+        data: xr.DataArray,
+        map_output_dir: Path,
+        varname: str,
+        tag: str = "",
+        map_kwargs: dict | None = None,
+    ):
+        """
+        Plot a 2D map for a data array using scatter plot.
+
+        Parameters
+        ----------
+        data: xr.DataArray
+            DataArray to be plotted
+        map_output_dir: Path
+            Directory where the map will be saved
+        varname: str
+            Name of the variable to be plotted
+        tag: str
+            Any tag you want to add to the plot
+        map_kwargs: dict | None
+            Additional keyword arguments for the map.
+
+        Returns
+        -------
+            Name of the saved plot file.
+        """
+        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
+        # check for known keys in map_kwargs
+        marker_size_base = map_kwargs_save.pop("marker_size", 1)
+        scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
+        marker = map_kwargs_save.pop("marker", "o")
+        vmin = map_kwargs_save.pop("vmin", None)
+        vmax = map_kwargs_save.pop("vmax", None)
+
+        # Create figure and axis objects
+        fig = plt.figure(dpi=self.dpi_val)
+        ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
+        ax.coastlines()
+
+        marker_size = marker_size_base
+        if scale_marker_size:
+            marker_size = np.clip(
+                marker_size / np.cos(np.radians(data["lat"])) ** 2,
+                a_max=marker_size * 10.0,
+                a_min=marker_size,
+            )
+
+        valid_time = str(data["valid_time"][0].values.astype("datetime64[m]"))
+
+        scatter_plt = ax.scatter(
+            data["lon"],
+            data["lat"],
+            c=data,
+            cmap="coolwarm",
+            s=marker_size,
+            marker=marker,
+            transform=ccrs.PlateCarree(),
+            vmin=vmin,
+            vmax=vmax,
+            linewidths=0.0,  # only markers, avoids aliasing for very small markers
+            **map_kwargs_save,
+        )
+
+        plt.colorbar(
+            scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}"
+        )
+        plt.title(f"{self.stream}, {varname} : fstep = {self.fstep:03} ({valid_time})")
+        ax.set_global()
+        ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
+
+        # TODO: make this nicer
+        parts = [
+            "map",
+            self.run_id,
+            tag,
+            str(self.sample),
+            valid_time,
+            self.stream,
+            varname,
+            str(self.fstep).zfill(3),
+        ]
+
+        name = "_".join(filter(None, parts))
+        fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
+
+        _logger.debug(f"Saving map to {fname}")
+        plt.savefig(fname)
+        plt.close()
+
+        return name
 
     def animation(self, samples, fsteps, variables, select, tag) -> list[str]:
         """
@@ -350,11 +504,26 @@ class Plotter:
 
         for _, sa in enumerate(samples):
             for _, var in enumerate(variables):
+                _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
                 image_paths = []
                 for _, fstep in enumerate(fsteps):
-                    image_paths.append(
-                        f"{map_output_dir}/map_{self.run_id}_{tag}_{sa}_{self.stream}_{var}_{fstep:03d}.png"
-                    )
+                    # TODO: refactor to avoid code duplication with scatter_plot
+                    parts = [
+                        "map",
+                        self.run_id,
+                        tag,
+                        str(sa),
+                        "*",
+                        self.stream,
+                        var,
+                        str(fstep).zfill(3),
+                    ]
+
+                    name = "_".join(filter(None, parts))
+                    fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
+
+                    names = glob.glob(fname)
+                    image_paths += names
 
                 images = [Image.open(path) for path in image_paths]
                 images[0].save(
@@ -378,7 +547,7 @@ class LinePlots:
         self.dpi_val = cfg.get("dpi_val")
         self.fig_size = cfg.get("fig_size", (8, 10))
 
-        self.out_plot_dir = output_basedir / "line_plots"
+        self.out_plot_dir = Path(output_basedir) / "line_plots"
 
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
