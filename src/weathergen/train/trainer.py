@@ -387,6 +387,10 @@ class Trainer(TrainerBase):
         # removing the reshaping, make sure to index the tensors starting at forecast_offset, e.g.,
         # target_times_raw = streams_data[i_batch][i_strm].target_times_raw[forecast_offset+fstep],
         # when iterating over batch, stream, and fsteps.
+        if self.cf.get("encode_targets_latent", False):
+            # unpack the predictions/tokens from the latent space if the latent space tokens are encoded
+            preds, tokens_all, tokens_targets = preds
+            
         targets_rt = [
             [
                 torch.cat([t[i].target_tokens[fstep] for t in streams_data])
