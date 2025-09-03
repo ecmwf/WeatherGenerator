@@ -27,10 +27,14 @@ class MLP(torch.nn.Module):
         norm_type="LayerNorm",
         dim_aux=None,
         norm_eps=1e-5,
+        name: str | None = None,
     ):
         """Constructor"""
 
         super(MLP, self).__init__()
+
+        if name is not None:
+            self.name = name
 
         assert num_layers >= 2
 
@@ -59,7 +63,6 @@ class MLP(torch.nn.Module):
             self.layers.append(torch.nn.Dropout(p=dropout_rate))
 
         self.layers.append(torch.nn.Linear(dim_hidden, dim_out))
-        self.layers.append(nonlin())
 
     def forward(self, *args):
         x, x_in, aux = args[0], args[0], args[-1]

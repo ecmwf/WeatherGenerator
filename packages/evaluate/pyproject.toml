@@ -11,6 +11,7 @@ dependencies = [
     "panel",
     "omegaconf",
     "weathergen-common",
+    "plotly>=6.2.0",
 ]
 
 [dependency-groups]
@@ -20,6 +21,8 @@ dev = [
  "ruff==0.9.7",
 ]
 
+[project.scripts]
+evaluation = "weathergen.evaluate.run_evaluation:evaluate"
 
 
 [tool.ruff.lint]

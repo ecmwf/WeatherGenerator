@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import torch
+import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
@@ -16,15 +18,19 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
+from weathergen.model.blocks import CrossAttentionBlock, OriginalPredictionBlock, SelfAttentionBlock
 from weathergen.model.embeddings import (
     StreamEmbedLinear,
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
+from weathergen.model.utils import ActivationFactory
 from weathergen.utils.config import Config, get_dtype
 
 
 class EmbeddingEngine:
+    name: "EmbeddingEngine"
+
     def __init__(self, cf: Config, sources_size) -> None:
         """
         Initialize the EmbeddingEngine with the configuration.
@@ -43,6 +49,8 @@ class EmbeddingEngine:
         :return: torch.nn.ModuleList containing the embedding layers.
         """
         for i, si in enumerate(self.cf.streams):
+            stream_name = si.get("name", i)
+
             if "diagnostic" in si and si["diagnostic"]:
                 self.embeds.append(torch.nn.Identity())
                 continue
@@ -60,15 +68,19 @@ class EmbeddingEngine:
                         num_heads=si["embed"]["num_heads"],
                         use_perceiver=si["embed"].get("use_perceiver", False),
                         cross_attn_params=si["embed"].get("cross_attention", None),
+                        dropout_rate=self.cf.embed_dropout_rate,
                         norm_type=self.cf.norm_type,
                         embed_size_centroids=self.cf.embed_size_centroids,
                         unembed_mode=self.cf.embed_unembed_mode,
+                        stream_name=stream_name,
                     )
                 )
             elif si["embed"]["net"] == "linear":
                 self.embeds.append(
                     StreamEmbedLinear(
-                        self.sources_size[i] * si["token_size"], self.cf.ae_local_dim_embed
+                        self.sources_size[i] * si["token_size"],
+                        self.cf.ae_local_dim_embed,
+                        stream_name=stream_name,
                     )
                 )
             else:
@@ -77,6 +89,8 @@ class EmbeddingEngine:
 
 
 class LocalAssimilationEngine:
+    name: "LocalAssimilationEngine"
+
     def __init__(self, cf: Config) -> None:
         """
         Initialize the LocalAssimilationEngine with the configuration.
@@ -119,6 +133,8 @@ class LocalAssimilationEngine:
 
 
 class Local2GlobalAssimilationEngine:
+    name: "Local2GlobalAssimilationEngine"
+
     def __init__(self, cf: Config) -> None:
         """
         Initialize the Local2GlobalAssimilationEngine with the configuration.
@@ -180,6 +196,8 @@ class Local2GlobalAssimilationEngine:
 
 
 class GlobalAssimilationEngine:
+    name: "GlobalAssimilationEngine"
+
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
         """
         Initialize the GlobalAssimilationEngine with the configuration.
@@ -247,6 +265,8 @@ class GlobalAssimilationEngine:
 
 
 class ForecastingEngine:
+    name: "ForecastingEngine"
+
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
         """
         Initialize the ForecastingEngine with the configuration.
@@ -324,13 +344,22 @@ class ForecastingEngine:
 
 
 class EnsPredictionHead(torch.nn.Module):
-    #########################################
     def __init__(
-        self, dim_embed, dim_out, ens_num_layers, ens_size, norm_type="LayerNorm", hidden_factor=2
+        self,
+        dim_embed,
+        dim_out,
+        ens_num_layers,
+        ens_size,
+        stream_name: str,
+        norm_type="LayerNorm",
+        hidden_factor=2,
+        final_activation: None | str = None,
     ):
         """Constructor"""
 
         super(EnsPredictionHead, self).__init__()
+
+        self.name = f"EnsPredictionHead_{stream_name}"
 
         dim_internal = dim_embed * hidden_factor
         # norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
@@ -351,6 +380,11 @@ class EnsPredictionHead(torch.nn.Module):
                     torch.nn.Linear(dim_internal, dim_out if enl - 2 == i else dim_internal)
                 )
 
+            # Add optional final non-linear activation
+            if final_activation is not None and enl >= 1:
+                fal = ActivationFactory.get(final_activation)
+                self.pred_heads[-1].append(fal)
+
     #########################################
     @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
     def forward(self, toks):
@@ -365,7 +399,7 @@ class EnsPredictionHead(torch.nn.Module):
         return preds
 
 
-class TargetPredictionEngine:
+class TargetPredictionEngineClassic(nn.Module):
     def __init__(
         self,
         cf,
@@ -375,6 +409,7 @@ class TargetPredictionEngine:
         tr_mlp_hidden_factor,
         softcap,
         tro_type,
+        stream_name: str,
     ):
         """
         Initialize the TargetPredictionEngine with the configuration.
@@ -387,6 +422,9 @@ class TargetPredictionEngine:
         :param softcap: Softcap value for the attention layers.
         :param tro_type: Type of target readout (e.g., "obs_value").
         """
+        super(TargetPredictionEngineClassic, self).__init__()
+        self.name = f"TargetPredictionEngine_{stream_name}"
+
         self.cf = cf
         self.dims_embed = dims_embed
         self.dim_coord_in = dim_coord_in
@@ -396,19 +434,13 @@ class TargetPredictionEngine:
         self.tro_type = tro_type
         self.tte = torch.nn.ModuleList()
 
-    def create(self):
-        """
-        Creates and returns the module list (tte).
-
-        :return: torch.nn.ModuleList containing the target prediction blocks.
-        """
         for i in range(len(self.dims_embed) - 1):
             # Multi-Cross Attention Head
             self.tte.append(
                 MultiCrossAttentionHeadVarlen(
-                    self.dims_embed[i],
-                    self.cf.ae_global_dim_embed,
-                    self.cf.streams[0]["target_readout"]["num_heads"],
+                    dim_embed_q=self.dims_embed[i],
+                    dim_embed_kv=self.cf.ae_global_dim_embed,
+                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
                     dim_head_proj=self.tr_dim_head_proj,
                     with_residual=True,
                     with_qk_lnorm=True,
@@ -426,7 +458,7 @@ class TargetPredictionEngine:
             if self.cf.pred_self_attention:
                 self.tte.append(
                     MultiSelfAttentionHeadVarlen(
-                        self.dims_embed[i],
+                        dim_embed=self.dims_embed[i],
                         num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
                         dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                         with_qk_lnorm=True,
@@ -451,4 +483,212 @@ class TargetPredictionEngine:
                     norm_eps=self.cf.mlp_norm_eps,
                 )
             )
-        return self.tte
+
+    def forward(self, latent, output, latent_lens, output_lens, coordinates):
+        tc_tokens = output
+        tcs_lens = output_lens
+        tokens_stream = latent
+        tokens_lens = latent_lens
+        tcs_aux = coordinates
+
+        for ib, block in enumerate(self.tte):
+            if self.cf.pred_self_attention and ib % 3 == 1:
+                tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
+            else:
+                tc_tokens = checkpoint(
+                    block,
+                    tc_tokens,
+                    tokens_stream,
+                    tcs_lens,
+                    tokens_lens,
+                    tcs_aux,
+                    use_reentrant=False,
+                )
+        return tc_tokens
+
+
+class TargetPredictionEngine(nn.Module):
+    def __init__(
+        self,
+        cf,
+        dims_embed,
+        dim_coord_in,
+        tr_dim_head_proj,
+        tr_mlp_hidden_factor,
+        softcap,
+        tro_type,
+        stream_name: str,
+    ):
+        """
+        Initialize the TargetPredictionEngine with the configuration.
+
+        :param cf: Configuration object containing parameters for the engine.
+        :param dims_embed: List of embedding dimensions for each layer.
+        :param dim_coord_in: Input dimension for coordinates.
+        :param tr_dim_head_proj: Dimension for head projection.
+        :param tr_mlp_hidden_factor: Hidden factor for the MLP layers.
+        :param softcap: Softcap value for the attention layers.
+        :param tro_type: Type of target readout (e.g., "obs_value").
+
+        the decoder_type decides the how the conditioning is done
+
+        PerceiverIO: is a simple CrossAttention layer with no MLP or Adaptive LayerNorm
+        AdaLayerNormConditioning: only conditions via the Adaptive LayerNorm
+        CrossAttentionConditioning: conditions via the CrossAttention layer but also uses an MLP
+        CrossAttentionAdaNormConditioning: conditions via the CrossAttention layer and
+            Adaptive LayerNorm
+        PerceiverIOCoordConditioning: The conditioning is the coordinates and is a modified Adaptive
+            LayerNorm that does not scale after the layer is applied
+        """
+        super(TargetPredictionEngine, self).__init__()
+        self.name = f"TargetPredictionEngine_{stream_name}"
+
+        self.cf = cf
+        self.dims_embed = dims_embed
+        self.dim_coord_in = dim_coord_in
+        self.tr_dim_head_proj = tr_dim_head_proj
+        self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
+        self.softcap = softcap
+        self.tro_type = tro_type
+
+        # For backwards compatibility
+        from omegaconf import OmegaConf
+
+        self.cf = OmegaConf.merge(
+            OmegaConf.create({"decoder_type": "PerceiverIOCoordConditioning"}), self.cf
+        )
+
+        attention_kwargs = {
+            "with_qk_lnorm": True,
+            "dropout_rate": 0.1,  # Assuming dropout_rate is 0.1
+            "with_flash": self.cf.with_flash_attention,
+            "norm_type": self.cf.norm_type,
+            "softcap": self.softcap,
+            "dim_aux": self.dim_coord_in,
+            "norm_eps": self.cf.norm_eps,
+            "attention_dtype": get_dtype(self.cf.attention_dtype),
+        }
+        self.tte = nn.ModuleList()
+        self.output_in_norm = nn.LayerNorm(self.dims_embed[0])
+        self.latent_in_norm = nn.LayerNorm(self.cf.ae_global_dim_embed)
+        self.final_norm = nn.Identity()  # nn.RMSNorm(self.dims_embed[-1])
+        self.dropout = nn.Dropout(0.2)
+        self.pos_embed = nn.Parameter(torch.zeros(1, 9, self.cf.ae_global_dim_embed))
+        dim_aux = self.cf.ae_global_dim_embed
+
+        for ith, dim in enumerate(self.dims_embed[:-1]):
+            if self.cf.decoder_type == "PerceiverIO":
+                # a single cross attention layer as per https://arxiv.org/pdf/2107.14795
+                self.tte.append(
+                    CrossAttentionBlock(
+                        dim_q=dim,
+                        dim_kv=dim_aux,
+                        dim_aux=dim_aux,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        with_self_attn=False,
+                        with_adanorm=False,
+                        with_mlp=False,
+                        attention_kwargs=attention_kwargs,
+                    )
+                )
+            elif self.cf.decoder_type == "AdaLayerNormConditioning":
+                self.tte.append(
+                    SelfAttentionBlock(
+                        dim=dim,
+                        dim_aux=dim_aux,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        attention_kwargs=attention_kwargs,
+                        with_adanorm=True,
+                        dropout_rate=0.1,
+                    )
+                )
+            elif self.cf.decoder_type == "CrossAttentionConditioning":
+                self.tte.append(
+                    CrossAttentionBlock(
+                        dim_q=dim,
+                        dim_kv=self.cf.ae_global_dim_embed,
+                        dim_aux=dim_aux,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        with_self_attn=True,
+                        with_adanorm=False,
+                        with_mlp=True,
+                        dropout_rate=0.1,
+                        attention_kwargs=attention_kwargs,
+                    )
+                )
+            elif self.cf.decoder_type == "CrossAttentionAdaNormConditioning":
+                self.tte.append(
+                    CrossAttentionBlock(
+                        dim_q=dim,
+                        dim_kv=dim_aux,
+                        dim_aux=dim_aux,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        with_self_attn=True,
+                        with_adanorm=True,
+                        with_mlp=True,
+                        dropout_rate=0.1,
+                        attention_kwargs=attention_kwargs,
+                    )
+                )
+            elif self.cf.decoder_type == "PerceiverIOCoordConditioning":
+                self.tte.append(
+                    OriginalPredictionBlock(
+                        config=self.cf,
+                        dim_in=dim,
+                        dim_out=self.dims_embed[ith + 1],
+                        dim_kv=dim_aux,
+                        dim_aux=self.dim_coord_in,
+                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        attention_kwargs=attention_kwargs,
+                        tr_dim_head_proj=tr_dim_head_proj,
+                        tr_mlp_hidden_factor=tr_mlp_hidden_factor,
+                        tro_type=tro_type,
+                        mlp_norm_eps=self.cf.mlp_norm_eps,
+                    )
+                )
+            else:
+                raise NotImplementedError(
+                    f"{self.cf.decoder_type} is not implemented for prediction heads"
+                )
+
+    def forward(self, latent, output, latent_lens, output_lens, coordinates):
+        latent = (
+            self.dropout(self.latent_in_norm(latent + self.pos_embed))
+            if self.cf.decoder_type != "PerceiverIOCoordConditioning"
+            else latent
+        )
+        for layer in self.tte:
+            if isinstance(layer, OriginalPredictionBlock):
+                output = checkpoint(
+                    layer,
+                    latent=latent.flatten(0, 1),
+                    output=output,
+                    coords=coordinates,
+                    latent_lens=latent_lens,
+                    output_lens=output_lens,
+                    use_reentrant=False,
+                )
+            elif isinstance(layer, CrossAttentionBlock):
+                output = checkpoint(
+                    layer,
+                    x=output,
+                    x_kv=latent.flatten(0, 1),
+                    x_lens=output_lens,
+                    aux=latent[:, 0],
+                    x_kv_lens=latent_lens,
+                    use_reentrant=False,
+                )
+            else:
+                output = checkpoint(
+                    layer,
+                    x=output,
+                    x_lens=output_lens,
+                    aux=latent[:, 0],
+                    use_reentrant=False,
+                )
+        output = (
+            self.final_norm(output)
+            if self.cf.decoder_type != "PerceiverIOCoordConditioning"
+            else output
+        )
+        return output

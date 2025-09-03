@@ -9,7 +9,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import logging
+import re
 import time
 from typing import Any
 
@@ -17,7 +17,7 @@ import numpy as np
 import torch
 import tqdm
 from torch import Tensor
-from torch.distributed.fsdp import FullStateDictConfig, StateDictType
+from torch.distributed.fsdp import FullOptimStateDictConfig, FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     MixedPrecision,
@@ -30,15 +30,15 @@ from torch.distributed.fsdp.wrap import (
 import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
+from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
+from weathergen.utils.logger import logger
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.validation_io import write_output
-
-_logger = logging.getLogger(__name__)
 
 
 class Trainer(TrainerBase):
@@ -54,8 +54,11 @@ class Trainer(TrainerBase):
     ):
         self.cf = cf
 
+        self.freeze_modules = cf.get("freeze_modules", "")
+
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
+        assert cf.forecast_policy if cf.forecast_steps > 0 else True
 
         self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
@@ -88,7 +91,6 @@ class Trainer(TrainerBase):
             cf.end_date_val,
             cf.batch_size_validation_per_gpu,
             cf.samples_per_validation,
-            train_logger=self.train_logger,
             stage=VAL,
             shuffle=cf.shuffle,
         )
@@ -113,21 +115,21 @@ class Trainer(TrainerBase):
         self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         self.model = self.model.to(self.devices[0])
         self.model.load(run_id_trained, epoch)
-        _logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
+        logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
         self.ddp_model = self.model
         self.model_params = ModelParams().create(cf).to(self.devices[0])
-        _logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
+        logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
 
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
         if is_root():
             config.save(self.cf, epoch=0)
 
-        _logger.info(f"Starting inference with id={self.cf.run_id}.")
+        logger.info(f"Starting inference with id={self.cf.run_id}.")
 
         # inference validation set
         self.validate(epoch=0)
-        _logger.info(f"Finished inference run with id: {cf.run_id}")
+        logger.info(f"Finished inference run with id: {cf.run_id}")
 
     def run(self, cf, run_id_contd=None, epoch_contd=None):
         # general initalization
@@ -139,7 +141,6 @@ class Trainer(TrainerBase):
             cf.end_date,
             cf.batch_size_per_gpu,
             cf.samples_per_epoch,
-            train_logger=self.train_logger,
             stage=TRAIN,
             shuffle=cf.shuffle,
         )
@@ -149,7 +150,6 @@ class Trainer(TrainerBase):
             cf.end_date_val,
             cf.batch_size_validation_per_gpu,
             cf.samples_per_validation,
-            train_logger=self.train_logger,
             stage=VAL,
             shuffle=True,
         )
@@ -173,12 +173,26 @@ class Trainer(TrainerBase):
         self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         # load model if specified
         if run_id_contd is not None:
-            _logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
+            logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
             self.model.load(run_id_contd, epoch_contd)
-            _logger.info(f"Loaded model id={run_id_contd}.")
+            if cf.with_ddp and cf.with_fsdp:
+                FSDP.set_state_dict_type(
+                    self.model,
+                    StateDictType.FULL_STATE_DICT,
+                    FullStateDictConfig(rank0_only=False),
+                )
+            logger.info(f"Loaded model id={run_id_contd}.")
 
         if cf.forecast_freeze_model:
             self.model = self.model.freeze_weights_forecast()
+
+        for name, module in self.model.named_modules():
+            name = module.name if hasattr(module, "name") else name
+            # avoid the whole model element which has name ''
+            if name == "":
+                continue
+            if re.fullmatch(self.freeze_modules, name) is not None:
+                freeze_weights(module)
 
         self.model = self.model.to(self.devices[0])
 
@@ -211,6 +225,7 @@ class Trainer(TrainerBase):
                 cpu_offload=None,
                 sync_module_states=(run_id_contd is not None),
                 mixed_precision=mp,
+                use_orig_params=True,
             )
 
         self.model_params = ModelParams().create(cf).to("cuda")
@@ -219,13 +234,17 @@ class Trainer(TrainerBase):
         if (is_root() and not cf.with_fsdp) or not cf.with_ddp:
             self.model.print_num_parameters()
 
-        # TODO: learning rate schedule
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
-        kappa = cf.batch_size_per_gpu * cf.num_ranks
-        beta1 = max(0.5, 1.0 - kappa * (1.0 - 0.9))
-        beta2 = 1.0 - kappa * (1.0 - 0.999)
-        eps = 1e-08 / np.sqrt(kappa)
-        # beta1, beta2, eps = 0.125, 0.125, 1e-08
+        # aiming for beta1=0.9 and beta2=0.95 following the MAE paper https://arxiv.org/pdf/2111.06377
+        kappa = (
+            cf.batch_size_per_gpu * cf.num_ranks
+        )  # I doubt this holds for us from some anecdotal runs
+        beta1 = max(
+            0.5, 1.0 - kappa * (1.0 - 0.975)
+        )  # aiming for beta1 = 0.9 at one node, ie kappa=B=4
+        beta2 = 1.0 - kappa * (1.0 - 0.9875)  # aiming for beta2 = 0.95 at one node, ie B=4
+        eps = 2e-08 / np.sqrt(kappa)
+
         self.optimizer = torch.optim.AdamW(
             self.ddp_model.parameters(),
             lr=cf.lr_start,
@@ -242,7 +261,7 @@ class Trainer(TrainerBase):
         cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size_per_gpu)
 
         steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
-        _logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
+        logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
         # ensure that steps_decay has a reasonable value
         if steps_decay < int(0.2 * cf.lr_steps):
             cf.lr_steps_warmup = int(0.1 * cf.lr_steps)
@@ -258,7 +277,7 @@ class Trainer(TrainerBase):
             s += (
                 f" cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}.",
             )
-            _logger.warning(s)
+            logger.warning(s)
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             cf.batch_size_per_gpu,
@@ -279,7 +298,7 @@ class Trainer(TrainerBase):
 
         if self.cf.istep > 0 and is_root():
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
-            _logger.info(str)
+            logger.info(str)
 
         # Instantiate loss calculator modules to compute losses
         self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=self.devices[0])
@@ -302,7 +321,7 @@ class Trainer(TrainerBase):
 
         if is_root():
             config.save(self.cf, None)
-            _logger.info(config.format_cf(self.cf))
+            logger.info(config.format_cf(self.cf))
 
         # training loop
 
@@ -311,13 +330,13 @@ class Trainer(TrainerBase):
             self.validate(-1)
 
         for epoch in range(epoch_base, cf.num_epochs):
-            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: train.")
+            logger.info(f"Epoch {epoch} of {cf.num_epochs}: train.")
             self.train(epoch)
 
-            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: validate.")
+            logger.info(f"Epoch {epoch} of {cf.num_epochs}: validate.")
             self.validate(epoch)
 
-            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
+            logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
             self.save_model(epoch)
 
         # log final model
@@ -498,8 +517,8 @@ class Trainer(TrainerBase):
             if bidx % log_interval == 0:
                 self._log(TRAIN)
 
-            # model checkpoint
-            if bidx % self.checkpoint_freq == 0:
+            # save checkpoint (with designation _latest)
+            if bidx % self.checkpoint_freq == 0 and bidx > 0:
                 self.save_model(-1)
 
             self.cf.istep += cf.batch_size_per_gpu
@@ -621,10 +640,19 @@ class Trainer(TrainerBase):
             torch.save(state, file_tmp)
             # move file (which is changing the link in the file system and very fast)
             file_tmp.replace(file_out)
-            _logger.info(f"Saved model to {file_out}")
+            logger.info(f"Saved model to {file_out}")
 
             # save config
             config.save(self.cf, epoch)
+
+        if self.cf.with_ddp and self.cf.with_fsdp:
+            with FSDP.state_dict_type(
+                self.ddp_model,
+                StateDictType.FULL_STATE_DICT,
+                FullStateDictConfig(rank0_only=False),
+                FullOptimStateDictConfig(rank0_only=False),
+            ):
+                state = self.ddp_model.state_dict()
 
     def _prepare_losses_for_logging(
         self,
@@ -688,7 +716,7 @@ class Trainer(TrainerBase):
                     self.perf_mem,
                 )
 
-            self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
     def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
         if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:
