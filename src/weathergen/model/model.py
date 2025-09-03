@@ -203,12 +203,12 @@ class Model(torch.nn.Module):
         # local assimilation engine
         self.ae_local_blocks = LocalAssimilationEngine(cf).create()
 
-        if cf.kl_weight > 0.0:
+        if cf.latent_noise_kl_weight > 0.0:
             self.interpolate_latents = InterpolatedLatents(
-                gamma=cf.noise_gamma,
+                gamma=cf.latent_noise_gamma,
                 dim=cf.ae_local_dim_embed,
-                use_additive_noise=cf.use_additive_noise,
-                deterministic=cf.deterministic_latents,
+                use_additive_noise=cf.latent_noise_use_additive_noise,
+                deterministic=cf.latent_noise_deterministic_latents,
             )
 
         ##############
@@ -631,7 +631,7 @@ class Model(torch.nn.Module):
         # for block in self.ae_local_blocks:
         #     tokens = checkpoint(block, tokens, cell_lens, use_reentrant=False)
 
-        # if self.cf.kl_weight > 0.0:
+        # if self.cf.latent_noise_kl_weight > 0.0:
         #     tokens, posteriors = self.interpolate_latents.interpolate_with_noise(
         #         tokens, sampling=self.training
         #     )
@@ -675,7 +675,7 @@ class Model(torch.nn.Module):
             for block in self.ae_local_blocks:
                 tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=False)
 
-            if self.cf.kl_weight > 0.0:
+            if self.cf.latent_noise_kl_weight > 0.0:
                 tokens_c, posteriors_c = self.interpolate_latents.interpolate_with_noise(
                     tokens_c, sampling=self.training
                 )

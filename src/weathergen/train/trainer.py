@@ -56,10 +56,10 @@ class Trainer(TrainerBase):
         self.cf = OmegaConf.merge(
             OmegaConf.create(
                 {
-                    "kl_weight": 0.0,
-                    "noise_gamma": 2.0,
-                    "use_additive_noise": False,
-                    "deterministic_latents": False,
+                    "latent_noise_kl_weight": 0.0,
+                    "latent_noise_gamma": 2.0,
+                    "latent_noise_use_additive_noise": False,
+                    "latent_noise_deterministic_latents": False,
                 }
             ),
             cf,
@@ -506,9 +506,9 @@ class Trainer(TrainerBase):
                     preds=preds,
                     streams_data=batch[0],
                 )
-                if cf.kl_weight > 0.0:
+                if cf.latent_noise_kl_weight > 0.0:
                     kl = torch.cat([posterior.kl() for posterior in posteriors])
-                    loss_values.loss += cf.kl_weight * kl.mean()
+                    loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
 
             # backward pass
             self.grad_scaler.scale(loss_values.loss).backward()
