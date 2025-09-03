@@ -61,7 +61,6 @@ def get_inference_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--analysis_streams_output",
         nargs="+",
-        default=["ERA5"],
         help="Analysis output streams during inference.",
     )
 
