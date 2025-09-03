@@ -12,6 +12,7 @@ import pathlib
 import numpy as np
 import torch
 
+from weathergen.common.io import IOReaderData
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
@@ -326,14 +327,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         # source window (of potentially multi-step length)
                         rdata: ReaderData = ds.get_source(idx)
 
+                        # rdata needs to be wrapped in a different class
+                        # to avoid unwanted dependencies => see IOReaderData docstring
+                        rdata_wrapped = IOReaderData.create(rdata)
+
                         if rdata.is_empty():
-                            stream_data.add_empty_source()
+                            stream_data.add_empty_source(rdata_wrapped)
                         else:
                             # TODO: handling of conversion from numpy to torch here and below
                             # TODO: this should only be collected in validation mode
-                            source_raw = torch.from_numpy(
-                                np.concatenate((rdata.coords, rdata.geoinfos, rdata.data), 1)
-                            )
 
                             (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                                 stream_info,
@@ -345,7 +347,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 ds,
                             )
 
-                            stream_data.add_source(source_raw, ss_lens, ss_cells, ss_centroids)
+                            stream_data.add_source(rdata_wrapped, ss_lens, ss_cells, ss_centroids)
 
                         # target
 

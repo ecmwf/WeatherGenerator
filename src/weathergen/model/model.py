@@ -260,6 +260,8 @@ class Model(torch.nn.Module):
         self.pred_heads = torch.nn.ModuleList()
 
         for i_obs, si in enumerate(cf.streams):
+            stream_name = si.get("name", i_obs)
+
             # extract and setup relevant parameters
             etc = si["embed_target_coords"]
             tro_type = si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
@@ -310,6 +312,7 @@ class Model(torch.nn.Module):
                         with_residual=False,
                         dropout_rate=dropout_rate,
                         norm_eps=self.cf.mlp_norm_eps,
+                        stream_name=f"embed_target_coords_{stream_name}",
                     )
                 )
             else:
@@ -326,6 +329,7 @@ class Model(torch.nn.Module):
                         dropout_rate=dropout_rate,
                         norm_type=cf.norm_type,
                         norm_eps=self.cf.mlp_norm_eps,
+                        stream_name=f"pred_adapter_kv_{stream_name}",
                     )
                 )
             else:
@@ -345,6 +349,7 @@ class Model(torch.nn.Module):
                 tr_mlp_hidden_factor,
                 softcap,
                 tro_type,
+                stream_name=stream_name,
             )
 
             self.target_token_engines.append(tte)
@@ -362,6 +367,7 @@ class Model(torch.nn.Module):
                     si["pred_head"]["ens_size"],
                     norm_type=cf.norm_type,
                     final_activation=final_activation,
+                    stream_name=stream_name,
                 )
             )
 

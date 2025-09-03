@@ -1,4 +1,4 @@
-streams_directory: "./config/streams/streams_anemoi/"
+streams_directory: "./config/streams/era5_1deg/"
 
 embed_orientation: "channels"
 embed_local_coords: True
@@ -45,8 +45,8 @@ forecast_delta_hrs: 0
 forecast_steps: 0
 forecast_policy: null
 forecast_freeze_model: False
-forecast_att_dense_rate: 0.25
-fe_num_blocks: 8
+forecast_att_dense_rate: 1.0
+fe_num_blocks: 0
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -73,6 +73,11 @@ loss_fcts_val:
 batch_size_per_gpu: 1
 batch_size_validation_per_gpu: 1
 
+# a regex that needs to fully match the name of the modules you want to freeze
+# e.g. ".*ERA5" will match any module whose name ends in ERA5\
+# encoders and decoders that exist per stream have the stream name attached at the end
+freeze_modules: ""
+
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
 training_mode: "masking"
@@ -81,7 +86,7 @@ masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
 # note that a sampled masking rate leads to varying requirements
 masking_rate_sampling: True
-# sample a subset of all target points, useful e.g. to reduce memory requirements
+# sample a subset of all target points, useful e.g. to reduce memory requirements (also can specify per-stream)
 sampling_rate_target: 1.0
 # include a masking strategy here, currently only supporting "random", "block", "healpix" and "channel"
 masking_strategy: "random"
@@ -137,6 +142,7 @@ run_id: ???
 train_log:
   # The period to log metrics (in number of batch steps)
   log_interval: 20
+<<<<<<< HEAD
 
 
 # # additions for the latent loss
@@ -150,3 +156,5 @@ train_log:
 #     - "mse"
 #     - 1
 
+=======
+>>>>>>> develop

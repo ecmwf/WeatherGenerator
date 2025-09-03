@@ -7,9 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 import numpy as np
 import torch
+
+from weathergen.common.io import IOReaderData
 
 
 class StreamData:
@@ -119,7 +120,7 @@ class StreamData:
 
         return self
 
-    def add_empty_source(self) -> None:
+    def add_empty_source(self, source: IOReaderData) -> None:
         """
         Add an empty source for an input.
 
@@ -132,7 +133,7 @@ class StreamData:
         None
         """
 
-        self.source_raw += [torch.tensor([])]
+        self.source_raw += [source]
         self.source_tokens_lens += [torch.zeros([self.nhc_source], dtype=torch.int32)]
         self.source_tokens_cells += [torch.tensor([])]
         self.source_centroids += [torch.tensor([])]
@@ -169,7 +170,7 @@ class StreamData:
 
         self.target_tokens[fstep] += [[torch.tensor([], dtype=torch.int32)]]
         self.target_tokens_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
-        self.target_coords[fstep] += [[torch.zeros((0, 106)) for _ in range(self.nhc_target)]]
+        self.target_coords[fstep] += [[torch.zeros((0, 105)) for _ in range(self.nhc_target)]]
         self.target_coords_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
         self.target_coords_raw[fstep] += [[torch.tensor([]) for _ in range(self.nhc_target)]]
         self.target_times_raw[fstep] += [
@@ -177,7 +178,7 @@ class StreamData:
         ]
 
     def add_source(
-        self, ss_raw: torch.tensor, ss_lens: torch.tensor, ss_cells: list, ss_centroids: list
+        self, ss_raw: IOReaderData, ss_lens: torch.tensor, ss_cells: list, ss_centroids: list
     ) -> None:
         """
         Add data for source for one input.
@@ -363,7 +364,12 @@ class StreamData:
 
         # collect all sources in current stream and add to batch sample list when non-empty
         if torch.tensor([len(s) for s in self.source_tokens_cells]).sum() > 0:
-            self.source_raw = torch.cat(self.source_raw)
+            self.source_raw = IOReaderData(
+                np.concatenate([item.coords for item in self.source_raw]),
+                np.concatenate([item.geoinfos for item in self.source_raw]),
+                np.concatenate([item.data for item in self.source_raw]),
+                np.concatenate([item.datetimes for item in self.source_raw]),
+            )
 
             # collect by merging entries per cells, preserving cell structure
             self.source_tokens_cells = self._merge_cells(self.source_tokens_cells, self.nhc_source)
@@ -378,7 +384,7 @@ class StreamData:
             self.source_centroids[idx] = self.mask_value
 
         else:
-            self.source_raw = torch.tensor([])
+            self.source_raw = IOReaderData(np.array([]), np.array([]), np.array([]), np.array([]))
             self.source_tokens_lens = torch.zeros([self.nhc_source])
             self.source_tokens_cells = torch.tensor([])
             self.source_centroids = torch.tensor([])
