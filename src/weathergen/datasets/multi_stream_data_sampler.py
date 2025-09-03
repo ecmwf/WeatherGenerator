@@ -109,7 +109,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     case "icon":
                         dataset = IconDataset
                         datapath = cf.data_path_icon
-                    case "synop":
+                    case "station":
                         dataset = DataReaderSynop
                         datapath = cf.data_path_obs
                     case _:
