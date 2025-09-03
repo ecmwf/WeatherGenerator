@@ -67,9 +67,17 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
     else:
-        # Load model config here...
+        # Load model config here. In case model_path is not provided, get it from private conf
+        if model_path is None:
+            pconf = _load_private_conf()
+            model_path = _get_config_attribute(
+                config=pconf, attribute_name="model_path", fallback="models"
+            )
         model_path = Path(model_path)
         fname = model_path / run_id / _get_model_config_file_name(run_id, epoch)
+        assert fname.exists(), (
+            "The fallback path to the model does not exist. Please provide a `model_path`."
+        )
 
     _logger.info(f"Loading config from specified run_id and epoch: {fname}")
 
@@ -146,11 +154,6 @@ def _load_streams_in_config(config: Config) -> Config:
     config = config.copy()
     if streams_directory is not None:
         streams_directory = Path(streams_directory)
-        if not streams_directory.is_dir():
-            msg = f"Streams directory {streams_directory} does not exist."
-            raise FileNotFoundError(msg)
-
-        _logger.info(f"Loading streams from {streams_directory}")
         config.streams = load_streams(streams_directory)
     return config
 
@@ -235,7 +238,7 @@ def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
     return overwrite_config
 
 
-def _load_private_conf(private_home: Path | None) -> DictConfig:
+def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     "Return the private configuration."
     "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
 
@@ -246,7 +249,7 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
 
     elif "WEATHERGEN_PRIVATE_CONF" in os.environ:
         private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
-        _logger.info(f"Loading private config fromWEATHERGEN_PRIVATE_CONF:{private_home}.")
+        _logger.info(f"Loading private config from WEATHERGEN_PRIVATE_CONF:{private_home}.")
 
     elif env_script_path.is_file():
         _logger.info(f"Loading private config from platform-env.py: {env_script_path}.")
@@ -295,9 +298,29 @@ def _load_default_conf() -> Config:
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
+    # TODO: might want to put this into config later instead of hardcoding it here...
+    streams_history = {
+        "streams_anemoi": "era5_1deg",
+        "streams_mixed": "era5_nppatms_synop",
+        "streams_ocean": "fesom",
+        "streams_icon": "icon",
+        "streams_mixed_experimental": "cerra_seviri",
+    }
     if not streams_directory.is_dir():
-        msg = f"Streams directory {streams_directory} does not exist."
-        raise FileNotFoundError(msg)
+        streams_directory_config = streams_directory
+        dirs = [streams_directory]
+        while streams_directory.name in streams_history and not streams_directory.is_dir():
+            streams_directory = streams_directory.with_name(streams_history[streams_directory.name])
+            dirs.append(streams_directory)
+        if not streams_directory.is_dir():
+            msg = f"Could not find stream directory, nor its history: {[str(dir) for dir in dirs]}"
+            raise FileNotFoundError(msg)
+        _logger.info(
+            f"Streams directory {streams_directory} found in "
+            f"history for {streams_directory_config}. "
+            "Note: This change will not be reflected in the config. "
+            "Please update the 'streams_directory' variable manually."
+        )
 
     # read all reportypes from directory, append to existing ones
     streams_directory = streams_directory.absolute()
@@ -307,7 +330,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
     streams = {}
     # exclude temp files starting with "." or "#" (eg. emacs, vim, macos savefiles)
     stream_files = sorted(streams_directory.rglob("[!.#]*.yml"))
-    _logger.info(f"discover stream configs: {', '.join(map(str, stream_files))}")
+    _logger.info(f"Discover stream configs: {', '.join(map(str, stream_files))}")
     for config_file in stream_files:
         try:
             config = OmegaConf.load(config_file)
@@ -353,9 +376,9 @@ def set_paths(config: Config) -> Config:
 
 
 def _get_config_attribute(config: Config, attribute_name: str, fallback: str) -> str:
-    """Get an attribute from a Config. If not, fall back to path_shared_working_dir concatenated
-    with the desired fallback path. Raise an error if neither the attribute nor
-    is specified."""
+    """Get an attribute from a Config. If not available, fall back to path_shared_working_dir
+    concatenated with the desired fallback path. Raise an error if neither the attribute nor a
+    fallback is specified."""
     attribute = OmegaConf.select(config, attribute_name)
     fallback_root = OmegaConf.select(config, "path_shared_working_dir")
     assert attribute is not None or fallback_root is not None, (
