@@ -21,7 +21,6 @@ from weathergen.common.io import ZarrIO
 from weathergen.evaluate.plotter import LinePlots, Plotter
 from weathergen.evaluate.score import VerifiedData, get_score
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
-from weathergen.utils.config import Config
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -314,7 +313,7 @@ def plot_data(
     run_id: str,
     run_cfg: dict,
     results_dir: Path,
-    plot_dir: Path,
+    plot_base_dir: Path,
     stream: str,
     stream_cfg: dict,
 ) -> list[str]:
@@ -327,7 +326,7 @@ def plot_data(
         Configuration dictionary containing all information for the evaluation.
     run_id : str
         Run identifier.
-    run: dict
+    run_cfg: dict
         Run sub-config.
     results_dir :
         Directory where the inference results are stored.
@@ -336,6 +335,8 @@ def plot_data(
         Base directory where the plots will be saved.
     stream :
         Stream name to plot data for.
+    stream_cfg:
+        Stream sub-config.
     Returns
     -------
     List of plot names generated during the plotting process.
@@ -363,7 +364,7 @@ def plot_data(
         "plot_subtimesteps": stream_cfg.get("tokenize_spacetime", False),
     }
 
-    plotter = Plotter(plotter_cfg, plot_dir)
+    plotter = Plotter(plotter_cfg, plot_base_dir)
 
     check, (plot_chs, plot_fsteps, plot_samples) = check_availability(
         cfg, run_id, run_cfg, stream, results_dir, eval=False
@@ -571,14 +572,11 @@ def retrieve_metric_from_json(
     score_path = (
         Path(metric_dir) / f"{run_id}_{stream}_{region}_{metric}_epoch{epoch:05d}.json"
     )
-    _logger.info(f"Looking for: {score_path}")
+    _logger.debug(f"Looking for: {score_path}")
 
     if score_path.exists():
         with open(score_path) as f:
             data_dict = json.load(f)
-            print("data shape:", np.array(data_dict["data"]).shape)
-            print("dims:", data_dict.get("dims"))
-            print("coords keys:", list(data_dict.get("coords", {}).keys()))
             return xr.DataArray.from_dict(data_dict)
     else:
         raise FileNotFoundError(f"File {score_path} not found in the archive.")
@@ -836,30 +834,6 @@ def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataA
         da = da.drop_vars(name)
         da = da.expand_dims({name: [val]}, axis=axis)
     return da
-
-
-def get_stream_attr(config: Config, stream_name: str, key: str, default=None):
-    """
-    Get the value of a key for a specific stream from the a model config.
-
-    Parameters:
-    ------------
-        config: dict
-            The full configuration dictionary.
-        stream_name: str
-            The name of the stream (e.g. 'ERA5').
-        key: str
-            The key to look up (e.g. 'tokenize_spacetime').
-        default: Optional
-            Value to return if not found (default: None).
-
-    Returns:
-        The parameter value if found, otherwise the default.
-    """
-    for stream in config.get("streams", []):
-        if stream.get("name") == stream_name:
-            return stream.get(key, default)
-    return default
 
 
 def check_availability(

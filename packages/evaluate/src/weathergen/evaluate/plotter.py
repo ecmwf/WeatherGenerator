@@ -141,7 +141,6 @@ class Plotter:
             else:
                 # Scalar coord or dim coord (e.g., 'forecast_step', 'channel')
                 da = da.sel({key: value})
-
         return da
 
     def create_histograms_per_sample(
@@ -187,13 +186,15 @@ class Plotter:
             select_var = self.select | {"channel": var}
 
             targ, prd = (
-                self.select_from_da(target, select_var).compute(),
-                self.select_from_da(preds, select_var).compute(),
+                self.select_from_da(target, select_var),
+                self.select_from_da(preds, select_var),
             )
 
             # Remove NaNs
             targ = targ.dropna(dim="ipoint")
             prd = prd.dropna(dim="ipoint")
+            assert targ.size > 0, "Data array must not be empty or contain only NAs"
+            assert prd.size > 0, "Data array must not be empty or contain only NAs"
 
             if self.plot_subtimesteps:
                 ntimes_unique = len(np.unique(targ.valid_time))
@@ -371,6 +372,7 @@ class Plotter:
                     _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
 
                 da_t = da_t.dropna(dim="ipoint")
+                assert da_t.size > 0, "Data array must not be empty or contain only NAs"
 
                 name = self.scatter_plot(
                     da_t,
