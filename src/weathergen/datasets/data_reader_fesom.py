@@ -143,7 +143,7 @@ class DataReaderFesom(DataReaderTimestep):
 
         self.mean = np.concatenate((np.array([0, 0]), np.array(self.ds.data.attrs["means"])))
         self.stdev = np.sqrt(
-            np.concatenate((np.array([1, 1]), np.array(self.ds.data.attrs["vars"])))
+            np.concatenate((np.array([1, 1]), np.array(self.ds.data.attrs["std"])))
         )
 
         source_channels = stream_info.get("source")
