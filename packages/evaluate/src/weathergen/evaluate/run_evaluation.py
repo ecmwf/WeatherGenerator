@@ -15,13 +15,14 @@ from collections import defaultdict
 from pathlib import Path
 
 from omegaconf import OmegaConf
+
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
+    check_availability,
     metric_list_to_json,
     plot_data,
     plot_summary,
     retrieve_metric_from_json,
-    check_availability,
 )
 from weathergen.utils.config import _REPO_ROOT, load_config, load_model_config
 
@@ -125,7 +126,9 @@ def evaluate_from_config(cfg):
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                _ = plot_data(cfg, run_id, run, results_dir, runplot_dir, stream, stream_dict)
+                _ = plot_data(
+                    cfg, run_id, run, results_dir, runplot_dir, stream, stream_dict
+                )
 
             if stream_dict.get("evaluation"):
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
@@ -143,20 +146,27 @@ def evaluate_from_config(cfg):
                                 metric,
                                 run.epoch,
                             )
-                            checked, (channels, fsteps, samples) =  check_availability(cfg, run_id, run, stream, results_dir, metric_data)
+                            checked, (channels, fsteps, samples) = check_availability(
+                                cfg, run_id, run, stream, results_dir, metric_data
+                            )
                             if not checked:
                                 metrics_to_compute.append(metric)
                             else:
-                                #simply select the chosen eval channels, samples, fsteps here...
+                                # simply select the chosen eval channels, samples, fsteps here...
                                 scores_dict[metric][region][stream][run_id] = (
-                                    metric_data.sel(sample=list(samples),channel=list(channels), forecast_step=list(fsteps))
+                                    metric_data.sel(
+                                        sample=list(samples),
+                                        channel=list(channels),
+                                        forecast_step=list(fsteps),
+                                    )
                                 )
                         except (FileNotFoundError, KeyError):
                             metrics_to_compute.append(metric)
-                            
-                    if metrics_to_compute:
 
-                        checked, _ = check_availability(cfg, run_id, run, stream, results_dir)
+                    if metrics_to_compute:
+                        checked, _ = check_availability(
+                            cfg, run_id, run, stream, results_dir
+                        )
 
                         all_metrics, points_per_sample = calc_scores_per_stream(
                             cfg, results_dir, stream, region, metrics_to_compute
@@ -182,6 +192,7 @@ def evaluate_from_config(cfg):
     if scores_dict and summary_plots:
         _logger.info("Started creating summary plots..")
         plot_summary(cfg, scores_dict, summary_dir, print_summary=cfg.print_summary)
+
 
 if __name__ == "__main__":
     evaluate()
