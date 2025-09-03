@@ -134,7 +134,7 @@ class Masker:
             return source_data
 
         # if we have masking_strategy "combination"
-        # at each pass we will sample a different masking_strategy
+        # for each stream and batch we sample a different masking_strategy
         # according to some probability distribution
         if self.original_masking_strategy == "combination":
             # Sample a masking strategy from the config
