@@ -347,8 +347,8 @@ class LossCalculator:
                     loss_lfct = LossCalculator._loss_per_loss_function_lat(
                         loss_fct,
                         stream_info=None,
-                        target=tokens_all[fstep],
-                        pred=tokens_targets[fstep_targs]
+                        target=tokens_targets[fstep_targs],
+                        pred=tokens_all[fstep]
                     )
                     
                     losses_all_lat[i_lfct] += loss_lfct # TODO: break into fsteps
