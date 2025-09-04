@@ -126,9 +126,7 @@ def evaluate_from_config(cfg):
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                _ = plot_data(
-                    cfg, run_id, run, results_dir, runplot_dir, stream, stream_dict
-                )
+                _ = plot_data(cfg, cf_run, results_dir, runplot_dir, stream)
 
             if stream_dict.get("evaluation"):
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
@@ -147,7 +145,7 @@ def evaluate_from_config(cfg):
                                 run.epoch,
                             )
                             checked, (channels, fsteps, samples) = check_availability(
-                                cfg, run_id, run, stream, results_dir, metric_data
+                                cfg, run_id, run, stream, results_dir, metric_data, mode = "evaluation"
                             )
                             if not checked:
                                 metrics_to_compute.append(metric)
@@ -165,7 +163,7 @@ def evaluate_from_config(cfg):
 
                     if metrics_to_compute:
                         checked, _ = check_availability(
-                            cfg, run_id, run, stream, results_dir
+                            cfg, run_id, run, stream, results_dir, mode = "evaluation"
                         )
 
                         all_metrics, points_per_sample = calc_scores_per_stream(
