@@ -31,7 +31,7 @@ from weathergen.model.engines import (
     TargetPredictionEngineClassic,
 )
 from weathergen.model.layers import MLP
-from weathergen.model.parametrised_prob_dist import InterpolatedLatents
+from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.logger import logger
@@ -204,7 +204,7 @@ class Model(torch.nn.Module):
         self.ae_local_blocks = LocalAssimilationEngine(cf).create()
 
         if cf.latent_noise_kl_weight > 0.0:
-            self.interpolate_latents = InterpolatedLatents(
+            self.interpolate_latents = LatentInterpolator(
                 gamma=cf.latent_noise_gamma,
                 dim=cf.ae_local_dim_embed,
                 use_additive_noise=cf.latent_noise_use_additive_noise,

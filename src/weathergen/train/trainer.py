@@ -59,7 +59,8 @@ class Trainer(TrainerBase):
                     "latent_noise_kl_weight": 0.0,
                     "latent_noise_gamma": 2.0,
                     "latent_noise_use_additive_noise": False,
-                    "latent_noise_deterministic_latents": False,
+                    "latent_noise_deterministic_latents": True,
+                    "latent_noise_saturate_encodings": 5,
                 }
             ),
             cf,

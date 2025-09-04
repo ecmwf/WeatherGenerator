@@ -12,6 +12,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from weathergen.model.norms import SaturateEncodings
+
 
 class DiagonalGaussianDistribution:
     """
@@ -69,36 +71,52 @@ class DiagonalGaussianDistribution:
         return self.mean
 
 
-class InterpolatedLatents(nn.Module):
+class LatentInterpolator(nn.Module):
     """
     Code taken and adapted from: https://github.com/Jiawei-Yang/DeTok/tree/main
     """
 
-    def __init__(self, gamma, dim, use_additive_noise=False, deterministic=False):
+    def __init__(
+        self,
+        gamma,
+        dim,
+        use_additive_noise=False,
+        deterministic=False,
+        saturate_encodings=None,
+    ):
         super().__init__()
+
+        assert deterministic or saturate_encodings is None, (
+            "Cannot use saturate_encodings without deterministic"
+        )
         self.gamma = gamma
+        self.saturate_encodings = saturate_encodings
         self.use_additive_noise = use_additive_noise
         self.diag_gaussian = DiagonalGaussianDistribution(
             deterministic=deterministic, channel_dim=-1
         )
-        self.mean_and_var = nn.Linear(dim, 2 * dim, bias=False)
+        self.mean_and_var = nn.Sequential(
+            nn.Linear(dim, 2 * dim, bias=False),
+            SaturateEncodings(saturate_encodings)
+            if saturate_encodings is not None
+            else nn.Identity(),
+        )
 
-    def interpolate_with_noise(self, z, sampling=False, noise_level=-1):
+    def interpolate_with_noise(self, z, batch_size=1, sampling=False, noise_level=-1):
+        assert batch_size == 1, (
+            "Given how we chunk in assimilate_local, dealing with batch_size greater than 1 is not "
+            + "supported at the moment"
+        )
         self.diag_gaussian.reset_parameters(self.mean_and_var(z))
         z_latents = self.diag_gaussian.sample() if sampling else self.diag_gaussian.mean
 
         if self.training and self.gamma > 0.0:
             device = z_latents.device
             s = z_latents.shape
-            batch_size = 1
             if noise_level > 0.0:
                 noise_level_tensor = torch.full(batch_size, noise_level, device=device)
             else:
                 noise_level_tensor = torch.rand(batch_size, device=device)
-            # TODO: make this deal with batchsize > 1
-            # noise_level_tensor = (
-            #    noise_level_tensor[torch.repeat_interleave(z_lens)].unsqueeze(-1).expand(-1, s[-1])
-            # )
             noise = torch.randn(s, device=device) * self.gamma
             if self.use_additive_noise:
                 z_latents = z_latents + noise_level_tensor * noise
