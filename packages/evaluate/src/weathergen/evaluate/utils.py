@@ -953,6 +953,7 @@ def check_availability(
             _logger.info(f"{name.capitalize()}(s) {missing} missing in previous evaluation. Recomputing.")
             check = False
 
+
     scope = "metric file" if available_data is not None else "Zarr file"
     _logger.info(f"All checks passed – All channels, samples, fsteps are present in {scope}...")
     return check, (requested["channel"], requested["fstep"], requested["sample"])
