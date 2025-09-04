@@ -123,15 +123,15 @@ class DataReaderSynop(DataReaderTimestep):
 
         # TODO: this should be stored/cached
         self.mean, self.stdev = self._compute_mean_stdev()
+        self.mean_geoinfo = self.mean[self.geoinfo_idx]
+        self.stdev_geoinfo = self.stdev[self.geoinfo_idx]
 
     def _compute_mean_stdev(self) -> (np.array, np.array):
         _logger.info("Starting computation of mean and stdev.")
 
-        mean = [0.0 for _ in range(self.offset_data_channels)]
-        stdev = [1.0 for _ in range(self.offset_data_channels)]
+        mean, stdev = [], []
 
-        data_channels_file = [k for k in self.ds.keys()][self.offset_data_channels :]
-        for ch in data_channels_file:
+        for ch in self.channels_file:
             data = np.array(self.ds[ch], np.float64)
             mask = data == self.fillvalue
             data[mask] = np.nan
@@ -246,7 +246,7 @@ class DataReaderSynop(DataReaderTimestep):
         """
 
         channels = self.stream_info.get(ch_type)
-        assert not channels, f"{ch_type} channels need to be specified"
+        assert channels is not None, f"{ch_type} channels need to be specified"
         # sanity check
         is_empty = len(channels) == 0 if channels is not None else False
         if is_empty:
@@ -255,7 +255,7 @@ class DataReaderSynop(DataReaderTimestep):
 
         chs_idx = np.sort([self.channels_file.index(ch) for ch in channels])
 
-        return np.array(chs_idx) + self.offset_data_channels
+        return np.array(chs_idx)
 
 
 # TODO: move to base class
