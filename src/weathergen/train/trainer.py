@@ -15,6 +15,8 @@ import time
 from typing import Any
 import itertools
 
+from pathlib import Path
+
 import numpy as np
 import torch
 import tqdm
@@ -29,6 +31,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 
 # FSDP2
 from torch.distributed.fsdp import fully_shard, FSDPModule, MixedPrecisionPolicy
+from torch.distributed.tensor import distribute_tensor, DTensor
 
 import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
@@ -39,7 +42,7 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlen,
-    MultiCrossAttentionHeadVarlenSlicedQ
+    MultiCrossAttentionHeadVarlenSlicedQ,
 )
 from weathergen.model.engines import (
     LocalAssimilationEngine,
@@ -54,6 +57,7 @@ from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.validation_io import write_output
+from weathergen.utils.logger import logger
 
 _logger = logging.getLogger(__name__)
 
@@ -128,7 +132,6 @@ class Trainer(TrainerBase):
         targets_num_channels = self.dataset_val.get_targets_num_channels()
         targets_coords_size = self.dataset_val.get_targets_coords_size()
 
-
         self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         self.model = self.model.to(self.devices[0])
         self.model.load(run_id_trained, epoch)
@@ -136,7 +139,6 @@ class Trainer(TrainerBase):
         self.model_params = ModelParams().create(cf)
         self.model_params = self.model_params.to(self.devices[0])
         _logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
-
 
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
@@ -195,11 +197,6 @@ class Trainer(TrainerBase):
 
         with torch.device("meta"):
             self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-        # load model if specified
-        if run_id_contd is not None:
-            _logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
-            self.model.load(run_id_contd, epoch_contd)
-            _logger.info(f"Loaded model id={run_id_contd}.")
 
         if cf.forecast_freeze_model:
             self.model = self.model.freeze_weights_forecast()
@@ -229,7 +226,6 @@ class Trainer(TrainerBase):
                 MultiCrossAttentionHeadVarlen,
                 MultiCrossAttentionHeadVarlenSlicedQ,
                 MultiSelfAttentionHeadVarlen,
-                
             )
             for module in self.model.modules():
                 if isinstance(module, modules_to_shard):
@@ -244,20 +240,26 @@ class Trainer(TrainerBase):
             #     if isinstance(module, engines_to_shard):
             #         fully_shard(module, **fsdp_kwargs)
 
-        self.model_params = ModelParams(cf).create(cf)# .to(device)
+        self.model_params = ModelParams(cf).create(cf)  # .to(device)
 
-        self.test_lin = nn.Linear(128,256)
-        fully_shard(self.test_lin,**fsdp_kwargs)
+        self.test_lin = nn.Linear(128, 256)
+        fully_shard(self.test_lin, **fsdp_kwargs)
         print(self.test_lin)
-        print(isinstance(self.test_lin,nn.Linear))
+        print(isinstance(self.test_lin, nn.Linear))
 
         if cf.with_ddp and cf.with_fsdp:
             fully_shard(self.model, **fsdp_kwargs)
             for tensor in itertools.chain(self.model.parameters(), self.model.buffers()):
                 assert tensor.device == torch.device("meta")
 
-        self.model.to_empty(device="cuda")
-        self.model.reset_parameters()
+        # load model if specified
+        if run_id_contd is None:
+            self.model.to_empty(device="cuda")
+            self.model.reset_parameters()
+        else:
+            _logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
+            self.load_model(run_id_contd, epoch_contd)
+            _logger.info(f"Loaded model id={run_id_contd}.")
         self.model_params.reset_parameters(cf)
         self.model_params = self.model_params.to(device)
         print(self.model)
@@ -548,8 +550,8 @@ class Trainer(TrainerBase):
             self.stdev_unweighted_hist += [loss_values.stddev_all]
 
             perf_gpu, perf_mem = self.get_perf()
-            self.perf_gpu = 0 # ddp_average(torch.tensor([perf_gpu])).item()
-            self.perf_mem = 0 # ddp_average(torch.tensor([perf_mem])).item()
+            self.perf_gpu = 0  # ddp_average(torch.tensor([perf_gpu])).item()
+            self.perf_mem = 0  # ddp_average(torch.tensor([perf_mem])).item()
 
             self._log_terminal(bidx, epoch, TRAIN)
             if bidx % log_interval == 0:
@@ -557,8 +559,7 @@ class Trainer(TrainerBase):
 
             # model checkpoint
             if bidx % self.checkpoint_freq == (bidx - 1):
-                # self.save_model(-1)
-                pass
+                self.save_model(-1)
 
             self.cf.istep += cf.batch_size_per_gpu
 
@@ -651,19 +652,145 @@ class Trainer(TrainerBase):
             [[b.to(device) for b in bf] for bf in batch[2]],
         )
 
+    def load_model(self, run_id: str, epoch=-1):
+        """Loads model state from checkpoint and checks for missing and unused keys.
+        Args:
+            run_id : model_id of the trained model
+            epoch : The epoch to load. Default (-1) is the latest epoch
+        """
+
+        path_run = Path(self.cf.model_path) / run_id
+        epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"
+        filename = f"{run_id}_{epoch_id}.chkpt"
+
+        params = torch.load(
+            path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
+        )
+        is_model_sharded = self.cf.with_ddp and self.cf.with_fsdp
+        if is_model_sharded:
+            meta_sharded_sd = self.model.state_dict()
+            sharded_sd = {}
+            for param_name, full_tensor in params.items():
+                sharded_meta_param = meta_sharded_sd.get(param_name)
+                sharded_tensor = distribute_tensor(
+                    full_tensor,
+                    sharded_meta_param.device_mesh,
+                    sharded_meta_param.placements,
+                )
+                sharded_sd[param_name.replace("module.", "")] = nn.Parameter(sharded_tensor)
+        else:
+            maybe_sharded_sd = {}
+            for k in params.keys():
+                maybe_sharded_sd[k.replace("module.", "")] = params[k]
+        # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
+        mkeys, ukeys = self.model.load_state_dict(
+            maybe_sharded_sd, strict=False, assign=is_model_sharded
+        )
+
+        if len(mkeys) > 0:
+            logger.warning(f"Missing keys when loading model: {mkeys}")
+
+        if len(ukeys) > 0:
+            logger.warning(f"Unused keys when loading model: {mkeys}")
+
+    def load_optim(self):
+        """
+        TODO implement
+        """
+        pass
+        # last_optim_checkpoint = (
+        #     f"{self.folder}/{'dcp_api' if self.dcp_api else 'dtensor_api'}"
+        #     f"/{self.last_training_time}/{OPTIM_CHECKPOINT}"
+        # )
+        # full_sd = torch.load(
+        #     last_optim_checkpoint, mmap=True, weights_only=True, map_location="cpu"
+        # )
+        # _init_optim_state(opt)
+        # param_groups = opt.state_dict()["param_groups"]
+        # state = opt.state_dict()["state"]
+
+        # full_param_groups = full_sd["param_groups"]
+        # full_state = full_sd["state"]
+
+        # for param_group, full_param_group in zip(param_groups, full_param_groups):
+        #     for key, value in full_param_group.items():
+        #         if key == PARAMS:
+        #             continue
+        #         param_group[key] = value
+        #     for pid, full_pid in zip(param_group[PARAMS], full_param_group[PARAMS]):
+        #         if pid not in state:
+        #             continue
+        #         param_state = state[pid]
+        #         full_param_state = full_state[full_pid]
+        #         for attr, full_tensor in full_param_state.items():
+        #             sharded_tensor = param_state[attr]
+        #             if isinstance(sharded_tensor, DTensor):
+        #                 # exp_avg is DTensor
+        #                 param_state[attr] = distribute_tensor(
+        #                     full_tensor,
+        #                     sharded_tensor.device_mesh,
+        #                     sharded_tensor.placements,
+        #                 )
+        #             else:
+        #                 # step is plain tensor
+        #                 param_state[attr] = full_tensor
+        # opt.load_state_dict(
+        #     {
+        #         "param_groups": param_groups,
+        #         "state": state,
+        #     }
+        # )
+
+    def _get_full_model_state_dict(self):
+        maybe_sharded_sd = self.model.state_dict()
+        if self.cf.with_ddp and self.cf.with_fsdp:
+            cpu_state_dict = {}
+            for param_name, sharded_param in maybe_sharded_sd.items():
+                full_param = sharded_param.full_tensor()
+                if is_root():
+                    cpu_state_dict[param_name] = full_param.cpu()
+                else:
+                    del full_param
+            return cpu_state_dict
+        else:
+            return maybe_sharded_sd
+
+    def _get_full_optimizer_state_dict(self):
+        is_rank_zero = is_root()
+        sharded_sd = self.optimizer.state_dict()
+        sharded_state = sharded_sd["state"]
+        full_state = {}
+        for group_id, sharded_group in sharded_state.items():
+            group_state = {}
+            for attr, sharded_tensor in sharded_group.items():
+                if isinstance(sharded_tensor, DTensor):
+                    # "exp_avg" in AdamW is `DTensor`
+                    full_tensor = sharded_tensor.full_tensor()
+                else:
+                    # "step" in AdamW is plain tensor
+                    full_tensor = sharded_tensor
+                if is_rank_zero:
+                    group_state[attr] = full_tensor.cpu()
+                else:
+                    del full_tensor
+            if is_rank_zero:
+                full_state[group_id] = group_state
+            else:
+                del group_state
+        if is_rank_zero:
+            return {
+                "param_groups": sharded_sd["param_groups"],
+                "state": full_state,
+            }
+        else:
+            return {}
+
     def save_model(self, epoch: int, name=None):
         # Saving at epoch == max_epoch means that we are saving the latest checkpoint.
         max_epoch = self.cf.num_epochs
         assert epoch <= max_epoch, (epoch, max_epoch)
-        if self.cf.with_ddp and self.cf.with_fsdp:
-            with FSDP.state_dict_type(
-                self.model,
-                StateDictType.FULL_STATE_DICT,
-                FullStateDictConfig(rank0_only=True, offload_to_cpu=True),
-            ):
-                state = self.model.state_dict()
-        else:
-            state = self.model.state_dict()
+        model_state_dict = self._get_full_model_state_dict(self.model)
+        optim_state_dict = self._get_full_optimizer_state_dict(self.model, self.optimizer)
 
         if is_root():
             filename = "".join(
@@ -678,7 +805,7 @@ class Trainer(TrainerBase):
             file_out = base_path / (filename + ".chkpt")
             file_tmp = base_path / (filename + "_tmp.chkpt")
             # save temp file (slow)
-            torch.save(state, file_tmp)
+            torch.save(model_state_dict, file_tmp)
             # move file (which is changing the link in the file system and very fast)
             file_tmp.replace(file_out)
             _logger.info(f"Saved model to {file_out}")
