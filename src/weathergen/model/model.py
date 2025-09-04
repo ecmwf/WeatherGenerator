@@ -30,7 +30,7 @@ from weathergen.model.engines import (
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
-from weathergen.model.layers import MLP
+from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.logger import logger
@@ -301,7 +301,12 @@ class Model(torch.nn.Module):
             # embedding network for coordinates
             if etc["net"] == "linear":
                 self.embed_target_coords.append(
-                    torch.nn.Linear(dim_coord_in, dims_embed[0], bias=False)
+                    NamedLinear(
+                        f"embed_target_coords_{stream_name}",
+                        in_features=dim_coord_in,
+                        out_features=dims_embed[0],
+                        bias=False,
+                    )
                 )
             elif etc["net"] == "mlp":
                 self.embed_target_coords.append(
