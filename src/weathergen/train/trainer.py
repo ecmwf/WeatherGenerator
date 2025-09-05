@@ -789,8 +789,8 @@ class Trainer(TrainerBase):
         # Saving at epoch == max_epoch means that we are saving the latest checkpoint.
         max_epoch = self.cf.num_epochs
         assert epoch <= max_epoch, (epoch, max_epoch)
-        model_state_dict = self._get_full_model_state_dict(self.model)
-        optim_state_dict = self._get_full_optimizer_state_dict(self.model, self.optimizer)
+        model_state_dict = self._get_full_model_state_dict()
+        optim_state_dict = self._get_full_optimizer_state_dict()
 
         if is_root():
             filename = "".join(
