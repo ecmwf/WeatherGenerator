@@ -15,7 +15,7 @@ import torch
 from astropy_healpix.healpy import ang2pix
 
 from weathergen.datasets.stream_data import StreamData
-
+from typing import List, Optional, Tuple
 
 ####################################################################################################
 def arc_alpha(sin_alpha, cos_alpha):
