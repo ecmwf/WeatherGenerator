@@ -413,7 +413,6 @@ class Masker:
 
         return full_mask
 
-    
     def _generate_causal_mask(
         self,
         tokenized_data: list[torch.Tensor],
@@ -433,19 +432,19 @@ class Masker:
 
         # Extract all lengths at once
         token_lens = np.array([len(token_data) for token_data in tokenized_data])
-        
+
         if len(token_lens) == 0:
             return []
-        
+
         # Calculate start indices for masking
         # astype(int) performs floor operation by truncation
         num_future_to_mask = (rate * token_lens).astype(int)
         start_mask_indices = np.maximum(1, token_lens - num_future_to_mask)
-        
+
         # Handle edge cases
         mask_valid = token_lens > 1  # Only cells with >1 timestep can be masked
         start_mask_indices = np.where(mask_valid, start_mask_indices, token_lens)
-        
+
         # Create masks with list comprehension
         # Needed to handle variable lengths
         full_mask = [
@@ -457,7 +456,7 @@ class Masker:
             )
             if token_len > 1
             else (np.zeros(1, dtype=bool) if token_len == 1 else np.array([], dtype=bool))
-            for token_len, start_idx in zip(token_lens, start_mask_indices)
+            for token_len, start_idx in zip(token_lens, start_mask_indices, strict=False)
         ]
 
         return full_mask
