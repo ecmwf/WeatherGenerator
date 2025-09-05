@@ -10,7 +10,7 @@
 # nor does it submit to any jurisdiction.
 import os
 
-import logging
+import re
 import time
 from typing import Any
 import itertools
@@ -20,9 +20,9 @@ from pathlib import Path
 import numpy as np
 import torch
 import tqdm
+from omegaconf import OmegaConf
 from torch import Tensor
-import torch.nn as nn
-from torch.distributed.fsdp import FullStateDictConfig, StateDictType
+from torch.distributed.fsdp import FullOptimStateDictConfig, FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     MixedPrecision,
@@ -50,16 +50,16 @@ from weathergen.model.engines import (
     GlobalAssimilationEngine,
     TargetPredictionEngine,
 )
+from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
+from weathergen.utils.logger import logger
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.validation_io import write_output
 from weathergen.utils.logger import logger
-
-_logger = logging.getLogger(__name__)
 
 
 class Trainer(TrainerBase):
@@ -73,7 +73,21 @@ class Trainer(TrainerBase):
         self,
         cf: Config,
     ):
-        self.cf = cf
+        self.cf = OmegaConf.merge(
+            OmegaConf.create(
+                {
+                    "latent_noise_kl_weight": 0.0,
+                    "latent_noise_gamma": 2.0,
+                    "latent_noise_use_additive_noise": False,
+                    "latent_noise_deterministic_latents": True,
+                    "latent_noise_saturate_encodings": 5,
+                }
+            ),
+            cf,
+        )
+        cf = self.cf
+
+        self.freeze_modules = cf.get("freeze_modules", "")
 
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
@@ -102,6 +116,8 @@ class Trainer(TrainerBase):
         # general initalization
         self.init(cf)
 
+        cf = self.cf
+
         # !! modifies config: adds config.streams[i].<stage>_source_channels
         # and config.streams[i].<stage>_target_channels !!
         self.dataset_val = MultiStreamDataSampler(
@@ -110,7 +126,6 @@ class Trainer(TrainerBase):
             cf.end_date_val,
             cf.batch_size_validation_per_gpu,
             cf.samples_per_validation,
-            train_logger=self.train_logger,
             stage=VAL,
             shuffle=cf.shuffle,
         )
@@ -145,15 +160,16 @@ class Trainer(TrainerBase):
         if is_root():
             config.save(self.cf, epoch=0)
 
-        _logger.info(f"Starting inference with id={self.cf.run_id}.")
+        logger.info(f"Starting inference with id={self.cf.run_id}.")
 
         # inference validation set
         self.validate(epoch=0)
-        _logger.info(f"Finished inference run with id: {cf.run_id}")
+        logger.info(f"Finished inference run with id: {cf.run_id}")
 
     def run(self, cf, run_id_contd=None, epoch_contd=None):
         # general initalization
         self.init(cf)
+        cf = self.cf
 
         self.dataset = MultiStreamDataSampler(
             cf,
@@ -161,7 +177,6 @@ class Trainer(TrainerBase):
             cf.end_date,
             cf.batch_size_per_gpu,
             cf.samples_per_epoch,
-            train_logger=self.train_logger,
             stage=TRAIN,
             shuffle=cf.shuffle,
         )
@@ -171,7 +186,6 @@ class Trainer(TrainerBase):
             cf.end_date_val,
             cf.batch_size_validation_per_gpu,
             cf.samples_per_validation,
-            train_logger=self.train_logger,
             stage=VAL,
             shuffle=True,
         )
@@ -200,6 +214,14 @@ class Trainer(TrainerBase):
 
         if cf.forecast_freeze_model:
             self.model = self.model.freeze_weights_forecast()
+
+        for name, module in self.model.named_modules():
+            name = module.name if hasattr(module, "name") else name
+            # avoid the whole model element which has name ''
+            if name == "":
+                continue
+            if re.fullmatch(self.freeze_modules, name) is not None:
+                freeze_weights(module)
 
         if cf.with_ddp and not cf.with_fsdp:
             self.model = torch.nn.parallel.DistributedDataParallel(
@@ -241,11 +263,6 @@ class Trainer(TrainerBase):
             #         fully_shard(module, **fsdp_kwargs)
 
         self.model_params = ModelParams(cf).create(cf)  # .to(device)
-
-        self.test_lin = nn.Linear(128, 256)
-        fully_shard(self.test_lin, **fsdp_kwargs)
-        print(self.test_lin)
-        print(isinstance(self.test_lin, nn.Linear))
 
         if cf.with_ddp and cf.with_fsdp:
             fully_shard(self.model, **fsdp_kwargs)
@@ -298,7 +315,7 @@ class Trainer(TrainerBase):
         cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size_per_gpu)
 
         steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
-        _logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
+        logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
         # ensure that steps_decay has a reasonable value
         if steps_decay < int(0.2 * cf.lr_steps):
             cf.lr_steps_warmup = int(0.1 * cf.lr_steps)
@@ -314,7 +331,7 @@ class Trainer(TrainerBase):
             s += (
                 f" cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}.",
             )
-            _logger.warning(s)
+            logger.warning(s)
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             cf.batch_size_per_gpu,
@@ -335,7 +352,7 @@ class Trainer(TrainerBase):
 
         if self.cf.istep > 0 and is_root():
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
-            _logger.info(str)
+            logger.info(str)
 
         # Instantiate loss calculator modules to compute losses
         self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=device)
@@ -358,7 +375,7 @@ class Trainer(TrainerBase):
 
         if is_root():
             config.save(self.cf, None)
-            _logger.info(config.format_cf(self.cf))
+            logger.info(config.format_cf(self.cf))
 
         # training loop
 
@@ -367,13 +384,13 @@ class Trainer(TrainerBase):
             self.validate(-1)
 
         for epoch in range(epoch_base, cf.num_epochs):
-            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: train.")
+            logger.info(f"Epoch {epoch} of {cf.num_epochs}: train.")
             self.train(epoch)
 
-            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: validate.")
+            logger.info(f"Epoch {epoch} of {cf.num_epochs}: validate.")
             self.validate(epoch)
 
-            _logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
+            logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
             self.save_model(epoch)
 
         # log final model
@@ -522,11 +539,16 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                preds = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
+                preds, posteriors = self.model(
+                    self.model_params, batch, cf.forecast_offset, forecast_steps
+                )
                 loss_values = self.loss_calculator.compute_loss(
                     preds=preds,
                     streams_data=batch[0],
                 )
+                if cf.latent_noise_kl_weight > 0.0:
+                    kl = torch.cat([posterior.kl() for posterior in posteriors])
+                    loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
 
             # backward pass
             self.grad_scaler.scale(loss_values.loss).backward()
@@ -588,7 +610,7 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds = self.model(
+                        preds, _ = self.model(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
 
@@ -808,10 +830,19 @@ class Trainer(TrainerBase):
             torch.save(model_state_dict, file_tmp)
             # move file (which is changing the link in the file system and very fast)
             file_tmp.replace(file_out)
-            _logger.info(f"Saved model to {file_out}")
+            logger.info(f"Saved model to {file_out}")
 
             # save config
             config.save(self.cf, epoch)
+
+        if self.cf.with_ddp and self.cf.with_fsdp:
+            with FSDP.state_dict_type(
+                self.ddp_model,
+                StateDictType.FULL_STATE_DICT,
+                FullStateDictConfig(rank0_only=False),
+                FullOptimStateDictConfig(rank0_only=False),
+            ):
+                state = self.ddp_model.state_dict()
 
     def _prepare_losses_for_logging(
         self,
@@ -877,7 +908,7 @@ class Trainer(TrainerBase):
                     self.perf_mem,
                 )
 
-            self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
     def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
         if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:

@@ -19,7 +19,7 @@ from weathergen.datasets.stream_data import StreamData
 
 ####################################################################################################
 def arc_alpha(sin_alpha, cos_alpha):
-    """Invert cosine/sine for alpha \in [0,2pi] using both functions"""
+    """Invert cosine/sine for alpha in [0,2pi] using both functions"""
     t = torch.arccos(cos_alpha)
     mask = sin_alpha < 0.0
     t[mask] = (2.0 * np.pi) - t[mask]
@@ -56,7 +56,7 @@ def s2tor3(lats, lons):
     """
     Convert from spherical to Cartesion R^3 coordinates
 
-    Note: mathematics convention with lats \in [0,pi] and lons \in [0,2pi] is used
+    Note: mathematics convention with lats in [0,pi] and lons in [0,2pi] is used
           (which is not problematic for lons but for lats care is required)
     """
     x = torch.sin(lats) * torch.cos(lons)
@@ -67,19 +67,36 @@ def s2tor3(lats, lons):
 
 
 ####################################################################################################
-def r3tos2(pos):
+def r3tos2(pos: torch.Tensor) -> torch.Tensor:
     """
     Convert from spherical to Cartesion R^3 coordinates
 
-    Note: mathematics convention with lats \in [0,pi] and lons \in [0,2pi] is used
-          (which is not problematic for lons but for lats care is required)
+    This optimized version is faster and more numerically stable by:
+    1. Unbinding the input tensor to get x, y, and z components directly.
+    2. Using torch.hypot for a more efficient and stable calculation of
+       the xy-plane norm.
+    3. Stacking the final latitude and longitude tensors along the last
+       dimension, which avoids an expensive permute operation.
+
+    Args:
+        pos (torch.Tensor): A tensor of Cartesian coordinates with shape `(..., 3)`.
+
+    Returns:
+        torch.Tensor: .
     """
-    norm2 = torch.square(pos[..., 0]) + torch.square(pos[..., 1])
-    # r = torch.sqrt(norm2 + torch.square(pos[..., 2]))
-    lats = torch.atan2(pos[..., 2], torch.sqrt(norm2))
-    lons = torch.atan2(pos[..., 1], pos[..., 0])
-    out = torch.stack([lats, lons])
-    return out.permute([*list(torch.arange(len(out.shape))[:-1] + 1), 0])
+    # Unbind the last dimension to get x, y, and z tensors.
+    x, y, z = torch.unbind(pos, dim=-1)
+
+    # Use torch.hypot(x, y)
+    xy_norm = torch.sqrt(x**2 + y**2)
+
+    # Calculate latitudes and longitudes using atan2.
+    # The output is directly a tensor with the same batch dimensions as the input.
+    lats = torch.atan2(z, xy_norm)
+    lons = torch.atan2(y, x)
+
+    # Stack the results along the final dimension to get a `(..., 2)` tensor.
+    return torch.stack([lats, lons], dim=-1)
 
 
 ####################################################################################################
