@@ -116,6 +116,8 @@ def get_data(
         else:
             points_per_sample = None
 
+        fsteps_final = []
+
         for fstep in fsteps:
             _logger.info(f"RUN {run_id} - {stream}: Processing fstep {fstep}...")
             da_tars_fs, da_preds_fs = [], []
@@ -135,39 +137,53 @@ def get_data(
                     pred = bbox.apply_mask(pred)
 
                 npoints = len(target.ipoint)
+                if npoints == 0:
+                    _logger.info(
+                        f"Skipping {stream} sample {sample} forecast step: {fstep}. Dataset is empty."
+                    )
+                    continue
 
                 da_tars_fs.append(target.squeeze())
                 da_preds_fs.append(pred.squeeze())
                 pps.append(npoints)
 
+            if len(da_tars_fs) > 0:
+                fsteps_final.append(fstep)
+
             _logger.debug(
                 f"Concatenating targets and predictions for stream {stream}, forecast_step {fstep}..."
             )
-            da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
-            da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
 
-            if set(channels) != set(all_channels):
-                _logger.debug(
-                    f"Restricting targets and predictions to channels {channels} for stream {stream}..."
-                )
-                available_channels = da_tars_fs.channel.values
-                existing_channels = [ch for ch in channels if ch in available_channels]
-                if len(existing_channels) < len(channels):
-                    _logger.warning(
-                        f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
+            if da_tars_fs:
+                da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
+                da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
+
+                if set(channels) != set(all_channels):
+                    _logger.debug(
+                        f"Restricting targets and predictions to channels {channels} for stream {stream}..."
                     )
+                    available_channels = da_tars_fs.channel.values
+                    existing_channels = [
+                        ch for ch in channels if ch in available_channels
+                    ]
+                    if len(existing_channels) < len(channels):
+                        _logger.warning(
+                            f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
+                        )
 
-                da_tars_fs = da_tars_fs.sel(channel=existing_channels)
-                da_preds_fs = da_preds_fs.sel(channel=existing_channels)
+                    da_tars_fs = da_tars_fs.sel(channel=existing_channels)
+                    da_preds_fs = da_preds_fs.sel(channel=existing_channels)
 
-            da_tars.append(da_tars_fs)
-            da_preds.append(da_preds_fs)
+                da_tars.append(da_tars_fs)
+                da_preds.append(da_preds_fs)
             if return_counts:
                 points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
-
+        
         # Safer than a list
-        da_tars = {fstep: da for fstep, da in zip(fsteps, da_tars, strict=False)}
-        da_preds = {fstep: da for fstep, da in zip(fsteps, da_preds, strict=False)}
+        da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=False)}
+        da_preds = {
+            fstep: da for fstep, da in zip(fsteps_final, da_preds, strict=False)
+        }
 
         return WeatherGeneratorOutput(
             target=da_tars, prediction=da_preds, points_per_sample=points_per_sample
@@ -395,6 +411,10 @@ def plot_data(
 
     da_tars = model_output.target
     da_preds = model_output.prediction
+
+    if not da_tars:
+        _logger.info(f"Skipping Plot Data for {stream}. Targets are empty.")
+        return
 
     maps_config = common_ranges(da_tars, da_preds, plot_chs, maps_config)
 

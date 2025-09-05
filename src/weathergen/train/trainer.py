@@ -16,7 +16,7 @@ from typing import Any
 import numpy as np
 import torch
 import tqdm
-from omegaconf import ListConfig, OmegaConf
+from omegaconf import OmegaConf
 from torch import Tensor
 from torch.distributed.fsdp import FullOptimStateDictConfig, FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -53,7 +53,19 @@ class Trainer(TrainerBase):
         self,
         cf: Config,
     ):
-        self.cf = cf
+        self.cf = OmegaConf.merge(
+            OmegaConf.create(
+                {
+                    "latent_noise_kl_weight": 0.0,
+                    "latent_noise_gamma": 2.0,
+                    "latent_noise_use_additive_noise": False,
+                    "latent_noise_deterministic_latents": True,
+                    "latent_noise_saturate_encodings": 5,
+                }
+            ),
+            cf,
+        )
+        cf = self.cf
 
         self.freeze_modules = cf.get("freeze_modules", "")
 
@@ -134,6 +146,8 @@ class Trainer(TrainerBase):
         # general initalization
         self.init(cf)
 
+        cf = self.cf
+
         # !! modifies config: adds config.streams[i].<stage>_source_channels
         # and config.streams[i].<stage>_target_channels !!
         self.dataset_val = MultiStreamDataSampler(
@@ -185,6 +199,7 @@ class Trainer(TrainerBase):
     def run(self, cf, run_id_contd=None, epoch_contd=None):
         # general initalization
         self.init(cf)
+        cf = self.cf
 
         self.dataset = MultiStreamDataSampler(
             cf,
@@ -535,11 +550,16 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
+                preds, posteriors = self.ddp_model(
+                    self.model_params, batch, cf.forecast_offset, forecast_steps
+                )
                 loss_values = self.loss_calculator.compute_loss(
                     preds=preds,
                     streams_data=batch[0],
                 )
+                if cf.latent_noise_kl_weight > 0.0:
+                    kl = torch.cat([posterior.kl() for posterior in posteriors])
+                    loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
 
             # backward pass
             self.grad_scaler.scale(loss_values.loss).backward()
@@ -598,7 +618,7 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds = self.ddp_model(
+                        preds, _ = self.ddp_model(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
 

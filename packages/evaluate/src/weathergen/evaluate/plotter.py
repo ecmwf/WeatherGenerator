@@ -212,7 +212,9 @@ class Plotter:
 
             for (valid_time, targ_t), (_, prd_t) in groups:
                 if valid_time is not None:
-                    _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
+                    _logger.debug(
+                        f"Plotting histogram for {var} at valid_time {valid_time}"
+                    )
 
                 name = self.plot_histogram(targ_t, prd_t, hist_output_dir, var, tag=tag)
                 plot_names.append(name)
@@ -340,7 +342,6 @@ class Plotter:
             map_kwargs_save["marker_size"] = DefaultMarkerSize.get_marker_size(
                 self.stream
             )
-
 
         # Basic map output directory for this stream
         map_output_dir = self.get_map_output_dir(tag)
