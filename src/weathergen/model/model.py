@@ -30,10 +30,8 @@ from weathergen.model.engines import (
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
-
-from weathergen.model.layers import MLP
-from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.layers import MLP, NamedLinear
+from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.logger import logger
