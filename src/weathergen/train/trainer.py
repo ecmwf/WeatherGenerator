@@ -917,16 +917,15 @@ class Trainer(TrainerBase):
 
             if is_root():
                 if stage == VAL:
-                    print(
+                    logger.info(
                         f"validation ({self.cf.run_id}) : {epoch:03d} : {avg_loss.nanmean().item()}"
                     )
                     for _, st in enumerate(self.cf.streams):
-                        print(
+                        logger.info(
                             "{}".format(st["name"])
                             + f" : {losses_all[st['name']].nanmean():0.4E} \t",
-                            end="",
                         )
-                    print("\n", flush=True)
+                    logger.info("\n")
 
                 elif stage == TRAIN:
                     # samples per sec
@@ -934,7 +933,7 @@ class Trainer(TrainerBase):
                     pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
                     pstr += "(lr={:.2E}, s/sec={:.3f})"
                     len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
-                    print(
+                    logger.info(
                         pstr.format(
                             epoch,
                             bidx,
@@ -944,15 +943,13 @@ class Trainer(TrainerBase):
                             self.lr_scheduler.get_lr(),
                             (self.print_freq * self.cf.batch_size_per_gpu) / dt,
                         ),
-                        flush=True,
                     )
-                    print("\t", end="")
+                    logger.info("\t")
                     for _, st in enumerate(self.cf.streams):
-                        print(
+                        logger.info(
                             "{}".format(st["name"])
                             + f" : {losses_all[st['name']].nanmean():0.4E} \t",
-                            end="",
                         )
-                    print("\n", flush=True)
+                    logger.info("\n")
 
             self.t_start = time.time()

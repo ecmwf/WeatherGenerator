@@ -16,7 +16,9 @@ import pdb
 import sys
 import time
 import traceback
+import os
 from pathlib import Path
+from datetime import datetime
 
 import weathergen.utils.cli as cli
 import weathergen.utils.config as config
@@ -170,7 +172,24 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     cf = config.set_run_id(cf, args.run_id, False)
 
     fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
-    init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
+
+    # Get current time
+    now = datetime.now()
+    timestamp = now.strftime("%Y-%m-%d-%H%M")
+
+    output_dir = f"./output/{timestamp}-{cf.run_id}"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # this line should probably come after the processes have been sorted out else we get lots of duplication due to
+    # multiple process in the multiGPU case
+    init_loggers(
+        logging_level=logging.DEBUG,
+        critical_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-critical.txt"],
+        error_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-error.txt"],
+        warning_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-warning.txt"],
+        info_output_streams=[sys.stdout, f"{output_dir}/{cf.run_id}-info.txt"],
+        debug_output_streams=[fname_debug_logging],
+    )
 
     cf.streams = config.load_streams(Path(cf.streams_directory))
 

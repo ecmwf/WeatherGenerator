@@ -76,14 +76,14 @@ def init_logger_per_stream(logger, stream_handle, output_streams):
     return logger
 
 
-@cache
+# @cache
 def init_loggers(
     logging_level=logging.DEBUG,
-    critical_output_streams=sys.stderr,
-    error_output_streams=sys.stderr,
-    warning_output_streams=sys.stderr,
-    info_output_streams=sys.stdout,
-    debug_output_streams=sys.stdout,
+    critical_output_streams=None,
+    error_output_streams=None,
+    warning_output_streams=None,
+    info_output_streams=None,
+    debug_output_streams=None,
 ):
     """
     Initialize the logger for the package and set output streams/files.
@@ -104,6 +104,15 @@ def init_loggers(
     """
 
     package = "weathergen"
+    critical_output_streams = (
+        [sys.stderr] if critical_output_streams is None else critical_output_streams
+    )
+    error_output_streams = [sys.stderr] if error_output_streams is None else error_output_streams
+    warning_output_streams = (
+        [sys.stderr] if warning_output_streams is None else warning_output_streams
+    )
+    info_output_streams = [sys.stdout] if info_output_streams is None else info_output_streams
+    debug_output_streams = [sys.stdout] if debug_output_streams is None else debug_output_streams
 
     logger = logging.getLogger(package)
     logger.handlers.clear()
@@ -119,10 +128,12 @@ def init_loggers(
     ]
 
     # find the unique streams
-    streams_unique = set([s[1] for s in log_streams])
+    import itertools
+
+    streams_unique = set(itertools.chain.from_iterable([s[1] for s in log_streams]))
     # collect for each unique one all logging levels
     streams_collected = [
-        [ls[0] for ls in log_streams if ls[1] == stream] for stream in streams_unique
+        [ls[0] for ls in log_streams if stream in ls[1]] for stream in streams_unique
     ]
 
     # set the logging
