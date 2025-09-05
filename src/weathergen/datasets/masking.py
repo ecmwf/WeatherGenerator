@@ -413,6 +413,7 @@ class Masker:
 
         return full_mask
 
+    
     def _generate_causal_mask(
         self,
         tokenized_data: list[torch.Tensor],
@@ -424,44 +425,39 @@ class Masker:
         """
         Generates a causal mask, masking the latest times
         in each tokenized_data according to the masking rate.
-
-        Args:
-            tokenized_data (list[torch.Tensor]): A list of tensors. Most will have a shape of
-                                                (time, num_tokens, num_channels), but some may
-                                            be empty with a shape of (0,), no data in cell
-            rate (float): The desired masking rate.
-            coords (torch.Tensor): The coordinates tensor.
-            geoinfos (torch.Tensor): The geoinfos tensor.
-
-        Returns:
-            list[np.ndarray]: A list of boolean masks. Each mask corresponds to a tensor
-                            in tokenized_data.
         """
-
         if not tokenized_data:
             return []
 
         rate = self._get_sampling_rate()
 
-        full_mask = []
-        for token_data in tokenized_data:
-            if len(token_data) == 0:
-                # empty - return empty mask
-                full_mask.append(np.array([], dtype=bool))
-            elif len(token_data) == 1:
-                # for 1 timestep, don't mask target
-                full_mask.append(np.zeros(1, dtype=bool))
-            else:
-                # create temporal mask
-                num_time_windows = len(token_data)
-                mask = np.zeros(num_time_windows, dtype=bool)
-                # mask the final time windows based on rate
-                num_future_to_mask = int(rate * num_time_windows)
-                # set the mask to True for the final time windows
-                start_mask_idx = num_time_windows - num_future_to_mask
-                # force start_mask_idx is at least 1, keep one source time
-                start_mask_idx = max(1, start_mask_idx)
-                mask[start_mask_idx:] = True
-                full_mask.append(mask)
+        # Extract all lengths at once
+        token_lens = np.array([len(token_data) for token_data in tokenized_data])
+        
+        if len(token_lens) == 0:
+            return []
+        
+        # Calculate start indices for masking
+        # astype(int) performs floor operation by truncation
+        num_future_to_mask = (rate * token_lens).astype(int)
+        start_mask_indices = np.maximum(1, token_lens - num_future_to_mask)
+        
+        # Handle edge cases
+        mask_valid = token_lens > 1  # Only cells with >1 timestep can be masked
+        start_mask_indices = np.where(mask_valid, start_mask_indices, token_lens)
+        
+        # Create masks with list comprehension
+        # Needed to handle variable lengths
+        full_mask = [
+            np.concatenate(
+                [
+                    np.zeros(start_idx, dtype=bool),
+                    np.ones(max(0, token_len - start_idx), dtype=bool),
+                ]
+            )
+            if token_len > 1
+            else (np.zeros(1, dtype=bool) if token_len == 1 else np.array([], dtype=bool))
+            for token_len, start_idx in zip(token_lens, start_mask_indices)
+        ]
 
         return full_mask
