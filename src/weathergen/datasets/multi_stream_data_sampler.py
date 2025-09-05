@@ -334,6 +334,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         # to avoid unwanted dependencies => see IOReaderData docstring
                         rdata_wrapped = IOReaderData.create(rdata)
 
+                        print("Stream:", stream_info["filenames"])
+
                         if rdata.is_empty():
                             stream_data.add_empty_source(rdata_wrapped)
                         else:
