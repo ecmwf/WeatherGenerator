@@ -184,22 +184,25 @@ def main():
 
     args = parser.parse_args()
 
-    # Read YAML config list if exists
-    if args.config:
-        with open(args.config) as f:
-            yaml_data = yaml.safe_load(f)
-
-        config_files = yaml_data["run_ids"]
-        yaml_always_show_patterns = yaml_data.get("always_show_patterns", [])
-    elif args.run_id_1 and args.model_directory_1 and args.run_id_2 and args.model_directory_2:
+    if args.run_id_1 and args.model_directory_1 and args.run_id_2 and args.model_directory_2:
         config_files = [
             [args.run_id_1, args.model_directory_1],
             [args.run_id_2, args.model_directory_2],
         ]
         yaml_always_show_patterns = args.show if args.show else []
+    # Read YAML config list if exists
+    elif Path(args.config).exists():
+        with open(args.config) as f:
+            yaml_data = yaml.safe_load(f)
+
+        config_files = yaml_data["run_ids"]
+        yaml_always_show_patterns = yaml_data.get("always_show_patterns", [])
     else:
         # error: pass config or command line arguments
-        logger.error("Please provide a config or specify two run IDs and their model directories.")
+        logger.error(
+            "Please provide a config list (.yml format) or specify two run IDs "
+            "and their model directories."
+        )
         return
     # Load configs using load_model_config from config module
     configs = {}
