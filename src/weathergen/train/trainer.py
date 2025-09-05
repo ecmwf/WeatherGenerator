@@ -16,7 +16,7 @@ from typing import Any
 import numpy as np
 import torch
 import tqdm
-from omegaconf import ListConfig, OmegaConf
+from omegaconf import OmegaConf
 from torch import Tensor
 from torch.distributed.fsdp import FullOptimStateDictConfig, FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -71,7 +71,7 @@ class Trainer(TrainerBase):
 
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
-        self.validate_forecast_policy_and_steps(cf=cf)
+        config.validate_forecast_policy_and_steps(cf=cf)
 
         self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
@@ -91,56 +91,6 @@ class Trainer(TrainerBase):
 
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
-
-    @staticmethod
-    def validate_forecast_policy_and_steps(cf: OmegaConf):
-        """
-        Validates the forecast policy and steps within a configuration object.
-
-        This method enforces specific rules for the `forecast_steps` attribute, which can be
-        either a single integer or a list of integers, ensuring consistency with the
-        `forecast_policy` attribute.
-
-        The validation logic is as follows:
-        - If `cf.forecast_steps` is a single integer, a `forecast_policy` must be defined
-        (i.e., not None or empty) only if `forecast_steps` is unequal to 0.
-        - If `cf.forecast_steps` is a list, it must be non-empty, and all of its elements
-        must be non-negative integers. Additionally, a `forecast_policy` must be
-        defined if any of the forecast steps in the list are greater than 0.
-
-        Args:
-            cf (OmegaConf): The configuration object containing the `forecast_steps`
-                            and `forecast_policy` attributes.
-
-        Raises:
-            TypeError: If `cf.forecast_steps` is not an integer or a non-empty list.
-            AssertionError: If a `forecast_policy` is required but not provided, or
-                            if `forecast_step` is negative while `forecast_policy` is provided, or
-                            if any of the forecast steps in a list are negative.
-        """
-        provide_forecast_policy = (
-            "A 'forecast_policy' must be specified when 'forecast_steps' is not zero. "
-        )
-        valid_forecast_policies = (
-            "Valid values for 'forecast_policy' are, e.g., 'fixed' when using constant "
-            "forecast steps throughout the training, or 'sequential' when varying the forecast "
-            "steps over epochs, such as, e.g., 'forecast_steps: [2, 2, 4, 4]'. "
-        )
-        valid_forecast_steps = (
-            "'forecast_steps' must be a positive integer or a non-empty list of positive integers. "
-        )
-        if isinstance(cf.forecast_steps, int):
-            assert (
-                cf.forecast_policy and cf.forecast_steps > 0 if cf.forecast_steps != 0 else True
-            ), provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
-        elif isinstance(cf.forecast_steps, ListConfig) and len(cf.forecast_steps) > 0:
-            assert (
-                cf.forecast_policy and all(step >= 0 for step in cf.forecast_steps)
-                if any(n > 0 for n in cf.forecast_steps)
-                else True
-            ), provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
-        else:
-            raise TypeError(valid_forecast_steps)
 
     def inference(self, cf, run_id_trained, epoch):
         # general initalization
