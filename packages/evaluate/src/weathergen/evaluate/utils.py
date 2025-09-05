@@ -142,11 +142,13 @@ def get_data(
                         f"Skipping {stream} sample {sample} forecast step: {fstep}. Dataset is empty."
                     )
                     continue
-                
-                fsteps_final.append(fstep)
+
                 da_tars_fs.append(target.squeeze())
                 da_preds_fs.append(pred.squeeze())
                 pps.append(npoints)
+
+            if len(da_tars_fs) > 0:
+                fsteps_final.append(fstep)
 
             _logger.debug(
                 f"Concatenating targets and predictions for stream {stream}, forecast_step {fstep}..."
