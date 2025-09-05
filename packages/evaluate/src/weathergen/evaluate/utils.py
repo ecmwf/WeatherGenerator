@@ -224,7 +224,9 @@ def calc_scores_per_stream(
         f"RUN {run_id} - {stream}: Calculating scores for metrics {metrics}..."
     )
 
-    channels, fsteps, samples = _get_channels_fsteps_samples(cfg, run_id, stream, mode = "evaluation")
+    checked, (channels, fsteps, samples) = check_availability(
+                cfg, run, stream, results_dir, mode = "evaluation"
+            )
 
     output_data = get_data(
         cfg,
@@ -371,7 +373,7 @@ def plot_data(
     plotter = Plotter(plotter_cfg, plot_dir)
 
     check, (plot_chs, plot_fsteps, plot_samples) = check_availability(
-        cfg, run_id, run_cfg, stream, results_dir, mode = "plotting"
+        cfg, run_id, stream, results_dir, mode = "plotting"
     )
 
     # plot_samples = plot_settings.get("sample", None)
@@ -842,8 +844,6 @@ def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataA
 
 def check_availability(
     cfg: dict,
-    run_id: str,
-    run_cfg: dict,
     stream: str,
     results_dir: Path,
     available_data: dict = None,
@@ -861,8 +861,6 @@ def check_availability(
     ----------
     cfg :dict
         The plot config.
-    run : str
-        The run considered.
     stream : str
         The stream considered.
     results_dir : Path
@@ -880,6 +878,7 @@ def check_availability(
     str
         samples
     """
+    run_id = results_dir.name
 
     #fill info for requested channels, fsteps, samples
     channels, fsteps, samples = _get_channels_fsteps_samples(
@@ -956,7 +955,7 @@ def check_availability(
 
     scope = "metric file" if available_data is not None else "Zarr file"
     _logger.info(f"All checks passed – All channels, samples, fsteps are present in {scope}...")
-    return check, (requested["channel"], requested["fstep"], requested["sample"])
+    return check, (list(requested["channel"]), list(requested["fstep"]), list(requested["sample"]))
 
 
 def _get_channels_fsteps_samples(
