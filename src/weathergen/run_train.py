@@ -61,13 +61,30 @@ def inference_from_args(argl: list[str]):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
-    init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
+    devices = Trainer.init_torch()
+    cf = Trainer.init_ddp(cf)
+
+    # Get current time
+    now = datetime.now()
+    timestamp = now.strftime("%Y-%m-%d-%H%M")
+
+    output_dir = f"./output/{timestamp}-{cf.run_id}"
+
+    # this line should probably come after the processes have been sorted out else we get lots of duplication due to
+    # multiple process in the multiGPU case
+    init_loggers(
+        logging_level=logging.DEBUG,
+        critical_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-critical.txt"],
+        error_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-error.txt"],
+        warning_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-warning.txt"],
+        info_output_streams=[sys.stdout, f"{output_dir}/{cf.run_id}-info.txt"],
+        debug_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-debug.txt"],
+    )
 
     cf.run_history += [(args.from_run_id, cf.istep)]
 
     trainer = Trainer()
-    trainer.inference(cf, args.from_run_id, args.epoch)
+    trainer.inference(cf, devices, args.from_run_id, args.epoch)
 
 
 ####################################################################################################
@@ -129,8 +146,25 @@ def train_continue_from_args(argl: list[str]):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
-    init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
+    devices = Trainer.init_torch()
+    cf = Trainer.init_ddp(cf)
+
+    # Get current time
+    now = datetime.now()
+    timestamp = now.strftime("%Y-%m-%d-%H%M")
+
+    output_dir = f"./output/{timestamp}-{cf.run_id}"
+
+    # this line should probably come after the processes have been sorted out else we get lots of duplication due to
+    # multiple process in the multiGPU case
+    init_loggers(
+        logging_level=logging.DEBUG,
+        critical_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-critical.txt"],
+        error_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-error.txt"],
+        warning_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-warning.txt"],
+        info_output_streams=[sys.stdout, f"{output_dir}/{cf.run_id}-info.txt"],
+        debug_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-debug.txt"],
+    )
 
     # track history of run to ensure traceability of results
     cf.run_history += [(args.from_run_id, cf.istep)]
@@ -142,7 +176,7 @@ def train_continue_from_args(argl: list[str]):
 
             torch._dynamo.config.optimize_ddp = False
     trainer = Trainer()
-    trainer.run(cf, args.from_run_id, args.epoch)
+    trainer.run(cf, devices, args.from_run_id, args.epoch)
 
 
 ####################################################################################################
@@ -171,7 +205,8 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
     cf = config.set_run_id(cf, args.run_id, False)
 
-    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
+    devices = Trainer.init_torch()
+    cf = Trainer.init_ddp(cf)
 
     # Get current time
     now = datetime.now()
@@ -187,7 +222,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
         error_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-error.txt"],
         warning_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-warning.txt"],
         info_output_streams=[sys.stdout, f"{output_dir}/{cf.run_id}-info.txt"],
-        debug_output_streams=[fname_debug_logging],
+        debug_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-debug.txt"],
     )
 
     cf.streams = config.load_streams(Path(cf.streams_directory))
@@ -199,7 +234,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     trainer = Trainer(checkpoint_freq=250, print_freq=10)
 
     try:
-        trainer.run(cf)
+        trainer.run(cf, devices)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()

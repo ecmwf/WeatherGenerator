@@ -82,35 +82,32 @@ class TrainerBase:
             _logger.info(f"rank: {rank} has run_id: {cf.run_id}")
             return
 
-        rank = int(os.environ["LOCAL_RANK"])
+        rank = int(os.environ.get("LOCAL_RANK",-1))
+        if rank == -1:
+            # Called using SLURM instead of torchrun
+            local_rank = int(os.environ.get("SLURM_LOCALID"))
+            ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
+            rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
+
+        num_ranks = int(os.environ.get("WORLD_SIZE", -1))
+        if num_ranks == -1:
+            # Called using SLURM instead of torchrun
+            num_ranks = int(os.environ.get("SLURM_NTASKS"))
+
         if torch.accelerator.is_available():
             device_type = torch.accelerator.current_accelerator()
             device = torch.device(f"{device_type}:{rank}")
             torch.accelerator.set_device_index(rank)
-            print(f"Running on rank {rank} on device {device}")
+            _logger.info(
+                f"DDP initialization: rank={rank}, num_ranks={num_ranks}"
+            )
         else:
             device = torch.device("cpu")
-            print(f"Running on device {device}")
+            _logger.info(f"Running on device {device}")
 
         backend = torch.distributed.get_default_backend_for_device(device)
         torch.distributed.init_process_group(backend=backend, world_size=2, device_id=device)
 
-
-        # local_rank = int(os.environ.get("SLURM_LOCALID"))
-        # ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
-        # rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
-        # num_ranks = int(os.environ.get("SLURM_NTASKS"))
-        # _logger.info(
-        #     f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, "
-        #     f"rank={rank}, num_ranks={num_ranks}"
-        # )
-        # print(
-        #     f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, "
-        #     f"rank={rank}, num_ranks={num_ranks}"
-        # )
-        # print(rank)
-        # rank = int(os.environ["LOCAL_RANK"])
-        # print(rank)
 
         if rank == 0:
             # Check that port 1345 is available, raise an error if not
@@ -130,49 +127,16 @@ class TrainerBase:
                         _logger.error(f"Error while binding to port 1345 on {master_node}: {e}")
                         raise
 
-        # _logger.info(
-        #     f"Initializing DDP with rank {rank} out of {num_ranks} on master_node:{master_node}."
-        # )
-
-        # dist.init_process_group(
-        #     backend="nccl",
-        #     init_method=f"tcp://{master_node}:{PORT}",
-        #     timeout=datetime.timedelta(seconds=240),
-        #     world_size=num_ranks,
-        #     rank=rank,
-        #     device_id=torch.device("cuda", rank),
-        # )
         if is_root():
             _logger.info("DDP initialized: root.")
         # Wait for all ranks to reach this point
         dist.barrier()
 
-        # # communicate run id to all nodes
-        # len_run_id = len(cf.run_id)
-        # run_id_int = torch.zeros(len_run_id, dtype=torch.int32).to(device)
-        # if is_root():
-        #     _logger.info(f"Communicating run_id to all nodes: {cf.run_id}")
-        #     run_id_int = str_to_tensor(cf.run_id).to(device)
-        # dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
-        # if not is_root():
-        #     cf.run_id = tensor_to_str(run_id_int)
-        # _logger.info(f"rank: {rank} has run_id: {cf.run_id}")
-
-        # # communicate data_loader_rng_seed
-        # if hasattr(cf, "data_loader_rng_seed"):
-        #     if cf.data_loader_rng_seed is not None:
-        #         l_seed = torch.tensor(
-        #             [cf.data_loader_rng_seed if rank == 0 else 0], dtype=torch.int32
-        #         ).to(device)
-        #         dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
-        #         cf.data_loader_rng_seed = l_seed.item()
-
-        # TODO: move outside of the config
         cf.rank = rank
         cf.num_ranks = num_ranks
         cf.with_ddp = True
 
-        return
+        return cf
 
     def init_perf_monitoring(self):
         self.device_handles, self.device_names = [], []

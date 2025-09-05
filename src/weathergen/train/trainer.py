@@ -59,7 +59,6 @@ from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.logger import logger
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.validation_io import write_output
-from weathergen.utils.logger import logger
 
 
 class Trainer(TrainerBase):
@@ -72,6 +71,7 @@ class Trainer(TrainerBase):
     def init(
         self,
         cf: Config,
+        devices
     ):
         self.cf = OmegaConf.merge(
             OmegaConf.create(
@@ -95,14 +95,11 @@ class Trainer(TrainerBase):
 
         self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
-        self.devices = self.init_torch()
+        self.devices = devices 
 
         # Get num_ranks of previous, to be continued run before
         # num_ranks gets overwritten by current setting during init_ddp()
         self.num_ranks_original = cf.get("num_ranks", None)
-
-        # TODO remove num_ranks, rank, with_with ddp from config
-        self.init_ddp(cf)
 
         # create output directory
         if is_root():
@@ -112,9 +109,9 @@ class Trainer(TrainerBase):
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
-    def inference(self, cf, run_id_trained, epoch):
+    def inference(self, cf, devices, run_id_trained, epoch):
         # general initalization
-        self.init(cf)
+        self.init(cf, devices)
 
         cf = self.cf
 
@@ -150,10 +147,10 @@ class Trainer(TrainerBase):
         self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         self.model = self.model.to(self.devices[0])
         self.model.load(run_id_trained, epoch)
-        _logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
+        logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
         self.model_params = ModelParams().create(cf)
         self.model_params = self.model_params.to(self.devices[0])
-        _logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
+        logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
 
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
@@ -166,9 +163,9 @@ class Trainer(TrainerBase):
         self.validate(epoch=0)
         logger.info(f"Finished inference run with id: {cf.run_id}")
 
-    def run(self, cf, run_id_contd=None, epoch_contd=None):
+    def run(self, cf, devices, run_id_contd=None, epoch_contd=None):
         # general initalization
-        self.init(cf)
+        self.init(cf, devices)
         cf = self.cf
 
         self.dataset = MultiStreamDataSampler(
