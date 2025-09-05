@@ -145,7 +145,7 @@ def evaluate_from_config(cfg):
                                 run.epoch,
                             )
                             checked, (channels, fsteps, samples) = check_availability(
-                                cfg, stream, results_dir, metric_data, mode = "evaluation"
+                                cfg, stream, results_dir, metric_data, mode="evaluation"
                             )
                             if not checked:
                                 metrics_to_compute.append(metric)
@@ -162,9 +162,8 @@ def evaluate_from_config(cfg):
                             metrics_to_compute.append(metric)
 
                     if metrics_to_compute:
-
                         all_metrics, points_per_sample = calc_scores_per_stream(
-                            cfg, run_id, results_dir, stream, region, metrics_to_compute
+                            cfg, results_dir, stream, region, metrics_to_compute
                         )
 
                         metric_list_to_json(

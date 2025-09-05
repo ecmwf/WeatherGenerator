@@ -224,8 +224,8 @@ def calc_scores_per_stream(
     )
 
     checked, (channels, fsteps, samples) = check_availability(
-                cfg, run, stream, results_dir, mode = "evaluation"
-            )
+        cfg, stream, results_dir, mode="evaluation"
+    )
 
     output_data = get_data(
         cfg,
@@ -372,7 +372,7 @@ def plot_data(
     plotter = Plotter(plotter_cfg, plot_dir)
 
     check, (plot_chs, plot_fsteps, plot_samples) = check_availability(
-        cfg, run_id, stream, results_dir, mode = "plotting"
+        cfg, stream, results_dir, mode="plotting"
     )
 
     # plot_samples = plot_settings.get("sample", None)
@@ -879,39 +879,42 @@ def check_availability(
     """
     run_id = results_dir.name
 
-    #fill info for requested channels, fsteps, samples
-    channels, fsteps, samples = _get_channels_fsteps_samples(
-        cfg, run_id, stream, mode
-    )
-    
+    # fill info for requested channels, fsteps, samples
+    channels, fsteps, samples = _get_channels_fsteps_samples(cfg, run_id, stream, mode)
+
     requested = {
         "channel": set(channels) if channels is not None else None,
         "fstep": set(fsteps) if fsteps is not None else None,
         "sample": set(samples) if samples is not None else None,
     }
 
-    #fill info from available json file (if provided)
+    # fill info from available json file (if provided)
     available = {
-        "channel": set(available_data["channel"].values.ravel())  if available_data is not None else {},
-        "fstep": set(available_data["forecast_step"].values.ravel())  if available_data is not None else {},
-        "sample": set(available_data.coords["sample"].values.ravel())  if available_data is not None else {},
+        "channel": set(available_data["channel"].values.ravel())
+        if available_data is not None
+        else {},
+        "fstep": set(available_data["forecast_step"].values.ravel())
+        if available_data is not None
+        else {},
+        "sample": set(available_data.coords["sample"].values.ravel())
+        if available_data is not None
+        else {},
     }
 
-    #fill info from zarr  
-    #TODO: make fname_zarr retrieval nicer
+    # fill info from zarr
+    # TODO: make fname_zarr retrieval nicer
     epoch = cfg.get("run_ids").get(run_id).get("epoch")
     rank = cfg.get("run_ids").get(run_id).get("rank")
 
     fname_zarr = results_dir.joinpath(
         f"validation_epoch{epoch:05d}_rank{rank:04d}.zarr"
     )
-   
+
     if not fname_zarr.exists() or not fname_zarr.is_dir():
         _logger.error(f"Zarr file {fname_zarr} does not exist or is not a directory.")
         raise FileNotFoundError(
             f"Zarr file {fname_zarr} does not exist or is not a directory."
         )
-
 
     with ZarrIO(fname_zarr) as zio:
         zio_data = {
@@ -920,18 +923,16 @@ def check_availability(
             "channel": set(peek_tar_channels(zio, stream, zio.forecast_steps[0])),
         }
 
-    # Loop 
-    
     check = True
+    corrected = False
     for name in ["channel", "fstep", "sample"]:
-       
         if requested[name] is None:
             # Default to all in Zarr
             requested[name] = zio_data[name]
             # If JSON exists, must exactly match
             if available_data is not None and zio_data[name] != available[name]:
                 _logger.info(
-                    f"Requested all {name}s, but previous config was a strict subset. Recomputing."
+                    f"Requested all {name}s for {mode}, but previous config was a strict subset. Recomputing."
                 )
                 check = False
 
@@ -940,26 +941,32 @@ def check_availability(
             missing = requested[name] - zio_data[name]
             _logger.info(
                 f"Requested {name}(s) {missing} do(es) not exist in Zarr. "
-                f"Removing missing {name}(s)."
+                f"Removing missing {name}(s) for {mode}."
             )
             requested[name] = requested[name] & zio_data[name]
-
+            corrected = True
 
         # Must be a subset of available_data (if provided)
         if available_data is not None and not requested[name] <= available[name]:
             missing = requested[name] - available[name]
-            _logger.info(f"{name.capitalize()}(s) {missing} missing in previous evaluation. Recomputing.")
+            _logger.info(
+                f"{name.capitalize()}(s) {missing} missing in previous evaluation. Recomputing."
+            )
             check = False
 
+    if check and not corrected:
+        scope = "metric file" if available_data is not None else "Zarr file"
+        _logger.info(
+            f"All checks passed – All channels, samples, fsteps requested for {mode} are present in {scope}..."
+        )
+    return check, (
+        sorted(list(requested["channel"])),
+        sorted(list(requested["fstep"])),
+        sorted(list(requested["sample"])),
+    )
 
-    scope = "metric file" if available_data is not None else "Zarr file"
-    _logger.info(f"All checks passed – All channels, samples, fsteps are present in {scope}...")
-    return check, (list(requested["channel"]), list(requested["fstep"]), list(requested["sample"]))
 
-
-def _get_channels_fsteps_samples(
-    cfg: dict, run_id: str, stream: str, mode: str
-):
+def _get_channels_fsteps_samples(cfg: dict, run_id: str, stream: str, mode: str):
     """
     Get channels, fsteps and samples for a given run and stream from the config. Replace 'all' with None.
 
@@ -983,14 +990,13 @@ def _get_channels_fsteps_samples(
     list/None
         samples
     """
-    assert mode == "plotting" or mode == "evaluation", "get_channels_fsteps_samples:: Mode should be either 'plotting' or 'evaluation'"
-
-    samples = (
-        cfg.run_ids.get(run_id).streams.get(stream)[mode].get("sample", None)
+    assert mode == "plotting" or mode == "evaluation", (
+        "get_channels_fsteps_samples:: Mode should be either 'plotting' or 'evaluation'"
     )
+
+    samples = cfg.run_ids.get(run_id).streams.get(stream)[mode].get("sample", None)
     fsteps = (
-        cfg.run_ids.get(run_id)
-        .streams.get(stream)[mode].get("forecast_step", None)
+        cfg.run_ids.get(run_id).streams.get(stream)[mode].get("forecast_step", None)
     )
 
     channels = cfg.run_ids.get(run_id).streams.get(stream).get("channels", None)
