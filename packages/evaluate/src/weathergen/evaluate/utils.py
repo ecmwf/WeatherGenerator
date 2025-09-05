@@ -180,8 +180,6 @@ def get_data(
             if return_counts:
                 points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
 
-        fsteps_final = list(sorted(set(fsteps_final)))
-
         # Safer than a list
         da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=False)}
         da_preds = {
