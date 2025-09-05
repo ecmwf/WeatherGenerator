@@ -55,6 +55,9 @@ class Masker:
         # until it is generated in mask_source.
         self.perm_sel: list[np.typing.NDArray] = None
 
+        # Per-batch strategy tracking
+        self.batch_strategy_set = False
+
         # Check for required masking_strategy_config at construction time
         if self.masking_strategy == "healpix":
             hl_data = self.healpix_level_data
@@ -91,6 +94,30 @@ class Masker:
         """
         self.rng = rng
 
+    def set_batch_strategy(self):
+        """
+        Sample and set masking strategy for a batch.
+        Relevant for masking_strategy "combination",
+        where for each batch, every stream should
+        use the same masking strategy, instead of
+        sampling a different one for each stream.
+        """
+
+        if self.original_masking_strategy == "combination":
+            strategy = self.rng.choice(
+                self.masking_strategy_config["strategies"],
+                p=self.masking_strategy_config["probabilities"],
+            )
+            self.masking_strategy = strategy
+            self.batch_strategy_set = True
+        else:
+            self.masking_strategy = self.original_masking_strategy
+            self.batch_strategy_set = True
+
+    def reset_batch_strategy(self):
+        """Reset batch strategy for next batch."""
+        self.batch_strategy_set = False
+
     def mask_source(
         self,
         tokenized_data: list[torch.Tensor],
@@ -117,6 +144,9 @@ class Masker:
         if num_tokens == 0:
             return tokenized_data
 
+        # Ensure we use per-batch strategy
+        assert self.batch_strategy_set, "Batch strategy must be set before calling mask_source"
+
         # Set the masking rate.
         rate = self._get_sampling_rate()
 
@@ -132,17 +162,6 @@ class Masker:
             self.perm_sel = [np.ones(tl, dtype=bool) for tl in token_lens]
             source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
             return source_data
-
-        # if we have masking_strategy "combination"
-        # for each stream and batch we sample a different masking_strategy
-        # according to some probability distribution
-        if self.original_masking_strategy == "combination":
-            # Sample a masking strategy from the config
-            strategy = self.rng.choice(
-                self.masking_strategy_config["strategies"],
-                p=self.masking_strategy_config["probabilities"],
-            )
-            self.masking_strategy = strategy
 
         # Implementation of different masking strategies.
         # Generate a flat boolean mask for random, block, or healpix masking at cell level.
