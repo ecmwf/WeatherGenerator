@@ -43,7 +43,7 @@ class ColoredRelPathFormatter(logging.Formatter):
         return super(ColoredRelPathFormatter, self).format(record, *args, **kwargs)
 
 
-def init_logger_per_stream(logger, stream_handle, output_streams):
+def init_logger_per_stream(run_id, logger, stream_handle, output_streams):
     for ostr in output_streams if type(output_streams) is tuple else [output_streams]:
         # determine correct stream handler
         with_color = True
@@ -56,7 +56,7 @@ def init_logger_per_stream(logger, stream_handle, output_streams):
             # make sure the path is independent of path where job is launched
             if not ofile.is_absolute():
                 work_dir = pathlib.Path(_load_private_conf().get("path_shared_working_dir"))
-                ofile = work_dir / ofile
+                ofile = work_dir / "results" / run_id / ofile
             # make sure the parent directory exists
             pathlib.Path(ofile.parent).mkdir(parents=True, exist_ok=True)
             handler = logging.FileHandler(ofile)
@@ -78,6 +78,7 @@ def init_logger_per_stream(logger, stream_handle, output_streams):
 
 @cache
 def init_loggers(
+    run_id,
     logging_level=logging.DEBUG,
     critical_output_streams=sys.stderr,
     error_output_streams=sys.stderr,
@@ -109,25 +110,28 @@ def init_loggers(
     logger.handlers.clear()
     logger.setLevel(logging_level)
 
+    def make_list(arg):
+        return arg if type(arg) is list else [arg]
+
     # collect for further processing
     log_streams = [
-        [logging.CRITICAL, critical_output_streams],
-        [logging.ERROR, error_output_streams],
-        [logging.WARNING, warning_output_streams],
-        [logging.INFO, info_output_streams],
-        [logging.DEBUG, debug_output_streams],
+        [logging.CRITICAL, make_list(critical_output_streams)],
+        [logging.ERROR, make_list(error_output_streams)],
+        [logging.WARNING, make_list(warning_output_streams)],
+        [logging.INFO, make_list(info_output_streams)],
+        [logging.DEBUG, make_list(debug_output_streams)],
     ]
 
     # find the unique streams
-    streams_unique = set([s[1] for s in log_streams])
+    streams_unique = set([x for xs in [s[1] for s in log_streams] for x in xs])
     # collect for each unique one all logging levels
     streams_collected = [
-        [ls[0] for ls in log_streams if ls[1] == stream] for stream in streams_unique
+        [ls[0] for ls in log_streams if stream in ls[1]] for stream in streams_unique
     ]
 
     # set the logging
     for streams, stream_handle in zip(streams_collected, streams_unique, strict=True):
-        logger = init_logger_per_stream(logger, min(streams), stream_handle)
+        logger = init_logger_per_stream(run_id, logger, min(streams), stream_handle)
 
 
 # TODO: remove, it should be module-level loggers
