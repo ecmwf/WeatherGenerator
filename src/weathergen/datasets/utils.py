@@ -447,40 +447,29 @@ def get_target_coords_local_fast(hlc, target_coords, geoinfo_offset):
 
 
 ####################################################################################################
-def tcs_optimized(target_coords, s2tor3):
+def tcs_optimized(target_coords: List[torch.Tensor]) -> Tuple[List[torch.Tensor], torch.Tensor]:
     """
+    Args:
+    target_coords: List of 2D coordinate tensors, each with shape [N, 2]
+
     Returns:
         tcs: List of transformed coordinates
         concatenated_coords: All original coords concatenated
     """
-    if not target_coords:
-        return [], torch.tensor([])
 
-    # Filter non-empty tensors and get their info in one pass
-    non_empty_info = [(i, t) for i, t in enumerate(target_coords) if len(t) > 0]
-
-    if not non_empty_info:
-        return [torch.tensor([]) for _ in target_coords], torch.tensor([])
-
-    # Extract indices and tensors
-    valid_indices, valid_tensors = zip(*non_empty_info, strict=True)
-
-    stacked_coords = torch.cat(valid_tensors, dim=0)  
+    # Concatenate all tensors
+    stacked_coords = torch.cat(target_coords, dim=0)  # [total_points, 2]
 
     # Single vectorized coordinate transformation
-    theta_all = torch.deg2rad(90.0 - stacked_coords[..., 0])
+    theta_all = torch.deg2rad(90.0 - stacked_coords[..., 0]) 
     phi_all = torch.deg2rad(180.0 + stacked_coords[..., 1])
+    
+    # Transform all coordinates
+    transformed_all = s2tor3(theta_all, phi_all)  # [total_points, 3]
 
-    transformed_all = s2tor3(theta_all, phi_all)  
-
-    # Split back to original structure using cumulative sizes
-    sizes = [t.shape[0] for _, t in non_empty_info]
-    split_transformed = torch.split(transformed_all, sizes, dim=0)
-
-    # Reconstruct tcs list with correct positioning
-    tcs = [torch.tensor([]) for _ in target_coords]
-    for idx, transformed in zip(valid_indices, split_transformed, strict=True):
-        tcs[idx] = transformed
+    # Split back to original structure 
+    sizes = [t.shape[0] for t in target_coords] # Get original tensor sizes
+    tcs = list(torch.split(transformed_all, sizes, dim=0)) # Split back to list
 
     return tcs, stacked_coords
 
@@ -494,7 +483,7 @@ def get_target_coords_local_ffast(
     """
 
     # target_coords_lens = [len(t) for t in target_coords]
-    tcs, target_coords = tcs_optimized(target_coords, s2tor3)
+    tcs, target_coords = tcs_optimized(target_coords)
 
     if target_coords.shape[0] == 0:
         return torch.tensor([])
