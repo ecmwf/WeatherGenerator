@@ -83,18 +83,18 @@ def evaluate_from_config(cfg):
             _logger.info(
                 f"Loading config for run {run_id} from private paths: {private_paths}"
             )
-            cf_run = load_config(private_paths, run_id, run["epoch"])
+            run_cfg = load_config(private_paths, run_id, run["epoch"])
         else:
             _logger.info(
                 f"Loading config for run {run_id} from model directory: {model_base_dir}"
             )
-            cf_run = load_model_config(run_id, run["epoch"], model_base_dir)
+            run_cfg = load_model_config(run_id, run["epoch"], model_base_dir)
 
         results_base_dir = run.get(
             "results_base_dir", None
         )  # base directory where results will be stored
         if not results_base_dir:
-            results_base_dir = Path(cf_run["run_path"])
+            results_base_dir = Path(run_cfg["run_path"])
             logging.info(
                 f"Results directory obtained from model config: {results_base_dir}"
             )
@@ -126,9 +126,7 @@ def evaluate_from_config(cfg):
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                _ = plot_data(
-                    cfg, run_id, run, results_dir, runplot_dir, stream, stream_dict
-                )
+                _ = plot_data(cfg, run_cfg, results_dir, runplot_dir, stream)
 
             if stream_dict.get("evaluation"):
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
@@ -147,7 +145,7 @@ def evaluate_from_config(cfg):
                                 run.epoch,
                             )
                             checked, (channels, fsteps, samples) = check_availability(
-                                cfg, run_id, run, stream, results_dir, metric_data
+                                cfg, stream, results_dir, metric_data, mode = "evaluation"
                             )
                             if not checked:
                                 metrics_to_compute.append(metric)
@@ -155,21 +153,18 @@ def evaluate_from_config(cfg):
                                 # simply select the chosen eval channels, samples, fsteps here...
                                 scores_dict[metric][region][stream][run_id] = (
                                     metric_data.sel(
-                                        sample=list(samples),
-                                        channel=list(channels),
-                                        forecast_step=list(fsteps),
+                                        sample=samples,
+                                        channel=channels,
+                                        forecast_step=fsteps,
                                     )
                                 )
                         except (FileNotFoundError, KeyError):
                             metrics_to_compute.append(metric)
 
                     if metrics_to_compute:
-                        checked, _ = check_availability(
-                            cfg, run_id, run, stream, results_dir
-                        )
 
                         all_metrics, points_per_sample = calc_scores_per_stream(
-                            cfg, results_dir, stream, region, metrics_to_compute
+                            cfg, run_id, results_dir, stream, region, metrics_to_compute
                         )
 
                         metric_list_to_json(
