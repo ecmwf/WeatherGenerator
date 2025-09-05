@@ -1,3 +1,12 @@
+#!/usr/bin/env -S uv run
+# /// script
+# dependencies = [
+#   "tabulate",
+# ]
+# [tool.uv.sources]
+# TBD
+# ///
+
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -6,6 +15,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
 
 import argparse
 import fnmatch
@@ -17,10 +27,7 @@ import pandas as pd
 import yaml
 from omegaconf import OmegaConf
 
-from config import load_model_config
-
-logging.basicConfig(level=logging.INFO)
-_logger = logging.getLogger(__name__)
+from weathergen.utils.config import load_model_config
 
 
 def truncate_value(value, max_length=50):
@@ -133,6 +140,10 @@ def process_streams(cfg):
 
 
 def main():
+    
+    logging.basicConfig(level=logging.INFO)
+    _logger = logging.getLogger(__name__)
+    
     parser = argparse.ArgumentParser(
         description="Compare WeatherGenerator configs and output markdown table."
     )
