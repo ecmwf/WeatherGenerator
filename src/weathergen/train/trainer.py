@@ -16,7 +16,7 @@ from typing import Any
 import numpy as np
 import torch
 import tqdm
-from omegaconf import OmegaConf
+from omegaconf import ListConfig, OmegaConf
 from torch import Tensor
 from torch.distributed.fsdp import FullOptimStateDictConfig, FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -132,13 +132,13 @@ class Trainer(TrainerBase):
         if isinstance(cf.forecast_steps, int):
             assert (
                 cf.forecast_policy and cf.forecast_steps > 0 if cf.forecast_steps != 0 else True
-            ), provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
+            ), (provide_forecast_policy + valid_forecast_policies + valid_forecast_steps)
         elif isinstance(cf.forecast_steps, ListConfig) and len(cf.forecast_steps) > 0:
             assert (
                 cf.forecast_policy and all(step >= 0 for step in cf.forecast_steps)
                 if any(n > 0 for n in cf.forecast_steps)
                 else True
-            ), provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
+            ), (provide_forecast_policy + valid_forecast_policies + valid_forecast_steps)
         else:
             raise TypeError(valid_forecast_steps)
 
