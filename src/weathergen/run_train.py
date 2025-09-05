@@ -178,7 +178,6 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     timestamp = now.strftime("%Y-%m-%d-%H%M")
 
     output_dir = f"./output/{timestamp}-{cf.run_id}"
-    os.makedirs(output_dir, exist_ok=True)
 
     # this line should probably come after the processes have been sorted out else we get lots of duplication due to
     # multiple process in the multiGPU case
