@@ -18,6 +18,7 @@ from omegaconf import OmegaConf
 
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
+    check_availability,
     metric_list_to_json,
     plot_data,
     plot_summary,
@@ -143,30 +144,28 @@ def evaluate_from_config(cfg):
                                 metric,
                                 run.epoch,
                             )
-
-                            # check if channels unchanged from previous config
-                            channels = cfg["run_ids"][run_id]["streams"][stream].get(
-                                "channels"
+                            checked, (channels, fsteps, samples) = check_availability(
+                                cfg, run_id, run, stream, results_dir, metric_data, mode = "evaluation"
                             )
-                            missing_channels = []
-                            for ch in channels:
-                                if ch not in metric_data["channel"].values:
-                                    missing_channels.append(ch)
-                            if missing_channels:
-                                _logger.info(
-                                    f"Channels {missing_channels} do not appear in saved scores for {metric}. Recomputing."
-                                )
+                            if not checked:
                                 metrics_to_compute.append(metric)
                             else:
+                                # simply select the chosen eval channels, samples, fsteps here...
                                 scores_dict[metric][region][stream][run_id] = (
-                                    metric_data
+                                    metric_data.sel(
+                                        sample=list(samples),
+                                        channel=list(channels),
+                                        forecast_step=list(fsteps),
+                                    )
                                 )
-
-                        # TODO update retrieve_metric_from_json to avoid having to catch errors
-                        except (FileNotFoundError, KeyError, ValueError):
+                        except (FileNotFoundError, KeyError):
                             metrics_to_compute.append(metric)
 
                     if metrics_to_compute:
+                        checked, _ = check_availability(
+                            cfg, run_id, run, stream, results_dir, mode = "evaluation"
+                        )
+
                         all_metrics, points_per_sample = calc_scores_per_stream(
                             cfg, results_dir, stream, region, metrics_to_compute
                         )
@@ -185,6 +184,7 @@ def evaluate_from_config(cfg):
                         scores_dict[metric][region][stream][run_id] = all_metrics.sel(
                             {"metric": metric}
                         )
+
     # plot summary
     summary_plots = cfg.get("summary_plots", True)
     if scores_dict and summary_plots:
