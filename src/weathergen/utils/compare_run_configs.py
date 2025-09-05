@@ -141,7 +141,7 @@ def process_streams(cfg: dict | None):
 def main():
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
-    
+
     parser = argparse.ArgumentParser(
         description="Compare WeatherGenerator configs and output markdown table."
     )
