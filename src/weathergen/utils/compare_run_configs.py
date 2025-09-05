@@ -1,10 +1,13 @@
 #!/usr/bin/env -S uv run
 # /// script
 # dependencies = [
+#   "pandas",
 #   "tabulate",
+#   "pyyaml",
+#   "omegaconf",
 # ]
 # [tool.uv.sources]
-# TBD
+# weathergen = { path = "../../../" }
 # ///
 
 # (C) Copyright 2025 WeatherGenerator contributors.
@@ -107,18 +110,16 @@ def configs_to_markdown_table(
     return df_sorted.to_markdown(tablefmt="github")
 
 
-def process_streams(cfg):
+def process_streams(cfg: dict | None):
     """Process and flatten streams configuration."""
     if "streams" not in cfg:
         return
 
     streams_val = cfg["streams"]
-    _logger.debug(f"Streams type: {type(streams_val)}")
 
     # Convert OmegaConf objects to regular Python objects
     if hasattr(streams_val, "_content"):
         streams_val = OmegaConf.to_object(streams_val)
-        _logger.debug(f"Converted streams to Python object: {type(streams_val)}")
 
     # Unpack streams based on type
     if isinstance(streams_val, list):
@@ -135,14 +136,11 @@ def process_streams(cfg):
         cfg["streams.value"] = streams_val
 
     del cfg["streams"]
-    streams_keys = [k for k in cfg.keys() if k.startswith("streams")]
-    _logger.debug(f"After streams processing: {streams_keys}")
 
 
 def main():
-    
     logging.basicConfig(level=logging.INFO)
-    _logger = logging.getLogger(__name__)
+    logger = logging.getLogger(__name__)
     
     parser = argparse.ArgumentParser(
         description="Compare WeatherGenerator configs and output markdown table."
@@ -201,7 +199,8 @@ def main():
         yaml_always_show_patterns = args.show if args.show else []
     else:
         # error: pass config or command line arguments
-        _logger.error("Please provide a config or specify two run IDs and their model directories.")
+        logger.error("Please provide a config or specify two run IDs and their model directories.")
+        return
     # Load configs using load_model_config from config module
     configs = {}
     for item in config_files:
@@ -212,7 +211,7 @@ def main():
             path = item
             run_id = os.path.splitext(os.path.basename(path))[0]
 
-        _logger.info(f"Loading config for run_id: {run_id} from {path}")
+        logger.info(f"Loading config for run_id: {run_id} from {path}")
         cfg = load_model_config(run_id, None, path)
         actual_run_id = cfg.get("run_id", run_id)
 
@@ -239,12 +238,12 @@ def main():
     # Write output
     with open(output_file, "w") as f:
         f.write(md_table)
-    _logger.info(f"Table written to {output_file}")
+    logger.info(f"Table written to {output_file}")
     row_count = len(md_table.split("\n")) - 3
     pattern_info = (
         f" (patterns: {', '.join(yaml_always_show_patterns)})" if yaml_always_show_patterns else ""
     )
-    _logger.info(f"Filtered to {row_count} rows{pattern_info}")
+    logger.info(f"Filtered to {row_count} rows{pattern_info}")
 
 
 if __name__ == "__main__":
