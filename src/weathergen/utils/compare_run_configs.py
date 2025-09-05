@@ -163,7 +163,7 @@ def main():
     )
     parser.add_argument(
         "--config",
-        default=None,
+        default="config/config_list.yml",
         help="Path to YAML file listing run_ids and always_show_patterns.",
     )
     parser.add_argument(
@@ -212,7 +212,7 @@ def main():
             run_id = os.path.splitext(os.path.basename(path))[0]
 
         logger.info(f"Loading config for run_id: {run_id} from {path}")
-        cfg = load_model_config(run_id, None, path)
+        cfg = load_model_config(run_id=run_id, epoch=None, model_path=path)
         actual_run_id = cfg.get("run_id", run_id)
 
         # Process streams and flatten
