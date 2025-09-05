@@ -373,10 +373,6 @@ def plot_data(
         cfg, stream, results_dir, mode="plotting"
     )
 
-    # plot_samples = plot_settings.get("sample", None)
-    # plot_fsteps = plot_settings.get("forecast_step", None)
-    # plot_chs = stream_cfg.get("channels")
-
     # Check if maps should be plotted and handle configuration if provided
     plot_maps = plot_settings.get("plot_maps", False)
     if not isinstance(plot_maps, bool):
