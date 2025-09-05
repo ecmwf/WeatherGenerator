@@ -56,12 +56,9 @@ class Masker:
         self.perm_sel: list[np.typing.NDArray] = None
 
         # Per-batch strategy tracking
-        # masking_strategy_per_batch is the strategy
-        # used for the current batch.
         self.same_strategy_per_batch = self.masking_strategy_config.get(
             "same_strategy_per_batch", False
         )
-        self.masking_strategy_per_batch = None
         self.batch_strategy_set = False
 
         # Check for required masking_strategy_config at construction time
