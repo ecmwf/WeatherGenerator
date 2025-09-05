@@ -547,8 +547,8 @@ class LinePlots:
         self.dpi_val = cfg.get("dpi_val")
         self.fig_size = cfg.get("fig_size", (8, 10))
         self.log_scale = cfg.evaluation.get("log_scale", False)
+        self.add_grid = cfg.evaluation.get("add_grid", False)
         self.out_plot_dir = Path(output_basedir) / "line_plots"
-
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
@@ -667,10 +667,13 @@ class LinePlots:
         title = "".join(c if c.isalnum() else " " for c in tag)
         plt.title(title)
         plt.legend(frameon=False)
+    
+        if self.add_grid:
+            plt.grid(True, linestyle="--", color="gray", alpha=0.5)
 
         if self.log_scale:
             plt.yscale("log")
-            
+
         if print_summary:
             _logger.info(f"Summary values for {tag}")
             self.print_all_points_from_graph(fig)
