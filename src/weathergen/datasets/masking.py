@@ -39,7 +39,6 @@ class Masker:
     def __init__(self, cf: Config):
         self.masking_rate = cf.masking_rate
         self.masking_strategy = cf.masking_strategy
-        self.original_masking_strategy = cf.masking_strategy
         self.masking_rate_sampling = cf.masking_rate_sampling
         # masking_strategy_config is a dictionary that can hold any additional parameters
         self.healpix_level_data = cf.healpix_level
@@ -56,6 +55,9 @@ class Masker:
         self.perm_sel: list[np.typing.NDArray] = None
 
         # Per-batch strategy tracking
+        # masking_strategy_per_batch is the strategy 
+        # used for the current batch.
+        self.masking_strategy_per_batch = None
         self.batch_strategy_set = False
 
         # Check for required masking_strategy_config at construction time
@@ -103,19 +105,20 @@ class Masker:
         sampling a different one for each stream.
         """
 
-        if self.original_masking_strategy == "combination":
+        if self.masking_strategy == "combination":
             strategy = self.rng.choice(
                 self.masking_strategy_config["strategies"],
                 p=self.masking_strategy_config["probabilities"],
             )
-            self.masking_strategy = strategy
+            self.masking_strategy_per_batch = strategy
             self.batch_strategy_set = True
         else:
-            self.masking_strategy = self.original_masking_strategy
+            self.masking_strategy_per_batch = self.masking_strategy
             self.batch_strategy_set = True
 
     def reset_batch_strategy(self):
         """Reset batch strategy for next batch."""
+        self.masking_strategy_per_batch = None
         self.batch_strategy_set = False
 
     def mask_source(
@@ -145,7 +148,7 @@ class Masker:
             return tokenized_data
 
         # Ensure we use per-batch strategy
-        assert self.batch_strategy_set, "Batch strategy must be set before calling mask_source"
+        assert self.batch_strategy_set, "Batch strategy must be set"
 
         # Set the masking rate.
         rate = self._get_sampling_rate()
@@ -167,30 +170,30 @@ class Masker:
         # Generate a flat boolean mask for random, block, or healpix masking at cell level.
         # Generate a 3D mask to apply to each cell for channel masking.
 
-        if self.masking_strategy == "random":
+        if self.masking_strategy_per_batch == "random":
             flat_mask = self.rng.uniform(0, 1, num_tokens) < rate
 
-        elif self.masking_strategy == "block":
+        elif self.masking_strategy_per_batch == "block":
             flat_mask = np.zeros(num_tokens, dtype=bool)
             block_size = int(np.round(rate * num_tokens))
             if block_size > 0 and num_tokens > 0:
                 start_index = self.rng.integers(0, max(1, num_tokens - block_size + 1))
                 flat_mask[start_index : start_index + block_size] = True
 
-        elif self.masking_strategy == "healpix":
+        elif self.masking_strategy_per_batch == "healpix":
             flat_mask = self._generate_healpix_mask(token_lens, rate)
 
-        elif self.masking_strategy == "channel":
+        elif self.masking_strategy_per_batch == "channel":
             mask = self._generate_channel_mask(tokenized_data, rate, coords, geoinfos, source)
 
         else:
-            assert False, f"Unknown masking strategy: {self.masking_strategy}"
+            assert False, f"Unknown masking strategy: {self.masking_strategy_per_batch}"
 
         # apply mask
 
         # if masking_strategy is channel, we need to handle the masking differently,
         # since p is not 1D Boolean for the list of cells, but 3D to mask the channels in each cell.
-        if self.masking_strategy == "channel":
+        if self.masking_strategy_per_batch == "channel":
             self.perm_sel = mask
             # In the source_data we will set the channels that are masked to 0.0.
             source_data = []
@@ -247,7 +250,7 @@ class Masker:
 
         # process all healpix cells used for embedding
         for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
-            if self.masking_strategy == "channel":
+            if self.masking_strategy_per_batch == "channel":
                 # If masking strategy is channel, handle target tokens differently.
                 # We don't have Booleans per cell, instead per channel per cell,
                 # we set the unmasked channels to NaN so not in loss.
