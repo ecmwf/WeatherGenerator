@@ -75,9 +75,9 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
             )
         model_path = Path(model_path)
         fname = model_path / run_id / _get_model_config_file_name(run_id, epoch)
-        assert (
-            fname.exists()
-        ), "The fallback path to the model does not exist. Please provide a `model_path`."
+        assert fname.exists(), (
+            "The fallback path to the model does not exist. Please provide a `model_path`."
+        )
 
     _logger.info(f"Loading config from specified run_id and epoch: {fname}")
 
@@ -381,9 +381,9 @@ def _get_config_attribute(config: Config, attribute_name: str, fallback: str) ->
     fallback is specified."""
     attribute = OmegaConf.select(config, attribute_name)
     fallback_root = OmegaConf.select(config, "path_shared_working_dir")
-    assert (
-        attribute is not None or fallback_root is not None
-    ), f"Must specify `{attribute_name}` in config if `path_shared_working_dir` is None in config"
+    assert attribute is not None or fallback_root is not None, (
+        f"Must specify `{attribute_name}` in config if `path_shared_working_dir` is None in config"
+    )
     attribute = attribute if attribute else fallback_root + fallback
     return attribute
 
@@ -466,6 +466,6 @@ def validate_forecast_policy_and_steps(cf: OmegaConf):
             cf.forecast_policy and all(step >= 0 for step in cf.forecast_steps)
             if any(n > 0 for n in cf.forecast_steps)
             else True
-        ), (provide_forecast_policy + valid_forecast_policies + valid_forecast_steps)
+        ), provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
     else:
         raise TypeError(valid_forecast_steps)
