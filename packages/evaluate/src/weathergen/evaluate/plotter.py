@@ -326,20 +326,10 @@ class Plotter:
             List of plot names for the saved maps.
         """
         self.update_data_selection(select)
-
-        map_kwargs_save = (
-            {
-                key: value
-                for key, value in map_kwargs.copy().items()
-                if key not in variables
-            }
-            if map_kwargs is not None
-            else {}
-        )
-
-        if not hasattr(map_kwargs_save, "marker_size"):
+        
+        if not hasattr(map_kwargs, "marker_size"):
             # Set default marker size if not specified in maps_config
-            map_kwargs_save["marker_size"] = DefaultMarkerSize.get_marker_size(
+            map_kwargs["marker_size"] = DefaultMarkerSize.get_marker_size(
                 self.stream
             )
 
@@ -375,7 +365,7 @@ class Plotter:
                     map_output_dir,
                     var,
                     tag=tag,
-                    map_kwargs=map_kwargs[var],
+                    map_kwargs=map_kwargs,
                 )
                 plot_names.append(name)
 
@@ -411,14 +401,15 @@ class Plotter:
         -------
             Name of the saved plot file.
         """
+       
         map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
         # check for known keys in map_kwargs
         marker_size_base = map_kwargs_save.pop("marker_size", 1)
         scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
         marker = map_kwargs_save.pop("marker", "o")
-        vmin = map_kwargs_save.pop("vmin", None)
-        vmax = map_kwargs_save.pop("vmax", None)
-
+        vmin = map_kwargs_save[varname].pop("vmin", None)
+        vmax = map_kwargs_save[varname].pop("vmax", None)
+  
         # Create figure and axis objects
         fig = plt.figure(dpi=self.dpi_val)
         ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
@@ -445,7 +436,7 @@ class Plotter:
             vmin=vmin,
             vmax=vmax,
             linewidths=0.0,  # only markers, avoids aliasing for very small markers
-            **map_kwargs_save,
+            **map_kwargs_save[varname],
         )
 
         plt.colorbar(
