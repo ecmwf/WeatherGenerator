@@ -7,10 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import numpy as np
-from weathergen.evaluate.plotter import LinePlots, Plotter
 import logging
+
+import numpy as np
+
 _logger = logging.getLogger(__name__)
+
 
 def collect_streams(runs):
     """Get all unique streams across runs, sorted."""
@@ -22,7 +24,7 @@ def collect_channels(scores_dict, metric, region, runs):
     channels = set()
     if metric not in scores_dict or region not in scores_dict[metric]:
         return []
-    for stream, run_data in scores_dict[metric][region].items():
+    for _stream, run_data in scores_dict[metric][region].items():
         for run_id in runs:
             if run_id not in run_data:
                 continue
@@ -50,7 +52,9 @@ def plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary
                 run_ids.append(run_id)
 
             if selected_data:
-                _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
+                _logger.info(
+                    f"Creating plot for {metric} - {region} - {stream} - {ch}."
+                )
                 name = "_".join([metric, region] + sorted(set(run_ids)) + [stream, ch])
                 plotter.plot(
                     selected_data,

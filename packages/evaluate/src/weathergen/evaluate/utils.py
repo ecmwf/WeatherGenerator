@@ -18,10 +18,12 @@ import xarray as xr
 from tqdm import tqdm
 
 from weathergen.common.io import ZarrIO
+from weathergen.evaluate.plot_utils import (
+    plot_metric_region,
+)
 from weathergen.evaluate.plotter import LinePlots, Plotter
 from weathergen.evaluate.score import VerifiedData, get_score
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
-from weathergen.evaluate.plot_utils import collect_streams, collect_channels, plot_metric_region
 from weathergen.utils.config import Config
 
 _logger = logging.getLogger(__name__)
@@ -179,7 +181,7 @@ def get_data(
                 da_preds.append(da_preds_fs)
             if return_counts:
                 points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
-        
+
         # Safer than a list
         da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=False)}
         da_preds = {
@@ -599,7 +601,9 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
 
     for region in regions:
         for metric in metrics:
-            plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+            plot_metric_region(
+                metric, region, runs, scores_dict, plotter, print_summary
+            )
 
 
 ############# Utility functions ############

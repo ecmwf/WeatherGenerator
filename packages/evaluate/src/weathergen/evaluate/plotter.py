@@ -667,7 +667,7 @@ class LinePlots:
         title = "".join(c if c.isalnum() else " " for c in tag)
         plt.title(title)
         plt.legend(frameon=False)
-    
+
         if self.add_grid:
             plt.grid(True, linestyle="--", color="gray", alpha=0.5)
 
