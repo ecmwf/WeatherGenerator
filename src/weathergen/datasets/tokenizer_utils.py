@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 import torch
-from torch.nn.utils.rnn import pad_sequence
 from astropy_healpix.healpy import ang2pix
+from torch.nn.utils.rnn import pad_sequence
 
 from weathergen.datasets.utils import (
     r3tos2,
@@ -199,38 +199,38 @@ def tokenize_window_space(
     if local_coords:
         fp32 = torch.float32
         posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])  # prepend zero
-        B = len(idxs_ord)
+        len_idxs_ord = len(idxs_ord)
 
         # pad indices
         idxs_padded = pad_sequence(idxs_ord, batch_first=True, padding_value=-1)  
         mask = idxs_padded != -1  
 
-        Kmax = idxs_padded.shape[1]
-        N = posr3.shape[0]
+        k_max = idxs_padded.shape[1]
 
-        safe_idxs = idxs_padded.clamp(min=0)   
+        idxs_padded = idxs_padded.clamp(min=0)   
 
         # Gather positions directly
-        pos_padded = posr3[safe_idxs]          
+        pos_padded = posr3[idxs_padded]          
         pos_padded[~mask] = 0                  # zero out invalid
 
         # Batched rotation
-        pos_rot = torch.matmul(pos_padded, hpy_verts_rots.transpose(1,2))  
-
-        # Flatten + apply functions
-        pos_flat = pos_rot.reshape(-1, 3)      
+        # The shape of torch.matmul output is [len_idxs_ord, k_max, 3].
+        # So instead of having len_idxs_ord, separate sequences of k_max points each, 
+        # you now have one long list of len_idxs_ord*k_max points that can be processed.
+        pos_rot = torch.matmul(pos_padded, hpy_verts_rots.transpose(1,2)).reshape(-1, 3)  
+   
         mask_flat = mask.reshape(-1)           
 
         out_dim = n_coords(r3tos2(torch.zeros(1,3))).shape[-1]
-        out_flat = torch.zeros(mask_flat.size(0), out_dim, dtype=fp32, device=pos_flat.device)
+        out_flat = torch.zeros(mask_flat.size(0), out_dim, dtype=fp32)
 
-        out_flat[mask_flat] = n_coords(r3tos2(pos_flat[mask_flat]).to(fp32))
+        out_flat[mask_flat] = n_coords(r3tos2(pos_rot[mask_flat]).to(fp32))
 
         # Reshape back
-        coords_local = out_flat.view(B, Kmax, out_dim)  
+        coords_local = out_flat.view(len_idxs_ord, k_max, out_dim)  
 
         # Ragged list 
-        coords_local = [coords_local[b, :len(idxs_ord[b])] for b in range(B)]
+        coords_local = [coords_local[b, :len(idxs_ord[b])] for b in range(len_idxs_ord)]
     else:
         coords_local = torch.cat([torch.zeros_like(coords[0]).unsqueeze(0), coords])
         coords_local = [coords_local[idxs] for idxs in idxs_ord]
