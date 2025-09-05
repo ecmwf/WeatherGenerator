@@ -61,7 +61,7 @@ def s2tor3(lats, lons):
     """
     sin_lats = torch.sin(lats)
     cos_lats = torch.cos(lats)
-    
+
     # Calculate the x, y, and z coordinates using vectorized operations.
     x = sin_lats * torch.cos(lons)
     y = sin_lats * torch.sin(lons)
