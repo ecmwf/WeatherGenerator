@@ -11,6 +11,7 @@
 import torch
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
+from torch.nn.utils.parametrizations import spectral_norm
 
 
 class MLP(torch.nn.Module):
@@ -28,6 +29,7 @@ class MLP(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         name: str | None = None,
+        spec_norm=False,
     ):
         """Constructor"""
 
@@ -63,6 +65,8 @@ class MLP(torch.nn.Module):
             self.layers.append(torch.nn.Dropout(p=dropout_rate))
 
         self.layers.append(torch.nn.Linear(dim_hidden, dim_out))
+        if spec_norm:
+            self.layers[-1] = spectral_norm(self.layers[-1])
 
     def forward(self, *args):
         x, x_in, aux = args[0], args[0], args[-1]

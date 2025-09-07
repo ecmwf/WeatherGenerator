@@ -10,6 +10,8 @@
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
+from torch.nn.utils.parametrizations import spectral_norm
+
 
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
@@ -317,6 +319,8 @@ class ForecastingEngine:
                         )
                     )
                 # Add MLP block
+                # spec_norm = True if (i == (self.cf.fe_num_blocks - 1)) else False
+                spec_norm = True
                 self.fe_blocks.append(
                     MLP(
                         self.cf.ae_global_dim_embed,
@@ -326,6 +330,7 @@ class ForecastingEngine:
                         norm_type=self.cf.norm_type,
                         dim_aux=1,
                         norm_eps=self.cf.mlp_norm_eps,
+                        spec_norm=spec_norm,
                     )
                 )
 
@@ -335,8 +340,13 @@ class ForecastingEngine:
                 if m.bias is not None:
                     torch.nn.init.normal_(m.bias, mean=0, std=0.001)
 
+        def apply_spec_norm(m):
+            if isinstance(m, torch.nn.Linear):
+                spectral_norm(m)
+
         for block in self.fe_blocks:
             block.apply(init_weights_final)
+            # block.apply(apply_spec_norm)
 
         return self.fe_blocks
 
