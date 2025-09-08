@@ -184,11 +184,11 @@ def main():
 
     args = parser.parse_args()
 
-    if args.run_id_1 and  args.run_id_2:
+    if args.run_id_1 and args.run_id_2:
         if args.model_directory_1 is None:
-            args.model_directory_1 = _load_private_conf()["path_shared_working_dir"]+"models/"
+            args.model_directory_1 = _load_private_conf()["path_shared_working_dir"] + "models/"
         if args.model_directory_2 is None:
-            args.model_directory_2 = _load_private_conf()["path_shared_working_dir"]+"models/"
+            args.model_directory_2 = _load_private_conf()["path_shared_working_dir"] + "models/"
         config_files = [
             [args.run_id_1, args.model_directory_1],
             [args.run_id_2, args.model_directory_2],
@@ -224,8 +224,8 @@ def main():
         except Exception:
             logger.warning(
                 f"Failed to load config for run_id: {run_id} from {path}",
-                "Assuming epoch=0 and retrying."
-                )
+                "Assuming epoch=0 and retrying.",
+            )
             cfg = load_model_config(run_id=run_id, epoch=0, model_path=path)
         actual_run_id = cfg.get("run_id", run_id)
 
