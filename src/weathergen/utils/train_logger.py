@@ -120,7 +120,7 @@ class TrainLogger:
         log_vals += [lr]
 
         for st in self.cf.streams:
-            st_name = _clean_name(st["name"])
+            st_name = st["name"]
             loss = losses_all[st_name]
             stddev = stddev_all[st_name]
 
@@ -166,7 +166,7 @@ class TrainLogger:
         log_vals += [samples]
 
         for st in self.cf.streams:
-            st_name = _clean_name(st["name"])
+            st_name = st["name"]
             loss = losses_all[st_name]
             stddev = stddev_all[st_name]
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts_val):
