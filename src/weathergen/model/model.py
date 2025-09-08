@@ -62,7 +62,10 @@ class ModelParams(torch.nn.Module):
         # self.pe_embed = torch.zeros(len_token_seq, cf.ae_local_dim_embed, dtype=self.dtype)
 
         pe = torch.zeros(
-            self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed, dtype=self.dtype
+            self.num_healpix_cells,
+            cf.ae_local_num_queries,
+            cf.ae_global_dim_embed,
+            dtype=self.dtype,
         )
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
         # self.pe_global = pe
@@ -87,7 +90,7 @@ class ModelParams(torch.nn.Module):
         else:
             tokens_lens_value = nqs * s[1] * s[2]
         self.tokens_lens = torch.nn.Parameter(
-            tokens_lens_value * torch.ones(bs * s[1]+ 1, dtype=torch.int32), requires_grad=False
+            tokens_lens_value * torch.ones(bs * s[1] + 1, dtype=torch.int32), requires_grad=False
         )
         self.tokens_lens.data[0] = 0
         # self.tokens_lens = tokens_lens_value * torch.ones(bs * s[1], dtype=torch.int32)
@@ -129,7 +132,7 @@ class ModelParams(torch.nn.Module):
         dim_embed = cf.ae_local_dim_embed
         len_token_seq = 1024
         self.pe_embed.data.fill_(0.0)
-        position = torch.arange(0, len_token_seq,device=self.pe_embed.device).unsqueeze(1)
+        position = torch.arange(0, len_token_seq, device=self.pe_embed.device).unsqueeze(1)
         div = torch.exp(
             torch.arange(0, dim_embed, 2, device=self.pe_embed.device)
             * -(math.log(len_token_seq) / dim_embed),
@@ -190,7 +193,7 @@ class ModelParams(torch.nn.Module):
         self.q_cells_lens.data.fill_(1)
         self.q_cells_lens.data[0] = 0
 
-        #ensure all params have grad set to False
+        # ensure all params have grad set to False
 
         return
 
@@ -451,12 +454,11 @@ class Model(torch.nn.Module):
 
     def reset_parameters(self):
         def _reset_params(module):
-            if isinstance(module, nn.Linear):
-                module.reset_parameters()
-            elif isinstance(module, nn.LayerNorm):
+            if isinstance(module, nn.Linear | nn.LayerNorm):
                 module.reset_parameters()
             else:
                 pass
+
         self.apply(_reset_params)
 
     #########################################

@@ -16,9 +16,8 @@ import pdb
 import sys
 import time
 import traceback
-import os
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 import weathergen.utils.cli as cli
 import weathergen.utils.config as config
@@ -70,8 +69,8 @@ def inference_from_args(argl: list[str]):
 
     output_dir = f"./output/{timestamp}-{cf.run_id}"
 
-    # this line should probably come after the processes have been sorted out else we get lots of duplication due to
-    # multiple process in the multiGPU case
+    # this line should probably come after the processes have been sorted out else we get lots of 
+    # duplication due to multiple process in the multiGPU case
     init_loggers(
         logging_level=logging.DEBUG,
         critical_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-critical.txt"],
@@ -155,8 +154,8 @@ def train_continue_from_args(argl: list[str]):
 
     output_dir = f"./output/{timestamp}-{cf.run_id}"
 
-    # this line should probably come after the processes have been sorted out else we get lots of duplication due to
-    # multiple process in the multiGPU case
+    # this line should probably come after the processes have been sorted out else we get lots of 
+    # duplication due to multiple process in the multiGPU case
     init_loggers(
         logging_level=logging.DEBUG,
         critical_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-critical.txt"],
@@ -214,8 +213,8 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
     output_dir = f"./output/{timestamp}-{cf.run_id}"
 
-    # this line should probably come after the processes have been sorted out else we get lots of duplication due to
-    # multiple process in the multiGPU case
+    # this line should probably come after the processes have been sorted out else we get lots of 
+    # duplication due to multiple process in the multiGPU case
     init_loggers(
         logging_level=logging.DEBUG,
         critical_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-critical.txt"],

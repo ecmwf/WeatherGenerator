@@ -11,7 +11,6 @@ import logging
 import os
 import pathlib
 import sys
-from functools import cache
 
 from weathergen.utils.config import _load_private_conf
 

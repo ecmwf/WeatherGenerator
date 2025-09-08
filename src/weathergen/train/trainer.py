@@ -8,54 +8,43 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-import os
-
+import itertools
 import re
 import time
-from typing import Any
-import itertools
-
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
+import torch.nn as nn
 import tqdm
 from omegaconf import OmegaConf
 from torch import Tensor
-from torch.distributed.fsdp import FullOptimStateDictConfig, FullStateDictConfig, StateDictType
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    MixedPrecision,
-    ShardingStrategy,
-)
 
 # FSDP2
-from torch.distributed.fsdp import fully_shard, FSDPModule, MixedPrecisionPolicy
-from torch.distributed.tensor import distribute_tensor, DTensor
+from torch.distributed.fsdp import (
+    MixedPrecisionPolicy,
+    fully_shard,
+)
+from torch.distributed.tensor import DTensor, distribute_tensor
 
 import weathergen.utils.config as config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
-from weathergen.model.model import Model, ModelParams
-from weathergen.model.layers import MLP
 from weathergen.model.attention import (
+    MultiCrossAttentionHeadVarlen,
+    MultiCrossAttentionHeadVarlenSlicedQ,
     MultiSelfAttentionHead,
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
-    MultiCrossAttentionHeadVarlen,
-    MultiCrossAttentionHeadVarlenSlicedQ,
 )
-from weathergen.model.engines import (
-    LocalAssimilationEngine,
-    Local2GlobalAssimilationEngine,
-    GlobalAssimilationEngine,
-    TargetPredictionEngine,
-)
+from weathergen.model.layers import MLP
+from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
-from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
+from weathergen.utils.distributed import all_gather_vlen, is_root
 from weathergen.utils.logger import logger
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.validation_io import write_output
@@ -68,11 +57,7 @@ class Trainer(TrainerBase):
         self.checkpoint_freq = checkpoint_freq
         self.print_freq = print_freq
 
-    def init(
-        self,
-        cf: Config,
-        devices
-    ):
+    def init(self, cf: Config, devices):
         self.cf = OmegaConf.merge(
             OmegaConf.create(
                 {
@@ -95,7 +80,7 @@ class Trainer(TrainerBase):
 
         self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
-        self.devices = devices 
+        self.devices = devices
 
         # Get world_size of previous, to be continued run before
         # world_size gets overwritten by current setting during init_ddp()

@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datetime
 import errno
 import logging
 import os
@@ -18,7 +17,6 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing
 
-from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
 
@@ -77,7 +75,7 @@ class TrainerBase:
             _logger.info("Distributed training is not available.")
             return
 
-        if not dist.is_initialized() and (cf.with_ddp == True or cf.with_fsdp == True):
+        if not dist.is_initialized() and (cf.with_ddp or cf.with_fsdp):
             # These environment variables are typically set by the launch utility
             # (e.g., torchrun, Slurm)
             local_rank = int(os.environ.get("LOCAL_RANK", "-1"))

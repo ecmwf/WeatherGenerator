@@ -47,7 +47,7 @@ class LearningRateScheduler:
 
         self.optimizer = optimizer
         self.batch_size = batch_size
-        self.world_size = world_size 
+        self.world_size = world_size
 
         self.n_steps_warmup = n_steps_warmup
         self.n_steps_decay = n_steps_decay
