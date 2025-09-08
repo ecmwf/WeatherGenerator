@@ -30,7 +30,7 @@ import pandas as pd
 import yaml
 from omegaconf import OmegaConf
 
-from weathergen.utils.config import load_model_config, _load_private_conf
+from weathergen.utils.config import _load_private_conf, load_model_config
 
 
 def truncate_value(value, max_length=50):
