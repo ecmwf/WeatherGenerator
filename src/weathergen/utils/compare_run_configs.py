@@ -30,7 +30,7 @@ import pandas as pd
 import yaml
 from omegaconf import OmegaConf
 
-from weathergen.utils.config import load_model_config
+from weathergen.utils.config import load_model_config, _load_private_conf
 
 
 def truncate_value(value, max_length=50):
@@ -184,7 +184,11 @@ def main():
 
     args = parser.parse_args()
 
-    if args.run_id_1 and args.model_directory_1 and args.run_id_2 and args.model_directory_2:
+    if args.run_id_1 and  args.run_id_2:
+        if args.model_directory_1 is None:
+            args.model_directory_1 = _load_private_conf()["path_shared_working_dir"]+"models/"
+        if args.model_directory_2 is None:
+            args.model_directory_2 = _load_private_conf()["path_shared_working_dir"]+"models/"
         config_files = [
             [args.run_id_1, args.model_directory_1],
             [args.run_id_2, args.model_directory_2],
@@ -215,7 +219,14 @@ def main():
             run_id = os.path.splitext(os.path.basename(path))[0]
 
         logger.info(f"Loading config for run_id: {run_id} from {path}")
-        cfg = load_model_config(run_id=run_id, epoch=None, model_path=path)
+        try:
+            cfg = load_model_config(run_id=run_id, epoch=None, model_path=path)
+        except Exception as e:
+            logger.warning(
+                f"Failed to load config for run_id: {run_id} from {path}: {e}",
+                "Assuming epoch=0 and retrying."
+                )
+            cfg = load_model_config(run_id=run_id, epoch=0, model_path=path)
         actual_run_id = cfg.get("run_id", run_id)
 
         # Process streams and flatten
