@@ -15,6 +15,7 @@ import xarray as xr
 
 _logger = logging.getLogger(__name__)
 
+
 def match_climatology_time(
     target_datetime: pd.Timestamp, clim_data: xr.Dataset
 ) -> int | None:
@@ -36,7 +37,7 @@ def match_climatology_time(
     # Convert numpy datetime64 to pandas datetime if needed
     if isinstance(target_datetime, np.datetime64):
         target_datetime = pd.to_datetime(target_datetime)
-    
+
     target_doy = target_datetime.dayofyear
     target_hour = target_datetime.hour
 
@@ -45,7 +46,6 @@ def match_climatology_time(
     clim_doys = clim_times.dayofyear
     clim_hours = clim_times.hour
 
-    # Find matching time using vectorized comparison
     time_matches = (clim_doys == target_doy) & (clim_hours == target_hour)
     matching_indices = np.where(time_matches)[0]
 
@@ -62,3 +62,62 @@ def match_climatology_time(
                 f"Found {len(matching_indices)} matching times, using first one"
             )
         return matching_indices[0]
+
+
+def find_climatology_indices(
+    target_lats: np.ndarray,
+    target_lons: np.ndarray,
+    clim_lats: np.ndarray,
+    clim_lons: np.ndarray,
+) -> np.ndarray:
+    """
+    Function to find climatology indices matching target coordinates with tolerance.
+
+    This function performs 2D coordinate matching between target coordinates and
+    climatology coordinates using approximate matching with 1e-10 tolerance.
+
+    Parameters
+    ----------
+    target_lats : np.ndarray
+        Target latitude coordinates (1D array)
+    target_lons : np.ndarray
+        Target longitude coordinates (1D array)
+    clim_lats : np.ndarray
+        Climatology latitude coordinates (1D array)
+    clim_lons : np.ndarray
+        Climatology longitude coordinates (1D array)
+
+    Returns
+    -------
+    np.ndarray
+        Array of climatology indices for each target coordinate.
+        Shape: (len(target_lats),). Contains -1 for coordinates with no match.
+    """
+
+    # Convert to numpy arrays if needed
+    target_lats = np.asarray(target_lats)
+    target_lons = np.asarray(target_lons)
+    clim_lats = np.asarray(clim_lats)
+    clim_lons = np.asarray(clim_lons)
+
+    # Hardcode conversion of clim_lons from 0-360 to -180-180
+    clim_lons = clim_lons - 180
+
+    # Create result array initialized with -1 (no match)
+    result_indices = np.full(len(target_lats), -1, dtype=np.int32)
+
+    # Approximate matching with 1e-10 tolerance
+    tolerance = 1e-5
+    for i, (target_lat, target_lon) in enumerate(
+        zip(target_lats, target_lons, strict=True)
+    ):
+        # Find approximate matches using tolerance-based comparison
+        lat_match = np.abs(clim_lats - target_lat) <= tolerance
+        lon_match = np.abs(clim_lons - target_lon) <= tolerance
+        coord_match = lat_match & lon_match
+
+        match_indices = np.where(coord_match)[0]
+        if len(match_indices) > 0:
+            result_indices[i] = match_indices[0]  # Use first match
+
+    return result_indices

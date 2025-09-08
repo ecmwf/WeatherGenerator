@@ -18,7 +18,10 @@ import xarray as xr
 from tqdm import tqdm
 
 from weathergen.common.io import ZarrIO
-from weathergen.evaluate.clim_utils import match_climatology_time
+from weathergen.evaluate.clim_utils import (
+    find_climatology_indices,
+    match_climatology_time,
+)
 from weathergen.evaluate.plotter import LinePlots, Plotter
 from weathergen.evaluate.score import VerifiedData, get_score
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
@@ -226,14 +229,36 @@ def align_clim_data(
             .transpose("grid_points", "channels")
         )
 
-        clim_values = prepared_clim_data.values
-
         for sample in tqdm(samples):
-            sample_mask = target_data.sample.values == sample
+            if len(samples) > 1:
+                sample_mask = target_data.sample.values == sample
+                target_lats = target_data.loc[{"ipoint": sample_mask}].lat.values
+                target_lons = target_data.loc[{"ipoint": sample_mask}].lon.values
+            else:
+                target_lats = target_data.lat.values
+                target_lons = target_data.lon.values
+            clim_lats = prepared_clim_data.latitude.values
+            clim_lons = prepared_clim_data.longitude.values
+            clim_indices = find_climatology_indices(
+                target_lats, target_lons, clim_lats, clim_lons
+            )
+
+            # Check for unmatched coordinates
+            unmatched_mask = clim_indices == -1
+            if np.any(unmatched_mask):
+                n_unmatched = np.sum(unmatched_mask)
+                raise ValueError(
+                    f"Found {n_unmatched} target coordinates with no matching climatology coordinates. "
+                    f"This will cause incorrect ACC calculations. "
+                    f"Check coordinate alignment between target and climatology data."
+                )
+
+            clim_values = prepared_clim_data.isel(grid_points=clim_indices).values
             try:
-                # Assuming that coordinates match, we can directly assign
-                # TODO: implement check if coords match
-                aligned_clim_data[fstep].loc[{"ipoint": sample_mask}] = clim_values
+                if len(samples) > 1:
+                    aligned_clim_data[fstep].loc[{"ipoint": sample_mask}] = clim_values
+                else:
+                    aligned_clim_data[fstep] = clim_values
             except (ValueError, IndexError) as e:
                 raise ValueError(
                     f"Failed to align climatology data with target data for ACC calculation. "
