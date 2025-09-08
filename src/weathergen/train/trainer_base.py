@@ -23,7 +23,8 @@ from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
 
 _logger = logging.getLogger(__name__)
-PORT=1345
+PORT = 1345
+
 
 class TrainerBase:
     def __init__(self):
@@ -68,73 +69,77 @@ class TrainerBase:
 
     @staticmethod
     def init_ddp(cf):
+        """Initializes the distributed environment."""
         rank = 0
-        num_ranks = 1
+        world_size = 1
 
-        master_node = os.environ.get("MASTER_ADDR", "-1")
-        if master_node == "-1":
-            cf.with_ddp = False
-            cf.rank = rank
-            cf.num_ranks = num_ranks
-            _logger.info(
-                "DDP not initialized. MASTER_ADDR not set. Running in single process mode."
-            )
-            _logger.info(f"rank: {rank} has run_id: {cf.run_id}")
+        if not dist.is_available():
+            _logger.info("Distributed training is not available.")
             return
 
-        rank = int(os.environ.get("LOCAL_RANK",-1))
-        if rank == -1:
-            # Called using SLURM instead of torchrun
-            local_rank = int(os.environ.get("SLURM_LOCALID"))
-            ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
-            rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
+        if not dist.is_initialized() and (cf.with_ddp == True or cf.with_fsdp == True):
+            # These environment variables are typically set by the launch utility
+            # (e.g., torchrun, Slurm)
+            local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
+            if local_rank == -1:
+                # Called using SLURM instead of torchrun
+                local_rank = int(os.environ.get("SLURM_LOCALID"))
+            rank = int(os.environ.get("RANK", "-1"))
+            if rank == -1:
+                ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
+                rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
+            world_size = int(os.environ.get("WORLD_SIZE", "-1"))
+            if world_size == -1:
+                # Called using SLURM instead of torchrun
+                world_size = int(os.environ.get("SLURM_NTASKS"))
+            master_addr = os.environ.get("MASTER_ADDR", "localhost")
+            master_port = os.environ.get("MASTER_PORT", f"{PORT}")  # Default port
 
-        num_ranks = int(os.environ.get("WORLD_SIZE", -1))
-        if num_ranks == -1:
-            # Called using SLURM instead of torchrun
-            num_ranks = int(os.environ.get("SLURM_NTASKS"))
+            if torch.accelerator.is_available():
+                device_type = torch.accelerator.current_accelerator()
+                device = torch.device(f"{device_type}:{rank}")
+                torch.accelerator.set_device_index(rank)
+                _logger.info(f"DDP initialization: rank={rank}, world_size={world_size}")
+            else:
+                device = torch.device("cpu")
+                _logger.info(f"Running on device {device}")
 
-        if torch.accelerator.is_available():
-            device_type = torch.accelerator.current_accelerator()
-            device = torch.device(f"{device_type}:{rank}")
-            torch.accelerator.set_device_index(rank)
-            _logger.info(
-                f"DDP initialization: rank={rank}, num_ranks={num_ranks}"
+            backend = torch.distributed.get_default_backend_for_device(device)
+            torch.distributed.init_process_group(
+                backend=backend,
+                world_size=world_size,
+                device_id=device,
+                rank=rank,
+                init_method=f"tcp://{master_addr}:{master_port}",
             )
-        else:
-            device = torch.device("cpu")
-            _logger.info(f"Running on device {device}")
+            _logger.info(f"Process group initialized ({backend}).")
 
-        backend = torch.distributed.get_default_backend_for_device(device)
-        torch.distributed.init_process_group(backend=backend, world_size=2, device_id=device)
-
-
-        if rank == 0:
-            # Check that port 1345 is available, raise an error if not
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                try:
-                    s.bind((master_node, PORT))
-                except OSError as e:
-                    if e.errno == errno.EADDRINUSE:
-                        _logger.error(
-                            (
-                                f"Port 1345 is already in use on {master_node}.",
-                                " Please check your network configuration.",
+            if rank == 0:
+                # Check that port 1345 is available, raise an error if not
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    try:
+                        s.bind((master_addr, PORT))
+                    except OSError as e:
+                        if e.errno == errno.EADDRINUSE:
+                            _logger.error(
+                                (
+                                    f"Port 1345 is already in use on {master_addr}.",
+                                    " Please check your network configuration.",
+                                )
                             )
-                        )
-                        raise
-                    else:
-                        _logger.error(f"Error while binding to port 1345 on {master_node}: {e}")
-                        raise
+                            raise
+                        else:
+                            _logger.error(f"Error while binding to port 1345 on {master_addr}: {e}")
+                            raise
 
-        if is_root():
-            _logger.info("DDP initialized: root.")
-        # Wait for all ranks to reach this point
-        dist.barrier()
+            if is_root():
+                _logger.info("DDP initialized: root.")
+            # Wait for all ranks to reach this point
+            dist.barrier()
 
-        cf.rank = rank
-        cf.num_ranks = num_ranks
-        cf.with_ddp = True
+            cf.rank = rank
+            cf.world_size = world_size
+            cf.with_ddp = True
 
         return cf
 
