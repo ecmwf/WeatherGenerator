@@ -313,6 +313,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 time_win1 = self.time_window_handler.window(idx)
 
+                # Sample masking strategy once per batch item
+                if hasattr(self.tokenizer, "masker"):
+                    self.tokenizer.masker.set_batch_strategy()
+
                 streams_data: list[StreamData] = []
 
                 # for all streams
@@ -380,6 +384,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # merge inputs for sources and targets for current stream
                     stream_data.merge_inputs()
                     streams_data += [stream_data]
+
+                # Reset masking strategy for next batch item
+                if hasattr(self.tokenizer, "masker"):
+                    self.tokenizer.masker.reset_batch_strategy()
 
                 # skip completely empty batch item or when all targets are empty -> no grad
                 if not (all(s.empty() or s.target_empty() for s in streams_data)):
