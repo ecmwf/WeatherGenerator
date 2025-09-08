@@ -143,23 +143,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # MODIFIES config !!!
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
                 stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
-
-                stream_info["target_channel_weights"] = [
-                    stream_info["channel_weights"].get(ch, 1.0)
-                    if stream_info.get("channel_weights", None)  # .get(ch, None)
-                    else 1.0
-                    for ch in ds.target_channels
-                ]
-
-                if stream_info.get("channel_weights", None) is not None:
-                    # Check whether all given channel_weights could be matched to a channel.
-                    ch_unmatched = [
-                        ch for ch in stream_info["channel_weights"] if ch not in ds.target_channels
-                    ]
-                    if len(ch_unmatched) > 0:
-                        logger.info(
-                            f"Unmatched channel_weights in {stream_info.name}: {ch_unmatched}"
-                        )
+                stream_info["target_channel_weights"] = (
+                    ds.target_channel_weights
+                    if ds.target_channel_weights is not None
+                    else [1.0 for _ in ds.target_channels]
+                )
 
                 self.streams_datasets[-1] += [ds]
 
