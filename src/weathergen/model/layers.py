@@ -9,8 +9,23 @@
 
 
 import torch
+import torch.nn as nn
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
+
+
+class NamedLinear(torch.nn.Module):
+    def __init__(self, name: str | None = None, **kwargs):
+        super(NamedLinear, self).__init__()
+        self.linear = nn.Linear(**kwargs)
+        if name is not None:
+            self.name = name
+
+    def reset_parameters(self):
+        self.linear.reset_parameters()
+
+    def forward(self, x):
+        return self.linear(x)
 
 
 class MLP(torch.nn.Module):
@@ -27,10 +42,14 @@ class MLP(torch.nn.Module):
         norm_type="LayerNorm",
         dim_aux=None,
         norm_eps=1e-5,
+        name: str | None = None,
     ):
         """Constructor"""
 
         super(MLP, self).__init__()
+
+        if name is not None:
+            self.name = name
 
         assert num_layers >= 2
 
