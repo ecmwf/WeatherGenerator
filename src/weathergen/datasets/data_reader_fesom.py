@@ -180,28 +180,24 @@ class DataReaderFesom(DataReaderTimestep):
 
         source_channels = self._stream_info.get("source")
         source_excl = self._stream_info.get("source_exclude")
-        self.source_channels, self.source_idx = (
-            self.select(source_channels, source_excl)
-            if source_channels or source_excl
-            else (self.colnames, self.cols_idx)
-        )
+        self.source_channels, self.source_idx = self.select_channels(source_channels, source_excl)
 
         target_channels = self._stream_info.get("target")
         target_excl = self._stream_info.get("target_exclude")
-        self.target_channels, self.target_idx = (
-            self.select(target_channels, target_excl)
-            if target_channels or target_excl
-            else (self.colnames, self.cols_idx)
-        )
+        self.target_channels, self.target_idx = self.select_channels(target_channels, target_excl)
 
         self.geoinfo_channels = []
         self.geoinfo_idx = []
 
         self._initialized = True
 
-    def select(
+    def select_channels(
         self, ch_filters: list[str] | None, excl: list[str] | None = None
     ) -> tuple[list[str], NDArray]:
+        """
+        Allow user to specify which columns they want to access.
+        Get functions only returned for these specified columns.
+        """
         if excl and ch_filters:
             mask = [
                 any(f == c for f in ch_filters) and all(ex not in c for ex in excl)
@@ -212,7 +208,7 @@ class DataReaderFesom(DataReaderTimestep):
         elif excl:
             mask = [all(ex not in c for ex in excl) for c in self.colnames]
         else:
-            assert False, "Cannot use select with both ch_filters and excl as None"
+            return self.colnames, self.cols_idx
 
         selected_cols_idx = self.cols_idx[np.where(mask)[0]]
         selected_colnames = [self.colnames[i] for i in np.where(mask)[0]]
