@@ -221,9 +221,9 @@ def main():
         logger.info(f"Loading config for run_id: {run_id} from {path}")
         try:
             cfg = load_model_config(run_id=run_id, epoch=None, model_path=path)
-        except Exception as e:
+        except Exception:
             logger.warning(
-                f"Failed to load config for run_id: {run_id} from {path}: {e}",
+                f"Failed to load config for run_id: {run_id} from {path}",
                 "Assuming epoch=0 and retrying."
                 )
             cfg = load_model_config(run_id=run_id, epoch=0, model_path=path)
