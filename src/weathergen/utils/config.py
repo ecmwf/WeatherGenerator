@@ -16,7 +16,7 @@ from pathlib import Path
 
 import torch
 import yaml
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from weathergen.train.utils import get_run_id
 
@@ -154,11 +154,6 @@ def _load_streams_in_config(config: Config) -> Config:
     config = config.copy()
     if streams_directory is not None:
         streams_directory = Path(streams_directory)
-        if not streams_directory.is_dir():
-            msg = f"Streams directory {streams_directory} does not exist."
-            raise FileNotFoundError(msg)
-
-        _logger.info(f"Loading streams from {streams_directory}")
         config.streams = load_streams(streams_directory)
     return config
 
@@ -303,9 +298,29 @@ def _load_default_conf() -> Config:
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
+    # TODO: might want to put this into config later instead of hardcoding it here...
+    streams_history = {
+        "streams_anemoi": "era5_1deg",
+        "streams_mixed": "era5_nppatms_synop",
+        "streams_ocean": "fesom",
+        "streams_icon": "icon",
+        "streams_mixed_experimental": "cerra_seviri",
+    }
     if not streams_directory.is_dir():
-        msg = f"Streams directory {streams_directory} does not exist."
-        raise FileNotFoundError(msg)
+        streams_directory_config = streams_directory
+        dirs = [streams_directory]
+        while streams_directory.name in streams_history and not streams_directory.is_dir():
+            streams_directory = streams_directory.with_name(streams_history[streams_directory.name])
+            dirs.append(streams_directory)
+        if not streams_directory.is_dir():
+            msg = f"Could not find stream directory, nor its history: {[str(dir) for dir in dirs]}"
+            raise FileNotFoundError(msg)
+        _logger.info(
+            f"Streams directory {streams_directory} found in "
+            f"history for {streams_directory_config}. "
+            "Note: This change will not be reflected in the config. "
+            "Please update the 'streams_directory' variable manually."
+        )
 
     # read all reportypes from directory, append to existing ones
     streams_directory = streams_directory.absolute()
@@ -315,7 +330,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
     streams = {}
     # exclude temp files starting with "." or "#" (eg. emacs, vim, macos savefiles)
     stream_files = sorted(streams_directory.rglob("[!.#]*.yml"))
-    _logger.info(f"discover stream configs: {', '.join(map(str, stream_files))}")
+    _logger.info(f"Discover stream configs: {', '.join(map(str, stream_files))}")
     for config_file in stream_files:
         try:
             config = OmegaConf.load(config_file)
@@ -404,3 +419,53 @@ def get_dtype(value: str) -> torch.dtype:
         raise NotImplementedError(
             f"Dtype {value} is not recognized, choose either, bf16, fp16, or fp32"
         )
+
+
+def validate_forecast_policy_and_steps(cf: OmegaConf):
+    """
+    Validates the forecast policy and steps within a configuration object.
+
+    This method enforces specific rules for the `forecast_steps` attribute, which can be
+    either a single integer or a list of integers, ensuring consistency with the
+    `forecast_policy` attribute.
+
+    The validation logic is as follows:
+    - If `cf.forecast_steps` is a single integer, a `forecast_policy` must be defined
+    (i.e., not None or empty) only if `forecast_steps` is unequal to 0.
+    - If `cf.forecast_steps` is a list, it must be non-empty, and all of its elements
+    must be non-negative integers. Additionally, a `forecast_policy` must be
+    defined if any of the forecast steps in the list are greater than 0.
+
+    Args:
+        cf (OmegaConf): The configuration object containing the `forecast_steps`
+                        and `forecast_policy` attributes.
+
+    Raises:
+        TypeError: If `cf.forecast_steps` is not an integer or a non-empty list.
+        AssertionError: If a `forecast_policy` is required but not provided, or
+                        if `forecast_step` is negative while `forecast_policy` is provided, or
+                        if any of the forecast steps in a list are negative.
+    """
+    provide_forecast_policy = (
+        "A 'forecast_policy' must be specified when 'forecast_steps' is not zero. "
+    )
+    valid_forecast_policies = (
+        "Valid values for 'forecast_policy' are, e.g., 'fixed' when using constant "
+        "forecast steps throughout the training, or 'sequential' when varying the forecast "
+        "steps over epochs, such as, e.g., 'forecast_steps: [2, 2, 4, 4]'. "
+    )
+    valid_forecast_steps = (
+        "'forecast_steps' must be a positive integer or a non-empty list of positive integers. "
+    )
+    if isinstance(cf.forecast_steps, int):
+        assert cf.forecast_policy and cf.forecast_steps > 0 if cf.forecast_steps != 0 else True, (
+            provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
+        )
+    elif isinstance(cf.forecast_steps, ListConfig) and len(cf.forecast_steps) > 0:
+        assert (
+            cf.forecast_policy and all(step >= 0 for step in cf.forecast_steps)
+            if any(n > 0 for n in cf.forecast_steps)
+            else True
+        ), provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
+    else:
+        raise TypeError(valid_forecast_steps)

@@ -30,7 +30,8 @@ from weathergen.model.engines import (
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
-from weathergen.model.layers import MLP
+from weathergen.model.layers import MLP, NamedLinear
+from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.logger import logger
@@ -202,6 +203,14 @@ class Model(torch.nn.Module):
         # local assimilation engine
         self.ae_local_blocks = LocalAssimilationEngine(cf).create()
 
+        if cf.latent_noise_kl_weight > 0.0:
+            self.interpolate_latents = LatentInterpolator(
+                gamma=cf.latent_noise_gamma,
+                dim=cf.ae_local_dim_embed,
+                use_additive_noise=cf.latent_noise_use_additive_noise,
+                deterministic=cf.latent_noise_deterministic_latents,
+            )
+
         ##############
         # local -> global assimilation engine adapter
         self.ae_adapter = Local2GlobalAssimilationEngine(cf).create()
@@ -260,6 +269,8 @@ class Model(torch.nn.Module):
         self.pred_heads = torch.nn.ModuleList()
 
         for i_obs, si in enumerate(cf.streams):
+            stream_name = si.get("name", i_obs)
+
             # extract and setup relevant parameters
             etc = si["embed_target_coords"]
             tro_type = si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
@@ -299,7 +310,12 @@ class Model(torch.nn.Module):
             # embedding network for coordinates
             if etc["net"] == "linear":
                 self.embed_target_coords.append(
-                    torch.nn.Linear(dim_coord_in, dims_embed[0], bias=False)
+                    NamedLinear(
+                        f"embed_target_coords_{stream_name}",
+                        in_features=dim_coord_in,
+                        out_features=dims_embed[0],
+                        bias=False,
+                    )
                 )
             elif etc["net"] == "mlp":
                 self.embed_target_coords.append(
@@ -310,6 +326,7 @@ class Model(torch.nn.Module):
                         with_residual=False,
                         dropout_rate=dropout_rate,
                         norm_eps=self.cf.mlp_norm_eps,
+                        stream_name=f"embed_target_coords_{stream_name}",
                     )
                 )
             else:
@@ -326,6 +343,7 @@ class Model(torch.nn.Module):
                         dropout_rate=dropout_rate,
                         norm_type=cf.norm_type,
                         norm_eps=self.cf.mlp_norm_eps,
+                        stream_name=f"pred_adapter_kv_{stream_name}",
                     )
                 )
             else:
@@ -345,6 +363,7 @@ class Model(torch.nn.Module):
                 tr_mlp_hidden_factor,
                 softcap,
                 tro_type,
+                stream_name=stream_name,
             )
 
             self.target_token_engines.append(tte)
@@ -362,6 +381,7 @@ class Model(torch.nn.Module):
                     si["pred_head"]["ens_size"],
                     norm_type=cf.norm_type,
                     final_activation=final_activation,
+                    stream_name=stream_name,
                 )
             )
 
@@ -493,7 +513,7 @@ class Model(torch.nn.Module):
         tokens = self.embed_cells(model_params, streams_data)
 
         # local assimilation engine and adapter
-        tokens = self.assimilate_local(model_params, tokens, source_cell_lens)
+        tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
 
         tokens = self.assimilate_global(model_params, tokens)
 
@@ -524,7 +544,7 @@ class Model(torch.nn.Module):
             )
         ]
 
-        return preds_all
+        return preds_all, posteriors
 
     #########################################
     def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
@@ -613,8 +633,15 @@ class Model(torch.nn.Module):
         )
 
         # # local assimilation model
-        # for block in self.ae_local_blocks :
-        #   tokens = checkpoint( block, tokens, cell_lens, use_reentrant=False)
+        # for block in self.ae_local_blocks:
+        #     tokens = checkpoint(block, tokens, cell_lens, use_reentrant=False)
+
+        # if self.cf.latent_noise_kl_weight > 0.0:
+        #     tokens, posteriors = self.interpolate_latents.interpolate_with_noise(
+        #         tokens, sampling=self.training
+        #     )
+        # else:
+        #     tokens, posteriors = tokens, 0.0
 
         # for block in self.ae_adapter:
         #     tokens_global = checkpoint(
@@ -631,6 +658,7 @@ class Model(torch.nn.Module):
         cell_lens = cell_lens[1:]
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_all = []
+        posteriors = []
         zero_pad = torch.zeros(1, device="cuda", dtype=torch.int32)
         for i in range((cell_lens.shape[0]) // clen):
             # make sure we properly catch all elements in last chunk
@@ -652,6 +680,14 @@ class Model(torch.nn.Module):
             for block in self.ae_local_blocks:
                 tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=False)
 
+            if self.cf.latent_noise_kl_weight > 0.0:
+                tokens_c, posteriors_c = self.interpolate_latents.interpolate_with_noise(
+                    tokens_c, sampling=self.training
+                )
+                posteriors += [posteriors_c]
+            else:
+                tokens_c, posteriors = tokens_c, 0.0
+
             for block in self.ae_adapter:
                 tokens_global_c = checkpoint(
                     block,
@@ -672,7 +708,7 @@ class Model(torch.nn.Module):
             + model_params.pe_global
         ).flatten(1, 2)
 
-        return tokens_global
+        return tokens_global, posteriors
 
     #########################################
     def assimilate_global(self, model_params: ModelParams, tokens: torch.Tensor) -> torch.Tensor:

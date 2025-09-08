@@ -18,12 +18,13 @@ from omegaconf import OmegaConf
 
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
+    check_availability,
     metric_list_to_json,
     plot_data,
     plot_summary,
     retrieve_metric_from_json,
 )
-from weathergen.utils.config import _REPO_ROOT, load_config, set_paths
+from weathergen.utils.config import _REPO_ROOT, load_config, load_model_config
 
 _logger = logging.getLogger(__name__)
 
@@ -46,12 +47,14 @@ def evaluate_from_args(argl: list[str]) -> None:
     )
 
     args = parser.parse_args(argl)
+    evaluate_from_config(OmegaConf.load(args.config))
 
+
+def evaluate_from_config(cfg):
     # configure logging
     logging.basicConfig(level=logging.INFO)
 
     # load configuration
-    cfg = OmegaConf.load(args.config)
 
     runs = cfg.run_ids
 
@@ -72,17 +75,28 @@ def evaluate_from_args(argl: list[str]) -> None:
     for run_id, run in runs.items():
         _logger.info(f"RUN {run_id}: Getting data...")
 
-        # Allow for run ID specific directories
-        # If results_base_dir is not provided, default paths are used
-        results_base_dir = run.get("results_base_dir", None)
+        # Load model configuration and set (run-id specific) directories
+        # If results_base_dir and model_base_dir are not provided, default paths are used
+        model_base_dir = run.get("model_base_dir", None)
 
-        if results_base_dir is None:
-            cf_run = load_config(private_paths, run_id, run["epoch"])
-            cf_run = set_paths(cf_run)
-            results_base_dir = Path(cf_run["run_path"])
+        if private_paths:
+            _logger.info(
+                f"Loading config for run {run_id} from private paths: {private_paths}"
+            )
+            run_cfg = load_config(private_paths, run_id, run["epoch"])
+        else:
+            _logger.info(
+                f"Loading config for run {run_id} from model directory: {model_base_dir}"
+            )
+            run_cfg = load_model_config(run_id, run["epoch"], model_base_dir)
 
+        results_base_dir = run.get(
+            "results_base_dir", None
+        )  # base directory where results will be stored
+        if not results_base_dir:
+            results_base_dir = Path(run_cfg["run_path"])
             logging.info(
-                f"Results directory obtained automatically: {results_base_dir}"
+                f"Results directory obtained from model config: {results_base_dir}"
             )
         else:
             logging.info(f"Results directory parsed: {results_base_dir}")
@@ -112,7 +126,7 @@ def evaluate_from_args(argl: list[str]) -> None:
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                _ = plot_data(cfg, results_dir, runplot_dir, stream, stream_dict)
+                _ = plot_data(cfg, run_cfg, results_dir, runplot_dir, stream)
 
             if stream_dict.get("evaluation"):
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
@@ -130,27 +144,21 @@ def evaluate_from_args(argl: list[str]) -> None:
                                 metric,
                                 run.epoch,
                             )
-
-                            # check if channels unchanged from previous config
-                            channels = cfg["run_ids"][run_id]["streams"][stream].get(
-                                "channels"
+                            checked, (channels, fsteps, samples) = check_availability(
+                                cfg, stream, results_dir, metric_data, mode="evaluation"
                             )
-                            missing_channels = []
-                            for ch in channels:
-                                if ch not in metric_data["channel"].values:
-                                    missing_channels.append(ch)
-                            if missing_channels:
-                                _logger.info(
-                                    f"Channels {missing_channels} do not appear in saved scores for {metric}. Recomputing."
-                                )
+                            if not checked:
                                 metrics_to_compute.append(metric)
                             else:
+                                # simply select the chosen eval channels, samples, fsteps here...
                                 scores_dict[metric][region][stream][run_id] = (
-                                    metric_data
+                                    metric_data.sel(
+                                        sample=samples,
+                                        channel=channels,
+                                        forecast_step=fsteps,
+                                    )
                                 )
-
-                        # TODO update retrieve_metric_from_json to avoid having to catch errors
-                        except (FileNotFoundError, KeyError, ValueError):
+                        except (FileNotFoundError, KeyError):
                             metrics_to_compute.append(metric)
 
                     if metrics_to_compute:
@@ -172,9 +180,10 @@ def evaluate_from_args(argl: list[str]) -> None:
                         scores_dict[metric][region][stream][run_id] = all_metrics.sel(
                             {"metric": metric}
                         )
-    # plot summary
 
-    if scores_dict and cfg.summary_plots:
+    # plot summary
+    summary_plots = cfg.get("summary_plots", True)
+    if scores_dict and summary_plots:
         _logger.info("Started creating summary plots..")
         plot_summary(cfg, scores_dict, summary_dir, print_summary=cfg.print_summary)
 
