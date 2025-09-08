@@ -11,6 +11,7 @@
 
 import math
 import warnings
+import logging
 from pathlib import Path
 
 import astropy_healpix as hp
@@ -35,8 +36,8 @@ from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.config import Config, get_dtype
-from weathergen.utils.logger import logger
 
+logger = logging.getLogger(__name__)
 
 class ModelParams(torch.nn.Module):
     """Creation of query and embedding parameters of the model."""

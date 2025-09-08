@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import pathlib
+import logging
 
 import numpy as np
 import torch
@@ -33,11 +34,11 @@ from weathergen.datasets.utils import (
     compute_offsets_scatter_embed,
     compute_source_cell_lens,
 )
-from weathergen.utils.logger import logger
 from weathergen.utils.train_logger import Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 
+logger = logging.getLogger(__name__)
 
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ###################################################

@@ -11,6 +11,7 @@ import logging
 import os
 import pathlib
 import sys
+from functools import cache
 
 from weathergen.utils.config import _load_private_conf
 
@@ -42,48 +43,8 @@ class ColoredRelPathFormatter(logging.Formatter):
         return super(ColoredRelPathFormatter, self).format(record, *args, **kwargs)
 
 
-def init_logger_per_stream(logger, stream_handle, output_streams):
-    for ostr in output_streams if type(output_streams) is tuple else [output_streams]:
-        # determine correct stream handler
-        with_color = True
-        if getattr(ostr, "name", None) == "<stdout>" or getattr(ostr, "name", None) == "<stderr>":
-            handler = logging.StreamHandler(ostr)
-        elif ostr == "null":
-            handler = logging.NullHandler()
-        elif type(ostr) is str or type(ostr) is pathlib.Path:
-            ofile = pathlib.Path(ostr)
-            # make sure the path is independent of path where job is launched
-            if not ofile.is_absolute():
-                work_dir = pathlib.Path(_load_private_conf().get("path_shared_working_dir"))
-                ofile = work_dir / ofile
-            # make sure the parent directory exists
-            pathlib.Path(ofile.parent).mkdir(parents=True, exist_ok=True)
-            handler = logging.FileHandler(ofile)
-            with_color = False
-        else:  # ostr cannot be handled so skip
-            continue
-
-        format_str = (
-            "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
-        )
-        formatter = ColoredRelPathFormatter(fmt=format_str, color=with_color)
-
-        handler.setLevel(stream_handle)
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-
-    return logger
-
-
-# @cache
-def init_loggers(
-    logging_level=logging.DEBUG,
-    critical_output_streams=None,
-    error_output_streams=None,
-    warning_output_streams=None,
-    info_output_streams=None,
-    debug_output_streams=None,
-):
+@cache
+def init_loggers(filename, logging_level_file=logging.DEBUG, logging_level_console=logging.DEBUG):
     """
     Initialize the logger for the package and set output streams/files.
 
@@ -92,7 +53,7 @@ def init_loggers(
     This function follows a singleton pattern, it will only operate once per process
     and will be a no-op if called again.
 
-    Valid arguements for streams: tuple of
+    Valid arguments for streams: tuple of
       sys.stdout, sys.stderr : standard out and err streams
       null : /dev/null
       string/pathlib.Path : specifies path and outfile to be used for stream
@@ -102,43 +63,30 @@ def init_loggers(
                 not supported
     """
 
-    package = "weathergen"
-    critical_output_streams = (
-        [sys.stderr] if critical_output_streams is None else critical_output_streams
+    format_str = (
+        "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
     )
-    error_output_streams = [sys.stderr] if error_output_streams is None else error_output_streams
-    warning_output_streams = (
-        [sys.stderr] if warning_output_streams is None else warning_output_streams
-    )
-    info_output_streams = [sys.stdout] if info_output_streams is None else info_output_streams
-    debug_output_streams = [sys.stdout] if debug_output_streams is None else debug_output_streams
 
-    logger = logging.getLogger(package)
-    logger.handlers.clear()
-    logger.setLevel(logging_level)
+    ofile = pathlib.Path(filename)
+    # make sure the path is independent of path where job is launched
+    if not ofile.is_absolute():
+        work_dir = pathlib.Path(_load_private_conf().get("path_shared_working_dir"))
+        ofile = work_dir / ofile
+    # make sure the parent directory exists
+    pathlib.Path(ofile.parent).mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(level=logging_level_file,
+                    format=format_str,
+                    datefmt='%m-%d %H:%M',
+                    filename=ofile,
+                    filemode='w') 
+    # define a Handler which writes INFO messages or higher to the sys.stderr
+    console = logging.StreamHandler()
+    console.setLevel(logging_level_console)
 
-    # collect for further processing
-    log_streams = [
-        [logging.CRITICAL, critical_output_streams],
-        [logging.ERROR, error_output_streams],
-        [logging.WARNING, warning_output_streams],
-        [logging.INFO, info_output_streams],
-        [logging.DEBUG, debug_output_streams],
-    ]
+    # set a format which is simpler for console use
+    formatter = ColoredRelPathFormatter(fmt=format_str, color=True)
+    # tell the handler to use this format
+    console.setFormatter(formatter)
+    # add the handler to the root logger
+    logging.getLogger('').addHandler(console)
 
-    # find the unique streams
-    import itertools
-
-    streams_unique = set(itertools.chain.from_iterable([s[1] for s in log_streams]))
-    # collect for each unique one all logging levels
-    streams_collected = [
-        [ls[0] for ls in log_streams if stream in ls[1]] for stream in streams_unique
-    ]
-
-    # set the logging
-    for streams, stream_handle in zip(streams_collected, streams_unique, strict=True):
-        logger = init_logger_per_stream(logger, min(streams), stream_handle)
-
-
-# TODO: remove, it should be module-level loggers
-logger = logging.getLogger("weathergen")

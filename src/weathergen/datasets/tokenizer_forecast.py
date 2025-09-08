@@ -27,8 +27,6 @@ from weathergen.datasets.utils import (
     locs_to_cell_coords_ctrs,
     r3tos2,
 )
-from weathergen.utils.logger import init_loggers
-
 
 class TokenizerForecast:
     def __init__(self, healpix_level: int):
@@ -144,7 +142,6 @@ class TokenizerForecast:
         time_win: tuple,
         normalizer,  # dataset
     ):
-        init_loggers()
         token_size = stream_info["token_size"]
         is_diagnostic = stream_info.get("diagnostic", False)
         tokenize_spacetime = stream_info.get("tokenize_spacetime", False)

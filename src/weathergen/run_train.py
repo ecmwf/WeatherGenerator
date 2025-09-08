@@ -19,10 +19,15 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
+import torch.distributed as dist
+
 import weathergen.utils.cli as cli
 import weathergen.utils.config as config
 from weathergen.train.trainer import Trainer
 from weathergen.utils.logger import init_loggers
+
+
+logger = logging.getLogger(__name__)
 
 
 def inference():
@@ -63,22 +68,16 @@ def inference_from_args(argl: list[str]):
     devices = Trainer.init_torch()
     cf = Trainer.init_ddp(cf)
 
-    # Get current time
-    now = datetime.now()
-    timestamp = now.strftime("%Y-%m-%d-%H%M")
+    if cf.rank == 0:
+        # Get current time
+        now = datetime.now()
+        timestamp = now.strftime("%Y-%m-%d-%H%M")
 
-    output_dir = f"./output/{timestamp}-{cf.run_id}"
+        output_dir = f"./output/{timestamp}-{cf.run_id}"
 
-    # this line should probably come after the processes have been sorted out else we get lots of 
-    # duplication due to multiple process in the multiGPU case
-    init_loggers(
-        logging_level=logging.DEBUG,
-        critical_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-critical.txt"],
-        error_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-error.txt"],
-        warning_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-warning.txt"],
-        info_output_streams=[sys.stdout, f"{output_dir}/{cf.run_id}-info.txt"],
-        debug_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-debug.txt"],
-    )
+        # this line should probably come after the processes have been sorted out else we get lots
+        # of duplication due to multiple process in the multiGPU case
+        init_loggers(f"{output_dir}/{cf.run_id}-log.txt")
 
     cf.run_history += [(args.from_run_id, cf.istep)]
 
@@ -104,8 +103,6 @@ def train_continue() -> None:
 def train_continue_from_args(argl: list[str]):
     parser = cli.get_continue_parser()
     args = parser.parse_args(argl)
-
-    init_loggers()
 
     if args.finetune_forecast:
         finetune_overwrite = dict(
@@ -148,22 +145,16 @@ def train_continue_from_args(argl: list[str]):
     devices = Trainer.init_torch()
     cf = Trainer.init_ddp(cf)
 
-    # Get current time
-    now = datetime.now()
-    timestamp = now.strftime("%Y-%m-%d-%H%M")
+    if cf.rank == 0:
+        # Get current time
+        now = datetime.now()
+        timestamp = now.strftime("%Y-%m-%d-%H%M")
 
-    output_dir = f"./output/{timestamp}-{cf.run_id}"
+        output_dir = f"./output/{timestamp}-{cf.run_id}"
 
-    # this line should probably come after the processes have been sorted out else we get lots of 
-    # duplication due to multiple process in the multiGPU case
-    init_loggers(
-        logging_level=logging.DEBUG,
-        critical_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-critical.txt"],
-        error_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-error.txt"],
-        warning_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-warning.txt"],
-        info_output_streams=[sys.stdout, f"{output_dir}/{cf.run_id}-info.txt"],
-        debug_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-debug.txt"],
-    )
+        # this line should probably come after the processes have been sorted out else we get lots
+        # of duplication due to multiple process in the multiGPU case
+        init_loggers(f"{output_dir}/{cf.run_id}-log.txt")
 
     # track history of run to ensure traceability of results
     cf.run_history += [(args.from_run_id, cf.istep)]
@@ -207,22 +198,16 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     devices = Trainer.init_torch()
     cf = Trainer.init_ddp(cf)
 
-    # Get current time
-    now = datetime.now()
-    timestamp = now.strftime("%Y-%m-%d-%H%M")
+    if cf.rank == 0:
+        # Get current time
+        now = datetime.now()
+        timestamp = now.strftime("%Y-%m-%d-%H%M")
 
-    output_dir = f"./output/{timestamp}-{cf.run_id}"
+        output_dir = f"./output/{timestamp}-{cf.run_id}"
 
-    # this line should probably come after the processes have been sorted out else we get lots of 
-    # duplication due to multiple process in the multiGPU case
-    init_loggers(
-        logging_level=logging.DEBUG,
-        critical_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-critical.txt"],
-        error_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-error.txt"],
-        warning_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-warning.txt"],
-        info_output_streams=[sys.stdout, f"{output_dir}/{cf.run_id}-info.txt"],
-        debug_output_streams=[sys.stderr, f"{output_dir}/{cf.run_id}-debug.txt"],
-    )
+        # this line should probably come after the processes have been sorted out else we get lots
+        # of duplication due to multiple process in the multiGPU case
+        init_loggers(f"{output_dir}/{cf.run_id}-log.txt")
 
     cf.streams = config.load_streams(Path(cf.streams_directory))
 

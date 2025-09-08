@@ -13,6 +13,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+import logging
 
 import numpy as np
 import torch
@@ -45,10 +46,10 @@ from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import all_gather_vlen, is_root
-from weathergen.utils.logger import logger
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.validation_io import write_output
 
+logger = logging.getLogger(__name__)
 
 class Trainer(TrainerBase):
     def __init__(self, checkpoint_freq=250, print_freq=10):
@@ -234,15 +235,6 @@ class Trainer(TrainerBase):
             for module in self.model.modules():
                 if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)
-            # engines_to_shard = (
-            #     LocalAssimilationEngine,
-            #     Local2GlobalAssimilationEngine,
-            #     GlobalAssimilationEngine,
-            #     TargetPredictionEngine,
-            # )
-            # for module in self.model.modules():
-            #     if isinstance(module, engines_to_shard):
-            #         fully_shard(module, **fsdp_kwargs)
 
         self.model_params = ModelParams(cf).create(cf)  # .to(device)
 

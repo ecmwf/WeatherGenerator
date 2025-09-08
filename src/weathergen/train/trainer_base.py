@@ -20,7 +20,6 @@ import torch.multiprocessing
 from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
 
-_logger = logging.getLogger(__name__)
 PORT = 1345
 
 
@@ -69,13 +68,17 @@ class TrainerBase:
     def init_ddp(cf):
         """Initializes the distributed environment."""
         rank = 0
-        world_size = 1
 
         if not dist.is_available():
-            _logger.info("Distributed training is not available.")
+            print("Distributed training is not available.")
             return
 
-        if not dist.is_initialized() and (cf.with_ddp or cf.with_fsdp):
+        world_size = int(os.environ.get("WORLD_SIZE", "-1"))
+        if world_size == -1:
+            # Called using SLURM instead of torchrun
+            world_size = int(os.environ.get("SLURM_NTASKS", "1"))
+
+        if not dist.is_initialized() and world_size > 1:
             # These environment variables are typically set by the launch utility
             # (e.g., torchrun, Slurm)
             local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
@@ -86,10 +89,6 @@ class TrainerBase:
             if rank == -1:
                 ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
                 rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
-            world_size = int(os.environ.get("WORLD_SIZE", "-1"))
-            if world_size == -1:
-                # Called using SLURM instead of torchrun
-                world_size = int(os.environ.get("SLURM_NTASKS"))
             master_addr = os.environ.get("MASTER_ADDR", "localhost")
             master_port = os.environ.get("MASTER_PORT", f"{PORT}")  # Default port
 
@@ -97,10 +96,10 @@ class TrainerBase:
                 device_type = torch.accelerator.current_accelerator()
                 device = torch.device(f"{device_type}:{rank}")
                 torch.accelerator.set_device_index(rank)
-                _logger.info(f"DDP initialization: rank={rank}, world_size={world_size}")
+                print(f"DDP initialization: rank={rank}, world_size={world_size}")
             else:
                 device = torch.device("cpu")
-                _logger.info(f"Running on device {device}")
+                print(f"Running on device {device}")
 
             backend = torch.distributed.get_default_backend_for_device(device)
             torch.distributed.init_process_group(
@@ -110,34 +109,17 @@ class TrainerBase:
                 rank=rank,
                 init_method=f"tcp://{master_addr}:{master_port}",
             )
-            _logger.info(f"Process group initialized ({backend}).")
-
-            if rank == 0:
-                # Check that port 1345 is available, raise an error if not
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    try:
-                        s.bind((master_addr, PORT))
-                    except OSError as e:
-                        if e.errno == errno.EADDRINUSE:
-                            _logger.error(
-                                (
-                                    f"Port 1345 is already in use on {master_addr}.",
-                                    " Please check your network configuration.",
-                                )
-                            )
-                            raise
-                        else:
-                            _logger.error(f"Error while binding to port 1345 on {master_addr}: {e}")
-                            raise
+            print(f"Process group initialized ({backend}).")
 
             if is_root():
-                _logger.info("DDP initialized: root.")
+                print("DDP initialized: root.")
             # Wait for all ranks to reach this point
             dist.barrier()
 
-            cf.rank = rank
-            cf.world_size = world_size
-            cf.with_ddp = True
+
+        cf.world_size = world_size
+        cf.rank = rank
+        cf.with_ddp = world_size > 1
 
         return cf
 
