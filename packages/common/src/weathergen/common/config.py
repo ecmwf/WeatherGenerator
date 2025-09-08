@@ -405,6 +405,7 @@ def get_path_output(config: Config, epoch: int) -> Path:
 
     return base_path / fname
 
+
 def validate_forecast_policy_and_steps(cf: OmegaConf):
     """
     Validates the forecast policy and steps within a configuration object.
