@@ -7,14 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import warnings
 from functools import partial
 
-import astropy_healpix as hp
 import numpy as np
 import torch
 
 from weathergen.datasets.masking import Masker
+from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
     arc_alpha,
     encode_times_source,
@@ -24,112 +23,14 @@ from weathergen.datasets.tokenizer_utils import (
 )
 from weathergen.datasets.utils import (
     get_target_coords_local_ffast,
-    healpix_verts_rots,
-    locs_to_cell_coords_ctrs,
-    r3tos2,
 )
 from weathergen.utils.logger import init_loggers
 
 
-class TokenizerMasking:
+class TokenizerMasking(Tokenizer):
     def __init__(self, healpix_level: int, masker: Masker):
-        ref = torch.tensor([1.0, 0.0, 0.0])
-
-        self.hl_source = healpix_level
-        self.hl_target = healpix_level
-
+        super().__init__(healpix_level)
         self.masker = masker
-
-        self.num_healpix_cells_source = 12 * 4**self.hl_source
-        self.num_healpix_cells_target = 12 * 4**self.hl_target
-
-        verts00, verts00_rots = healpix_verts_rots(self.hl_source, 0.0, 0.0)
-        verts10, verts10_rots = healpix_verts_rots(self.hl_source, 1.0, 0.0)
-        verts11, verts11_rots = healpix_verts_rots(self.hl_source, 1.0, 1.0)
-        verts01, verts01_rots = healpix_verts_rots(self.hl_source, 0.0, 1.0)
-        vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_source, 0.5, 0.5)
-        self.hpy_verts = [
-            verts00.to(torch.float32),
-            verts10.to(torch.float32),
-            verts11.to(torch.float32),
-            verts01.to(torch.float32),
-            vertsmm.to(torch.float32),
-        ]
-        self.hpy_verts_rots_source = [
-            verts00_rots.to(torch.float32),
-            verts10_rots.to(torch.float32),
-            verts11_rots.to(torch.float32),
-            verts01_rots.to(torch.float32),
-            vertsmm_rots.to(torch.float32),
-        ]
-
-        verts00, verts00_rots = healpix_verts_rots(self.hl_target, 0.0, 0.0)
-        verts10, verts10_rots = healpix_verts_rots(self.hl_target, 1.0, 0.0)
-        verts11, verts11_rots = healpix_verts_rots(self.hl_target, 1.0, 1.0)
-        verts01, verts01_rots = healpix_verts_rots(self.hl_target, 0.0, 1.0)
-        vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_target, 0.5, 0.5)
-        self.hpy_verts = [
-            verts00.to(torch.float32),
-            verts10.to(torch.float32),
-            verts11.to(torch.float32),
-            verts01.to(torch.float32),
-            vertsmm.to(torch.float32),
-        ]
-        self.hpy_verts_rots_target = [
-            verts00_rots.to(torch.float32),
-            verts10_rots.to(torch.float32),
-            verts11_rots.to(torch.float32),
-            verts01_rots.to(torch.float32),
-            vertsmm_rots.to(torch.float32),
-        ]
-
-        self.verts_local = []
-        verts = torch.stack([verts10, verts11, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts00_rots, verts.transpose(0, 1)))
-        self.verts_local.append(temp.flatten(1, 2))
-
-        verts = torch.stack([verts00, verts11, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts10_rots, verts.transpose(0, 1)))
-        self.verts_local.append(temp.flatten(1, 2))
-
-        verts = torch.stack([verts00, verts10, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts11_rots, verts.transpose(0, 1)))
-        self.verts_local.append(temp.flatten(1, 2))
-
-        verts = torch.stack([verts00, verts11, verts10, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts01_rots, verts.transpose(0, 1)))
-        self.verts_local.append(temp.flatten(1, 2))
-
-        verts = torch.stack([verts00, verts10, verts11, verts01])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(vertsmm_rots, verts.transpose(0, 1)))
-        self.verts_local.append(temp.flatten(1, 2))
-
-        self.hpy_verts_local_target = torch.stack(self.verts_local).transpose(0, 1)
-
-        # add local coords wrt to center of neighboring cells
-        # (since the neighbors are used in the prediction)
-        num_healpix_cells = 12 * 4**self.hl_target
-        with warnings.catch_warnings(action="ignore"):
-            temp = hp.neighbours(
-                np.arange(num_healpix_cells), 2**self.hl_target, order="nested"
-            ).transpose()
-        # fix missing nbors with references to self
-        for i, row in enumerate(temp):
-            temp[i][row == -1] = i
-        self.hpy_nctrs_target = (
-            vertsmm[temp.flatten()]
-            .reshape((num_healpix_cells, 8, 3))
-            .transpose(1, 0)
-            .to(torch.float32)
-        )
-
-        self.size_time_embedding = 6
-
-    def get_size_time_embedding(self) -> int:
-        """
-        Get size of time embedding
-        """
-        return self.size_time_embedding
 
     def reset_rng(self, rng) -> None:
         """
@@ -191,62 +92,12 @@ class TokenizerMasking:
         source_tokens_cells = self.masker.mask_source(tokenized_data, coords, geoinfos, source)
 
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
-
         if source_tokens_lens.sum() > 0:
-            source_means = [
-                (
-                    self.hpy_verts[-1][i].unsqueeze(0).repeat(len(s), 1)
-                    if len(s) > 0
-                    else torch.tensor([])
-                )
-                for i, s in enumerate(source_tokens_cells)
-            ]
-            source_means_lens = [len(s) for s in source_means]
-            # merge and split to vectorize computations
-            source_means = torch.cat(source_means)
-            source_centroids = torch.cat(
-                [source_means.to(torch.float32), r3tos2(source_means).to(torch.float32)], -1
-            )
-            source_centroids = torch.split(source_centroids, source_means_lens)
+            source_centroids = self.compute_source_centroids(source_tokens_cells)
         else:
             source_centroids = torch.tensor([])
 
         return (source_tokens_cells, source_tokens_lens, source_centroids)
-
-    def sample_tensors_uniform_vectorized(
-        self, tensor_list: list, lengths: list, max_total_points: int
-    ):
-        """
-        This function randomly selects tensors up to a maximum number of total points
-
-        tensor_list: List[torch.tensor] the list to select from
-        lengths: List[int] the length of each tensor in tensor_list
-        max_total_points: the maximum number of total points to sample from
-        """
-        if not tensor_list:
-            return [], 0
-
-        # Create random permutation
-        perm = self.rng.permutation(len(tensor_list))
-
-        # Vectorized cumulative sum
-        cumsum = torch.cumsum(lengths[perm], dim=0)
-
-        # Find cutoff point
-        valid_mask = cumsum <= max_total_points
-        if not valid_mask.any():
-            return [], 0
-
-        num_selected = valid_mask.sum().item()
-        selected_indices = perm[:num_selected]
-        selected_indices = torch.zeros_like(perm).scatter(0, selected_indices, 1)
-
-        selected_tensors = [
-            t if mask.item() == 1 else t[:0]
-            for t, mask in zip(tensor_list, selected_indices, strict=False)
-        ]
-
-        return selected_tensors
 
     def batchify_target(
         self,
@@ -303,7 +154,10 @@ class TokenizerMasking:
         target_tokens_lens = [len(t) for t in target_tokens]
         total_target = sum(target_tokens_lens)
 
-        # sampling the number of targets according to sampling_rate_target
+        # sampling the number of targets according to per-stream sampling_rate_target
+        # otherwise take global sampling_rate_target from config
+        sampling_rate_target = stream_info.get("sampling_rate_target", sampling_rate_target)
+
         samples = (torch.empty(total_target).uniform_() < sampling_rate_target).split(
             target_tokens_lens
         )
@@ -322,6 +176,7 @@ class TokenizerMasking:
             target_tokens = self.sample_tensors_uniform_vectorized(
                 target_tokens, torch.tensor(tt_lens), max_num_targets
             )
+
         tt_lin = torch.cat(target_tokens)
         target_tokens_lens = [len(t) for t in target_tokens]
         tt_lens = target_tokens_lens
@@ -364,3 +219,38 @@ class TokenizerMasking:
             target_coords = list(target_coords.split(tt_lens))
 
         return (target_tokens, target_coords, target_coords_raw, target_times_raw)
+
+    def sample_tensors_uniform_vectorized(
+        self, tensor_list: list, lengths: list, max_total_points: int
+    ):
+        """
+        This function randomly selects tensors up to a maximum number of total points
+
+        tensor_list: List[torch.tensor] the list to select from
+        lengths: List[int] the length of each tensor in tensor_list
+        max_total_points: the maximum number of total points to sample from
+        """
+        if not tensor_list:
+            return [], 0
+
+        # Create random permutation
+        perm = self.rng.permutation(len(tensor_list))
+
+        # Vectorized cumulative sum
+        cumsum = torch.cumsum(lengths[perm], dim=0)
+
+        # Find cutoff point
+        valid_mask = cumsum <= max_total_points
+        if not valid_mask.any():
+            return [], 0
+
+        num_selected = valid_mask.sum().item()
+        selected_indices = perm[:num_selected]
+        selected_indices = torch.zeros_like(perm).scatter(0, selected_indices, 1)
+
+        selected_tensors = [
+            t if mask.item() == 1 else t[:0]
+            for t, mask in zip(tensor_list, selected_indices, strict=False)
+        ]
+
+        return selected_tensors

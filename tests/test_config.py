@@ -84,7 +84,7 @@ def is_equal(config1, config2):
 
 
 @pytest.fixture
-def models_dir():
+def shared_working_dir():
     with tempfile.TemporaryDirectory(prefix="models") as temp_dir:
         yield temp_dir
 
@@ -108,9 +108,11 @@ def streams_dir():
 
 
 @pytest.fixture
-def private_conf(models_dir):
+def private_conf(shared_working_dir):
     cf = OmegaConf.create(DUMMY_PRIVATE_CONF)
-    cf.model_path = models_dir
+    cf.path_shared_working_dir = shared_working_dir
+    cf.path_shared_slurm_dir = shared_working_dir
+
     return cf
 
 
@@ -157,6 +159,12 @@ def test_contains_private(config_fresh):
     assert contains_keys(config_fresh, sanitized_private_conf)
 
 
+def test_is_paths_set(config_fresh):
+    paths = {"model_path": "foo", "run_path": "bar"}
+
+    assert contains_keys(config_fresh, paths)
+
+
 @pytest.mark.parametrize("overwrite_dict", DUMMY_OVERWRITES, indirect=True)
 def test_load_with_overwrite_dict(overwrite_dict, private_config_file):
     cf = config.load_config(private_config_file, None, None, overwrite_dict)
@@ -177,6 +185,15 @@ def test_load_with_overwrite_file(private_config_file, overwrite_file):
     cf = config.load_config(private_config_file, None, None, overwrite_file)
 
     assert contains(cf, sub_cf)
+
+
+def test_load_with_stream_in_overwrite(private_config_file, streams_dir, mocker):
+    overwrite = {"streams_directory": streams_dir}
+    stub = mocker.patch("weathergen.utils.config.load_streams", return_value=streams_dir)
+
+    config.load_config(private_config_file, None, None, overwrite)
+
+    stub.assert_called_once_with(streams_dir)
 
 
 def test_load_multiple_overwrites(private_config_file):

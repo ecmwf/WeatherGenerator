@@ -87,7 +87,9 @@ class TrainLogger:
         # TODO: performance: we repeatedly open the file for each call. Better for multiprocessing
         # but we can probably do better and rely for example on the logging module.
 
-        metrics_path = get_train_metrics_path(base_path=Path("results"), run_id=self.cf.run_id)
+        metrics_path = get_train_metrics_path(
+            base_path=Path(self.cf.run_path), run_id=self.cf.run_id
+        )
         with open(metrics_path, "ab") as f:
             s = json.dumps(clean_metrics) + "\n"
             f.write(s.encode("utf-8"))
@@ -118,7 +120,7 @@ class TrainLogger:
         log_vals += [lr]
 
         for st in self.cf.streams:
-            st_name = _clean_name(st["name"])
+            st_name = st["name"]
             loss = losses_all[st_name]
             stddev = stddev_all[st_name]
 
@@ -164,7 +166,7 @@ class TrainLogger:
         log_vals += [samples]
 
         for st in self.cf.streams:
-            st_name = _clean_name(st["name"])
+            st_name = st["name"]
             loss = losses_all[st_name]
             stddev = stddev_all[st_name]
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts_val):
@@ -182,12 +184,15 @@ class TrainLogger:
 
     #######################################
     @staticmethod
-    def read(run_id: str, model_path: str, epoch: int = -1) -> Metrics:
+    def read(run_id: str, model_path: str = None, epoch: int = -1) -> Metrics:
         """
         Read data for run_id
         """
-
-        cf = config.load_model_config(run_id, epoch, model_path)
+        # Load config from given model_path if provided, otherwise use path from private config
+        if model_path:
+            cf = config.load_model_config(run_id=run_id, epoch=epoch, model_path=model_path)
+        else:
+            cf = config.load_config(private_home=None, from_run_id=run_id, epoch=epoch)
         run_id = cf.run_id
 
         result_dir_base = Path(cf.run_path)
