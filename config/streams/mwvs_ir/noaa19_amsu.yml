@@ -7,9 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-NPPATMS :
+noaa19_amsua :
   type : obs
-  filenames : ['observations-ea-ofb-0001-2012-2023-metopc-amsu-radiances-v2.zarr']
+  filenames : ['observations-ea-ofb-0001-2012-2023-noaa19-amsu-a-radiances-v2.zarr']
   loss_weight : 1.0
   token_size : 32
   max_num_targets: -1
