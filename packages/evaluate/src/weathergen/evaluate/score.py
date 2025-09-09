@@ -168,6 +168,7 @@ class Scores:
             "ets": self.calc_ets,
             "pss": self.calc_pss,
             "fbi": self.calc_fbi,
+            "froc": self.calc_froc,
             "mae": self.calc_mae,
             "l1": self.calc_l1,
             "l2": self.calc_l2,
@@ -424,6 +425,21 @@ class Scores:
         fbi = fbi.where(denom > 0, np.nan)
 
         return fbi
+
+    def calc_froct(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        group_by_coord: str | None = None,
+    ) -> np.array:
+        breakpoint()
+        froct = p[t + 1] - p[t]
+        groct = gt[t + t] - gt[t]
+
+        if group_by_coord:
+            froct = froct.groupby(group_by_coord)
+
+        return froct
 
     def calc_pss(
         self,
