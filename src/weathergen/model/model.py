@@ -19,6 +19,7 @@ import numpy as np
 import torch
 from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
+from torch.nn.functional import silu
 
 from weathergen.model.engines import (
     EmbeddingEngine,
@@ -258,7 +259,8 @@ class Model(torch.nn.Module):
                 "Empty forecast engine (fe_num_blocks = 0), but forecast_steps[i] > 0 for some i"
             )
 
-        self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells).create()
+        self.fe = ForecastingEngine(cf, self.num_healpix_cells)
+        self.fe_blocks = self.fe.create()
 
         ###############
         # embed coordinates yielding one query token for each target token
@@ -519,6 +521,7 @@ class Model(torch.nn.Module):
 
         # roll-out in latent space
         preds_all = []
+
         for fstep in range(forecast_offset, forecast_offset + forecast_steps):
             # prediction
             preds_all += [
@@ -531,7 +534,10 @@ class Model(torch.nn.Module):
                 )
             ]
 
-            tokens = self.forecast(model_params, tokens)
+            if not self.cf.forecast_diffusion:
+                tokens = self.forecast(model_params, tokens, noise_embedding=None)
+            else:
+                tokens = self.edm_sampler(model_params, tokens)
 
         # prediction for final step
         preds_all += [
@@ -727,7 +733,7 @@ class Model(torch.nn.Module):
         return tokens
 
     #########################################
-    def forecast(self, model_params: ModelParams, tokens: torch.Tensor) -> torch.Tensor:
+    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, noise_embedding: torch.Tensor) -> torch.Tensor:
         """Advances latent space representation in time
 
         Args:
@@ -744,6 +750,61 @@ class Model(torch.nn.Module):
             tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
 
         return tokens
+
+    def edm_preconditioning(self, model_params: ModelParams, tokens: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
+
+        c_skip = self.sigma_data ** 2 / (noise ** 2 + self.sigma_data ** 2)
+        c_out = noise * self.sigma_data / (noise ** 2 + self.sigma_data ** 2).sqrt()
+        c_in = 1 / (self.sigma_data ** 2 + noise ** 2).sqrt()
+        c_noise = noise.log() / 4
+
+        #embed the noise
+        emb = self.cf.map_noise(noise)
+        emb = silu(self.map_layer0(emb))
+        emb = silu(self.map_layer1(emb))
+
+        F_x = self.forecast(model_params, (c_in * tokens), c_noise.flatten())
+        D_x = c_skip * tokens + c_out * F_x
+        return D_x
+
+    
+    def edm_sampler(
+        self, model_params: ModelParams, tokens: torch.Tensor, class_labels=None, randn_like=torch.randn_like,
+        num_steps=18, sigma_min=0.002, sigma_max=80, rho=7,
+        S_churn=0, S_min=0, S_max=float('inf'), S_noise=1,
+    ):
+        # Adjust noise levels based on what's supported by the network.
+        sigma_min = max(sigma_min, self.fe.sigma_min)
+        sigma_max = min(sigma_max, self.fe.sigma_max)
+
+        # Time step discretization.
+        step_indices = torch.arange(num_steps, dtype=torch.float64, device=tokens.device)
+        t_steps = (sigma_max ** (1 / rho) + step_indices / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))) ** rho
+        t_steps = torch.cat([torch.as_tensor(t_steps), torch.zeros_like(t_steps[:1])]) # t_N = 0
+
+        # Main sampling loop.
+        x_next = tokens.to(torch.float64) * t_steps[0]
+        for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])): # 0, ..., N-1
+            x_cur = x_next
+
+            # Increase noise temporarily.
+            gamma = min(S_churn / num_steps, np.sqrt(2) - 1) if S_min <= t_cur <= S_max else 0
+            t_hat = torch.as_tensor(t_cur + gamma * t_cur)
+            x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * randn_like(x_cur)
+
+            # Euler step.
+            denoised = self.edm_preconditioning(model_params, x_hat, noise=t_hat).to(torch.float64)
+            d_cur = (x_hat - denoised) / t_hat
+            x_next = x_hat + (t_next - t_hat) * d_cur
+
+            # Apply 2nd order correction.
+            if i < num_steps - 1:
+                denoised = self.edm_preconditioning(model_params, x_next, noise=t_next).to(torch.float64)
+                d_prime = (x_next - denoised) / t_next
+                x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
+
+        return x_next
+
 
     #########################################
     def predict(

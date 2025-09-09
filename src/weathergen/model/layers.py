@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
-
+from weathergen.model.attention import LinearNormConditioning
 
 class NamedLinear(torch.nn.Module):
     def __init__(self, name: str | None = None, **kwargs):
@@ -43,6 +43,7 @@ class MLP(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         name: str | None = None,
+        with_noise_conditioning=False
     ):
         """Constructor"""
 
@@ -79,8 +80,18 @@ class MLP(torch.nn.Module):
 
         self.layers.append(torch.nn.Linear(dim_hidden, dim_out))
 
+        if with_noise_conditioning:
+            self.noise_conditioning = LinearNormConditioning(dim_in)
+
+
+    #TODO: check that arguments are correctly interpreted in all dependencies
     def forward(self, *args):
-        x, x_in, aux = args[0], args[0], args[-1]
+        x, x_in, noise_embedding, aux = args[0], args[0], args[-1], args[-2]
+
+        if self.noise_conditioning:
+            assert noise_embedding is not None, "Need noise embedding if using noise conditioning"
+            x = self.noise_conditioning(x, noise_embedding)
+
 
         for i, layer in enumerate(self.layers):
             x = layer(x, aux) if (i == 0 and self.with_aux) else layer(x)
