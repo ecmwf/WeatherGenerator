@@ -13,7 +13,6 @@ ERA5_t :
   source : ['2t', 't_']
   target : ['2t', 't_']
   loss_weight : 1.
-  masking_rate : 0.6
   masking_rate_none : 0.05
   token_size : 8
   tokenize_spacetime : True
