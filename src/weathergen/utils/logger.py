@@ -63,9 +63,7 @@ def init_loggers(filename, logging_level_file=logging.DEBUG, logging_level_conso
                 not supported
     """
 
-    format_str = (
-        "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
-    )
+    format_str = "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
 
     ofile = pathlib.Path(filename)
     # make sure the path is independent of path where job is launched
@@ -74,11 +72,13 @@ def init_loggers(filename, logging_level_file=logging.DEBUG, logging_level_conso
         ofile = work_dir / ofile
     # make sure the parent directory exists
     pathlib.Path(ofile.parent).mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(level=logging_level_file,
-                    format=format_str,
-                    datefmt='%m-%d %H:%M',
-                    filename=ofile,
-                    filemode='w') 
+    logging.basicConfig(
+        level=logging_level_file,
+        format=format_str,
+        datefmt="%m-%d %H:%M",
+        filename=ofile,
+        filemode="w",
+    )
     # define a Handler which writes INFO messages or higher to the sys.stderr
     console = logging.StreamHandler()
     console.setLevel(logging_level_console)
@@ -88,5 +88,4 @@ def init_loggers(filename, logging_level_file=logging.DEBUG, logging_level_conso
     # tell the handler to use this format
     console.setFormatter(formatter)
     # add the handler to the root logger
-    logging.getLogger('').addHandler(console)
-
+    logging.getLogger("").addHandler(console)

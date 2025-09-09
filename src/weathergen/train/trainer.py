@@ -51,6 +51,7 @@ from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
 
+
 class Trainer(TrainerBase):
     def __init__(self, checkpoint_freq=250, print_freq=10):
         TrainerBase.__init__(self)

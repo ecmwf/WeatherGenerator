@@ -116,7 +116,6 @@ class TrainerBase:
             # Wait for all ranks to reach this point
             dist.barrier()
 
-
         cf.world_size = world_size
         cf.rank = rank
         cf.with_ddp = world_size > 1

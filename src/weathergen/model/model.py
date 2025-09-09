@@ -39,6 +39,7 @@ from weathergen.utils.config import Config, get_dtype
 
 logger = logging.getLogger(__name__)
 
+
 class ModelParams(torch.nn.Module):
     """Creation of query and embedding parameters of the model."""
 

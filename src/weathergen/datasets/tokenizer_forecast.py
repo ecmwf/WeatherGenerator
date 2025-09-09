@@ -28,6 +28,7 @@ from weathergen.datasets.utils import (
     r3tos2,
 )
 
+
 class TokenizerForecast:
     def __init__(self, healpix_level: int):
         ref = torch.tensor([1.0, 0.0, 0.0])

@@ -40,6 +40,7 @@ type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 
 logger = logging.getLogger(__name__)
 
+
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ###################################################
     def __init__(
