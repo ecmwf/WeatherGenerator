@@ -36,6 +36,7 @@ from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.config import Config, get_dtype
+from weathergen.utils.distributed import is_root
 
 logger = logging.getLogger(__name__)
 
@@ -370,7 +371,8 @@ class Model(torch.nn.Module):
                         dim_embed, dim_out, num_layers + 1, dtype=torch.int32
                     ).tolist()
 
-            logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
+            if is_root():
+                logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
 
             dim_coord_in = self.targets_coords_size[i_obs]
 
@@ -437,9 +439,10 @@ class Model(torch.nn.Module):
 
             # ensemble prediction heads to provide probabilistic prediction
             final_activation = si["pred_head"].get("final_activation", "Identity")
-            logger.debug(
-                f"{final_activation} activation as prediction head output of {si['name']} stream"
-            )
+            if is_root():
+                logger.debug(
+                    f"{final_activation} activation as prediction head output of {si['name']} stream"
+                )
             self.pred_heads.append(
                 EnsPredictionHead(
                     dims_embed[-1],
@@ -547,10 +550,10 @@ class Model(torch.nn.Module):
         mkeys, ukeys = self.load_state_dict(params_renamed, strict=False)
         # mkeys, ukeys = self.load_state_dict( params, strict=False)
 
-        if len(mkeys) > 0:
+        if len(mkeys) > 0 and is_root():
             logger.warning(f"Missing keys when loading model: {mkeys}")
 
-        if len(ukeys) > 0:
+        if len(ukeys) > 0 and is_root():
             logger.warning(f"Unused keys when loading model: {mkeys}")
 
     #########################################
@@ -881,12 +884,13 @@ class Model(torch.nn.Module):
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
                 nn = si["name"]
-                logger.warning(
-                    (
-                        f"Skipping prediction for {nn} because",
-                        f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
+                if is_root():
+                    logger.warning(
+                        (
+                            f"Skipping prediction for {nn} because",
+                            f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
+                        )
                     )
-                )
                 preds_tokens += [torch.tensor([], device=tc_tokens.device)]
                 continue
 

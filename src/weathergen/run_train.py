@@ -16,7 +16,6 @@ import pdb
 import sys
 import time
 import traceback
-from datetime import datetime
 from pathlib import Path
 
 import torch.distributed as dist
@@ -69,15 +68,12 @@ def inference_from_args(argl: list[str]):
     cf = Trainer.init_ddp(cf)
 
     if cf.rank == 0:
-        # Get current time
-        now = datetime.now()
-        timestamp = now.strftime("%Y-%m-%d-%H%M")
-
-        output_dir = f"./output/{timestamp}-{cf.run_id}"
-
         # this line should probably come after the processes have been sorted out else we get lots
         # of duplication due to multiple process in the multiGPU case
-        init_loggers(f"{output_dir}/{cf.run_id}-log.txt")
+        init_loggers(cf.run_id)
+
+
+    logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
 
     cf.run_history += [(args.from_run_id, cf.istep)]
 
@@ -146,15 +142,9 @@ def train_continue_from_args(argl: list[str]):
     cf = Trainer.init_ddp(cf)
 
     if cf.rank == 0:
-        # Get current time
-        now = datetime.now()
-        timestamp = now.strftime("%Y-%m-%d-%H%M")
-
-        output_dir = f"./output/{timestamp}-{cf.run_id}"
-
         # this line should probably come after the processes have been sorted out else we get lots
         # of duplication due to multiple process in the multiGPU case
-        init_loggers(f"{output_dir}/{cf.run_id}-log.txt")
+        init_loggers(cf.run_id)
 
     # track history of run to ensure traceability of results
     cf.run_history += [(args.from_run_id, cf.istep)]
@@ -198,16 +188,12 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     devices = Trainer.init_torch()
     cf = Trainer.init_ddp(cf)
 
-    if cf.rank == 0:
-        # Get current time
-        now = datetime.now()
-        timestamp = now.strftime("%Y-%m-%d-%H%M")
-
-        output_dir = f"./output/{timestamp}-{cf.run_id}"
-
+    # if cf.rank == 0:
         # this line should probably come after the processes have been sorted out else we get lots
         # of duplication due to multiple process in the multiGPU case
-        init_loggers(f"{output_dir}/{cf.run_id}-log.txt")
+    init_loggers(cf.run_id)
+
+    logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
 
     cf.streams = config.load_streams(Path(cf.streams_directory))
 

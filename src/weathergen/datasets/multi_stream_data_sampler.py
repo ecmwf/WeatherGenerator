@@ -35,6 +35,7 @@ from weathergen.datasets.utils import (
     compute_source_cell_lens,
 )
 from weathergen.utils.train_logger import Stage
+from weathergen.utils.distributed import is_root
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 
@@ -66,10 +67,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.len_hrs: int = cf.len_hrs
         self.step_hrs: int = cf.step_hrs
         self.time_window_handler = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
-        logger.info(
-            f"Time window handler: start={start_date}, end={end_date},"
-            f"len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
-        )
+        if is_root():
+            logger.info(
+                f"Time window handler: start={start_date}, end={end_date},"
+                f"len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
+            )
 
         self.forecast_offset = cf.forecast_offset
         self.forecast_delta_hrs = (
@@ -80,7 +82,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             [cf.forecast_steps] if isinstance(cf.forecast_steps, int) else cf.forecast_steps
         )
         if cf.forecast_policy is not None:
-            if self.forecast_steps.max() == 0:
+            if self.forecast_steps.max() == 0 and is_root():
                 logger.warning("forecast policy is not None but number of forecast steps is 0.")
         self.forecast_policy = cf.forecast_policy
 
@@ -132,10 +134,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         raise FileNotFoundError(msg)
 
                 ds_type = stream_info["type"]
-                logger.info(
-                    f"Opening dataset with type: {ds_type}"
-                    + f"from stream config {stream_info['name']}.",
-                )
+                if is_root():
+                    logger.info(
+                        f"Opening dataset with type: {ds_type}"
+                        + f"from stream config {stream_info['name']}.",
+                    )
                 ds = dataset(filename=filename, **kwargs)
 
                 fsm = self.forecast_steps[0]
