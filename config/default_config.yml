@@ -94,13 +94,17 @@ masking_rate: 0.6
 masking_rate_sampling: True
 # sample a subset of all target points, useful e.g. to reduce memory requirements (also can specify per-stream)
 sampling_rate_target: 1.0
-# include a masking strategy here, currently only supporting "random", "block", "healpix" and "channel"
+# include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "causal" and "combination"
 masking_strategy: "random"
 # masking_strategy_config is a dictionary of additional parameters for the masking strategy
 # required for "healpix" and "channel" masking strategies
 # "healpix": requires healpix mask level to be specified with `hl_mask`
-# "channel": requires "mode" to be specified, "per_cell" or "global", 
-masking_strategy_config: {"hl_mask": 3}
+# "channel": requires "mode" to be specified, "per_cell" or "global",
+masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
+                          "probabilities": [0.34, 0.33, 0.33],
+                          "hl_mask": 3, "mode": "per_cell",
+                          "same_strategy_per_batch": false
+                          }
 
 num_epochs: 32
 samples_per_epoch: 4096

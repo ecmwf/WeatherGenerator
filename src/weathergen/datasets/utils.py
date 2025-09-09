@@ -59,11 +59,16 @@ def s2tor3(lats, lons):
     Note: mathematics convention with lats in [0,pi] and lons in [0,2pi] is used
           (which is not problematic for lons but for lats care is required)
     """
-    x = torch.sin(lats) * torch.cos(lons)
-    y = torch.sin(lats) * torch.sin(lons)
-    z = torch.cos(lats)
-    out = torch.stack([x, y, z])
-    return out.permute([*list(np.arange(len(out.shape))[:-1] + 1), 0])
+    sin_lats = torch.sin(lats)
+    cos_lats = torch.cos(lats)
+
+    # Calculate the x, y, and z coordinates using vectorized operations.
+    x = sin_lats * torch.cos(lons)
+    y = sin_lats * torch.sin(lons)
+    z = cos_lats
+
+    # Stack the x, y, and z tensors along the last dimension.
+    return torch.stack([x, y, z], dim=-1)
 
 
 ####################################################################################################

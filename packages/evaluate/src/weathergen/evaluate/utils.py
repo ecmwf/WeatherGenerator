@@ -24,7 +24,6 @@ from weathergen.evaluate.plot_utils import (
 from weathergen.evaluate.plotter import LinePlots, Plotter
 from weathergen.evaluate.score import VerifiedData, get_score
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
-from weathergen.utils.config import Config
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -37,6 +36,7 @@ class WeatherGeneratorOutput:
     points_per_sample: xr.DataArray | None
 
 
+# TODO: This function needs some careful refactoring.
 def get_data(
     cfg: dict,
     results_dir: Path,
@@ -94,17 +94,18 @@ def get_data(
 
     with ZarrIO(fname_zarr) as zio:
         zio_forecast_steps = zio.forecast_steps
-        stream_dict = run.streams[stream]
+        stream_cfg = run.streams[stream]
         all_channels = peek_tar_channels(zio, stream, zio_forecast_steps[0])
         _logger.info(f"RUN {run_id}: Processing stream {stream}...")
 
         fsteps = zio_forecast_steps if fsteps is None else fsteps
+
         # TODO: Avoid conversion of fsteps and sample to integers (as obtained from the ZarrIO)
         fsteps = sorted([int(fstep) for fstep in fsteps])
         samples = sorted(
             [int(sample) for sample in zio.samples] if samples is None else samples
         )
-        channels = channels or stream_dict.get("channels", all_channels)
+        channels = channels or stream_cfg.get("channels", all_channels)
         channels = to_list(channels)
 
         da_tars, da_preds = [], []
@@ -223,25 +224,28 @@ def calc_scores_per_stream(
         f"RUN {run_id} - {stream}: Calculating scores for metrics {metrics}..."
     )
 
-    samples = cfg.evaluation.get("sample", None)
-    fsteps = cfg.evaluation.get("forecast_step", None)
-    channels = cfg.get("channels")
+    checked, (channels, fsteps, samples) = check_availability(
+        cfg, stream, results_dir, mode="evaluation"
+    )
 
-    if samples == "all":
-        samples = None
-
-    if fsteps == "all":
-        fsteps = None
-
-    output_data = get_data(cfg, results_dir, stream, region=region, return_counts=True)
+    output_data = get_data(
+        cfg,
+        results_dir,
+        stream,
+        region=region,
+        fsteps=fsteps,
+        samples=samples,
+        channels=channels,
+        return_counts=True,
+    )
 
     da_preds = output_data.prediction
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
 
     # get coordinate information from retrieved data
-
     fsteps = [int(k) for k in da_tars.keys()]
+
     first_da = list(da_preds.values())[0]
 
     # TODO: improve the way we handle samples.
@@ -289,6 +293,7 @@ def calc_scores_per_stream(
             _logger.debug(f"Running computation of metrics for stream {stream}...")
             combined_metrics = combined_metrics.compute()
             combined_metrics = scalar_coord_to_dim(combined_metrics, "channel")
+            combined_metrics = scalar_coord_to_dim(combined_metrics, "sample")
         else:
             # depending on the datset, there might be no data (e.g. no CERRA in southern hemisphere region)
             _logger.warning(
@@ -310,7 +315,7 @@ def calc_scores_per_stream(
 
 def plot_data(
     cfg: dict,
-    run_config: oc.DictConfig,
+    run_cfg: oc.DictConfig,
     results_dir: Path,
     plot_dir: Path,
     stream: str,
@@ -320,29 +325,30 @@ def plot_data(
 
     Parameters
     ----------
-    cfg :
+    cfg : dict
         Configuration dictionary containing all information for the evaluation.
-        Must provide a stream configuration under `cfg['run_ids'][run_id]["streams"][stream]`.
-    run_config :
-        Configuration for the run, including stream information.
+    run_cfg: dict
+        Run sub-config.
     results_dir :
         Directory where the inference results are stored.
         Expected scheme `<results_base_dir>/<run_id>`.
-    plot_base_dir :
+    plot_dir :
         Base directory where the plots will be saved.
     stream :
         Stream name to plot data for.
+    stream_cfg:
+        Stream sub-config.
     Returns
     -------
     List of plot names generated during the plotting process.
     """
-    run_id = results_dir.name
+    run_id = run_cfg["run_id"]
 
     # get stream dict from evaluation config (assumed to be part of cfg at this point)
-    stream_dict = cfg["run_ids"][run_id]["streams"][stream]
+    stream_cfg = cfg["run_ids"][run_id]["streams"][stream]
 
     # handle plotting settings
-    plot_settings = stream_dict.get("plotting", {})
+    plot_settings = stream_cfg.get("plotting", {})
 
     # return early if no plotting is requested
     if not (
@@ -355,21 +361,20 @@ def plot_data(
     ):
         return
 
-    # get plotter configuration
     plotter_cfg = {
         "image_format": cfg.get("image_format", "png"),
         "dpi_val": cfg.get("dpi_val", 300),
         "fig_size": cfg.get("fig_size", (8, 10)),
         "plot_subtimesteps": get_stream_attr(
-            run_config, stream, "tokenize_spacetime", False
+            run_cfg, stream, "tokenize_spacetime", False
         ),
     }
 
     plotter = Plotter(plotter_cfg, plot_dir)
 
-    plot_samples = plot_settings.get("sample", None)
-    plot_fsteps = plot_settings.get("forecast_step", None)
-    plot_chs = stream_dict.get("channels")
+    check, (plot_chs, plot_fsteps, plot_samples) = check_availability(
+        cfg, stream, results_dir, mode="plotting"
+    )
 
     # Check if maps should be plotted and handle configuration if provided
     plot_maps = plot_settings.get("plot_maps", False)
@@ -570,6 +575,7 @@ def retrieve_metric_from_json(
         Path(metric_dir) / f"{run_id}_{stream}_{region}_{metric}_epoch{epoch:05d}.json"
     )
     _logger.debug(f"Looking for: {score_path}")
+
     if score_path.exists():
         with open(score_path) as f:
             data_dict = json.load(f)
@@ -765,7 +771,174 @@ def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataA
     return da
 
 
-def get_stream_attr(config: Config, stream_name: str, key: str, default=None):
+def check_availability(
+    cfg: dict,
+    stream: str,
+    results_dir: Path,
+    available_data: dict = None,
+    mode: str = "",
+):
+    """
+    Check if requested channels, forecast steps and samples are
+    i) available in the previously saved json if metric data is specified (return False otherwise)
+    ii) available in the Zarr file (return error otherwise)
+    Additionally, if channels, forecast steps or samples is None/'all', it will
+    i) set the variable to all available vars in Zarr file
+    ii) return True only if the respective variable contains the same indeces in JSON and Zarr (return False otherwise)
+
+    Parameters
+    ----------
+    cfg :dict
+        The plot config.
+    stream : str
+        The stream considered.
+    results_dir : Path
+        The path where the Zarr should live.
+    available_data : dict, optional
+        The available data loaded from JSON.
+    Returns
+    -------
+    bool
+        True/False depending on the above logic (True if metrics do not need recomputing)
+    str
+        channels
+    str
+        fsteps
+    str
+        samples
+    """
+    run_id = results_dir.name
+
+    # fill info for requested channels, fsteps, samples
+    channels, fsteps, samples = _get_channels_fsteps_samples(cfg, run_id, stream, mode)
+
+    requested = {
+        "channel": set(channels) if channels is not None else None,
+        "fstep": set(fsteps) if fsteps is not None else None,
+        "sample": set(samples) if samples is not None else None,
+    }
+
+    # fill info from available json file (if provided)
+    available = {
+        "channel": set(available_data["channel"].values.ravel())
+        if available_data is not None
+        else {},
+        "fstep": set(available_data["forecast_step"].values.ravel())
+        if available_data is not None
+        else {},
+        "sample": set(available_data.coords["sample"].values.ravel())
+        if available_data is not None
+        else {},
+    }
+
+    # fill info from zarr
+    # TODO: make fname_zarr retrieval nicer
+    epoch = cfg.get("run_ids").get(run_id).get("epoch")
+    rank = cfg.get("run_ids").get(run_id).get("rank")
+
+    fname_zarr = results_dir.joinpath(
+        f"validation_epoch{epoch:05d}_rank{rank:04d}.zarr"
+    )
+
+    if not fname_zarr.exists() or not fname_zarr.is_dir():
+        _logger.error(f"Zarr file {fname_zarr} does not exist or is not a directory.")
+        raise FileNotFoundError(
+            f"Zarr file {fname_zarr} does not exist or is not a directory."
+        )
+
+    with ZarrIO(fname_zarr) as zio:
+        zio_data = {
+            "fstep": set(int(f) for f in zio.forecast_steps),
+            "sample": set(int(s) for s in zio.samples),
+            "channel": set(peek_tar_channels(zio, stream, zio.forecast_steps[0])),
+        }
+
+    check = True
+    corrected = False
+    for name in ["channel", "fstep", "sample"]:
+        if requested[name] is None:
+            # Default to all in Zarr
+            requested[name] = zio_data[name]
+            # If JSON exists, must exactly match
+            if available_data is not None and zio_data[name] != available[name]:
+                _logger.info(
+                    f"Requested all {name}s for {mode}, but previous config was a strict subset. Recomputing."
+                )
+                check = False
+
+        # Must be subset of Zarr
+        if not requested[name] <= zio_data[name]:
+            missing = requested[name] - zio_data[name]
+            _logger.info(
+                f"Requested {name}(s) {missing} do(es) not exist in Zarr. "
+                f"Removing missing {name}(s) for {mode}."
+            )
+            requested[name] = requested[name] & zio_data[name]
+            corrected = True
+
+        # Must be a subset of available_data (if provided)
+        if available_data is not None and not requested[name] <= available[name]:
+            missing = requested[name] - available[name]
+            _logger.info(
+                f"{name.capitalize()}(s) {missing} missing in previous evaluation. Recomputing."
+            )
+            check = False
+
+    if check and not corrected:
+        scope = "metric file" if available_data is not None else "Zarr file"
+        _logger.info(
+            f"All checks passed – All channels, samples, fsteps requested for {mode} are present in {scope}..."
+        )
+    return check, (
+        sorted(list(requested["channel"])),
+        sorted(list(requested["fstep"])),
+        sorted(list(requested["sample"])),
+    )
+
+
+def _get_channels_fsteps_samples(cfg: dict, run_id: str, stream: str, mode: str):
+    """
+    Get channels, fsteps and samples for a given run and stream from the config. Replace 'all' with None.
+
+    Parameters
+    ----------
+    cfg: dict
+        The plot config.
+    run: str,
+        The run considered.
+    stream: str
+        The stream considered.
+    mode: str
+        if plotting or evaluation mode
+
+    Returns
+    -------
+    list/None
+        channels
+    list/None
+        fsteps
+    list/None
+        samples
+    """
+    assert mode == "plotting" or mode == "evaluation", (
+        "get_channels_fsteps_samples:: Mode should be either 'plotting' or 'evaluation'"
+    )
+
+    samples = cfg.run_ids.get(run_id).streams.get(stream)[mode].get("sample", None)
+    fsteps = (
+        cfg.run_ids.get(run_id).streams.get(stream)[mode].get("forecast_step", None)
+    )
+
+    channels = cfg.run_ids.get(run_id).streams.get(stream).get("channels", None)
+
+    channels = None if (channels == "all" or channels is None) else list(channels)
+    fsteps = None if (fsteps == "all" or fsteps is None) else list(fsteps)
+    samples = None if (samples == "all" or samples is None) else list(samples)
+
+    return channels, fsteps, samples
+
+
+def get_stream_attr(config: oc.DictConfig, stream_name: str, key: str, default=None):
     """
     Get the value of a key for a specific stream from the a model config.
 
