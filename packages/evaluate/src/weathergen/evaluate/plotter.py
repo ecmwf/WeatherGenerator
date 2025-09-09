@@ -540,14 +540,31 @@ class Plotter:
 
 
 class LinePlots:
-    def __init__(self, cfg: dict, output_basedir: str | Path):
-        self.cfg = cfg
-        self.image_format = cfg.image_format
-        self.dpi_val = cfg.get("dpi_val")
-        self.fig_size = cfg.get("fig_size", (8, 10))
-        self.log_scale = cfg.evaluation.get("log_scale", False)
-        self.add_grid = cfg.evaluation.get("add_grid", False)
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
+        """
+        Initialize the LinePlots class.
+
+        Parameters
+        ----------
+        plotter_cfg:
+            Configuration dictionary containing basic information for plotting.
+            Expected keys are:
+                - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
+                - dpi_val: DPI value for the saved images
+                - fig_size: Size of the figure (width, height) in inches
+        output_basedir:
+            Base directory under which the plots will be saved.
+            Expected scheme `<results_base_dir>/<run_id>`.
+        """
+
+        self.image_format = plotter_cfg.get("image_format")
+        self.dpi_val = plotter_cfg.get("dpi_val")
+        self.fig_size = plotter_cfg.get("fig_size")
+        self.log_scale = plotter_cfg.get("log_scale")
+        self.add_grid = plotter_cfg.get("add_grid")
+        
         self.out_plot_dir = Path(output_basedir) / "line_plots"
+
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
