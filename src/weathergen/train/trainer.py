@@ -500,12 +500,13 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                preds, posteriors = self.ddp_model(
+                preds, posteriors, weights = self.ddp_model(
                     self.model_params, batch, cf.forecast_offset, forecast_steps
                 )
                 loss_values = self.loss_calculator.compute_loss(
                     preds=preds,
                     streams_data=batch[0],
+                    weights_samples=weights,
                 )
                 if cf.latent_noise_kl_weight > 0.0:
                     kl = torch.cat([posterior.kl() for posterior in posteriors])

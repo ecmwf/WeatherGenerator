@@ -64,6 +64,9 @@ def stats_normalized_erf(target, ens, mu, stddev):
 def mse(target, ens, mu, *kwargs):
     return torch.nn.functional.mse_loss(target, mu)
 
+def diff_mse(target, ens, mu, *kwargs):
+    return torch.nn.functional.mse_loss(target, mu, reduction="none") *
+
 
 def mse_ens(target, ens, mu, stddev):
     mse_loss = torch.nn.functional.mse_loss
@@ -89,6 +92,7 @@ def mse_channel_location_weighted(
     pred: torch.Tensor,
     weights_channels: torch.Tensor | None,
     weights_points: torch.Tensor | None,
+    weights_samples: torch.Tensor | None = None,
 ):
     """
     Compute weighted MSE loss for one window or step
@@ -138,11 +142,13 @@ def mse_channel_location_weighted(
     diff2 = torch.square(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0))
     if weights_points is not None:
         diff2 = (diff2.transpose(1, 0) * weights_points).transpose(1, 0)
-    loss_chs = diff2.mean(0)
-    loss = torch.mean(loss_chs * weights_channels if weights_channels else loss_chs)
+    diff2_weighted = diff2 * weights_samples if weights_samples is not None else diff2
+    loss_chs = diff2_weighted.mean(0)
+    loss_per_sample = loss_chs * weights_channels if weights_channels else loss_chs
+    loss_per_sample_weighted = loss_per_sample * weights_samples if weights_samples is not None else loss_per_sample
+    loss = loss_per_sample_weighted.mean()
 
     return loss, loss_chs
-
 
 def cosine_latitude(stream_data, forecast_offset, fstep, min_value=1e-3, max_value=1.0):
     latitudes_radian = stream_data.target_coords_raw[forecast_offset + fstep][:, 0] * np.pi / 180

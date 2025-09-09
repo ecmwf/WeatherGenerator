@@ -423,6 +423,7 @@ class Model(torch.nn.Module):
         num_params_embed_tcs = [get_num_parameters(etc) for etc in self.embed_target_coords]
         num_params_tte = [get_num_parameters(tte) for tte in self.target_token_engines]
         num_params_preds = [get_num_parameters(head) for head in self.pred_heads]
+        
 
         print("-----------------")
         print(f"Total number of trainable parameters: {num_params_total:,}")
@@ -511,6 +512,10 @@ class Model(torch.nn.Module):
 
         (streams_data, source_cell_lens, target_coords_idxs) = batch
 
+        if self.cf.forecast_diffusion and self.training:
+            target_tokens = streams_data.target_tokens[self.cf.forecast_offset :]
+
+
         # embed
         tokens = self.embed_cells(model_params, streams_data)
 
@@ -521,6 +526,13 @@ class Model(torch.nn.Module):
 
         # roll-out in latent space
         preds_all = []
+
+        #weights default to 1s
+        weights = torch.ones(tokens.shape[0], dtype=self.dtype)
+
+
+        if self.cf.forecast_diffusion:
+            assert forecast_steps == 1, "forecast_diffusion only implemented for single step"
 
         for fstep in range(forecast_offset, forecast_offset + forecast_steps):
             # prediction
@@ -535,7 +547,9 @@ class Model(torch.nn.Module):
             ]
 
             if not self.cf.forecast_diffusion:
-                tokens = self.forecast(model_params, tokens, noise_embedding=None)
+                tokens = self.forecast(model_params, tokens)
+            elif self.cf.forecast_diffusion and self.training:
+                tokens, weights = self.denoise(model_params, tokens, target_tokens)
             else:
                 tokens = self.edm_sampler(model_params, tokens)
 
@@ -550,7 +564,7 @@ class Model(torch.nn.Module):
             )
         ]
 
-        return preds_all, posteriors
+        return preds_all, posteriors, weights
 
     #########################################
     def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
@@ -733,7 +747,7 @@ class Model(torch.nn.Module):
         return tokens
 
     #########################################
-    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, noise_embedding: torch.Tensor) -> torch.Tensor:
+    def forecast(self, model_params: ModelParams, tokens: torch.Tensor) -> torch.Tensor:
         """Advances latent space representation in time
 
         Args:
@@ -767,9 +781,19 @@ class Model(torch.nn.Module):
         D_x = c_skip * tokens + c_out * F_x
         return D_x
 
-    
+    def denoise(self, model_params: ModelParams, condition_tokens: torch.Tensor, target_tokens: torch.Tensor):
+        rnd_normal = torch.randn([target_tokens.shape[0], 1, 1, 1])
+        sigma = (rnd_normal * self.P_std + self.P_mean).exp()
+        n = torch.randn_like(target_tokens) * sigma
+        noised_target = target_tokens + n
+        concat_x = torch.concat([condition_tokens, noised_target], dim=1)
+        weight = (sigma ** 2 + self.sigma_data ** 2) / (sigma * self.sigma_data) ** 2
+
+
+        return self.edm_preconditioning(model_params, concat_x, noise=n), weight
+
     def edm_sampler(
-        self, model_params: ModelParams, tokens: torch.Tensor, class_labels=None, randn_like=torch.randn_like,
+        self, model_params: ModelParams, condition_tokens: torch.Tensor, class_labels=None, randn_like=torch.randn_like,
         num_steps=18, sigma_min=0.002, sigma_max=80, rho=7,
         S_churn=0, S_min=0, S_max=float('inf'), S_noise=1,
     ):
@@ -778,12 +802,13 @@ class Model(torch.nn.Module):
         sigma_max = min(sigma_max, self.fe.sigma_max)
 
         # Time step discretization.
-        step_indices = torch.arange(num_steps, dtype=torch.float64, device=tokens.device)
+        step_indices = torch.arange(num_steps, dtype=torch.float64)
         t_steps = (sigma_max ** (1 / rho) + step_indices / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))) ** rho
         t_steps = torch.cat([torch.as_tensor(t_steps), torch.zeros_like(t_steps[:1])]) # t_N = 0
 
         # Main sampling loop.
-        x_next = tokens.to(torch.float64) * t_steps[0]
+        n = torch.randn([condition_tokens.shape[0], 1, 1, 1], device=condition_tokens.device) #shape should be like target_tokens
+        x_next =  (n * t_steps[0]).to(torch.float64)
         for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])): # 0, ..., N-1
             x_cur = x_next
 
@@ -793,13 +818,15 @@ class Model(torch.nn.Module):
             x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * randn_like(x_cur)
 
             # Euler step.
-            denoised = self.edm_preconditioning(model_params, x_hat, noise=t_hat).to(torch.float64)
+            concat_x = torch.concat([condition_tokens, x_hat], dim=1)
+            denoised = self.edm_preconditioning(model_params, concat_x, noise=t_hat).to(torch.float64)
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 
             # Apply 2nd order correction.
             if i < num_steps - 1:
-                denoised = self.edm_preconditioning(model_params, x_next, noise=t_next).to(torch.float64)
+                concat_x = torch.concat([condition_tokens, x_next], dim=1)
+                denoised = self.edm_preconditioning(model_params, concat_x, noise=t_next).to(torch.float64)
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 

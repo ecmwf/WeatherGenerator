@@ -140,6 +140,7 @@ class LossCalculator:
         substep_masks: list[torch.Tensor],
         weights_channels: torch.Tensor,
         weights_locations: torch.Tensor,
+        weights_samples: torch.Tensor = None,
     ):
         """
         Compute loss for given loss function
@@ -153,8 +154,9 @@ class LossCalculator:
             assert mask_t.sum() == len(weights_locations) if weights_locations is not None else True
 
             loss, loss_chs = loss_fct(
-                target[mask_t], pred[:, mask_t], weights_channels, weights_locations
+                target[mask_t], pred[:, mask_t], weights_channels, weights_locations, weights_samples
             )
+
 
             # accumulate loss
             loss_lfct = loss_lfct + loss
@@ -173,6 +175,7 @@ class LossCalculator:
         self,
         preds: list[list[Tensor]],
         streams_data: list[list[any]],
+        weights_samples: torch.Tensor = None,
     ) -> LossValues:
         """
         Computes the total loss for a given batch of predictions and corresponding
@@ -268,6 +271,7 @@ class LossCalculator:
                         substep_masks,
                         weights_channels,
                         weights_locations,
+                        weights_samples
                     )
                     losses_all[stream_info.name][:, i_lfct] += loss_lfct_chs
 
