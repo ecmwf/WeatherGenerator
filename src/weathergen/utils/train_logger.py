@@ -428,7 +428,7 @@ def clean_df(df, columns: list[str] | None):
     return df
 
 
-def clean_name(s):
+def clean_name(s: str) -> str:
     """
     Remove all characters from a string except letters, digits, and underscores.
 
@@ -449,7 +449,6 @@ def _key_loss(st_name: str, lf_name: str) -> str:
 
 def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
     st_name = clean_name(st_name)
-    ch_name = clean_name(ch_name)
     return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
 
 
