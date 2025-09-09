@@ -432,9 +432,19 @@ class Scores:
         gt: xr.DataArray,
         group_by_coord: str | None = None,
     ) -> np.array:
-        breakpoint()
-        froct = p[t + 1] - p[t]
-        groct = gt[t + t] - gt[t]
+        """
+        Calculate the forecast rate of change over time metric to indicate whether a model produces
+        stable activity over lead time. The forecast rate of change over time (froct) metric helps
+        to identify the point when model activities start to fade to zero or begin to explode.
+
+        TODO: Complete docstring
+        """
+        # TODO: Check shapes and make sure to compute difference over time. Resulting froct is a
+        # 1-dimensional array along time.
+        froct = [
+            p[t + 1] - p[t] for t in range(p.shape[1])
+        ]  # Maybe iterate over t to compute delta iteratively.
+        # groct = gt[t + t] - gt[t]  # Could also be interesting to directly compute difference to froct of ground truth
 
         if group_by_coord:
             froct = froct.groupby(group_by_coord)
