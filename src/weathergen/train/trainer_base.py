@@ -1,3 +1,5 @@
+# ruff: noqa: T201
+
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -7,16 +9,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import errno
-import logging
 import os
-import socket
 
 import pynvml
 import torch
 import torch.distributed as dist
 import torch.multiprocessing
 
+from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root
 
@@ -114,7 +114,27 @@ class TrainerBase:
             if is_root():
                 print("DDP initialized: root.")
             # Wait for all ranks to reach this point
+
             dist.barrier()
+            # communicate run id to all nodes
+            len_run_id = len(cf.run_id)
+            run_id_int = torch.zeros(len_run_id, dtype=torch.int32).to(device)
+            if is_root():
+                print(f"Communicating run_id to all nodes: {cf.run_id}")
+                run_id_int = str_to_tensor(cf.run_id).to(device)
+            dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
+            if not is_root():
+                cf.run_id = tensor_to_str(run_id_int)
+            print(f"rank: {rank} has run_id: {cf.run_id}")
+
+            # communicate data_loader_rng_seed
+            # if hasattr(cf, "data_loader_rng_seed"):
+            #     if cf.data_loader_rng_seed is not None:
+            #         l_seed = torch.tensor(
+            #             [cf.data_loader_rng_seed if rank == 0 else 0], dtype=torch.int32
+            #         ).cuda()
+            #         dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
+            #         cf.data_loader_rng_seed = l_seed.item()
 
         cf.world_size = world_size
         cf.rank = rank

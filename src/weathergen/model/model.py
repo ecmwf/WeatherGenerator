@@ -9,9 +9,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 import math
 import warnings
-import logging
 from pathlib import Path
 
 import astropy_healpix as hp
@@ -441,7 +441,7 @@ class Model(torch.nn.Module):
             final_activation = si["pred_head"].get("final_activation", "Identity")
             if is_root():
                 logger.debug(
-                    f"{final_activation} activation as prediction head output of {si['name']} stream"
+                    f"{final_activation} activation of prediction head of {si['name']} stream"
                 )
             self.pred_heads.append(
                 EnsPredictionHead(

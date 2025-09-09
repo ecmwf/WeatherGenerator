@@ -9,11 +9,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 import itertools
+import logging
 import re
 import time
 from pathlib import Path
 from typing import Any
-import logging
 
 import numpy as np
 import torch
@@ -281,12 +281,13 @@ class Trainer(TrainerBase):
             self.model.to_empty(device="cuda")
             self.model.reset_parameters()
         else:
-            logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
+            if is_root():
+                logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
             self.load_model(run_id_contd, epoch_contd)
-            logger.info(f"Loaded model id={run_id_contd}.")
+            if is_root():
+                logger.info(f"Loaded model id={run_id_contd}.")
         self.model_params.reset_parameters(cf)
         self.model_params = self.model_params.to(device)
-        print(self.model)
 
         if cf.compile_model:
             self.model = torch.compile(self.model, dynamic=True)
@@ -322,7 +323,8 @@ class Trainer(TrainerBase):
         cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size_per_gpu)
 
         steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
-        logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
+        if is_root():
+            logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
         # ensure that steps_decay has a reasonable value
         if steps_decay < int(0.2 * cf.lr_steps):
             cf.lr_steps_warmup = int(0.1 * cf.lr_steps)
@@ -338,7 +340,8 @@ class Trainer(TrainerBase):
             s += (
                 f" cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}.",
             )
-            logger.warning(s)
+            if is_root():
+                logger.warning(s)
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             cf.batch_size_per_gpu,
@@ -359,7 +362,8 @@ class Trainer(TrainerBase):
 
         if self.cf.istep > 0 and is_root():
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
-            logger.info(str)
+            if is_root():
+                logger.info(str)
 
         # Instantiate loss calculator modules to compute losses
         self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=device)
@@ -819,7 +823,7 @@ class Trainer(TrainerBase):
         max_epoch = self.cf.num_epochs
         assert epoch <= max_epoch, (epoch, max_epoch)
         model_state_dict = self._get_full_model_state_dict()
-        optim_state_dict = self._get_full_optimizer_state_dict()
+        # optim_state_dict = self._get_full_optimizer_state_dict()
 
         if is_root():
             filename = "".join(
@@ -837,7 +841,8 @@ class Trainer(TrainerBase):
             torch.save(model_state_dict, file_tmp)
             # move file (which is changing the link in the file system and very fast)
             file_tmp.replace(file_out)
-            logger.info(f"Saved model to {file_out}")
+            if is_root():
+                logger.info(f"Saved model to {file_out}")
 
             # save config
             config.save(self.cf, epoch)

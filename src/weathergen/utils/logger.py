@@ -7,14 +7,67 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import json
 import logging
+import logging.config
 import os
 import pathlib
-import sys
-from functools import cache
 from datetime import datetime
+from functools import cache
 
 from weathergen.utils.config import _load_private_conf
+
+FORMAT_STR = "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
+LOGGING_CONFIG = """
+{
+    "version": 1,
+    "disable_existing_loggers": false,
+    "formatters": {
+        "custom": {
+            "class": "weathergen.utils.logger.ColoredRelPathFormatter",
+            "format": f"{FORMAT_STR}"
+        }
+    },
+    "handlers": {
+        "stdout": {
+            "class": "logging.StreamHandler",
+            "level": "INFO",
+            "formatter": "custom",
+            "stream": "ext://sys.stdout"
+        },
+        "stderr": {
+            "class": "logging.StreamHandler",
+            "level": "ERROR",
+            "formatter": "custom",
+            "stream": "ext://sys.stderr"
+        },
+        "logfile": {
+            "class": "logging.FileHandler",
+            "level": "DEBUG",
+            "formatter": "custom",
+            "filename": "log.text",
+            "mode": "w"
+        },
+        "errorfile": {
+            "class": "logging.FileHandler",
+            "level": "ERROR",
+            "formatter": "custom",
+            "filename": "error.txt",
+            "mode": "w"
+        }
+    },
+    "root": {
+        "level": "DEBUG",
+        "handlers": [
+            "stderr",
+            "stdout",
+            "logfile",
+            "errorfile"
+        ]
+    }
+}
+"""
+
 
 class ColoredRelPathFormatter(logging.Formatter):
     COLOR_CODES = {
@@ -44,7 +97,7 @@ class ColoredRelPathFormatter(logging.Formatter):
 
 
 @cache
-def init_loggers(run_id, logging_level=logging.DEBUG):
+def init_loggers(run_id, logging_config=None):
     """
     Initialize the logger for the package and set output streams/files.
 
@@ -69,43 +122,27 @@ def init_loggers(run_id, logging_level=logging.DEBUG):
 
     output_dir = f"./output/{timestamp}-{run_id}"
 
-    filename = f"{output_dir}/{run_id}-log.txt"
+    # load the structure for logging config
+    if logging_config is None:
+        logging_config = json.loads(LOGGING_CONFIG)
 
-    format_str = "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
+    for _, handler in logging_config["handlers"].items():
+        for k, v in handler.items():
+            if k == "formatter":
+                handler[k] = v
+            elif k == "filename":
+                filename = f"{output_dir}/{run_id}-{v}"
+                ofile = pathlib.Path(filename)
+                # make sure the path is independent of path where job is launched
+                if not ofile.is_absolute():
+                    work_dir = pathlib.Path(_load_private_conf().get("path_shared_working_dir"))
+                    ofile = work_dir / ofile
+                pathlib.Path(ofile.parent).mkdir(parents=True, exist_ok=True)
+                handler[k] = ofile
+            else:
+                continue
 
-    ofile = pathlib.Path(filename)
-    # make sure the path is independent of path where job is launched
-    if not ofile.is_absolute():
-        work_dir = pathlib.Path(_load_private_conf().get("path_shared_working_dir"))
-        ofile = work_dir / ofile
     # make sure the parent directory exists
-    pathlib.Path(ofile.parent).mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(
-        level=logging_level,
-        format=format_str,
-        datefmt="%m-%d %H:%M",
-        filename=ofile,
-        filemode="w",
-    )
-    # define a Handler which writes INFO messages or higher to the sys.stderr
-    console = logging.StreamHandler()
-    console.setLevel(logging_level)
+    logging.config.dictConfig(logging_config)
 
-    # set a format which is simpler for console use
-    formatter = ColoredRelPathFormatter(fmt=format_str, color=True)
-    # tell the handler to use this format
-    console.setFormatter(formatter)
-
-    # Print errors 
-    ofile = pathlib.Path(f"{output_dir}/{run_id}-error.txt")
-    pathlib.Path(ofile.parent).mkdir(parents=True, exist_ok=True)
-    error_file = logging.FileHandler(ofile)
-    error_file.setLevel(logging.WARNING)
-    formatter = ColoredRelPathFormatter(fmt=format_str, color=True)
-    # tell the handler to use this format
-    error_file.setFormatter(formatter)
-
-
-    # add the handler to the root logger
-    logging.getLogger("").addHandler(console)
-    logging.getLogger("").addHandler(error_file)
+    logging.info(f"Logging set up. Logs are in {output_dir}")

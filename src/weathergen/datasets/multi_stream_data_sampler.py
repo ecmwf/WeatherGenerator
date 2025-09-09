@@ -7,8 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import pathlib
 import logging
+import pathlib
 
 import numpy as np
 import torch
@@ -34,8 +34,8 @@ from weathergen.datasets.utils import (
     compute_offsets_scatter_embed,
     compute_source_cell_lens,
 )
-from weathergen.utils.train_logger import Stage
 from weathergen.utils.distributed import is_root
+from weathergen.utils.train_logger import Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 
@@ -414,7 +414,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         worker_info = torch.utils.data.get_worker_info()
 
         if worker_info is None:
-            assert self.world_size == 1
+            assert self.world_size == 1, self.world_size
             iter_start = 0
             iter_end = len(self)
 
