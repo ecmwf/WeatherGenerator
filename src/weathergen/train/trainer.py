@@ -232,14 +232,46 @@ class Trainer(TrainerBase):
                 MultiCrossAttentionHeadVarlenSlicedQ,
                 MultiSelfAttentionHeadVarlen,
             )
-            for module in self.model.modules():
+            for module in self.model.embeds.modules():
                 if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)
+
+            for module in self.model.ae_local_blocks.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+
+            for module in self.model.ae_adapter.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+
+            for module in self.model.ae_global_blocks.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+
+            for module in self.model.fe_blocks.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+
+            full_precision_fsdp_kwargs = {
+                "mp_policy": MixedPrecisionPolicy(
+                    param_dtype=torch.float32,
+                    reduce_dtype=torch.float32,
+                )
+                if cf.with_mixed_precision
+                else None,
+            }
+            for module in self.model.pred_adapter_kv.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **full_precision_fsdp_kwargs)
+
+            for module in self.model.target_token_engines.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **full_precision_fsdp_kwargs)
 
         self.model_params = ModelParams(cf).create(cf)  # .to(device)
 
         if cf.with_ddp and cf.with_fsdp:
-            fully_shard(self.model, **fsdp_kwargs)
+            fully_shard(self.model)
             for tensor in itertools.chain(self.model.parameters(), self.model.buffers()):
                 assert tensor.device == torch.device("meta")
 

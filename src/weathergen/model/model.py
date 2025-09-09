@@ -863,7 +863,7 @@ class Model(torch.nn.Module):
 
             ## embed token coords, concatenating along batch dimension
             # (which is taking care of through the varlen attention)
-            # with torch.amp.autocast("cuda", dtype=torch.float32, enabled=False):
+            # arguably we should to the mixed precision policy when creating the model in FSDP
             tc_tokens = torch.cat(
                 [
                     checkpoint(

@@ -155,8 +155,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         x = peh(checkpoint(self.embed, x_in.transpose(-2, -1), use_reentrant=False))
 
         for layer in self.layers:
-            # x = checkpoint(layer, x, use_reentrant=False)
-            x = layer(x)
+            x = checkpoint(layer, x, use_reentrant=False)
 
         # read out
         if self.unembed_mode == "full":
