@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from PIL import Image
-
+from weathergen.evaluate.plot_utils import DefaultMarkerSize
 from weathergen.utils.config import _load_private_conf
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
@@ -679,47 +679,3 @@ class LinePlots:
         plt.close()
 
 
-class DefaultMarkerSize:
-    """
-    Utility class for managing default configuration values, such as marker sizes
-    for various data streams.
-    """
-
-    _marker_size_stream = {
-        "era5": 2.5,
-        "imerg": 0.25,
-        "cerra": 0.1,
-    }
-
-    _default_marker_size = 0.5
-
-    @classmethod
-    def get_marker_size(cls, stream_name: str) -> float:
-        """
-        Get the default marker size for a given stream name.
-
-        Parameters
-        ----------
-        stream_name : str
-            The name of the stream.
-
-        Returns
-        -------
-        float
-            The default marker size for the stream.
-        """
-        return cls._marker_size_stream.get(
-            stream_name.lower(), cls._default_marker_size
-        )
-
-    @classmethod
-    def list_streams(cls):
-        """
-        List all streams with defined marker sizes.
-
-        Returns
-        -------
-        list[str]
-            List of stream names.
-        """
-        return list(cls._marker_size_stream.keys())

@@ -14,13 +14,40 @@ import numpy as np
 _logger = logging.getLogger(__name__)
 
 
-def collect_streams(runs):
-    """Get all unique streams across runs, sorted."""
+def collect_streams(runs: dict):
+    """Get all unique streams across runs, sorted.
+    
+    Parameters
+    ----------
+    runs : dict
+        The dictionary containing all run configs.
+   
+    Returns
+    -------
+    set 
+        all available streams
+    """
     return sorted({s for run in runs.values() for s in run["streams"].keys()})
 
 
-def collect_channels(scores_dict, metric, region, runs):
-    """Get all unique channels available for given metric and region across runs."""
+def collect_channels(scores_dict: dict, metric: str, region: str, runs) -> dict:
+    """Get all unique channels available for given metric and region across runs.
+    
+    Parameters
+    ----------
+    scores_dict : dict
+        The dictionary containing all computed metrics.
+    metric: str
+        String specifying the metric to plot 
+    region: str
+        String specifying the region to plot
+    runs: dict
+        Dictionary containing the config for all runs
+    Returns
+    -------
+    list 
+        returns a list with all available channels
+    """
     channels = set()
     if metric not in scores_dict or region not in scores_dict[metric]:
         return []
@@ -33,8 +60,25 @@ def collect_channels(scores_dict, metric, region, runs):
     return list(channels)
 
 
-def plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary):
-    """Plot data for all streams and channels for a given metric and region."""
+def plot_metric_region(metric: str, region: str, runs: dict, scores_dict: dict, plotter: object, print_summary: bool):
+    """Plot data for all streams and channels for a given metric and region.
+    
+    Parameters
+    ----------
+    metric: str
+        String specifying the metric to plot 
+    region: str
+        String specifying the region to plot
+    runs: dict
+        Dictionary containing the config for all runs
+    scores_dict : dict
+        The dictionary containing all computed metrics.
+    plotter:
+        Plotter object to handle the plotting part 
+    print_summary: bool
+        Option to print plot values to screen 
+        
+    """
     streams_set = collect_streams(runs)
     channels_set = collect_channels(scores_dict, metric, region, runs)
 
@@ -64,3 +108,48 @@ def plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary
                     y_dim=metric,
                     print_summary=print_summary,
                 )
+
+class DefaultMarkerSize:
+    """
+    Utility class for managing default configuration values, such as marker sizes
+    for various data streams.
+    """
+
+    _marker_size_stream = {
+        "era5": 2.5,
+        "imerg": 0.25,
+        "cerra": 0.1,
+    }
+
+    _default_marker_size = 0.5
+
+    @classmethod
+    def get_marker_size(cls, stream_name: str) -> float:
+        """
+        Get the default marker size for a given stream name.
+
+        Parameters
+        ----------
+        stream_name : str
+            The name of the stream.
+
+        Returns
+        -------
+        float
+            The default marker size for the stream.
+        """
+        return cls._marker_size_stream.get(
+            stream_name.lower(), cls._default_marker_size
+        )
+
+    @classmethod
+    def list_streams(cls):
+        """
+        List all streams with defined marker sizes.
+
+        Returns
+        -------
+        list[str]
+            List of stream names.
+        """
+        return list(cls._marker_size_stream.keys())
