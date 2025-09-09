@@ -17,14 +17,17 @@ from pathlib import Path
 from omegaconf import OmegaConf, DictConfig
 
 from weathergen.evaluate.utils import (
+    get_reader,
     calc_scores_per_stream,
-    check_availability,
     metric_list_to_json,
     plot_data,
     plot_summary,
     retrieve_metric_from_json,
 )
 from weathergen.evaluate.io_reader import Reader, WeatherGeneratorOutput
+from weathergen.evaluate.json_reader import JsonReader
+from weathergen.evaluate.zarr_reader import ZarrReader
+
 from weathergen.utils.config import _REPO_ROOT
 
 _logger = logging.getLogger(__name__)
@@ -77,8 +80,8 @@ def evaluate_from_config(cfg):
 
     for run_id, run in runs.items():
         _logger.info(f"RUN {run_id}: Getting data...")
-
-        reader = Reader(run, run_id, private_paths)
+        
+        reader = get_reader(run, run_id, private_paths)
 
         for stream in reader.streams:
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
@@ -103,8 +106,8 @@ def evaluate_from_config(cfg):
                                 region,
                                 metric,
                             )
-                            checked, (channels, fsteps, samples) = check_availability(
-                                reader, stream, metric_data, mode="evaluation"
+                            checked, (channels, fsteps, samples) = reader.check_availability(
+                                stream, metric_data, mode="evaluation"
                             )
                             if not checked:
                                 metrics_to_compute.append(metric)
