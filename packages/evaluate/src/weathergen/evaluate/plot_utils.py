@@ -16,15 +16,15 @@ _logger = logging.getLogger(__name__)
 
 def collect_streams(runs: dict):
     """Get all unique streams across runs, sorted.
-    
+
     Parameters
     ----------
     runs : dict
         The dictionary containing all run configs.
-   
+
     Returns
     -------
-    set 
+    set
         all available streams
     """
     return sorted({s for run in runs.values() for s in run["streams"].keys()})
@@ -32,20 +32,20 @@ def collect_streams(runs: dict):
 
 def collect_channels(scores_dict: dict, metric: str, region: str, runs) -> dict:
     """Get all unique channels available for given metric and region across runs.
-    
+
     Parameters
     ----------
     scores_dict : dict
         The dictionary containing all computed metrics.
     metric: str
-        String specifying the metric to plot 
+        String specifying the metric to plot
     region: str
         String specifying the region to plot
     runs: dict
         Dictionary containing the config for all runs
     Returns
     -------
-    list 
+    list
         returns a list with all available channels
     """
     channels = set()
@@ -60,13 +60,20 @@ def collect_channels(scores_dict: dict, metric: str, region: str, runs) -> dict:
     return list(channels)
 
 
-def plot_metric_region(metric: str, region: str, runs: dict, scores_dict: dict, plotter: object, print_summary: bool):
+def plot_metric_region(
+    metric: str,
+    region: str,
+    runs: dict,
+    scores_dict: dict,
+    plotter: object,
+    print_summary: bool,
+):
     """Plot data for all streams and channels for a given metric and region.
-    
+
     Parameters
     ----------
     metric: str
-        String specifying the metric to plot 
+        String specifying the metric to plot
     region: str
         String specifying the region to plot
     runs: dict
@@ -74,10 +81,10 @@ def plot_metric_region(metric: str, region: str, runs: dict, scores_dict: dict, 
     scores_dict : dict
         The dictionary containing all computed metrics.
     plotter:
-        Plotter object to handle the plotting part 
+        Plotter object to handle the plotting part
     print_summary: bool
-        Option to print plot values to screen 
-        
+        Option to print plot values to screen
+
     """
     streams_set = collect_streams(runs)
     channels_set = collect_channels(scores_dict, metric, region, runs)
@@ -108,6 +115,7 @@ def plot_metric_region(metric: str, region: str, runs: dict, scores_dict: dict, 
                     y_dim=metric,
                     print_summary=print_summary,
                 )
+
 
 class DefaultMarkerSize:
     """

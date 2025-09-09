@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from PIL import Image
+
 from weathergen.evaluate.plot_utils import DefaultMarkerSize
 from weathergen.utils.config import _load_private_conf
 
@@ -330,9 +331,10 @@ class Plotter:
 
         # copy global plotting options, not specific to any variable
         map_kwargs_global = {
-                key: value for key, value in (map_kwargs or {}).items() 
-                if key not in variables
-            }
+            key: value
+            for key, value in (map_kwargs or {}).items()
+            if key not in variables
+        }
 
         # Basic map output directory for this stream
         map_output_dir = self.get_map_output_dir(tag)
@@ -369,7 +371,7 @@ class Plotter:
                     map_output_dir,
                     var,
                     tag=tag,
-                    map_kwargs= dict(map_kwargs.get(var, {})) | map_kwargs_global,
+                    map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
                 )
                 plot_names.append(name)
 
@@ -407,13 +409,15 @@ class Plotter:
         """
         # check for known keys in map_kwargs
         map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
-        marker_size_base = map_kwargs_save.pop("marker_size",  DefaultMarkerSize.get_marker_size(self.stream))
+        marker_size_base = map_kwargs_save.pop(
+            "marker_size", DefaultMarkerSize.get_marker_size(self.stream)
+        )
         scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
         marker = map_kwargs_save.pop("marker", "o")
         vmin = map_kwargs_save.pop("vmin", None)
         vmax = map_kwargs_save.pop("vmax", None)
 
-        #scale marker size
+        # scale marker size
         marker_size = marker_size_base
         if scale_marker_size:
             marker_size = np.clip(
@@ -421,7 +425,7 @@ class Plotter:
                 a_max=marker_size * 10.0,
                 a_min=marker_size,
             )
-  
+
         # Create figure and axis objects
         fig = plt.figure(dpi=self.dpi_val)
         ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
@@ -677,5 +681,3 @@ class LinePlots:
         name = "_".join(filter(None, parts))
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
         plt.close()
-
-
