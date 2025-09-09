@@ -327,12 +327,12 @@ class Plotter:
             List of plot names for the saved maps.
         """
         self.update_data_selection(select)
-        
-        if not hasattr(map_kwargs, "marker_size"):
-            # Set default marker size if not specified in maps_config
-            map_kwargs["marker_size"] = DefaultMarkerSize.get_marker_size(
-                self.stream
-            )
+
+        # copy global plotting options, not specific to any variable
+        map_kwargs_global = {
+                key: value for key, value in (map_kwargs or {}).items() 
+                if key not in variables
+            }
 
         # Basic map output directory for this stream
         map_output_dir = self.get_map_output_dir(tag)
@@ -369,7 +369,7 @@ class Plotter:
                     map_output_dir,
                     var,
                     tag=tag,
-                    map_kwargs=map_kwargs,
+                    map_kwargs= dict(map_kwargs.get(var, {})) | map_kwargs_global,
                 )
                 plot_names.append(name)
 
@@ -405,20 +405,15 @@ class Plotter:
         -------
             Name of the saved plot file.
         """
-       
-        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
         # check for known keys in map_kwargs
-        marker_size_base = map_kwargs_save.pop("marker_size", 1)
+        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
+        marker_size_base = map_kwargs_save.pop("marker_size",  DefaultMarkerSize.get_marker_size(self.stream))
         scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
         marker = map_kwargs_save.pop("marker", "o")
-        vmin = map_kwargs_save[varname].pop("vmin", None)
-        vmax = map_kwargs_save[varname].pop("vmax", None)
-  
-        # Create figure and axis objects
-        fig = plt.figure(dpi=self.dpi_val)
-        ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
-        ax.coastlines()
+        vmin = map_kwargs_save.pop("vmin", None)
+        vmax = map_kwargs_save.pop("vmax", None)
 
+        #scale marker size
         marker_size = marker_size_base
         if scale_marker_size:
             marker_size = np.clip(
@@ -426,6 +421,11 @@ class Plotter:
                 a_max=marker_size * 10.0,
                 a_min=marker_size,
             )
+  
+        # Create figure and axis objects
+        fig = plt.figure(dpi=self.dpi_val)
+        ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
+        ax.coastlines()
 
         valid_time = str(data["valid_time"][0].values.astype("datetime64[m]"))
 
@@ -440,7 +440,7 @@ class Plotter:
             vmin=vmin,
             vmax=vmax,
             linewidths=0.0,  # only markers, avoids aliasing for very small markers
-            **map_kwargs_save[varname],
+            **map_kwargs_save,
         )
 
         plt.colorbar(
