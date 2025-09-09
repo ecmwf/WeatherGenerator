@@ -18,6 +18,9 @@ import xarray as xr
 from tqdm import tqdm
 
 from weathergen.common.io import ZarrIO
+from weathergen.evaluate.plot_utils import (
+    plot_metric_region,
+)
 from weathergen.evaluate.plotter import LinePlots, Plotter
 from weathergen.evaluate.score import VerifiedData, get_score
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
@@ -581,7 +584,7 @@ def retrieve_metric_from_json(
         raise FileNotFoundError(f"File {score_path} not found in the archive.")
 
 
-def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path, print_summary: bool):
+def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     """
     Plot summary of the evaluation results.
     This function is a placeholder for future implementation.
@@ -592,86 +595,21 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path, print_summary:
         Configuration dictionary containing all information for the evaluation.
     scores_dict :
         Dictionary containing scores for each metric and stream.
-    print_summary
-        If True, print a summary of the evaluation results.
     """
     _logger.info("Plotting summary of evaluation results...")
 
     runs = cfg.run_ids
     metrics = cfg.evaluation.metrics
-
+    print_summary = cfg.evaluation.get("print_summary", False)
     regions = cfg.evaluation.get("regions", ["global"])
 
     plotter = LinePlots(cfg, summary_dir)
 
     for region in regions:
         for metric in metrics:
-            # get total list of streams
-            # TODO: improve this
-            streams_set = list(
-                sorted(
-                    set.union(
-                        *[set(run_id["streams"].keys()) for run_id in runs.values()]
-                    )
-                )
+            plot_metric_region(
+                metric, region, runs, scores_dict, plotter, print_summary
             )
-
-            # get total list of channels
-            # TODO: improve this
-            channels_set = list(
-                set(
-                    value
-                    for run_id in runs
-                    for stream in scores_dict.get(metric).get(region).keys()
-                    if region in scores_dict.get(metric, {})
-                    and run_id
-                    in scores_dict.get(metric, {})
-                    .get(region, {})
-                    .get(stream, {})  # check if run_id exists
-                    for value in np.atleast_1d(
-                        scores_dict[metric][region][stream][run_id]["channel"].values
-                    )
-                )
-            )
-
-            # TODO: move this into plot_utils
-            for stream in streams_set:  # loop over streams
-                for ch in channels_set:  # loop over channels
-                    selected_data = []
-                    labels = []
-                    run_ids = []
-                    for run_id, data in scores_dict[metric][region][stream].items():
-                        # fill list of plots with one xarray per run_id, if it exists.
-                        if ch not in set(np.atleast_1d(data.channel.values)):
-                            continue
-
-                        # continue if data contains NaN values
-                        if data.isnull().any():
-                            continue
-
-                        selected_data.append(data.sel(channel=ch))
-                        labels.append(runs[run_id].get("label", run_id))
-                        run_ids.append(run_id)
-
-                    # if there is data for this stream and channel, plot it
-                    if selected_data:
-                        _logger.info(
-                            f"Creating plot for {metric} - {region} - {stream} - {ch}."
-                        )
-                        name = "_".join(
-                            [metric]
-                            + [region]
-                            + sorted(list(set(run_ids)))
-                            + [stream, ch]
-                        )
-                        plotter.plot(
-                            selected_data,
-                            labels,
-                            tag=name,
-                            x_dim="forecast_step",
-                            y_dim=metric,
-                            print_summary=print_summary,
-                        )
 
 
 ############# Utility functions ############
@@ -739,7 +677,6 @@ def calc_val(x: xr.DataArray, bound: str) -> list[float]:
     -------
         a list with the maximum or minimum values for a specific variable.
     """
-
     if bound == "max":
         return x.max(dim=("ipoint")).values
     elif bound == "min":
@@ -769,7 +706,6 @@ def calc_bounds(
         a list with the maximum or minimum values for a specific variable.
     """
     list_bound = []
-
     for da_tars, da_preds in zip(data_tars.values(), data_preds.values(), strict=False):
         list_bound.extend(
             (
