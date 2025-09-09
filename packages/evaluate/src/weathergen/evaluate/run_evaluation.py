@@ -63,7 +63,7 @@ def evaluate_from_config(cfg):
     # Directory to store the summary plots
     private_paths = cfg.get("private_paths", None)
     summary_dir = Path(
-        cfg.get("summary_dir", _DEFAULT_PLOT_DIR)
+        cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR)
     )  # base directory where summary plots will be stored
 
     metrics = cfg.evaluation.metrics
@@ -182,10 +182,10 @@ def evaluate_from_config(cfg):
                         )
 
     # plot summary
-    summary_plots = cfg.get("summary_plots", True)
+    summary_plots = cfg.evaluation.get("summary_plots", True)
     if scores_dict and summary_plots:
         _logger.info("Started creating summary plots..")
-        plot_summary(cfg, scores_dict, summary_dir, print_summary=cfg.print_summary)
+        plot_summary(cfg, scores_dict, summary_dir)
 
 
 if __name__ == "__main__":
