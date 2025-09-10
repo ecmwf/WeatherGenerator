@@ -189,7 +189,9 @@ def align_clim_data(
                 clim_values = prepared_clim_data.isel(grid_points=clim_indices).values
                 try:
                     if len(samples) > 1:
-                        aligned_clim_data[fstep].loc[{"ipoint": sample_mask}] = clim_values
+                        aligned_clim_data[fstep].loc[{"ipoint": sample_mask}] = (
+                            clim_values
+                        )
                     else:
                         aligned_clim_data[fstep] = clim_values
                 except (ValueError, IndexError) as e:

@@ -305,8 +305,8 @@ def calc_scores_per_stream(
             )
 
             # Prepare kwargs for metrics that need climatology data
-            if 'acc' in metrics:
-                metrics_kwargs['acc'] = {
+            if "acc" in metrics:
+                metrics_kwargs["acc"] = {
                     "clim_mean": aligned_clim_data[fstep],
                     "spatial_dims": ["ipoint"],
                 }
