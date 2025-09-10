@@ -192,7 +192,7 @@ def healpix_verts_rots(hl: int, dx=0.5, dy=0.5):
 
 
 ####################################################################################################
-def locs_to_cell_coords_ctrs(healpix_centers_rots, locs):
+def locs_to_cell_coords_ctrs(healpix_centers_rots, locs) -> torch.Tensor:
     """
     Map a list of locations per cell to spherical local coordinates centered
     at the healpix cell center
@@ -229,6 +229,8 @@ def locs_to_cell_coords_ctrs(healpix_centers_rots, locs):
         rotations_selected,
         all_points.unsqueeze(-1)
     ).squeeze(-1)
+
+    import pdb; pdb.set_trace()
 
     return local_locs
 
@@ -397,6 +399,7 @@ def get_target_coords_local(hlc, target_coords, geoinfo_offset):
 
 
 ####################################################################################################
+# TODO: remove this function, it is dead code that will fail immediately
 def get_target_coords_local_fast(hlc, target_coords, geoinfo_offset):
     """Generate local coordinates for target coords w.r.t healpix cell vertices and
     and for healpix cell vertices themselves
