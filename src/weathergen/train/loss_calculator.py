@@ -105,6 +105,12 @@ class LossCalculator:
 
         return stream_info_loss_weight, weights_channels
 
+    def _get_fstep_weights(self, forecast_steps):
+        fsteps = np.arange(forecast_steps)
+        gamma = 0.6
+        weights = gamma**fsteps
+        return weights * (len(fsteps) / np.sum(weights))
+
     def _get_location_weights(self, stream_info, stream_data, forecast_offset, fstep):
         location_weight_type = stream_info.get("location_weight", None)
         if location_weight_type is None:
@@ -230,9 +236,11 @@ class LossCalculator:
 
             stream_data = streams_data[i_batch][i_stream_info]
 
+            fstep_loss_weights = self._get_fstep_weights(len(targets))
+
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
-            for fstep, target in enumerate(targets):
+            for fstep, (target, fstep_weight) in enumerate(zip(targets, fstep_loss_weights)):
                 # skip if either target or prediction has no data points
                 pred = preds[fstep][i_stream_info]
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
@@ -273,7 +281,9 @@ class LossCalculator:
 
                     # Add the weighted and normalized loss from this loss function to the total
                     # batch loss
-                    loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct * stream_loss_weight)
+                    loss_fstep = loss_fstep + (
+                        loss_fct_weight * loss_lfct * stream_loss_weight * fstep_weight
+                    )
                     ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
 
                 loss_fsteps = loss_fsteps + (loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0)
