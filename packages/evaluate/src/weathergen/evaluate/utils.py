@@ -267,10 +267,25 @@ def calc_scores_per_stream(
         },
     )
 
+    # fsteps ordered numerically
+    sfsteps = sorted(fsteps)
+
     for (fstep, tars), (_, preds) in zip(
         da_tars.items(), da_preds.items(), strict=False
     ):
         _logger.debug(f"Verifying data for stream {stream}...")
+
+        # Prepare any metric-specific kwargs, similar for ACC
+        metrics_kwargs = {}
+        for metric in metrics:
+            metrics_kwargs[metric] = {}
+
+        if "fact" in metrics:
+            # index of fstep in sorted fsteps
+            fstep_idx = sfsteps.index(fstep)
+            next_fstep = sfsteps[fstep_idx + 1] if fstep_idx + 1 < len(sfsteps) else None
+            preds_next = da_preds.get(next_fstep, None)
+            metrics_kwargs["fact"] = {"next_prediction": preds_next}
 
         if preds.ipoint.size > 0:
             score_data = VerifiedData(preds, tars)
@@ -282,7 +297,11 @@ def calc_scores_per_stream(
 
             combined_metrics = [
                 get_score(
-                    score_data, metric, agg_dims="ipoint", group_by_coord="sample"
+                    score_data,
+                    metric,
+                    agg_dims="ipoint",
+                    group_by_coord="sample",
+                    **metrics_kwargs[metric],
                 )
                 for metric in metrics
             ]

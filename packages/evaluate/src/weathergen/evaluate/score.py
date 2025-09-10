@@ -604,6 +604,72 @@ class Scores:
 
         return rmse
 
+    def calc_fact(
+        self,
+        p: xr.DataArray,
+        p1: xr.DataArray,
+        group_by_coord: str | None = None,
+    ):
+        """
+        Calculate simple forecast activity
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        p1: xr.DataArray
+            Next forecast step data array
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the FACT score.
+        """
+        if self._agg_dims is None:
+            raise ValueError(
+                "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
+            )
+
+        fact = p1 - p
+
+        if group_by_coord:
+            fact = fact.groupby(group_by_coord)
+
+        fact = self._mean(fact)
+
+        return fact
+
+    def calc_fact2(
+        self,
+        p: xr.DataArray,
+        clim_mean: xr.DataArray,
+        group_by_coord: str | None = None,
+    ):
+        """
+        Calculate forecast activity after Ben Bouallègue et al. (2024)
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        clim_mean: xr.DataArray
+            Climatological mean data array
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the FACT score.
+        """
+        if self._agg_dims is None:
+            raise ValueError(
+                "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
+            )
+
+        fact2 = p - clim_mean
+
+        if group_by_coord:
+            fact2 = fact2.groupby(group_by_coord)
+
+        fact = fact.std(dim=self._agg_dims)
+
+        return fact2
+
     def calc_acc(
         self,
         p: xr.DataArray,
