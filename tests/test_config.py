@@ -189,7 +189,7 @@ def test_load_with_overwrite_file(private_config_file, overwrite_file):
 
 def test_load_with_stream_in_overwrite(private_config_file, streams_dir, mocker):
     overwrite = {"streams_directory": streams_dir}
-    stub = mocker.patch("weathergen.utils.config.load_streams", return_value=streams_dir)
+    stub = mocker.patch("weathergen.common.config.load_streams", return_value=streams_dir)
 
     config.load_config(private_config_file, None, None, overwrite)
 
