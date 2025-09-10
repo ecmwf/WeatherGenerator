@@ -5,7 +5,6 @@ import pandas as pd
 import torch
 from astropy_healpix.healpy import ang2pix
 from torch import Tensor
-from torch.nn.utils.rnn import pad_sequence
 
 from weathergen.datasets.utils import (
     r3tos2,
@@ -293,35 +292,23 @@ def _coords_local(
     """Compute simple local coordinates for a set of 3D positions on the unit sphere."""
     fp32 = torch.float32
     posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])  # prepend zero
-    len_idxs_ord = len(idxs_ord)
 
-    # pad indices
-    idxs_padded = pad_sequence(idxs_ord, batch_first=True, padding_value=-1)
-    mask = idxs_padded != -1
-
-    k_max = idxs_padded.shape[1]
-
-    idxs_padded = idxs_padded.clamp(min=0)
-
-    # Gather positions directly
-    pos_padded = posr3[idxs_padded]
-    pos_padded[~mask] = 0  # zero out invalid
-
-    # Batched rotation
-    # The shape of torch.matmul output is [len_idxs_ord, k_max, 3].
-    # So instead of having len_idxs_ord, separate sequences of k_max points each,
-    # you now have one long list of len_idxs_ord*k_max points that can be processed.
-    pos_rot = torch.matmul(pos_padded, hpy_verts_rots.transpose(1, 2)).reshape(-1, 3)
-
-    mask_flat = mask.reshape(-1)
-
-    out_dim = n_coords(r3tos2(torch.zeros(1, 3))).shape[-1]
-    out_flat = torch.zeros(mask_flat.size(0), out_dim, dtype=fp32)
-
-    out_flat[mask_flat] = n_coords(r3tos2(pos_rot[mask_flat]).to(fp32))
-
-    # Reshape back
-    coords_local = out_flat.view(len_idxs_ord, k_max, out_dim)
-
-    # Ragged list
-    return [coords_local[b, : len(idxs_ord[b])] for b in range(len_idxs_ord)]
+    idxs_ords_lens_l = [len(idxs) for idxs in idxs_ord]
+    # int32 should be enough
+    idxs_ords_lens = torch.tensor(idxs_ords_lens_l, dtype=torch.int32)
+    # concat all indices
+    idxs_ords_c = torch.cat(idxs_ord)
+    # Copy the rotation matrices for each healpix cell
+    # num_points x 3 x 3
+    rots = torch.repeat_interleave(hpy_verts_rots, idxs_ords_lens, dim=0)
+    # BMM only works for b x n x m and b x m x 1
+    # adding a dummy dimension to posr3
+    # numpoints x 3 x 1
+    posr3_sel = posr3[idxs_ords_c].unsqueeze(-1)
+    vec_rot = torch.bmm(rots, posr3_sel)
+    vec_rot = vec_rot.squeeze(-1)
+    vec_scaled = n_coords(r3tos2(vec_rot).to(fp32))
+    # split back to ragged list
+    # num_points x 2
+    coords_local = torch.split(vec_scaled, idxs_ords_lens_l, dim=0)
+    return list(coords_local)

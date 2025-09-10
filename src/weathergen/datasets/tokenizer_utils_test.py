@@ -59,3 +59,6 @@ def test_coords_local():
     coords_local = simple_coords_local(_pos3r, _hpy_verts_rots, _idxs_ord, n_coords)
     coords_local_ref = _coords_local(_pos3r, _hpy_verts_rots, _idxs_ord, n_coords)
     torch.testing.assert_close(coords_local, coords_local_ref, atol=1e-6, rtol=0)
+
+
+test_coords_local()
