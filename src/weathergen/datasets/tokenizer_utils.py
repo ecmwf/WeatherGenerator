@@ -1,4 +1,3 @@
-import pdb
 from collections.abc import Callable
 
 import numpy as np
@@ -8,12 +7,12 @@ from astropy_healpix.healpy import ang2pix
 from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
 
-CoordNormalizer = Callable[[torch.Tensor], torch.Tensor]
-
 from weathergen.datasets.utils import (
     r3tos2,
     s2tor3,
 )
+
+CoordNormalizer = Callable[[torch.Tensor], torch.Tensor]
 
 # on some clusters our numpy version is pinned to be 1.x.x where the np.argsort does not
 # the stable=True argument
@@ -205,41 +204,7 @@ def tokenize_window_space(
     # convert to local coordinates
     # TODO: avoid that padded lists are rotated, which means potentially a lot of zeros
     if local_coords:
-        fp32 = torch.float32
-        posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])  # prepend zero
-        len_idxs_ord = len(idxs_ord)
-
-        # pad indices
-        idxs_padded = pad_sequence(idxs_ord, batch_first=True, padding_value=-1)
-        mask = idxs_padded != -1
-
-        k_max = idxs_padded.shape[1]
-
-        idxs_padded = idxs_padded.clamp(min=0)
-
-        # Gather positions directly
-        pos_padded = posr3[idxs_padded]
-        pos_padded[~mask] = 0  # zero out invalid
-
-        # Batched rotation
-        # The shape of torch.matmul output is [len_idxs_ord, k_max, 3].
-        # So instead of having len_idxs_ord, separate sequences of k_max points each,
-        # you now have one long list of len_idxs_ord*k_max points that can be processed.
-        pos_rot = torch.matmul(pos_padded, hpy_verts_rots.transpose(1, 2)).reshape(-1, 3)
-
-        mask_flat = mask.reshape(-1)
-
-        out_dim = n_coords(r3tos2(torch.zeros(1, 3))).shape[-1]
-        out_flat = torch.zeros(mask_flat.size(0), out_dim, dtype=fp32)
-
-        out_flat[mask_flat] = n_coords(r3tos2(pos_rot[mask_flat]).to(fp32))
-
-        # Reshape back
-        coords_local = out_flat.view(len_idxs_ord, k_max, out_dim)
-
-        # Ragged list
-        coords_local = [coords_local[b, : len(idxs_ord[b])] for b in range(len_idxs_ord)]
-        pdb.set_trace()
+        coords_local = _coords_local(posr3, hpy_verts_rots, idxs_ord, n_coords)
     else:
         coords_local = torch.cat([torch.zeros_like(coords[0]).unsqueeze(0), coords])
         coords_local = [coords_local[idxs] for idxs in idxs_ord]
