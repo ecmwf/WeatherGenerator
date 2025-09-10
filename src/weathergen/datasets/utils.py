@@ -192,7 +192,9 @@ def healpix_verts_rots(hl: int, dx=0.5, dy=0.5):
 
 
 ####################################################################################################
-def locs_to_cell_coords_ctrs(healpix_centers_rots, locs) -> torch.Tensor:
+def locs_to_cell_coords_ctrs(
+    healpix_centers_rots: torch.Tensor, locs: list[torch.Tensor]
+) -> torch.Tensor:
     """
     Map a list of locations per cell to spherical local coordinates centered
     at the healpix cell center
@@ -200,37 +202,21 @@ def locs_to_cell_coords_ctrs(healpix_centers_rots, locs) -> torch.Tensor:
 
     ## express each centroid in local coordinates w.r.t to healpix center
     #  by rotating center to origin
-    if isinstance(locs, torch.Tensor):
 
-        local_locs = [
-        torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1) if len(s) > 0 else torch.tensor([])
-        for i, (R, s) in enumerate(zip(healpix_centers_rots, locs, strict=False))
-        ]
-        return local_locs
-
-    if not locs:
-        return []
-    
     # Concatenate all non-empty locations
-    all_points = torch.cat(locs, dim=0)  
+    all_points = torch.cat(locs, dim=0)
     lengths = torch.tensor([len(s) for s in locs], device=all_points.device)
-    
+
     # Efficiently create batch indices using torch.repeat_interleave
     batch_indices = torch.repeat_interleave(
-        torch.arange(len(locs), device=all_points.device),
-        lengths
+        torch.arange(len(locs), device=all_points.device), lengths
     )
-    
-    # Select rotation matrices for each point
-    rotations_selected = healpix_centers_rots[batch_indices] 
-    
-    # Vectorized matrix multiplication
-    local_locs = torch.bmm(
-        rotations_selected,
-        all_points.unsqueeze(-1)
-    ).squeeze(-1)
 
-    import pdb; pdb.set_trace()
+    # Select rotation matrices for each point
+    rotations_selected = healpix_centers_rots[batch_indices]
+
+    # Vectorized matrix multiplication
+    local_locs = torch.bmm(rotations_selected, all_points.unsqueeze(-1)).squeeze(-1)
 
     return local_locs
 
@@ -553,42 +539,42 @@ def get_target_coords_local_ffast(
     vls = vls.transpose(0, 1)
 
     zi = 0
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = (
-        ref - locs_to_cell_coords_ctrs(verts00_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        verts00_rots, tcs
     )
 
     zi = 3
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[0]
 
     zi = 15
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = (
-        ref - locs_to_cell_coords_ctrs(verts10_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        verts10_rots, tcs
     )
 
     zi = 18
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[1]
 
     zi = 30
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = (
-        ref - locs_to_cell_coords_ctrs(verts11_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        verts11_rots, tcs
     )
 
     zi = 33
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[2]
 
     zi = 45
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = (
-        ref - locs_to_cell_coords_ctrs(verts01_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        verts01_rots, tcs
     )
 
     zi = 48
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[3]
 
     zi = 60
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = (
-        ref - locs_to_cell_coords_ctrs(vertsmm_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        vertsmm_rots, tcs
     )
-    
+
     zi = 63
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[4]
 
