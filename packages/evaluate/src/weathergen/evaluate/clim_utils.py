@@ -102,7 +102,7 @@ def find_climatology_indices(
     clim_lons = np.asarray(clim_lons)
 
     # Hardcode conversion of clim_lons from 0-360 to -180-180
-    clim_lons = clim_lons - 180
+    clim_lons[clim_lons >= 180] = clim_lons[clim_lons >= 180] - 360
 
     # Create result array initialized with -1 (no match)
     result_indices = np.full(len(target_lats), -1, dtype=np.int32)
