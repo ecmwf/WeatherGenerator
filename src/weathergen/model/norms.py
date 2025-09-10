@@ -157,3 +157,17 @@ class AdaLayerNormLayer(torch.nn.Module):
             )
             + x
         )
+
+
+class SaturateEncodings(nn.Module):
+    """A common alternative to a KL regularisation prevent outliers in the latent space when
+    learning an auto-encoder for latent generative model, an example value for the scale factor is 5
+    """
+
+    def __init__(self, scale_factor):
+        super().__init__()
+
+        self.scale_factor_squared = scale_factor**2
+
+    def forward(self, x):
+        return x / torch.sqrt(1 + (x**2 / self.scale_factor_squared))
