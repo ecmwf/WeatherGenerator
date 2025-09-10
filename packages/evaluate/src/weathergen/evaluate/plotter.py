@@ -11,7 +11,7 @@ import xarray as xr
 from PIL import Image
 
 from weathergen.evaluate.plot_utils import DefaultMarkerSize
-from weathergen.utils.config import _load_private_conf
+from weathergen.common.config import _load_private_conf
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
