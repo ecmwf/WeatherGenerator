@@ -564,7 +564,6 @@ class LinePlots:
         self.add_grid = plotter_cfg.get("add_grid")
         
         self.out_plot_dir = Path(output_basedir) / "line_plots"
-
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
