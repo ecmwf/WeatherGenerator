@@ -10,6 +10,7 @@
 
 import torch
 import torch.distributed as dist
+import os
 
 SYNC_TIMEOUT_SEC = 60 * 60  # 1 hour
 
@@ -112,3 +113,54 @@ def all_gather_vdim(tensor: torch.Tensor, group=None) -> list[torch.Tensor]:
     dist.all_to_all(outputs, inputs, group=group)
 
     return outputs
+
+# --------------------------------------------------------------
+
+def get_rank(default=0):
+    """
+    Attempts to determine the rank (i.e., the process ID in a parallel job)
+    by checking common environment variables used by various HPC schedulers.
+
+    Parameters:
+        default (int): Default rank value to return if no environment variable is found.
+
+    Returns:
+        int: The detected rank or the default value.
+    """
+    var_list = [
+        "SLURM_PROCID", # SLURM
+        "PMI_RANK", # Intel MPI
+        "OMPI_COMM_WORLD_RANK", # Open MPI
+        #"MP_CHILD"
+        #"RANK",
+    ]
+    for var in var_list:
+        value = os.getenv(var)
+        if value is not None:
+            return int(value)
+    return int(default)
+
+def get_size(default=1):
+    """
+    Attempts to determine the total number of processes (world size)
+    by checking common environment variables used by various HPC schedulers.
+
+    Parameters:
+        default (int): Default size value to return if no environment variable is found.
+
+    Returns:
+        int: The detected world size or the default value.
+    """
+    var_list = [
+        "SLURM_NTASKS", # SLURM
+        "PMI_SIZE", # Intel MPI
+        "OMPI_COMM_WORLD_SIZE", # Open MPI
+        #"MP_PROCS"
+        #"SIZE",
+        #"WORLD_SIZE",
+    ]
+    for var in var_list:
+        value = os.getenv(var)
+        if value is not None:
+            return int(value)
+    return int(default)
