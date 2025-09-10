@@ -114,7 +114,7 @@ def locs_to_cell_coords(hl: int, locs: list, dx=0.5, dy=0.5) -> list:
 
 
 ####################################################################################################
-def locs_to_ctr_coords(ctrs_r3, locs: list) -> list:
+def locs_to_ctr_coords(ctrs_r3, locs: list[torch.Tensor]) -> list:
     """
     Map a list of locations per cell to spherical local coordinates centered
     at the healpix cell center
@@ -142,6 +142,7 @@ def locs_to_ctr_coords(ctrs_r3, locs: list) -> list:
     # Split back using tensor operations
     local_locs = torch.split(rotated_points, lengths.tolist())
     
+    import pdb; pdb.set_trace()
     return list(local_locs)
 
 
