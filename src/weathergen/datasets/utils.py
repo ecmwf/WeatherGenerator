@@ -13,7 +13,6 @@ import astropy_healpix as hp
 import numpy as np
 import torch
 from astropy_healpix.healpy import ang2pix
-import pdb
 
 from weathergen.datasets.stream_data import StreamData
 
@@ -471,7 +470,6 @@ def tcs_optimized(target_coords: list[torch.Tensor]) -> tuple[list[torch.Tensor]
     # Split back to original structure
     sizes = [t.shape[0] for t in target_coords]  # Get original tensor sizes
     tcs = list(torch.split(transformed_all, sizes, dim=0))  # Split back to list
-    pdb.set_trace()
     return tcs, stacked_coords
 
 
