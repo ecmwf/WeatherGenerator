@@ -39,7 +39,13 @@ def test_locs_to_ctr_coords():
         ),
         tensor([]),
     ]
-    ctrs_r3 = []
+    ctrs_r3 = tensor(
+        [
+            [7.2425e-01, 6.8954e-01, 6.1232e-17],
+            [7.0695e-01, 7.0695e-01, 2.0833e-02],
+            [7.4079e-01, 6.7141e-01, 2.0833e-02],
+        ]
+    )
     torch.testing.assert_close(
         locs_to_ctr_coords(ctrs_r3, locs),
         _locs_to_ctr_coords(ctrs_r3, locs),

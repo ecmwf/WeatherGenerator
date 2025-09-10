@@ -141,9 +141,6 @@ def locs_to_ctr_coords(ctrs_r3, locs: list[torch.Tensor]) -> list:
     # Split back using tensor operations
     local_locs = torch.split(rotated_points, lengths.tolist())
 
-    import pdb
-
-    pdb.set_trace()
     return list(local_locs)
 
 
