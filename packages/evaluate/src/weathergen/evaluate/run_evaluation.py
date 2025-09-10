@@ -18,7 +18,6 @@ from omegaconf import OmegaConf, DictConfig
 
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
-    check_availability,
     metric_list_to_json,
     plot_data,
     plot_summary,
@@ -103,8 +102,8 @@ def evaluate_from_config(cfg):
                                 region,
                                 metric,
                             )
-                            checked, (channels, fsteps, samples) = check_availability(
-                                reader, stream, metric_data, mode="evaluation"
+                            checked, (channels, fsteps, samples) = reader.check_availability(
+                                stream, metric_data, mode="evaluation"
                             )
                             if not checked:
                                 metrics_to_compute.append(metric)

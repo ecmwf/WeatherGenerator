@@ -53,8 +53,8 @@ def calc_scores_per_stream(
         f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}..."
     )
 
-    checked, (channels, fsteps, samples) = check_availability(
-        reader, stream, mode="evaluation"
+    checked, (channels, fsteps, samples) = reader.check_availability(
+        stream, mode="evaluation"
     )
 
     output_data =reader.get_data( 
@@ -189,9 +189,8 @@ def plot_data(
 
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
 
-    check, (plot_chs, plot_fsteps, plot_samples) = check_availability(
-        reader, stream, mode="plotting"
-    )
+    check, (plot_chs, plot_fsteps, plot_samples) = reader.check_availability(
+        stream, mode="plotting")
 
     # Check if maps should be plotted and handle configuration if provided
     plot_maps = plot_settings.get("plot_maps", False)
@@ -553,147 +552,3 @@ def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataA
     return da
 
 
-def check_availability(
-    reader: Reader,
-    stream: str, 
-    available_data: dict = None,
-    mode: str = "",
-):
-    """
-    Check if requested channels, forecast steps and samples are
-    i) available in the previously saved json if metric data is specified (return False otherwise)
-    ii) available in the Zarr file (return error otherwise)
-    Additionally, if channels, forecast steps or samples is None/'all', it will
-    i) set the variable to all available vars in Zarr file
-    ii) return True only if the respective variable contains the same indeces in JSON and Zarr (return False otherwise)
-
-    Parameters
-    ----------
-    reader : Reader
-        Reader object that handles the IO and the config for the given run_id
-    stream : str
-        The stream considered.
-    available_data : dict, optional
-        The available data loaded from JSON.
-    Returns
-    -------
-    bool
-        True/False depending on the above logic (True if metrics do not need recomputing)
-    str
-        channels
-    str
-        fsteps
-    str
-        samples
-    """
-
-    # fill info for requested channels, fsteps, samples
-    channels, fsteps, samples = _get_channels_fsteps_samples(reader, stream, mode)
-
-    requested = {
-        "channel": set(channels) if channels is not None else None,
-        "fstep": set(fsteps) if fsteps is not None else None,
-        "sample": set(samples) if samples is not None else None,
-    }
-
-    # fill info from available json file (if provided)
-    available = {
-        "channel": set(available_data["channel"].values.ravel())
-        if available_data is not None
-        else {},
-        "fstep": set(available_data["forecast_step"].values.ravel())
-        if available_data is not None
-        else {},
-        "sample": set(available_data.coords["sample"].values.ravel())
-        if available_data is not None
-        else {},
-    }
-
-    # fill info from reader
-    reader_data = {
-        "fstep": set(int(f) for f in reader.get_forecast_steps()),
-        "sample": set(int(s) for s in reader.get_samples()),
-        "channel": set(reader.get_channels(stream)),
-    }
-
-    check = True
-    corrected = False
-    for name in ["channel", "fstep", "sample"]:
-        if requested[name] is None:
-            # Default to all in Zarr
-            requested[name] = reader_data[name]
-            # If JSON exists, must exactly match
-            if available_data is not None and reader_data[name] != available[name]:
-                _logger.info(
-                    f"Requested all {name}s for {mode}, but previous config was a strict subset. Recomputing."
-                )
-                check = False
-
-        # Must be subset of Zarr
-        if not requested[name] <= reader_data[name]:
-            missing = requested[name] - reader_data[name]
-            _logger.info(
-                f"Requested {name}(s) {missing} do(es) not exist in Zarr. "
-                f"Removing missing {name}(s) for {mode}."
-            )
-            requested[name] = requested[name] & reader_data[name]
-            corrected = True
-
-        # Must be a subset of available_data (if provided)
-        if available_data is not None and not requested[name] <= available[name]:
-            missing = requested[name] - available[name]
-            _logger.info(
-                f"{name.capitalize()}(s) {missing} missing in previous evaluation. Recomputing."
-            )
-            check = False
-
-    if check and not corrected:
-        scope = "metric file" if available_data is not None else "Zarr file"
-        _logger.info(
-            f"All checks passed – All channels, samples, fsteps requested for {mode} are present in {scope}..."
-        )
-    return check, (
-        sorted(list(requested["channel"])),
-        sorted(list(requested["fstep"])),
-        sorted(list(requested["sample"])),
-    )
-
-
-def _get_channels_fsteps_samples(reader: Reader, stream: str, mode: str):
-    """
-    Get channels, fsteps and samples for a given run and stream from the config. Replace 'all' with None.
-
-    Parameters
-    ----------
-    reader: Reader
-        The plot config.
-    stream: str
-        The stream considered.
-    mode: str
-        if plotting or evaluation mode
-
-    Returns
-    -------
-    list/None
-        channels
-    list/None
-        fsteps
-    list/None
-        samples
-    """
-    assert mode == "plotting" or mode == "evaluation", (
-        "get_channels_fsteps_samples:: Mode should be either 'plotting' or 'evaluation'"
-    )
-
-    stream_cfg = reader.get_stream(stream)
-    assert stream_cfg.get(mode, False), "Mode does not exist in stream config. Please add it."
-
-    samples = stream_cfg[mode].get("sample", None)
-    fsteps = stream_cfg[mode].get("forecast_step", None)
-    channels = stream_cfg.get("channels", None)
-
-    channels = None if (channels == "all" or channels is None) else list(channels)
-    fsteps = None if (fsteps == "all" or fsteps is None) else list(fsteps)
-    samples = None if (samples == "all" or samples is None) else list(samples)
-
-    return channels, fsteps, samples
