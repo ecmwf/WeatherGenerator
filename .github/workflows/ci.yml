@@ -11,7 +11,7 @@ on:
 
 jobs:
   linting:
-    name: python
+    name: linter
     runs-on: ubuntu-latest
 
     steps:
