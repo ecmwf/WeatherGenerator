@@ -60,3 +60,8 @@ def simple_coords_local(
         n_coords(r3tos2(torch.matmul(R, posr3[idxs].transpose(1, 0)).transpose(1, 0)).to(fp32))
         for R, idxs in zip(hpy_verts_rots, idxs_ord, strict=True)
     ]
+
+
+def test_coords_local():
+    n_coords = lambda x: x
+    coords_local = simple_coords_local(_pos3r, _hpy_verts_rots, _idxs_ord, n_coords)
