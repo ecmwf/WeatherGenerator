@@ -13,9 +13,10 @@ import astropy_healpix as hp
 import numpy as np
 import torch
 from astropy_healpix.healpy import ang2pix
+import pdb
 
 from weathergen.datasets.stream_data import StreamData
-from typing import List, Optional, Tuple
+
 
 ####################################################################################################
 def arc_alpha(sin_alpha, cos_alpha):
@@ -447,7 +448,7 @@ def get_target_coords_local_fast(hlc, target_coords, geoinfo_offset):
 
 
 ####################################################################################################
-def tcs_optimized(target_coords: List[torch.Tensor]) -> Tuple[List[torch.Tensor], torch.Tensor]:
+def tcs_optimized(target_coords: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor]:
     """
     Args:
     target_coords: List of 2D coordinate tensors, each with shape [N, 2]
@@ -461,16 +462,16 @@ def tcs_optimized(target_coords: List[torch.Tensor]) -> Tuple[List[torch.Tensor]
     stacked_coords = torch.cat(target_coords, dim=0)  # [total_points, 2]
 
     # Single vectorized coordinate transformation
-    theta_all = torch.deg2rad(90.0 - stacked_coords[..., 0]) 
+    theta_all = torch.deg2rad(90.0 - stacked_coords[..., 0])
     phi_all = torch.deg2rad(180.0 + stacked_coords[..., 1])
-    
+
     # Transform all coordinates
     transformed_all = s2tor3(theta_all, phi_all)  # [total_points, 3]
 
-    # Split back to original structure 
-    sizes = [t.shape[0] for t in target_coords] # Get original tensor sizes
-    tcs = list(torch.split(transformed_all, sizes, dim=0)) # Split back to list
-
+    # Split back to original structure
+    sizes = [t.shape[0] for t in target_coords]  # Get original tensor sizes
+    tcs = list(torch.split(transformed_all, sizes, dim=0))  # Split back to list
+    pdb.set_trace()
     return tcs, stacked_coords
 
 
