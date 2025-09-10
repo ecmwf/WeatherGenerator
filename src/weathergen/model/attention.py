@@ -95,6 +95,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         )
 
         out = self.proj_out(outs.flatten(-2, -1))
+
         if self.with_residual:
             out = out + x_in
 
