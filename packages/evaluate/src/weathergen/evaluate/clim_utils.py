@@ -12,6 +12,7 @@ import logging
 import numpy as np
 import pandas as pd
 import xarray as xr
+from tqdm import tqdm
 
 _logger = logging.getLogger(__name__)
 
@@ -121,3 +122,79 @@ def find_climatology_indices(
             result_indices[i] = match_indices[0]  # Use first match
 
     return result_indices
+
+
+def align_clim_data(
+    target_output: dict,
+    clim_data: xr.Dataset,
+) -> dict:
+    """
+    Align climatology data with target data structure.
+    """
+    _logger.info("Aligning climatological data with target structure...")
+    # create empty climatology data for each forecast step
+    aligned_clim_data = {}
+    for fstep, target_data in target_output.items():
+        aligned_clim_data[fstep] = xr.DataArray(
+            np.full_like(
+                target_output[fstep].values,
+                np.nan,  # Create array with same shape filled with NaNs
+            ),
+            coords=target_output[fstep].coords,  # Use the same coordinates as target
+            dims=target_output[fstep].dims,  # Use the same dimensions as target
+        )
+        samples = np.unique(target_data.sample.values)
+        # Prepare climatology data for each sample
+        matching_time_idx = match_climatology_time(
+            target_data.valid_time.values[0], clim_data
+        )
+        prepared_clim_data = (
+            clim_data.data.isel(
+                time=matching_time_idx,
+            )
+            .sel(
+                channels=target_data.channel.values,
+            )
+            .transpose("grid_points", "channels")
+        )
+
+        for sample in tqdm(samples):
+            if len(samples) > 1:
+                sample_mask = target_data.sample.values == sample
+                target_lats = target_data.loc[{"ipoint": sample_mask}].lat.values
+                target_lons = target_data.loc[{"ipoint": sample_mask}].lon.values
+            else:
+                target_lats = target_data.lat.values
+                target_lons = target_data.lon.values
+            clim_lats = prepared_clim_data.latitude.values
+            clim_lons = prepared_clim_data.longitude.values
+            clim_indices = find_climatology_indices(
+                target_lats, target_lons, clim_lats, clim_lons
+            )
+
+            # Check for unmatched coordinates
+            unmatched_mask = clim_indices == -1
+            if np.any(unmatched_mask):
+                n_unmatched = np.sum(unmatched_mask)
+                raise ValueError(
+                    f"Found {n_unmatched} target coordinates with no matching climatology coordinates. "
+                    f"This will cause incorrect ACC calculations. "
+                    f"Check coordinate alignment between target and climatology data."
+                )
+
+            clim_values = prepared_clim_data.isel(grid_points=clim_indices).values
+            try:
+                if len(samples) > 1:
+                    aligned_clim_data[fstep].loc[{"ipoint": sample_mask}] = clim_values
+                else:
+                    aligned_clim_data[fstep] = clim_values
+            except (ValueError, IndexError) as e:
+                raise ValueError(
+                    f"Failed to align climatology data with target data for ACC calculation. "
+                    f"This error typically occurs when the number of points per sample varies between samples. "
+                    f"ACC metric is currently only supported for forecasting data with constant points per sample. "
+                    f"Please ensure all samples have the same spatial coverage and grid points. "
+                    f"Original error: {e}"
+                ) from e
+
+    return aligned_clim_data
