@@ -1,11 +1,10 @@
 import torch
 from torch import tensor
 
-from weathergen.datasets.utils import locs_to_cell_coords_ctrs, locs_to_ctr_coords, vecs_to_rots
+from weathergen.datasets.utils import locs_to_ctr_coords, vecs_to_rots
 
 
 def _locs_to_ctr_coords(ctrs_r3, locs: list[torch.Tensor]) -> list[torch.Tensor]:
-
     ctrs_rots = vecs_to_rots(ctrs_r3).to(torch.float32)
 
     ## express each centroid in local coordinates w.r.t to healpix center
@@ -18,6 +17,7 @@ def _locs_to_ctr_coords(ctrs_r3, locs: list[torch.Tensor]) -> list[torch.Tensor]
         )
         for i, (R, s) in enumerate(zip(ctrs_rots, locs, strict=False))
     ]
+
 
 def test_locs_to_ctr_coords():
     locs = [
@@ -44,4 +44,3 @@ def test_locs_to_ctr_coords():
         locs_to_ctr_coords(ctrs_r3, locs),
         _locs_to_ctr_coords(ctrs_r3, locs),
     )
-
