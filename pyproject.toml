@@ -30,7 +30,6 @@ dependencies = [
  "weathergen-common",
  "weathergen-evaluate",
  "numexpr>=2.11.0",
- "pdbpp>=0.11.7",
 ]
 
 [project.urls]
@@ -62,6 +61,7 @@ dev = [
  "pytest-mock>=3.14.1",
  "ruff==0.9.7",
  "tensorboard>=2.20.0",
+ "pdbpp>=0.11.7",
 ]
 
 
