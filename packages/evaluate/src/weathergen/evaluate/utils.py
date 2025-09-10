@@ -255,6 +255,7 @@ def calc_scores_per_stream(
     if "climatology_path" in stream_dict:
         clim_data_path = stream_dict["climatology_path"]
         clim_data = xr.open_dataset(clim_data_path)
+        _logger.info("Aligning climatological data with target structure...")
         aligned_clim_data = align_clim_data(da_tars, clim_data)
     else:
         _logger.warning(

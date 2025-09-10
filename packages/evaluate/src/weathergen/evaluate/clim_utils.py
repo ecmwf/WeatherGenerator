@@ -131,7 +131,6 @@ def align_clim_data(
     """
     Align climatology data with target data structure.
     """
-    _logger.info("Aligning climatological data with target structure...")
     # create empty climatology data for each forecast step
     aligned_clim_data = {}
     for fstep, _ in target_output.items():
