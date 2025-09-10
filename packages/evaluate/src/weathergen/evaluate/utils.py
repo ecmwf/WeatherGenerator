@@ -336,7 +336,7 @@ def metric_list_to_json(
             # Match the expected filename pattern
             save_path = (
                 reader.metrics_dir
-                / f"{reader.run_id}_{stream}_{region}_{metric}_epoch{reader.epoch}.json"
+                / f"{reader.run_id}_{stream}_{region}_{metric}_epoch{reader.epoch:05d}.json"
             )
 
             _logger.info(f"Saving results to {save_path}")
@@ -374,7 +374,7 @@ def retrieve_metric_from_json(
         Path(reader.metrics_dir) / f"{reader.run_id}_{stream}_{region}_{metric}_epoch{reader.epoch:05d}.json"
     )
     _logger.debug(f"Looking for: {score_path}")
-
+   
     if score_path.exists():
         with open(score_path) as f:
             data_dict = json.load(f)
