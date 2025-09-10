@@ -60,6 +60,6 @@ jobs:
           # Install a specific version of uv.
           version: "0.7.13"
 
-      - name: Check PR is linked to an issue
+      - name: Run all unit tests
       # Send the PR number to the script, which will check if it is linked to an issue.
         run: ./scripts/actions.sh unit-test
