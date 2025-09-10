@@ -338,12 +338,16 @@ def calc_scores_per_stream(
             aligned_clim_data = align_clim_data(da_tars, clim_data)
         else:
             _logger.warning(
-                f"No climatology path specified for stream {stream}. Removing ACC from metrics"
+                f"No climatology path specified for stream {stream}. Setting ACC to NaN. "
                 "Add 'climatology_path' to evaluation config to keep ACC."
             )
-            metrics.remove("acc")
-    else:
-        aligned_clim_data = None
+            aligned_clim_data = {fstep: xr.DataArray(
+                np.full_like(
+                    da_tars[fstep].values,
+                    np.nan,  # Create array with same shape filled with NaNs
+                )
+            , coords=da_tars[fstep].coords, dims=da_tars[fstep].dims) for fstep in da_tars}
+            # metrics.remove("acc")
 
     fsteps = [int(k) for k in da_tars.keys()]
 
@@ -373,6 +377,10 @@ def calc_scores_per_stream(
     ):
         _logger.debug(f"Verifying data for stream {stream}...")
 
+        metrics_kwargs = {}
+        for metric in metrics:
+            metrics_kwargs[metric] = {}
+
         if preds.ipoint.size > 0:
             score_data = VerifiedData(preds, tars)
 
@@ -382,13 +390,11 @@ def calc_scores_per_stream(
             )
 
             # Prepare kwargs for metrics that need climatology data
-            if aligned_clim_data is not None and fstep in aligned_clim_data:
-                metrics_kwargs = {
+            if 'acc' in metrics:
+                metrics_kwargs['acc'] = {
                     "clim_mean": aligned_clim_data[fstep],
                     "spatial_dims": ["ipoint"],
                 }
-            else:
-                metrics_kwargs = {}
 
             combined_metrics = [
                 get_score(
@@ -396,7 +402,7 @@ def calc_scores_per_stream(
                     metric,
                     agg_dims="ipoint",
                     group_by_coord="sample",
-                    **metrics_kwargs,
+                    **metrics_kwargs[metric],
                 )
                 for metric in metrics
             ]
