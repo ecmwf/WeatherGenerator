@@ -512,10 +512,6 @@ class Model(torch.nn.Module):
 
         (streams_data, source_cell_lens, target_coords_idxs) = batch
 
-        if self.cf.forecast_diffusion and self.training:
-            target_tokens = streams_data.target_tokens[self.cf.forecast_offset :]
-
-
         # embed
         tokens = self.embed_cells(model_params, streams_data)
 
@@ -524,6 +520,14 @@ class Model(torch.nn.Module):
 
         tokens = self.assimilate_global(model_params, tokens)
 
+        # if diffusion, must encode the target as well...
+        print(f'is training? {self.training}')
+        if self.cf.forecast_policy == "diffusion" and self.training:
+            target_tokens = self.embed_target(model_params, streams_data)
+
+
+
+
         # roll-out in latent space
         preds_all = []
 
@@ -531,8 +535,8 @@ class Model(torch.nn.Module):
         weights = torch.ones(tokens.shape[0], dtype=self.dtype)
 
 
-        if self.cf.forecast_diffusion:
-            assert forecast_steps == 1, "forecast_diffusion only implemented for single step"
+        if self.cf.forecast_policy == "diffusion":
+            assert forecast_steps == 1, "diffusion forecast only implemented for single step"
 
         for fstep in range(forecast_offset, forecast_offset + forecast_steps):
             # prediction
@@ -546,9 +550,9 @@ class Model(torch.nn.Module):
                 )
             ]
 
-            if not self.cf.forecast_diffusion:
+            if not self.cf.forecast_policy == "diffusion":
                 tokens = self.forecast(model_params, tokens)
-            elif self.cf.forecast_diffusion and self.training:
+            elif self.cf.forecast_policy == "diffusion" and self.training:
                 tokens, weights = self.denoise(model_params, tokens, target_tokens)
             else:
                 tokens = self.edm_sampler(model_params, tokens)
@@ -618,6 +622,60 @@ class Model(torch.nn.Module):
                     tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
 
         return tokens_all
+
+    def embed_target(self, model_params: ModelParams, streams_data) -> torch.Tensor:
+        """Embeds target tokens for diffusion training
+        Args:
+            model_params : Query and embedding parameters
+            streams_data : Used to initialize first tokens for pre-processing
+        Returns:
+            Tokens for local assimilation
+        """
+        
+        target_tokens_lens = torch.stack(
+            [
+                torch.stack(
+                    [
+                        s.target_tokens_lens[self.cf.forecast_steps] if len(s.target_tokens_lens[self.cf.forecast_steps]) > 0 else torch.tensor([])
+                        for s in stl_b
+                    ]
+                )
+                for stl_b in streams_data
+            ]
+        )
+
+        offsets_base = target_tokens_lens.sum(1).sum(0).cumsum(0)
+        tokens_all = torch.empty(
+            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=self.dtype, device="cuda"
+        )
+
+        for _, sb in enumerate(streams_data):
+            for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
+                if not s.target_empty():
+                    idxs = s.target_idxs_embed
+                    idxs_pe = s.target_idxs_embed_pe
+
+                    # create full scatter index
+                    # (there's no broadcasting which is likely highly inefficient)
+                    idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+                    x_embed = embed(s.target_tokens_cells, s.target_centroids).flatten(0, 1)
+                    # there's undocumented limitation in flash_attn that will make embed fail if
+                    # #tokens is too large; code below is a work around
+                    # x_embed = torch.cat(
+                    #     [
+                    #         embed(s_c, c_c).flatten(0, 1)
+                    #         for s_c, c_c in zip(
+                    #             torch.split(s.source_tokens_cells, 49152),
+                    #             torch.split(s.source_centroids, 49152),
+                    #         )
+                    #     ]
+                    # )
+
+                    # scatter write to reorder from per stream to per cell ordering
+                    tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
+
+        return tokens_all
+
 
     #########################################
     def assimilate_local(

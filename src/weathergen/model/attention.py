@@ -240,8 +240,10 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         # compile for efficiency
         self.flex_attention = torch.compile(flex_attention, dynamic=False)
 
+        self.noise_conditioning = None
         if with_noise_conditioning:
             self.noise_conditioning = LinearNormConditioning(dim_embed)
+
 
     def forward(self, x, noise_embedding=None, ada_ln_aux=None):
         if self.with_residual:
@@ -479,7 +481,7 @@ class LinearNormConditioning(torch.nn.Module):
 
     def __init__(self, feature_size):
         super().__init__()
-        self.conditional_linear_layer = nn.Linear(
+        self.conditional_linear_layer = torch.nn.Linear(
             in_features=feature_size,
             out_features=2 * feature_size
         )
@@ -555,6 +557,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
             self.att = self.attention
             self.softmax = torch.nn.Softmax(dim=-1)
         
+        self.noise_conditioning = None
         if with_noise_conditioning:
             self.noise_conditioning = LinearNormConditioning(dim_embed)
 

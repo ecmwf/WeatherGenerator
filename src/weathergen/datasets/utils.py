@@ -630,6 +630,40 @@ def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
             offsets += source_tokens_lens[ib][itype]
             offsets_pe += source_tokens_lens[ib][itype]
 
+    target_offsets_base_list = [target_tokens_lens.sum(1).sum(0).cumsum(0) for target_tokens_lens in batch.target_tokens_lens]
+    target_offsets_list = [torch.cat([torch.zeros(1, dtype=torch.int32), tob[:-1]]) for tob in target_offsets_base_list]
+    target_offsets_pe_list = [torch.zeros_like(tob) for tob in target_offsets_list]
+
+    # Compute target_idxs_embed for each StreamData in the batch
+    for i, (target_offsets, target_offsets_pe) in enumerate(zip(target_offsets_list, target_offsets_pe_list)):
+        for ib, sb in enumerate(batch):
+            for itype, s in enumerate(sb):
+                if not s.target_empty():
+                    s.target_idxs_embed.append(
+                        torch.cat(
+                            [
+                                torch.arange(offset, offset + token_len, dtype=torch.int64)
+                                for offset, token_len in zip(
+                                    target_offsets,
+                                    batch.target_coords_lens[ib, itype],
+                                    strict=False
+                                )
+                            ]
+                        )
+                    )
+                    s.target_idxs_embed_pe.append(
+                        torch.cat(
+                            [
+                                torch.arange(offset, offset + token_len, dtype=torch.int32)
+                                for offset, token_len in zip(
+                                    target_offsets_pe,
+                                    batch.target_coords_lens[ib][itype],
+                                    strict=False
+                                )
+                            ]
+                        )
+                    )
+
     return batch
 
 

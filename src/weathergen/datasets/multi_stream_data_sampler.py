@@ -256,7 +256,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         len_dt_samples = len(self) // self.batch_size
         if self.forecast_policy is None:
             self.perms_forecast_dt = np.zeros(len_dt_samples, dtype=np.int64)
-        elif self.forecast_policy == "fixed" or self.forecast_policy == "sequential":
+        elif self.forecast_policy == "fixed" or self.forecast_policy == "sequential" or self.forecast_policy == "diffusion":
             self.perms_forecast_dt = fsm * np.ones(len_dt_samples, dtype=np.int64)
         elif self.forecast_policy == "random" or self.forecast_policy == "sequential_random":
             # randint high=one-past
