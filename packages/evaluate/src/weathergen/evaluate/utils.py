@@ -147,7 +147,6 @@ def get_data(
                     )
                     continue
 
-                fsteps_final.append(fstep)
                 da_tars_fs.append(target.squeeze())
                 da_preds_fs.append(pred.squeeze())
                 pps.append(npoints)
