@@ -163,7 +163,12 @@ def evaluate_from_config(cfg):
 
                     if metrics_to_compute:
                         all_metrics, points_per_sample = calc_scores_per_stream(
-                            cfg, results_dir, stream, region, metrics_to_compute
+                            cfg,
+                            run_cfg,
+                            results_dir,
+                            stream,
+                            region,
+                            metrics_to_compute,
                         )
 
                         metric_list_to_json(

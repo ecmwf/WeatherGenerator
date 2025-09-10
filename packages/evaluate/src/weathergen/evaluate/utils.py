@@ -18,10 +18,10 @@ import xarray as xr
 from tqdm import tqdm
 
 from weathergen.common.io import ZarrIO
+from weathergen.evaluate.clim_utils import align_clim_data
 from weathergen.evaluate.plot_utils import (
     plot_metric_region,
 )
-from weathergen.evaluate.clim_utils import align_clim_data
 from weathergen.evaluate.plotter import LinePlots, Plotter
 from weathergen.evaluate.score import VerifiedData, get_score
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
@@ -197,6 +197,7 @@ def get_data(
 
 def calc_scores_per_stream(
     cfg: dict,
+    run_cfg: oc.DictConfig,
     results_dir: Path,
     stream: str,
     region: str,
@@ -209,6 +210,8 @@ def calc_scores_per_stream(
     ----------
     cfg :
         Configuration dictionary containing all information for the evaluation.
+    run_cfg: oc.DictConfig
+        Configuration dictionary containing all information for the specific run.
     results_dir : Path
         Directory where the results are stored.
         Expected scheme `<results_base_dir>/<run_id>`.
@@ -253,10 +256,24 @@ def calc_scores_per_stream(
     # Get climatology data path from configuration
     run = cfg.run_ids[run_id]
     stream_dict = run.streams[stream]
+    clim_fn = next(
+        (
+            item.get("climatology_filename")
+            for item in run_cfg["streams"]
+            if item.get("name") == stream
+        ),
+        None,
+    )
 
     # Check if climatology path is specified in the stream configuration
     if "climatology_path" in stream_dict:
         clim_data_path = stream_dict["climatology_path"]
+        clim_data = xr.open_dataset(clim_data_path)
+        _logger.info("Aligning climatological data with target structure...")
+        aligned_clim_data = align_clim_data(da_tars, clim_data)
+    elif "data_path_aux" in run_cfg and clim_fn is not None:
+        clim_data_path = run_cfg["data_path_aux"]
+        clim_data_path = clim_data_path + clim_fn
         clim_data = xr.open_dataset(clim_data_path)
         _logger.info("Aligning climatological data with target structure...")
         aligned_clim_data = align_clim_data(da_tars, clim_data)
