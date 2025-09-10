@@ -65,7 +65,7 @@ def mse(target, ens, mu, *kwargs):
     return torch.nn.functional.mse_loss(target, mu)
 
 def diff_mse(target, ens, mu, *kwargs):
-    return torch.nn.functional.mse_loss(target, mu, reduction="none") *
+    return torch.nn.functional.mse_loss(target, mu, reduction="none")
 
 
 def mse_ens(target, ens, mu, stddev):

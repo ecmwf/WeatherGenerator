@@ -243,7 +243,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         if with_noise_conditioning:
             self.noise_conditioning = LinearNormConditioning(dim_embed)
 
-    def forward(self, x, noise_embedding=None ada_ln_aux=None):
+    def forward(self, x, noise_embedding=None, ada_ln_aux=None):
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)

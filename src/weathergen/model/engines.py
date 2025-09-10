@@ -10,7 +10,6 @@
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
-from layers import PositionalEmbedding
 from torch.nn import Linear
 import numpy as np
 
@@ -27,7 +26,7 @@ from weathergen.model.embeddings import (
     StreamEmbedLinear,
     StreamEmbedTransformer,
 )
-from weathergen.model.layers import MLP
+from weathergen.model.layers import MLP, PositionalEmbedding
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.config import Config, get_dtype
 
