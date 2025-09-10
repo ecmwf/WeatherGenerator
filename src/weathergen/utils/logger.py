@@ -17,7 +17,6 @@ from functools import cache
 
 from weathergen.utils.config import _load_private_conf
 
-FORMAT_STR = "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
 LOGGING_CONFIG = """
 {
     "version": 1,
@@ -25,7 +24,7 @@ LOGGING_CONFIG = """
     "formatters": {
         "custom": {
             "class": "weathergen.utils.logger.ColoredRelPathFormatter",
-            "format": f"{FORMAT_STR}"
+            "format":"%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s" 
         }
     },
     "handlers": {
