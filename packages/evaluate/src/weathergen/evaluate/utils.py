@@ -247,28 +247,21 @@ def calc_scores_per_stream(
 
     # get coordinate information from retrieved data
 
-    if "acc" in metrics:
-        # Get climatology data path from configuration
-        run = cfg.run_ids[run_id]
-        stream_dict = run.streams[stream]
+    # Get climatology data path from configuration
+    run = cfg.run_ids[run_id]
+    stream_dict = run.streams[stream]
 
-        # Check if climatology path is specified in the stream configuration
-        if "climatology_path" in stream_dict:
-            clim_data_path = stream_dict["climatology_path"]
-            clim_data = xr.open_dataset(clim_data_path)
-            aligned_clim_data = align_clim_data(da_tars, clim_data)
-        else:
-            _logger.warning(
-                f"No climatology path specified for stream {stream}. Setting ACC to NaN. "
-                "Add 'climatology_path' to evaluation config to keep ACC."
-            )
-            aligned_clim_data = {fstep: xr.DataArray(
-                np.full_like(
-                    da_tars[fstep].values,
-                    np.nan,  # Create array with same shape filled with NaNs
-                )
-            , coords=da_tars[fstep].coords, dims=da_tars[fstep].dims) for fstep in da_tars}
-            # metrics.remove("acc")
+    # Check if climatology path is specified in the stream configuration
+    if "climatology_path" in stream_dict:
+        clim_data_path = stream_dict["climatology_path"]
+        clim_data = xr.open_dataset(clim_data_path)
+        aligned_clim_data = align_clim_data(da_tars, clim_data)
+    else:
+        _logger.warning(
+            f"No climatology path specified for stream {stream}. Setting climatology to NaN. "
+            "Add 'climatology_path' to evaluation config to keep metrics like ACC."
+        )
+        aligned_clim_data = align_clim_data(da_tars, None)
 
     fsteps = [int(k) for k in da_tars.keys()]
 
