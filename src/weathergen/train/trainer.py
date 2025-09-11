@@ -155,6 +155,9 @@ class Trainer(TrainerBase):
         self.init(cf, devices)
         cf = self.cf
 
+        self.device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
+
         self.dataset = MultiStreamDataSampler(
             cf,
             cf.start_date,
@@ -189,9 +192,6 @@ class Trainer(TrainerBase):
         sources_size = self.dataset.get_sources_size()
         targets_num_channels = self.dataset.get_targets_num_channels()
         targets_coords_size = self.dataset.get_targets_coords_size()
-
-        device_type = torch.accelerator.current_accelerator()
-        device = torch.device(f"{device_type}:{cf.rank}")
 
         with torch.device("meta"):
             self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
@@ -287,7 +287,7 @@ class Trainer(TrainerBase):
             if is_root():
                 logger.info(f"Loaded model id={run_id_contd}.")
         self.model_params.reset_parameters(cf)
-        self.model_params = self.model_params.to(device)
+        self.model_params = self.model_params.to(self.device)
 
         if cf.compile_model:
             self.model = torch.compile(self.model, dynamic=True)
@@ -366,8 +366,8 @@ class Trainer(TrainerBase):
                 logger.info(str)
 
         # Instantiate loss calculator modules to compute losses
-        self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=device)
-        self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=device)
+        self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=self.device)
+        self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.device)
 
         # recover epoch when continuing run
         if self.world_size_original is None:
@@ -543,10 +543,9 @@ class Trainer(TrainerBase):
             forecast_steps = batch[-1]
             batch = self.batch_to_device(batch)
 
-            device = f"cuda:{self.cf.rank}"
             # evaluate model
             with torch.autocast(
-                device_type=device,
+                device_type="cuda",
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
@@ -563,8 +562,6 @@ class Trainer(TrainerBase):
 
             # backward pass
             self.grad_scaler.scale(loss_values.loss).backward()
-            # if device == "cuda:0":
-            #     import pdb; pdb.set_trace()
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
@@ -615,9 +612,8 @@ class Trainer(TrainerBase):
                     batch = self.batch_to_device(batch)
 
                     # evaluate model
-                    device = f"cuda:{self.cf.rank}"
                     with torch.autocast(
-                        device_type=device,
+                        device_type="cuda",
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
@@ -678,11 +674,10 @@ class Trainer(TrainerBase):
 
     def batch_to_device(self, batch):
         # forecast_steps is dropped here from the batch
-        device = f"cuda:{self.cf.rank}"
         return (
-            [[d.to_device(device) for d in db] for db in batch[0]],
-            batch[1].to(device),
-            [[b.to(device) for b in bf] for bf in batch[2]],
+            [[d.to_device(self.device) for d in db] for db in batch[0]],
+            batch[1].to(self.device),
+            [[b.to(self.device) for b in bf] for bf in batch[2]],
         )
 
     def load_model(self, run_id: str, epoch=-1):
@@ -863,10 +858,8 @@ class Trainer(TrainerBase):
         losses_all: dict[str, Tensor] = {}
         stddev_all: dict[str, Tensor] = {}
 
-        device_type = torch.accelerator.current_accelerator()
-        device = torch.device(f"{device_type}:{self.cf.rank}")
         # Make list of losses into a tensor. This is individual tensor per rank
-        real_loss = torch.tensor(self.loss_model_hist, device=device)
+        real_loss = torch.tensor(self.loss_model_hist, device=self.device)
         # Gather all tensors from all ranks into a list and stack them into one tensor again
         real_loss = torch.cat(all_gather_vlen(real_loss))
 
