@@ -280,12 +280,28 @@ def calc_scores_per_stream(
         for metric in metrics:
             metrics_kwargs[metric] = {}
 
-        if "fact" in metrics:
+        if "froct" in metrics:
             # index of fstep in sorted fsteps
             fstep_idx = sfsteps.index(fstep)
             next_fstep = sfsteps[fstep_idx + 1] if fstep_idx + 1 < len(sfsteps) else None
-            preds_next = da_preds.get(next_fstep, None)
-            metrics_kwargs["fact"] = {"next_prediction": preds_next}
+            if next_fstep is not None:
+                preds_next = da_preds.get(next_fstep, None)
+            else:
+                preds_next = da_preds.get(fstep, None)
+                # set all values to nan if there is no next step
+                # preds_next[:] = np.full_like(preds_next, np.nan)
+            metrics_kwargs["froct"] = {"p1": preds_next}
+
+        if "troct" in metrics:
+            # index of fstep in sorted fsteps
+            fstep_idx = sfsteps.index(fstep)
+            next_fstep = sfsteps[fstep_idx + 1] if fstep_idx + 1 < len(sfsteps) else None
+            if next_fstep is not None:
+                gt1 = da_tars.get(next_fstep, None)
+            else:
+                gt1 = da_tars.get(fstep, None)
+                # gt1[:] = np.full_like(gt1, np.nan)
+            metrics_kwargs["troct"] = {"gt1": gt1}
 
         if preds.ipoint.size > 0:
             score_data = VerifiedData(preds, tars)

@@ -175,6 +175,8 @@ class Scores:
             "rmse": self.calc_rmse,
             "bias": self.calc_bias,
             "acc": self.calc_acc,
+            "froct": self.calc_froct,
+            "troct": self.calc_troct,
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
@@ -604,71 +606,77 @@ class Scores:
 
         return rmse
 
-    def calc_fact(
+    def calc_froct(
         self,
         p: xr.DataArray,
+        gt: xr.DataArray,
         p1: xr.DataArray,
         group_by_coord: str | None = None,
     ):
         """
-        Calculate simple forecast activity
+        Calculate forecast rate of change over time
 
         Parameters
         ----------
         p: xr.DataArray
             Forecast data array
+        gt: xr.DataArray
+            Ground truth data array (not used in calculation, but kept for consistency)
         p1: xr.DataArray
             Next forecast step data array
         group_by_coord: str
             Name of the coordinate to group by.
-            If provided, the coordinate becomes a new dimension of the FACT score.
+            If provided, the coordinate becomes a new dimension of the FROCT score.
         """
         if self._agg_dims is None:
             raise ValueError(
                 "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
             )
 
-        fact = p1 - p
+        froct = np.abs(p - p1.values)
 
         if group_by_coord:
-            fact = fact.groupby(group_by_coord)
+            froct = froct.groupby(group_by_coord)
 
-        fact = self._mean(fact)
+        froct = self._mean(froct)
 
-        return fact
-
-    def calc_fact2(
+        return froct
+    
+    def calc_troct(
         self,
         p: xr.DataArray,
-        clim_mean: xr.DataArray,
+        gt: xr.DataArray,
+        gt1: xr.DataArray,
         group_by_coord: str | None = None,
     ):
         """
-        Calculate forecast activity after Ben Bouallègue et al. (2024)
+        Calculate forecast rate of change over time
 
         Parameters
         ----------
         p: xr.DataArray
             Forecast data array
-        clim_mean: xr.DataArray
-            Climatological mean data array
+        gt: xr.DataArray
+            Ground truth data array (not used in calculation, but kept for consistency)
+        gt1: xr.DataArray
+            Next ground truth step data array
         group_by_coord: str
             Name of the coordinate to group by.
-            If provided, the coordinate becomes a new dimension of the FACT score.
+            If provided, the coordinate becomes a new dimension of the FROCT score.
         """
         if self._agg_dims is None:
             raise ValueError(
                 "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
             )
 
-        fact2 = p - clim_mean
+        troct = np.abs(gt - gt1.values)
 
         if group_by_coord:
-            fact2 = fact2.groupby(group_by_coord)
+            troct = troct.groupby(group_by_coord)
 
-        fact = fact.std(dim=self._agg_dims)
+        troct = self._mean(troct)
 
-        return fact2
+        return troct
 
     def calc_acc(
         self,
