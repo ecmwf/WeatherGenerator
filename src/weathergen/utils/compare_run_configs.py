@@ -5,6 +5,7 @@
 #   "tabulate",
 #   "pyyaml",
 #   "omegaconf",
+#   "weathergen",
 # ]
 # [tool.uv.sources]
 # weathergen = { path = "../../../" }
