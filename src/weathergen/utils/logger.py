@@ -24,7 +24,8 @@ LOGGING_CONFIG = """
     "formatters": {
         "custom": {
             "class": "weathergen.utils.logger.ColoredRelPathFormatter",
-            "format":"%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s" 
+            "format": \
+                "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
         }
     },
     "handlers": {
