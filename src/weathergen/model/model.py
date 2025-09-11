@@ -632,49 +632,58 @@ class Model(torch.nn.Module):
             Tokens for local assimilation
         """
         
-        target_tokens_lens = torch.stack(
-            [
+        fsteps = self.cf.forecast_steps
+        source_tokenized_target_lens = []
+
+        for fstep in range(fsteps):
+            source_tokenized_target_lens.append(
                 torch.stack(
                     [
-                        s.target_tokens_lens[self.cf.forecast_steps] if len(s.target_tokens_lens[self.cf.forecast_steps]) > 0 else torch.tensor([])
-                        for s in stl_b
+                        torch.stack(
+                            [
+                                s.source_tokenized_target_lens[fstep]
+                                if len(s.source_tokenized_target_lens) > fstep
+                                else torch.tensor([])
+                                for s in stl_b
+                            ]
+                        )
+                        for stl_b in batch
                     ]
                 )
-                for stl_b in streams_data
-            ]
-        )
+            )
 
-        offsets_base = target_tokens_lens.sum(1).sum(0).cumsum(0)
-        tokens_all = torch.empty(
+        target_offsets_base_list = [source_tokenized_target_lens[fstep].sum(1).sum(0).cumsum(0) for fstep in range(fsteps)]
+        tokens_all_list = [torch.empty(
             (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=self.dtype, device="cuda"
-        )
+        ) for offsets_base in target_offsets_base_list]
 
-        for _, sb in enumerate(streams_data):
-            for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                if not s.target_empty():
-                    idxs = s.target_idxs_embed
-                    idxs_pe = s.target_idxs_embed_pe
+        for fstep in range(fsteps):
+            for _, sb in enumerate(streams_data):
+                for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
+                    if not s.target_empty():
+                        idxs = s.target_idxs_embed[fstep]
+                        idxs_pe = s.target_idxs_embed_pe[fstep]
 
-                    # create full scatter index
-                    # (there's no broadcasting which is likely highly inefficient)
-                    idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed(s.target_tokens_cells, s.target_centroids).flatten(0, 1)
-                    # there's undocumented limitation in flash_attn that will make embed fail if
-                    # #tokens is too large; code below is a work around
-                    # x_embed = torch.cat(
-                    #     [
-                    #         embed(s_c, c_c).flatten(0, 1)
-                    #         for s_c, c_c in zip(
-                    #             torch.split(s.source_tokens_cells, 49152),
-                    #             torch.split(s.source_centroids, 49152),
-                    #         )
-                    #     ]
-                    # )
+                        # create full scatter index
+                        # (there's no broadcasting which is likely highly inefficient)
+                        idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+                        x_embed = embed(s.source_tokenized_target[fstep], s.target_centroids).flatten(0, 1)
+                        # there's undocumented limitation in flash_attn that will make embed fail if
+                        # #tokens is too large; code below is a work around
+                        # x_embed = torch.cat(
+                        #     [
+                        #         embed(s_c, c_c).flatten(0, 1)
+                        #         for s_c, c_c in zip(
+                        #             torch.split(s.source_tokens_cells, 49152),
+                        #             torch.split(s.source_centroids, 49152),
+                        #         )
+                        #     ]
+                        # )
 
-                    # scatter write to reorder from per stream to per cell ordering
-                    tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
+                        # scatter write to reorder from per stream to per cell ordering
+                        tokens_all_list[fstep].scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
 
-        return tokens_all
+        return tokens_all_list
 
 
     #########################################

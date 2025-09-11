@@ -601,6 +601,28 @@ def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
         ]
     )
 
+    # collect target_tokens_lens for all stream datas
+    fsteps = len(batch[0][0].target_tokens_lens)
+
+    source_tokenized_target_lens = []
+
+    for fstep in range(fsteps):
+        source_tokenized_target_lens.append(
+            torch.stack(
+                [
+                    torch.stack(
+                        [
+                            s.source_tokenized_target_lens[fstep]
+                            if len(s.source_tokenized_target_lens) > fstep
+                            else torch.tensor([])
+                            for s in stl_b
+                        ]
+                    )
+                    for stl_b in batch
+                ]
+            )
+        )
+
     # precompute index sets for scatter operation after embed
     offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
     offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets_base[:-1]])
@@ -630,22 +652,31 @@ def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
             offsets += source_tokens_lens[ib][itype]
             offsets_pe += source_tokens_lens[ib][itype]
 
-    target_offsets_base_list = [target_tokens_lens.sum(1).sum(0).cumsum(0) for target_tokens_lens in batch.target_tokens_lens]
+    target_offsets_base_list = [source_tokenized_target_lens[fstep].sum(1).sum(0).cumsum(0) for fstep in range(fsteps)]
     target_offsets_list = [torch.cat([torch.zeros(1, dtype=torch.int32), tob[:-1]]) for tob in target_offsets_base_list]
     target_offsets_pe_list = [torch.zeros_like(tob) for tob in target_offsets_list]
 
     # Compute target_idxs_embed for each StreamData in the batch
-    for i, (target_offsets, target_offsets_pe) in enumerate(zip(target_offsets_list, target_offsets_pe_list)):
+    for(fstep, target_offsets, target_offsets_pe) in zip(range(fsteps), target_offsets_list, target_offsets_pe_list):
         for ib, sb in enumerate(batch):
             for itype, s in enumerate(sb):
-                if not s.target_empty():
+                if hasattr(s, 'target_idxs_embed') is False:
+                    s.target_idxs_embed = []
+                    s.target_idxs_embed_pe = []
+                if not s.target_fstep_empty(fstep):
+                    print(f'target_offsets: {target_offsets}')
+                    print(f'target_token_lens: {source_tokenized_target_lens[fstep][ib, itype]}')
+                    # Assert that neither tensor is 0-dimensional
+                    assert target_offsets.dim() > 0 and source_tokenized_target_lens[fstep][ib, itype].numel() > 0, f"dims were {target_offsets.dim()} and {target_token_lens[fstep][ib, itype].dim()}"
+
                     s.target_idxs_embed.append(
                         torch.cat(
                             [
                                 torch.arange(offset, offset + token_len, dtype=torch.int64)
+
                                 for offset, token_len in zip(
                                     target_offsets,
-                                    batch.target_coords_lens[ib, itype],
+                                    source_tokenized_target_lens[fstep][ib, itype],
                                     strict=False
                                 )
                             ]
@@ -657,12 +688,13 @@ def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
                                 torch.arange(offset, offset + token_len, dtype=torch.int32)
                                 for offset, token_len in zip(
                                     target_offsets_pe,
-                                    batch.target_coords_lens[ib][itype],
+                                    source_tokenized_target_lens[fstep][ib][itype],
                                     strict=False
                                 )
                             ]
                         )
                     )
+
 
     return batch
 

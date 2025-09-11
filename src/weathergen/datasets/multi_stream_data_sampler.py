@@ -375,7 +375,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                     ds,
                                 )
 
-                                stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t)
+                                (source_tokenized_target, source_tokenized_target_lens, target_centroids) = self.tokenizer.batchify_source(
+                                    stream_info,
+                                    torch.from_numpy(rdata.coords),
+                                    torch.from_numpy(rdata.geoinfos),
+                                    torch.from_numpy(rdata.data),
+                                    rdata.datetimes,
+                                    (time_win1.start, time_win1.end),
+                                    ds,
+                                )
+
+                                stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t, source_tokenized_target, source_tokenized_target_lens, target_centroids)
 
                     # merge inputs for sources and targets for current stream
                     stream_data.merge_inputs()

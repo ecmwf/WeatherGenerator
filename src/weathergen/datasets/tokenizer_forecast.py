@@ -141,6 +141,7 @@ class TokenizerForecast(Tokenizer):
         target_times = np.split(times_reordered_enc, ll)
 
         target_tokens_lens = torch.tensor([len(s) for s in target_tokens], dtype=torch.int32)
+        target_centroids = torch.tensor([])
 
         # compute encoding of target coordinates used in prediction network
         if target_tokens_lens.sum() > 0:
