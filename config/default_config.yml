@@ -150,7 +150,12 @@ desc: ""
 data_loader_rng_seed: ???
 run_id: ???
 
-# Parameters for logging/printing in the training loop
+# The period to log in the training loop (in number of batch steps)
+log_intervals:
+  terminal: 10
+  metrics: 20
+  checkpoint: 250
+
 train_log:
   # The period to log metrics (in number of batch steps)
   log_interval: 20
