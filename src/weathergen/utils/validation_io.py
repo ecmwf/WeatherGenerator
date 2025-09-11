@@ -33,7 +33,7 @@ def write_output(
         output_stream_names = cf.analysis_streams_output  # --- to be removed at some point ---
     else:
         output_stream_names = None
-        
+
     if output_stream_names is None:
         output_stream_names = stream_names
 
