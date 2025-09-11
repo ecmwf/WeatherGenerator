@@ -174,6 +174,9 @@ def main():
         "--max-length", type=int, default=30, help="Maximum length for config values."
     )
     parser.add_argument(
+        "--private-home", type=Path, default=None, help="Path to private home directory."
+    )
+    parser.add_argument(
         "--show",
         type=int,
         default=[],
@@ -185,11 +188,26 @@ def main():
 
     args = parser.parse_args()
 
+    if args.private_home is None:
+        # get WeatherGenerator-private relative to project root
+        args.private_home = (
+            Path(__file__).parent.parent.parent.parent.parent / "WeatherGenerator-private"
+        )
+        logger.info(
+            f"No private home directory specified. Using default private home directory: {args.private_home}"
+        )
+
     if args.run_id_1 and args.run_id_2:
         if args.model_directory_1 is None:
-            args.model_directory_1 = _load_private_conf()["path_shared_working_dir"] + "models/"
+            args.model_directory_1 = (
+                _load_private_conf(private_home=args.private_home)["path_shared_working_dir"]
+                + "models/"
+            )
         if args.model_directory_2 is None:
-            args.model_directory_2 = _load_private_conf()["path_shared_working_dir"] + "models/"
+            args.model_directory_2 = (
+                _load_private_conf(private_home=args.private_home)["path_shared_working_dir"]
+                + "models/"
+            )
         config_files = [
             [args.run_id_1, args.model_directory_1],
             [args.run_id_2, args.model_directory_2],
