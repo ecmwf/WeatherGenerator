@@ -45,7 +45,7 @@ def inference_from_args(argl: list[str]):
         end_date_val=args.end_date,
         samples_per_validation=args.samples,
         log_validation=args.samples if args.save_samples else 0,
-        analysis_streams_output=args.analysis_streams_output,
+        streams_output=args.streams_output,
     )
 
     cli_overwrite = config.from_cli_arglist(args.options)

@@ -27,7 +27,13 @@ def write_output(
     targets_lens,
 ):
     stream_names = [stream.name for stream in cf.streams]
-    output_stream_names = cf.analysis_streams_output
+    if cf.streams_output is not None:
+        output_stream_names = cf.streams_output
+    elif cf.analysis_streams_output is not None:  # --- to be removed at some point ---
+        output_stream_names = cf.analysis_streams_output  # --- to be removed at some point ---
+    else:
+        output_stream_names = None
+        
     if output_stream_names is None:
         output_stream_names = stream_names
 
