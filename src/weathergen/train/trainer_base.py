@@ -68,6 +68,7 @@ class TrainerBase:
     def init_ddp(cf):
         """Initializes the distributed environment."""
         rank = 0
+        local_rank = 0
 
         if not dist.is_available():
             print("Distributed training is not available.")
