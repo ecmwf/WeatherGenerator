@@ -76,27 +76,46 @@ class Tokenizer:
             vertsmm_rots.to(torch.float32),
         ]
 
+        transforms = [
+            ([verts10, verts11, verts01, vertsmm], verts00_rots),
+            ([verts00, verts11, verts01, vertsmm], verts10_rots),
+            ([verts00, verts10, verts01, vertsmm], verts11_rots),
+            ([verts00, verts11, verts10, vertsmm], verts01_rots),
+            ([verts00, verts10, verts11, verts01], vertsmm_rots),
+        ]
+
         self.verts_local = []
-        verts = torch.stack([verts10, verts11, verts01, vertsmm])
-        verts_trans: list[torch.Tensor] = [t for t in verts.transpose(0, 1)]
-        temp = ref - locs_to_cell_coords_ctrs(verts00_rots, verts_trans)
-        self.verts_local.append(temp.flatten(1, 2))
+        for (_verts, rot) in transforms:
+            # Compute local coordinates
+            verts = torch.stack(_verts)
+            verts = verts.transpose(0, 1)
+            # Perform the rotation:
+            t1 = torch.matmul(rot, verts.transpose(-1, -2)).transpose(-2, -1)
+            t2 = ref - t1
+            self.verts_local.append(t2.flatten(1, 2))
 
-        verts = torch.stack([verts00, verts11, verts01, vertsmm])
-        temp = ref - locs_to_cell_coords_ctrs(verts10_rots, verts_trans)
-        self.verts_local.append(temp.flatten(1, 2))
+        # all_verts = []
 
-        verts = torch.stack([verts00, verts10, verts01, vertsmm])
-        temp = ref - locs_to_cell_coords_ctrs(verts11_rots, verts_trans)
-        self.verts_local.append(temp.flatten(1, 2))
+        # verts = torch.stack([verts10, verts11, verts01, vertsmm])
+        # verts_trans: list[torch.Tensor] = [t for t in verts.transpose(0, 1)]
+        # temp = ref - locs_to_cell_coords_ctrs(verts00_rots, verts_trans).reshape_as(verts)
+        # self.verts_local.append(temp.flatten(1, 2))
 
-        verts = torch.stack([verts00, verts11, verts10, vertsmm])
-        temp = ref - locs_to_cell_coords_ctrs(verts01_rots, verts_trans)
-        self.verts_local.append(temp.flatten(1, 2))
+        # verts = torch.stack([verts00, verts11, verts01, vertsmm])
+        # temp = ref - locs_to_cell_coords_ctrs(verts10_rots, verts_trans)
+        # self.verts_local.append(temp.flatten(1, 2))
 
-        verts = torch.stack([verts00, verts10, verts11, verts01])
-        temp = ref - locs_to_cell_coords_ctrs(vertsmm_rots, verts_trans)
-        self.verts_local.append(temp.flatten(1, 2))
+        # verts = torch.stack([verts00, verts10, verts01, vertsmm])
+        # temp = ref - locs_to_cell_coords_ctrs(verts11_rots, verts_trans)
+        # self.verts_local.append(temp.flatten(1, 2))
+
+        # verts = torch.stack([verts00, verts11, verts10, vertsmm])
+        # temp = ref - locs_to_cell_coords_ctrs(verts01_rots, verts_trans)
+        # self.verts_local.append(temp.flatten(1, 2))
+
+        # verts = torch.stack([verts00, verts10, verts11, verts01])
+        # temp = ref - locs_to_cell_coords_ctrs(vertsmm_rots, verts_trans)
+        # self.verts_local.append(temp.flatten(1, 2))
 
         self.hpy_verts_local_target = torch.stack(self.verts_local).transpose(0, 1)
 
