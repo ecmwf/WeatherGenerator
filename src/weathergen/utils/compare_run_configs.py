@@ -175,7 +175,7 @@ def main():
     )
     parser.add_argument(
         "--show",
-        type=int,
+        type=str,
         default=[],
         help=(
             "Put '*' to show all parameters, or leave empty to only show changed parameters. "
