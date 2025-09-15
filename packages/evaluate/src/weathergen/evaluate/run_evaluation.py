@@ -102,18 +102,20 @@ def evaluate_from_config(cfg):
                                 region,
                                 metric,
                             )
-                            checked, (channels, fsteps, samples) = reader.check_availability(
+                            
+                            available_data = reader.check_availability(
                                 stream, metric_data, mode="evaluation"
                             )
-                            if not checked:
+                        
+                            if not available_data.json_availability:
                                 metrics_to_compute.append(metric)
                             else:
                                 # simply select the chosen eval channels, samples, fsteps here...
                                 scores_dict[metric][region][stream][run_id] = (
                                     metric_data.sel(
-                                        sample=samples,
-                                        channel=channels,
-                                        forecast_step=fsteps,
+                                        sample=available_data.samples,
+                                        channel=available_data.channels,
+                                        forecast_step=available_data.fsteps,
                                     )
                                 )
                         except (FileNotFoundError, KeyError):

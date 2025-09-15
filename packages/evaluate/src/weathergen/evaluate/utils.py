@@ -53,16 +53,16 @@ def calc_scores_per_stream(
         f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}..."
     )
 
-    checked, (channels, fsteps, samples) = reader.check_availability(
+    available_data = reader.check_availability(
         stream, mode="evaluation"
     )
 
     output_data =reader.get_data( 
         stream,
         region=region,
-        fsteps=fsteps,
-        samples=samples,
-        channels=channels,
+        fsteps=available_data.fsteps,
+        samples=available_data.samples,
+        channels=available_data.channels,
         return_counts=True,
     )
 
@@ -189,8 +189,7 @@ def plot_data(
 
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
 
-    check, (plot_chs, plot_fsteps, plot_samples) = reader.check_availability(
-        stream, mode="plotting")
+    available_data = reader.check_availability(stream, mode="plotting")
 
     # Check if maps should be plotted and handle configuration if provided
     plot_maps = plot_settings.get("plot_maps", False)
@@ -206,17 +205,11 @@ def plot_data(
     if not isinstance(plot_animations, bool):
         raise TypeError("plot_animations must be a boolean.")
 
-    if plot_fsteps == "all":
-        plot_fsteps = None
-
-    if plot_samples == "all":
-        plot_samples = None
-
     model_output = reader.get_data(
         stream,
-        samples=plot_samples,
-        fsteps=plot_fsteps,
-        channels=plot_chs,
+        samples=available_data.samples,
+        fsteps=available_data.fsteps,
+        channels=available_data.channels,
     )
 
     da_tars = model_output.target
@@ -229,7 +222,7 @@ def plot_data(
     #get common ranges across all run_ids
     if not isinstance(global_plotting_opts.get(stream), oc.DictConfig):
         global_plotting_opts[stream] = oc.DictConfig({})
-    maps_config = common_ranges(da_tars, da_preds, plot_chs, global_plotting_opts[stream])
+    maps_config = common_ranges(da_tars, da_preds, available_data.channels, global_plotting_opts[stream])
 
     plot_names = []
 
