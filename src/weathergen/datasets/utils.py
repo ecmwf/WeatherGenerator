@@ -200,7 +200,9 @@ def healpix_verts_rots(hl: int, dx=0.5, dy=0.5):
 
 
 ####################################################################################################
-def locs_to_cell_coords_ctrs(healpix_centers_rots, locs: list) -> list:
+def locs_to_cell_coords_ctrs(
+    healpix_centers_rots: torch.Tensor, locs: list[torch.Tensor]
+) -> torch.Tensor:
     """
     Map a list of locations per cell to spherical local coordinates centered
     at the healpix cell center
@@ -208,10 +210,21 @@ def locs_to_cell_coords_ctrs(healpix_centers_rots, locs: list) -> list:
 
     ## express each centroid in local coordinates w.r.t to healpix center
     #  by rotating center to origin
-    local_locs = [
-        torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1) if len(s) > 0 else torch.tensor([])
-        for i, (R, s) in enumerate(zip(healpix_centers_rots, locs, strict=False))
-    ]
+
+    # Concatenate all non-empty locations
+    all_points = torch.cat(locs, dim=0)
+    lengths = torch.tensor([len(s) for s in locs], device=all_points.device)
+
+    # Efficiently create batch indices using torch.repeat_interleave
+    batch_indices = torch.repeat_interleave(
+        torch.arange(len(locs), device=all_points.device), lengths
+    )
+
+    # Select rotation matrices for each point
+    rotations_selected = healpix_centers_rots[batch_indices]
+
+    # Vectorized matrix multiplication
+    local_locs = torch.bmm(rotations_selected, all_points.unsqueeze(-1)).squeeze(-1)
 
     return local_locs
 
@@ -380,6 +393,7 @@ def get_target_coords_local(hlc, target_coords, geoinfo_offset):
 
 
 ####################################################################################################
+# TODO: remove this function, it is dead code that will fail immediately
 def get_target_coords_local_fast(hlc, target_coords, geoinfo_offset):
     """Generate local coordinates for target coords w.r.t healpix cell vertices and
     and for healpix cell vertices themselves
@@ -477,6 +491,33 @@ def get_target_coords_local_fast(hlc, target_coords, geoinfo_offset):
 
 
 ####################################################################################################
+def tcs_optimized(target_coords: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor]:
+    """
+    Args:
+    target_coords: List of 2D coordinate tensors, each with shape [N, 2]
+
+    Returns:
+        tcs: List of transformed coordinates
+        concatenated_coords: All original coords concatenated
+    """
+
+    # Concatenate all tensors
+    stacked_coords = torch.cat(target_coords, dim=0)  # [total_points, 2]
+
+    # Single vectorized coordinate transformation
+    theta_all = torch.deg2rad(90.0 - stacked_coords[..., 0])
+    phi_all = torch.deg2rad(180.0 + stacked_coords[..., 1])
+
+    # Transform all coordinates
+    transformed_all = s2tor3(theta_all, phi_all)  # [total_points, 3]
+
+    # Split back to original structure
+    sizes = [t.shape[0] for t in target_coords]  # Get original tensor sizes
+    tcs = list(torch.split(transformed_all, sizes, dim=0))  # Split back to list
+    return tcs, stacked_coords
+
+
+####################################################################################################
 def get_target_coords_local_ffast(
     hlc, target_coords, target_geoinfos, target_times, verts_rots, verts_local, nctrs
 ):
@@ -485,18 +526,8 @@ def get_target_coords_local_ffast(
     """
 
     # target_coords_lens = [len(t) for t in target_coords]
-    tcs = [
-        (
-            s2tor3(
-                torch.deg2rad(90.0 - t[..., 0]),
-                torch.deg2rad(180.0 + t[..., 1]),
-            )
-            if len(t) > 0
-            else torch.tensor([])
-        )
-        for t in target_coords
-    ]
-    target_coords = torch.cat(target_coords)
+    tcs, target_coords = tcs_optimized(target_coords)
+
     if target_coords.shape[0] == 0:
         return torch.tensor([])
     target_geoinfos = torch.cat(target_geoinfos)
@@ -533,37 +564,42 @@ def get_target_coords_local_ffast(
     vls = vls.transpose(0, 1)
 
     zi = 0
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts00_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        verts00_rots, tcs
     )
+
     zi = 3
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[0]
 
     zi = 15
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts10_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        verts10_rots, tcs
     )
+
     zi = 18
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[1]
 
     zi = 30
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts11_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        verts11_rots, tcs
     )
+
     zi = 33
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[2]
 
     zi = 45
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts01_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        verts01_rots, tcs
     )
+
     zi = 48
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[3]
 
     zi = 60
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(vertsmm_rots, tcs)
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        vertsmm_rots, tcs
     )
+
     zi = 63
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[4]
 
