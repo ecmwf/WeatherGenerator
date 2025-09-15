@@ -106,10 +106,17 @@ class LossCalculator:
         return stream_info_loss_weight, weights_channels
 
     def _get_fstep_weights(self, forecast_steps):
-        fsteps = np.arange(forecast_steps)
-        gamma = 0.6
-        weights = gamma**fsteps
-        return weights * (len(fsteps) / np.sum(weights))
+        timestep_weight_type = cf.get("timestep_weight")
+        breakpoint()
+        if location_weight_type is None:
+            return [1.0 for _ in range(forecast_steps)]
+        weights_timestep_fct = getattr(losses, timestep_weight_type)
+        return weights_timestep_fct(forecast_steps, weight_option)
+
+        # fsteps = np.arange(forecast_steps)
+        # gamma = 0.8
+        # weights = gamma**fsteps
+        # return weights * (len(fsteps) / np.sum(weights))
 
     def _get_location_weights(self, stream_info, stream_data, forecast_offset, fstep):
         location_weight_type = stream_info.get("location_weight", None)
