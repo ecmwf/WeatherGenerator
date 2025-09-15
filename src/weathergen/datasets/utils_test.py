@@ -1,8 +1,14 @@
 import torch
 from torch import Tensor, tensor
 
-from weathergen.datasets.utils import locs_to_cell_coords_ctrs, s2tor3, tcs_optimized
-from weathergen.datasets.utils import locs_to_ctr_coords, vecs_to_rots
+from weathergen.datasets.utils import (
+    locs_to_cell_coords_ctrs,
+    locs_to_ctr_coords,
+    s2tor3,
+    tcs_optimized,
+    vecs_to_rots,
+)
+
 
 def _locs_to_cell_coords_ctrs(
     healpix_centers_rots: torch.Tensor, locs: list[torch.Tensor]
@@ -97,7 +103,6 @@ def test_tcs():
     assert len(tcs_ref) == len(tcs_opt)
     torch.testing.assert_close(cat_tcs_ref, cat_tcs_opt)
     torch.testing.assert_close(tcs_ref, tcs_opt, atol=1e-8, rtol=1e-5)
-
 
 
 def _locs_to_ctr_coords(ctrs_r3, locs: list[torch.Tensor]) -> list[torch.Tensor]:
