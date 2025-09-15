@@ -469,6 +469,33 @@ def get_target_coords_local_fast(hlc, target_coords, geoinfo_offset):
 
 
 ####################################################################################################
+def tcs_optimized(target_coords: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor]:
+    """
+    Args:
+    target_coords: List of 2D coordinate tensors, each with shape [N, 2]
+
+    Returns:
+        tcs: List of transformed coordinates
+        concatenated_coords: All original coords concatenated
+    """
+
+    # Concatenate all tensors
+    stacked_coords = torch.cat(target_coords, dim=0)  # [total_points, 2]
+
+    # Single vectorized coordinate transformation
+    theta_all = torch.deg2rad(90.0 - stacked_coords[..., 0])
+    phi_all = torch.deg2rad(180.0 + stacked_coords[..., 1])
+
+    # Transform all coordinates
+    transformed_all = s2tor3(theta_all, phi_all)  # [total_points, 3]
+
+    # Split back to original structure
+    sizes = [t.shape[0] for t in target_coords]  # Get original tensor sizes
+    tcs = list(torch.split(transformed_all, sizes, dim=0))  # Split back to list
+    return tcs, stacked_coords
+
+
+####################################################################################################
 def get_target_coords_local_ffast(
     hlc, target_coords, target_geoinfos, target_times, verts_rots, verts_local, nctrs
 ):
@@ -477,18 +504,8 @@ def get_target_coords_local_ffast(
     """
 
     # target_coords_lens = [len(t) for t in target_coords]
-    tcs = [
-        (
-            s2tor3(
-                torch.deg2rad(90.0 - t[..., 0]),
-                torch.deg2rad(180.0 + t[..., 1]),
-            )
-            if len(t) > 0
-            else torch.tensor([])
-        )
-        for t in target_coords
-    ]
-    target_coords = torch.cat(target_coords)
+    tcs, target_coords = tcs_optimized(target_coords)
+
     if target_coords.shape[0] == 0:
         return torch.tensor([])
     target_geoinfos = torch.cat(target_geoinfos)
