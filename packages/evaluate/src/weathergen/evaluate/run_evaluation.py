@@ -24,7 +24,7 @@ from weathergen.evaluate.utils import (
     plot_summary,
     retrieve_metric_from_json,
 )
-from weathergen.utils.config import _REPO_ROOT, load_config, load_model_config
+from weathergen.common.config import _REPO_ROOT, load_config, load_model_config
 
 _logger = logging.getLogger(__name__)
 
