@@ -14,13 +14,14 @@ import os
 import subprocess
 from pathlib import Path
 
-import torch
 import yaml
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from weathergen.train.utils import get_run_id
 
-_REPO_ROOT = Path(__file__).parent.parent.parent.parent  # TODO use importlib for resources
+_REPO_ROOT = Path(
+    __file__
+).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
 
 _logger = logging.getLogger(__name__)
@@ -403,22 +404,6 @@ def get_path_output(config: Config, epoch: int) -> Path:
     fname = f"validation_epoch{epoch:05d}_rank{config.rank:04d}.zarr"
 
     return base_path / fname
-
-
-def get_dtype(value: str) -> torch.dtype:
-    """
-    changes the conf value to a torch dtype
-    """
-    if value == "bf16":
-        return torch.bfloat16
-    elif value == "fp16":
-        return torch.float16
-    elif value == "fp32":
-        return torch.float32
-    else:
-        raise NotImplementedError(
-            f"Dtype {value} is not recognized, choose either, bf16, fp16, or fp32"
-        )
 
 
 def validate_forecast_policy_and_steps(cf: OmegaConf):

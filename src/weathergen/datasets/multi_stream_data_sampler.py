@@ -132,7 +132,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 ds_type = stream_info["type"]
                 logger.info(
                     f"Opening dataset with type: {ds_type}"
-                    + f"from stream config {stream_info['name']}.",
+                    + f" from stream config {stream_info['name']}.",
                 )
                 ds = dataset(filename=filename, **kwargs)
 

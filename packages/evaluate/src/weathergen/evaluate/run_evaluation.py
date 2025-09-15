@@ -24,12 +24,11 @@ from weathergen.evaluate.utils import (
     retrieve_metric_from_json,
 )
 from weathergen.evaluate.io_reader import Reader, WeatherGeneratorOutput
-from weathergen.utils.config import _REPO_ROOT
+from weathergen.common.config import _REPO_ROOT
 
 _logger = logging.getLogger(__name__)
 
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
-
 
 def evaluate() -> None:
     # By default, arguments from the command line are read.
