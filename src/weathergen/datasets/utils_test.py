@@ -1,7 +1,13 @@
 import torch
 from torch import Tensor, tensor
 
-from weathergen.datasets.utils import locs_to_cell_coords_ctrs, s2tor3, tcs_optimized
+from weathergen.datasets.utils import (
+    locs_to_cell_coords_ctrs,
+    locs_to_ctr_coords,
+    s2tor3,
+    tcs_optimized,
+    vecs_to_rots,
+)
 
 
 def _locs_to_cell_coords_ctrs(
@@ -97,3 +103,51 @@ def test_tcs():
     assert len(tcs_ref) == len(tcs_opt)
     torch.testing.assert_close(cat_tcs_ref, cat_tcs_opt)
     torch.testing.assert_close(tcs_ref, tcs_opt, atol=1e-8, rtol=1e-5)
+
+
+def _locs_to_ctr_coords(ctrs_r3, locs: list[torch.Tensor]) -> list[torch.Tensor]:
+    ctrs_rots = vecs_to_rots(ctrs_r3).to(torch.float32)
+
+    ## express each centroid in local coordinates w.r.t to healpix center
+    #  by rotating center to origin
+    return [
+        (
+            torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1)
+            if len(s) > 0
+            else torch.zeros([0, 3])
+        )
+        for i, (R, s) in enumerate(zip(ctrs_rots, locs, strict=False))
+    ]
+
+
+def test_locs_to_ctr_coords():
+    locs = [
+        tensor(
+            [
+                [0.7235, -0.6899, -0.0245],
+                [0.7178, -0.6951, -0.0408],
+                [0.7288, -0.6835, -0.0408],
+                [0.7229, -0.6886, -0.0571],
+            ]
+        ),
+        tensor(
+            [
+                [0.6899, -0.7235, -0.0245],
+                [0.6835, -0.7288, -0.0408],
+                [0.6951, -0.7178, -0.0408],
+                [0.6886, -0.7229, -0.0571],
+            ]
+        ),
+        tensor([]),
+    ]
+    ctrs_r3 = tensor(
+        [
+            [7.2425e-01, 6.8954e-01, 6.1232e-17],
+            [7.0695e-01, 7.0695e-01, 2.0833e-02],
+            [7.4079e-01, 6.7141e-01, 2.0833e-02],
+        ]
+    )
+    torch.testing.assert_close(
+        locs_to_ctr_coords(ctrs_r3, locs),
+        _locs_to_ctr_coords(ctrs_r3, locs),
+    )

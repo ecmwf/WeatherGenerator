@@ -136,7 +136,7 @@ def locs_to_cell_coords(hl: int, locs: list, dx=0.5, dy=0.5) -> list:
 
 
 ####################################################################################################
-def locs_to_ctr_coords(ctrs_r3, locs: list) -> list:
+def locs_to_ctr_coords(ctrs_r3, locs: list[torch.Tensor]) -> list:
     """
     Map a list of locations per cell to spherical local coordinates centered
     at the healpix cell center
@@ -146,16 +146,24 @@ def locs_to_ctr_coords(ctrs_r3, locs: list) -> list:
 
     ## express each centroid in local coordinates w.r.t to healpix center
     #  by rotating center to origin
-    local_locs = [
-        (
-            torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1)
-            if len(s) > 0
-            else torch.zeros([0, 3])
-        )
-        for i, (R, s) in enumerate(zip(ctrs_rots, locs, strict=False))
-    ]
 
-    return local_locs
+    # Concatenate all points into single tensor
+    all_points = torch.cat(locs, dim=0)
+
+    lengths = torch.tensor([len(s) for s in locs], device=all_points.device)
+    batch_indices = torch.repeat_interleave(
+        torch.arange(len(locs), device=all_points.device), lengths
+    )
+
+    point_rotations = ctrs_rots[batch_indices]
+
+    # Single vectorized batch matrix multiplication
+    rotated_points = torch.bmm(point_rotations, all_points.unsqueeze(-1)).squeeze(-1)
+
+    # Split back using tensor operations
+    local_locs = torch.split(rotated_points, lengths.tolist())
+
+    return list(local_locs)
 
 
 ####################################################################################################

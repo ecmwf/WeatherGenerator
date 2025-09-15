@@ -2381,7 +2381,6 @@ dependencies = [
     { name = "omegaconf" },
     { name = "packaging" },
     { name = "pandas" },
-    { name = "pdbpp" },
     { name = "polars" },
     { name = "psutil" },
     { name = "pynvml" },
@@ -2399,6 +2398,7 @@ dependencies = [
 dev = [
     { name = "ipykernel" },
     { name = "jupytext" },
+    { name = "pdbpp" },
     { name = "pytest" },
     { name = "pytest-mock" },
     { name = "ruff" },
@@ -2418,7 +2418,6 @@ requires-dist = [
     { name = "omegaconf", specifier = "~=2.3.0" },
     { name = "packaging" },
     { name = "pandas", specifier = "~=2.2" },
-    { name = "pdbpp", specifier = ">=0.11.7" },
     { name = "polars", specifier = "~=1.25.2" },
     { name = "psutil" },
     { name = "pynvml" },
@@ -2436,6 +2435,7 @@ requires-dist = [
 dev = [
     { name = "ipykernel", specifier = ">=6.30.0" },
     { name = "jupytext", specifier = ">=1.17.2" },
+    { name = "pdbpp", specifier = ">=0.11.7" },
     { name = "pytest", specifier = "~=8.3.5" },
     { name = "pytest-mock", specifier = ">=3.14.1" },
     { name = "ruff", specifier = "==0.9.7" },
