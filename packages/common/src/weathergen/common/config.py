@@ -109,9 +109,9 @@ def _backward_compatibility(config: Config):
     "outdatet" run configurations. The fixes in this function should be 
     eventually removed.
     """
-    if not cf.log_intervals: # TODO remove this for next version
-        cf.log_intervals = OmegaConf.construct(
-            {"checkpoint":250, "terminal":10, "metrics": cf.train_log.log_interval}
+    if not config.log_intervals: # TODO remove this for next version
+        config.log_intervals = OmegaConf.construct(
+            {"checkpoint":250, "terminal":10, "metrics": config.train_log.log_interval}
         )
 
 def load_config(
