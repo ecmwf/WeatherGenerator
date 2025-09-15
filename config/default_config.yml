@@ -77,9 +77,8 @@ loss_fcts_val:
     - 1.0
 
 timestep_weight:
-  - 
-    - "gamma_decay"
-    - 0.8
+  - "gamma_decay"
+  - 0.8
 
 batch_size_per_gpu: 1
 batch_size_validation_per_gpu: 1

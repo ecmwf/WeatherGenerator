@@ -106,17 +106,12 @@ class LossCalculator:
         return stream_info_loss_weight, weights_channels
 
     def _get_fstep_weights(self, forecast_steps):
-        timestep_weight_type = cf.get("timestep_weight")
+        timestep_weight_config = self.cf.get("timestep_weight")
         breakpoint()
-        if location_weight_type is None:
+        if timestep_weight_config is None:
             return [1.0 for _ in range(forecast_steps)]
-        weights_timestep_fct = getattr(losses, timestep_weight_type)
-        return weights_timestep_fct(forecast_steps, weight_option)
-
-        # fsteps = np.arange(forecast_steps)
-        # gamma = 0.8
-        # weights = gamma**fsteps
-        # return weights * (len(fsteps) / np.sum(weights))
+        weights_timestep_fct = getattr(losses, timestep_weight_config[0])
+        return weights_timestep_fct(forecast_steps, timestep_weight_config[1])
 
     def _get_location_weights(self, stream_info, stream_data, forecast_offset, fstep):
         location_weight_type = stream_info.get("location_weight", None)
@@ -247,7 +242,9 @@ class LossCalculator:
 
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
-            for fstep, (target, fstep_weight) in enumerate(zip(targets, fstep_loss_weights)):
+            for fstep, (target, fstep_weight) in enumerate(
+                zip(targets, fstep_loss_weights, strict=False)
+            ):
                 # skip if either target or prediction has no data points
                 pred = preds[fstep][i_stream_info]
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
