@@ -31,7 +31,7 @@ import pandas as pd
 import yaml
 from omegaconf import OmegaConf
 
-from weathergen.utils.config import load_model_config
+from weathergen.common.config import load_model_config
 
 
 def truncate_value(value, max_length=50):
@@ -164,7 +164,7 @@ def main():
     )
     parser.add_argument(
         "--config",
-        default="config/config_list.yml",
+        default="config/compare_config_list.yml",
         help="Path to YAML file listing run_ids and always_show_patterns.",
     )
     parser.add_argument(
@@ -175,7 +175,7 @@ def main():
     )
     parser.add_argument(
         "--show",
-        type=int,
+        type=str,
         default=[],
         help=(
             "Put '*' to show all parameters, or leave empty to only show changed parameters. "
