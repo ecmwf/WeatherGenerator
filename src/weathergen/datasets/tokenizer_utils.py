@@ -1,12 +1,17 @@
+from collections.abc import Callable
+
 import numpy as np
 import pandas as pd
 import torch
 from astropy_healpix.healpy import ang2pix
+from torch import Tensor
 
 from weathergen.datasets.utils import (
     r3tos2,
     s2tor3,
 )
+
+CoordNormalizer = Callable[[torch.Tensor], torch.Tensor]
 
 # on some clusters our numpy version is pinned to be 1.x.x where the np.argsort does not
 # the stable=True argument
@@ -117,7 +122,9 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
     return (hpy_idxs_ord_split, thetas, phis, posr3)
 
 
-def hpy_splits(coords: torch.tensor, hl: int, token_size: int, pad_tokens: bool):
+def hpy_splits(
+    coords: torch.Tensor, hl: int, token_size: int, pad_tokens: bool
+) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
     """Compute healpix cell for each data point and splitting information per cell;
        when the token_size is exceeded then splitting based on lat is used;
        tokens can be padded
@@ -171,7 +178,7 @@ def tokenize_window_space(
     token_size,
     hl,
     hpy_verts_rots,
-    n_coords,
+    n_coords: CoordNormalizer,
     n_geoinfos,
     n_data,
     enc_time,
@@ -194,16 +201,9 @@ def tokenize_window_space(
     source_padded = torch.cat([torch.zeros_like(source[0]).unsqueeze(0), n_data(source)])
 
     # convert to local coordinates
-    # TODO: how to vectorize it so that there's no list comprhension (and the rots are not
-    # duplicated)
     # TODO: avoid that padded lists are rotated, which means potentially a lot of zeros
     if local_coords:
-        fp32 = torch.float32
-        posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])
-        coords_local = [
-            n_coords(r3tos2(torch.matmul(R, posr3[idxs].transpose(1, 0)).transpose(1, 0)).to(fp32))
-            for R, idxs in zip(hpy_verts_rots, idxs_ord, strict=True)
-        ]
+        coords_local = _coords_local(posr3, hpy_verts_rots, idxs_ord, n_coords)
     else:
         coords_local = torch.cat([torch.zeros_like(coords[0]).unsqueeze(0), coords])
         coords_local = [coords_local[idxs] for idxs in idxs_ord]
@@ -284,3 +284,31 @@ def tokenize_window_spacetime(
         tokens_cells = [t + tc for t, tc in zip(tokens_cells, tokens_cells_cur, strict=True)]
 
     return tokens_cells
+
+
+def _coords_local(
+    posr3: Tensor, hpy_verts_rots: Tensor, idxs_ord: list[Tensor], n_coords: CoordNormalizer
+) -> list[Tensor]:
+    """Compute simple local coordinates for a set of 3D positions on the unit sphere."""
+    fp32 = torch.float32
+    posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])  # prepend zero
+
+    idxs_ords_lens_l = [len(idxs) for idxs in idxs_ord]
+    # int32 should be enough
+    idxs_ords_lens = torch.tensor(idxs_ords_lens_l, dtype=torch.int32)
+    # concat all indices
+    idxs_ords_c = torch.cat(idxs_ord)
+    # Copy the rotation matrices for each healpix cell
+    # num_points x 3 x 3
+    rots = torch.repeat_interleave(hpy_verts_rots, idxs_ords_lens, dim=0)
+    # BMM only works for b x n x m and b x m x 1
+    # adding a dummy dimension to posr3
+    # numpoints x 3 x 1
+    posr3_sel = posr3[idxs_ords_c].unsqueeze(-1)
+    vec_rot = torch.bmm(rots, posr3_sel)
+    vec_rot = vec_rot.squeeze(-1)
+    vec_scaled = n_coords(r3tos2(vec_rot).to(fp32))
+    # split back to ragged list
+    # num_points x 2
+    coords_local = torch.split(vec_scaled, idxs_ords_lens_l, dim=0)
+    return list(coords_local)
