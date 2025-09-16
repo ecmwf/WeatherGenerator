@@ -5,6 +5,7 @@ from pathlib import Path
 
 import cartopy
 import cartopy.crs as ccrs
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import omegaconf as oc
@@ -434,16 +435,28 @@ class Plotter:
 
         valid_time = str(data["valid_time"][0].values.astype("datetime64[m]"))
 
+        if isinstance(map_kwargs_save.get("levels", False), oc.listconfig.ListConfig):
+            cmap = plt.get_cmap(map_kwargs_save.pop("colormap", "coolwarm"))
+            norm = mpl.colors.BoundaryNorm(
+                map_kwargs_save.pop("levels", None), cmap.N, extend="both"
+            )
+        else:
+            cmap = plt.get_cmap(map_kwargs_save.pop("colormap", "coolwarm"))
+            norm = mpl.colors.Normalize(
+                vmin=vmin,
+                vmax=vmax,
+                clip=False,
+            )
+
         scatter_plt = ax.scatter(
             data["lon"],
             data["lat"],
             c=data,
-            cmap="coolwarm",
+            norm=norm,
+            cmap=cmap,
             s=marker_size,
             marker=marker,
             transform=ccrs.PlateCarree(),
-            vmin=vmin,
-            vmax=vmax,
             linewidths=0.0,  # only markers, avoids aliasing for very small markers
             **map_kwargs_save,
         )
