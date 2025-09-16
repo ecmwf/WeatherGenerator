@@ -2400,7 +2400,6 @@ dependencies = [
     { name = "polars" },
     { name = "psutil" },
     { name = "pynvml" },
-    { name = "pyrefly" },
     { name = "torch", version = "2.6.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'macosx' and sys_platform != 'win32'" },
     { name = "torch", version = "2.6.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'macosx'" },
     { name = "torch", version = "2.6.0+cu124", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
@@ -2416,6 +2415,7 @@ dev = [
     { name = "ipykernel" },
     { name = "jupytext" },
     { name = "pdbpp" },
+    { name = "pyrefly" },
     { name = "pytest" },
     { name = "pytest-mock" },
     { name = "ruff" },
@@ -2438,7 +2438,6 @@ requires-dist = [
     { name = "polars", specifier = "~=1.25.2" },
     { name = "psutil" },
     { name = "pynvml" },
-    { name = "pyrefly", specifier = "==0.33.0" },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'macosx' and sys_platform != 'win32'", specifier = "==2.6.0" },
     { name = "torch", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = "==2.6.0", index = "https://download.pytorch.org/whl/cu124" },
     { name = "torch", marker = "sys_platform == 'macosx'", specifier = "==2.6.0", index = "https://download.pytorch.org/whl/cpu" },
@@ -2454,6 +2453,7 @@ dev = [
     { name = "ipykernel", specifier = ">=6.30.0" },
     { name = "jupytext", specifier = ">=1.17.2" },
     { name = "pdbpp", specifier = ">=0.11.7" },
+    { name = "pyrefly", specifier = "==0.33.0" },
     { name = "pytest", specifier = "~=8.3.5" },
     { name = "pytest-mock", specifier = ">=3.14.1" },
     { name = "ruff", specifier = "==0.9.7" },
@@ -2473,6 +2473,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "pyrefly" },
     { name = "pytest" },
     { name = "pytest-mock" },
     { name = "ruff" },
@@ -2488,6 +2489,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "pyrefly", specifier = "==0.33.0" },
     { name = "pytest", specifier = "~=8.3.5" },
     { name = "pytest-mock", specifier = ">=3.14.1" },
     { name = "ruff", specifier = "==0.9.7" },
