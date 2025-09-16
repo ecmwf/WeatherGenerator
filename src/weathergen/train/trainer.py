@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 import torch
 import tqdm
+from omegaconf import OmegaConf
 from torch import Tensor
 from torch.distributed.fsdp import FullOptimStateDictConfig, FullStateDictConfig, StateDictType
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -27,17 +28,18 @@ from torch.distributed.fsdp.wrap import (
     size_based_auto_wrap_policy,  # default_auto_wrap_policy,
 )
 
-import weathergen.utils.config as config
+import weathergen.common.config as config
+from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
-from weathergen.utils.config import Config, get_dtype
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.logger import logger
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
+from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
 
 
@@ -52,13 +54,25 @@ class Trainer(TrainerBase):
         self,
         cf: Config,
     ):
-        self.cf = cf
+        self.cf = OmegaConf.merge(
+            OmegaConf.create(
+                {
+                    "latent_noise_kl_weight": 0.0,
+                    "latent_noise_gamma": 2.0,
+                    "latent_noise_use_additive_noise": False,
+                    "latent_noise_deterministic_latents": True,
+                    "latent_noise_saturate_encodings": 5,
+                }
+            ),
+            cf,
+        )
+        cf = self.cf
 
         self.freeze_modules = cf.get("freeze_modules", "")
 
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
-        assert cf.forecast_policy if cf.forecast_steps > 0 else True
+        config.validate_forecast_policy_and_steps(cf=cf)
 
         self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
@@ -82,6 +96,8 @@ class Trainer(TrainerBase):
     def inference(self, cf, run_id_trained, epoch):
         # general initalization
         self.init(cf)
+
+        cf = self.cf
 
         # !! modifies config: adds config.streams[i].<stage>_source_channels
         # and config.streams[i].<stage>_target_channels !!
@@ -134,6 +150,7 @@ class Trainer(TrainerBase):
     def run(self, cf, run_id_contd=None, epoch_contd=None):
         # general initalization
         self.init(cf)
+        cf = self.cf
 
         self.dataset = MultiStreamDataSampler(
             cf,
@@ -488,11 +505,17 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                preds = self.ddp_model(self.model_params, batch, cf.forecast_offset, forecast_steps)
+                preds, posteriors = self.ddp_model(
+                    self.model_params, batch, cf.forecast_offset, forecast_steps
+                )
                 loss_values = self.loss_calculator.compute_loss(
                     preds=preds,
                     streams_data=batch[0],
                 )
+
+                if cf.latent_noise_kl_weight > 0.0:
+                    kl = torch.cat([posterior.kl() for posterior in posteriors])
+                    loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
                 
             if bidx == 0 and is_root():
                 if self.cf.get("encode_targets_latent", False):
@@ -502,6 +525,7 @@ class Trainer(TrainerBase):
                     np.save(save_dir + self.cf.run_id + "_tokens_all_epoch" + str(epoch) + ".npy", [t.detach().cpu().numpy() for t in tokens_all])
                     np.save(save_dir + self.cf.run_id + "_tokens_targets_epoch" + str(epoch) + ".npy", [t.detach().cpu().numpy() for t in tokens_targets])
 
+            
             # backward pass
             self.grad_scaler.scale(loss_values.loss).backward()
 
@@ -562,7 +586,7 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds = self.ddp_model(
+                        preds, _ = self.ddp_model(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
 

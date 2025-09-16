@@ -185,7 +185,7 @@ class StreamData:
 
         Parameters
         ----------
-        ss_raw : torch.tensor( number of data points in time window , number of channels )
+        ss_raw : IOReaderData( dataclass containing coords, geoinfos, data, and datetimes )
         ss_lens : torch.tensor( number of healpix cells )
         ss_cells : list( number of healpix cells )
             [ torch.tensor( tokens per cell, token size, number of channels) ]

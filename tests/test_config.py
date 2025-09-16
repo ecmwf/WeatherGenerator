@@ -4,7 +4,7 @@ import tempfile
 import pytest
 from omegaconf import OmegaConf
 
-import weathergen.utils.config as config
+import weathergen.common.config as config
 
 TEST_RUN_ID = "test123"
 SECRET_COMPONENT = "53CR3T"
@@ -189,7 +189,7 @@ def test_load_with_overwrite_file(private_config_file, overwrite_file):
 
 def test_load_with_stream_in_overwrite(private_config_file, streams_dir, mocker):
     overwrite = {"streams_directory": streams_dir}
-    stub = mocker.patch("weathergen.utils.config.load_streams", return_value=streams_dir)
+    stub = mocker.patch("weathergen.common.config.load_streams", return_value=streams_dir)
 
     config.load_config(private_config_file, None, None, overwrite)
 
@@ -234,7 +234,7 @@ def test_from_cli(options, cf):
     ],
 )
 def test_set_run_id(config_fresh, run_id, reuse, expected, mocker):
-    mocker.patch("weathergen.utils.config.get_run_id", return_value="generated")
+    mocker.patch("weathergen.common.config.get_run_id", return_value="generated")
 
     config_fresh = config.set_run_id(config_fresh, run_id, reuse)
 
