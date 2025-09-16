@@ -22,6 +22,18 @@ def _locs_to_cell_coords_ctrs(
         ]
     )
 
+def _locs_to_cell_coords_ctrs_2(
+    healpix_centers_rots: torch.Tensor, locs: list[torch.Tensor]
+) -> list[torch.Tensor]:
+    return (
+        [
+            torch.matmul(R, s.transpose(-1, -2)).transpose(-2, -1)
+            if len(s) > 0
+            else torch.tensor([])
+            for _, (R, s) in enumerate(zip(healpix_centers_rots, locs, strict=False))
+        ]
+    )
+
 
 def test_locs_to_cell_coords_ctrs():
     locs = [
