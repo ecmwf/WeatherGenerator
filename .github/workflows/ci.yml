@@ -26,7 +26,7 @@ jobs:
       - name: Run ruff (black)
         # Do not attempt to install the default dependencies, this is much faster.
         # Run temporarily on a sub directory before the main restyling.
-        run: ./scripts/actions.sh lint-test
+        run: ./scripts/actions.sh lint-check
   pr:
     name: PR checks
     runs-on: ubuntu-latest
