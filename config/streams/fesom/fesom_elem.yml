@@ -7,9 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-FESOM_NODE :
+FESOM_ELEM :
   type : fesom
-  filenames : ['ocean_node']
+  filenames : ['ocean_elem']
   loss_weight : 1.
   source : null
   target : null

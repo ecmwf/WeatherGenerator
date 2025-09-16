@@ -16,7 +16,7 @@ from weathergen.model.attention import (
 )
 from weathergen.model.layers import MLP
 from weathergen.model.norms import AdaLayerNormLayer
-from weathergen.utils.config import get_dtype
+from weathergen.utils.utils import get_dtype
 
 
 class SelfAttentionBlock(nn.Module):

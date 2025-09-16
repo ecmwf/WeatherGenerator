@@ -42,14 +42,19 @@ pred_mlp_adaln: True
 # one is training an auto-encoder
 forecast_offset : 0
 forecast_delta_hrs: 0
-forecast_steps: 0
-forecast_policy: null
+forecast_steps: 1
+forecast_policy: "diffusion"
 forecast_freeze_model: False
 forecast_att_dense_rate: 1.0
-fe_num_blocks: 0
+fe_num_blocks: 4
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
+
+#diffusion parameter (forecast_diffusion must be True)
+fe_diff_sigma_min: 0
+fe_diff_sigma_max: None
+fe_diff_sigma_data: 1
 
 healpix_level: 5
 
@@ -94,17 +99,13 @@ masking_rate: 0.6
 masking_rate_sampling: True
 # sample a subset of all target points, useful e.g. to reduce memory requirements (also can specify per-stream)
 sampling_rate_target: 1.0
-# include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "causal" and "combination"
+# include a masking strategy here, currently only supporting "random", "block", "healpix" and "channel"
 masking_strategy: "random"
 # masking_strategy_config is a dictionary of additional parameters for the masking strategy
 # required for "healpix" and "channel" masking strategies
 # "healpix": requires healpix mask level to be specified with `hl_mask`
-# "channel": requires "mode" to be specified, "per_cell" or "global",
-masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
-                          "probabilities": [0.34, 0.33, 0.33],
-                          "hl_mask": 3, "mode": "per_cell",
-                          "same_strategy_per_batch": false
-                          }
+# "channel": requires "mode" to be specified, "per_cell" or "global", 
+masking_strategy_config: {"hl_mask": 3}
 
 num_epochs: 32
 samples_per_epoch: 4096
@@ -113,7 +114,7 @@ shuffle: True
 
 lr_scaling_policy: "sqrt"
 lr_start: 1e-6
-lr_max: 1e-5 # 5e-5
+lr_max: 5e-5
 lr_final_decay: 1e-6
 lr_final: 0.0
 lr_steps_warmup: 512 
@@ -152,16 +153,3 @@ run_id: ???
 train_log:
   # The period to log metrics (in number of batch steps)
   log_interval: 20
-
-
-# # additions for the latent loss
-encode_targets_latent: true
-# latent_loss_fcts:
-#   -
-#     - "mse"
-#     - 1 
-# latent_loss_fcts_val:
-#   -
-#     - "mse"
-#     - 1
-
