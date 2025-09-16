@@ -15,9 +15,9 @@ import numpy as np
 import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
-
 from weathergen.common.config import load_config, load_model_config
 from weathergen.common.io import ZarrIO
+
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
 
 _logger = logging.getLogger(__name__)
@@ -306,6 +306,14 @@ class Reader:
                                 f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
                             )
 
+                        da_tars_fs, da_preds_fs, existing_channels = self.calc_channels(
+                            da_tars_fs,
+                            da_preds_fs,
+                            available_channels,
+                            existing_channels,
+                            stream_cfg,
+                        )
+
                         da_tars_fs = da_tars_fs.sel(channel=existing_channels)
                         da_preds_fs = da_preds_fs.sel(channel=existing_channels)
 
@@ -360,6 +368,58 @@ class Reader:
             _logger.debug(f"Peeked channels for stream {stream}: {channels}")
 
         return channels
+
+    def calc_channels(
+        self,
+        data_tars: dict[xr.DataArray],
+        data_preds: dict[xr.DataArray],
+        available_channels: np.array,
+        existing_channels: list,
+        stream_cfg: dict,
+    ) -> dict[xr.DataArray]:
+        def calc_10ff(da):
+            if da.stream.values == "ERA5" and "10si" not in da.channel.values:
+                if "10u" in da.channel.values and "10v" in da.channel.values:
+                    ff = (
+                        np.sqrt(da.sel(channel="10u") ** 2 + da.sel(channel="10v") ** 2)
+                        .mean()
+                        .values
+                    )
+                else:
+                    _logger.debug(
+                        "10u or 10v were not found so calculation of 10ff is skipped..."
+                    )
+
+            elif (
+                da.stream.values == "CERRA" or da.stream.values == "ERA5"
+            ) and "10si" in da.channel.values:
+                ff = (da.sel(channel="10si")).mean().values
+
+            return ff
+
+        if (
+            "calc_channels" in stream_cfg
+            and "10ff" in stream_cfg["calc_channels"]
+            and "10ff" not in available_channels
+        ):
+            data_tars, data_preds = [
+                xr.concat(
+                    [
+                        da,
+                        xr.DataArray(
+                            np.array([[calc_10ff(da)] * len(da.ipoint)]).T,
+                            dims=["ipoint", "channel"],
+                            coords={"ipoint": da.ipoint, "channel": ["10ff"]},
+                        ),
+                    ],
+                    dim="channel",
+                )
+                for da in [data_tars, data_preds]
+            ]
+
+            existing_channels = existing_channels + ["10ff"]
+
+        return data_tars, data_preds, existing_channels
 
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """
