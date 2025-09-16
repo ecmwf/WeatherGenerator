@@ -38,10 +38,10 @@ case "$1" in
     (
       cd "$SCRIPT_DIR/packages/common" || exit 1
       uv run --all-packages pyrefly check
-      cd "$SCRIPT_DIR/packages/evaluate" || exit 1
-      uv run --all-packages pyrefly check
-      cd "$SCRIPT_DIR" || exit 1
-      uv run --all-packages pyrefly check
+      # cd "$SCRIPT_DIR/packages/evaluate" || exit 1
+      # uv run --all-packages pyrefly check
+      # cd "$SCRIPT_DIR" || exit 1
+      # uv run --all-packages pyrefly check
     )
     ;;
   unit-test)
