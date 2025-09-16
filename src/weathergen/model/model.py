@@ -30,9 +30,10 @@ from weathergen.model.engines import (
     LocalAssimilationEngine,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
+    GMMPredictionHead,
 )
 from weathergen.model.layers import MLP, NamedLinear
-from weathergen.model.parametrised_prob_dist import LatentInterpolator
+from weathergen.model.parametrised_prob_dist import LatentInterpolator, GaussianMixtureDiag
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.logger import logger
 from weathergen.utils.utils import get_dtype
@@ -371,20 +372,48 @@ class Model(torch.nn.Module):
 
             # ensemble prediction heads to provide probabilistic prediction
             final_activation = si["pred_head"].get("final_activation", "Identity")
+            pred_dist = si["pred_head"].get("distribution", "deterministic")  # "deterministic" | "gmm"
+            num_components = si["pred_head"].get("num_components", 5)
             logger.debug(
                 f"{final_activation} activation as prediction head output of {si['name']} stream"
             )
-            self.pred_heads.append(
-                EnsPredictionHead(
-                    dims_embed[-1],
-                    self.targets_num_channels[i_obs],
-                    si["pred_head"]["num_layers"],
-                    si["pred_head"]["ens_size"],
-                    norm_type=cf.norm_type,
-                    final_activation=final_activation,
-                    stream_name=stream_name,
+            if pred_dist == "gmm":
+                # Head outputs raw GMM params; we will sample later for logging-compat
+                self.pred_heads.append(
+                    GMMPredictionHead(
+                        in_dim=dims_embed[-1],
+                        out_channels=self.targets_num_channels[i_obs],
+                        num_components=num_components,
+                        stream_name=stream_name,
+                    )
                 )
-            )
+            else:
+                self.pred_heads.append(
+                    EnsPredictionHead(
+                        dims_embed[-1],
+                        self.targets_num_channels[i_obs],
+                        si["pred_head"]["num_layers"],
+                        si["pred_head"]["ens_size"],
+                        norm_type=cf.norm_type,
+                        final_activation=final_activation,
+                        stream_name=stream_name,
+                    )
+                )
+
+            # Prepare per-stream GMM helpers (None for non-GMM streams)
+            self.gmm_helpers: list[GaussianMixtureDiag | None] = []
+            for i_obs, si in enumerate(cf.streams):
+                pred_dist = si["pred_head"].get("distribution", "deterministic")
+                if pred_dist == "gmm":
+                    self.gmm_helpers.append(
+                        GaussianMixtureDiag(
+                            num_components=si["pred_head"].get("num_components", 5),
+                            event_dim=self.targets_num_channels[i_obs],
+                            min_scale=1e-6,
+                        )
+                    )
+                else:
+                    self.gmm_helpers.append(None)
 
         return self
 
@@ -839,6 +868,35 @@ class Model(torch.nn.Module):
             )
 
             # final prediction head to map back to physical space
-            preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
+            head = self.pred_heads[ii]
+            pred_dist = self.cf.streams[ii]["pred_head"].get("distribution", "deterministic")
+            ens_size = self.cf.streams[ii]["pred_head"].get("ens_size", 8)
+            if pred_dist == "gmm":
+
+                
+                #print(f"Predicting GMM with {ens_size} samples and {head}")
+
+                # 1) raw params
+                raw_logits, raw_means, raw_log_scales = checkpoint(head, tc_tokens, use_reentrant=False)
+                # 2) valid params
+                pi, mu, sigma = GaussianMixtureDiag.params_from_raw(
+                    raw_logits, raw_means, raw_log_scales, min_scale=1e-6
+                )
+
+                # 3) sample to [ens, N, C] to keep compatibility with logging/denorm
+                #samples = self.gmm_helpers[ii].sample(pi, mu, sigma, num_samples=ens_size)  # [S,N,C]
+                
+                if self.training:
+                    # Differentiable mean prediction to keep gradients flowing
+                    # mean: [N, C] = sum_k pi[N,K] * mu[N,K,C]
+                    mean_nc = torch.einsum("nk,nkc->nc", pi, mu)  # [N, C]
+                    samples = mean_nc.unsqueeze(0).expand(ens_size, -1, -1)  # [S, N, C]
+                else:
+                    # Sampling only for eval/logging
+                    samples = self.gmm_helpers[ii].sample(pi, mu, sigma, num_samples=ens_size)  # [S, N, C]
+                
+                preds_tokens += [samples]
+            else:
+                preds_tokens += [checkpoint(head, tc_tokens, use_reentrant=False)]
 
         return preds_tokens

@@ -124,3 +124,57 @@ class LatentInterpolator(nn.Module):
                 z_latents = (1 - noise_level_tensor) * z_latents + noise_level_tensor * noise
 
         return z_latents, self.diag_gaussian
+
+# Add this new utility class (used for parameter conversion and sampling)
+class GaussianMixtureDiag(nn.Module):
+    """
+    Simple diagonal-covariance GMM helper: parameter transform + sampling.
+    Shapes:
+      raw_logits:   [N, K]
+      raw_means:    [N, K, C]
+      raw_log_scales: [N, K, C] (unconstrained)
+    """
+    def __init__(self, num_components: int, event_dim: int, min_scale: float = 1e-6):
+        super().__init__()
+        self.K = int(num_components)
+        self.C = int(event_dim)
+        self.min_scale = float(min_scale)
+
+    @staticmethod
+    def params_from_raw(raw_logits: torch.Tensor,
+                        raw_means: torch.Tensor,
+                        raw_log_scales: torch.Tensor,
+                        min_scale: float = 1e-6) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Convert raw head outputs to valid GMM params.
+        Returns:
+          pi: [N, K], mu: [N, K, C], sigma: [N, K, C]
+        """
+        pi = nn.functional.softmax(raw_logits, dim=-1)                  # [N, K]
+        sigma = nn.functional.softplus(raw_log_scales) + min_scale      # [N, K, C]
+        return pi, raw_means, sigma
+
+    @torch.no_grad()
+    def sample(self, pi: torch.Tensor, mu: torch.Tensor, sigma: torch.Tensor, num_samples: int) -> torch.Tensor:
+        """
+        Draw num_samples per item. Returns [S, N, C].
+          pi: [N, K], mu: [N, K, C], sigma: [N, K, C]
+        """
+        device = mu.device
+        dtype = mu.dtype
+        N, K, C = mu.shape
+        S = int(num_samples)
+
+        # Categorical over components per item
+        cat = torch.distributions.Categorical(probs=pi)
+        z = cat.sample((S,))  # [S, N]
+
+        # Gather per-sample component params
+        mu_S = mu.unsqueeze(0).expand(S, -1, -1, -1)        # [S, N, K, C]
+        sg_S = sigma.unsqueeze(0).expand(S, -1, -1, -1)     # [S, N, K, C]
+        z_idx = z.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 1, C)  # [S, N, 1, C]
+        mu_sel = torch.gather(mu_S, dim=2, index=z_idx).squeeze(2)  # [S, N, C]
+        sg_sel = torch.gather(sg_S, dim=2, index=z_idx).squeeze(2)  # [S, N, C]
+
+        eps = torch.randn((S, N, C), device=device, dtype=dtype)
+        return mu_sel + eps * sg_sel

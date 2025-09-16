@@ -397,6 +397,35 @@ class EnsPredictionHead(torch.nn.Module):
 
         return preds
 
+# Add this new prediction head next to the ensemble head
+class GMMPredictionHead(torch.nn.Module):
+    """
+    Predicts GMM parameters: logits [N,K], means [N,K,C], log_scales [N,K,C].
+    Kept simple (three Linear heads) to match existing style.
+    """
+    def __init__(self, in_dim: int, out_channels: int, num_components: int, stream_name: str):
+        super().__init__()
+        self.name = f"GMMPredictionHead_{stream_name}"
+        self.C = int(out_channels)
+        self.K = int(num_components)
+
+        self.head_logits = nn.Linear(in_dim, self.K, bias=True)
+        self.head_means = nn.Linear(in_dim, self.K * self.C, bias=True)
+        self.head_log_scales = nn.Linear(in_dim, self.K * self.C, bias=True)
+
+    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
+    def forward(self, toks: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        toks: [N, D]
+        Returns:
+          raw_logits: [N, K]
+          raw_means: [N, K, C]
+          raw_log_scales: [N, K, C]
+        """
+        raw_logits = self.head_logits(toks)                                     # [N, K]
+        raw_means = self.head_means(toks).reshape(toks.shape[0], self.K, self.C)        # [N, K, C]
+        raw_log_scales = self.head_log_scales(toks).reshape(toks.shape[0], self.K, self.C)  # [N, K, C]
+        return raw_logits, raw_means, raw_log_scales
 
 class TargetPredictionEngineClassic(nn.Module):
     def __init__(
