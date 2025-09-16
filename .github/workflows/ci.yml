@@ -26,11 +26,7 @@ jobs:
       - name: Run ruff (black)
         # Do not attempt to install the default dependencies, this is much faster.
         # Run temporarily on a sub directory before the main restyling.
-        run: uv run --no-project --with "ruff==0.12.2" ruff format --target-version py312 --check -n src/ scripts/
-
-      - name: Run ruff (flake8)
-        # Do not attempt to install the default dependencies, this is much faster.
-        run: uv run --no-project --verbose --with "ruff==0.12.2" ruff check src/ 
+        run: ./scripts/actions.sh lint-test
   pr:
     name: PR checks
     runs-on: ubuntu-latest
