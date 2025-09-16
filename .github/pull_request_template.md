@@ -1,47 +1,30 @@
 ## Description
 
-<!-- Provide a brief summary of the changes introduced in this pull request. -->
+<!--
+Provide a brief summary of the changes introduced in this pull request.
+-->
 
-## Type of Change
-
--   [ ] Bug fix (non-breaking change which fixes an issue)
--   [ ] New feature (non-breaking change which adds functionality)
--   [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
--   [ ] Documentation update
 
 ## Issue Number
 
-<!-- Link the Issue number this change addresses, ideally in one of the "magic format" such as Closes #XYZ -->
+<!--
+Link the Issue number this change addresses:
+Closes #XYZ 
+-->
 
-<!-- Alternatively, explain the motivation behind the changes and the context in which they are being made. -->
+Is this PR a draft? Mark it as draft.
 
-## Code Compatibility
+## Checklist before asking for review
 
 -   [ ] I have performed a self-review of my code
-
-### Code Performance and Testing
-
--   [ ] I ran the `uv run train` and (if necessary) `uv run evaluate` on a least one GPU node and it works 
--   [ ] If the new feature introduces modifications at the config level, I have made sure to have notified the other software developers through Mattermost and updated the paths in the `$WEATHER_GENERATOR_PRIVATE` directory
-
-<!-- In case this affects the model sharding or other specific components please describe these here. -->
-
-### Dependencies
-
--   [ ] I have ensured that the code is still pip-installable after the changes and runs
--   [ ] I have tested that new dependencies themselves are pip-installable.
--   [ ] I have not introduced new dependencies in the inference portion of the pipeline
-
-<!-- List any new dependencies that are required for this change and the justification to add them. -->
-
-### Documentation
-
--   [ ] My code follows the style guidelines of this project
--   [ ] I have updated the documentation and docstrings to reflect the changes
--   [ ] I have added comments to my code, particularly in hard-to-understand areas
-
-<!-- Describe any major updates to the documentation -->
-
-## Additional Notes
-
-<!-- Include any additional information, caveats, or considerations that the reviewer should be aware of. -->
+-   [ ] My changes comply with basic sanity checks:
+      - I have fixed formatting issues with `./scripts/actions.sh lint`
+      - I have run unit tests with `./scripts/actions.sh unit-test`
+      - I have documented my code and added unit tests if relevant
+-   [ ] I have tried my changes with data and code:
+      - I have run the integration tests with `./scripts/actions.sh integration-test`
+      - (bigger changes) I have run a full training: `launch-slurm.py --time 60`
+      - (bigger changes and experiments) I have shared a hegdedoc in the github issue with all the configurations and runs for this experiments
+-   [ ] I have informed and aligned with people impacted by my change:
+    - for config changes: the MatterMost channels and/or a design doc
+    - for changes of dependencies: the MatterMost software development channel
