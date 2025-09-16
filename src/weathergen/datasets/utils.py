@@ -602,7 +602,7 @@ def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
     )
 
     # collect target_tokens_lens for all stream datas
-    fsteps = len(batch[0][0].target_tokens_lens)
+    fsteps = len(batch[0][0].source_tokenized_target_lens)
 
     source_tokenized_target_lens = []
 
