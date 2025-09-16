@@ -106,10 +106,10 @@ class TrainerBase:
 
         master_port=os.getenv("MASTER_PORT")
         if rank == 0:
-            # Check that port 1345 is available, raise an error if not
+            # Check that port master_port is available, raise an error if not
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 try:
-                    s.bind((master_node, 1345))
+                    s.bind((master_node, master_port))
                 except OSError as e:
                     if e.errno == errno.EADDRINUSE:
                         _logger.error(
