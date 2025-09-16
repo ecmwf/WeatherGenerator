@@ -15,9 +15,9 @@ import numpy as np
 import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
+
 from weathergen.common.config import load_config, load_model_config
 from weathergen.common.io import ZarrIO
-
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
 
 _logger = logging.getLogger(__name__)

@@ -14,8 +14,10 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from omegaconf import OmegaConf, DictConfig
+from omegaconf import DictConfig, OmegaConf
 
+from weathergen.common.config import _REPO_ROOT
+from weathergen.evaluate.io_reader import Reader
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
@@ -23,12 +25,11 @@ from weathergen.evaluate.utils import (
     plot_summary,
     retrieve_metric_from_json,
 )
-from weathergen.evaluate.io_reader import Reader, WeatherGeneratorOutput
-from weathergen.common.config import _REPO_ROOT
 
 _logger = logging.getLogger(__name__)
 
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
+
 
 def evaluate() -> None:
     # By default, arguments from the command line are read.
@@ -67,7 +68,7 @@ def evaluate_from_config(cfg):
 
     metrics = cfg.evaluation.metrics
     regions = cfg.evaluation.get("regions", ["global"])
-    
+
     global_plotting_opts = cfg.get("global_plotting_options", DictConfig)
 
     # to get a structure like: scores_dict[metric][region][stream][run_id] = plot
@@ -101,11 +102,11 @@ def evaluate_from_config(cfg):
                                 region,
                                 metric,
                             )
-                            
+
                             available_data = reader.check_availability(
                                 stream, metric_data, mode="evaluation"
                             )
-                        
+
                             if not available_data.json_availability:
                                 metrics_to_compute.append(metric)
                             else:
@@ -126,7 +127,7 @@ def evaluate_from_config(cfg):
                         )
 
                         metric_list_to_json(
-                            reader, 
+                            reader,
                             [all_metrics],
                             [points_per_sample],
                             [stream],
