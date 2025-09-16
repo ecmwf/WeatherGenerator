@@ -586,9 +586,14 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds, _ = self.ddp_model(
+                        
+                        ret = self.ddp_model(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
+                        if self.cf.get("encode_targets_latent", False):
+                            preds = ret
+                        else:
+                            preds, _ = ret
 
                     # compute loss and log output
                     if bidx < cf.log_validation:

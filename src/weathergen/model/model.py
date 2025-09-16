@@ -553,7 +553,7 @@ class Model(torch.nn.Module):
                 tokens_targets = []
                 tokens_targets_srclk = self.embed_cells_targets_srclk(model_params, streams_data)
                 for fstep in range(len(tokens_targets_srclk)):
-                    tokens_target = self.assimilate_local(
+                    tokens_target, _ = self.assimilate_local(
                         model_params, tokens_targets_srclk[fstep], source_cell_lens
                     )
                     tokens_target = self.assimilate_global(model_params, tokens_target)
@@ -565,7 +565,7 @@ class Model(torch.nn.Module):
         if self.cf.get("encode_targets_latent", False): #TODO: KCT, put a safeguard: if there is a latent loss, encode_targets_latent has to be True
             return preds_all, tokens_all, tokens_targets
         else:
-            return preds_all
+            return preds_all, posteriors
 
     #########################################
     def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
