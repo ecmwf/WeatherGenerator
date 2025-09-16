@@ -137,7 +137,8 @@ class Masker:
         # Generate a 3D mask to apply to each cell for channel masking.
 
         if self.masking_strategy == "random":
-            flat_mask = self.rng.uniform(0, 1, num_tokens) < rate
+            specific_rng = np.random.default_rng(seed=42)
+            flat_mask = specific_rng.uniform(0, 1, num_tokens) < rate
 
         elif self.masking_strategy == "block":
             flat_mask = np.zeros(num_tokens, dtype=bool)

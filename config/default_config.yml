@@ -23,8 +23,8 @@ ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
-ae_global_dim_embed: 2048
-ae_global_num_blocks: 8
+ae_global_dim_embed: 512
+ae_global_num_blocks: 2
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -88,7 +88,7 @@ freeze_modules: ""
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
 training_mode: "masking"
 # masking rate when training mode is "masking"; ignored in foreacast mode
-masking_rate: 0.6
+masking_rate: 0.1
 # sample the masking rate (with normal distribution centered at masking_rate)
 # note that a sampled masking rate leads to varying requirements
 masking_rate_sampling: True
@@ -123,7 +123,7 @@ weight_decay: 0.1
 norm_type: "LayerNorm"
 nn_module: "te"
 
-start_date: 197901010000
+start_date: 199001010000
 end_date: 202012310000
 start_date_val: 202101010000
 end_date_val: 202201010000

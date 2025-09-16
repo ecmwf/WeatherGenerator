@@ -586,15 +586,19 @@ class Model(torch.nn.Module):
             A list containing all prediction results
         """
 
+        print("Starting forward pass")
         (streams_data, source_cell_lens, target_coords_idxs) = batch
 
         # embed
         tokens = self.embed_cells(model_params, streams_data)
+        print("Data is embedded")
 
         # local assimilation engine and adapter
         tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
+        print("Assimilated locally")
 
         tokens = self.assimilate_global(model_params, tokens)
+        print("Assimilated globally")
 
         # roll-out in latent space
         preds_all = []
@@ -697,6 +701,7 @@ class Model(torch.nn.Module):
             self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
         )
 
+        print(tokens.shape)
         s = self.q_cells.shape
         # print( f'{np.prod(np.array(tokens.shape))} :: {np.prod(np.array(s))}'
         #        + ':: {np.prod(np.array(tokens.shape))/np.prod(np.array(s))}')
@@ -712,7 +717,7 @@ class Model(torch.nn.Module):
             + [model_params.q_cells_lens[1:] for _ in range(batch_size)]
         )
 
-        # # local assimilation model
+        # local assimilation model
         # for block in self.ae_local_blocks:
         #     tokens = checkpoint(block, tokens, cell_lens, use_reentrant=False)
 
@@ -788,6 +793,7 @@ class Model(torch.nn.Module):
             + model_params.pe_global
         ).flatten(1, 2)
 
+        print(tokens_global.shape)
         return tokens_global, posteriors
 
     #########################################
@@ -910,6 +916,7 @@ class Model(torch.nn.Module):
                 [streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))]
             )
 
+            print(tc_tokens.shape)
             tc_tokens = tte(
                 latent=tokens_stream,
                 output=tc_tokens,

@@ -74,6 +74,7 @@ class TrainerBase:
             print("Distributed training is not available.")
             return
 
+        dist.set_debug_level(dist.DebugLevel.DETAIL)
         world_size = int(os.environ.get("WORLD_SIZE", "-1"))
         if world_size == -1:
             # Called using SLURM instead of torchrun
@@ -95,7 +96,7 @@ class TrainerBase:
 
             if torch.accelerator.is_available():
                 device_type = torch.accelerator.current_accelerator()
-                device = torch.device(f"{device_type}:{local_rank}")
+                device = torch.device(f"{device_type}:{rank}")
                 torch.accelerator.set_device_index(local_rank)
                 print(f"DDP initialization: rank={rank}, world_size={world_size}")
             else:
