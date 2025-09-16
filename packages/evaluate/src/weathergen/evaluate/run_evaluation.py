@@ -14,12 +14,12 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
-from weathergen.common.config import _REPO_ROOT, load_config, load_model_config
+from weathergen.common.config import _REPO_ROOT
+from weathergen.evaluate.io_reader import Reader
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
-    check_availability,
     metric_list_to_json,
     plot_data,
     plot_summary,
@@ -69,64 +69,24 @@ def evaluate_from_config(cfg):
     metrics = cfg.evaluation.metrics
     regions = cfg.evaluation.get("regions", ["global"])
 
+    global_plotting_opts = cfg.get("global_plotting_options", DictConfig)
+
     # to get a structure like: scores_dict[metric][region][stream][run_id] = plot
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
 
     for run_id, run in runs.items():
         _logger.info(f"RUN {run_id}: Getting data...")
 
-        # Load model configuration and set (run-id specific) directories
-        # If results_base_dir and model_base_dir are not provided, default paths are used
-        model_base_dir = run.get("model_base_dir", None)
+        reader = Reader(run, run_id, private_paths)
 
-        if private_paths:
-            _logger.info(
-                f"Loading config for run {run_id} from private paths: {private_paths}"
-            )
-            run_cfg = load_config(private_paths, run_id, run["epoch"])
-        else:
-            _logger.info(
-                f"Loading config for run {run_id} from model directory: {model_base_dir}"
-            )
-            run_cfg = load_model_config(run_id, run["epoch"], model_base_dir)
-
-        results_base_dir = run.get(
-            "results_base_dir", None
-        )  # base directory where results will be stored
-        if not results_base_dir:
-            results_base_dir = Path(run_cfg["run_path"])
-            logging.info(
-                f"Results directory obtained from model config: {results_base_dir}"
-            )
-        else:
-            logging.info(f"Results directory parsed: {results_base_dir}")
-
-        runplot_base_dir = Path(
-            run.get("runplot_base_dir", results_base_dir)
-        )  # base directory where map plots and histograms will be stored
-        metrics_base_dir = Path(
-            run.get("metrics_base_dir", results_base_dir)
-        )  # base directory where score files will be stored
-
-        results_dir, runplot_dir = (
-            Path(results_base_dir) / run_id,
-            Path(runplot_base_dir) / run_id,
-        )
-        # for backward compatibility allow metric_dir to be specified in the run config
-        metrics_dir = Path(
-            run.get("metrics_dir", metrics_base_dir / run_id / "evaluation")
-        )
-
-        streams = run["streams"].keys()
-
-        for stream in streams:
+        for stream in reader.streams:
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
 
-            stream_dict = run["streams"][stream]
+            stream_dict = reader.get_stream(stream)
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                _ = plot_data(cfg, run_cfg, results_dir, runplot_dir, stream)
+                _ = plot_data(reader, stream, global_plotting_opts)
 
             if stream_dict.get("evaluation"):
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
@@ -137,25 +97,25 @@ def evaluate_from_config(cfg):
                     for metric in metrics:
                         try:
                             metric_data = retrieve_metric_from_json(
-                                metrics_dir,
-                                run_id,
+                                reader,
                                 stream,
                                 region,
                                 metric,
-                                run.epoch,
                             )
-                            checked, (channels, fsteps, samples) = check_availability(
-                                cfg, stream, results_dir, metric_data, mode="evaluation"
+
+                            available_data = reader.check_availability(
+                                stream, metric_data, mode="evaluation"
                             )
-                            if not checked:
+
+                            if not available_data.json_availability:
                                 metrics_to_compute.append(metric)
                             else:
                                 # simply select the chosen eval channels, samples, fsteps here...
                                 scores_dict[metric][region][stream][run_id] = (
                                     metric_data.sel(
-                                        sample=samples,
-                                        channel=channels,
-                                        forecast_step=fsteps,
+                                        sample=available_data.samples,
+                                        channel=available_data.channels,
+                                        forecast_step=available_data.fsteps,
                                     )
                                 )
                         except (FileNotFoundError, KeyError):
@@ -163,17 +123,15 @@ def evaluate_from_config(cfg):
 
                     if metrics_to_compute:
                         all_metrics, points_per_sample = calc_scores_per_stream(
-                            cfg, results_dir, stream, region, metrics_to_compute
+                            reader, stream, region, metrics_to_compute
                         )
 
                         metric_list_to_json(
+                            reader,
                             [all_metrics],
                             [points_per_sample],
                             [stream],
                             region,
-                            metrics_dir,
-                            run_id,
-                            run.epoch,
                         )
 
                     for metric in metrics_to_compute:
@@ -182,8 +140,7 @@ def evaluate_from_config(cfg):
                         )
 
     # plot summary
-    summary_plots = cfg.evaluation.get("summary_plots", True)
-    if scores_dict and summary_plots:
+    if scores_dict and cfg.evaluation.get("summary_plots", True):
         _logger.info("Started creating summary plots..")
         plot_summary(cfg, scores_dict, summary_dir)
 
