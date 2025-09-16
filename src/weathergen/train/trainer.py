@@ -263,11 +263,11 @@ class Trainer(TrainerBase):
             }
             for module in self.model.pred_adapter_kv.modules():
                 if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
+                    fully_shard(module, **full_precision_fsdp_kwargs)
 
             for module in self.model.target_token_engines.modules():
                 if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
+                    fully_shard(module, **full_precision_fsdp_kwargs)
 
         self.model_params = ModelParams(cf).create(cf)  # .to(device)
 
@@ -528,7 +528,7 @@ class Trainer(TrainerBase):
     def train(self, epoch):
         cf = self.cf
         self.model.train()
-        torch.autograd.set_detect_anomaly(True)
+        # torch.autograd.set_detect_anomaly(True)
         log_interval = self.cf.train_log.log_interval
 
         dataset_iter = iter(self.data_loader)
@@ -553,7 +553,7 @@ class Trainer(TrainerBase):
                 preds, posteriors = self.model(
                     self.model_params, batch, cf.forecast_offset, forecast_steps
                 )
-            print("Forward pass successful")
+            # print("Forward pass successful")
             loss_values = self.loss_calculator.compute_loss(
                 preds=preds,
                 streams_data=batch[0],
@@ -561,7 +561,7 @@ class Trainer(TrainerBase):
             if cf.latent_noise_kl_weight > 0.0:
                 kl = torch.cat([posterior.kl() for posterior in posteriors])
                 loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
-            print("Computing loss successful")
+            # print("Computing loss successful")
 
             # backward pass
             self.optimizer.zero_grad()
@@ -571,7 +571,7 @@ class Trainer(TrainerBase):
             # gradient clipping
             # self.grad_scaler.unscale_(self.optimizer)
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=cf.grad_clip)
-            print("Backward successful")
+            # print("Backward successful")
 
             # optimizer step
             # self.grad_scaler.step(self.optimizer)
