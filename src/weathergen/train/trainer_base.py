@@ -21,7 +21,7 @@ import torch.multiprocessing
 from weathergen.common.config import Config
 from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.config import Config
-from weathergen.utils.distributed import is_root,get_rank, get_size
+from weathergen.utils.distributed import is_root, get_rank_from_env, get_size_from_env
 
 _logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class TrainerBase:
             return torch.device("cpu")
 
         #local_id_node = os.environ.get("SLURM_LOCALID", "-1")
-        rank = get_rank(default="-1")
+        rank = get_rank_from_env(default="-1")
         cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
         num_gpus = len(cuda_visible_devices.split(',')) if cuda_visible_devices else 0
         rank_local = rank % num_gpus
@@ -92,11 +92,12 @@ class TrainerBase:
         # ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
         # rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
         # num_ranks = int(os.environ.get("SLURM_NTASKS"))
-        rank = get_rank(default=0)
-        num_ranks = get_size(default=1)
         cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
-        num_gpus = len(cuda_visible_devices.split(',')) if cuda_visible_devices else 0
-        rank_local = rank % num_gpus
+        num_gpus             = len(cuda_visible_devices.split(',')) if cuda_visible_devices else 0
+        
+        rank                 = get_rank_from_env(default=0)
+        num_ranks            = get_size_from_env(default=1)
+        rank_local           = rank % num_gpus
 
         _logger.info(
             f"DDP initialization: local_rank={rank_local}, ranks_per_node={num_gpus}, "

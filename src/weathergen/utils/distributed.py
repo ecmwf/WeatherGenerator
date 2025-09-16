@@ -116,7 +116,7 @@ def all_gather_vdim(tensor: torch.Tensor, group=None) -> list[torch.Tensor]:
 
 # --------------------------------------------------------------
 
-def get_rank(default=0):
+def get_rank_from_env(default=0):
     """
     Attempts to determine the rank (i.e., the process ID in a parallel job)
     by checking common environment variables used by various HPC schedulers.
@@ -140,7 +140,7 @@ def get_rank(default=0):
             return int(value)
     return int(default)
 
-def get_size(default=1):
+def get_size_from_env(default=1):
     """
     Attempts to determine the total number of processes (world size)
     by checking common environment variables used by various HPC schedulers.
