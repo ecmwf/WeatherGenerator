@@ -7,11 +7,12 @@ import cartopy
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
+import omegaconf as oc
 import xarray as xr
 from PIL import Image
 
-from weathergen.evaluate.plot_utils import DefaultMarkerSize
 from weathergen.common.config import _load_private_conf
+from weathergen.evaluate.plot_utils import DefaultMarkerSize
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
@@ -286,7 +287,7 @@ class Plotter:
         name = "_".join(filter(None, parts))
 
         fname = hist_output_dir / f"{name}.{self.image_format}"
-        logging.debug(f"Saving histogram to {fname}")
+        _logger.debug(f"Saving histogram to {fname}")
         plt.savefig(fname)
         plt.close()
 
@@ -333,7 +334,7 @@ class Plotter:
         map_kwargs_global = {
             key: value
             for key, value in (map_kwargs or {}).items()
-            if key not in variables
+            if not isinstance(value, oc.DictConfig)
         }
 
         # Basic map output directory for this stream
@@ -540,13 +541,29 @@ class Plotter:
 
 
 class LinePlots:
-    def __init__(self, cfg: dict, output_basedir: str | Path):
-        self.cfg = cfg
-        self.image_format = cfg.image_format
-        self.dpi_val = cfg.get("dpi_val")
-        self.fig_size = cfg.get("fig_size", (8, 10))
-        self.log_scale = cfg.evaluation.get("log_scale", False)
-        self.add_grid = cfg.evaluation.get("add_grid", False)
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
+        """
+        Initialize the LinePlots class.
+
+        Parameters
+        ----------
+        plotter_cfg:
+            Configuration dictionary containing basic information for plotting.
+            Expected keys are:
+                - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
+                - dpi_val: DPI value for the saved images
+                - fig_size: Size of the figure (width, height) in inches
+        output_basedir:
+            Base directory under which the plots will be saved.
+            Expected scheme `<results_base_dir>/<run_id>`.
+        """
+
+        self.image_format = plotter_cfg.get("image_format")
+        self.dpi_val = plotter_cfg.get("dpi_val")
+        self.fig_size = plotter_cfg.get("fig_size")
+        self.log_scale = plotter_cfg.get("log_scale")
+        self.add_grid = plotter_cfg.get("add_grid")
+
         self.out_plot_dir = Path(output_basedir) / "line_plots"
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
@@ -642,7 +659,7 @@ class LinePlots:
                 dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1
             ]
             if non_zero_dims:
-                logging.info(
+                _logger.info(
                     f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
                 )
             averaged = data.mean(
