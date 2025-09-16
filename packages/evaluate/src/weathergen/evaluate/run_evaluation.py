@@ -16,7 +16,6 @@ from pathlib import Path
 
 from omegaconf import OmegaConf
 
-from weathergen.common.config import _REPO_ROOT, load_config, load_model_config
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     check_availability,
@@ -25,6 +24,7 @@ from weathergen.evaluate.utils import (
     plot_summary,
     retrieve_metric_from_json,
 )
+from weathergen.common.config import _REPO_ROOT, load_config, load_model_config
 
 _logger = logging.getLogger(__name__)
 
