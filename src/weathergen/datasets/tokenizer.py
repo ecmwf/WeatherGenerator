@@ -88,7 +88,7 @@ class Tokenizer:
         verts_local_2 = []
         verts = torch.stack([verts10, verts11, verts01, vertsmm])
         temp = ref - torch.stack(_locs_to_cell_coords_ctrs_2(verts00_rots, verts.transpose(0, 1)))
-        verts_loca_2l.append(temp.flatten(1, 2))
+        verts_local_2.append(temp.flatten(1, 2))
 
         self.verts_local = []
         for (_verts, rot) in transforms:
