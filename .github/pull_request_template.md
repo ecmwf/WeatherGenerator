@@ -26,7 +26,7 @@ Is this PR a draft? Mark it as draft.
       - I have documented my code and added unit tests if relevant
 -   [ ] I have tried my changes with data and code:
       - I have run the integration tests with `./scripts/actions.sh integration-test`
-      - (bigger changes) I have run a full training: `launch-slurm.py --time 60`
+      - (bigger changes) I have run a full training and I have written in the comment the run_id(s): `launch-slurm.py --time 60`
       - (bigger changes and experiments) I have shared a hegdedoc in the github issue with all the configurations and runs for this experiments
 -   [ ] I have informed and aligned with people impacted by my change:
     - for config changes: the MatterMost channels and/or a design doc
