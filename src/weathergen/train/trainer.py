@@ -553,7 +553,6 @@ class Trainer(TrainerBase):
                 preds, posteriors = self.model(
                     self.model_params, batch, cf.forecast_offset, forecast_steps
                 )
-            # print("Forward pass successful")
             loss_values = self.loss_calculator.compute_loss(
                 preds=preds,
                 streams_data=batch[0],
@@ -561,22 +560,20 @@ class Trainer(TrainerBase):
             if cf.latent_noise_kl_weight > 0.0:
                 kl = torch.cat([posterior.kl() for posterior in posteriors])
                 loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
-            # print("Computing loss successful")
 
             # backward pass
             self.optimizer.zero_grad()
-            # self.grad_scaler.scale(loss_values.loss).backward()
-            loss_values.loss.backward()
+            self.grad_scaler.scale(loss_values.loss).backward()
+            # loss_values.loss.backward()
 
             # gradient clipping
-            # self.grad_scaler.unscale_(self.optimizer)
+            self.grad_scaler.unscale_(self.optimizer)
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=cf.grad_clip)
-            # print("Backward successful")
 
             # optimizer step
-            # self.grad_scaler.step(self.optimizer)
-            # self.grad_scaler.update()
-            self.optimizer.step()
+            self.grad_scaler.step(self.optimizer)
+            self.grad_scaler.update()
+            # self.optimizer.step()
 
             # update learning rate
             self.lr_scheduler.step()
