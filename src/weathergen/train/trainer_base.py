@@ -20,7 +20,6 @@ import torch.multiprocessing
 
 from weathergen.common.config import Config
 from weathergen.train.utils import str_to_tensor, tensor_to_str
-from weathergen.utils.config import Config
 from weathergen.utils.distributed import is_root, get_rank_from_env, get_size_from_env
 
 _logger = logging.getLogger(__name__)
