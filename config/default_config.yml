@@ -109,7 +109,7 @@ shuffle: True
 
 lr_scaling_policy: "sqrt"
 lr_start: 1e-6
-lr_max: 5e-5
+lr_max: 1e-5 # 5e-5
 lr_final_decay: 1e-6
 lr_final: 0.0
 lr_steps_warmup: 512 
@@ -148,3 +148,16 @@ run_id: ???
 train_log:
   # The period to log metrics (in number of batch steps)
   log_interval: 20
+
+
+# # additions for the latent loss
+encode_targets_latent: true
+# latent_loss_fcts:
+#   -
+#     - "mse"
+#     - 1 
+# latent_loss_fcts_val:
+#   -
+#     - "mse"
+#     - 1
+

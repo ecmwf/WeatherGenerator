@@ -538,6 +538,7 @@ class Model(torch.nn.Module):
         if self.cf.forecast_policy == "diffusion":
             assert forecast_steps == 1, "diffusion forecast only implemented for single step"
 
+        tokens_all = [tokens]
         for fstep in range(forecast_offset, forecast_offset + forecast_steps):
             # prediction
             preds_all += [
@@ -556,6 +557,7 @@ class Model(torch.nn.Module):
                 tokens, weights = self.denoise(model_params, tokens, target_tokens)
             else:
                 tokens = self.edm_sampler(model_params, tokens)
+            tokens_all += [tokens]
 
         # prediction for final step
         preds_all += [
@@ -568,7 +570,25 @@ class Model(torch.nn.Module):
             )
         ]
 
-        return preds_all, posteriors, weights
+        # now encode the targets into the latent space for all fsteps
+        if self.cf.get("encode_targets_latent", False):
+            with torch.no_grad():
+                tokens_targets = []
+                tokens_targets_srclk = self.embed_cells_targets_srclk(model_params, streams_data)
+                for fstep in range(len(tokens_targets_srclk)):
+                    tokens_target = self.assimilate_local(
+                        model_params, tokens_targets_srclk[fstep], source_cell_lens
+                    )
+                    tokens_target = self.assimilate_global(model_params, tokens_target)
+                    tokens_target_det = tokens_target.detach() # explicitly detach as well
+                    tokens_targets.append(tokens_target_det)
+                    
+        print(torch.linalg.norm(tokens_all[1] - tokens_targets[0]))
+
+        if self.cf.get("encode_targets_latent", False): #TODO: KCT, put a safeguard: if there is a latent loss, encode_targets_latent has to be True
+            return preds_all, tokens_all, tokens_targets
+        else:
+            return preds_all, posteriors, weights
 
     #########################################
     def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
@@ -623,68 +643,69 @@ class Model(torch.nn.Module):
 
         return tokens_all
 
-    def embed_target(self, model_params: ModelParams, streams_data) -> torch.Tensor:
-        """Embeds target tokens for diffusion training
+    def embed_cells_targets_srclk(self, model_params: ModelParams, streams_data) -> torch.Tensor:
+        """Embeds target data similar to source tokens for each fstep and stream separately and rearranges it to cell-wise order
         Args:
             model_params : Query and embedding parameters
             streams_data : Used to initialize first tokens for pre-processing
         Returns:
             Tokens for local assimilation
         """
-        
-        fsteps = self.cf.forecast_steps
-        source_tokenized_target_lens = []
-
-        for fstep in range(fsteps):
-            source_tokenized_target_lens.append(
-                torch.stack(
-                    [
-                        torch.stack(
-                            [
-                                s.source_tokenized_target_lens[fstep]
-                                if len(s.source_tokenized_target_lens) > fstep
-                                else torch.tensor([])
-                                for s in stl_b
-                            ]
-                        )
-                        for stl_b in batch
-                    ]
-                )
+        with torch.no_grad():
+            target_srclk_tokens_lens = torch.stack(
+                [
+                    torch.stack(
+                        [
+                            torch.stack(
+                                [
+                                    s.target_srclk_tokens_lens[fstep]
+                                    if len(s.target_srclk_tokens_lens[fstep]) > 0
+                                    else torch.tensor([])
+                                    for fstep in range(len(s.target_srclk_tokens_lens))
+                                ]
+                            )
+                            for s in stl_b
+                        ]
+                    )
+                    for stl_b in streams_data
+                ]
             )
+            offsets_base = target_srclk_tokens_lens.sum(1).sum(0).cumsum(1)
+            num_fsteps = target_srclk_tokens_lens.shape[2]  # TODO: KCT, if there are diff no of tokens per fstep, this may fail
+            tokens_all = []
+            for fstep in range(num_fsteps):
+                tokens_all.append(
+                    torch.empty(
+                        (int(offsets_base[fstep][-1]), self.cf.ae_local_dim_embed),
+                        dtype=self.dtype,
+                        device="cuda",
+                    )
+                )
 
-        target_offsets_base_list = [source_tokenized_target_lens[fstep].sum(1).sum(0).cumsum(0) for fstep in range(fsteps)]
-        tokens_all_list = [torch.empty(
-            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=self.dtype, device="cuda"
-        ) for offsets_base in target_offsets_base_list]
-
-        for fstep in range(fsteps):
+            tokens_all_scattered = []
             for _, sb in enumerate(streams_data):
                 for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                    if not s.target_empty():
-                        idxs = s.target_idxs_embed[fstep]
-                        idxs_pe = s.target_idxs_embed_pe[fstep]
+                    for fstep in range(num_fsteps):
+                        if not (s.target_srclk_tokens_lens[fstep].sum() == 0):
+                            idxs = s.target_srclk_idxs_embed[fstep]  
+                            idxs_pe = s.target_srclk_idxs_embed_pe[fstep]
 
-                        # create full scatter index
-                        # (there's no broadcasting which is likely highly inefficient)
-                        idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                        x_embed = embed(s.source_tokenized_target[fstep], s.target_centroids).flatten(0, 1)
-                        # there's undocumented limitation in flash_attn that will make embed fail if
-                        # #tokens is too large; code below is a work around
-                        # x_embed = torch.cat(
-                        #     [
-                        #         embed(s_c, c_c).flatten(0, 1)
-                        #         for s_c, c_c in zip(
-                        #             torch.split(s.source_tokens_cells, 49152),
-                        #             torch.split(s.source_centroids, 49152),
-                        #         )
-                        #     ]
-                        # )
+                            # create full scatter index
+                            # (there's no broadcasting which is likely highly inefficient)
+                            idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
-                        # scatter write to reorder from per stream to per cell ordering
-                        tokens_all_list[fstep].scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
+                            x_embed = embed(
+                                s.target_srclk_tokens_cells[fstep], s.source_centroids # TODO: KCT, get this from the srclk targets
+                            ).flatten(0, 1)
 
-        return tokens_all_list
+                            # scatter write to reorder from per stream to per cell ordering
+                            tokens_all_fstep = tokens_all[fstep]
+                            tokens_all_fstep.scatter_(
+                                0, idxs, x_embed + model_params.pe_embed[idxs_pe]
+                            )
+                            tokens_all_scattered.append(tokens_all_fstep)
 
+        return tokens_all_scattered
 
     #########################################
     def assimilate_local(
