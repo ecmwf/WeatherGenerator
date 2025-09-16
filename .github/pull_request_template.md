@@ -23,7 +23,8 @@ Is this PR a draft? Mark it as draft.
 -   [ ] My changes comply with basic sanity checks:
       - I have fixed formatting issues with `./scripts/actions.sh lint`
       - I have run unit tests with `./scripts/actions.sh unit-test`
-      - I have documented my code and added unit tests if relevant
+      - I have documented my code and I have updated the docstrings.
+      - I have added unit tests, if relevant
 -   [ ] I have tried my changes with data and code:
       - I have run the integration tests with `./scripts/actions.sh integration-test`
       - (bigger changes) I have run a full training and I have written in the comment the run_id(s): `launch-slurm.py --time 60`
