@@ -15,9 +15,9 @@ import numpy as np
 import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
+
 from weathergen.common.config import load_config, load_model_config
 from weathergen.common.io import ZarrIO
-
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
 
 _logger = logging.getLogger(__name__)
@@ -389,11 +389,16 @@ class Reader:
                     _logger.debug(
                         "10u or 10v were not found so calculation of 10ff is skipped..."
                     )
+                    return
 
             elif (
                 da.stream.values == "CERRA" or da.stream.values == "ERA5"
             ) and "10si" in da.channel.values:
                 ff = (da.sel(channel="10si")).mean().values
+
+            else:
+                _logger.debug("Calculation of 10ff is skipped...")
+                return
 
             return ff
 
@@ -402,21 +407,31 @@ class Reader:
             and "10ff" in stream_cfg["calc_channels"]
             and "10ff" not in available_channels
         ):
-            data_tars, data_preds = [
-                xr.concat(
-                    [
-                        da,
-                        xr.DataArray(
-                            np.array([[calc_10ff(da)] * len(da.ipoint)]).T,
-                            dims=["ipoint", "channel"],
-                            coords={"ipoint": da.ipoint, "channel": ["10ff"]},
-                        ),
-                    ],
-                    dim="channel",
-                )
-                for da in [data_tars, data_preds]
-            ]
+            data_updated = []
+            for da in [data_tars, data_preds]:
+                calc10ff = calc_10ff(da)
 
+                if calc10ff is not None:
+                    data_updated.append(
+                        xr.concat(
+                            [
+                                da,
+                                xr.DataArray(
+                                    np.array([[calc10ff] * len(da.ipoint)]).T,
+                                    dims=["ipoint", "channel"],
+                                    coords={
+                                        "ipoint": da.ipoint,
+                                        "channel": ["10ff"],
+                                    },
+                                ),
+                            ],
+                            dim="channel",
+                        )
+                    )
+                else:
+                    return data_tars, data_preds, existing_channels
+
+            data_tars, data_preds = data_updated
             existing_channels = existing_channels + ["10ff"]
 
         return data_tars, data_preds, existing_channels
