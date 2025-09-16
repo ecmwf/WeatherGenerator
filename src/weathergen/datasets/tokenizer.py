@@ -15,10 +15,8 @@ import torch
 
 from weathergen.datasets.utils import (
     healpix_verts_rots,
-    locs_to_cell_coords_ctrs,
     r3tos2,
 )
-from weathergen.datasets.utils_test import _locs_to_cell_coords_ctrs_2
 
 
 class Tokenizer:
@@ -86,10 +84,10 @@ class Tokenizer:
         ]
 
         self.verts_local = []
-        for (_verts, rot) in transforms:
+        for _verts, rot in transforms:
             # Compute local coordinates
             verts = torch.stack(_verts)
-            # <healpix, 4, 3> 
+            # <healpix, 4, 3>
             verts = verts.transpose(0, 1)
             # Perform the rotation using batch matrix multiplication
             t1 = torch.bmm(rot, verts.transpose(-1, -2)).transpose(-2, -1)
