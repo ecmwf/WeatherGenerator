@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,15 +15,10 @@ import numpy as np
 import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
-
+from weathergen.common.config import load_config, load_model_config
 from weathergen.common.io import ZarrIO
-from weathergen.evaluate.plot_utils import (
-    plot_metric_region,
-)
-from weathergen.evaluate.plotter import LinePlots, Plotter
-from weathergen.evaluate.score import VerifiedData, get_score
+
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
-from weathergen.utils.config import _REPO_ROOT, load_config, load_model_config
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -48,6 +42,7 @@ class WeatherGeneratorOutput:
     prediction: dict[str, xr.Dataset]
     points_per_sample: xr.DataArray | None
 
+
 @dataclass
 class DataAvailability:
     """
@@ -63,12 +58,14 @@ class DataAvailability:
     samples: list[int]
         List of samples requested
     """
+
     json_availability: bool
     channels: list[str] | None
     fsteps: list[int] | None
     samples: list[int] | None
 
-class Reader(object):
+
+class Reader:
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
         """
         Generic data reader class.
@@ -94,11 +91,11 @@ class Reader(object):
         self.model_base_dir = self.eval_cfg.get("model_base_dir", None)
 
         # Load model configuration and set (run-id specific) directories
-        self.inference_cfg = self.get_inference_config() 
+        self.inference_cfg = self.get_inference_config()
 
         self.results_base_dir = self.eval_cfg.get(
-                "results_base_dir", None
-            )  # base directory where results will be stored
+            "results_base_dir", None
+        )  # base directory where results will be stored
 
         if not self.results_base_dir:
             self.results_base_dir = Path(self.inference_cfg["run_path"])
@@ -122,19 +119,22 @@ class Reader(object):
         )
         # for backward compatibility allow metric_dir to be specified in the run config
         self.metrics_dir = Path(
-            self.eval_cfg.get("metrics_dir", self.metrics_base_dir / self.run_id / "evaluation")
+            self.eval_cfg.get(
+                "metrics_dir", self.metrics_base_dir / self.run_id / "evaluation"
             )
-        
+        )
+
         self.fname_zarr = self.results_dir.joinpath(
             f"validation_epoch{self.epoch:05d}_rank{self.rank:04d}.zarr"
         )
 
         if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
-            _logger.error(f"Zarr file {self.fname_zarr} does not exist or is not a directory.")
+            _logger.error(
+                f"Zarr file {self.fname_zarr} does not exist or is not a directory."
+            )
             raise FileNotFoundError(
                 f"Zarr file {self.fname_zarr} does not exist or is not a directory."
             )
-
 
     def get_inference_config(self):
         """
@@ -155,8 +155,8 @@ class Reader(object):
                 f"Loading config for run {self.run_id} from model directory: {self.model_base_dir}"
             )
             config = load_model_config(self.run_id, self.epoch, self.model_base_dir)
-        
-        if type(config) not in [dict, oc.DictConfig]:    
+
+        if type(config) not in [dict, oc.DictConfig]:
             _logger.warning("Model config not found. inference config will be empty.")
             config = {}
 
@@ -164,22 +164,22 @@ class Reader(object):
 
     def get_stream(self, stream: str):
         """
-        returns the dictionary associated to a particular stream 
+        returns the dictionary associated to a particular stream
 
         Parameters
         ----------
         stream: str
-            the stream name 
+            the stream name
 
         Returns
         -------
-        dict 
-            the config dictionary associated to that stream  
+        dict
+            the config dictionary associated to that stream
         """
         return self.eval_cfg.streams.get(stream, {})
 
-
-    def get_data(self, 
+    def get_data(
+        self,
         stream: str,
         region: str = "global",
         samples: list[int] | None = None,
@@ -217,7 +217,7 @@ class Reader(object):
             - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast step.
             - points_per_sample: xarray DataArray containing the number of points per sample, if `return_counts` is True.
         """
-        
+
         bbox = RegionBoundingBox.from_region_name(region)
 
         with ZarrIO(self.fname_zarr) as zio:
@@ -230,7 +230,9 @@ class Reader(object):
             # TODO: Avoid conversion of fsteps and sample to integers (as obtained from the ZarrIO)
             fsteps = sorted([int(fstep) for fstep in fsteps])
             samples = sorted(
-                [int(sample) for sample in self.get_samples()] if samples is None else samples
+                [int(sample) for sample in self.get_samples()]
+                if samples is None
+                else samples
             )
             channels = channels or stream_cfg.get("channels", all_channels)
             channels = to_list(channels)
@@ -250,7 +252,9 @@ class Reader(object):
             fsteps_final = []
 
             for fstep in fsteps:
-                _logger.info(f"RUN {self.run_id} - {stream}: Processing fstep {fstep}...")
+                _logger.info(
+                    f"RUN {self.run_id} - {stream}: Processing fstep {fstep}..."
+                )
                 da_tars_fs, da_preds_fs = [], []
                 pps = []
 
@@ -311,7 +315,9 @@ class Reader(object):
                     points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
 
             # Safer than a list
-            da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=False)}
+            da_tars = {
+                fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=False)
+            }
             da_preds = {
                 fstep: da for fstep, da in zip(fsteps_final, da_preds, strict=False)
             }
@@ -325,12 +331,12 @@ class Reader(object):
     def get_samples(self) -> set[int]:
         with ZarrIO(self.fname_zarr) as zio:
             return set(int(s) for s in zio.samples)
-    
-    def get_forecast_steps(self)-> set[int]:
+
+    def get_forecast_steps(self) -> set[int]:
         with ZarrIO(self.fname_zarr) as zio:
             return set(int(f) for f in zio.forecast_steps)
 
-    #TODO: get this from config
+    # TODO: get this from config
     def get_channels(self, stream: str) -> list[str]:
         """
         Peek the channels of a target stream.
@@ -347,13 +353,15 @@ class Reader(object):
             A list of channel names in the tar stream.
         """
         with ZarrIO(self.fname_zarr) as zio:
-            dummy_out = zio.get_data(list(self.get_samples())[0], stream, list(self.get_forecast_steps())[0])
+            dummy_out = zio.get_data(
+                list(self.get_samples())[0], stream, list(self.get_forecast_steps())[0]
+            )
             channels = dummy_out.target.channels
             _logger.debug(f"Peeked channels for stream {stream}: {channels}")
 
         return channels
-    
-    def get_inference_stream_attr(self, stream_name: str, key: str, default = None):
+
+    def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """
         Get the value of a key for a specific stream from the a model config.
 
@@ -377,8 +385,8 @@ class Reader(object):
         return default
 
     def check_availability(
-        self, 
-        stream: str, 
+        self,
+        stream: str,
         available_data: dict = None,
         mode: str = "",
     ) -> DataAvailability:
@@ -474,14 +482,13 @@ class Reader(object):
             _logger.info(
                 f"All checks passed – All channels, samples, fsteps requested for {mode} are present in {scope}..."
             )
-        
-        return DataAvailability(
-            json_availability = check_json, 
-            channels = sorted(list(requested["channel"])),
-            fsteps = sorted(list(requested["fstep"])),
-            samples = sorted(list(requested["sample"])),
-        )
 
+        return DataAvailability(
+            json_availability=check_json,
+            channels=sorted(list(requested["channel"])),
+            fsteps=sorted(list(requested["fstep"])),
+            samples=sorted(list(requested["sample"])),
+        )
 
     def _get_channels_fsteps_samples(self, stream: str, mode: str) -> DataAvailability:
         """
@@ -507,19 +514,19 @@ class Reader(object):
         )
 
         stream_cfg = self.get_stream(stream)
-        assert stream_cfg.get(mode, False), "Mode does not exist in stream config. Please add it."
+        assert stream_cfg.get(mode, False), (
+            "Mode does not exist in stream config. Please add it."
+        )
 
         samples = stream_cfg[mode].get("sample", None)
         fsteps = stream_cfg[mode].get("forecast_step", None)
         channels = stream_cfg.get("channels", None)
 
         return DataAvailability(
-            json_availability = True, 
-            channels = None if (channels == "all" or channels is None) else list(channels),
-            fsteps = None if (fsteps == "all" or fsteps is None) else list(fsteps),
-            samples = None if (samples == "all" or samples is None) else list(samples),
+            json_availability=True,
+            channels=None
+            if (channels == "all" or channels is None)
+            else list(channels),
+            fsteps=None if (fsteps == "all" or fsteps is None) else list(fsteps),
+            samples=None if (samples == "all" or samples is None) else list(samples),
         )
-
-
-
-
