@@ -85,10 +85,13 @@ class Tokenizer:
             ([verts00, verts10, verts11, verts01], vertsmm_rots),
         ]
 
-        verts_local_2 = []
-        verts = torch.stack([verts10, verts11, verts01, vertsmm])
-        temp = ref - torch.stack(_locs_to_cell_coords_ctrs_2(verts00_rots, verts.transpose(0, 1)))
-        verts_local_2.append(temp.flatten(1, 2))
+        # verts_local_2 = []
+        # verts2 = torch.stack([verts10, verts11, verts01, vertsmm])
+        # verts2 = verts2.transpose(0, 1)
+        # temp = ref - torch.stack(_locs_to_cell_coords_ctrs_2(verts00_rots, verts2))
+        # verts_local_2.append(temp.flatten(1, 2))
+
+        # (_verts, rot) = transforms[0]
 
         self.verts_local = []
         for (_verts, rot) in transforms:
@@ -96,11 +99,11 @@ class Tokenizer:
             verts = torch.stack(_verts)
             verts = verts.transpose(0, 1)
             # Perform the rotation:
-            t1 = torch.matmul(rot, verts.transpose(-1, -2)).transpose(-2, -1)
+            t1 = torch.bmm(rot, verts.transpose(-1, -2)).transpose(-2, -1)
             t2 = ref - t1
             self.verts_local.append(t2.flatten(1, 2))
 
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
 
         self.hpy_verts_local_target = torch.stack(self.verts_local).transpose(0, 1)
 
