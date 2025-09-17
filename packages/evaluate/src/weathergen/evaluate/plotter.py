@@ -11,8 +11,8 @@ import numpy as np
 import omegaconf as oc
 import xarray as xr
 from PIL import Image
-
 from weathergen.common.config import _load_private_conf
+
 from weathergen.evaluate.plot_utils import DefaultMarkerSize
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
@@ -418,6 +418,18 @@ class Plotter:
         marker = map_kwargs_save.pop("marker", "o")
         vmin = map_kwargs_save.pop("vmin", None)
         vmax = map_kwargs_save.pop("vmax", None)
+        cmap = plt.get_cmap(map_kwargs_save.pop("colormap", "coolwarm"))
+
+        if isinstance(map_kwargs_save.get("levels", False), oc.listconfig.ListConfig):
+            norm = mpl.colors.BoundaryNorm(
+                map_kwargs_save.pop("levels", None), cmap.N, extend="both"
+            )
+        else:
+            norm = mpl.colors.Normalize(
+                vmin=vmin,
+                vmax=vmax,
+                clip=False,
+            )
 
         # scale marker size
         marker_size = marker_size_base
@@ -434,19 +446,6 @@ class Plotter:
         ax.coastlines()
 
         valid_time = str(data["valid_time"][0].values.astype("datetime64[m]"))
-
-        if isinstance(map_kwargs_save.get("levels", False), oc.listconfig.ListConfig):
-            cmap = plt.get_cmap(map_kwargs_save.pop("colormap", "coolwarm"))
-            norm = mpl.colors.BoundaryNorm(
-                map_kwargs_save.pop("levels", None), cmap.N, extend="both"
-            )
-        else:
-            cmap = plt.get_cmap(map_kwargs_save.pop("colormap", "coolwarm"))
-            norm = mpl.colors.Normalize(
-                vmin=vmin,
-                vmax=vmax,
-                clip=False,
-            )
 
         scatter_plt = ax.scatter(
             data["lon"],
