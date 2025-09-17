@@ -16,6 +16,26 @@ from weathergen.datasets.data_reader_base import (
     check_reader_data,
 )
 
+############################################################################
+import os, time
+from typing import Sequence
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+def _pfx() -> str:
+    # Helpful when multiple workers/ranks print at once
+    return f"[DATAREADER DEBUG:{os.environ.get('RANK', '?')}/{os.getpid()}]"
+
+import signal
+
+class _Timeout(Exception): pass
+def _alarm_handler(signum, frame): raise _Timeout()
+
+signal.signal(signal.SIGALRM, _alarm_handler)
+
+############################################################################
+
 _logger = logging.getLogger(__name__)
 
 
@@ -42,7 +62,7 @@ class DataReaderCams(DataReaderTimestep):
         # ======= Reading the Dataset ================
 
         # Open the dataset using Xarray with Zarr engine
-        self.ds = xr.open_dataset(filename, engine="zarr")
+        self.ds = xr.open_dataset(filename, engine="zarr", chunks={"time": 24})
 
         # Column (variable) names and indices
         self.colnames = stream_info["variables"] # list(self.ds)
@@ -70,21 +90,7 @@ class DataReaderCams(DataReaderTimestep):
         end_ds = np.datetime64(self.time[-1])
         self.temporal_frequency = self.time[1] - self.time[0]
 
-        # # Skip stream if it doesn't intersect with time window
-        # print(f"start_ds = {start_ds}")
-        # print(f"tw_handler.t_end  = {tw_handler.t_end}")
-        # print(f"end_ds = {end_ds}")
-        # print(f"tw_handler.t_start = {tw_handler.t_start}")
-        # """
-        # 0: start_ds = 2017-10-01T00:00:00.000000000
-        # 0: tw_handler.t_end  = 2017-01-03T00:00:00.000000
-        # 0: end_ds = 2022-05-31T21:00:00.000000000
-        # 0: tw_handler.t_start = 2017-01-01T00:00:00.000000
-
-        # """
-
         if start_ds > tw_handler.t_end or end_ds < tw_handler.t_start:
-            # print("inside skipping stream")
             name = stream_info["name"]
             _logger.warning(f"{name} is not supported over data loader window. Stream is skipped.")
             super().__init__(tw_handler, stream_info)
@@ -202,7 +208,6 @@ class DataReaderCams(DataReaderTimestep):
         """
         return self.len
 
-
     @override
     def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
         """
@@ -233,7 +238,22 @@ class DataReaderCams(DataReaderTimestep):
             data_per_channel = []
             for ch in channels:
                 # expect ds[ch] with shape (time, lat, lon) for this dataset
-                arr = np.asarray(self.ds[ch][t0:t1, :, :], dtype=np.float32)  # (T, nlat, nlon)
+
+                ###################################################################################
+
+                signal.alarm(30)  # seconds
+                arr = 0
+                try:
+                    arr = np.asarray(self.ds[ch][t0:t1, :, :], dtype=np.float32)  # (T, nlat, nlon)
+                except _Timeout:
+                    print(f"{_pfx()} idx={idx} TIMEOUT while reading channel '{ch}' [{t0}:{t1}] after 30s", flush=True)
+                    print(f"{_pfx()} idx={idx} TIMEOUT time steps: {self.time[t0:t1]}", flush=True)
+                    print(f"{_pfx()} idx={idx} TIMEOUT data: {arr}", flush=True)
+
+                finally:
+                    signal.alarm(0)  # always cancel alarm
+
+                ###################################################################################
                 if arr.ndim != 3:
                     raise ValueError(f"Expected 3D array (time, lat, lon) for '{ch}', got shape {arr.shape}")
                 _, nlat, nlon = arr.shape
@@ -244,12 +264,11 @@ class DataReaderCams(DataReaderTimestep):
             # move channels to last and flatten time: (T, G, C) -> (T*G, C)
             data = np.transpose(data_TCG, (0, 2, 1)).reshape(T * (nlat * nlon), len(channels)).astype(np.float32)
 
-        except MissingDateError as e:
+        except Exception as e:
             _logger.debug(f"Date not present in CAMS dataset: {str(e)}. Skipping.")
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
-
         # --- coords: build flattened [lat, lon] once, then repeat for each time
         lon2d, lat2d = np.meshgrid(np.asarray(self.lon), np.asarray(self.lat))  # shapes (nlat, nlon)
         G = lon2d.size
@@ -262,13 +281,6 @@ class DataReaderCams(DataReaderTimestep):
         # --- empty geoinfos (match anemoi)
         geoinfos = np.zeros((data.shape[0], 0), dtype=np.float32)
 
-        # debug (optional)
-        print(f"from CAMS, T={T}, nlat={nlat}, nlon={nlon}, G={G}")
-        print(f"data_TCG.shape = {(T, len(channels), G)}")
-        print(f"final data.shape = {data.shape}")
-        print(f"coords.shape = {coords.shape}")
-        print(f"len(datetimes) = {len(datetimes)}")
-
         rd = ReaderData(
             coords=coords,
             geoinfos=geoinfos,
@@ -277,75 +289,3 @@ class DataReaderCams(DataReaderTimestep):
         )
         check_reader_data(rd, dtr)
         return rd
-
-    # def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
-    #     """
-    #     Get data for temporal window
-    #     Parameters
-    #     ----------
-    #     idx : int
-    #         Index of temporal window
-    #     channels_idx : np.array
-    #         Selection of channels
-    #     Returns
-    #     -------
-    #     data (coords, geoinfos, data, datetimes)
-    #     """
-
-    #     (t_idxs, dtr) = self._get_dataset_idxs(idx)
-
-    #     if self.ds is None or self.len == 0 or len(t_idxs) == 0:
-    #         return ReaderData.empty(
-    #             num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
-    #         )
-
-    #     # TODO: handle sub-sampling
-    #     # print(f"#2.5.1 inside DataReaderCams._get()", flush=True)
-    #     t_idxs_start = t_idxs[0]
-    #     t_idxs_end = t_idxs[-1] + 1
-
-    #     # datetime
-    #     datetimes = self.time[t_idxs_start:t_idxs_end]
-
-    #     # =========== lat/lon coordinates + tiling to match time steps ==========
-
-    #     # making lon, lat like a mesh for easier flattening later
-    #     lon2d, lat2d = np.meshgrid(self.lon, self.lat)
-
-    #     print(f"len(self.lon) = {len(self.lon)}")
-    #     print(f"len(self.lat) = {len(self.lat)}")
-    #     print(f"len(datetimes) = {len(datetimes)}")
-
-    #     # Flatten to match (lat, lon) storage order in your array
-    #     lat = lat2d.flatten()[:, np.newaxis]   # shape (241*480,)
-    #     lon = lon2d.flatten()[:, np.newaxis]
-
-    #     lat = np.tile(lat, len(datetimes))
-    #     lon = np.tile(lon, len(datetimes))
-
-    #     coords = np.concatenate([lat, lon], axis=0)
-
-    #     # data
-    #     channels = np.array(self.colnames)[channels_idx]
-
-    #     data_reshaped = [
-    #         np.asarray(self.ds[ch_][t_idxs_start:t_idxs_end, :, :]).reshape(-1, 1) for ch_ in channels
-    #     ]
-    #     data = np.concatenate(data_reshaped, axis=1)
-
-    #     # time coordinate repeated to match grid points
-    #     datetimes = np.repeat(datetimes, len(data) // len(t_idxs))
-    #     print(f"len(datetimes) = {len(datetimes)}")
-
-    #     # empty geoinfos
-    #     geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
-
-    #     rd = ReaderData(
-    #         coords=coords,
-    #         geoinfos=geoinfos,
-    #         data=data,
-    #         datetimes=datetimes,
-    #     )
-    #     check_reader_data(rd, dtr)
-
-    #     return rd
