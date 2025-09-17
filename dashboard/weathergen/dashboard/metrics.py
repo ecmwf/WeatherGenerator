@@ -19,7 +19,8 @@ experiment_id = "384213844828345"
 all_stages = ["train", "val"]
 
 # Cache TTL
-_ttl_sec = 120
+# _ttl_sec = 120
+_ttl_sec = 0
 
 
 class MlFlowUpload:
@@ -45,7 +46,7 @@ def latest_runs():
     runs_pdf = pl.DataFrame(
         mlflow.search_runs(
             experiment_ids=[experiment_id],
-            filter_string="status='FINISHED' AND tags.completion_status = 'success'",
+            # filter_string="status='FINISHED' AND tags.completion_status = 'success'",
         )
     )
     runs_pdf = runs_pdf.filter(pl.col("tags.stage").is_in(all_stages))
@@ -64,7 +65,7 @@ def all_runs():
     runs_pdf = pl.DataFrame(
         mlflow.search_runs(
             experiment_ids=[experiment_id],
-            filter_string="status='FINISHED' AND tags.completion_status = 'success'",
+            # filter_string="status='FINISHED' AND tags.completion_status = 'success'",
         )
     )
     return runs_pdf
