@@ -282,8 +282,8 @@ class Trainer(TrainerBase):
             self.model.reset_parameters()
         else:
             if is_root():
-                logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
-            self.load_model(run_id_contd, epoch_contd)
+                logger.info(f"Continuing run with id={self.cf.from_run_id} at epoch {epoch_contd}.")
+            self.load_model(self.cf.from_run_id, epoch_contd)
             if is_root():
                 logger.info(f"Loaded model id={run_id_contd}.")
         self.model_params.reset_parameters(cf)
