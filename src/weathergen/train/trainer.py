@@ -715,7 +715,7 @@ class Trainer(TrainerBase):
                 maybe_sharded_sd[k.replace("module.", "")] = params[k]
         # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
         mkeys, ukeys = self.model.load_state_dict(
-            maybe_sharded_sd, strict=False, assign=is_model_sharded
+            maybe_sharded_sd, strict=False, assign=True
         )
 
         if len(mkeys) > 0:
