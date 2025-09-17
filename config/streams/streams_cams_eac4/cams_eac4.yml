@@ -22,6 +22,18 @@ CAMSEAC4 :
       # Sulfur dioxide (so2)
       'so2_1000', 'so2_925', 'so2_850', 'so2_700', 'so2_600', 'so2_500',
       'so2_400', 'so2_300', 'so2_250', 'so2_200', 'so2_150', 'so2_100', 'so2_50',
+
+      # Nitrogen monoxide (no)
+      'no_1000', 'no_925', 'no_850', 'no_700', 'no_600', 'no_500',
+      'no_400', 'no_300', 'no_250', 'no_200', 'no_150', 'no_100', 'no_50',
+
+      # Nitrogen dioxide (no2)
+      'no2_1000', 'no2_925', 'no2_850', 'no2_700', 'no2_600', 'no2_500',
+      'no2_400', 'no2_300', 'no2_250', 'no2_200', 'no2_150', 'no2_100', 'no2_50',
+
+      # Carbon monoxide (co)
+      'co_1000', 'co_925', 'co_850', 'co_700', 'co_600', 'co_500',
+      'co_400', 'co_300', 'co_250', 'co_200', 'co_150', 'co_100', 'co_50',
   ]
   target : [
       # Surface variables
@@ -35,6 +47,18 @@ CAMSEAC4 :
       # Sulfur dioxide (so2)
       'so2_1000', 'so2_925', 'so2_850', 'so2_700', 'so2_600', 'so2_500',
       'so2_400', 'so2_300', 'so2_250', 'so2_200', 'so2_150', 'so2_100', 'so2_50',
+
+      # Nitrogen monoxide (no)
+      'no_1000', 'no_925', 'no_850', 'no_700', 'no_600', 'no_500',
+      'no_400', 'no_300', 'no_250', 'no_200', 'no_150', 'no_100', 'no_50',
+
+      # Nitrogen dioxide (no2)
+      'no2_1000', 'no2_925', 'no2_850', 'no2_700', 'no2_600', 'no2_500',
+      'no2_400', 'no2_300', 'no2_250', 'no2_200', 'no2_150', 'no2_100', 'no2_50',
+
+      # Carbon monoxide (co)
+      'co_1000', 'co_925', 'co_850', 'co_700', 'co_600', 'co_500',
+      'co_400', 'co_300', 'co_250', 'co_200', 'co_150', 'co_100', 'co_50',
   ]
   # source_exclude : []
   # target_exclude : []
@@ -50,21 +74,33 @@ CAMSEAC4 :
       # Sulfur dioxide (so2)
       'so2_1000', 'so2_925', 'so2_850', 'so2_700', 'so2_600', 'so2_500',
       'so2_400', 'so2_300', 'so2_250', 'so2_200', 'so2_150', 'so2_100', 'so2_50',
+
+      # Nitrogen monoxide (no)
+      'no_1000', 'no_925', 'no_850', 'no_700', 'no_600', 'no_500',
+      'no_400', 'no_300', 'no_250', 'no_200', 'no_150', 'no_100', 'no_50',
+
+      # Nitrogen dioxide (no2)
+      'no2_1000', 'no2_925', 'no2_850', 'no2_700', 'no2_600', 'no2_500',
+      'no2_400', 'no2_300', 'no2_250', 'no2_200', 'no2_150', 'no2_100', 'no2_50',
+
+      # Carbon monoxide (co)
+      'co_1000', 'co_925', 'co_850', 'co_700', 'co_600', 'co_500',
+      'co_400', 'co_300', 'co_250', 'co_200', 'co_150', 'co_100', 'co_50',
   ]
   loss_weight : 1.
   masking_rate : 0.6
   masking_rate_none : 0.05
-  token_size : 32
+  token_size : 16
   tokenize_spacetime : True
   embed : 
     net : transformer
     num_tokens : 1
     num_heads : 8
     dim_embed : 512
-    num_blocks : 4
+    num_blocks : 2
   embed_target_coords :
     net : linear
-    dim_embed : 512 
+    dim_embed : 512
   target_readout :
     type : 'obs_value'  # token or obs_value
     num_layers : 2
