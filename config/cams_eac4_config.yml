@@ -5,16 +5,16 @@ start_date: 200301010000
 # start_date_val: 202201010000
 # end_date_val: 202205300000
 
-num_epochs: 63 # 10
+num_epochs: 45 # 10
 
-step_hrs: 1
+# samples_per_epoch: 700  # HERE
+# samples_per_validation: 200  # HERE
+# shuffle: True
 
-samples_per_epoch: 1500 
-samples_per_validation: 300 
-shuffle: True
-
-loader_num_workers: 16
+loader_num_workers: 4
 
 masking_rate: 0.8
+# forecast_offset : 1 # HERE
+
 
 with_mixed_precision: True
