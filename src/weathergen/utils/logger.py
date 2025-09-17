@@ -13,7 +13,7 @@ import pathlib
 import sys
 from functools import cache
 
-from weathergen.utils.config import _load_private_conf
+from weathergen.common.config import _load_private_conf
 
 
 class ColoredRelPathFormatter(logging.Formatter):
