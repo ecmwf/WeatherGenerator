@@ -119,7 +119,7 @@ def _check_logging(config: Config) -> Config:
     Apply fixes to log frequency config.
     """
     config = config.copy()
-    if not config.log_intervals:  # TODO remove this for next version
+    if config.get("log_intervals") is None:  # TODO remove this for next version
         config.log_intervals = OmegaConf.construct(
             {"checkpoint": 250, "terminal": 10, "metrics": config.train_log.log_interval}
         )
