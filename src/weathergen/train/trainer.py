@@ -29,7 +29,8 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.tensor import DTensor, distribute_tensor
 
-import weathergen.utils.config as config
+import weathergen.common.config as config
+from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
@@ -44,7 +45,7 @@ from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
-from weathergen.utils.config import Config, get_dtype
+from weathergen.utils.utils import get_dtype
 from weathergen.utils.distributed import all_gather_vlen, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.validation_io import write_output
@@ -78,7 +79,7 @@ class Trainer(TrainerBase):
 
         assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
-        assert cf.forecast_policy if cf.forecast_steps > 0 else True
+        config.validate_forecast_policy_and_steps(cf=cf)
 
         self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
 
