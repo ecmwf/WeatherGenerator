@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import yaml
 
-import weathergen.utils.config as config
+import weathergen.common.config as config
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
 _logger = logging.getLogger(__name__)
