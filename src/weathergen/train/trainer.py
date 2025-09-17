@@ -718,6 +718,9 @@ class Trainer(TrainerBase):
             maybe_sharded_sd, strict=False, assign=True
         )
 
+        if not is_model_sharded:
+            self.model = self.model.to(self.device)
+
         if len(mkeys) > 0:
             logger.warning(f"Missing keys when loading model: {mkeys}")
 
