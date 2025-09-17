@@ -650,7 +650,7 @@ class Scores:
         group_by_coord: str | None = None,
     ):
         """
-        Calculate forecast rate of change over time
+        Calculate target rate of change over time
 
         Parameters
         ----------
