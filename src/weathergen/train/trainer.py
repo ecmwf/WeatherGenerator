@@ -45,9 +45,9 @@ from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
-from weathergen.utils.utils import get_dtype
 from weathergen.utils.distributed import all_gather_vlen, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
+from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
@@ -547,7 +547,7 @@ class Trainer(TrainerBase):
 
             # evaluate model
             with torch.autocast(
-                    device_type=f"cuda:{cf.local_rank}",
+                device_type=f"cuda:{cf.local_rank}",
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
@@ -617,7 +617,7 @@ class Trainer(TrainerBase):
 
                     # evaluate model
                     with torch.autocast(
-                            device_type=f"cuda:{cf.local_rank}",
+                        device_type=f"cuda:{cf.local_rank}",
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
@@ -715,9 +715,7 @@ class Trainer(TrainerBase):
             for k in params.keys():
                 maybe_sharded_sd[k.replace("module.", "")] = params[k]
         # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
-        mkeys, ukeys = self.model.load_state_dict(
-            maybe_sharded_sd, strict=False, assign=True
-        )
+        mkeys, ukeys = self.model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
 
         if not is_model_sharded:
             self.model = self.model.to(self.device)

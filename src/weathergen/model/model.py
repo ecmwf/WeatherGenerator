@@ -36,8 +36,8 @@ from weathergen.model.engines import (
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.utils import get_num_parameters
-from weathergen.utils.utils import get_dtype
 from weathergen.utils.distributed import is_root
+from weathergen.utils.utils import get_dtype
 
 logger = logging.getLogger(__name__)
 
