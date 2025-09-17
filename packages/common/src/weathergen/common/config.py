@@ -88,7 +88,7 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
 
     config = OmegaConf.create(json.loads(json_str))
 
-    return _backward_compatibility(config)
+    return _check_logging(config)
 
 
 def _get_model_config_file_name(run_id: str, epoch: int | None):
@@ -101,19 +101,30 @@ def _get_model_config_file_name(run_id: str, epoch: int | None):
     return f"model_{run_id}{epoch_str}.json"
 
 
-def _backward_compatibility(config: Config):
+def _apply_fixes(config: Config) -> Config:
     """
-    Guarantee temporary backward compatibiltiy for config.
+    Apply fixes to maintain a best effort backward combatibility.
 
-    This method should act as a central hook to implement backward
+    This method should act as a central hook to implement config backward
     compatibility fixes. This is needed to run inference/continuing from
     "outdatet" run configurations. The fixes in this function should be
     eventually removed.
     """
+    config = _check_logging(config)
+    return config
+
+
+def _check_logging(config: Config) -> Config:
+    """
+    Apply fixes to log frequency config.
+    """
+    config = config.copy()
     if not config.log_intervals:  # TODO remove this for next version
         config.log_intervals = OmegaConf.construct(
             {"checkpoint": 250, "terminal": 10, "metrics": config.train_log.log_interval}
         )
+
+    return config
 
 
 def load_config(
