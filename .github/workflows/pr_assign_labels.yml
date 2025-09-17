@@ -1,4 +1,5 @@
 # This workflow automatically applies labels from issues to pull requests that reference them.
+# Most code is generated from chatgpt.
 name: Sync issue labels to PR
 
 on:
