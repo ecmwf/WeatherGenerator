@@ -70,8 +70,13 @@ def inference_from_args(argl: list[str]):
 
     cf.run_history += [(args.from_run_id, cf.istep)]
 
+<<<<<<< HEAD
     trainer = Trainer(cf.log_intervals)
     trainer.inference(cf, devices, args.from_run_id, args.epoch)
+=======
+    trainer = Trainer(cf.train_log_freq)
+    trainer.inference(cf, args.from_run_id, args.epoch)
+>>>>>>> acf76bd (rename `log_intevals` to `train_log_freq`)
 
 
 ####################################################################################################
@@ -138,7 +143,7 @@ def train_continue_from_args(argl: list[str]):
     # track history of run to ensure traceability of results
     cf.run_history += [(args.from_run_id, cf.istep)]
 
-    trainer = Trainer(cf.log_intervals)
+    trainer = Trainer(cf.train_log_freq)
     trainer.run(cf, devices, args.from_run_id, args.epoch)
 
 
@@ -184,7 +189,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
 
-    trainer = Trainer(cf.log_intervals)
+    trainer = Trainer(cf.train_log_freq)
 
     try:
         trainer.run(cf, devices)

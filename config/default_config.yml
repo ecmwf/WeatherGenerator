@@ -151,7 +151,7 @@ data_loader_rng_seed: ???
 run_id: ???
 
 # The period to log in the training loop (in number of batch steps)
-log_intervals:
+train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250

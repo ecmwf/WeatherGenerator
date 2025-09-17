@@ -54,10 +54,10 @@ logger = logging.getLogger(__name__)
 
 
 class Trainer(TrainerBase):
-    def __init__(self, log_intervals: Config):
+    def __init__(self, train_log_freq: Config):
         TrainerBase.__init__(self)
 
-        self.log_intervals = log_intervals
+        self.train_log_freq = train_log_freq
 
     def init(self, cf: Config, devices):
         self.cf = OmegaConf.merge(
@@ -589,11 +589,11 @@ class Trainer(TrainerBase):
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
 
             self._log_terminal(bidx, epoch, TRAIN)
-            if bidx % self.log_intervals.metrics == 0:
+            if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
 
             # save model checkpoint (with designation _latest)
-            if bidx % self.log_intervals.checkpoint == 0 and bidx > 0:
+            if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
 
             self.cf.istep += cf.batch_size_per_gpu
@@ -943,7 +943,7 @@ class Trainer(TrainerBase):
         self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
     def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
-        print_freq = self.log_intervals.terminal
+        print_freq = self.train_log_freq.terminal
         if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
             avg_loss, losses_all, _ = self._prepare_losses_for_logging()
