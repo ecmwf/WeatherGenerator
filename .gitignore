@@ -217,3 +217,10 @@ models
 results
 playground/
 .config/
+plots
+logs
+outputs
+output
+models
+results
+reports
