@@ -70,28 +70,28 @@ def calc_scores_per_stream(
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
 
-    # get coordinate information from retrieved data
-
     # Get climatology data path from configuration
-    run = cfg.run_ids[run_id]
-    stream_dict = run.streams[stream]
+    stream_dict = reader.eval_cfg['streams'][stream]
+    inference_cfg = reader.get_inference_config()
+    # This searches for the climatology filename in the stream configuration
     clim_fn = next(
         (
             item.get("climatology_filename")
-            for item in run_cfg["streams"]
+            for item in inference_cfg["streams"]
             if item.get("name") == stream
         ),
         None,
     )
 
-    # Check if climatology path is specified in the stream configuration
+    # Check if climatology path is specified in the eval configuration
     if "climatology_path" in stream_dict:
         clim_data_path = stream_dict["climatology_path"]
         clim_data = xr.open_dataset(clim_data_path)
         _logger.info("Aligning climatological data with target structure...")
         aligned_clim_data = align_clim_data(da_tars, clim_data)
-    elif "data_path_aux" in run_cfg and clim_fn is not None:
-        clim_data_path = run_cfg["data_path_aux"]
+    # Otherwise check if a general aux data path and clim fn is specified in the inference configuration
+    elif "data_path_aux" in inference_cfg and clim_fn is not None:
+        clim_data_path = inference_cfg["data_path_aux"]
         clim_data_path = clim_data_path + clim_fn
         clim_data = xr.open_dataset(clim_data_path)
         _logger.info("Aligning climatological data with target structure...")
