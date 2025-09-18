@@ -56,14 +56,9 @@ class StreamData:
         self.target_tokens_lens = [[0] for _ in range(forecast_steps + 1)]
         # source tokens per cell
         self.source_tokens_cells = []
-        # target tokens per cell
-        self.source_tokenized_target = [[] for _ in range(forecast_steps + 1)]
         # length of source tokens per cell (without padding)
         self.source_tokens_lens = []
         self.source_centroids = []
-        # target tokens per cell
-        self.source_tokenized_target_lens = [[] for _ in range(forecast_steps + 1)]
-        self.target_centroids = [[] for _ in range(forecast_steps + 1)]
         # unaltered source (for logging)
         self.source_raw = []
         # auxiliary data for scatter operation that changes from stream-centric to cell-centric
@@ -79,6 +74,7 @@ class StreamData:
         
         self.target_srclk_idxs_embed = [torch.tensor([]) for _ in range(forecast_steps + 1)]
         self.target_srclk_idxs_embed_pe = [torch.tensor([]) for _ in range(forecast_steps + 1)]
+
 
     def to_device(self, device="cuda") -> None:
         """
@@ -97,11 +93,6 @@ class StreamData:
         self.source_tokens_cells = self.source_tokens_cells.to(device, non_blocking=True)
         self.source_centroids = self.source_centroids.to(device, non_blocking=True)
         self.source_tokens_lens = self.source_tokens_lens.to(device, non_blocking=True)
-
-        self.target_tokens_cells = self.target_tokens_cells.to(device, non_blocking=True)
-        self.target_centroids = self.target_centroids.to(device, non_blocking=True)
-        self.target_tokens_lens = self.target_tokens_lens.to(device, non_blocking=True)
-
 
         self.target_coords = [t.to(device, non_blocking=True) for t in self.target_coords]
         self.target_tokens = [t.to(device, non_blocking=True) for t in self.target_tokens]
@@ -247,10 +238,6 @@ class StreamData:
         target_coords: torch.tensor,
         target_coords_raw: torch.tensor,
         times_raw: torch.tensor,
-        source_tokenized_target: torch.tensor,
-        source_tokenized_target_lens: torch.tensor,
-        target_centroids: torch.tensor,
-
     ) -> None:
         """
         Add data for target for one input.
@@ -280,9 +267,6 @@ class StreamData:
         self.target_coords[fstep] += [target_coords]
         self.target_coords_raw[fstep] += [target_coords_raw]
         self.target_times_raw[fstep] += [times_raw]
-        self.source_tokenized_target[fstep] += [source_tokenized_target]
-        self.source_tokenized_target_lens[fstep] += [source_tokenized_target_lens]
-        self.target_centroids[fstep] += [target_centroids]
 
     def target_empty(self) -> bool:
         """
@@ -300,25 +284,6 @@ class StreamData:
 
         # cat over forecast steps
         return torch.cat(self.target_tokens_lens).sum() == 0
-
-    def target_fstep_empty(self, fstep: int) -> bool:
-        """
-        Test if target for stream is empty
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        boolean
-            True if target is empty for stream, else False
-        """
-
-        # cat over forecast steps
-        return self.target_tokens_lens[fstep].sum() == 0
-
-
 
     def source_empty(self) -> bool:
         """

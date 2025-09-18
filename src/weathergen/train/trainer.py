@@ -416,9 +416,6 @@ class Trainer(TrainerBase):
         # removing the reshaping, make sure to index the tensors starting at forecast_offset, e.g.,
         # target_times_raw = streams_data[i_batch][i_strm].target_times_raw[forecast_offset+fstep],
         # when iterating over batch, stream, and fsteps.
-        if self.cf.get("encode_targets_latent", False):
-            # unpack the predictions/tokens from the latent space if the latent space tokens are encoded
-            preds, tokens_all, tokens_targets = preds
             
         targets_rt = [
             [
@@ -505,11 +502,11 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                preds, posteriors, weights = self.ddp_model(
+                out = self.ddp_model(
                     self.model_params, batch, cf.forecast_offset, forecast_steps
                 )
                 loss_values = self.loss_calculator.compute_loss(
-                    preds=preds,
+                    out=out,
                     streams_data=batch[0],
                     weights_samples=weights,
                 )
@@ -517,13 +514,17 @@ class Trainer(TrainerBase):
                     kl = torch.cat([posterior.kl() for posterior in posteriors])
                     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
                 
-            if bidx == 0 and is_root():
-                if self.cf.get("encode_targets_latent", False):
+            # if bidx == 0 and is_root():
+            #     if self.cf.get("encode_targets_latent", False):
                     # unpack the predictions/tokens from the latent space if the latent space tokens are encoded
-                    preds, tokens_all, tokens_targets = preds
-                    save_dir = "/iopsstor/scratch/cscs/ktezcan/weathergen/tokens/"
-                    np.save(save_dir + self.cf.run_id + "_tokens_all_epoch" + str(epoch) + ".npy", [t.detach().cpu().numpy() for t in tokens_all])
-                    np.save(save_dir + self.cf.run_id + "_tokens_targets_epoch" + str(epoch) + ".npy", [t.detach().cpu().numpy() for t in tokens_targets])
+                    # preds, posteriors, weights, tokens_all, tokens_targets = out
+                    # save_dir = "/iopsstor/scratch/cscs/ktezcan/weathergen/tokens/"
+                    # np.save(save_dir + self.cf.run_id + "_tokens_all_epoch" + str(epoch) + ".npy", [t.detach().cpu().numpy() for t in tokens_all])
+                    # np.save(save_dir + self.cf.run_id + "_tokens_targets_epoch" + str(epoch) + ".npy", [t.detach().cpu().numpy() for t in tokens_targets])
+            preds, posteriors, weights, tokens_all, tokens_targets = out
+            if cf.latent_noise_kl_weight > 0.0:
+                kl = torch.cat([posterior.kl() for posterior in posteriors])
+                loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
 
             # backward pass
             self.grad_scaler.scale(loss_values.loss).backward()
@@ -585,14 +586,14 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds, _ = self.ddp_model(
+                        out = self.ddp_model(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
 
                     # compute loss and log output
                     if bidx < cf.log_validation:
                         loss_values = self.loss_calculator_val.compute_loss(
-                            preds=preds,
+                            out=out,
                             streams_data=batch[0],
                         )
 
@@ -604,7 +605,7 @@ class Trainer(TrainerBase):
                             targets_times_all,
                             targets_lens,
                         ) = self._prepare_logging(
-                            preds=preds,
+                            preds=out[0],
                             forecast_offset=cf.forecast_offset,
                             forecast_steps=cf.forecast_steps,
                             streams_data=batch[0],
@@ -624,7 +625,7 @@ class Trainer(TrainerBase):
 
                     else:
                         loss_values = self.loss_calculator_val.compute_loss(
-                            preds=preds,
+                            out=out,
                             streams_data=batch[0],
                         )
 

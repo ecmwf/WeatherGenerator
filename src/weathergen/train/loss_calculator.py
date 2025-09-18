@@ -199,9 +199,8 @@ class LossCalculator:
 
     def compute_loss(
         self,
-        preds: list[list[Tensor]],
+        out: list[list[Tensor]],
         streams_data: list[list[any]],
-        weights_samples: torch.Tensor = None,
     ) -> LossValues:
         """
         Computes the total loss for a given batch of predictions and corresponding
@@ -256,11 +255,8 @@ class LossCalculator:
                 device=self.device,
             )
         
+        preds, posteriors, weights, tokens_all, tokens_targets = out
 
-        if self.cf.get("encode_targets_latent", False):
-            # unpack the predictions/tokens from the latent space if the latent space tokens are encoded
-            preds, tokens_all, tokens_targets = preds
-                
         # TODO: iterate over batch dimension
         i_batch = 0
         for i_stream_info, stream_info in enumerate(self.cf.streams):
@@ -276,6 +272,7 @@ class LossCalculator:
             ctr_fsteps = 0
             for fstep, target in enumerate(targets):
                 # skip if either target or prediction has no data points
+                preds = out[0]
                 pred = preds[fstep][i_stream_info]
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
                     continue
@@ -310,7 +307,7 @@ class LossCalculator:
                         substep_masks,
                         weights_channels,
                         weights_locations,
-                        weights_samples
+                        weights
                     )
                     losses_all[stream_info.name][:, i_lfct] += loss_lfct_chs
 

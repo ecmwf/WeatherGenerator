@@ -191,3 +191,6 @@ def weight_init(shape, mode, fan_in, fan_out):
     if mode == 'kaiming_uniform': return np.sqrt(3 / fan_in) * (torch.rand(*shape) * 2 - 1)
     if mode == 'kaiming_normal':  return np.sqrt(1 / fan_in) * torch.randn(*shape)
     raise ValueError(f'Invalid init mode "{mode}"')
+
+
+#TODO: try gencast positional embeddings for noise encoding...

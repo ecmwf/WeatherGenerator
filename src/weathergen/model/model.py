@@ -12,6 +12,7 @@
 import math
 import warnings
 from pathlib import Path
+import logging
 
 import astropy_healpix as hp
 import astropy_healpix.healpy
@@ -192,6 +193,10 @@ class Model(torch.nn.Module):
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
+
+        self.P_mean = cf.P_mean if "P_mean" in cf else -1.2
+        self.P_std = cf.P_std if "P_std" in cf else 1.2
+        self.sigma_data = cf.sigma_data if "sigma_data" in cf else 1.0
 
     #########################################
     def create(self) -> "Model":
@@ -521,19 +526,27 @@ class Model(torch.nn.Module):
 
         tokens = self.assimilate_global(model_params, tokens)
 
-        # if diffusion, must encode the target as well...
-        print(f'is training? {self.training}')
-        if self.cf.forecast_policy == "diffusion" and self.training:
-            target_tokens = self.embed_target(model_params, streams_data)
-
-
-
+        # now encode the targets into the latent space for all fsteps
+        if self.cf.get("encode_targets_latent", False) or (self.cf.forecast_policy == "diffusion"):
+            with torch.no_grad():
+                tokens_targets = []
+                tokens_targets_srclk = self.embed_cells_targets_srclk(model_params, streams_data)
+                for fstep in range(len(tokens_targets_srclk)):
+                    tokens_target, _ = self.assimilate_local(
+                        model_params, tokens_targets_srclk[fstep], source_cell_lens
+                    )
+                    tokens_target = self.assimilate_global(model_params, tokens_target)
+                    tokens_target_det = tokens_target.detach() # explicitly detach as well
+                    tokens_targets.append(tokens_target_det)
 
         # roll-out in latent space
         preds_all = []
 
+        logger.info(f'tokens {tokens.shape} ')
+        logger.info(f'target tokens {tokens_targets[0].shape} ')
+
         #weights default to 1s
-        weights = torch.ones(tokens.shape[0], dtype=self.dtype)
+        weights = torch.ones(tokens.shape[0], dtype=self.dtype, device=tokens.device)
 
 
         if self.cf.forecast_policy == "diffusion":
@@ -555,8 +568,10 @@ class Model(torch.nn.Module):
             if not self.cf.forecast_policy == "diffusion":
                 tokens = self.forecast(model_params, tokens)
             elif self.cf.forecast_policy == "diffusion" and self.training:
-                tokens, weights = self.denoise(model_params, tokens, target_tokens)
+                logger.info('denoising step')
+                tokens, weights = self.denoise(model_params, tokens, tokens_targets[fstep - forecast_offset]) #TODO should never denoise multipel delta_t...
             else:
+                logger.info('sampling step')
                 tokens = self.edm_sampler(model_params, tokens)
             tokens_all += [tokens]
 
@@ -570,26 +585,11 @@ class Model(torch.nn.Module):
                 target_coords_idxs,
             )
         ]
-
-        # now encode the targets into the latent space for all fsteps
-        if self.cf.get("encode_targets_latent", False):
-            with torch.no_grad():
-                tokens_targets = []
-                tokens_targets_srclk = self.embed_cells_targets_srclk(model_params, streams_data)
-                for fstep in range(len(tokens_targets_srclk)):
-                    tokens_target = self.assimilate_local(
-                        model_params, tokens_targets_srclk[fstep], source_cell_lens
-                    )
-                    tokens_target = self.assimilate_global(model_params, tokens_target)
-                    tokens_target_det = tokens_target.detach() # explicitly detach as well
-                    tokens_targets.append(tokens_target_det)
                     
-        print(torch.linalg.norm(tokens_all[1] - tokens_targets[0]))
-
-        if self.cf.get("encode_targets_latent", False): #TODO: KCT, put a safeguard: if there is a latent loss, encode_targets_latent has to be True
-            return preds_all, tokens_all, tokens_targets
+        if self.cf.get("encode_targets_latent", False) or (self.cf.forecast_policy == "diffusion"):
+            return preds_all, posteriors, weights, tokens_all, tokens_targets
         else:
-            return preds_all, posteriors, weights
+            return preds_all, posteriors, weights, None, None
 
     #########################################
     def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
@@ -836,7 +836,7 @@ class Model(torch.nn.Module):
         return tokens
 
     #########################################
-    def forecast(self, model_params: ModelParams, tokens: torch.Tensor) -> torch.Tensor:
+    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, noise_conditioning: None) -> torch.Tensor:
         """Advances latent space representation in time
 
         Args:
@@ -850,36 +850,40 @@ class Model(torch.nn.Module):
 
         for it, block in enumerate(self.fe_blocks):
             aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
-            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+            tokens = checkpoint(block, tokens, noise_conditioning, aux_info, use_reentrant=False)
 
         return tokens
 
-    def edm_preconditioning(self, model_params: ModelParams, tokens: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
+    def edm_preconditioning(self, model_params: ModelParams, condition_tokens: torch.Tensor, noised_target: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
 
         c_skip = self.sigma_data ** 2 / (noise ** 2 + self.sigma_data ** 2)
         c_out = noise * self.sigma_data / (noise ** 2 + self.sigma_data ** 2).sqrt()
         c_in = 1 / (self.sigma_data ** 2 + noise ** 2).sqrt()
         c_noise = noise.log() / 4
 
+        target_tokens = c_in * noised_target
+        
+        logger.info(f'condition_tokens {condition_tokens.shape}, target_tokens {target_tokens.shape}')
+
+        concat_x = torch.concat([condition_tokens, target_tokens], dim=1)
+    
         #embed the noise
-        emb = self.cf.map_noise(noise)
+        emb = self.fe.map_noise(c_noise.flatten())
         emb = silu(self.map_layer0(emb))
         emb = silu(self.map_layer1(emb))
 
-        F_x = self.forecast(model_params, (c_in * tokens), c_noise.flatten())
-        D_x = c_skip * tokens + c_out * F_x
+        F_x = self.forecast(model_params, concat_x, emb)
+        D_x = c_skip * noised_target + c_out * F_x
         return D_x
 
     def denoise(self, model_params: ModelParams, condition_tokens: torch.Tensor, target_tokens: torch.Tensor):
-        rnd_normal = torch.randn([target_tokens.shape[0], 1, 1, 1])
+        rnd_normal = torch.randn([target_tokens.shape[0], 1, 1], device=target_tokens.device)
         sigma = (rnd_normal * self.P_std + self.P_mean).exp()
         n = torch.randn_like(target_tokens) * sigma
         noised_target = target_tokens + n
-        concat_x = torch.concat([condition_tokens, noised_target], dim=1)
         weight = (sigma ** 2 + self.sigma_data ** 2) / (sigma * self.sigma_data) ** 2
 
-
-        return self.edm_preconditioning(model_params, concat_x, noise=n), weight
+        return self.edm_preconditioning(model_params, condition_tokens, noised_target, noise=n), weight
 
     def edm_sampler(
         self, model_params: ModelParams, condition_tokens: torch.Tensor, class_labels=None, randn_like=torch.randn_like,
@@ -907,15 +911,13 @@ class Model(torch.nn.Module):
             x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * randn_like(x_cur)
 
             # Euler step.
-            concat_x = torch.concat([condition_tokens, x_hat], dim=1)
-            denoised = self.edm_preconditioning(model_params, concat_x, noise=t_hat).to(torch.float64)
+            denoised = self.edm_preconditioning(model_params, condition_tokens, x_hat, noise=t_hat).to(torch.float64)
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 
             # Apply 2nd order correction.
             if i < num_steps - 1:
-                concat_x = torch.concat([condition_tokens, x_next], dim=1)
-                denoised = self.edm_preconditioning(model_params, concat_x, noise=t_next).to(torch.float64)
+                denoised = self.edm_preconditioning(model_params, condition_tokens, x_hat, noise=t_next).to(torch.float64)
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
