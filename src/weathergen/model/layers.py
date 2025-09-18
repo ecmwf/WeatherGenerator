@@ -154,7 +154,7 @@ class FFW(MLP):
 
 #from EDM
 class PositionalEmbedding(torch.nn.Module):
-    def __init__(self, num_channels, max_positions=10000, endpoint=False):
+    def __init__(self, num_channels, max_positions=25000, endpoint=False):
         super().__init__()
         self.num_channels = num_channels
         self.max_positions = max_positions
