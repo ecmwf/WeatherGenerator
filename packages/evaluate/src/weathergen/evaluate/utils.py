@@ -71,7 +71,7 @@ def calc_scores_per_stream(
     points_per_sample = output_data.points_per_sample
 
     # Get climatology data path from configuration
-    stream_dict = reader.eval_cfg['streams'][stream]
+    stream_dict = reader.eval_cfg["streams"][stream]
     inference_cfg = reader.get_inference_config()
     # This searches for the climatology filename in the stream configuration
     clim_fn = next(
