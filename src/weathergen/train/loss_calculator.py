@@ -107,7 +107,6 @@ class LossCalculator:
 
     def _get_fstep_weights(self, forecast_steps):
         timestep_weight_config = self.cf.get("timestep_weight")
-        breakpoint()
         if timestep_weight_config is None:
             return [1.0 for _ in range(forecast_steps)]
         weights_timestep_fct = getattr(losses, timestep_weight_config[0])
