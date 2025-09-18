@@ -869,8 +869,8 @@ class Model(torch.nn.Module):
     
         #embed the noise
         emb = self.fe.map_noise(c_noise.flatten())
-        emb = silu(self.map_layer0(emb))
-        emb = silu(self.map_layer1(emb))
+        emb = silu(self.fe.map_layer0(emb))
+        emb = silu(self.fe.map_layer1(emb))
 
         F_x = self.forecast(model_params, concat_x, emb)
         D_x = c_skip * noised_target + c_out * F_x

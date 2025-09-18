@@ -285,7 +285,7 @@ class ForecastingEngine:
             self.sigma_min = self.cf.fe_diff_sigma_min
             self.sigma_max = self.cf.fe_diff_sigma_max if self.cf.fe_diff_sigma_max is not None else float('inf')
             self.sigma_data = self.cf.fe_diff_sigma_data
-            self.map_noise = PositionalEmbedding(128, self.cf.fe_diff_sigma_data)
+            self.map_noise = PositionalEmbedding(self.cf.ae_global_dim_embed, self.cf.fe_diff_sigma_data)
             init = dict(init_mode='kaiming_uniform', init_weight=np.sqrt(1/3), init_bias=np.sqrt(1/3))
             self.map_layer0 = Linear(in_features=self.cf.ae_global_dim_embed, out_features=self.cf.ae_global_dim_embed, **init)
             self.map_layer1 = Linear(in_features=self.cf.ae_global_dim_embed, out_features=self.cf.ae_global_dim_embed, **init)

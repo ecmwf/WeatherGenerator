@@ -492,13 +492,16 @@ class LinearNormConditioning(torch.nn.Module):
     def forward(self, inputs, norm_conditioning):
         # norm_conditioning: [batch, feature_size]
         # inputs: [batch, ..., feature_size]
+        print(f'norm_conditioning shape: {norm_conditioning.shape}')
         conditional_scale_offset = self.conditional_linear_layer(norm_conditioning)
+        print(f'conditional_scale_offset shape: {conditional_scale_offset.shape}, inputs shape: {inputs.shape}')
         scale_minus_one, offset = torch.chunk(conditional_scale_offset, 2, dim=-1)
         scale = scale_minus_one + 1.0
         # Reshape scale and offset for broadcasting if needed
         while scale.dim() < inputs.dim():
             scale = scale.unsqueeze(1)
             offset = offset.unsqueeze(1)
+        print(f'scale shape: {scale.shape}, offset shape: {offset.shape}, inputs shape: {inputs.shape}')
         return inputs * scale + offset
 
 class MultiSelfAttentionHead(torch.nn.Module):
