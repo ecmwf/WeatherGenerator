@@ -79,7 +79,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype)
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
         vs = self.proj_heads_v(x).reshape(s)
-        
+
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
 
@@ -333,7 +333,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
         ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype)
         vs = self.proj_heads_v(x_kv).reshape(s)
-        
+
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
 
@@ -443,7 +443,7 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
         s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
         ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype)
         vs = self.proj_heads_v(x_kv).reshape(s)
-        
+
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
 
@@ -538,7 +538,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype)
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
         vs = self.proj_heads_v(x).reshape(s).to(self.dtype)
-        
+
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
 
