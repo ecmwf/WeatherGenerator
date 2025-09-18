@@ -52,30 +52,9 @@ def calc_scores_per_stream(
     )
 
     available_data = reader.check_availability(stream, mode="evaluation")
-
-    output_data = reader.get_data(
-        stream,
-        region=region,
-        fsteps=available_data.fsteps,
-        samples=available_data.samples,
-        channels=available_data.channels,
-        return_counts=True,
-    )
-
-    da_preds = output_data.prediction
-    da_tars = output_data.target
-    points_per_sample = output_data.points_per_sample
-
-    # get coordinate information from retrieved data
-    fsteps = [int(k) for k in da_tars.keys()]
-
-    first_da = list(da_preds.values())[0]
-
-    # TODO: improve the way we handle samples.
-    samples = list(np.atleast_1d(np.unique(first_da.sample.values)))
-    channels = list(np.atleast_1d(first_da.channel.values))
-
-    metric_list = []
+    channels = available_data.channels
+    samples = available_data.samples
+    fsteps = available_data.fsteps
 
     metric_stream = xr.DataArray(
         np.full(
@@ -88,7 +67,23 @@ def calc_scores_per_stream(
             "channel": channels,
             "metric": metrics,
         },
+        )
+    
+    output_data = reader.get_data(
+        stream,
+        region=region,
+        fsteps=fsteps,
+        samples=samples,
+        channels=channels,
+        return_counts=True,
     )
+
+    da_preds = output_data.prediction
+    da_tars = output_data.target
+    points_per_sample = output_data.points_per_sample
+
+    # TODO: improve the way we handle samples.
+    metric_list = []
 
     for (fstep, tars), (_, preds) in zip(
         da_tars.items(), da_preds.items(), strict=False
@@ -337,9 +332,9 @@ def metric_list_to_json(
     )
 
 
-def retrieve_metric_from_json(reader: Reader, stream: str, region: str, metric: str):
+def retrieve_metric_from_file(reader: Reader, stream: str, region: str, metric: str):
     """
-    Retrieve the score for a given run, stream, metric, epoch, and rank from a JSON file.
+    Retrieve the score for a given run, stream, metric, epoch, and rank from a given file (Json or csv).
 
     Parameters
     ----------
@@ -357,18 +352,45 @@ def retrieve_metric_from_json(reader: Reader, stream: str, region: str, metric: 
     xr.DataArray
         The metric DataArray.
     """
-    score_path = (
-        Path(reader.metrics_dir)
-        / f"{reader.run_id}_{stream}_{region}_{metric}_epoch{reader.epoch:05d}.json"
-    )
-    _logger.debug(f"Looking for: {score_path}")
+    if hasattr(reader, "data") and reader.data is not None:
 
-    if score_path.exists():
-        with open(score_path) as f:
-            data_dict = json.load(f)
-            return xr.DataArray.from_dict(data_dict)
+        available_data = reader.check_availability(stream, mode="evaluation")
+        
+        #empty DataArray with NaNs
+        data = np.full(
+            (len(available_data.samples), len(available_data.fsteps), len(available_data.channels), 1),
+            np.nan,
+        )
+        #fill it only for matching metric
+        if metric == reader.metric and region == reader.region and stream == reader.stream:
+            data = reader.data.values[np.newaxis, :, :, np.newaxis].T
+        
+        da = xr.DataArray(
+        data.astype(np.float32),
+        dims=("sample", "forecast_step","channel", "metric"),
+        coords={
+            "sample": available_data.samples,
+            "forecast_step": available_data.fsteps,
+            "channel": available_data.channels,
+            "metric": [metric],
+        },
+        attrs={"npoints_per_sample": reader.npoints_per_sample},
+        )
+
+        return da
     else:
-        raise FileNotFoundError(f"File {score_path} not found in the archive.")
+        score_path = (
+            Path(reader.metrics_dir)
+            / f"{reader.run_id}_{stream}_{region}_{metric}_epoch{reader.epoch:05d}.json"
+        )
+        _logger.debug(f"Looking for: {score_path}")
+
+        if score_path.exists():
+            with open(score_path) as f:
+                data_dict = json.load(f)
+                return xr.DataArray.from_dict(data_dict)
+        else:
+            raise FileNotFoundError(f"File {score_path} not found in the archive.")
 
 
 def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):

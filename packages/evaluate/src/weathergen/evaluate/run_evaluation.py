@@ -17,13 +17,13 @@ from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
-from weathergen.evaluate.io_reader import Reader
+from weathergen.evaluate.io_reader import CsvReader, WeatherGenReader
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
     plot_data,
     plot_summary,
-    retrieve_metric_from_json,
+    retrieve_metric_from_file,
 )
 
 _logger = logging.getLogger(__name__)
@@ -77,7 +77,13 @@ def evaluate_from_config(cfg):
     for run_id, run in runs.items():
         _logger.info(f"RUN {run_id}: Getting data...")
 
-        reader = Reader(run, run_id, private_paths)
+        type = run.get("type", "zarr")
+        if type == "zarr":
+            reader = WeatherGenReader(run, run_id, private_paths)
+        elif type == "csv":
+            reader = CsvReader(run, run_id, private_paths)
+        else:
+            raise ValueError(f"Unknown run type {type} for run {run_id}. Supported: zarr, csv.")
 
         for stream in reader.streams:
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
@@ -95,31 +101,30 @@ def evaluate_from_config(cfg):
                     metrics_to_compute = []
 
                     for metric in metrics:
-                        try:
-                            metric_data = retrieve_metric_from_json(
-                                reader,
-                                stream,
-                                region,
-                                metric,
-                            )
+                        metric_data = retrieve_metric_from_file(
+                            reader,
+                            stream,
+                            region,
+                            metric,
+                        )
 
-                            available_data = reader.check_availability(
-                                stream, metric_data, mode="evaluation"
-                            )
-
-                            if not available_data.json_availability:
-                                metrics_to_compute.append(metric)
-                            else:
-                                # simply select the chosen eval channels, samples, fsteps here...
-                                scores_dict[metric][region][stream][run_id] = (
-                                    metric_data.sel(
-                                        sample=available_data.samples,
-                                        channel=available_data.channels,
-                                        forecast_step=available_data.fsteps,
-                                    )
-                                )
-                        except (FileNotFoundError, KeyError):
+                        available_data = reader.check_availability(
+                            stream, metric_data, mode="evaluation"
+                        )
+                       
+                        if not available_data.json_availability:
                             metrics_to_compute.append(metric)
+                        else:
+                            # simply select the chosen eval channels, samples, fsteps here...
+                            scores_dict[metric][region][stream][run_id] = (
+                                metric_data.sel(
+                                    sample=available_data.samples,
+                                    channel=available_data.channels,
+                                    forecast_step=available_data.fsteps,
+                                )
+                            )
+                        # except (FileNotFoundError, KeyError):
+                        #     metrics_to_compute.append(metric)
 
                     if metrics_to_compute:
                         all_metrics, points_per_sample = calc_scores_per_stream(
