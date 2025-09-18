@@ -512,11 +512,16 @@ class Model(torch.nn.Module):
 
         # embed
         tokens = self.embed_cells(model_params, streams_data)
+        tokens1 = self.embed_cells(model_params, streams_data)
+        tokens2 = self.embed_cells(model_params, streams_data)
+        print(torch.allclose(tokens1, tokens2))
 
         # local assimilation engine and adapter
         tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
 
-        tokens = self.assimilate_global(model_params, tokens)
+        tokens1 = self.assimilate_global(model_params, tokens)
+        tokens2 = self.assimilate_global(model_params, tokens)
+        print(torch.allclose(tokens1, tokens2))
 
         # roll-out in latent space
         preds_all = []
@@ -562,6 +567,26 @@ class Model(torch.nn.Module):
                     
         print(torch.linalg.norm(tokens_all[1] - tokens_targets[0]))
 
+        if False:
+            preds_from_targets = []
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps):
+                        # prediction
+                        preds_from_targets += [
+                            self.predict(
+                                model_params,
+                                fstep,
+                                tokens_targets[fstep],
+                                streams_data,
+                                target_coords_idxs,
+                            )
+                        ]
+            save_dir = Path("/users/ktezcan/projects/Meteoswiss/WeatherGenerator/personal/clariden/experiments_latent_loss_rnd2/tokens")
+            np.save(save_dir / (self.cf.run_id+"_preds_from_targets"), [tt[0][0].cpu().detach().numpy() for tt in preds_from_targets])
+            np.save(save_dir / (self.cf.run_id+"_preds_all"), [tt[0][0].cpu().detach().numpy() for tt in preds_all])
+            np.save(save_dir / (self.cf.run_id+"_tokens_targets"), [tt.cpu().detach().numpy() for tt in tokens_targets])
+            np.save(save_dir / (self.cf.run_id+"_tokens_all"), [tt.cpu().detach().numpy() for tt in tokens_all])
+
+            
         if self.cf.get("encode_targets_latent", False): #TODO: KCT, put a safeguard: if there is a latent loss, encode_targets_latent has to be True
             return preds_all, tokens_all, tokens_targets
         else:
