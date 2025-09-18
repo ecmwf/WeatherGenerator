@@ -45,7 +45,7 @@ from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
-from weathergen.utils.distributed import all_gather_vlen, is_root
+from weathergen.utils.distributed import all_gather_vlen, is_root, ddp_average
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
@@ -584,15 +584,15 @@ class Trainer(TrainerBase):
             self.stdev_unweighted_hist += [loss_values.stddev_all]
 
             perf_gpu, perf_mem = self.get_perf()
-            self.perf_gpu = 0  # ddp_average(torch.tensor([perf_gpu])).item()
-            self.perf_mem = 0  # ddp_average(torch.tensor([perf_mem])).item()
+            self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
+            self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
 
             self._log_terminal(bidx, epoch, TRAIN)
             if bidx % log_interval == 0:
                 self._log(TRAIN)
 
             # model checkpoint
-            if bidx % self.checkpoint_freq == (bidx - 1):
+            if bidx % self.checkpoint_freq == 0 and bidx > 0:
                 self.save_model(-1)
 
             self.cf.istep += cf.batch_size_per_gpu
@@ -868,7 +868,7 @@ class Trainer(TrainerBase):
         # Gather all tensors from all ranks into a list and stack them into one tensor again
         real_loss = torch.cat(all_gather_vlen(real_loss))
 
-        for stream in self.cf.streams:  # Loop over all steams
+        for stream in self.cf.streams:  # Loop over all streams
             stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
             stream_all = torch.stack(stream_hist).to(torch.float64)
             losses_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
