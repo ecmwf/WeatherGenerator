@@ -18,8 +18,8 @@ import time
 import traceback
 from pathlib import Path
 
+import weathergen.common.config as config
 import weathergen.utils.cli as cli
-import weathergen.utils.config as config
 from weathergen.train.trainer import Trainer
 from weathergen.utils.logger import init_loggers
 

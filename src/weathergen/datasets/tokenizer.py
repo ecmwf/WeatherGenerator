@@ -15,7 +15,6 @@ import torch
 
 from weathergen.datasets.utils import (
     healpix_verts_rots,
-    locs_to_cell_coords_ctrs,
     r3tos2,
 )
 
@@ -76,26 +75,26 @@ class Tokenizer:
             vertsmm_rots.to(torch.float32),
         ]
 
+        transforms = [
+            ([verts10, verts11, verts01, vertsmm], verts00_rots),
+            ([verts00, verts11, verts01, vertsmm], verts10_rots),
+            ([verts00, verts10, verts01, vertsmm], verts11_rots),
+            ([verts00, verts11, verts10, vertsmm], verts01_rots),
+            ([verts00, verts10, verts11, verts01], vertsmm_rots),
+        ]
+
         self.verts_local = []
-        verts = torch.stack([verts10, verts11, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts00_rots, verts.transpose(0, 1)))
-        self.verts_local.append(temp.flatten(1, 2))
-
-        verts = torch.stack([verts00, verts11, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts10_rots, verts.transpose(0, 1)))
-        self.verts_local.append(temp.flatten(1, 2))
-
-        verts = torch.stack([verts00, verts10, verts01, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts11_rots, verts.transpose(0, 1)))
-        self.verts_local.append(temp.flatten(1, 2))
-
-        verts = torch.stack([verts00, verts11, verts10, vertsmm])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(verts01_rots, verts.transpose(0, 1)))
-        self.verts_local.append(temp.flatten(1, 2))
-
-        verts = torch.stack([verts00, verts10, verts11, verts01])
-        temp = ref - torch.stack(locs_to_cell_coords_ctrs(vertsmm_rots, verts.transpose(0, 1)))
-        self.verts_local.append(temp.flatten(1, 2))
+        for _verts, rot in transforms:
+            # Compute local coordinates
+            verts = torch.stack(_verts)
+            # shape: <healpix, 4, 3>
+            verts = verts.transpose(0, 1)
+            # Batch multiplication by the 3x3 rotation matrices.
+            # shape: <healpix, 3, 3> @ <healpix, 4, 3> -> <healpix, 4, 3>
+            # Needs to transpose first to <healpix, 3, 4> then transpose back.
+            t1 = torch.bmm(rot, verts.transpose(-1, -2)).transpose(-2, -1)
+            t2 = ref - t1
+            self.verts_local.append(t2.flatten(1, 2))
 
         self.hpy_verts_local_target = torch.stack(self.verts_local).transpose(0, 1)
 
