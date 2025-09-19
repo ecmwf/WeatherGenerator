@@ -84,14 +84,13 @@ class Reader:
         self.private_paths = private_paths
 
         self.streams = eval_cfg.streams.keys()
-        
+
         # If results_base_dir and model_base_dir are not provided, default paths are used
         self.model_base_dir = self.eval_cfg.get("model_base_dir", None)
 
         self.results_base_dir = self.eval_cfg.get(
             "results_base_dir", None
         )  # base directory where results will be stored
-
 
     def get_stream(self, stream: str):
         """
@@ -110,17 +109,17 @@ class Reader:
         return self.eval_cfg.streams.get(stream, {})
 
     def get_samples(self) -> set[int]:
-        """ Placeholder implementation of sample getter. Override in subclass. """
-        return set()  
+        """Placeholder implementation of sample getter. Override in subclass."""
+        return set()
 
     def get_forecast_steps(self) -> set[int]:
-        """ Placeholder implementation forecast step getter. Override in subclass. """
-        return set() 
+        """Placeholder implementation forecast step getter. Override in subclass."""
+        return set()
 
     # TODO: get this from config
     def get_channels(self, stream: str | None = None) -> list[str]:
-        """ Placeholder implementation channel names getter. Override in subclass. """
-        return list()  
+        """Placeholder implementation channel names getter. Override in subclass."""
+        return list()
 
     def check_availability(
         self,
@@ -268,11 +267,11 @@ class Reader:
             fsteps=None if (fsteps == "all" or fsteps is None) else list(fsteps),
             samples=None if (samples == "all" or samples is None) else list(samples),
         )
-    
-class WeatherGenReader(Reader):
 
+
+class WeatherGenReader(Reader):
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
-        """ Data reader class for WeatherGenerator model outputs stored in Zarr format."""
+        """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
 
         super().__init__(eval_cfg, run_id, private_paths)
 

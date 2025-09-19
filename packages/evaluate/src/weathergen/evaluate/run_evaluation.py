@@ -17,7 +17,7 @@ from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
-from weathergen.evaluate.io_reader import Reader, WeatherGenReader
+from weathergen.evaluate.io_reader import WeatherGenReader
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
