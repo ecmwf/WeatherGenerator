@@ -175,6 +175,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
     cf = config.set_run_id(cf, args.run_id, False)
 
+    cf.data_loader_rng_seed = int(time.time())
     devices = Trainer.init_torch()
     cf = Trainer.init_ddp(cf)
 
@@ -189,7 +190,6 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
-    cf.data_loader_rng_seed = int(time.time())
 
     trainer = Trainer(checkpoint_freq=250, print_freq=10)
 

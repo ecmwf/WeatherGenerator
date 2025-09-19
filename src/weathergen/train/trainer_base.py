@@ -130,13 +130,13 @@ class TrainerBase:
             print(f"rank: {rank} has run_id: {cf.run_id}")
 
             # communicate data_loader_rng_seed
-            # if hasattr(cf, "data_loader_rng_seed"):
-            #     if cf.data_loader_rng_seed is not None:
-            #         l_seed = torch.tensor(
-            #             [cf.data_loader_rng_seed if rank == 0 else 0], dtype=torch.int32
-            #         ).cuda()
-            #         dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
-            #         cf.data_loader_rng_seed = l_seed.item()
+            if hasattr(cf, "data_loader_rng_seed"):
+                if cf.data_loader_rng_seed is not None:
+                    l_seed = torch.tensor(
+                        [cf.data_loader_rng_seed if rank == 0 else 0], dtype=torch.int32
+                    ).cuda()
+                    dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
+                    cf.data_loader_rng_seed = l_seed.item()
 
         cf.world_size = world_size
         cf.rank = rank
