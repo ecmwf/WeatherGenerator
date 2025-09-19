@@ -110,14 +110,17 @@ class Reader:
         return self.eval_cfg.streams.get(stream, {})
 
     def get_samples(self) -> set[int]:
-        return set()  # Placeholder implementation
+        """Placeholder implementation of sample getter. Override in subclass."""
+        return set()
 
     def get_forecast_steps(self) -> set[int]:
-        return set()  # Placeholder implementation
+        """Placeholder implementation forecast step getter. Override in subclass."""
+        return set()
 
     # TODO: get this from config
     def get_channels(self, stream: str | None = None) -> list[str]:
-        return list()  # Placeholder implementation
+        """Placeholder implementation channel names getter. Override in subclass."""
+        return list()
 
     def check_availability(
         self,
@@ -127,18 +130,18 @@ class Reader:
     ) -> DataAvailability:
         """
         Check if requested channels, forecast steps and samples are
-        i) available in the previously saved json if metric data is specified (return False otherwise)
-        ii) available in the Zarr file (return error otherwise)
+        i) available in the previously saved metric file if specified (return False otherwise)
+        ii) available in the source file (e.g. the Zarr file, return error otherwise)
         Additionally, if channels, forecast steps or samples is None/'all', it will
-        i) set the variable to all available vars in Zarr file
-        ii) return True only if the respective variable contains the same indeces in JSON and Zarr (return False otherwise)
+        i) set the variable to all available vars in source file
+        ii) return True only if the respective variable contains the same indeces in metric file and source file (return False otherwise)
 
         Parameters
         ----------
         stream : str
             The stream considered.
         available_data : dict, optional
-            The available data loaded from JSON.
+            The available data loaded from metric file.
         Returns
         -------
         DataAvailability
@@ -161,7 +164,7 @@ class Reader:
             "sample": set(samples) if samples is not None else None,
         }
 
-        # fill info from available json file (if provided)
+        # fill info from available metric file (if provided)
         available = {
             "channel": set(available_data["channel"].values.ravel())
             if available_data is not None
@@ -181,18 +184,18 @@ class Reader:
             "channel": set(self.get_channels(stream)),
         }
 
-        check_json = True
+        check_score = True
         corrected = False
         for name in ["channel", "fstep", "sample"]:
             if requested[name] is None:
                 # Default to all in Zarr
                 requested[name] = reader_data[name]
-                # If JSON exists, must exactly match
+                # If file with metrics exists, must exactly match
                 if available_data is not None and reader_data[name] != available[name]:
                     _logger.info(
                         f"Requested all {name}s for {mode}, but previous config was a strict subset. Recomputing."
                     )
-                    check_json = False
+                    check_score = False
 
             # Must be subset of Zarr
             if not requested[name] <= reader_data[name]:
@@ -210,16 +213,16 @@ class Reader:
                 _logger.info(
                     f"{name.capitalize()}(s) {missing} missing in previous evaluation. Recomputing."
                 )
-                check_json = False
+                check_score = False
 
-        if check_json and not corrected:
-            scope = "metric file" if available_data is not None else "source file"
+        if check_score and not corrected:
+            scope = "metric file" if available_data is not None else "Zarr file"
             _logger.info(
                 f"All checks passed – All channels, samples, fsteps requested for {mode} are present in {scope}..."
             )
 
         return DataAvailability(
-            score_availability=check_json,
+            score_availability=check_score,
             channels=sorted(list(requested["channel"])),
             fsteps=sorted(list(requested["fstep"])),
             samples=sorted(list(requested["sample"])),
