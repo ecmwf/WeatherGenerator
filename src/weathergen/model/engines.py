@@ -18,6 +18,7 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
+from weathergen.model.norms import SaturateEncodings
 from weathergen.model.blocks import CrossAttentionBlock, OriginalPredictionBlock, SelfAttentionBlock
 from weathergen.model.embeddings import (
     StreamEmbedLinear,
@@ -247,6 +248,15 @@ class GlobalAssimilationEngine:
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                     )
                 )
+            # Saturation block
+            self.self.ae_global_blocks.append(
+                nn.Sequential(
+                    nn.Linear(self.cf.ae_global_dim_embed, self.cf.ae_global_dim_embed, bias=False),
+                    SaturateEncodings(cf.latent_noise_saturate_encodings)
+                    if cf.latent_noise_saturate_encodings is not None
+                    else nn.Identity(),
+                )
+            )
             # MLP block
             self.ae_global_blocks.append(
                 MLP(
