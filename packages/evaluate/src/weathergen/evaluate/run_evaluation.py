@@ -83,7 +83,9 @@ def evaluate_from_config(cfg):
         elif type == "csv":
             reader = CsvReader(run, run_id, private_paths)
         else:
-            raise ValueError(f"Unknown run type {type} for run {run_id}. Supported: zarr, csv.")
+            raise ValueError(
+                f"Unknown run type {type} for run {run_id}. Supported: zarr, csv."
+            )
 
         for stream in reader.streams:
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
@@ -101,32 +103,31 @@ def evaluate_from_config(cfg):
                     metrics_to_compute = []
 
                     for metric in metrics:
-                        metric_data = retrieve_metric_from_file(
-                            reader,
-                            stream,
-                            region,
-                            metric,
-                        )
-
-                        if metric_data is None:
-                            metrics_to_compute.append(metric)
-                            continue
-
-                        available_data = reader.check_availability(
-                            stream, metric_data, mode="evaluation"
-                        )
-                       
-                        if not available_data.score_availability:
-                            metrics_to_compute.append(metric)
-                        else:
-                            # simply select the chosen eval channels, samples, fsteps here...
-                            scores_dict[metric][region][stream][run_id] = (
-                                metric_data.sel(
-                                    sample=available_data.samples,
-                                    channel=available_data.channels,
-                                    forecast_step=available_data.fsteps,
-                                )
+                        try:
+                            metric_data = retrieve_metric_from_file(
+                                reader,
+                                stream,
+                                region,
+                                metric,
                             )
+
+                            available_data = reader.check_availability(
+                                stream, metric_data, mode="evaluation"
+                            )
+
+                            if not available_data.score_availability:
+                                metrics_to_compute.append(metric)
+                            else:
+                                # simply select the chosen eval channels, samples, fsteps here...
+                                scores_dict[metric][region][stream][run_id] = (
+                                    metric_data.sel(
+                                        sample=available_data.samples,
+                                        channel=available_data.channels,
+                                        forecast_step=available_data.fsteps,
+                                    )
+                                )
+                        except (FileNotFoundError, KeyError):
+                            metrics_to_compute.append(metric)
 
                     if metrics_to_compute:
                         all_metrics, points_per_sample = calc_scores_per_stream(

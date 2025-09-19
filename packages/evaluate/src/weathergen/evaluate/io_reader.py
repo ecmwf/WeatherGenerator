@@ -8,15 +8,15 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import omegaconf as oc
+import pandas as pd
 import xarray as xr
 from tqdm import tqdm
-import re
-import pandas as pd
 
 from weathergen.common.config import load_config, load_model_config
 from weathergen.common.io import ZarrIO
@@ -48,11 +48,11 @@ class ReaderOutput:
 @dataclass
 class DataAvailability:
     """
-    Dataclass to hold information about data availability in JSON and Zarr files.
+    Dataclass to hold information about data availability in the input files.
     Attributes
     ----------
-    json_availability: bool
-        True if JSON file contains the requested combination.
+    score_availability: bool
+        True if the metric file contains the requested combination.
     channels: list[str]
         List of channels requested
     fsteps: list[int]
@@ -92,7 +92,7 @@ class Reader:
         self.results_base_dir = self.eval_cfg.get(
             "results_base_dir", None
         )  # base directory where results will be stored
-    
+
     def get_stream(self, stream: str):
         """
         returns the dictionary associated to a particular stream
@@ -118,11 +118,11 @@ class Reader:
     # TODO: get this from config
     def get_channels(self, stream: str | None = None) -> list[str]:
         return list()  # Placeholder implementation
-    
+
     def check_availability(
         self,
         stream: str,
-        available_data: dict | None =  None,
+        available_data: dict | None = None,
         mode: str = "",
     ) -> DataAvailability:
         """
@@ -211,7 +211,7 @@ class Reader:
                     f"{name.capitalize()}(s) {missing} missing in previous evaluation. Recomputing."
                 )
                 check_json = False
-        
+
         if check_json and not corrected:
             scope = "metric file" if available_data is not None else "source file"
             _logger.info(
@@ -224,7 +224,6 @@ class Reader:
             fsteps=sorted(list(requested["fstep"])),
             samples=sorted(list(requested["sample"])),
         )
-
 
     def _get_channels_fsteps_samples(self, stream: str, mode: str) -> DataAvailability:
         """
@@ -270,7 +269,7 @@ class Reader:
 
 class CsvReader(Reader):
     """
-        Reader class to read evaluation data from CSV files and convert to xarray DataArray.
+    Reader class to read evaluation data from CSV files and convert to xarray DataArray.
     """
 
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
@@ -288,13 +287,13 @@ class CsvReader(Reader):
         """
 
         super().__init__(eval_cfg, run_id, private_paths)
-        self.csv_path = eval_cfg.get("csv_path", None)
+        self.csv_path = eval_cfg.get("csv_path")
         assert self.csv_path is not None, "CSV path must be provided in the config."
 
         self.data = pd.read_csv(self.csv_path, index_col=0)
-      
+
         self.data = self.rename_channels()
-        self.metrics_base_dir =  Path(self.csv_path).parent
+        self.metrics_base_dir = Path(self.csv_path).parent
         # for backward compatibility allow metric_dir to be specified in the run config
         self.metrics_dir = Path(
             self.eval_cfg.get(
@@ -304,7 +303,7 @@ class CsvReader(Reader):
 
         assert len(eval_cfg.streams.keys()) == 1, "CsvReader only supports one stream."
         self.stream = list(eval_cfg.streams.keys())[0]
-        self.channels = self.data.index.tolist() 
+        self.channels = self.data.index.tolist()
         self.samples = [0]
         self.forecast_steps = [int(col.split()[0]) for col in self.data.columns]
         self.npoints_per_sample = [0]
@@ -331,12 +330,14 @@ class CsvReader(Reader):
             # If it starts with digits (surface vars like 2t, 10ff) → leave unchanged
             if re.match(r"^\d", name):
                 continue
-           
+
             # Otherwise, insert underscore between letters and digits
-            self.data = self.data.rename(index={name: re.sub(r"([a-zA-Z])(\d+)", r"\1_\2", name)})
-     
+            self.data = self.data.rename(
+                index={name: re.sub(r"([a-zA-Z])(\d+)", r"\1_\2", name)}
+            )
+
         return self.data
-    
+
     def get_samples(self) -> set[int]:
         return set(self.samples)  # Placeholder implementation
 
@@ -345,13 +346,14 @@ class CsvReader(Reader):
 
     # TODO: get this from config
     def get_channels(self, stream: str | None = None) -> list[str]:
-        assert stream == self.stream, "streams do not match in CSVReader." 
+        assert stream == self.stream, "streams do not match in CSVReader."
         return list(self.channels)  # Placeholder implementation
-    
+
 
 class WeatherGenReader(Reader):
-
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
+        """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
+
         super().__init__(eval_cfg, run_id, private_paths)
 
         self.epoch = eval_cfg.epoch
@@ -630,4 +632,3 @@ class WeatherGenReader(Reader):
             if stream.get("name") == stream_name:
                 return stream.get(key, default)
         return default
-

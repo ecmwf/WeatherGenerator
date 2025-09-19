@@ -67,8 +67,8 @@ def calc_scores_per_stream(
             "channel": channels,
             "metric": metrics,
         },
-        )
-    
+    )
+
     output_data = reader.get_data(
         stream,
         region=region,
@@ -353,28 +353,36 @@ def retrieve_metric_from_file(reader: Reader, stream: str, region: str, metric: 
         The metric DataArray.
     """
     if hasattr(reader, "data") and reader.data is not None:
-
         available_data = reader.check_availability(stream, mode="evaluation")
-        
-        #empty DataArray with NaNs
+
+        # empty DataArray with NaNs
         data = np.full(
-            (len(available_data.samples), len(available_data.fsteps), len(available_data.channels), 1),
+            (
+                len(available_data.samples),
+                len(available_data.fsteps),
+                len(available_data.channels),
+                1,
+            ),
             np.nan,
         )
-        #fill it only for matching metric
-        if metric == reader.metric and region == reader.region and stream == reader.stream:
+        # fill it only for matching metric
+        if (
+            metric == reader.metric
+            and region == reader.region
+            and stream == reader.stream
+        ):
             data = reader.data.values[np.newaxis, :, :, np.newaxis].T
-        
+
         da = xr.DataArray(
-        data.astype(np.float32),
-        dims=("sample", "forecast_step","channel", "metric"),
-        coords={
-            "sample": available_data.samples,
-            "forecast_step": available_data.fsteps,
-            "channel": available_data.channels,
-            "metric": [metric],
-        },
-        attrs={"npoints_per_sample": reader.npoints_per_sample},
+            data.astype(np.float32),
+            dims=("sample", "forecast_step", "channel", "metric"),
+            coords={
+                "sample": available_data.samples,
+                "forecast_step": available_data.fsteps,
+                "channel": available_data.channels,
+                "metric": [metric],
+            },
+            attrs={"npoints_per_sample": reader.npoints_per_sample},
         )
 
         return da
@@ -390,7 +398,7 @@ def retrieve_metric_from_file(reader: Reader, stream: str, region: str, metric: 
                 data_dict = json.load(f)
                 return xr.DataArray.from_dict(data_dict)
         else:
-            return None
+            raise FileNotFoundError(f"File {score_path} not found in the archive.")
 
 
 def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
