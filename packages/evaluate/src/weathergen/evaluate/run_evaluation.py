@@ -108,11 +108,15 @@ def evaluate_from_config(cfg):
                             metric,
                         )
 
+                        if metric_data is None:
+                            metrics_to_compute.append(metric)
+                            continue
+
                         available_data = reader.check_availability(
                             stream, metric_data, mode="evaluation"
                         )
                        
-                        if not available_data.json_availability:
+                        if not available_data.score_availability:
                             metrics_to_compute.append(metric)
                         else:
                             # simply select the chosen eval channels, samples, fsteps here...
@@ -123,8 +127,6 @@ def evaluate_from_config(cfg):
                                     forecast_step=available_data.fsteps,
                                 )
                             )
-                        # except (FileNotFoundError, KeyError):
-                        #     metrics_to_compute.append(metric)
 
                     if metrics_to_compute:
                         all_metrics, points_per_sample = calc_scores_per_stream(

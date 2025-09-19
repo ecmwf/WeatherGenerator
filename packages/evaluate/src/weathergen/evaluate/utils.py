@@ -390,7 +390,7 @@ def retrieve_metric_from_file(reader: Reader, stream: str, region: str, metric: 
                 data_dict = json.load(f)
                 return xr.DataArray.from_dict(data_dict)
         else:
-            raise FileNotFoundError(f"File {score_path} not found in the archive.")
+            return None
 
 
 def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):

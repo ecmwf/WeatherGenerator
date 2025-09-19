@@ -61,7 +61,7 @@ class DataAvailability:
         List of samples requested
     """
 
-    json_availability: bool
+    score_availability: bool
     channels: list[str] | None
     fsteps: list[int] | None
     samples: list[int] | None
@@ -122,7 +122,7 @@ class Reader:
     def check_availability(
         self,
         stream: str,
-        available_data: dict = None,
+        available_data: dict | None =  None,
         mode: str = "",
     ) -> DataAvailability:
         """
@@ -219,7 +219,7 @@ class Reader:
             )
 
         return DataAvailability(
-            json_availability=check_json,
+            score_availability=check_json,
             channels=sorted(list(requested["channel"])),
             fsteps=sorted(list(requested["fstep"])),
             samples=sorted(list(requested["sample"])),
@@ -259,7 +259,7 @@ class Reader:
         channels = stream_cfg.get("channels", None)
 
         return DataAvailability(
-            json_availability=True,
+            score_availability=True,
             channels=None
             if (channels == "all" or channels is None)
             else list(channels),
@@ -311,20 +311,6 @@ class CsvReader(Reader):
         self.epoch = eval_cfg.get("epoch", 0)
         self.metric = eval_cfg.get("metric")
         self.region = eval_cfg.get("region")
-        # self.data = xr.DataArray(
-        #     data.astype(np.float32),
-        #     dims=("forecast_step", "sample", "channel"),
-        #     coords={
-        #         "forecast_step": self.forecast_steps,
-        #         "sample": self.samples,
-        #         "channel": self.channels,
-        #         "stream": self.stream,
-        #     },
-        #     attrs={"npoints_per_sample": self.npoints_per_sample},
-        # )
-         
-        # da_dict = da.to_dict()
-
 
     def rename_channels(self) -> str:
         """
@@ -361,8 +347,6 @@ class CsvReader(Reader):
     def get_channels(self, stream: str | None = None) -> list[str]:
         assert stream == self.stream, "streams do not match in CSVReader." 
         return list(self.channels)  # Placeholder implementation
-    
-    
     
 
 class WeatherGenReader(Reader):
@@ -579,10 +563,10 @@ class WeatherGenReader(Reader):
 
             # Safer than a list
             da_tars = {
-                fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=False)
+                fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=True)
             }
             da_preds = {
-                fstep: da for fstep, da in zip(fsteps_final, da_preds, strict=False)
+                fstep: da for fstep, da in zip(fsteps_final, da_preds, strict=True)
             }
 
             return ReaderOutput(
@@ -646,110 +630,4 @@ class WeatherGenReader(Reader):
             if stream.get("name") == stream_name:
                 return stream.get(key, default)
         return default
-
-    # def check_availability(
-    #     self,
-    #     stream: str,
-    #     available_data: dict = None,
-    #     mode: str = "",
-    # ) -> DataAvailability:
-    #     """
-    #     Check if requested channels, forecast steps and samples are
-    #     i) available in the previously saved json if metric data is specified (return False otherwise)
-    #     ii) available in the Zarr file (return error otherwise)
-    #     Additionally, if channels, forecast steps or samples is None/'all', it will
-    #     i) set the variable to all available vars in Zarr file
-    #     ii) return True only if the respective variable contains the same indeces in JSON and Zarr (return False otherwise)
-
-    #     Parameters
-    #     ----------
-    #     stream : str
-    #         The stream considered.
-    #     available_data : dict, optional
-    #         The available data loaded from JSON.
-    #     Returns
-    #     -------
-    #     DataAvailability
-    #         A dataclass containing:
-    #         - channels: list of channels or None if 'all'
-    #         - fsteps: list of forecast steps or None if 'all'
-    #         - samples: list of samples or None if 'all'
-    #     """
-
-    #     # fill info for requested channels, fsteps, samples
-    #     requested_data = self._get_channels_fsteps_samples(stream, mode)
-
-    #     channels = requested_data.channels
-    #     fsteps = requested_data.fsteps
-    #     samples = requested_data.samples
-
-    #     requested = {
-    #         "channel": set(channels) if channels is not None else None,
-    #         "fstep": set(fsteps) if fsteps is not None else None,
-    #         "sample": set(samples) if samples is not None else None,
-    #     }
-
-    #     # fill info from available json file (if provided)
-    #     available = {
-    #         "channel": set(available_data["channel"].values.ravel())
-    #         if available_data is not None
-    #         else {},
-    #         "fstep": set(available_data["forecast_step"].values.ravel())
-    #         if available_data is not None
-    #         else {},
-    #         "sample": set(available_data.coords["sample"].values.ravel())
-    #         if available_data is not None
-    #         else {},
-    #     }
-
-    #     # fill info from reader
-    #     reader_data = {
-    #         "fstep": set(int(f) for f in self.get_forecast_steps()),
-    #         "sample": set(int(s) for s in self.get_samples()),
-    #         "channel": set(self.get_channels(stream)),
-    #     }
-
-    #     check_json = True
-    #     corrected = False
-    #     for name in ["channel", "fstep", "sample"]:
-    #         if requested[name] is None:
-    #             # Default to all in Zarr
-    #             requested[name] = reader_data[name]
-    #             # If JSON exists, must exactly match
-    #             if available_data is not None and reader_data[name] != available[name]:
-    #                 _logger.info(
-    #                     f"Requested all {name}s for {mode}, but previous config was a strict subset. Recomputing."
-    #                 )
-    #                 check_json = False
-
-    #         # Must be subset of Zarr
-    #         if not requested[name] <= reader_data[name]:
-    #             missing = requested[name] - reader_data[name]
-    #             _logger.info(
-    #                 f"Requested {name}(s) {missing} do(es) not exist in Zarr. "
-    #                 f"Removing missing {name}(s) for {mode}."
-    #             )
-    #             requested[name] = requested[name] & reader_data[name]
-    #             corrected = True
-
-    #         # Must be a subset of available_data (if provided)
-    #         if available_data is not None and not requested[name] <= available[name]:
-    #             missing = requested[name] - available[name]
-    #             _logger.info(
-    #                 f"{name.capitalize()}(s) {missing} missing in previous evaluation. Recomputing."
-    #             )
-    #             check_json = False
-
-    #     if check_json and not corrected:
-    #         scope = "metric file" if available_data is not None else "Zarr file"
-    #         _logger.info(
-    #             f"All checks passed – All channels, samples, fsteps requested for {mode} are present in {scope}..."
-    #         )
-
-    #     return DataAvailability(
-    #         json_availability=check_json,
-    #         channels=sorted(list(requested["channel"])),
-    #         fsteps=sorted(list(requested["fstep"])),
-    #         samples=sorted(list(requested["sample"])),
-    #     )
 
