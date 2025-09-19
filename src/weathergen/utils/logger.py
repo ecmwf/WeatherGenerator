@@ -12,7 +12,6 @@ import logging
 import logging.config
 import os
 import pathlib
-from datetime import datetime
 from functools import cache
 
 from weathergen.common.config import _load_private_conf

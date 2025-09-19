@@ -45,7 +45,7 @@ from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
-from weathergen.utils.distributed import all_gather_vlen, is_root, ddp_average
+from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
