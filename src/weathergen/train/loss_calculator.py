@@ -169,7 +169,6 @@ class LossCalculator:
                 target[mask_t], pred[:, mask_t], weights_channels, weights_locations, weights_samples
             )
 
-
             # accumulate loss
             loss_lfct = loss_lfct + loss
             losses_chs += loss_chs.detach()

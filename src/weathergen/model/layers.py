@@ -13,7 +13,7 @@ import torch.nn as nn
 import numpy as np
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
-from weathergen.model.attention import LinearNormConditioning
+# from weathergen.model.attention import LinearNormConditioning
 
 class NamedLinear(torch.nn.Module):
     def __init__(self, name: str | None = None, **kwargs):
@@ -95,61 +95,61 @@ class MLP(torch.nn.Module):
         return x
 
 
-class FFW(MLP):
-    def __init__(
-        self,
-        dim,
-        dim_out=None,
-        hidden_factor=2,
-        pre_layer_norm=True,
-        dropout_rate=0.0,
-        nonlin=torch.nn.GELU,
-        with_residual=True,
-        norm_type="LayerNorm",
-        dim_aux=None,
-        norm_eps=1e-5,
-        name: str | None = None,
-        with_noise_conditioning=False
+# class FFW(MLP):
+#     def __init__(
+#         self,
+#         dim,
+#         dim_out=None,
+#         hidden_factor=2,
+#         pre_layer_norm=True,
+#         dropout_rate=0.0,
+#         nonlin=torch.nn.GELU,
+#         with_residual=True,
+#         norm_type="LayerNorm",
+#         dim_aux=None,
+#         norm_eps=1e-5,
+#         name: str | None = None,
+#         with_noise_conditioning=False
 
-    ):
-        """Constructor"""
+#     ):
+#         """Constructor"""
 
-        super(FFW, self).__init__(
-            dim_in=dim,
-            dim_out=dim_out,
-            num_layers=2,
-            hidden_factor=hidden_factor,
-            pre_layer_norm=pre_layer_norm,
-            dropout_rate=dropout_rate,
-            nonlin=nonlin,
-            with_residual=with_residual,
-            norm_type=norm_type,
-            dim_aux=dim_aux,
-            norm_eps=norm_eps,
-            name=name,
-        )
+#         super(FFW, self).__init__(
+#             dim_in=dim,
+#             dim_out=dim_out,
+#             num_layers=2,
+#             hidden_factor=hidden_factor,
+#             pre_layer_norm=pre_layer_norm,
+#             dropout_rate=dropout_rate,
+#             nonlin=nonlin,
+#             with_residual=with_residual,
+#             norm_type=norm_type,
+#             dim_aux=dim_aux,
+#             norm_eps=norm_eps,
+#             name=name,
+#         )
 
-        if with_noise_conditioning:
-            self.noise_conditioning = LinearNormConditioning(dim_in)
+#         if with_noise_conditioning:
+#             self.noise_conditioning = LinearNormConditioning(dim_in)
     
-    def forward(self, *args):
-        x, x_in, noise_embedding, aux = args[0], args[0], args[-1], args[-2]
+#     def forward(self, *args):
+#         x, x_in, noise_embedding, aux = args[0], args[0], args[-1], args[-2]
 
-        if self.noise_conditioning:
-            assert noise_embedding is not None, "Need noise embedding if using noise conditioning"
-            x = self.noise_conditioning(x, noise_embedding)
+#         if self.noise_conditioning:
+#             assert noise_embedding is not None, "Need noise embedding if using noise conditioning"
+#             x = self.noise_conditioning(x, noise_embedding)
 
-        for i, layer in enumerate(self.layers):
-            x = layer(x, aux) if (i == 0 and self.with_aux) else layer(x)
+#         for i, layer in enumerate(self.layers):
+#             x = layer(x, aux) if (i == 0 and self.with_aux) else layer(x)
 
-        if self.with_residual:
-            if x.shape[-1] == x_in.shape[-1]:
-                x = x_in + x
-            else:
-                assert x.shape[-1] % x_in.shape[-1] == 0
-                x = x + x_in.repeat([*[1 for _ in x.shape[:-1]], x.shape[-1] // x_in.shape[-1]])
+#         if self.with_residual:
+#             if x.shape[-1] == x_in.shape[-1]:
+#                 x = x_in + x
+#             else:
+#                 assert x.shape[-1] % x_in.shape[-1] == 0
+#                 x = x + x_in.repeat([*[1 for _ in x.shape[:-1]], x.shape[-1] // x_in.shape[-1]])
 
-        return x
+#         return x
 
 
 #from EDM

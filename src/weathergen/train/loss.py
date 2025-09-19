@@ -142,7 +142,7 @@ def mse_channel_location_weighted(
     diff2 = torch.square(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0))
     if weights_points is not None:
         diff2 = (diff2.transpose(1, 0) * weights_points).transpose(1, 0)
-    diff2_weighted = diff2 * weights_samples if weights_samples is not None else diff2
+    diff2_weighted = diff2 * weights_samples.squeeze(0) if weights_samples is not None else diff2
     loss_chs = diff2_weighted.mean(0)
     loss_per_sample = loss_chs * weights_channels if weights_channels else loss_chs
     loss_per_sample_weighted = loss_per_sample * weights_samples if weights_samples is not None else loss_per_sample

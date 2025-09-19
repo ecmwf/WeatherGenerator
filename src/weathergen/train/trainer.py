@@ -508,7 +508,6 @@ class Trainer(TrainerBase):
                 loss_values = self.loss_calculator.compute_loss(
                     out=out,
                     streams_data=batch[0],
-                    weights_samples=weights,
                 )
                 if cf.latent_noise_kl_weight > 0.0:
                     kl = torch.cat([posterior.kl() for posterior in posteriors])

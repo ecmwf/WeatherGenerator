@@ -14,7 +14,7 @@ from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
-
+from weathergen.model.layers import Linear
 
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     def __init__(
@@ -254,6 +254,8 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
             assert noise_embedding is not None, "Need noise embedding if using noise conditioning"
             x = self.noise_conditioning(x, noise_embedding)
 
+        print(f'In MultiSelfAttentionHeadLocal forward: x dtype is {x.dtype}, noise_embedding dtype is {noise_embedding.dtype if noise_embedding is not None else "N/A"}')
+        exit()
         # project onto heads
         s = [x.shape[0], x.shape[1], self.num_heads, -1]
         qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3])
@@ -479,30 +481,29 @@ class LinearNormConditioning(torch.nn.Module):
     `norm_conditioning` which produces the scale and offset for each channel.
     """
 
-    def __init__(self, feature_size):
+    def __init__(self, feature_size, dtype=torch.bfloat16):
         super().__init__()
         self.conditional_linear_layer = torch.nn.Linear(
             in_features=feature_size,
-            out_features=2 * feature_size
+            out_features=2 * feature_size,
+            dtype=dtype,
         )
         # Optional: initialize weights similar to TruncatedNormal(stddev=1e-8)
         torch.nn.init.normal_(self.conditional_linear_layer.weight, std=1e-8)
         torch.nn.init.zeros_(self.conditional_linear_layer.bias)
+        self.dtype = dtype
 
     def forward(self, inputs, norm_conditioning):
         # norm_conditioning: [batch, feature_size]
         # inputs: [batch, ..., feature_size]
-        print(f'norm_conditioning shape: {norm_conditioning.shape}')
-        conditional_scale_offset = self.conditional_linear_layer(norm_conditioning)
-        print(f'conditional_scale_offset shape: {conditional_scale_offset.shape}, inputs shape: {inputs.shape}')
+        conditional_scale_offset = self.conditional_linear_layer(norm_conditioning.to(self.dtype))
         scale_minus_one, offset = torch.chunk(conditional_scale_offset, 2, dim=-1)
         scale = scale_minus_one + 1.0
         # Reshape scale and offset for broadcasting if needed
         while scale.dim() < inputs.dim():
             scale = scale.unsqueeze(1)
             offset = offset.unsqueeze(1)
-        print(f'scale shape: {scale.shape}, offset shape: {offset.shape}, inputs shape: {inputs.shape}')
-        return inputs * scale + offset
+        return (inputs * scale + offset).to(self.dtype) #TODO: check if to(self.dtype) needed here
 
 class MultiSelfAttentionHead(torch.nn.Module):
     def __init__(

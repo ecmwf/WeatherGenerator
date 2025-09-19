@@ -407,6 +407,14 @@ class Model(torch.nn.Module):
         # unfreeze forecast part
         for p in self.fe_blocks.parameters():
             p.requires_grad = True
+        
+        if self.cf.forecast_policy == "diffusion":
+            for p in self.fe.map_layer0.parameters():
+                p.requires_grad = True
+            for p in self.fe.map_layer1.parameters():
+                p.requires_grad = True
+            for p in self.fe.map_noise.parameters():
+                p.requires_grad = True
 
         return self
 
@@ -541,9 +549,6 @@ class Model(torch.nn.Module):
 
         # roll-out in latent space
         preds_all = []
-
-        logger.info(f'tokens {tokens.shape} ')
-        logger.info(f'target tokens {tokens_targets[0].shape} ')
 
         #weights default to 1s
         weights = torch.ones(tokens.shape[0], dtype=self.dtype, device=tokens.device)
@@ -848,8 +853,10 @@ class Model(torch.nn.Module):
             ValueError: For unexpected arguments in checkpoint method
         """
 
+        print(f'noise_conditioning dtype is {noise_conditioning.dtype}')
         for it, block in enumerate(self.fe_blocks):
             aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
+            print(f'iteration {it}, tokens dtype is {tokens.dtype}, aux_info dtype is {aux_info.dtype}')
             tokens = checkpoint(block, tokens, noise_conditioning, aux_info, use_reentrant=False)
 
         return tokens
@@ -862,8 +869,6 @@ class Model(torch.nn.Module):
         c_noise = noise.log() / 4
 
         target_tokens = c_in * noised_target
-        
-        logger.info(f'condition_tokens {condition_tokens.shape}, target_tokens {target_tokens.shape}')
 
         concat_x = torch.concat([condition_tokens, target_tokens], dim=1)
     
@@ -873,17 +878,17 @@ class Model(torch.nn.Module):
         emb = silu(self.fe.map_layer1(emb))
 
         F_x = self.forecast(model_params, concat_x, emb)
-        D_x = c_skip * noised_target + c_out * F_x
+        D_x = c_skip * noised_target + c_out * F_x[:, -target_tokens.shape[1]:, :]
         return D_x
 
     def denoise(self, model_params: ModelParams, condition_tokens: torch.Tensor, target_tokens: torch.Tensor):
-        rnd_normal = torch.randn([target_tokens.shape[0], 1, 1], device=target_tokens.device)
+        rnd_normal = torch.randn([target_tokens.shape[0], 1, 1], dtype=torch.float32, device=target_tokens.device)
         sigma = (rnd_normal * self.P_std + self.P_mean).exp()
         n = torch.randn_like(target_tokens) * sigma
         noised_target = target_tokens + n
         weight = (sigma ** 2 + self.sigma_data ** 2) / (sigma * self.sigma_data) ** 2
 
-        return self.edm_preconditioning(model_params, condition_tokens, noised_target, noise=n), weight
+        return self.edm_preconditioning(model_params, condition_tokens, noised_target, noise=sigma), weight
 
     def edm_sampler(
         self, model_params: ModelParams, condition_tokens: torch.Tensor, class_labels=None, randn_like=torch.randn_like,
@@ -900,14 +905,14 @@ class Model(torch.nn.Module):
         t_steps = torch.cat([torch.as_tensor(t_steps), torch.zeros_like(t_steps[:1])]) # t_N = 0
 
         # Main sampling loop.
-        n = torch.randn([condition_tokens.shape[0], 1, 1, 1], device=condition_tokens.device) #shape should be like target_tokens
-        x_next =  (n * t_steps[0]).to(torch.float64)
+        n = torch.randn(condition_tokens.shape, device=condition_tokens.device) #shape should be like target_tokens (may need adaptation if conditioning on multiple lags)
+        x_next =  (n * t_steps[0]).to(torch.float64).to(condition_tokens.device)
         for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])): # 0, ..., N-1
             x_cur = x_next
 
             # Increase noise temporarily.
             gamma = min(S_churn / num_steps, np.sqrt(2) - 1) if S_min <= t_cur <= S_max else 0
-            t_hat = torch.as_tensor(t_cur + gamma * t_cur)
+            t_hat = torch.as_tensor(t_cur + gamma * t_cur).to(condition_tokens.device)
             x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * randn_like(x_cur)
 
             # Euler step.
