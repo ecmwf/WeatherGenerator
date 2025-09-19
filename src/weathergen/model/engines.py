@@ -249,11 +249,11 @@ class GlobalAssimilationEngine:
                     )
                 )
             # Saturation block
-            self.self.ae_global_blocks.append(
+            self.ae_global_blocks.append(
                 nn.Sequential(
                     nn.Linear(self.cf.ae_global_dim_embed, self.cf.ae_global_dim_embed, bias=False),
-                    SaturateEncodings(cf.latent_noise_saturate_encodings)
-                    if cf.latent_noise_saturate_encodings is not None
+                    SaturateEncodings(self.cf.latent_noise_saturate_encodings)
+                    if self.cf.latent_noise_saturate_encodings is not None
                     else nn.Identity(),
                 )
             )
