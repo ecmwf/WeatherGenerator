@@ -14,7 +14,7 @@ num_epochs: 45 # 10
 loader_num_workers: 4
 
 masking_rate: 0.8
-# forecast_offset : 1 # HERE
+forecast_offset : 1 # HERE
 
 
 with_mixed_precision: True

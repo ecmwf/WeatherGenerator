@@ -16,7 +16,6 @@ from weathergen.datasets.data_reader_base import (
     check_reader_data,
 )
 
-############################################################################
 import os, time
 from typing import Sequence
 
@@ -60,10 +59,13 @@ class DataReaderCams(DataReaderTimestep):
         """
 
         # ======= Reading the Dataset ================
+        # open groups
+        ds_surface = xr.open_zarr(filename, group="surface", chunks={"time": 24})
+        ds_profiles = xr.open_zarr(filename, group="profiles", chunks={"time": 24})
 
-        # Open the dataset using Xarray with Zarr engine
-        self.ds = xr.open_dataset(filename, engine="zarr", chunks={"time": 24})
-
+        # merge along variables
+        self.ds = xr.merge([ds_surface, ds_profiles])
+        
         # Column (variable) names and indices
         self.colnames = stream_info["variables"] # list(self.ds)
         self.cols_idx = np.array(list(np.arange(len(self.colnames))))
@@ -83,6 +85,7 @@ class DataReaderCams(DataReaderTimestep):
         # Extract coordinates and pressure level
         self.lat =  _clip_lat(self.ds["latitude"].values)
         self.lon =  _clip_lon(self.ds["longitude"].values)
+        self.levels = stream_info["pressure_levels"]
 
         # Time range in the dataset
         self.time = self.ds["time"].values
@@ -91,6 +94,7 @@ class DataReaderCams(DataReaderTimestep):
         self.temporal_frequency = self.time[1] - self.time[0]
 
         if start_ds > tw_handler.t_end or end_ds < tw_handler.t_start:
+            # print("inside skipping stream")
             name = stream_info["name"]
             _logger.warning(f"{name} is not supported over data loader window. Stream is skipped.")
             super().__init__(tw_handler, stream_info)
@@ -110,7 +114,6 @@ class DataReaderCams(DataReaderTimestep):
         self.start_idx = (tw_handler.t_start - start_ds).astype("timedelta64[ns]").astype(int)
         self.end_idx = (tw_handler.t_end - start_ds).astype("timedelta64[ns]").astype(int) + 1
 
-        # Asma TODO check if self.len checks out
         # Number of time steps in selected range
         self.len = self.end_idx - self.start_idx + 1
 
@@ -187,9 +190,6 @@ class DataReaderCams(DataReaderTimestep):
 
         return selected_colnames, selected_cols_idx
 
-    # # Asma TODO test it once kerchunk is ready
-    # def get_levels(self, channels: list[str]) -> list:
-
     @override
     def init_empty(self) -> None:
         super().init_empty()
@@ -217,7 +217,6 @@ class DataReaderCams(DataReaderTimestep):
         -------
         ReaderData providing coords, geoinfos, data, datetimes
         """
-
         (t_idxs, dtr) = self._get_dataset_idxs(idx)
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
@@ -230,45 +229,48 @@ class DataReaderCams(DataReaderTimestep):
         t1 = t_idxs[-1] + 1  # end is exclusive
         T = t1 - t0
 
+        nlat = len(self.lat)
+        nlon = len(self.lon)
         # channels to read
         channels = np.array(self.colnames)[channels_idx].tolist()
 
         # --- read & shape data to match anemoi path: (T, C, G) -> (T, G, C) -> (T*G, C)
+        data_per_channel = []
         try:
-            data_per_channel = []
             for ch in channels:
-                # expect ds[ch] with shape (time, lat, lon) for this dataset
-
-                ###################################################################################
+                ch_parts = ch.split("_")
+                # retrieving profile channels
+                if len(ch_parts) == 2 and ch_parts[1] in self.levels :
+                    ch_ = ch_parts[0]
+                    level=int(ch_parts[1])
+                    data_lazy = self.ds[ch_].sel(isobaricInhPa=level)[t0:t1, :, :].astype("float32")
+                # retrieving surface channels
+                else:
+                    data_lazy = self.ds[ch][t0:t1, :, :].astype("float32")
 
                 signal.alarm(30)  # seconds
-                arr = 0
                 try:
-                    arr = np.asarray(self.ds[ch][t0:t1, :, :], dtype=np.float32)  # (T, nlat, nlon)
+                    data = data_lazy.compute(scheduler='synchronous').values
+                    data_per_channel.append(data.reshape(T, nlat * nlon))  # (T, G) 
                 except _Timeout:
                     print(f"{_pfx()} idx={idx} TIMEOUT while reading channel '{ch}' [{t0}:{t1}] after 30s", flush=True)
                     print(f"{_pfx()} idx={idx} TIMEOUT time steps: {self.time[t0:t1]}", flush=True)
-                    print(f"{_pfx()} idx={idx} TIMEOUT data: {arr}", flush=True)
+                    print(f"{_pfx()} idx={idx} TIMEOUT data: {data}", flush=True)
 
                 finally:
                     signal.alarm(0)  # always cancel alarm
-
-                ###################################################################################
-                if arr.ndim != 3:
-                    raise ValueError(f"Expected 3D array (time, lat, lon) for '{ch}', got shape {arr.shape}")
-                _, nlat, nlon = arr.shape
-                data_per_channel.append(arr.reshape(T, nlat * nlon))  # (T, G)
-
-            # stack channels to (T, C, G)
-            data_TCG = np.stack(data_per_channel, axis=1)  # (T, C, G)
-            # move channels to last and flatten time: (T, G, C) -> (T*G, C)
-            data = np.transpose(data_TCG, (0, 2, 1)).reshape(T * (nlat * nlon), len(channels)).astype(np.float32)
-
+                
         except Exception as e:
             _logger.debug(f"Date not present in CAMS dataset: {str(e)}. Skipping.")
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
+
+        # stack channels to (T, C, G)
+        data_TCG = np.stack(data_per_channel, axis=1)  # (T, C, G)
+        # move channels to last and flatten time: (T, G, C) -> (T*G, C)
+        data = np.transpose(data_TCG, (0, 2, 1)).reshape(T * (nlat * nlon), len(channels)).astype(np.float32)
+
         # --- coords: build flattened [lat, lon] once, then repeat for each time
         lon2d, lat2d = np.meshgrid(np.asarray(self.lon), np.asarray(self.lat))  # shapes (nlat, nlon)
         G = lon2d.size
