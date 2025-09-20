@@ -71,12 +71,16 @@ class VerifiedData:
 
     prediction: xr.DataArray
     ground_truth: xr.DataArray
+    prediction_next: xr.DataArray
+    ground_truth_next: xr.DataArray
+    climatology: xr.DataArray
 
     def __post_init__(self):
         # Perform checks on initialization
         self._validate_dimensions()
         self._validate_broadcastability()
 
+    # TODO: add checks for prediction_next, ground_truth_next, climatology
     def _validate_dimensions(self):
         # Ensure all dimensions in truth are in forecast (or equal)
         missing_dims = set(self.ground_truth.dims) - set(self.prediction.dims)
@@ -85,6 +89,7 @@ class VerifiedData:
                 f"Truth data has extra dimensions not found in forecast: {missing_dims}"
             )
 
+    # TODO: add checks for prediction_next, ground_truth_next, climatology
     def _validate_broadcastability(self):
         try:
             # Attempt broadcast
