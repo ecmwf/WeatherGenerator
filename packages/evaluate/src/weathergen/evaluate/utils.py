@@ -24,6 +24,23 @@ from weathergen.evaluate.score import VerifiedData, get_score
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
+def get_next_data(fstep, da_preds, da_tars, fsteps):
+    '''
+    Get the next forecast step data for the given forecast step.
+    '''
+
+    fstep_idx = fsteps.index(fstep)
+    # Get the next forecast step
+    next_fstep = fsteps[fstep_idx + 1] if fstep_idx + 1 < len(fsteps) else None
+    if next_fstep is not None:
+        preds_next = da_preds.get(next_fstep, None)
+        tars_next = da_tars.get(next_fstep, None)
+    else:
+        # TODO: replace by None and handle in metrics
+        preds_next = da_preds.get(fstep, None)
+        tars_next = da_tars.get(fstep, None)
+
+    return preds_next, tars_next
 
 def calc_scores_per_stream(
     reader: Reader, stream: str, region: str, metrics: list[str]
@@ -90,8 +107,6 @@ def calc_scores_per_stream(
         },
     )
 
-    # fsteps ordered numerically
-    sfsteps = sorted(fsteps)
 
     for (fstep, tars), (_, preds) in zip(
         da_tars.items(), da_preds.items(), strict=False
@@ -103,32 +118,10 @@ def calc_scores_per_stream(
         for metric in metrics:
             metrics_kwargs[metric] = {}
 
-        if "froct" in metrics:
-            # index of fstep in sorted fsteps
-            fstep_idx = sfsteps.index(fstep)
-            next_fstep = sfsteps[fstep_idx + 1] if fstep_idx + 1 < len(sfsteps) else None
-            if next_fstep is not None:
-                preds_next = da_preds.get(next_fstep, None)
-            else:
-                preds_next = da_preds.get(fstep, None)
-                # set all values to nan if there is no next step
-                # preds_next[:] = np.full_like(preds_next, np.nan)
-            metrics_kwargs["froct"] = {"p1": preds_next}
-
-        if "troct" in metrics:
-            # index of fstep in sorted fsteps
-            fstep_idx = sfsteps.index(fstep)
-            next_fstep = sfsteps[fstep_idx + 1] if fstep_idx + 1 < len(sfsteps) else None
-            if next_fstep is not None:
-                gt1 = da_tars.get(next_fstep, None)
-            else:
-                gt1 = da_tars.get(fstep, None)
-                # gt1[:] = np.full_like(gt1, np.nan)
-            metrics_kwargs["troct"] = {"gt1": gt1}
+        preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
 
         if preds.ipoint.size > 0:
-            score_data = VerifiedData(preds, tars)
-
+            score_data = VerifiedData(preds, tars, preds_next, tars_next)
             # Build up computation graphs for all metrics
             _logger.debug(
                 f"Build computation graphs for metrics for stream {stream}..."

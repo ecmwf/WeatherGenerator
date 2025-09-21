@@ -73,14 +73,13 @@ class VerifiedData:
     ground_truth: xr.DataArray
     prediction_next: xr.DataArray
     ground_truth_next: xr.DataArray
-    climatology: xr.DataArray
 
     def __post_init__(self):
         # Perform checks on initialization
         self._validate_dimensions()
         self._validate_broadcastability()
 
-    # TODO: add checks for prediction_next, ground_truth_next, climatology
+    # TODO: add checks for prediction_next, ground_truth_next
     def _validate_dimensions(self):
         # Ensure all dimensions in truth are in forecast (or equal)
         missing_dims = set(self.ground_truth.dims) - set(self.prediction.dims)
@@ -89,7 +88,7 @@ class VerifiedData:
                 f"Truth data has extra dimensions not found in forecast: {missing_dims}"
             )
 
-    # TODO: add checks for prediction_next, ground_truth_next, climatology
+    # TODO: add checks for prediction_next, ground_truth_next
     def _validate_broadcastability(self):
         try:
             # Attempt broadcast
@@ -264,7 +263,10 @@ class Scores:
 
         arg_names: list[str] = inspect.getfullargspec(f).args[1:]
 
-        args = {"p": data.prediction, "gt": data.ground_truth}
+        if score_name in ["froct", "troct"]:
+            args = {"p": data.prediction, "gt": data.ground_truth, "p_next": data.prediction_next, "gt_next": data.ground_truth_next}
+        else:
+            args = {"p": data.prediction, "gt": data.ground_truth}
 
         # Add group_by_coord if provided
         if group_by_coord is not None:
@@ -615,7 +617,8 @@ class Scores:
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
-        p1: xr.DataArray,
+        p_next: xr.DataArray,
+        gt_next: xr.DataArray,
         group_by_coord: str | None = None,
     ):
         """
@@ -627,8 +630,10 @@ class Scores:
             Forecast data array
         gt: xr.DataArray
             Ground truth data array (not used in calculation, but kept for consistency)
-        p1: xr.DataArray
+        p_next: xr.DataArray
             Next forecast step data array
+        gt_next: xr.DataArray
+            Next ground truth step data array (not used in calculation, but kept for consistency)
         group_by_coord: str
             Name of the coordinate to group by.
             If provided, the coordinate becomes a new dimension of the FROCT score.
@@ -638,7 +643,7 @@ class Scores:
                 "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
             )
 
-        froct = np.abs(p - p1.values)
+        froct = np.abs(p - p_next.values)
 
         if group_by_coord:
             froct = froct.groupby(group_by_coord)
@@ -651,7 +656,8 @@ class Scores:
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
-        gt1: xr.DataArray,
+        gt_next: xr.DataArray,
+        p_next: xr.DataArray,
         group_by_coord: str | None = None,
     ):
         """
@@ -660,10 +666,12 @@ class Scores:
         Parameters
         ----------
         p: xr.DataArray
-            Forecast data array
+            Forecast data array (not used in calculation, but kept for consistency)
         gt: xr.DataArray
-            Ground truth data array (not used in calculation, but kept for consistency)
-        gt1: xr.DataArray
+            Ground truth data array
+        p_next: xr.DataArray
+            Next forecast step data array (not used in calculation, but kept for consistency)
+        gt_next: xr.DataArray
             Next ground truth step data array
         group_by_coord: str
             Name of the coordinate to group by.
@@ -674,7 +682,7 @@ class Scores:
                 "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
             )
 
-        troct = np.abs(gt - gt1.values)
+        troct = np.abs(gt - gt_next.values)
 
         if group_by_coord:
             troct = troct.groupby(group_by_coord)
