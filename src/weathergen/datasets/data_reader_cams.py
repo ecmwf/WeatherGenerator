@@ -248,12 +248,12 @@ class DataReaderCams(DataReaderTimestep):
                 else:
                     data_lazy = self.ds[ch][t0:t1, :, :].astype("float32")
 
-                signal.alarm(30)  # seconds
+                signal.alarm(600)  # seconds
                 try:
                     data = data_lazy.compute(scheduler='synchronous').values
                     data_per_channel.append(data.reshape(T, nlat * nlon))  # (T, G) 
                 except _Timeout:
-                    print(f"{_pfx()} idx={idx} TIMEOUT while reading channel '{ch}' [{t0}:{t1}] after 30s", flush=True)
+                    print(f"{_pfx()} idx={idx} TIMEOUT while reading channel '{ch}' [{t0}:{t1}] after 600s", flush=True)
                     print(f"{_pfx()} idx={idx} TIMEOUT time steps: {self.time[t0:t1]}", flush=True)
                     print(f"{_pfx()} idx={idx} TIMEOUT data: {data}", flush=True)
 
