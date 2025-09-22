@@ -37,9 +37,8 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
         preds_next = da_preds.get(next_fstep, None)
         tars_next = da_tars.get(next_fstep, None)
     else:
-        # TODO: replace by None and handle in metrics
-        preds_next = da_preds.get(fstep, None)
-        tars_next = da_tars.get(fstep, None)
+        preds_next = None
+        tars_next = None
 
     return preds_next, tars_next
 

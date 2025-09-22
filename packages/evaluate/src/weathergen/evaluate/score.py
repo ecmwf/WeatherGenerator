@@ -619,6 +619,7 @@ class Scores:
         return rmse
 
     def calc_change_rate(
+        self,
         s0: xr.DataArray,
         s1: xr.DataArray,
     ):
@@ -638,9 +639,11 @@ class Scores:
             Change rate of the data array
         """
 
-        crate = np.abs(s1 - s0.values)
-
-        return crate
+        if s1 is None:
+            return xr.full_like(s0, np.nan)
+        else:
+            crate = np.abs(s1 - s0.values)
+            return crate
 
     def calc_froct(
         self,
