@@ -1,8 +1,8 @@
 {
    "assets": {
-      "ocean_node/*.zarr": {
+      "ocean_elem/ocean_node_{year}.zarr": {
          "description": "Ocean node component of the AWI model using OpenIFS (CY43R3 version). Configured on a  non-regular grid with 126858 nodes",
-         "href": "ocean_node/*.zarr",
+         "href": "ocean_elem/ocean_node_{year}.zarr",
          "inodes": "154,452",
          "locations": [
             "juwels_booster"
@@ -11,7 +11,7 @@
             "data"
          ],
          "size": "3.4 TB",
-         "title": "ocean_node/*.zarr",
+         "title": "ocean_elem/ocean_node_{year}.zarr",
          "type": "application/zarr"
       }
    },
@@ -48,7 +48,7 @@
       ],
       "type": "Polygon"
    },
-   "id": "weathergen.atmo.AWI IFS-FESOM (OCEAN ELEM)",
+   "id": "weathergen.atmo.AWI IFS-FESOM (OCEAN NODE)",
    "properties": {
       "description": "The ocean node component of the AWI IFS-FESOM coupled climate dataset that integrates atmospheric simulations from the IFS model with ocean and sea ice dynamics from the FESOM framework, capturing detailed Earth system interactions at high resolution.",
       "end_datetime": "2209-12-31T23:59:59",
@@ -60,13 +60,13 @@
          "ocean",
          "ocean node"
       ],
-      "name": "AWI IFS-FESOM (OCEAN ELEM)",
+      "name": "AWI IFS-FESOM (OCEAN NODE)",
       "processing_level": "model output",
       "providers": [
          "AWI"
       ],
       "start_datetime": "2000-01-01T00:00:00",
-      "title": "AWI IFS-FESOM Coupled Climate Model",
+      "title": "AWI IFS-FESOM Coupled Climate Model (Ocean node)",
       "unique_id": "16",
       "variables": {
          "MLD2": {

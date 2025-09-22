@@ -1,8 +1,8 @@
 {
    "assets": {
-      "atmos_all/*.zarr": {
+      "atmos_all/{year}.zarr": {
          "description": "Atmospheric component of the AWI model using OpenIFS (CY43R3 version). Configured on a regular grid of 400 (longitude) × 192 (latitude) points",
-         "href": "atmos_all/*.zarr",
+         "href": "atmos_all/{year}.zarr",
          "inodes": "614,657",
          "locations": [
             "juwels_booster"
@@ -11,7 +11,7 @@
             "data"
          ],
          "size": "12 TB",
-         "title": "atmos_all/*.zarr",
+         "title": "atmos_all/{year}.zarr",
          "type": "application/zarr"
       }
    },
@@ -57,7 +57,7 @@
       "keywords": [
          "coupled model",
          "climate simulation",
-         "atmopshere"
+         "atmosphere"
       ],
       "name": "AWI IFS-FESOM (ATMOS)",
       "processing_level": "model output",
@@ -66,7 +66,7 @@
          "ECMWF"
       ],
       "start_datetime": "2000-01-01T00:00:00",
-      "title": "AWI IFS-FESOM Coupled Climate Model",
+      "title": "AWI IFS-FESOM Coupled Climate Model (Atmos)",
       "unique_id": "14",
       "variables": {
          "10u": {

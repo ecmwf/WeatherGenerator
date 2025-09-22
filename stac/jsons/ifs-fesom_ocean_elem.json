@@ -1,8 +1,8 @@
 {
    "assets": {
-      "ocean_elem/*.zarr": {
+      "ocean_elem/ocean_elem_{year}.zarr": {
          "description": "Ocean element component of the AWI model using OpenIFS (CY43R3 version). Configured on a regular grid of 400 (longitude) × 192 (latitude) points",
-         "href": "ocean_elem/*.zarr",
+         "href": "ocean_elem/ocean_elem_{year}.zarr",
          "inodes": "154,452",
          "locations": [
             "juwels_booster"
@@ -11,7 +11,7 @@
             "data"
          ],
          "size": "4.4 TB",
-         "title": "ocean_elem/*.zarr",
+         "title": "ocean_elem/ocean_elem_{year}.zarr",
          "type": "application/zarr"
       }
    },
@@ -66,7 +66,7 @@
          "AWI"
       ],
       "start_datetime": "2000-01-01T00:00:00",
-      "title": "AWI IFS-FESOM Coupled Climate Model",
+      "title": "AWI IFS-FESOM Coupled Climate Model (Ocean element)",
       "unique_id": "15",
       "variables": {
          "tx_sur": {

@@ -4,7 +4,7 @@ local common = import 'common.jsonnet';
   name: "AWI IFS-FESOM (ATMOS)",
   filename: "ifs-fesom_atmos.json",
   description: "The atmosphere element component of the AWI IFS-FESOM coupled climate dataset that integrates atmospheric simulations from the IFS model with ocean and sea ice dynamics from the FESOM framework, capturing detailed Earth system interactions at high resolution.",
-  title: "AWI IFS-FESOM Coupled Climate Model",
+  title: "AWI IFS-FESOM Coupled Climate Model (Atmos)",
   unique_id: "14",
   start_datetime: "2000-01-01T00:00:00",
   end_datetime: "2209-12-31T23:59:59",
@@ -13,7 +13,7 @@ local common = import 'common.jsonnet';
   keywords: [
     "coupled model",
     "climate simulation",
-    "atmopshere",
+    "atmosphere",
   ],
   providers: [
     "AWI",
@@ -23,7 +23,10 @@ local common = import 'common.jsonnet';
 
    //retrieved from one arr file
    // ds['data'].attrs['columns'][2:], ds['data'].attrs['means']
-   // ds['data'].attrs['std']
+   // ds['data'].attrs['std'] 
+   // tendencies were calculate using a script: https://gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private/-/blob/main/data/preprocessing/tendencies/compute_tendencies.py?ref_type=heads (slighly modified)
+  // calculate min and max also separately
+
    variables: {
      names: [
       '10u',
@@ -1193,9 +1196,12 @@ local common = import 'common.jsonnet';
  },
 
   geometry: [0, 360, -90, 90],
+  
 
   dataset: {
-    dataset_name: 'atmos_all/*.zarr',
+    // This contains a set of files from the year 2000-2209, each for one year
+    // example: atmos_all/2000.zarr
+    dataset_name: 'atmos_all/{year}.zarr',
     type: 'application/zarr',
     description: 'Atmospheric component of the AWI model using OpenIFS (CY43R3 version). Configured on a regular grid of 400 (longitude) × 192 (latitude) points',
     locations: [common.hpc.jsc],
