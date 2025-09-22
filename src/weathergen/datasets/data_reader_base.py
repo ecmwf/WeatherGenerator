@@ -151,7 +151,7 @@ class TimeWindowHandler:
 
     def get_index_range(self) -> TimeIndexRange:
         """
-        Temporal window corresponding to index
+        Range of indices identifying time ranges, from start to end.
 
         Parameters
         ----------
