@@ -24,10 +24,11 @@ from weathergen.evaluate.score import VerifiedData, get_score
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
+
 def get_next_data(fstep, da_preds, da_tars, fsteps):
-    '''
+    """
     Get the next forecast step data for the given forecast step.
-    '''
+    """
 
     fstep_idx = fsteps.index(fstep)
     # Get the next forecast step
@@ -41,6 +42,7 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
         tars_next = da_tars.get(fstep, None)
 
     return preds_next, tars_next
+
 
 def calc_scores_per_stream(
     reader: Reader, stream: str, region: str, metrics: list[str]
@@ -106,7 +108,6 @@ def calc_scores_per_stream(
             "metric": metrics,
         },
     )
-
 
     for (fstep, tars), (_, preds) in zip(
         da_tars.items(), da_preds.items(), strict=False

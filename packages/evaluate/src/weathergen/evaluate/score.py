@@ -264,7 +264,12 @@ class Scores:
         arg_names: list[str] = inspect.getfullargspec(f).args[1:]
 
         if score_name in ["froct", "troct"]:
-            args = {"p": data.prediction, "gt": data.ground_truth, "p_next": data.prediction_next, "gt_next": data.ground_truth_next}
+            args = {
+                "p": data.prediction,
+                "gt": data.ground_truth,
+                "p_next": data.prediction_next,
+                "gt_next": data.ground_truth_next,
+            }
         else:
             args = {"p": data.prediction, "gt": data.ground_truth}
 
@@ -613,6 +618,30 @@ class Scores:
 
         return rmse
 
+    def calc_change_rate(
+        s0: xr.DataArray,
+        s1: xr.DataArray,
+    ):
+        """
+        Calculate the "change rate" of a data array as the mean absolute difference between two consecutive time steps.
+
+        Parameters
+        ----------
+        s0: xr.DataArray
+            Data array at time step t0
+        s1: xr.DataArray
+            Data array at time step t1
+
+        Returns
+        -------
+        xr.DataArray
+            Change rate of the data array
+        """
+
+        crate = np.abs(s1 - s0.values)
+
+        return crate
+
     def calc_froct(
         self,
         p: xr.DataArray,
@@ -643,7 +672,7 @@ class Scores:
                 "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
             )
 
-        froct = np.abs(p - p_next.values)
+        froct = self.calc_change_rate(p, p_next)
 
         if group_by_coord:
             froct = froct.groupby(group_by_coord)
@@ -651,7 +680,7 @@ class Scores:
         froct = self._mean(froct)
 
         return froct
-    
+
     def calc_troct(
         self,
         p: xr.DataArray,
@@ -682,7 +711,7 @@ class Scores:
                 "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
             )
 
-        troct = np.abs(gt - gt_next.values)
+        troct = self.calc_change_rate(gt, gt_next)
 
         if group_by_coord:
             troct = troct.groupby(group_by_coord)
