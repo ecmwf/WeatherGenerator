@@ -9,6 +9,7 @@
 
 import logging
 import pathlib
+from itertools import chain
 
 import numpy as np
 import torch
@@ -36,6 +37,7 @@ from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
+_MAX_LEN = 100_000_000
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +111,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 logger.warning("forecast policy is not None but number of forecast steps is 0.")
         self.forecast_policy = cf.forecast_policy
 
-        self.len = 100000000
-
         self.streams_datasets: list[list[AnyDataReader]] = []
         for _, stream_info in enumerate(cf.streams):
             self.streams_datasets.append([])
@@ -164,20 +164,31 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     )
                 ds = dataset(filename=filename, **kwargs)
 
-                fsm = self.forecast_steps[0]
-                if len(ds) > 0:
-                    self.len = min(self.len, len(ds) - (cf.len_hrs * (fsm + 1)) // cf.step_hrs)
-
-                # MODIFIES config !!!
-                stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
-                stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
-                stream_info["target_channel_weights"] = (
-                    ds.target_channel_weights
-                    if ds.target_channel_weights is not None
-                    else [1.0 for _ in ds.target_channels]
-                )
-
                 self.streams_datasets[-1] += [ds]
+
+        # MODIFIES config !!!
+        for stream_info, stream_datasets in zip(cf.streams, self.streams_datasets, strict=True):
+            # assume all datasets within one stream have the same channels
+            sample_ds = stream_datasets[0]
+            stream_info[f"{self._stage}_source_channels"] = sample_ds.source_channels
+            stream_info[f"{self._stage}_target_channels"] = sample_ds.target_channels
+            # TODO no need to modify the stream config here
+            stream_info["target_channel_weights"] = (
+                sample_ds.target_channel_weights
+                if sample_ds.target_channel_weights is not None
+                else [1.0 for _ in sample_ds.target_channels]
+            )
+
+        fsm: int = self.forecast_steps[0]
+        forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
+        self.len = min(
+            _MAX_LEN,
+            min(
+                len(ds) - forecast_len
+                for ds in chain.from_iterable(self.streams_datasets)
+                if len(ds) > 0
+            ),
+        )
 
         index_range = self.time_window_handler.get_index_range()
         self.len = len(index_range)
@@ -487,3 +498,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             )
 
         return iter_start, iter_end
+
+
+def create_datasets():
+    pass
