@@ -96,9 +96,9 @@ class TrainerBase:
 
             if torch.accelerator.is_available():
                 device_type = torch.accelerator.current_accelerator()
-                device = torch.device(f"{device_type}:{rank}")
+                device = torch.device(f"{device_type}:{local_rank}")
                 torch.accelerator.set_device_index(local_rank)
-                print(f"DDP initialization: rank={rank}, world_size={world_size}")
+                print(f"DDP initialization: device={device}, rank={rank}, world_size={world_size}")
             else:
                 device = torch.device("cpu")
                 print(f"Running on device {device}")
