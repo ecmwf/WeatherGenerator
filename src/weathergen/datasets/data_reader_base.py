@@ -188,6 +188,9 @@ class TimeWindowHandler:
 
         return DTRange(t_start_win, t_end_win)
 
+    def get_n_steps(self, forecast_step: int) -> int:
+        return (int(self.t_window_len) * forecast_step) // int(self.t_window_step)
+
 
 @dataclass
 class ReaderData:

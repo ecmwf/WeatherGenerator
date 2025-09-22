@@ -277,7 +277,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # value in worker_workset()
         self.rng = np.random.default_rng(self.data_loader_rng_seed)
 
-        fsm = (
+        fsm: int = (
             self.forecast_steps[min(self.epoch, len(self.forecast_steps) - 1)]
             if self.forecast_policy != "random"
             else self.forecast_steps.max()
@@ -289,7 +289,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         index_range = self.time_window_handler.get_index_range()
         idx_end = index_range.end
         # native length of datasets, independent of epoch length that has potentially been specified
-        forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
+        forecast_len = self.time_window_handler.get_n_steps(fsm + 1)
         idx_end -= forecast_len + self.forecast_offset
         assert idx_end > 0, "dataset size too small for forecast range"
         self.perms = np.arange(index_range.start, idx_end)
@@ -397,12 +397,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     for fstep in range(
                         self.forecast_offset, self.forecast_offset + forecast_dt + 1
                     ):
-                        step_forecast_dt = idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
-                        time_win_target = self.time_window_handler.window(step_forecast_dt)
+                        forecast_idx = idx + self.time_window_handler.get_n_steps(fstep)
+                        time_win_target = self.time_window_handler.window(forecast_idx)
 
                         # collect all targets for current stream
                         rdata: IOReaderData = collect_datasources(
-                            stream_ds, step_forecast_dt, "target"
+                            stream_ds, forecast_idx, "target"
                         )
 
                         if rdata.is_empty():
