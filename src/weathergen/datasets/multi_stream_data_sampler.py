@@ -109,60 +109,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 logger.warning("forecast policy is not None but number of forecast steps is 0.")
         self.forecast_policy = cf.forecast_policy
 
-        self.streams_datasets: list[list[AnyDataReader]] = []
-        for _, stream_info in enumerate(cf.streams):
-            self.streams_datasets.append([])
-
-            for fname in stream_info["filenames"]:
-                kwargs = {
-                    "tw_handler": self.time_window_handler,
-                    "stream_info": stream_info,
-                }
-                dataset: type[AnyDataReader] | None = None
-                match stream_info["type"]:
-                    case "obs":
-                        dataset = DataReaderObs
-                        datapath = cf.data_path_obs
-                        # kwargs["end"] = end_date_padded # TODO: implement the padding
-                    case "anemoi":
-                        dataset = DataReaderAnemoi
-                        datapath = cf.data_path_anemoi
-                    case "fesom":
-                        dataset = DataReaderFesom
-                        datapath = cf.data_path_fesom
-                    case "icon":
-                        dataset = IconDataset
-                        datapath = cf.data_path_icon
-                    case _:
-                        msg = f"Unsupported stream type {stream_info['type']}"
-                        f"for stream name '{stream_info['name']}'."
-                        raise ValueError(msg)
-
-                datapath = pathlib.Path(datapath)
-                fname = pathlib.Path(fname)
-                # dont check if file exists since zarr stores might be directories
-                if fname.exists():
-                    # check if fname is a valid path to allow for simple overwriting
-                    filename = fname
-                else:
-                    filename = pathlib.Path(datapath) / fname
-
-                    if not filename.exists():  # see above
-                        msg = (
-                            f"Did not find input data for {stream_info['type']} "
-                            f"stream '{stream_info['name']}': {filename}."
-                        )
-                        raise FileNotFoundError(msg)
-
-                ds_type = stream_info["type"]
-                if is_root():
-                    logger.info(
-                        f"Opening dataset with type: {ds_type}"
-                        + f" from stream config {stream_info['name']}.",
-                    )
-                ds = dataset(filename=filename, **kwargs)
-
-                self.streams_datasets[-1] += [ds]
+        self.streams_datasets: list[list[AnyDataReader]] = [
+            create_datasets(stream_info, self.time_window_handler, cf)
+            for stream_info in cf.streams
+        ]
 
         # MODIFIES config !!!
         for stream_info, stream_datasets in zip(cf.streams, self.streams_datasets, strict=True):
@@ -487,5 +437,59 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         return iter_start, iter_end
 
 
-def create_datasets():
-    pass
+def create_datasets(stream_info, time_window_handler, cf) -> list[DataReaderBase]:
+    datasets: list[DataReaderBase] = []
+
+    for fname in stream_info["filenames"]:
+        kwargs = {
+            "tw_handler": time_window_handler,
+            "stream_info": stream_info,
+        }
+        dataset: type[AnyDataReader] | None = None
+        match stream_info["type"]:
+            case "obs":
+                dataset = DataReaderObs
+                datapath = cf.data_path_obs
+                # kwargs["end"] = end_date_padded # TODO: implement the padding
+            case "anemoi":
+                dataset = DataReaderAnemoi
+                datapath = cf.data_path_anemoi
+            case "fesom":
+                dataset = DataReaderFesom
+                datapath = cf.data_path_fesom
+            case "icon":
+                dataset = IconDataset
+                datapath = cf.data_path_icon
+            case _:
+                msg = f"Unsupported stream type {stream_info['type']}"
+                f"for stream name '{stream_info['name']}'."
+                raise ValueError(msg)
+
+        datapath = pathlib.Path(datapath)
+        fname = pathlib.Path(fname)
+        # dont check if file exists since zarr stores might be directories
+        if fname.exists():
+            # check if fname is a valid path to allow for simple overwriting
+            filename = fname
+        else:
+            filename = pathlib.Path(datapath) / fname
+
+            if not filename.exists():  # see above
+                msg = (
+                    f"Did not find input data for {stream_info['type']} "
+                    f"stream '{stream_info['name']}': {filename}."
+                )
+                raise FileNotFoundError(msg)
+
+        ds_type = stream_info["type"]
+        if is_root():
+            logger.info(
+                f"Opening dataset with type: {ds_type}"
+                + f" from stream config {stream_info['name']}.",
+            )
+
+        ds = dataset(filename=filename, **kwargs)
+
+        datasets += [ds]
+    
+    return datasets
