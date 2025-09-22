@@ -9,7 +9,6 @@
 
 import logging
 import pathlib
-from itertools import chain
 
 import numpy as np
 import torch
@@ -37,7 +36,6 @@ from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
-_MAX_LEN = 100_000_000
 
 logger = logging.getLogger(__name__)
 
@@ -178,17 +176,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if sample_ds.target_channel_weights is not None
                 else [1.0 for _ in sample_ds.target_channels]
             )
-
-        fsm: int = self.forecast_steps[0]
-        forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
-        self.len = min(
-            _MAX_LEN,
-            min(
-                len(ds) - forecast_len
-                for ds in chain.from_iterable(self.streams_datasets)
-                if len(ds) > 0
-            ),
-        )
 
         index_range = self.time_window_handler.get_index_range()
         self.len = len(index_range)
