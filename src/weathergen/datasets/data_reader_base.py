@@ -10,6 +10,7 @@
 import datetime
 import logging
 from abc import abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 import numpy as np
@@ -46,7 +47,17 @@ class TimeIndexRange:
     """
 
     start: TIndex
-    end: TIndex
+    stop: TIndex
+    step: TIndex = 1
+
+    def __post_init__(self):
+        self._range = range(self.start, self.stop, self.step)
+
+    def __iter__(self) -> Iterator[TIndex]:
+        return iter(self._range)
+    
+    def __len__(self) -> int:
+        return len(self._range)
 
 
 @dataclass

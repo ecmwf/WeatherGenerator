@@ -193,7 +193,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 self.streams_datasets[-1] += [ds]
 
         index_range = self.time_window_handler.get_index_range()
-        self.len = int(index_range.end - index_range.start)
+        self.len = len(index_range)
         self.len = min(self.len, samples_per_epoch if samples_per_epoch else self.len)
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len // cf.world_size) // batch_size) * batch_size
@@ -287,12 +287,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # data
         index_range = self.time_window_handler.get_index_range()
-        idx_end = index_range.end
         # native length of datasets, independent of epoch length that has potentially been specified
         forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
-        idx_end -= forecast_len + self.forecast_offset
-        assert idx_end > 0, "dataset size too small for forecast range"
-        self.perms = np.arange(index_range.start, idx_end)
+        adjusted_index_range = range(
+            index_range.start,
+            index_range.stop
+            - forecast_len
+            + self.forecast_offset,
+        )
+        assert adjusted_index_range.stop > 0, "dataset size too small for forecast range"
+        self.perms = np.array(adjusted_index_range)
         if self.shuffle:
             self.perms = self.rng.permutation(self.perms)
 
