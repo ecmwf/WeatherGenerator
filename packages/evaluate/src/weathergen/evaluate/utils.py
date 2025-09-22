@@ -114,11 +114,6 @@ def calc_scores_per_stream(
     ):
         _logger.debug(f"Verifying data for stream {stream}...")
 
-        # Prepare any metric-specific kwargs, similar for ACC
-        metrics_kwargs = {}
-        for metric in metrics:
-            metrics_kwargs[metric] = {}
-
         preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
 
         if preds.ipoint.size > 0:
@@ -134,7 +129,6 @@ def calc_scores_per_stream(
                     metric,
                     agg_dims="ipoint",
                     group_by_coord="sample",
-                    **metrics_kwargs[metric],
                 )
                 for metric in metrics
             ]
