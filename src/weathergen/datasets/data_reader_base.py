@@ -199,6 +199,11 @@ class TimeWindowHandler:
 
         return DTRange(t_start_win, t_end_win)
 
+    def __str__(self)-> str:
+        return (
+            f"start={self.t_start}, end={self.t_end},"
+            +f"len_hrs={self.t_window_len}, step_hrs={self.t_window_step}"
+        )
 
 @dataclass
 class ReaderData:
