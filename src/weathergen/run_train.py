@@ -139,12 +139,6 @@ def train_continue_from_args(argl: list[str]):
     # track history of run to ensure traceability of results
     cf.run_history += [(args.from_run_id, cf.istep)]
 
-    if args.finetune_forecast:
-        if cf.forecast_freeze_model:
-            cf.with_fsdp = False
-            import torch
-
-            torch._dynamo.config.optimize_ddp = False
     trainer = Trainer()
     trainer.run(cf, devices, args.from_run_id, args.epoch)
 
