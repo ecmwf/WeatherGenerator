@@ -106,6 +106,7 @@ class StreamData:
         None
         """
 
+        source = IOReaderData.spoof(source)
         self.source_raw += [source]
         self.source_tokens_lens += [torch.zeros([self.nhc_source], dtype=torch.int32)]
         self.source_tokens_cells += [torch.tensor([])]

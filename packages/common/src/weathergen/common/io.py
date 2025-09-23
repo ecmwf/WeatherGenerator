@@ -21,6 +21,10 @@ import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
 
+import torch
+import astropy_healpix as hp
+# from weathergen.datasets.utils import s2tor3
+
 # experimental value, should be inferred more intelligently
 CHUNK_N_SAMPLES = 16392
 DType: typing.TypeAlias = np.float32
@@ -31,6 +35,24 @@ _logger = logging.getLogger(__name__)
 
 
 np.ndarray(3)
+
+def s2tor3(lats, lons):
+    """
+    Convert from spherical to Cartesion R^3 coordinates
+
+    Note: mathematics convention with lats in [0,pi] and lons in [0,2pi] is used
+          (which is not problematic for lons but for lats care is required)
+    """
+    sin_lats = torch.sin(lats)
+    cos_lats = torch.cos(lats)
+
+    # Calculate the x, y, and z coordinates using vectorized operations.
+    x = sin_lats * torch.cos(lons)
+    y = sin_lats * torch.sin(lons)
+    z = cos_lats
+
+    # Stack the x, y, and z tensors along the last dimension.
+    return torch.stack([x, y, z], dim=-1)
 
 
 @dataclasses.dataclass
@@ -61,6 +83,44 @@ class IOReaderData:
         datetimes = other.datetimes
 
         n_datapoints = len(data)
+
+        import pdb; pdb.set_trace()
+
+        assert coords.shape == (n_datapoints, 2), "number of datapoints do not match data"
+        assert geoinfos.shape[0] == n_datapoints, "number of datapoints do not match data"
+        assert datetimes.shape[0] == n_datapoints, "number of datapoints do not match data"
+
+        return cls(**dataclasses.asdict(other))
+
+    @classmethod
+    def spoof(cls, other: typing.Any) -> typing.Self:
+        """
+        Spoof an instance from data_reader_base.ReaderData instance.
+
+        other should be such an instance.
+        """
+
+        hl = 5
+        dx = 0.5
+        dy = 0.5
+
+        num_healpix_cells = 12 * 4**hl
+        lons, lats = hp.healpix_to_lonlat(
+            np.arange(0, num_healpix_cells), 2**hl, dx=dx, dy=dy, order="nested"
+        )
+        #healpix_centers = s2tor3(
+        #    torch.from_numpy(np.pi / 2.0 - lats.value), torch.from_numpy(lons.value)
+        #)
+        #healpix_centers = healpix_centers.numpy()
+
+        coords = np.stack([lats.value, lons.value], axis=-1)
+        geoinfos = np.zeros_like(coords[:, 0])
+        data = np.zeros_like(coords[:, 0])
+        datetimes = np.array(['2000-01-01T00:00:00'], dtype='datetime64[ns]').repeat(coords.shape[0])
+
+        n_datapoints = len(data)
+
+        import pdb; pdb.set_trace()
 
         assert coords.shape == (n_datapoints, 2), "number of datapoints do not match data"
         assert geoinfos.shape[0] == n_datapoints, "number of datapoints do not match data"

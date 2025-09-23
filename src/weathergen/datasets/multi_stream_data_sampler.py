@@ -334,8 +334,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         # to avoid unwanted dependencies => see IOReaderData docstring
                         rdata_wrapped = IOReaderData.create(rdata)
 
-                        if rdata.is_empty():
+                        if rdata.is_empty():     
                             stream_data.add_empty_source(rdata_wrapped)
+                            import pdb; pdb.set_trace()
                         else:
                             # TODO: handling of conversion from numpy to torch here and below
                             # TODO: this should only be collected in validation mode
