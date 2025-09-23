@@ -9,7 +9,6 @@
 
 import json
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -17,15 +16,14 @@ import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
 
-from weathergen.common.io import ZarrIO
+from weathergen.evaluate.io_reader import Reader
 from weathergen.evaluate.plot_utils import plot_metric_region
-from weathergen.evaluate.io_reader import WeatherGeneratorOutput, Reader
 from weathergen.evaluate.plotter import LinePlots, Plotter
 from weathergen.evaluate.score import VerifiedData, get_score
-from weathergen.evaluate.score_utils import  to_list
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
+
 
 def calc_scores_per_stream(
     reader: Reader, stream: str, region: str, metrics: list[str]
@@ -53,11 +51,9 @@ def calc_scores_per_stream(
         f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}..."
     )
 
-    available_data = reader.check_availability(
-        stream, mode="evaluation"
-    )
+    available_data = reader.check_availability(stream, mode="evaluation")
 
-    output_data =reader.get_data( 
+    output_data = reader.get_data(
         stream,
         region=region,
         fsteps=available_data.fsteps,
@@ -140,11 +136,7 @@ def calc_scores_per_stream(
     return metric_stream, points_per_sample
 
 
-def plot_data(
-    reader: Reader, 
-    stream: str,
-    global_plotting_opts: dict
-) -> list[str]:
+def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[str]:
     """
     Plot the data for a given run and stream.
 
@@ -152,7 +144,7 @@ def plot_data(
     ----------
     reader: Reader
         Reader object containing all infos about the run
-    stream: str 
+    stream: str
         Stream name to plot data for.
     global_plotting_opts: dict
         Dictionary containing all plotting options that apply globally to all run_ids
@@ -168,7 +160,7 @@ def plot_data(
 
     # handle plotting settings
     plot_settings = stream_cfg.get("plotting", {})
-   
+
     # return early if no plotting is requested
     if not (
         plot_settings
@@ -184,7 +176,9 @@ def plot_data(
         "image_format": global_plotting_opts.get("image_format", "png"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
-        "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False)
+        "plot_subtimesteps": reader.get_inference_stream_attr(
+            stream, "tokenize_spacetime", False
+        ),
     }
 
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
@@ -218,11 +212,13 @@ def plot_data(
     if not da_tars:
         _logger.info(f"Skipping Plot Data for {stream}. Targets are empty.")
         return
-    
-    #get common ranges across all run_ids
+
+    # get common ranges across all run_ids
     if not isinstance(global_plotting_opts.get(stream), oc.DictConfig):
         global_plotting_opts[stream] = oc.DictConfig({})
-    maps_config = common_ranges(da_tars, da_preds, available_data.channels, global_plotting_opts[stream])
+    maps_config = common_ranges(
+        da_tars, da_preds, available_data.channels, global_plotting_opts[stream]
+    )
 
     plot_names = []
 
@@ -276,7 +272,7 @@ def plot_data(
 
 
 def metric_list_to_json(
-    reader: Reader, 
+    reader: Reader,
     metrics_list: list[xr.DataArray],
     npoints_sample_list: list[xr.DataArray],
     streams: list[str],
@@ -288,7 +284,7 @@ def metric_list_to_json(
 
     Parameters
     ----------
-    reader: 
+    reader:
         Reader object containing all info about the run_id.
     metrics_list :
         Metrics per stream.
@@ -341,9 +337,7 @@ def metric_list_to_json(
     )
 
 
-def retrieve_metric_from_json(
-    reader: Reader, stream: str, region: str, metric: str
-):
+def retrieve_metric_from_json(reader: Reader, stream: str, region: str, metric: str):
     """
     Retrieve the score for a given run, stream, metric, epoch, and rank from a JSON file.
 
@@ -364,10 +358,11 @@ def retrieve_metric_from_json(
         The metric DataArray.
     """
     score_path = (
-        Path(reader.metrics_dir) / f"{reader.run_id}_{stream}_{region}_{metric}_epoch{reader.epoch:05d}.json"
+        Path(reader.metrics_dir)
+        / f"{reader.run_id}_{stream}_{region}_{metric}_epoch{reader.epoch:05d}.json"
     )
     _logger.debug(f"Looking for: {score_path}")
-   
+
     if score_path.exists():
         with open(score_path) as f:
             data_dict = json.load(f)
@@ -398,11 +393,11 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     eval_opt = cfg.get("evaluation", {})
 
     plot_cfg = {
-        "image_format" : plt_opt.get("image_format", "png"), 
-        "dpi_val": plt_opt.get("dpi_val", 300), 
-        "fig_size": plt_opt.get("fig_size", (8, 10)), 
-        "log_scale": eval_opt.get("log_scale", False), 
-        "add_grid": eval_opt.get("add_grid", False), 
+        "image_format": plt_opt.get("image_format", "png"),
+        "dpi_val": plt_opt.get("dpi_val", 300),
+        "fig_size": plt_opt.get("fig_size", (8, 10)),
+        "log_scale": eval_opt.get("log_scale", False),
+        "add_grid": eval_opt.get("add_grid", False),
     }
 
     plotter = LinePlots(plot_cfg, summary_dir)
@@ -414,7 +409,8 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
             )
 
 
-############# Utility functions ############    
+############# Utility functions ############
+
 
 def common_ranges(
     data_tars: list[dict],
@@ -543,5 +539,3 @@ def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataA
         da = da.drop_vars(name)
         da = da.expand_dims({name: [val]}, axis=axis)
     return da
-
-

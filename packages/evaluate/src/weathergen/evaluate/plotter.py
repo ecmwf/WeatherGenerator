@@ -5,14 +5,15 @@ from pathlib import Path
 
 import cartopy
 import cartopy.crs as ccrs
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+import omegaconf as oc
 import xarray as xr
 from PIL import Image
-import omegaconf as oc
 
-from weathergen.evaluate.plot_utils import DefaultMarkerSize
 from weathergen.common.config import _load_private_conf
+from weathergen.evaluate.plot_utils import DefaultMarkerSize
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
@@ -55,9 +56,9 @@ class Plotter:
 
         _logger.info(f"Taking cartopy paths from {work_dir}")
 
-        self.image_format = plotter_cfg.get("image_format", None)
-        self.dpi_val = plotter_cfg.get("dpi_val", None)
-        self.fig_size = plotter_cfg.get("fig_size", None)
+        self.image_format = plotter_cfg.get("image_format")
+        self.dpi_val = plotter_cfg.get("dpi_val")
+        self.fig_size = plotter_cfg.get("fig_size")
         self.plot_subtimesteps = plotter_cfg.get(
             "plot_subtimesteps", False
         )  # True if plots are created for each valid time separately
@@ -332,9 +333,10 @@ class Plotter:
 
         # copy global plotting options, not specific to any variable
         map_kwargs_global = {
-            key : value for key, value in (map_kwargs or {}).items() 
+            key: value
+            for key, value in (map_kwargs or {}).items()
             if not isinstance(value, oc.DictConfig)
-            }
+        }
 
         # Basic map output directory for this stream
         map_output_dir = self.get_map_output_dir(tag)
@@ -416,6 +418,18 @@ class Plotter:
         marker = map_kwargs_save.pop("marker", "o")
         vmin = map_kwargs_save.pop("vmin", None)
         vmax = map_kwargs_save.pop("vmax", None)
+        cmap = plt.get_cmap(map_kwargs_save.pop("colormap", "coolwarm"))
+
+        if isinstance(map_kwargs_save.get("levels", False), oc.listconfig.ListConfig):
+            norm = mpl.colors.BoundaryNorm(
+                map_kwargs_save.pop("levels", None), cmap.N, extend="both"
+            )
+        else:
+            norm = mpl.colors.Normalize(
+                vmin=vmin,
+                vmax=vmax,
+                clip=False,
+            )
 
         # scale marker size
         marker_size = marker_size_base
@@ -437,12 +451,11 @@ class Plotter:
             data["lon"],
             data["lat"],
             c=data,
-            cmap="coolwarm",
+            norm=norm,
+            cmap=cmap,
             s=marker_size,
             marker=marker,
             transform=ccrs.PlateCarree(),
-            vmin=vmin,
-            vmax=vmax,
             linewidths=0.0,  # only markers, avoids aliasing for very small markers
             **map_kwargs_save,
         )
@@ -562,7 +575,7 @@ class LinePlots:
         self.fig_size = plotter_cfg.get("fig_size")
         self.log_scale = plotter_cfg.get("log_scale")
         self.add_grid = plotter_cfg.get("add_grid")
-        
+
         self.out_plot_dir = Path(output_basedir) / "line_plots"
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
