@@ -648,8 +648,8 @@ class Scores:
         if s1 is None:
             return xr.full_like(s0, np.nan)
         else:
-            #it needs to be in this order to preserve the s0 forecast_step
-            crate = np.abs(s0 - s1.values) 
+            # it needs to be in this order to preserve the s0 forecast_step
+            crate = np.abs(s0 - s1.values)
             return crate
 
     def calc_froct(
@@ -681,7 +681,7 @@ class Scores:
             raise ValueError(
                 "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
             )
-        
+
         froct = self.calc_change_rate(p, p_next)
 
         if group_by_coord:

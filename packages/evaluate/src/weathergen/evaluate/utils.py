@@ -97,7 +97,7 @@ def calc_scores_per_stream(
         ),
         None,
     )
-    
+
     if stream_dict.get("needs_climatology", False):
         # Check if climatology path is specified in the eval configuration
         if "climatology_path" in stream_dict:
