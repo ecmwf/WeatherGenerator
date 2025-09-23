@@ -131,10 +131,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.streams = cf.streams
         self.shuffle = shuffle
-        # TODO: remove options that are no longer supported
-        self.input_window_steps = cf.input_window_steps
-        self.embed_local_coords = cf.embed_local_coords
-        self.embed_centroids_local_coords = cf.embed_centroids_local_coords
+
+        self.input_window_steps = cf.input_window_steps  # TODO is deprecated?
         self.sampling_rate_target = cf.sampling_rate_target
 
         self.batch_size = batch_size
