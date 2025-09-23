@@ -32,7 +32,7 @@ from weathergen.datasets.utils import (
     compute_offsets_scatter_embed,
     compute_source_cell_lens,
 )
-from weathergen.utils.distributed import is_root
+from weathergen.utils.distributed import get_rank, get_world_size, is_root
 from weathergen.utils.train_logger import Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
@@ -127,11 +127,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 else [1.0 for _ in sample_ds.target_channels]
             )
 
-        self._len = self._get_len(
-            self.time_window_handler, samples_per_epoch, batch_size, cf.num_ranks
-        )
-        self.rank = cf.rank
-        self.world_size = cf.world_size
+        self._len = self._get_len(self.time_window_handler, samples_per_epoch, batch_size)
 
         self.streams = cf.streams
         self.shuffle = shuffle
@@ -394,26 +390,27 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         return self._len
 
     @staticmethod
-    def _get_len(twh: TimeWindowHandler, samples_per_epoch, batch_size, num_ranks) -> int:
+    def _get_len(twh: TimeWindowHandler, samples_per_epoch, batch_size) -> int:
         index_range = twh.get_index_range()
         _len = len(index_range)
         samples_per_epoch = samples_per_epoch if samples_per_epoch else _len
         _len = min(_len, samples_per_epoch)
 
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
-        len_chunk = ((_len // num_ranks) // batch_size) * batch_size
+        len_chunk = ((_len // get_world_size()) // batch_size) * batch_size
         _len = min(_len, len_chunk)
         logger.info(f"index_range={index_range}, len={_len}, len_chunk={len(_len)}")
         return _len
 
     ###################################################
     def worker_workset(self):
-        local_start, local_end = self.rank * len(self), (self.rank + 1) * len(self)
+        rank = get_rank()
+        local_start, local_end = rank * len(self), (rank + 1) * len(self)
 
         worker_info = torch.utils.data.get_worker_info()
 
         if worker_info is None:
-            assert self.world_size == 1, self.world_size
+            assert get_world_size() == 1, get_world_size()
             iter_start = 0
             iter_end = len(self)
 
@@ -438,7 +435,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if worker_info.id + 1 == worker_info.num_workers:
                 iter_end = local_end
             logger.info(
-                f"{self.rank}::{worker_info.id}"
+                f"{rank}::{worker_info.id}"
                 + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
             )
 
