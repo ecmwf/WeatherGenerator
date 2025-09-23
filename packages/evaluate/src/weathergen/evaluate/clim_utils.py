@@ -205,6 +205,7 @@ def align_clim_data(
 
         return aligned_clim_data
 
+
 def get_climatology(reader, da_tars, stream: str) -> xr.Dataset | None:
     """
     Load climatology data if specified in the evaluation configuration.
@@ -222,7 +223,7 @@ def get_climatology(reader, da_tars, stream: str) -> xr.Dataset | None:
     xr.Dataset or None
         Climatology dataset if available, otherwise None
     """
-        # Get climatology data path from configuration
+    # Get climatology data path from configuration
     stream_dict = reader.eval_cfg["streams"][stream]
     inference_cfg = reader.get_inference_config()
     # This searches for the climatology filename in the stream configuration
