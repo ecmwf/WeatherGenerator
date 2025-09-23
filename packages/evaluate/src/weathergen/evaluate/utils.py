@@ -26,6 +26,24 @@ _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
 
+def get_next_data(fstep, da_preds, da_tars, fsteps):
+    """
+    Get the next forecast step data for the given forecast step.
+    """
+
+    fstep_idx = fsteps.index(fstep)
+    # Get the next forecast step
+    next_fstep = fsteps[fstep_idx + 1] if fstep_idx + 1 < len(fsteps) else None
+    if next_fstep is not None:
+        preds_next = da_preds.get(next_fstep, None)
+        tars_next = da_tars.get(next_fstep, None)
+    else:
+        preds_next = None
+        tars_next = None
+
+    return preds_next, tars_next
+
+
 def calc_scores_per_stream(
     reader: Reader, stream: str, region: str, metrics: list[str]
 ) -> tuple[xr.DataArray, xr.DataArray]:
@@ -128,13 +146,16 @@ def calc_scores_per_stream(
     ):
         _logger.debug(f"Verifying data for stream {stream}...")
 
+        preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
+
+        preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
+
         metrics_kwargs = {}
         for metric in metrics:
             metrics_kwargs[metric] = {}
 
         if preds.ipoint.size > 0:
-            score_data = VerifiedData(preds, tars)
-
+            score_data = VerifiedData(preds, tars, preds_next, tars_next)
             # Build up computation graphs for all metrics
             _logger.debug(
                 f"Build computation graphs for metrics for stream {stream}..."
@@ -153,7 +174,6 @@ def calc_scores_per_stream(
                     metric,
                     agg_dims="ipoint",
                     group_by_coord="sample",
-                    **metrics_kwargs[metric],
                 )
                 for metric in metrics
             ]

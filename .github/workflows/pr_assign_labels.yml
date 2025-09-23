@@ -36,7 +36,14 @@ jobs:
                 }
               }
             `;
-            const data = await github.graphql(query, { owner, repo, number: prNumber });
+            let data;
+            try { 
+              data = await github.graphql(query, { owner, repo, number: prNumber });
+            } catch (e) {
+              // Print a warning and stop here if the query fails (e.g., no linked issues)
+              core.warning(`GraphQL query failed: ${e.message}`);
+              return;
+            }
             const issues = data.repository.pullRequest.closingIssuesReferences.nodes;
 
             // 2) Collect unique label names from those issues
