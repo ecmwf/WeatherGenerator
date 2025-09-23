@@ -97,26 +97,29 @@ def calc_scores_per_stream(
         ),
         None,
     )
-
-    # Check if climatology path is specified in the eval configuration
-    if "climatology_path" in stream_dict:
-        clim_data_path = stream_dict["climatology_path"]
-        clim_data = xr.open_dataset(clim_data_path)
-        _logger.info("Aligning climatological data with target structure...")
-        aligned_clim_data = align_clim_data(da_tars, clim_data)
-    # Otherwise check if a general aux data path and clim fn is specified in the inference configuration
-    elif "data_path_aux" in inference_cfg and clim_fn is not None:
-        clim_data_path = inference_cfg["data_path_aux"]
-        clim_data_path = clim_data_path + clim_fn
-        clim_data = xr.open_dataset(clim_data_path)
-        _logger.info("Aligning climatological data with target structure...")
-        aligned_clim_data = align_clim_data(da_tars, clim_data)
+    
+    if stream_dict.get("needs_climatology", False):
+        # Check if climatology path is specified in the eval configuration
+        if "climatology_path" in stream_dict:
+            clim_data_path = stream_dict["climatology_path"]
+            clim_data = xr.open_dataset(clim_data_path)
+            _logger.info("Aligning climatological data with target structure...")
+            aligned_clim_data = align_clim_data(da_tars, clim_data)
+        # Otherwise check if a general aux data path and clim fn is specified in the inference configuration
+        elif "data_path_aux" in inference_cfg and clim_fn is not None:
+            clim_data_path = inference_cfg["data_path_aux"]
+            clim_data_path = clim_data_path + clim_fn
+            clim_data = xr.open_dataset(clim_data_path)
+            _logger.info("Aligning climatological data with target structure...")
+            aligned_clim_data = align_clim_data(da_tars, clim_data)
+        else:
+            _logger.warning(
+                f"No climatology path specified for stream {stream}. Setting climatology to NaN. "
+                "Add 'climatology_path' to evaluation config to keep metrics like ACC."
+            )
+            aligned_clim_data = None
     else:
-        _logger.warning(
-            f"No climatology path specified for stream {stream}. Setting climatology to NaN. "
-            "Add 'climatology_path' to evaluation config to keep metrics like ACC."
-        )
-        aligned_clim_data = align_clim_data(da_tars, None)
+        aligned_clim_data = None
 
     fsteps = [int(k) for k in da_tars.keys()]
 
@@ -148,25 +151,13 @@ def calc_scores_per_stream(
 
         preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
 
-        preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
-
-        metrics_kwargs = {}
-        for metric in metrics:
-            metrics_kwargs[metric] = {}
-
         if preds.ipoint.size > 0:
-            score_data = VerifiedData(preds, tars, preds_next, tars_next)
+            climatology = aligned_clim_data[fstep] if aligned_clim_data else None
+            score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
             # Build up computation graphs for all metrics
             _logger.debug(
                 f"Build computation graphs for metrics for stream {stream}..."
             )
-
-            # Prepare kwargs for metrics that need climatology data
-            if "acc" in metrics:
-                metrics_kwargs["acc"] = {
-                    "clim_mean": aligned_clim_data[fstep],
-                    "spatial_dims": ["ipoint"],
-                }
 
             combined_metrics = [
                 get_score(

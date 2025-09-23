@@ -71,15 +71,16 @@ class VerifiedData:
 
     prediction: xr.DataArray
     ground_truth: xr.DataArray
-    prediction_next: xr.DataArray
-    ground_truth_next: xr.DataArray
+    prediction_next: xr.DataArray | None
+    ground_truth_next: xr.DataArray | None
+    climatology: xr.DataArray | None
 
     def __post_init__(self):
         # Perform checks on initialization
         self._validate_dimensions()
         self._validate_broadcastability()
 
-    # TODO: add checks for prediction_next, ground_truth_next
+    # TODO: add checks for prediction_next, ground_truth_next, climatology
     def _validate_dimensions(self):
         # Ensure all dimensions in truth are in forecast (or equal)
         missing_dims = set(self.ground_truth.dims) - set(self.prediction.dims)
@@ -88,7 +89,7 @@ class VerifiedData:
                 f"Truth data has extra dimensions not found in forecast: {missing_dims}"
             )
 
-    # TODO: add checks for prediction_next, ground_truth_next
+    # TODO: add checks for prediction_next, ground_truth_next, climatology
     def _validate_broadcastability(self):
         try:
             # Attempt broadcast
@@ -269,6 +270,12 @@ class Scores:
                 "gt": data.ground_truth,
                 "p_next": data.prediction_next,
                 "gt_next": data.ground_truth_next,
+            }
+        elif score_name == "acc":
+            args = {
+                "p": data.prediction,
+                "gt": data.ground_truth,
+                "c": data.climatology,
             }
         else:
             args = {"p": data.prediction, "gt": data.ground_truth}
@@ -727,7 +734,7 @@ class Scores:
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
-        clim_mean: xr.DataArray,
+        c: xr.DataArray,
         group_by_coord: str | None = None,
         spatial_dims: list = None,
     ):
@@ -744,7 +751,7 @@ class Scores:
             Forecast data array
         gt: xr.DataArray
             Ground truth data array
-        clim_mean: xr.DataArray
+        c: xr.DataArray
             Climatological mean data array, which is used to calculate anomalies
         group_by_coord: str
             Name of the coordinate to group by.
@@ -762,8 +769,11 @@ class Scores:
                 raise ValueError(
                     f"Spatial dimension '{dim}' not found in prediction data dimensions: {p.dims}"
                 )
+        if c is None:
+            c = xr.full_like(p, np.nan).values
 
-        fcst_ano, obs_ano = p - clim_mean, gt - clim_mean
+        # Calculate anomalies
+        fcst_ano, obs_ano = p - c, gt - c
 
         if group_by_coord:
             # Define a function to calculate ACC for each group
