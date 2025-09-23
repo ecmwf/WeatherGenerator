@@ -373,7 +373,7 @@ class Model(torch.nn.Module):
             # ensemble prediction heads to provide probabilistic prediction
             final_activation = si["pred_head"].get("final_activation", "Identity")
             pred_dist = si["pred_head"].get("distribution", "deterministic")  # "deterministic" | "gmm"
-            num_components = si["pred_head"].get("num_components", 5)
+            num_components = si["pred_head"].get("num_components", 8)
             logger.debug(
                 f"{final_activation} activation as prediction head output of {si['name']} stream"
             )
@@ -894,8 +894,9 @@ class Model(torch.nn.Module):
                 else:
                     # Sampling only for eval/logging
                     samples = self.gmm_helpers[ii].sample(pi, mu, sigma, num_samples=ens_size)  # [S, N, C]
-                
-                preds_tokens += [samples]
+
+                # Return samples + params so the loss can consume the GMM                
+                preds_tokens += [(samples, (pi, mu, sigma))]
             else:
                 preds_tokens += [checkpoint(head, tc_tokens, use_reentrant=False)]
 

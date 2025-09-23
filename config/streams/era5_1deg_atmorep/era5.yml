@@ -35,5 +35,3 @@ ERA5 :
   pred_head :
     ens_size : 8
     num_layers : 1
-    distribution : gmm
-    num_components : 8

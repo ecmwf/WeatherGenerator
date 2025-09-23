@@ -10,6 +10,7 @@
 
 import numpy as np
 import torch
+import math
 
 stat_loss_fcts = ["stats", "kernel_crps"]  # Names of loss functions that need std computed
 
@@ -83,6 +84,114 @@ def kernel_crps(target, ens, mu, stddev, fair=True):
 
     return mae + ens_var
 
+def gmm_nll(
+    target: torch.Tensor,
+    params: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+):
+    """
+    Negative log-likelihood for a diagonal-covariance GMM evaluated against point targets.
+
+    Args:
+      target: [N, C]
+      params: (pi [N,K], mu [N,K,C], sigma [N,K,C])
+      weights_channels: [C] or None
+      weights_points: [N] or None
+
+    Returns:
+      loss: scalar
+      loss_chs: [C] mean NLL per channel (after location weighting)
+    """
+
+    pi, mu, sigma = params
+    # Ensure float32 for numerical stability in AMP contexts
+    target = target.float()
+    pi, mu, sigma = pi.float(), mu.float(), sigma.float()
+
+    # Mask out NaNs in targets (as in other losses)
+    mask_nan = ~torch.isnan(target)
+
+    # Compute per-channel log-likelihood: log sum_k pi_k N(x_c; mu_kc, sigma_kc)
+    # Shapes: target [N,1,C], mu/sigma [N,K,C]
+    x = target.unsqueeze(1)  # [N,1,C]
+    var = sigma.pow(2)       # [N,K,C]
+    # Normal log-prob per component/channel
+    log_two_pi = math.log(2.0 * math.pi)
+    log_norm = -0.5 * (log_two_pi + (x - mu).pow(2) / var + 2.0 * torch.log(sigma))  # [N,K,C]
+    # Mixture over K
+    log_mix = torch.log(pi.clamp_min(1e-12)).unsqueeze(-1) + log_norm  # [N,K,C]
+    ll_ch = torch.logsumexp(log_mix, dim=1)  # [N,C]
+    nll_ch = -ll_ch  # [N,C]
+
+    # Zero-out masked entries (keep same pattern as mse_channel_location_weighted)
+    nll_ch = torch.where(mask_nan, nll_ch, torch.zeros_like(nll_ch))
+
+    # Location weights (per row)
+    if weights_points is not None:
+        nll_ch = (nll_ch.transpose(1, 0) * weights_points).transpose(1, 0)
+
+    # Per-channel mean across locations
+    loss_chs = nll_ch.mean(dim=0)  # [C]
+
+    # Channel weighting
+    loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
+    return loss, loss_chs
+
+def ens_gaussian_nll(
+    target: torch.Tensor,
+    pred: torch.Tensor,  # [S, N, C] from EnsPredictionHead
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+    min_var: float = 1e-5,
+):
+    """
+    Negative log-likelihood under a Gaussian whose mean/variance are estimated from
+    the deterministic ensemble predictions.
+
+    Args:
+      target: [N, C]
+      pred:   [S, N, C] ensemble members
+      weights_channels: [C] or None
+      weights_points: [N] or None
+      min_var: variance floor for numerical stability
+
+    Returns:
+      loss: scalar
+      loss_chs: [C] mean NLL per channel (after location weighting)
+    """
+    target = target.float()
+    pred = pred.float()
+
+    # Mask out NaNs in targets
+    mask_nan = ~torch.isnan(target)
+
+    # Ensemble moments over S
+    mu = pred.mean(dim=0)                         # [N, C]
+    var = pred.var(dim=0, unbiased=False)         # [N, C] (ML variance, not unbiased)
+    var = torch.clamp(var, min=min_var)
+
+    # Gaussian NLL per point/channel
+    # 0.5 * [ log(2πσ^2) + (x-μ)^2 / σ^2 ]
+    nll = 0.5 * (
+        torch.log(2.0 * math.pi * var)
+        + (torch.where(mask_nan, target, 0.0) - torch.where(mask_nan, mu, 0.0)).pow(2) / var
+    )
+
+    # Zero-out masked entries
+    nll = torch.where(mask_nan, nll, torch.zeros_like(nll))
+
+    # Location weights
+    if weights_points is not None:
+        nll = (nll.transpose(1, 0) * weights_points).transpose(1, 0)
+
+    # Per-channel mean across locations
+    loss_chs = nll.mean(dim=0)                    # [C]
+
+    # Channel weighting -> scalar
+    loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
+    
+    return loss, loss_chs
 
 def mse_channel_location_weighted(
     target: torch.Tensor,

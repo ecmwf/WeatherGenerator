@@ -140,6 +140,7 @@ class LossCalculator:
         substep_masks: list[torch.Tensor],
         weights_channels: torch.Tensor,
         weights_locations: torch.Tensor,
+        gmm_params: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
     ):
         """
         Compute loss for given loss function
@@ -152,9 +153,17 @@ class LossCalculator:
         for mask_t in substep_masks:
             assert mask_t.sum() == len(weights_locations) if weights_locations is not None else True
 
-            loss, loss_chs = loss_fct(
-                target[mask_t], pred[:, mask_t], weights_channels, weights_locations
-            )
+            # Route GMM NLL to params; others use samples
+            if getattr(loss_fct, "__name__", "") == "gmm_nll":
+                assert gmm_params is not None, "GMM params are required for gmm_nll."
+                # Sub-select params for current substep
+                pi_t, mu_t, sg_t = (p[mask_t] for p in gmm_params)  # [Nt,K], [Nt,K,C], [Nt,K,C]
+                loss, loss_chs = loss_fct(target[mask_t], (pi_t, mu_t, sg_t), weights_channels, weights_locations)
+            else:
+                # pred is samples [S,N,C]
+                loss, loss_chs = loss_fct(
+                    target[mask_t], pred[:, mask_t], weights_channels, weights_locations
+                )
 
             # accumulate loss
             loss_lfct = loss_lfct + loss
@@ -235,6 +244,12 @@ class LossCalculator:
             for fstep, target in enumerate(targets):
                 # skip if either target or prediction has no data points
                 pred = preds[fstep][i_stream_info]
+
+                # Support tuple preds from GMM streams: (samples, (pi,mu,sigma))
+                gmm_params = None
+                if isinstance(pred, tuple) and len(pred) == 2:
+                    pred, gmm_params = pred  # pred -> samples [S,N,C]
+
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
                     continue
 
@@ -264,10 +279,11 @@ class LossCalculator:
                         loss_fct,
                         stream_info,
                         target,
-                        pred,
+                        pred,  # samples
                         substep_masks,
                         weights_channels,
                         weights_locations,
+                        gmm_params=gmm_params,
                     )
                     losses_all[stream_info.name][:, i_lfct] += loss_lfct_chs
 

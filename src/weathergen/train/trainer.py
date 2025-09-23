@@ -451,6 +451,10 @@ class Trainer(TrainerBase):
             for i_strm, target in enumerate(targets_rt[fstep]):
                 pred = preds[fstep][i_strm]
 
+                # If GMM tuple, use samples for logging/denorm
+                if isinstance(pred, tuple) and len(pred) == 2:
+                    pred = pred[0]
+
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
                     continue
 
