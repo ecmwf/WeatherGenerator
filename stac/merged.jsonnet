@@ -3,9 +3,10 @@
 // import functions
 local fn = import 'functions.libsonnet';
 local branch_name = std.extVar("branch_name");
+local github_username = std.extVar("username");
 
 // URL for hrefs
-local href_link = 'https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/'+branch_name+'/stac/jsons/';
+local href_link = 'https://raw.githubusercontent.com/'+github_username+'/WeatherGenerator/refs/heads/'+branch_name+'/stac/jsons/';
 
 // TODO: improve this
 local era5v8 = import 'era5_v8.jsonnet';
@@ -21,8 +22,11 @@ local fy3a = import 'fy3a.jsonnet';
 local fy3b = import 'fy3b.jsonnet';
 local fy3c = import 'fy3c.jsonnet';
 local goes16 = import 'abi-goes16.jsonnet';
+local ifs_fesom_atmos = import 'ifs_fesom_atmos.jsonnet';
+local ifs_fesom_ocean_elem = import 'ifs_fesom_ocean_elem.jsonnet';
+local ifs_fesom_ocean_node = import 'ifs_fesom_ocean_node.jsonnet';
 
-local datasets = [era5v8, opera, cerra, seviri, imerg, nppatms, synop, metopa, metopb, fy3a, fy3b, fy3c, goes16];
+local datasets = [era5v8, opera, cerra, seviri, imerg, nppatms, synop, metopa, metopb, fy3a, fy3b, fy3c, goes16, ifs_fesom_atmos, ifs_fesom_ocean_elem, ifs_fesom_ocean_node];
 
 local check = fn.check_unique_ids(datasets);
 
