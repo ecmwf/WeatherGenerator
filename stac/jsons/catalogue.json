@@ -3,108 +3,108 @@
    "id": "weathergen",
    "links": [
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/catalogue.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/catalogue.json",
          "rel": "root",
          "title": "The WeatherGenerator data server",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/catalogue.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/catalogue.json",
          "rel": "self",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/era5v8.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/era5v8.json",
          "rel": "child",
          "title": "ERA5",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/opera.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/opera.json",
          "rel": "child",
          "title": "OPERA",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/cerra.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/cerra.json",
          "rel": "child",
          "title": "CERRA",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/seviri.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/seviri.json",
          "rel": "child",
          "title": "SEVIRI",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/imerg.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/imerg.json",
          "rel": "child",
          "title": "IMERG",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/npp-atms.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/npp-atms.json",
          "rel": "child",
          "title": "NPP-ATMS",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/synop.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/synop.json",
          "rel": "child",
          "title": "SYNOP",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/metopa.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/metopa.json",
          "rel": "child",
          "title": "Metop-A, MHS",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/metopb.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/metopb.json",
          "rel": "child",
          "title": "Metop-B, MHS",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/fy3a.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/fy3a.json",
          "rel": "child",
          "title": "FY-3A, MWHS",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/fy3b.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/fy3b.json",
          "rel": "child",
          "title": "FY-3B, MWHS",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/fy3c.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/fy3c.json",
          "rel": "child",
          "title": "FY-3C, MWHS",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/abigoes.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/abigoes.json",
          "rel": "child",
          "title": "ABI-GOES16",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/ifs-fesom_atmos.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/ifs-fesom_atmos.json",
          "rel": "child",
          "title": "AWI IFS-FESOM Coupled Climate Model (Atmos)",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/ifs-fesom_ocean_elem.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/ifs-fesom_ocean_elem.json",
          "rel": "child",
          "title": "AWI IFS-FESOM Coupled Climate Model (Ocean element)",
          "type": "application/json"
       },
       {
-         "href": "https://raw.githubusercontent.com/ankitpatnala/WeatherGenerator/refs/heads/ankit_issue_933_add_stac_files_for_ifs_fesom_data/stac/jsons/ifs-fesom_ocean_node.json",
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/ifs-fesom_ocean_node.json",
          "rel": "child",
          "title": "AWI IFS-FESOM Coupled Climate Model (Ocean node)",
          "type": "application/json"
