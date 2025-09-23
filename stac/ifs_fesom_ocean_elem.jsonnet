@@ -17,7 +17,7 @@ local common = import 'common.jsonnet';
     "ocean element",
   ],
   "providers": [
-    "AWI",
+    common.providers.awi,
   ],
   "processing_level": "model output",
 

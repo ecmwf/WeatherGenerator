@@ -16,8 +16,7 @@ local common = import 'common.jsonnet';
     "atmosphere",
   ],
   providers: [
-    "AWI",
-    "ECMWF"
+    common.providers.awi,
   ],
   processing_level: "model output",
 

@@ -63,7 +63,13 @@
       "name": "AWI IFS-FESOM (OCEAN ELEM)",
       "processing_level": "model output",
       "providers": [
-         "AWI"
+         {
+            "name": "AWI",
+            "roles": [
+               "provider"
+            ],
+            "url": "https://www.awi.de"
+         }
       ],
       "start_datetime": "2000-01-01T00:00:00",
       "title": "AWI IFS-FESOM Coupled Climate Model (Ocean element)",

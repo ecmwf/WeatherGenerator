@@ -17,7 +17,7 @@ local common = import 'common.jsonnet';
     "ocean node",
   ],
   "providers": [
-    "AWI",
+    common.providers.awi,
   ],
   "processing_level": "model output",
 
