@@ -127,14 +127,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 else [1.0 for _ in sample_ds.target_channels]
             )
 
-        index_range = self.time_window_handler.get_index_range()
-        self.len = len(index_range)
-        self.len = min(self.len, samples_per_epoch if samples_per_epoch else self.len)
-        # adjust len to split loading across all workers and ensure it is multiple of batch_size
-        len_chunk = ((self.len // cf.world_size) // batch_size) * batch_size
-        self.len = min(self.len, len_chunk)
-        logger.info(f"index_range={index_range}, len={self.len}, len_chunk={len_chunk}")
-
+        self._len = self._get_len(
+            self.time_window_handler, samples_per_epoch, batch_size, cf.num_ranks
+        )
         self.rank = cf.rank
         self.world_size = cf.world_size
 
@@ -273,7 +268,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             len[*] : number of streams
         """
         iter_start, iter_end = self.worker_workset()
-        logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={self.len}")
+        logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={len(self)}")
 
         # create new shuffeling
         self.reset()
@@ -396,11 +391,24 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     ###################################################
     def __len__(self):
-        return self.len
+        return self._len
+
+    @staticmethod
+    def _get_len(twh: TimeWindowHandler, samples_per_epoch, batch_size, num_ranks) -> int:
+        index_range = twh.get_index_range()
+        _len = len(index_range)
+        samples_per_epoch = samples_per_epoch if samples_per_epoch else _len
+        _len = min(_len, samples_per_epoch)
+
+        # adjust len to split loading across all workers and ensure it is multiple of batch_size
+        len_chunk = ((_len // num_ranks) // batch_size) * batch_size
+        _len = min(_len, len_chunk)
+        logger.info(f"index_range={index_range}, len={_len}, len_chunk={len(_len)}")
+        return _len
 
     ###################################################
     def worker_workset(self):
-        local_start, local_end = self.rank * self.len, (self.rank + 1) * self.len
+        local_start, local_end = self.rank * len(self), (self.rank + 1) * len(self)
 
         worker_info = torch.utils.data.get_worker_info()
 
