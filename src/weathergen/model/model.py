@@ -512,17 +512,12 @@ class Model(torch.nn.Module):
 
         # embed
         tokens = self.embed_cells(model_params, streams_data)
-        tokens1 = self.embed_cells(model_params, streams_data)
-        tokens2 = self.embed_cells(model_params, streams_data)
-        print(torch.allclose(tokens1, tokens2))
 
         # local assimilation engine and adapter
         tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
 
-        tokens1 = self.assimilate_global(model_params, tokens)
-        tokens2 = self.assimilate_global(model_params, tokens)
-        print(torch.allclose(tokens1, tokens2))
-
+        tokens = self.assimilate_global(model_params, tokens)
+        
         # roll-out in latent space
         preds_all = []
         tokens_all = [tokens]
@@ -697,7 +692,7 @@ class Model(torch.nn.Module):
                             idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
                             x_embed = embed(
-                                s.target_srclk_tokens_cells[fstep], s.source_centroids # TODO: KCT, get this from the srclk targets
+                                s.target_srclk_tokens_cells[fstep], s.target_srclk_centroids[fstep]
                             ).flatten(0, 1)
 
                             # scatter write to reorder from per stream to per cell ordering
