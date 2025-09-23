@@ -204,3 +204,58 @@ def align_clim_data(
                     ) from e
 
         return aligned_clim_data
+
+def get_climatology(reader, da_tars, stream: str) -> xr.Dataset | None:
+    """
+    Load climatology data if specified in the evaluation configuration.
+
+    Parameters
+    ----------
+    reader : WeatherGenReader
+        Reader object to access data and configurations
+    da_tars : dict
+        Dictionary of target data arrays keyed by forecast step
+    stream : str
+        Name of the data stream
+    Returns
+    -------
+    xr.Dataset or None
+        Climatology dataset if available, otherwise None
+    """
+        # Get climatology data path from configuration
+    stream_dict = reader.eval_cfg["streams"][stream]
+    inference_cfg = reader.get_inference_config()
+    # This searches for the climatology filename in the stream configuration
+    clim_fn = next(
+        (
+            item.get("climatology_filename")
+            for item in inference_cfg["streams"]
+            if item.get("name") == stream
+        ),
+        None,
+    )
+
+    if stream_dict.get("needs_climatology", False):
+        # Check if climatology path is specified in the eval configuration
+        if "climatology_path" in stream_dict:
+            clim_data_path = stream_dict["climatology_path"]
+            clim_data = xr.open_dataset(clim_data_path)
+            _logger.info("Aligning climatological data with target structure...")
+            aligned_clim_data = align_clim_data(da_tars, clim_data)
+        # Otherwise check if a general aux data path and clim fn is specified in the inference configuration
+        elif "data_path_aux" in inference_cfg and clim_fn is not None:
+            clim_data_path = inference_cfg["data_path_aux"]
+            clim_data_path = clim_data_path + clim_fn
+            clim_data = xr.open_dataset(clim_data_path)
+            _logger.info("Aligning climatological data with target structure...")
+            aligned_clim_data = align_clim_data(da_tars, clim_data)
+        else:
+            _logger.warning(
+                f"No climatology path specified for stream {stream}. Setting climatology to NaN. "
+                "Add 'climatology_path' to evaluation config to keep metrics like ACC."
+            )
+            aligned_clim_data = None
+    else:
+        aligned_clim_data = None
+
+    return aligned_clim_data

@@ -16,7 +16,7 @@ import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
 
-from weathergen.evaluate.clim_utils import align_clim_data
+from weathergen.evaluate.clim_utils import get_climatology
 from weathergen.evaluate.io_reader import Reader
 from weathergen.evaluate.plot_utils import plot_metric_region
 from weathergen.evaluate.plotter import LinePlots, Plotter
@@ -85,41 +85,7 @@ def calc_scores_per_stream(
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
 
-    # Get climatology data path from configuration
-    stream_dict = reader.eval_cfg["streams"][stream]
-    inference_cfg = reader.get_inference_config()
-    # This searches for the climatology filename in the stream configuration
-    clim_fn = next(
-        (
-            item.get("climatology_filename")
-            for item in inference_cfg["streams"]
-            if item.get("name") == stream
-        ),
-        None,
-    )
-
-    if stream_dict.get("needs_climatology", False):
-        # Check if climatology path is specified in the eval configuration
-        if "climatology_path" in stream_dict:
-            clim_data_path = stream_dict["climatology_path"]
-            clim_data = xr.open_dataset(clim_data_path)
-            _logger.info("Aligning climatological data with target structure...")
-            aligned_clim_data = align_clim_data(da_tars, clim_data)
-        # Otherwise check if a general aux data path and clim fn is specified in the inference configuration
-        elif "data_path_aux" in inference_cfg and clim_fn is not None:
-            clim_data_path = inference_cfg["data_path_aux"]
-            clim_data_path = clim_data_path + clim_fn
-            clim_data = xr.open_dataset(clim_data_path)
-            _logger.info("Aligning climatological data with target structure...")
-            aligned_clim_data = align_clim_data(da_tars, clim_data)
-        else:
-            _logger.warning(
-                f"No climatology path specified for stream {stream}. Setting climatology to NaN. "
-                "Add 'climatology_path' to evaluation config to keep metrics like ACC."
-            )
-            aligned_clim_data = None
-    else:
-        aligned_clim_data = None
+    aligned_clim_data = get_climatology(reader, da_tars, stream)
 
     fsteps = [int(k) for k in da_tars.keys()]
 
