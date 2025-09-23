@@ -159,6 +159,7 @@ class PositionalEmbedding(torch.nn.Module):
         self.num_channels = num_channels
         self.max_positions = max_positions
         self.endpoint = endpoint
+        # TODO: should I set dtype here like in the attention blocks?
 
     def forward(self, x):
         freqs = torch.arange(start=0, end=self.num_channels//2, dtype=torch.float32, device=x.device)

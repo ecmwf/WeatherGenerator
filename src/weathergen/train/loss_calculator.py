@@ -93,6 +93,9 @@ class LossCalculator:
         else:
             self.loss_fcts_lat = []
 
+        if self.cf.forecast_policy == "diffusion" and self.cf.training_mode == "forecast" and self.loss_fcts:
+            _logger.warning("Loss functions in physical space are specified despite training diffusion-based forecast engine – Carefully check if this is the desired specification.")
+
 
     def _get_weights(self, stream_info):
         """
@@ -258,6 +261,7 @@ class LossCalculator:
 
         # TODO: iterate over batch dimension
         i_batch = 0
+            
         for i_stream_info, stream_info in enumerate(self.cf.streams):
             
             # 1. First go through the losses in the physical space
@@ -319,7 +323,7 @@ class LossCalculator:
                 ctr_fsteps += 1 if ctr_loss_fcts > 0 else 0
                 
         
-                      
+                    
             loss = loss + (loss_fsteps / (ctr_fsteps if ctr_fsteps > 0 else 1.0))
             ctr_streams += 1 if ctr_fsteps > 0 else 0
             
@@ -331,7 +335,7 @@ class LossCalculator:
             # replace channels without information by nan to exclude from further computations
             losses_all[stream_info.name][losses_all[stream_info.name] == 0.0] = torch.nan
             stddev_all[stream_info.name][stddev_all[stream_info.name] == 0.0] = torch.nan
-            
+        
         
         # 2. Now go through the losses in the latent space, if applicable
         if self.loss_fcts_lat:

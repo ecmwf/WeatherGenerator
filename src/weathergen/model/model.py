@@ -38,6 +38,7 @@ from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.logger import logger
 from weathergen.utils.utils import get_dtype
+import sys
 
 
 class ModelParams(torch.nn.Module):
@@ -572,15 +573,23 @@ class Model(torch.nn.Module):
 
             if not self.cf.forecast_policy == "diffusion":
                 tokens = self.forecast(model_params, tokens)
-            elif self.cf.forecast_policy == "diffusion" and self.training:
-                logger.info('denoising step')
-                tokens, weights = self.denoise(model_params, tokens, tokens_targets[fstep - forecast_offset]) #TODO should never denoise multipel delta_t...
-            else:
-                logger.info('sampling step')
-                tokens = self.edm_sampler(model_params, tokens)
-            tokens_all += [tokens]
+                tokens_all += [tokens]
+            if self.cf.forecast_policy == "diffusion":
+                #change the latent targets to residuals
+                tokens_targets[fstep - forecast_offset] = tokens_targets[fstep - forecast_offset] - tokens
+                if self.training:
+                    logger.info('denoising step')
+                    #TODO should never denoise multipel delta_t...
+                    #in this case, we predict residual, and add it to previous state before decoding
+                    res_tokens, weights = self.denoise(model_params, tokens, tokens_targets[fstep - forecast_offset])
+                else:
+                    logger.info('sampling step')
+                    res_tokens, weights = self.edm_sampler(model_params, tokens)
+                tokens = tokens + res_tokens
+                tokens_all += [res_tokens]
 
         # prediction for final step
+        #TODO: May exclude this step during forecast training when only latent loss is used (when working with diffusion)
         preds_all += [
             self.predict(
                 model_params,
@@ -853,10 +862,8 @@ class Model(torch.nn.Module):
             ValueError: For unexpected arguments in checkpoint method
         """
 
-        print(f'noise_conditioning dtype is {noise_conditioning.dtype}')
         for it, block in enumerate(self.fe_blocks):
             aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
-            print(f'iteration {it}, tokens dtype is {tokens.dtype}, aux_info dtype is {aux_info.dtype}')
             tokens = checkpoint(block, tokens, noise_conditioning, aux_info, use_reentrant=False)
 
         return tokens
@@ -875,7 +882,7 @@ class Model(torch.nn.Module):
         #embed the noise
         emb = self.fe.map_noise(c_noise.flatten())
         emb = silu(self.fe.map_layer0(emb))
-        emb = silu(self.fe.map_layer1(emb))
+        emb = silu(self.fe.map_layer1(emb)).to(concat_x.device)
 
         F_x = self.forecast(model_params, concat_x, emb)
         D_x = c_skip * noised_target + c_out * F_x[:, -target_tokens.shape[1]:, :]
@@ -900,13 +907,13 @@ class Model(torch.nn.Module):
         sigma_max = min(sigma_max, self.fe.sigma_max)
 
         # Time step discretization.
-        step_indices = torch.arange(num_steps, dtype=torch.float64)
+        step_indices = torch.arange(num_steps, dtype=torch.float32)
         t_steps = (sigma_max ** (1 / rho) + step_indices / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))) ** rho
         t_steps = torch.cat([torch.as_tensor(t_steps), torch.zeros_like(t_steps[:1])]) # t_N = 0
 
         # Main sampling loop.
         n = torch.randn(condition_tokens.shape, device=condition_tokens.device) #shape should be like target_tokens (may need adaptation if conditioning on multiple lags)
-        x_next =  (n * t_steps[0]).to(torch.float64).to(condition_tokens.device)
+        x_next =  (n * t_steps[0]).to(condition_tokens.device) #.to(torch.float64)
         for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])): # 0, ..., N-1
             x_cur = x_next
 
@@ -916,13 +923,13 @@ class Model(torch.nn.Module):
             x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * randn_like(x_cur)
 
             # Euler step.
-            denoised = self.edm_preconditioning(model_params, condition_tokens, x_hat, noise=t_hat).to(torch.float64)
+            denoised = self.edm_preconditioning(model_params, condition_tokens, x_hat, noise=t_hat) #.to(torch.float64)
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 
             # Apply 2nd order correction.
             if i < num_steps - 1:
-                denoised = self.edm_preconditioning(model_params, condition_tokens, x_hat, noise=t_next).to(torch.float64)
+                denoised = self.edm_preconditioning(model_params, condition_tokens, x_hat, noise=t_next) #.to(torch.float64)
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 

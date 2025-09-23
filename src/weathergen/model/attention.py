@@ -242,10 +242,11 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
 
         self.noise_conditioning = None
         if with_noise_conditioning:
-            self.noise_conditioning = LinearNormConditioning(dim_embed)
+            self.noise_conditioning = LinearNormConditioning(dim_embed, dtype=self.dtype)
 
 
     def forward(self, x, noise_embedding=None, ada_ln_aux=None):
+
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
@@ -254,8 +255,6 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
             assert noise_embedding is not None, "Need noise embedding if using noise conditioning"
             x = self.noise_conditioning(x, noise_embedding)
 
-        print(f'In MultiSelfAttentionHeadLocal forward: x dtype is {x.dtype}, noise_embedding dtype is {noise_embedding.dtype if noise_embedding is not None else "N/A"}')
-        exit()
         # project onto heads
         s = [x.shape[0], x.shape[1], self.num_heads, -1]
         qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3])
@@ -483,17 +482,17 @@ class LinearNormConditioning(torch.nn.Module):
 
     def __init__(self, feature_size, dtype=torch.bfloat16):
         super().__init__()
+        self.dtype = dtype
+
         self.conditional_linear_layer = torch.nn.Linear(
             in_features=feature_size,
             out_features=2 * feature_size,
-            dtype=dtype,
         )
         # Optional: initialize weights similar to TruncatedNormal(stddev=1e-8)
         torch.nn.init.normal_(self.conditional_linear_layer.weight, std=1e-8)
         torch.nn.init.zeros_(self.conditional_linear_layer.bias)
-        self.dtype = dtype
 
-    def forward(self, inputs, norm_conditioning):
+    def forward(self, inputs, norm_conditioning, dtype = None):
         # norm_conditioning: [batch, feature_size]
         # inputs: [batch, ..., feature_size]
         conditional_scale_offset = self.conditional_linear_layer(norm_conditioning.to(self.dtype))
@@ -563,7 +562,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         
         self.noise_conditioning = None
         if with_noise_conditioning:
-            self.noise_conditioning = LinearNormConditioning(dim_embed)
+            self.noise_conditioning = LinearNormConditioning(dim_embed, dtype=self.dtype)
 
     def forward(self, x, noise_embedding=None, ada_ln_aux=None):
         if self.with_residual:
@@ -572,7 +571,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
 
         if self.noise_conditioning:
             assert noise_embedding is not None, "Need noise embedding if using noise conditioning"
-            x = self.noise_conditioning(x, noise_embedding)
+            x = self.noise_conditioning(x, noise_embedding, dtype=self.dtype)
 
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
