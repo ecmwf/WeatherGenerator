@@ -207,14 +207,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         len_hrs = self.time_window_handler.t_window_len
         step_hrs = self.time_window_handler.t_window_step
         forecast_len = (len_hrs * (fsm + 1)) // step_hrs
-        adjusted_index_range = range(
-            index_range.start,
-            index_range.stop
-            - forecast_len
-            + self.forecast_offset,
-        )
-        assert adjusted_index_range.stop > 0, "dataset size too small for forecast range"
-        self.perms = np.array(adjusted_index_range)
+
+        # maximum index to generate a forecast that falls within the datasets
+        index_max = index_range.stop - forecast_len + self.forecast_offset
+        assert index_max > 0, "dataset size too small for forecast range"
+        self.perms = np.arange(index_range.start, index_max)
         if self.shuffle:
             self.perms = rng.permutation(self.perms)
 
