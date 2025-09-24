@@ -199,7 +199,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     def reset(self):
         # initialize the random number generator: self.data_loader_rng_seed is set to a DDP-unique
         # value in worker_workset()
-        self.rng = np.random.default_rng(self.data_loader_rng_seed)
+        rng = np.random.default_rng(self.data_loader_rng_seed)
 
         fsm = (
             self.forecast_steps[min(self.epoch, len(self.forecast_steps) - 1)]
@@ -224,7 +224,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         assert adjusted_index_range.stop > 0, "dataset size too small for forecast range"
         self.perms = np.array(adjusted_index_range)
         if self.shuffle:
-            self.perms = self.rng.permutation(self.perms)
+            self.perms = rng.permutation(self.perms)
 
         # forecast time steps
         len_dt_samples = len(self) // self.batch_size
@@ -234,13 +234,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.perms_forecast_dt = fsm * np.ones(len_dt_samples, dtype=np.int64)
         elif self.forecast_policy == "random" or self.forecast_policy == "sequential_random":
             # randint high=one-past
-            self.perms_forecast_dt = self.rng.integers(
+            self.perms_forecast_dt = rng.integers(
                 low=self.forecast_steps.min(), high=fsm + 1, size=len_dt_samples, dtype=np.int64
             )
         else:
             assert False
 
-        self.tokenizer.reset_rng(self.rng)
+        self.tokenizer.reset_rng(rng)
 
     ###################################################
     def denormalize_source_channels(self, stream_id, data) -> torch.Tensor:
