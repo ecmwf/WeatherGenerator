@@ -225,6 +225,7 @@ class LossCalculator:
         # TODO: iterate over batch dimension
         i_batch = 0
         for i_stream_info, stream_info in enumerate(self.cf.streams):
+            stream_name = stream_info.get("name", i_stream_info)
             # extract target tokens for current stream from the specified forecast offset onwards
             targets = streams_data[i_batch][i_stream_info].target_tokens[self.cf.forecast_offset :]
 
@@ -278,7 +279,9 @@ class LossCalculator:
 
                 loss_fsteps = loss_fsteps + (loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0)
                 ctr_fsteps += 1 if ctr_loss_fcts > 0 else 0
-
+            
+            if streams_data[i_batch][i_stream_info].is_spoof:
+                loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True) * loss_fsteps
             loss = loss + (loss_fsteps / (ctr_fsteps if ctr_fsteps > 0 else 1.0))
             ctr_streams += 1 if ctr_fsteps > 0 else 0
 

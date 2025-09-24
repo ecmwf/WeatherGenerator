@@ -339,23 +339,29 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         # to avoid unwanted dependencies => see IOReaderData docstring
                         rdata_wrapped = IOReaderData.create(rdata)
 
-                        if rdata.is_empty():
-                            stream_data.add_empty_source(rdata_wrapped)
-                        else:
-                            # TODO: handling of conversion from numpy to torch here and below
-                            # TODO: this should only be collected in validation mode
-
-                            (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
-                                stream_info,
-                                torch.from_numpy(rdata.coords),
-                                torch.from_numpy(rdata.geoinfos),
-                                torch.from_numpy(rdata.data),
-                                rdata.datetimes,
-                                (time_win1.start, time_win1.end),
-                                ds,
+                        sample_is_empty = rdata.is_empty()
+                        if sample_is_empty:
+                            rdata = IOReaderData.spoof(
+                                rdata,
+                                len(stream_info.train_source_channels),
+                                time_win1.start,
+                                ds.get_geoinfo_size(),
+                                ds.mean[ds.source_idx]
                             )
+                        # TODO: handling of conversion from numpy to torch here and below
+                        # TODO: this should only be collected in validation mode
+                        (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
+                            stream_info,
+                            torch.from_numpy(rdata.coords),
+                            torch.from_numpy(rdata.geoinfos),
+                            torch.from_numpy(rdata.data),
+                            rdata.datetimes,
+                            (time_win1.start, time_win1.end),
+                            ds,
+                        )
 
-                            stream_data.add_source(rdata_wrapped, ss_lens, ss_cells, ss_centroids)
+                        stream_data.add_source(rdata_wrapped, ss_lens, ss_cells, ss_centroids)
+                        stream_data.is_spoof = sample_is_empty
 
                         # target
 
@@ -370,21 +376,29 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                             rdata = ds.get_target(step_forecast_dt)
 
-                            if rdata.is_empty():
-                                stream_data.add_empty_target(fstep)
-                            else:
-                                (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
-                                    stream_info,
-                                    self.sampling_rate_target,
-                                    torch.from_numpy(rdata.coords),
-                                    torch.from_numpy(rdata.geoinfos),
-                                    torch.from_numpy(rdata.data),
-                                    rdata.datetimes,
-                                    (time_win2.start, time_win2.end),
-                                    ds,
+                            sample_is_empty = rdata.is_empty()
+                            if sample_is_empty:
+                                rdata = IOReaderData.spoof(
+                                    rdata,
+                                    len(stream_info.train_target_channels),
+                                    time_win1.start,
+                                    ds.get_geoinfo_size(),
+                                    ds.mean[ds.target_idx]
                                 )
 
-                                stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t)
+                            (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
+                                stream_info,
+                                self.sampling_rate_target,
+                                torch.from_numpy(rdata.coords),
+                                torch.from_numpy(rdata.geoinfos),
+                                torch.from_numpy(rdata.data),
+                                rdata.datetimes,
+                                (time_win2.start, time_win2.end),
+                                ds,
+                            )
+
+                            stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t)
+                            stream_data.is_spoof = sample_is_empty
 
                     # merge inputs for sources and targets for current stream
                     stream_data.merge_inputs()

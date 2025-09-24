@@ -910,7 +910,7 @@ class Model(torch.nn.Module):
             tcs_aux = torch.cat(
                 [streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))]
             )
-
+            
             tc_tokens = tte(
                 latent=tokens_stream,
                 output=tc_tokens,
@@ -921,5 +921,5 @@ class Model(torch.nn.Module):
 
             # final prediction head to map back to physical space
             preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
-
+            
         return preds_tokens
