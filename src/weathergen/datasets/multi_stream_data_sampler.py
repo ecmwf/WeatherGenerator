@@ -128,7 +128,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.streams = cf.streams
         self.shuffle = shuffle
 
-        self.input_window_steps = cf.input_window_steps  # TODO is deprecated?
         self.sampling_rate_target = cf.sampling_rate_target
 
         self.batch_size = batch_size
@@ -150,9 +149,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             masker = Masker(cf)
             self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
-            msg = "masked token modeling does not support self.input_window_steps > 1; "
-            msg += "increase window length"
-            assert self.input_window_steps == 1, msg
         else:
             assert False, f"Unsupported training mode: {cf.training_mode}"
 
