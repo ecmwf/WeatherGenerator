@@ -104,14 +104,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.forecast_steps = np.array(
             [cf.forecast_steps] if isinstance(cf.forecast_steps, int) else cf.forecast_steps
         )
-        if cf.forecast_policy is not None:
-            if self.forecast_steps.max() == 0 and is_root():
-                logger.warning("forecast policy is not None but number of forecast steps is 0.")
         self.forecast_policy = cf.forecast_policy
 
         self.streams_datasets: list[list[AnyDataReader]] = [
-            create_datasets(stream_info, self.time_window_handler, cf)
-            for stream_info in cf.streams
+            create_datasets(stream_info, self.time_window_handler, cf) for stream_info in cf.streams
         ]
 
         # MODIFIES config !!!
@@ -496,3 +492,4 @@ def create_datasets(stream_info, time_window_handler, cf) -> list[DataReaderBase
         datasets += [ds]
     
     return datasets
+
