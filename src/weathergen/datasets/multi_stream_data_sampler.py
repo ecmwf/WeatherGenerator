@@ -125,7 +125,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self._len = self._get_len(self.time_window_handler, samples_per_epoch, batch_size)
 
-        self.streams = cf.streams
         self.shuffle = shuffle
 
         self.sampling_rate_target = cf.sampling_rate_target
@@ -280,7 +279,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 streams_data: list[StreamData] = []
 
                 # for all streams
-                for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
+                for stream_ds in self.streams_datasets:
+                    stream_info = stream_ds[0].stream_info
                     stream_data = StreamData(
                         idx, forecast_dt + self.forecast_offset, self.num_healpix_cells
                     )
