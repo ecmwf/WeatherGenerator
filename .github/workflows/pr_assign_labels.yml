@@ -8,7 +8,7 @@ on:
 permissions:
   pull-requests: write
   contents: read
-  issues: read
+  issues: write
 
 jobs:
   sync:
@@ -58,11 +58,15 @@ jobs:
 
             // 3) Apply to the PR (PRs are "issues" in the REST API)
             if (labels.length) {
-              await github.rest.issues.addLabels({
-                owner, repo,
-                issue_number: prNumber,
-                labels
-              });
+              try {
+                await github.rest.issues.addLabels({
+                  owner, repo,
+                  issue_number: prNumber,
+                  labels
+                });
+              } catch (e) {
+                core.warning(`Failed to apply labels to PR ${prNumber}: ${e.message}`);
+              }
               core.info(`Applied labels to PR ${prNumber}: ${labels.join(", ")}`);
             } else {
               core.info("No labels to apply from linked issues.");
