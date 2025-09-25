@@ -1,0 +1,74 @@
+# This workflow automatically applies labels from issues to pull requests that reference them.
+name: Sync issue labels to PR
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  pull-requests: write
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Apply issue labels to PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const prNumber = context.payload.pull_request.number;
+
+            // 1) Find issues linked to this PR (those it will close)
+            const query = `
+              query($owner:String!, $repo:String!, $number:Int!) {
+                repository(owner:$owner, name:$repo) {
+                  pullRequest(number:$number) {
+                    closingIssuesReferences(first: 50) {
+                      nodes {
+                        number
+                        labels(first: 100) { nodes { name } }
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+            let data;
+            try { 
+              data = await github.graphql(query, { owner, repo, number: prNumber });
+            } catch (e) {
+              // Print a warning and stop here if the query fails (e.g., no linked issues)
+              core.warning(`GraphQL query failed: ${e.message}`);
+              return;
+            }
+            const issues = data.repository.pullRequest.closingIssuesReferences.nodes;
+
+            // 2) Collect unique label names from those issues
+            const labelSet = new Set();
+            for (const is of issues) {
+              for (const l of is.labels.nodes) labelSet.add(l.name);
+            }
+
+            // Optional: ignore labels you don't want copied
+            const IGNORE = new Set(["enhancement", "science", "bug", "documentation", "question", "good first issue", "help wanted"]);
+            const labels = Array.from(labelSet).filter(x => !IGNORE.has(x));
+
+            // 3) Apply to the PR (PRs are "issues" in the REST API)
+            if (labels.length) {
+              try {
+                await github.rest.issues.addLabels({
+                  owner, repo,
+                  issue_number: prNumber,
+                  labels
+                });
+              } catch (e) {
+                core.warning(`Failed to apply labels to PR ${prNumber}: ${e.message}`);
+              }
+              core.info(`Applied labels to PR ${prNumber}: ${labels.join(", ")}`);
+            } else {
+              core.info("No labels to apply from linked issues.");
+            }

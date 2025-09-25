@@ -602,6 +602,19 @@ wheels = [
 ]
 
 [[package]]
+name = "fancycompleter"
+version = "0.11.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyreadline3", marker = "sys_platform == 'win32'" },
+    { name = "pyrepl" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4e/4c/d11187dee93eff89d082afda79b63c79320ae1347e49485a38f05ad359d0/fancycompleter-0.11.1.tar.gz", hash = "sha256:5b4ad65d76b32b1259251516d0f1cb2d82832b1ff8506697a707284780757f69", size = 341776, upload-time = "2025-05-26T12:59:11.045Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/30/c3/6f0e3896f193528bbd2b4d2122d4be8108a37efab0b8475855556a8c4afa/fancycompleter-0.11.1-py3-none-any.whl", hash = "sha256:44243d7fab37087208ca5acacf8f74c0aa4d733d04d593857873af7513cdf8a6", size = 11207, upload-time = "2025-05-26T12:59:09.857Z" },
+]
+
+[[package]]
 name = "fasteners"
 version = "0.19"
 source = { registry = "https://pypi.org/simple" }
@@ -1488,6 +1501,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pdbpp"
+version = "0.11.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "fancycompleter" },
+    { name = "pygments" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c6/4c/118ef9534ac0632859b48c305d8c5dc9d6f963564fdfa66bc785c560247c/pdbpp-0.11.7.tar.gz", hash = "sha256:cb6604ac31a35ed0f2a29650a8c022b26284620be3e01cfd41b683b91da1ff14", size = 76026, upload-time = "2025-07-18T09:36:02.781Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/99/e9/704bbc08aace64fee536e4c2c20f63f64f6fdbad72938c5ed46c9723a9f1/pdbpp-0.11.7-py3-none-any.whl", hash = "sha256:51916b63693898cf4881b36b4501c83947758d73f582f1f84893662b163bdb75", size = 30545, upload-time = "2025-07-18T09:36:01.478Z" },
+]
+
+[[package]]
 name = "pdbufr"
 version = "0.13.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1779,6 +1805,40 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/9d/d9/5ccefb8bca925f44256b188a91c31238cae29ab6ee7f53661ecc04616146/pyproj-3.7.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:bf84d766646f1ebd706d883755df4370aaf02b48187cedaa7e4239f16bc8213d", size = 10771259, upload-time = "2025-02-16T04:28:20.822Z" },
     { url = "https://files.pythonhosted.org/packages/2a/7d/31dedff9c35fa703162f922eeb0baa6c44a3288469a5fd88d209e2892f9e/pyproj-3.7.1-cp312-cp312-win32.whl", hash = "sha256:5f0da2711364d7cb9f115b52289d4a9b61e8bca0da57f44a3a9d6fc9bdeb7274", size = 5859914, upload-time = "2025-02-16T04:28:23.303Z" },
     { url = "https://files.pythonhosted.org/packages/3e/47/c6ab03d6564a7c937590cff81a2742b5990f096cce7c1a622d325be340ee/pyproj-3.7.1-cp312-cp312-win_amd64.whl", hash = "sha256:aee664a9d806612af30a19dba49e55a7a78ebfec3e9d198f6a6176e1d140ec98", size = 6273196, upload-time = "2025-02-16T04:28:25.227Z" },
+]
+
+[[package]]
+name = "pyreadline3"
+version = "3.5.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/49/4cea918a08f02817aabae639e3d0ac046fef9f9180518a3ad394e22da148/pyreadline3-3.5.4.tar.gz", hash = "sha256:8d57d53039a1c75adba8e50dd3d992b28143480816187ea5efbd5c78e6c885b7", size = 99839, upload-time = "2024-09-19T02:40:10.062Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5a/dc/491b7661614ab97483abf2056be1deee4dc2490ecbf7bff9ab5cdbac86e1/pyreadline3-3.5.4-py3-none-any.whl", hash = "sha256:eaf8e6cc3c49bcccf145fc6067ba8643d1df34d604a1ec0eccbf7a18e6d3fae6", size = 83178, upload-time = "2024-09-19T02:40:08.598Z" },
+]
+
+[[package]]
+name = "pyrefly"
+version = "0.33.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3c/5d/3c448fb19a81a21a1f7e9a76280473273e85a2a5df7c0a2195deccf3c2a2/pyrefly-0.33.0.tar.gz", hash = "sha256:30c842ba7a6142c2e5cb8638b829d2b093c966e4b1211fee81ed42fedaa08632", size = 1399636, upload-time = "2025-09-15T14:57:04.787Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f1/e6/2ca0921cde526c40a55392001e15eba9078d3b0cfcb0e2dfbcc92caa3477/pyrefly-0.33.0-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:f235737e53a70925b94b8928131d81d6097cbf5413011c10d8730bae3970ad42", size = 6676391, upload-time = "2025-09-15T14:56:48.652Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/45/5401c34f85e408b98cc0583a25e591e5da0f04876da708286e69d4091c79/pyrefly-0.33.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:21bc7d9d2fd63d6144b156ae56ecc84ec30e29b8024fcc6ddf7c3ea2faab4025", size = 6218255, upload-time = "2025-09-15T14:56:50.941Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/9c/d05f80582979e20630741d5995fbcfc74951e755a6052c31c4e3c361d143/pyrefly-0.33.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:c63518cbbe50d4f63f1d8876466744787110ab218773f244f3bd7c6c923717a9", size = 6461939, upload-time = "2025-09-15T14:56:52.893Z" },
+    { url = "https://files.pythonhosted.org/packages/82/eb/7a94d9fe7ce7099fdacb9056b647cf7fddc94cc32e511194ac5b043619ba/pyrefly-0.33.0-py3-none-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:66eefc5453b097206b133d0ba205d07c815147239dbd40dbeeec1c066dd8c02c", size = 7277173, upload-time = "2025-09-15T14:56:54.957Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/90/91014e9e1525af0e53c9663782453311e19fd886098b1dceee5d7d977a04/pyrefly-0.33.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:33ed004ed22d207f68a558b2a38ce671200c0fcdf3f810b729fa481e350a8246", size = 6943644, upload-time = "2025-09-15T14:56:56.646Z" },
+    { url = "https://files.pythonhosted.org/packages/69/92/f99f8b3cf7289617b80f4903d3c5b60dbb2bb948b394baaf20d6efeaa9e3/pyrefly-0.33.0-py3-none-win32.whl", hash = "sha256:bf814c4468cb9b9b35ca2d7d44947995a6543c3bbd03fe3cb2e3fdfde22a751b", size = 6438608, upload-time = "2025-09-15T14:56:58.842Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/fa/61a929f85e6423f0455a22bb4dd609888d3940dd25f719bcf52822d147f2/pyrefly-0.33.0-py3-none-win_amd64.whl", hash = "sha256:5b08be1a43e51e2aa7e5125ba8b5c30d07f76ea965b857b10322667e96f396e6", size = 6864842, upload-time = "2025-09-15T14:57:00.72Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/e4/88b64c6d4a7a4f57f4530226734efab23ada37087e4c41848491410660fd/pyrefly-0.33.0-py3-none-win_arm64.whl", hash = "sha256:b858343993ee10fb8173348ef2ac879ff19d2ef4bbc4190b5c447fa5dd80a94d", size = 6476161, upload-time = "2025-09-15T14:57:03.316Z" },
+]
+
+[[package]]
+name = "pyrepl"
+version = "0.11.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/08/4f/7088417e5465c53a30b918d30542aad89352ea0d635a5d077717c69a7d2b/pyrepl-0.11.4.tar.gz", hash = "sha256:efe988b4a6e5eed587e9769dc2269aeec2b6feec2f5d77995ee85b9ad7cf7063", size = 51089, upload-time = "2025-07-17T22:56:25.42Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bd/a5/ce97a778f096aaa27cfcb7ad09f1198cf73277dcab6c68a4b8f332d91e48/pyrepl-0.11.4-py3-none-any.whl", hash = "sha256:ac30d6340267a21c39e1b1934f92bca6b8735017d14b17e40f903b2d1563541d", size = 55596, upload-time = "2025-07-17T22:56:24.537Z" },
 ]
 
 [[package]]
@@ -2354,6 +2414,8 @@ dependencies = [
 dev = [
     { name = "ipykernel" },
     { name = "jupytext" },
+    { name = "pdbpp" },
+    { name = "pyrefly" },
     { name = "pytest" },
     { name = "pytest-mock" },
     { name = "ruff" },
@@ -2390,6 +2452,8 @@ requires-dist = [
 dev = [
     { name = "ipykernel", specifier = ">=6.30.0" },
     { name = "jupytext", specifier = ">=1.17.2" },
+    { name = "pdbpp", specifier = ">=0.11.7" },
+    { name = "pyrefly", specifier = "==0.33.0" },
     { name = "pytest", specifier = "~=8.3.5" },
     { name = "pytest-mock", specifier = ">=3.14.1" },
     { name = "ruff", specifier = "==0.9.7" },
@@ -2409,6 +2473,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "pyrefly" },
     { name = "pytest" },
     { name = "pytest-mock" },
     { name = "ruff" },
@@ -2424,6 +2489,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "pyrefly", specifier = "==0.33.0" },
     { name = "pytest", specifier = "~=8.3.5" },
     { name = "pytest-mock", specifier = ">=3.14.1" },
     { name = "ruff", specifier = "==0.9.7" },
