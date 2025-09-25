@@ -283,8 +283,8 @@ class LossCalculator:
 
                 loss_fsteps = loss_fsteps + (loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0)
                 ctr_fsteps += 1 if ctr_loss_fcts > 0 else 0
-           
-            loss = loss + ( (mask*loss_fsteps) / (ctr_fsteps if ctr_fsteps > 0 else 1.0))
+
+            loss = loss + ((mask * loss_fsteps) / (ctr_fsteps if ctr_fsteps > 0 else 1.0))
             ctr_streams += 1 if ctr_fsteps > 0 and not stream_is_spoof else 0
 
             # normalize by forecast step

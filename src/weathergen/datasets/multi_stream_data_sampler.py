@@ -346,7 +346,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 len(stream_info.train_source_channels),
                                 time_win1.start,
                                 ds.get_geoinfo_size(),
-                                ds.mean[ds.source_idx]
+                                ds.mean[ds.source_idx],
                             )
                         # TODO: handling of conversion from numpy to torch here and below
                         # TODO: this should only be collected in validation mode
@@ -383,7 +383,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                     len(stream_info.train_target_channels),
                                     time_win1.start,
                                     ds.get_geoinfo_size(),
-                                    ds.mean[ds.target_idx]
+                                    ds.mean[ds.target_idx],
                                 )
 
                             (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
