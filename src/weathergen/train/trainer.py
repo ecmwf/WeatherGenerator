@@ -416,6 +416,10 @@ class Trainer(TrainerBase):
         # removing the reshaping, make sure to index the tensors starting at forecast_offset, e.g.,
         # target_times_raw = streams_data[i_batch][i_strm].target_times_raw[forecast_offset+fstep],
         # when iterating over batch, stream, and fsteps.
+        if self.cf.get("encode_targets_latent", False):
+            # unpack the predictions/tokens from the latent space if the latent space tokens are encoded
+            preds, tokens_all, tokens_targets = preds
+            
         targets_rt = [
             [
                 torch.cat([t[i].target_tokens[fstep] for t in streams_data])
@@ -487,7 +491,7 @@ class Trainer(TrainerBase):
         self.optimizer.zero_grad()
 
         # Unweighted loss, real weighted loss, std for losses that need it
-        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist, self.loss_unweighted_lat_hist = [], [], [], []
 
         # training loop
         self.t_start = time.time()
@@ -508,10 +512,20 @@ class Trainer(TrainerBase):
                     preds=preds,
                     streams_data=batch[0],
                 )
+
                 if cf.latent_noise_kl_weight > 0.0:
                     kl = torch.cat([posterior.kl() for posterior in posteriors])
                     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
+                
+            if bidx == 0 and is_root():
+                if self.cf.get("encode_targets_latent", False):
+                    # unpack the predictions/tokens from the latent space if the latent space tokens are encoded
+                    preds, tokens_all, tokens_targets = preds
+                    save_dir = "/iopsstor/scratch/cscs/ktezcan/weathergen/tokens/"
+                    np.save(save_dir + self.cf.run_id + "_tokens_all_epoch" + str(epoch) + ".npy", [t.detach().cpu().numpy() for t in tokens_all])
+                    np.save(save_dir + self.cf.run_id + "_tokens_targets_epoch" + str(epoch) + ".npy", [t.detach().cpu().numpy() for t in tokens_targets])
 
+            
             # backward pass
             self.grad_scaler.scale(loss_values.loss).backward()
 
@@ -530,6 +544,9 @@ class Trainer(TrainerBase):
             self.loss_unweighted_hist += [loss_values.losses_all]
             self.loss_model_hist += [loss_values.loss.item()]
             self.stdev_unweighted_hist += [loss_values.stddev_all]
+            
+            if loss_values.losses_all_lat.numel() > 0:
+                self.loss_unweighted_lat_hist += [loss_values.losses_all_lat.item()]
 
             perf_gpu, perf_mem = self.get_perf()
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu])).item()
@@ -552,7 +569,7 @@ class Trainer(TrainerBase):
         self.ddp_model.eval()
 
         dataset_val_iter = iter(self.data_loader_validation)
-        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist, self.loss_unweighted_lat_hist = [], [], [], []
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
@@ -569,9 +586,14 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds, _ = self.ddp_model(
+                        
+                        ret = self.ddp_model(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
+                        if self.cf.get("encode_targets_latent", False):
+                            preds = ret
+                        else:
+                            preds, _ = ret
 
                     # compute loss and log output
                     if bidx < cf.log_validation:
@@ -615,6 +637,9 @@ class Trainer(TrainerBase):
                     self.loss_unweighted_hist += [loss_values.losses_all]
                     self.loss_model_hist += [loss_values.loss.item()]
                     self.stdev_unweighted_hist += [loss_values.stddev_all]
+                    
+                    if loss_values.losses_all_lat.numel() > 0:
+                        self.loss_unweighted_lat_hist += [loss_values.losses_all_lat.item()]
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
@@ -691,21 +716,27 @@ class Trainer(TrainerBase):
         """
         losses_all: dict[str, Tensor] = {}
         stddev_all: dict[str, Tensor] = {}
+        losses_all_lat: Tensor
 
         # Make list of losses into a tensor. This is individual tensor per rank
         real_loss = torch.tensor(self.loss_model_hist, device=self.devices[0])
         # Gather all tensors from all ranks into a list and stack them into one tensor again
         real_loss = torch.cat(all_gather_vlen(real_loss))
 
-        for stream in self.cf.streams:  # Loop over all steams
+        for stream in self.cf.streams:  # Loop over all streams
             stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
             stream_all = torch.stack(stream_hist).to(torch.float64)
             losses_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
+            
             stream_hist = [stddev_all[stream.name] for stddev_all in self.stdev_unweighted_hist]
             stream_all = torch.stack(stream_hist).to(torch.float64)
             stddev_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
+            
+        lat_hist = [losses_all_lat for losses_all_lat in self.loss_unweighted_lat_hist]
+        lat_all = torch.tensor(lat_hist, device=self.devices[0]).to(torch.float64)
+        losses_all_lat = torch.cat(all_gather_vlen(lat_all))
 
-        return real_loss, losses_all, stddev_all
+        return real_loss, losses_all, stddev_all, losses_all_lat
 
     def _log(self, stage: Stage):
         """
@@ -719,7 +750,7 @@ class Trainer(TrainerBase):
             - This method only executes logging on the main process (rank 0).
             - After logging, historical loss and standard deviation records are cleared.
         """
-        avg_loss, losses_all, stddev_all = self._prepare_losses_for_logging()
+        avg_loss, losses_all, stddev_all, losses_all_lat = self._prepare_losses_for_logging()
         samples = self.cf.istep * self.cf.batch_size_per_gpu * self.cf.num_ranks
 
         if is_root():
@@ -743,7 +774,7 @@ class Trainer(TrainerBase):
     def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
         if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
-            avg_loss, losses_all, _ = self._prepare_losses_for_logging()
+            avg_loss, losses_all, _, losses_all_lat = self._prepare_losses_for_logging()
 
             if is_root():
                 if stage == VAL:
@@ -781,6 +812,13 @@ class Trainer(TrainerBase):
                         print(
                             "{}".format(st["name"])
                             + f" : {losses_all[st['name']].nanmean():0.4E} \t",
+                            end="",
+                        )
+                    # if the latent loss tensor is not empty:
+                    if losses_all_lat.numel():
+                        # print latent losses if available
+                        print(
+                            f"latent loss : {losses_all_lat.nanmean():0.4E} \t",
                             end="",
                         )
                     print("\n", flush=True)
