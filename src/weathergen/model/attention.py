@@ -14,7 +14,6 @@ from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
-from weathergen.model.layers import Linear
 
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     def __init__(

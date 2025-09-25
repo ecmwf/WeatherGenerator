@@ -581,10 +581,10 @@ class Model(torch.nn.Module):
                     logger.info('denoising step')
                     #TODO should never denoise multipel delta_t...
                     #in this case, we predict residual, and add it to previous state before decoding
-                    res_tokens, weights = self.denoise(model_params, tokens, tokens_targets[fstep - forecast_offset])
+                    res_tokens, weights = self.edm_denoise(model_params, tokens, tokens_targets[fstep - forecast_offset])
                 else:
                     logger.info('sampling step')
-                    res_tokens, weights = self.edm_sampler(model_params, tokens)
+                    res_tokens, weights = self.edm_sample(model_params, tokens)
                 tokens = tokens + res_tokens
                 tokens_all += [res_tokens]
 
@@ -888,7 +888,7 @@ class Model(torch.nn.Module):
         D_x = c_skip * noised_target + c_out * F_x[:, -target_tokens.shape[1]:, :]
         return D_x
 
-    def denoise(self, model_params: ModelParams, condition_tokens: torch.Tensor, target_tokens: torch.Tensor):
+    def edm_denoise(self, model_params: ModelParams, condition_tokens: torch.Tensor, target_tokens: torch.Tensor):
         rnd_normal = torch.randn([target_tokens.shape[0], 1, 1], dtype=torch.float32, device=target_tokens.device)
         sigma = (rnd_normal * self.P_std + self.P_mean).exp()
         n = torch.randn_like(target_tokens) * sigma
@@ -897,10 +897,11 @@ class Model(torch.nn.Module):
 
         return self.edm_preconditioning(model_params, condition_tokens, noised_target, noise=sigma), weight
 
-    def edm_sampler(
+    def edm_sample(
+        #default parameters taken form gencast supplementary, sampler architecture adapted form edm
         self, model_params: ModelParams, condition_tokens: torch.Tensor, class_labels=None, randn_like=torch.randn_like,
-        num_steps=18, sigma_min=0.002, sigma_max=80, rho=7,
-        S_churn=0, S_min=0, S_max=float('inf'), S_noise=1,
+        num_steps=20, sigma_min=0.02, sigma_max=88, rho=7,
+        S_churn=2.5, S_min=0, S_max=80, S_noise=1.05,
     ):
         # Adjust noise levels based on what's supported by the network.
         sigma_min = max(sigma_min, self.fe.sigma_min)
