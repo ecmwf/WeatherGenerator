@@ -225,7 +225,6 @@ class LossCalculator:
         # TODO: iterate over batch dimension
         i_batch = 0
         for i_stream_info, stream_info in enumerate(self.cf.streams):
-            stream_name = stream_info.get("name", i_stream_info)
             # extract target tokens for current stream from the specified forecast offset onwards
             targets = streams_data[i_batch][i_stream_info].target_tokens[self.cf.forecast_offset :]
 
