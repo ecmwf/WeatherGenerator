@@ -340,16 +340,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # bidx is used to count the #batches that have been emitted
         # idx_raw is used to index into the dataset; the decoupling is needed
         # since there are empty batches
-        idx_raw = iter_start
-        for i, _bidx in enumerate(range(iter_start, iter_end, self.batch_size)):
-            # forecast_dt needs to be constant per batch (amortized through data parallel training)
-            forecast_dt = self.perms_forecast_dt[i]
-
+        idx_raw = iter_start  # start step index
+        assert (iter_end - iter_start) // self.batch_size == len(self.perms_forecast_dt)
+        # forecast_dt needs to be constant per batch (amortized through data parallel training)
+        for forecast_dt in self.perms_forecast_dt:  # bidx loop
             # use while loop due to the scattered nature of the data in time and to
             # ensure batches are not empty
             batch = []
             while len(batch) < self.batch_size:
-                idx: TIndex = self.perms[idx_raw % self.perms.shape[0]]
+                # TODO: identity? len(self.perms) should be most likely longer then
+                # idx_raw since it contains the all dataset steps (- small adjustment)
+                # whereas iter_end-iter_start should be smaller since it is only a subset
+                perm_idx = idx_raw % len(self.perms)
+                idx: TIndex = self.perms[perm_idx]
                 idx_raw += 1
 
                 time_win_source = self.time_window_handler.window(idx)
