@@ -506,7 +506,7 @@ class Trainer(TrainerBase):
                 )
                 preds = model_output["preds_all"]
                 posteriors = model_output["posteriors"]
-                
+
                 loss_values = self.loss_calculator.compute_loss(
                     preds=preds,
                     streams_data=batch[0],

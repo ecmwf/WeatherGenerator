@@ -71,7 +71,7 @@ class StreamData:
         self.target_srclk_tokens_lens = [[] for _ in range(forecast_steps + 1)]
         self.target_srclk_tokens_cells = [[] for _ in range(forecast_steps + 1)]
         self.target_srclk_centroids = [[] for _ in range(forecast_steps + 1)]
-        
+
         self.target_srclk_idxs_embed = [torch.tensor([]) for _ in range(forecast_steps + 1)]
         self.target_srclk_idxs_embed_pe = [torch.tensor([]) for _ in range(forecast_steps + 1)]
 
@@ -110,7 +110,7 @@ class StreamData:
         self.target_srclk_centroids = [
             t.to(device, non_blocking=True) for t in self.target_srclk_centroids
         ]
-        
+
         self.target_srclk_idxs_embed = [
             t.to(device, non_blocking=True) for t in self.target_srclk_idxs_embed
         ]

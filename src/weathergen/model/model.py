@@ -517,7 +517,7 @@ class Model(torch.nn.Module):
         tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
 
         tokens = self.assimilate_global(model_params, tokens)
-        
+
         # roll-out in latent space
         preds_all = []
         tokens_all = [tokens]
@@ -557,15 +557,14 @@ class Model(torch.nn.Module):
                         model_params, tokens_targets_srclk[fstep], source_cell_lens
                     )
                     tokens_target = self.assimilate_global(model_params, tokens_target)
-                    tokens_target_det = tokens_target.detach() # explicitly detach as well
+                    tokens_target_det = tokens_target.detach()  # explicitly detach as well
                     tokens_targets.append(tokens_target_det)
-                    
-        
+
         return_dict = {"preds_all": preds_all, "posteriors": posteriors}
         if self.cf.get("encode_targets_latent", False):
             return_dict["tokens_all"] = tokens_all
             return_dict["tokens_targets"] = tokens_targets
-            
+
         return return_dict
 
     #########################################
@@ -649,7 +648,9 @@ class Model(torch.nn.Module):
                 ]
             )
             offsets_base = target_srclk_tokens_lens.sum(1).sum(0).cumsum(1)
-            num_fsteps = target_srclk_tokens_lens.shape[2]  # TODO: KCT, if there are diff no of tokens per fstep, this may fail
+            num_fsteps = target_srclk_tokens_lens.shape[
+                2
+            ]  # TODO: KCT, if there are diff no of tokens per fstep, this may fail
             tokens_all = []
             for fstep in range(num_fsteps):
                 tokens_all.append(
@@ -665,7 +666,7 @@ class Model(torch.nn.Module):
                 for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
                     for fstep in range(num_fsteps):
                         if not (s.target_srclk_tokens_lens[fstep].sum() == 0):
-                            idxs = s.target_srclk_idxs_embed[fstep]  
+                            idxs = s.target_srclk_idxs_embed[fstep]
                             idxs_pe = s.target_srclk_idxs_embed_pe[fstep]
 
                             # create full scatter index

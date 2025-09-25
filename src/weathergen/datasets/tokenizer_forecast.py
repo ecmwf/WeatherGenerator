@@ -42,14 +42,18 @@ class TokenizerForecast(Tokenizer):
         times: np.array,
         time_win: tuple,
         normalizer,  # dataset,
-        use_normalizer: str, # "source" or "target"
+        use_normalizer: str,  # "source" or "target"
     ):
         init_loggers()
         token_size = stream_info["token_size"]
         is_diagnostic = stream_info.get("diagnostic", False)
         tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
-        
-        channel_normalizer = normalizer.normalize_source_channels if use_normalizer == "source_normalizer" else normalizer.normalize_target_channels
+
+        channel_normalizer = (
+            normalizer.normalize_source_channels
+            if use_normalizer == "source_normalizer"
+            else normalizer.normalize_target_channels
+        )
 
         tokenize_window = partial(
             tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,

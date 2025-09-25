@@ -349,7 +349,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 rdata.datetimes,
                                 (time_win1.start, time_win1.end),
                                 ds,
-                                "source_normalizer"
+                                "source_normalizer",
                             )
 
                             stream_data.add_source(rdata_wrapped, ss_lens, ss_cells, ss_centroids)
@@ -386,7 +386,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                     np.concatenate((rdata.coords, rdata.geoinfos, rdata.data), 1)
                                 )
                                 (tt_cells_srclk, tt_lens_srclk, tt_centroids_srclk) = (
-                                    self.tokenizer.batchify_source( # TODO: KCT, check if anything source related is happening in the function
+                                    self.tokenizer.batchify_source(  # TODO: KCT, check if anything source related is happening in the function
                                         stream_info,
                                         torch.from_numpy(rdata.coords),
                                         torch.from_numpy(rdata.geoinfos),
@@ -394,7 +394,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                         rdata.datetimes,
                                         (time_win2.start, time_win2.end),
                                         ds,
-                                        "target_normalizer"
+                                        "target_normalizer",
                                     )
                                 )
 
