@@ -560,32 +560,13 @@ class Model(torch.nn.Module):
                     tokens_target_det = tokens_target.detach() # explicitly detach as well
                     tokens_targets.append(tokens_target_det)
                     
-        print(torch.linalg.norm(tokens_all[1] - tokens_targets[0]))
-
-        if False:
-            preds_from_targets = []
-            for fstep in range(forecast_offset, forecast_offset + forecast_steps):
-                        # prediction
-                        preds_from_targets += [
-                            self.predict(
-                                model_params,
-                                fstep,
-                                tokens_targets[fstep],
-                                streams_data,
-                                target_coords_idxs,
-                            )
-                        ]
-            save_dir = Path("/users/ktezcan/projects/Meteoswiss/WeatherGenerator/personal/clariden/experiments_latent_loss_rnd2/tokens")
-            np.save(save_dir / (self.cf.run_id+"_preds_from_targets"), [tt[0][0].cpu().detach().numpy() for tt in preds_from_targets])
-            np.save(save_dir / (self.cf.run_id+"_preds_all"), [tt[0][0].cpu().detach().numpy() for tt in preds_all])
-            np.save(save_dir / (self.cf.run_id+"_tokens_targets"), [tt.cpu().detach().numpy() for tt in tokens_targets])
-            np.save(save_dir / (self.cf.run_id+"_tokens_all"), [tt.cpu().detach().numpy() for tt in tokens_all])
-
+        
+        return_dict = {"preds_all": preds_all, "posteriors": posteriors}
+        if self.cf.get("encode_targets_latent", False):
+            return_dict["tokens_all"] = tokens_all
+            return_dict["tokens_targets"] = tokens_targets
             
-        if self.cf.get("encode_targets_latent", False): #TODO: KCT, put a safeguard: if there is a latent loss, encode_targets_latent has to be True
-            return preds_all, tokens_all, tokens_targets
-        else:
-            return preds_all, posteriors
+        return return_dict
 
     #########################################
     def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
