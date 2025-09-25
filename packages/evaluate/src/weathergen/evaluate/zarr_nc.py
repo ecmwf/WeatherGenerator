@@ -61,8 +61,6 @@ def reshape_dataset(input_data_array):
         pressure_level=pl,
     )
     sampled_data = [reshaped_dataset.where(reshaped_dataset.sample == i, drop=True) for i in range(len(np.unique(reshaped_dataset.sample)))]
-    #print(sampled_data[1])
-    #print(remove_ipoint(sampled_data[1]))
     sampled_data = [remove_ipoint(sample) for sample in sampled_data]
     # rename sample
     sampled_data = [ds.assign_coords(sample=i) for i, ds in enumerate(sampled_data)]
@@ -79,6 +77,8 @@ def add_conventions(run_id, ds):
     ds.attrs["history"] = "none"
     ds.attrs["Conventions"] = "CF-1.12"
     return ds
+
+import xarray as xr
 
 def cf_parser(config, ds) -> xr.Dataset:
     # Start a new xarray dataset from scratch, it's easier than deleting / renaming (I tried!).
@@ -100,12 +100,13 @@ def cf_parser(config, ds) -> xr.Dataset:
             ds = ds.rename_dims({dim_name: dim_dict['wg']})
         dim_attributes = dict(
                     standard_name = dim_dict.get('std',None),
-                    units = dim_dict.get('std_unit',None)
                 )
+        if 'std_unit' in dim_dict and dim_dict['std_unit'] is not None:
+            dim_attributes['units'] = dim_dict['std_unit']
         ds_attributes[dim_dict['wg']] = dim_attributes
     for var_name in ds:
         # TODO: better way to handle the ordering here
-        dims = ['forecast_step', 'pressure', 'valid_time', 'latitude', 'longitude',]
+        dims = ['forecast_period', 'pressure', 'valid_time', 'latitude', 'longitude',]
         if mapping[var_name]["level_type"] == "sfc":
             dims.remove('pressure')
         coordinates = {}
@@ -253,6 +254,7 @@ if __name__ == "__main__":
 
     # Load configuration
     # TODO: get path from platform-env
+    
     config_file = '../WeatherGenerator-private/evaluate/config_zarr2cf.yaml'
     config = OmegaConf.load(config_file)
     # check config loaded correctly
@@ -292,7 +294,6 @@ if __name__ == "__main__":
         _logger.info(f"Saving sample {sample_idx} to {out_fname}...")
         sample_all_steps = sample_all_steps.assign_coords(forecast_ref_time=forecast_ref_time[sample_idx])
         sample_all_steps = sample_all_steps.drop_vars('sample')
-        sample_all_steps = sample_all_steps.assign_coords(forecast_period=sample_all_steps.forecast_step * fstep_hours)
         sample_all_steps = cf_parser(config, sample_all_steps)
         sample_all_steps = add_conventions(run_id, sample_all_steps)
         sample_all_steps.to_netcdf(out_fname, mode = 'w')
@@ -305,7 +306,6 @@ if __name__ == "__main__":
         _logger.info(f"Saving sample {sample_idx} to {out_fname}...")
         sample_all_steps = sample_all_steps.assign_coords(forecast_ref_time=forecast_ref_time[sample_idx])
         sample_all_steps = sample_all_steps.drop_vars('sample')
-        sample_all_steps = sample_all_steps.assign_coords(forecast_period=sample_all_steps.forecast_step * fstep_hours)
         sample_all_steps = cf_parser(config, sample_all_steps)
         sample_all_steps = add_conventions(run_id, sample_all_steps)
         sample_all_steps.to_netcdf(out_fname, mode = 'w')
