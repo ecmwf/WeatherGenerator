@@ -349,6 +349,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 rdata.datetimes,
                                 (time_win1.start, time_win1.end),
                                 ds,
+                                "source"
                             )
 
                             stream_data.add_source(rdata_wrapped, ss_lens, ss_cells, ss_centroids)
@@ -393,6 +394,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                         rdata.datetimes,
                                         (time_win2.start, time_win2.end),
                                         ds,
+                                        "target"
                                     )
                                 )
 
