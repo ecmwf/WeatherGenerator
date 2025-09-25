@@ -501,9 +501,12 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                preds, posteriors = self.ddp_model(
+                model_output = self.ddp_model(
                     self.model_params, batch, cf.forecast_offset, forecast_steps
                 )
+                preds = model_output["preds_all"]
+                posteriors = model_output["posteriors"]
+                
                 loss_values = self.loss_calculator.compute_loss(
                     preds=preds,
                     streams_data=batch[0],
@@ -569,9 +572,10 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds, _ = self.ddp_model(
+                        model_output = self.ddp_model(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
+                        preds = model_output["preds_all"]
 
                     # compute loss and log output
                     if bidx < cf.log_validation:
