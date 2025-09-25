@@ -93,7 +93,6 @@ class OutputDataset:
 
         # maybe do dask conversion earlier? => usefull for parallel writing?
         data = da.from_zarr(self.data, chunks=chunks)  # dont call compute to lazy load
-        print(data.shape)
         # include pseudo ens dim so all data arrays have same dimensionality
         # TODO: does it make sense for target and source to have ens dim?
         additional_dims = (0, 1, 2) if len(data.shape) == 3 else (0, 1, 2, 5)
