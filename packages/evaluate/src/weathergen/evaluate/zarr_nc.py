@@ -25,6 +25,7 @@ if not _logger.handlers:
     handler.setFormatter(formatter)
     _logger.addHandler(handler)
 
+
 ## all functions
 def find_pl(all_variables):
     """
@@ -44,6 +45,7 @@ def find_pl(all_variables):
             var_dict.setdefault(var, []).append(var)
     pl = list(set(pl))
     return var_dict, pl
+
 
 def reshape_dataset(input_data_array):
     """
@@ -77,14 +79,15 @@ def reshape_dataset(input_data_array):
     sampled_data = [ds.assign_coords(sample=i) for i, ds in enumerate(sampled_data)]
     return sampled_data
 
+
 def remove_ipoint(sample_data):
     """
     Remove ipoint dimension by setting it as index and unstacking.
     """
-    sample_data = sample_data.set_index(ipoint=("valid_time", "lat", "lon")).unstack(
-        "ipoint"
-    )
+    sample_data = sample_data.set_index(ipoint=("valid_time", "lat", "lon")).unstack("ipoint")
+    ## TODO: regrid data to closest on a regularly spaced grid, current logic assigns a new lat, lon for each point
     return sample_data
+
 
 def add_conventions(stream, run_id, ds):
     """
@@ -93,9 +96,13 @@ def add_conventions(stream, run_id, ds):
     ds.attrs["title"] = f"WeatherGenerator Output for {run_id} using stream {stream}"
     ds.attrs["institution"] = "WeatherGenerator Project"
     ds.attrs["source"] = "WeatherGenerator v0.0"
-    ds.attrs["history"] = "Created using the zarr_nc.py script on " + np.datetime_as_string(np.datetime64("now"), unit="s")
+    ds.attrs["history"] = (
+        "Created using the zarr_nc.py script on "
+        + np.datetime_as_string(np.datetime64("now"), unit="s")
+    )
     ds.attrs["Conventions"] = "CF-1.12"
     return ds
+
 
 def cf_parser(config, ds) -> xr.Dataset:
     """
@@ -166,6 +173,7 @@ def cf_parser(config, ds) -> xr.Dataset:
     dataset.attrs = ds.attrs
     return dataset
 
+
 def output_filename(type, run_id, output_dir, output_format, forecast_ref_time):
     """
     Generate output filename based on type, run_id, sample index, output directory, format and forecast_ref_time.
@@ -175,12 +183,11 @@ def output_filename(type, run_id, output_dir, output_format, forecast_ref_time):
     file_extension = "nc"
     frt = np.datetime_as_string(forecast_ref_time, unit="h")
     # out_fname = Path(output_dir) / f'{type}_{run_id}_{np.datetime_as_string(forecast_ref_time, unit="h")}.{file_extension}'
-    # documentation wants <type>_<forecast_reference_time>_<forecast_period>_<collection>.<extension> 
-    #here multiple forecast steps are in one forecast so have amended to just use forecast reference time
-    out_fname = (
-        Path(output_dir) / f"{type}_{frt}_{run_id}.{file_extension}"
-    )
+    # documentation wants <type>_<forecast_reference_time>_<forecast_period>_<collection>.<extension>
+    # here multiple forecast steps are in one forecast so have amended to just use forecast reference time
+    out_fname = Path(output_dir) / f"{type}_{frt}_{run_id}.{file_extension}"
     return out_fname
+
 
 def zarr_store(run_id):
     """
@@ -196,14 +203,15 @@ def zarr_store(run_id):
             f"Zarr file {zarr_path} does not exist or is not a directory."
         )
     return zarr_path
-    
-def get_data(run_id: str, stream: str, type:str, fsteps=None, channels=None):
+
+
+def get_data(run_id: str, stream: str, type: str, fsteps=None, channels=None):
     """
     Retrieve data from Zarr store for a given run ID and stream.
     type: 'target' or 'prediction'
     """
     # check type is valid
-    if type not in ['target', 'prediction']:
+    if type not in ["target", "prediction"]:
         raise ValueError(f"Invalid type: {type}. Must be 'target' or 'prediction'.")
     fname_zarr = zarr_store(run_id)
     with ZarrIO(fname_zarr) as zio:
@@ -217,7 +225,7 @@ def get_data(run_id: str, stream: str, type:str, fsteps=None, channels=None):
         fsteps = sorted([int(fstep) for fstep in fsteps])
         samples = sorted([int(sample) for sample in samples])
     da_list = []
-    for fstep in range(1,  len(fsteps)):
+    for fstep in range(1, len(fsteps)):
         da_fs = []
         for sample in tqdm(
             samples,
@@ -225,9 +233,9 @@ def get_data(run_id: str, stream: str, type:str, fsteps=None, channels=None):
         ):
             with ZarrIO(fname_zarr) as zio:
                 out = zio.get_data(sample, stream, fstep)
-                if type == 'target':
+                if type == "target":
                     data = out.target.as_xarray()
-                elif type == 'prediction':
+                elif type == "prediction":
                     data = out.prediction.as_xarray()
             da_fs.append(data.squeeze())
         da_fs = xr.concat(da_fs, dim="ipoint")
@@ -243,25 +251,30 @@ def get_data(run_id: str, stream: str, type:str, fsteps=None, channels=None):
     return da_list
 
 
-def save_samples_to_netcdf(type_str, dict_sample_all_steps, FSTEP_HOURS, run_id, output_dir, output_format, config):
+def save_samples_to_netcdf(
+    type_str,
+    dict_sample_all_steps,
+    FSTEP_HOURS,
+    run_id,
+    output_dir,
+    output_format,
+    config,
+):
     """
     Uses dictionary of pred/target xarray DataArrays to save each sample to a NetCDF file.
     """
     for sample_idx, array_list in dict_sample_all_steps.items():
-        frt = array_list[0].coords['valid_time'].values[0] - FSTEP_HOURS
+        frt = array_list[0].coords["valid_time"].values[0] - FSTEP_HOURS
         sample_all_steps = xr.concat(array_list, dim="forecast_step")
-        out_fname = output_filename(
-            type_str, run_id, output_dir, output_format, frt
-        )
+        out_fname = output_filename(type_str, run_id, output_dir, output_format, frt)
         _logger.info(f"Saving sample {sample_idx} to {out_fname}...")
-        sample_all_steps = sample_all_steps.assign_coords(
-            forecast_ref_time=frt
-        )
-        stream = str(sample_all_steps.coords['stream'].values)
+        sample_all_steps = sample_all_steps.assign_coords(forecast_ref_time=frt)
+        stream = str(sample_all_steps.coords["stream"].values)
         sample_all_steps = sample_all_steps.drop_vars("sample")
         sample_all_steps = cf_parser(config, sample_all_steps)
         sample_all_steps = add_conventions(stream, run_id, sample_all_steps)
         sample_all_steps.to_netcdf(out_fname, mode="w")
+
 
 def parse_args(args):
     """
@@ -305,6 +318,7 @@ def parse_args(args):
     if unknown_args:
         _logger.warning(f"Unknown arguments: {unknown_args}")
     return args
+
 
 if __name__ == "__main__":
     # Get run_id zarr data as lists of xarray DataArrays
@@ -351,8 +365,12 @@ if __name__ == "__main__":
             for j in range(n_samples):
                 _logger.info(f"Processing sample {j}, forecast step {i + 1}")
                 dict_sample_all_steps.setdefault(j, []).append(fs_i_all_sample[j])
-        valid_time = [
-            [np.unique(da.valid_time).squeeze() for da in da_step] for da_step in da_list
-        ]
-        forecast_ref_times = [vt - FSTEP_HOURS for vt in valid_time[0]]
-        save_samples_to_netcdf(str(type)[:4], dict_sample_all_steps, FSTEP_HOURS, run_id, output_dir, output_format, config)
+        save_samples_to_netcdf(
+            str(type)[:4],
+            dict_sample_all_steps,
+            FSTEP_HOURS,
+            run_id,
+            output_dir,
+            output_format,
+            config,
+        )
