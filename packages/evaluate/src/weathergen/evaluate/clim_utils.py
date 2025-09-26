@@ -143,6 +143,11 @@ def align_clim_data(
             dims=target_output[fstep].dims,  # Use the same dimensions as target
         )
 
+    # Cache for previously computed indices
+    cached_target_lats = None
+    cached_target_lons = None
+    cached_clim_indices = None
+
     if clim_data is None:
         return aligned_clim_data
     else:
@@ -170,21 +175,33 @@ def align_clim_data(
                 else:
                     target_lats = target_data.lat.values
                     target_lons = target_data.lon.values
-                clim_lats = prepared_clim_data.latitude.values
-                clim_lons = prepared_clim_data.longitude.values
-                clim_indices = find_climatology_indices(
-                    target_lats, target_lons, clim_lats, clim_lons
-                )
-
-                # Check for unmatched coordinates
-                unmatched_mask = clim_indices == -1
-                if np.any(unmatched_mask):
-                    n_unmatched = np.sum(unmatched_mask)
-                    raise ValueError(
-                        f"Found {n_unmatched} target coordinates with no matching climatology coordinates. "
-                        f"This will cause incorrect ACC calculations. "
-                        f"Check coordinate alignment between target and climatology data."
+                # check if target coords match cached target coords
+                # if they do, use cached clim_indices
+                if (
+                    cached_clim_indices is not None
+                    and np.array_equal(target_lats, cached_target_lats)
+                    and np.array_equal(target_lons, cached_target_lons)
+                ):
+                    clim_indices = cached_clim_indices
+                else:
+                    clim_lats = prepared_clim_data.latitude.values
+                    clim_lons = prepared_clim_data.longitude.values
+                    clim_indices = find_climatology_indices(
+                        target_lats, target_lons, clim_lats, clim_lons
                     )
+                    # Check for unmatched coordinates
+                    unmatched_mask = clim_indices == -1
+                    if np.any(unmatched_mask):
+                        n_unmatched = np.sum(unmatched_mask)
+                        raise ValueError(
+                            f"Found {n_unmatched} target coordinates with no matching climatology coordinates. "
+                            f"This will cause incorrect ACC calculations. "
+                            f"Check coordinate alignment between target and climatology data."
+                        )
+                    # Cache the computed indices and target coords
+                    cached_clim_indices = clim_indices
+                    cached_target_lats = target_lats
+                    cached_target_lons = target_lons
 
                 clim_values = prepared_clim_data.isel(grid_points=clim_indices).values
                 try:
