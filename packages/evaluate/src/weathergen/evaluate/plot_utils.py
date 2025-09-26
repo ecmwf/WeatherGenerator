@@ -95,7 +95,7 @@ def plot_metric_region(
 
             for run_id, data in scores_dict[metric][region].get(stream, {}).items():
                 # skip if channel is missing or contains NaN
-                if ch not in np.atleast_1d(data.channel.values) or data.isnull().any():
+                if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
                     continue
 
                 selected_data.append(data.sel(channel=ch))
