@@ -14,7 +14,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
 from weathergen.evaluate.io_reader import WeatherGenReader
