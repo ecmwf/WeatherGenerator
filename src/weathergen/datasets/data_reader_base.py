@@ -71,8 +71,24 @@ def str_to_datetime64(s: str | int | NPDT64) -> NPDT64:
     """
     if isinstance(s, datetime64):
         return s
-    format_str = "%Y%m%d%H%M%S"
-    return np.datetime64(datetime.datetime.strptime(str(s), format_str))
+    s_str = str(s)
+
+    supported_formats = [
+        "%Y%m%d%H%M%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+    ]
+
+    for fmt in supported_formats:
+        try:
+            dt_obj = datetime.datetime.strptime(s_str, fmt)
+            return np.datetime64(dt_obj)
+        except ValueError:
+            pass
+
+    raise ValueError(f"Unable to parse the date string '{s}'. Original string might be invalid.")
 
 
 def str_to_timedelta(s: str | datetime.timedelta) -> pd.Timedelta:
