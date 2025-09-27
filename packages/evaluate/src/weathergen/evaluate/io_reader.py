@@ -18,6 +18,7 @@ from tqdm import tqdm
 
 from weathergen.common.config import load_config, load_model_config
 from weathergen.common.io import ZarrIO
+from weathergen.evaluate.derived_channels import DeriveChannels
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
 
 _logger = logging.getLogger(__name__)
@@ -405,6 +406,12 @@ class WeatherGenReader(Reader):
             channels = channels or stream_cfg.get("channels", all_channels)
             channels = to_list(channels)
 
+            dc = DeriveChannels(
+                all_channels,
+                channels,
+                stream_cfg,
+            )
+
             da_tars, da_preds = [], []
 
             if return_counts:
@@ -465,17 +472,13 @@ class WeatherGenReader(Reader):
                         _logger.debug(
                             f"Restricting targets and predictions to channels {channels} for stream {stream}..."
                         )
-                        available_channels = da_tars_fs.channel.values
-                        existing_channels = [
-                            ch for ch in channels if ch in available_channels
-                        ]
-                        if len(existing_channels) < len(channels):
-                            _logger.warning(
-                                f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
-                            )
 
-                        da_tars_fs = da_tars_fs.sel(channel=existing_channels)
-                        da_preds_fs = da_preds_fs.sel(channel=existing_channels)
+                        da_tars_fs, da_preds_fs, channels = dc.get_derived_channels(
+                            da_tars_fs, da_preds_fs
+                        )
+
+                        da_tars_fs = da_tars_fs.sel(channel=channels)
+                        da_preds_fs = da_preds_fs.sel(channel=channels)
 
                     da_tars.append(da_tars_fs)
                     da_preds.append(da_preds_fs)
