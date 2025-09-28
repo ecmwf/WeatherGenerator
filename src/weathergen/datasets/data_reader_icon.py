@@ -25,6 +25,9 @@ from weathergen.datasets.data_reader_base import (
     check_reader_data,
 )
 
+# from dask.diagnostics import ProgressBar
+
+
 _logger = logging.getLogger(__name__)
 
 frequencies = {
@@ -220,14 +223,13 @@ class DataReaderIconBase(DataReaderTimestep):
         ----------
         idx : int
             Index of temporal window
-        channels_idx : np.array
+        channels_idx : list[int]
             Selection of channels
 
         Returns
         -------
-        data (coords, geoinfos, data, datetimes)
+        ReaderData
         """
-
         (t_idxs, dtr) = self._get_dataset_idxs(idx)
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
@@ -235,40 +237,48 @@ class DataReaderIconBase(DataReaderTimestep):
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
-        # TODO: handle sub-sampling
-
+        # Determine time slice indices
         t_idxs_start = t_idxs[0]
         t_idxs_end = t_idxs[-1] + 1
+        n_times = t_idxs_end - t_idxs_start
 
-        # datetime
-        datetimes = np.asarray(self.time[t_idxs_start:t_idxs_end])
+        # Determine total number of rows (time steps * mesh_size)
+        total_rows = n_times * self.mesh_size
 
-        # lat/lon coordinates + tiling to match time steps
-        lat = self.lat.values[:, np.newaxis]
-        lon = self.lon.values[:, np.newaxis]
+        # datetime: repeat each datetime for each grid point
+        datetimes = np.repeat(self.time[t_idxs_start:t_idxs_end], self.mesh_size, axis=0)
 
-        lat = np.tile(lat, len(datetimes))
-        lon = np.tile(lon, len(datetimes))
-
+        # lat/lon coordinates: tile to match the time dimension
+        lat = np.tile(self.lat.values[:, np.newaxis], (n_times, 1))
+        lon = np.tile(self.lon.values[:, np.newaxis], (n_times, 1))
         coords = np.concatenate([lat, lon], axis=1)
 
-        # time coordinate repeated to match grid points
-        datetimes = np.repeat(datetimes, self.mesh_size).reshape(-1, 1)
-        datetimes = np.squeeze(datetimes)
-
-        # expanding indexes for data
-        start_row = t_idxs_start * self.mesh_size
-        end_row = t_idxs_end * self.mesh_size
-
-        # data
+        # Select channels
         channels = np.array(self.colnames)[channels_idx]
 
-        data_reshaped = [
-            np.asarray(self.ds[ch_]).reshape(-1, 1)[start_row:end_row] for ch_ in channels
-        ]
-        data = np.concatenate(data_reshaped, axis=1)
+        try:
+            data_per_channel = []
+            for ch_ in channels:
+                # print(f"Reading {ch_}...", flush=True)
+                # Slice the Dask array
+                da = self.ds[ch_].data[t_idxs_start:t_idxs_end, ...]
+                # Flatten each time step and compute
+                # with ProgressBar():
+                data_arr = da.reshape(-1, 1).compute(scheduler="synchronous")
+                data_per_channel.append(data_arr)
+            # Concatenate along channel axis
+            data = np.concatenate(data_per_channel, axis=1)
 
-        # empty geoinfos
+        except Exception as e:
+            _logger.debug(f"Date not present in ICON dataset: {str(e)}. Skipping.")
+            return ReaderData.empty(
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
+
+        # print(f"data.shape = {data.shape}")
+        # print(f"coords.shape = {coords.shape}")
+
+        # Empty geoinfos
         geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
 
         rd = ReaderData(
@@ -346,7 +356,7 @@ class DataReaderIconCmip6(DataReaderIconBase):
         zarr.consolidate_metadata(mapper)
 
         # Open the dataset using Xarray with Zarr engine
-        self.ds = xr.open_dataset(mapper, engine="zarr", consolidated=True)
+        self.ds = xr.open_dataset(mapper, engine="zarr", consolidated=True, chunks={"time": 1})
 
         # Column (variable) names and indices
         self.colnames = stream_info["variables"]
