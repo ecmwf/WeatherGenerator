@@ -1,24 +1,19 @@
-# streams_directory: "/work/bk1450/b383429/CMIP6/"
 streams_directory: "./config/streams/streams_icon_cmip6"
 
-start_date: 185907011100
-end_date: 185907101100 # 186512201200
-start_date_val: 185201011200 # 186601011200
-end_date_val: 185301011200 # 186912200000 # 185912200000 # 202212200000 # dataset ends at 2022-12-31T00:00:00
+start_date: 185001011100
+end_date:  200912311200
+start_date_val: 201001011100 
+end_date_val: 201912311200
 
-num_epochs: 1 # 10
-token_size: 64
+num_epochs: 200 # 10
+step_hrs: 24
 
-step_hrs: 1
-
-samples_per_epoch: 20 #  works # 100 works
-samples_per_validation: 17 
-shuffle: True
+# samples_per_epoch: 100 #  works # 100 works
+# samples_per_validation: 100 
+# shuffle: True
 
 loader_num_workers: 16
-
 masking_rate: 0.8
-
-with_mixed_precision: True
-
 multiprocessing_method: "spawn"
+
+forecast_offset : 1 

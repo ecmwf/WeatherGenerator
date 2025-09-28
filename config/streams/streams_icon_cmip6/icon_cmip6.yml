@@ -10,8 +10,14 @@
 ICONCMIP6 :
   type : iconcmip6
   filenames : ['1pctCO2_r1i1p1f1_day.json']
-  source_channels : ['clt', 'hfss',  'mrsos',   'pr'] 
-  target_channels : ['clt', 'hfss',  'mrsos',   'pr'] 
+  source_channels : [
+    'clt',   'hfss',  'mrso',   'pr',   'rlds',  'rlut',  'rsus',     'snc',  'tas',  'vas',
+    'hfls',  'mrro',  'mrsos',  'psl',  'rlus',  'rsds',  'sfcWind',  'snw',  'uas'  
+  ] 
+  target_channels : [
+    'clt',   'hfss',  'mrso',   'pr',   'rlds',  'rlut',  'rsus',     'snc',  'tas',  'vas',
+    'hfls',  'mrro',  'mrsos',  'psl',  'rlus',  'rsds',  'sfcWind',  'snw',  'uas'  
+  ] 
   attributes:
     lon: 'longitude'
     lat: 'latitude'
@@ -24,7 +30,7 @@ ICONCMIP6 :
   diagnostic : False
   masking_rate : 0.6
   masking_rate_none : 0.05
-  token_size : 32
+  token_size : 8
   embed : 
     net : transformer
     num_tokens : 1
