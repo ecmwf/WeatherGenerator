@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import yaml
 
-import weathergen.utils.config as config
+import weathergen.common.config as config
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
 _logger = logging.getLogger(__name__)
@@ -413,8 +413,10 @@ def plot_loss_per_stream(
                             + col
                         ]
 
-                        min_val = np.min([min_val, np.nanmin(y_data)])
-                        max_val = np.max([max_val, np.nanmax(y_data)])
+                        # skip all-nan slices
+                        if (~np.isnan(y_data)).sum() > 0:
+                            min_val = np.min([min_val, np.nanmin(y_data)])
+                            max_val = np.max([max_val, np.nanmax(y_data)])
 
         # TODO: ensure that legend is plotted with full opacity
         legend_str = legend_strs[0]
@@ -597,7 +599,7 @@ def plot_train(args=None):
     parser.add_argument(
         "-m",
         "--model_base_dir",
-        default="./models/",
+        default=None,
         type=Path,
         help="Base-directory where models are saved",
     )
@@ -648,7 +650,7 @@ def plot_train(args=None):
     # parse the command line arguments
     args = parser.parse_args(args)
 
-    model_base_dir = Path(args.model_base_dir)
+    model_base_dir = Path(args.model_base_dir) if args.model_base_dir else None
     out_dir = Path(args.output_dir)
     streams = list(args.streams)
     x_types_valid = ["step"]  # TODO: add "reltime" support when fix available

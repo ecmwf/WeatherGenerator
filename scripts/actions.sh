@@ -1,20 +1,37 @@
 #!/bin/bash
 
-# Get the directory where the script is located
+# TODO: this is the root weathergenerator directory, rename the variable.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
 
 case "$1" in
   sync)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv sync
+      uv sync --all-packages
     )
     ;;
   lint)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run --no-project --with "ruff==0.9.7" ruff format --target-version py312 && \
-      uv run --no-project --with "ruff==0.9.7" ruff check --fix
+      uv run --no-project --with "ruff==0.12.2" ruff format --target-version py312 \
+        src/ scripts/ packages/ \
+        && \
+      uv run --no-project --with "ruff==0.12.2" \
+        ruff check --target-version py312 \
+        --fix  \
+        src/ scripts/ packages/
+    )
+    ;;
+  lint-check)
+    (
+      cd "$SCRIPT_DIR" || exit 1
+      uv run --no-project --with "ruff==0.12.2" ruff format --target-version py312 \
+        -n \
+        src/ scripts/ packages/ \
+        && \
+      uv run --no-project --with "ruff==0.12.2" \
+       ruff check  --target-version py312  \
+       src/ scripts/ packages/
     )
     ;;
   unit-test)
@@ -26,7 +43,7 @@ case "$1" in
   integration-test)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run pytest ./integration_tests/small1_test.py --verbose
+      srun uv run --offline pytest ./integration_tests/small1_test.py --verbose
     )
     ;;
   create-links)
@@ -63,8 +80,27 @@ case "$1" in
       done
     )
     ;;
+  create-jupyter-kernel)
+    (
+      cd "$SCRIPT_DIR" || exit 1
+      uv sync --all-packages
+      uv run ipython kernel install --user --env VIRTUAL_ENV $(pwd)/.venv --name=weathergen_kernel --display-name "Python (WeatherGenerator)" 
+      echo "Jupyter kernel created. You can now use it in Jupyter Notebook or JupyterLab."
+      echo "To use this kernel, select 'Python (WeatherGenerator)' from the kernel options in Jupyter Notebook or JupyterLab."
+      echo "If you want to remove the kernel later, you can run:"
+      echo "jupyter kernelspec uninstall weathergen_kernel"
+    )
+    ;;
+  jupytext-sync)
+    (
+      cd "$SCRIPT_DIR" || exit 1
+      # Run on any python or jupyter notebook files in the WeatherGenerator-private/notebooks directory
+      uv run jupytext --set-formats ipynb,py:percent --sync  ../WeatherGenerator-private/notebooks/*.ipynb ../WeatherGenerator-private/notebooks/*.py
+      echo "Jupytext sync completed."
+    )
+    ;;
   *)
-    echo "Usage: $0 {sync|lint|unit-test|integration-test|create-links}"
+    echo "Usage: $0 {sync|lint|lint-check|unit-test|integration-test|create-links|create-jupyter-kernel|jupytext-sync}"
     exit 1
     ;;
 esac

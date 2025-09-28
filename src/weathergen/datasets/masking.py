@@ -3,7 +3,7 @@ import logging
 import numpy as np
 import torch
 
-from weathergen.utils.config import Config
+from weathergen.common.config import Config
 
 _logger = logging.getLogger(__name__)
 
@@ -16,6 +16,8 @@ class Masker:
         masking_rate (float): The base rate at which tokens are masked.
         masking_strategy (str): The strategy used for masking (e.g., "random",
         "block", "healpix", "channel").
+        current_strategy (str): The current strategy in use, relevant
+                                when using "combination" strategy.
         "random" - random masking of tokens at the level of the data
         "block" - masking out large blocks of tokens in 1D, without spatial meaning
         "healpix" - masking at the level of HEALPix cells, where all child cells
@@ -30,6 +32,7 @@ class Masker:
                     or globally (all have the same channels masked).
                     e.g. masking_strategy_config = {"mode": "per_cell"} or
                     {"mode": "global"}
+        "causal" - masking the latest timesteps in each token, according to the masking rate.
         masking_rate_sampling (bool): Whether to sample the masking rate from a distribution.
         masking_strategy_config (dict): Configuration for the masking strategy, can include
                                         additional parameters like "hl_mask", etc.
@@ -39,6 +42,7 @@ class Masker:
     def __init__(self, cf: Config):
         self.masking_rate = cf.masking_rate
         self.masking_strategy = cf.masking_strategy
+        self.current_strategy = cf.masking_strategy  # Current strategy in use
         self.masking_rate_sampling = cf.masking_rate_sampling
         # masking_strategy_config is a dictionary that can hold any additional parameters
         self.healpix_level_data = cf.healpix_level
@@ -54,8 +58,14 @@ class Masker:
         # until it is generated in mask_source.
         self.perm_sel: list[np.typing.NDArray] = None
 
+        # Per-batch strategy tracking
+        self.same_strategy_per_batch = self.masking_strategy_config.get(
+            "same_strategy_per_batch", False
+        )
+        self.batch_strategy_set = False
+
         # Check for required masking_strategy_config at construction time
-        if self.masking_strategy == "healpix":
+        if self.current_strategy == "healpix":
             hl_data = self.healpix_level_data
             hl_mask = self.masking_strategy_config.get("hl_mask")
             assert hl_data is not None and hl_mask is not None, (
@@ -63,7 +73,7 @@ class Masker:
             )
             assert hl_mask < hl_data, "hl_mask must be less than hl_data for HEALPix masking."
 
-        if self.masking_strategy == "channel":
+        if self.current_strategy == "channel":
             # Ensure that masking_strategy_config contains either 'global' or 'per_cell'
             assert self.masking_strategy_config.get("mode") in ["global", "per_cell"], (
                 "masking_strategy_config must contain 'mode' key with value 'global' or 'per_cell'."
@@ -74,7 +84,9 @@ class Masker:
                 # check explicit includes
                 source_include = stream.get("source_include", [])
                 target_include = stream.get("target_include", [])
-                assert set(source_include) == set(target_include), ()
+                assert set(source_include) == set(target_include), (
+                    "Source and target channels not identical. Required for masking_mode=channel"
+                )
                 # check excludes
                 source_exclude = stream.get("source_exclude", [])
                 target_exclude = stream.get("target_exclude", [])
@@ -87,6 +99,44 @@ class Masker:
         Reset rng after epoch to ensure proper randomization
         """
         self.rng = rng
+
+    def set_batch_strategy(self):
+        """
+        Set strategy for this batch.
+        Only relevant with combination and same_strategy_per_batch.
+        """
+        if self.masking_strategy == "combination" and self.same_strategy_per_batch:
+            self.current_strategy = self.rng.choice(
+                self.masking_strategy_config["strategies"],
+                p=self.masking_strategy_config["probabilities"],
+            )
+            self.batch_strategy_set = True
+
+    def reset_batch_strategy(self):
+        """
+        Reset for next batch.
+        """
+        if self.masking_strategy == "combination" and self.same_strategy_per_batch:
+            self.current_strategy = None
+            self.batch_strategy_set = False
+
+    def _select_strategy(self):
+        """
+        Select the strategy to use.
+        """
+        if self.masking_strategy == "combination":
+            if self.same_strategy_per_batch:
+                assert self.batch_strategy_set, "Must call set_batch_strategy() first"
+                return self.current_strategy
+            else:
+                # Sample new strategy for each stream
+                return self.rng.choice(
+                    self.masking_strategy_config["strategies"],
+                    p=self.masking_strategy_config["probabilities"],
+                )
+        else:
+            # Non-combination strategy, return as is
+            return self.masking_strategy
 
     def mask_source(
         self,
@@ -114,6 +164,9 @@ class Masker:
         if num_tokens == 0:
             return tokenized_data
 
+        # Clean strategy selection
+        self.current_strategy = self._select_strategy()
+
         # Set the masking rate.
         rate = self._get_sampling_rate()
 
@@ -134,30 +187,33 @@ class Masker:
         # Generate a flat boolean mask for random, block, or healpix masking at cell level.
         # Generate a 3D mask to apply to each cell for channel masking.
 
-        if self.masking_strategy == "random":
+        if self.current_strategy == "random":
             flat_mask = self.rng.uniform(0, 1, num_tokens) < rate
 
-        elif self.masking_strategy == "block":
+        elif self.current_strategy == "block":
             flat_mask = np.zeros(num_tokens, dtype=bool)
             block_size = int(np.round(rate * num_tokens))
             if block_size > 0 and num_tokens > 0:
                 start_index = self.rng.integers(0, max(1, num_tokens - block_size + 1))
                 flat_mask[start_index : start_index + block_size] = True
 
-        elif self.masking_strategy == "healpix":
+        elif self.current_strategy == "healpix":
             flat_mask = self._generate_healpix_mask(token_lens, rate)
 
-        elif self.masking_strategy == "channel":
+        elif self.current_strategy == "channel":
             mask = self._generate_channel_mask(tokenized_data, rate, coords, geoinfos, source)
 
+        elif self.current_strategy == "causal":
+            mask = self._generate_causal_mask(tokenized_data, rate, coords, geoinfos, source)
+
         else:
-            assert False, f"Unknown masking strategy: {self.masking_strategy}"
+            assert False, f"Unknown masking strategy: {self.current_strategy}"
 
         # apply mask
 
         # if masking_strategy is channel, we need to handle the masking differently,
         # since p is not 1D Boolean for the list of cells, but 3D to mask the channels in each cell.
-        if self.masking_strategy == "channel":
+        if self.current_strategy == "channel":
             self.perm_sel = mask
             # In the source_data we will set the channels that are masked to 0.0.
             source_data = []
@@ -167,6 +223,13 @@ class Masker:
                     source_data.append(data)
                 else:
                     source_data.append(data)
+
+        elif self.current_strategy == "causal":
+            # Only select unmasked timesteps
+            self.perm_sel = mask
+            source_data = []
+            for data, p in zip(tokenized_data, self.perm_sel, strict=True):
+                source_data.append(data[~p] if len(data) > 0 else data)
 
         else:
             # Split the flat mask to match the structure of the tokenized data (list of lists)
@@ -212,9 +275,9 @@ class Masker:
 
         processed_target_tokens = []
 
-        # process all healpix cells used for embedding
+        # process all tokens used for embedding
         for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
-            if self.masking_strategy == "channel":
+            if self.current_strategy == "channel":
                 # If masking strategy is channel, handle target tokens differently.
                 # We don't have Booleans per cell, instead per channel per cell,
                 # we set the unmasked channels to NaN so not in loss.
@@ -227,6 +290,10 @@ class Masker:
                         :, ~p[0, (self.dim_time_enc + coords.shape[-1] + geoinfos.shape[-1]) :]
                     ] = torch.nan
                     selected_tensors.append(c)
+
+            elif self.current_strategy == "causal":
+                # select only the target times where mask is True
+                selected_tensors = [c for i, c in enumerate(cc) if pp[i]]
 
             else:
                 # For other masking strategies, we simply select the tensors where the mask is True.
@@ -382,5 +449,53 @@ class Masker:
 
         # split across cells again
         full_mask = np.split(full_mask, np.cumsum(tokenized_data_lens[:-1]))
+
+        return full_mask
+
+    def _generate_causal_mask(
+        self,
+        tokenized_data: list[torch.Tensor],
+        rate: float,
+        coords: torch.Tensor,
+        geoinfos: torch.Tensor,
+        source: torch.Tensor,
+    ) -> list[np.typing.NDArray]:
+        """
+        Generates a causal mask, masking the latest times
+        in each tokenized_data according to the masking rate.
+        """
+        if not tokenized_data:
+            return []
+
+        rate = self._get_sampling_rate()
+
+        # Extract all lengths at once
+        token_lens = np.array([len(token_data) for token_data in tokenized_data])
+
+        if len(token_lens) == 0:
+            return []
+
+        # Calculate start indices for masking
+        # astype(int) performs floor operation by truncation
+        num_future_to_mask = (rate * token_lens).astype(int)
+        start_mask_indices = np.maximum(1, token_lens - num_future_to_mask)
+
+        # Handle edge cases
+        mask_valid = token_lens > 1  # Only cells with >1 timestep can be masked
+        start_mask_indices = np.where(mask_valid, start_mask_indices, token_lens)
+
+        # Create masks with list comprehension
+        # Needed to handle variable lengths
+        full_mask = [
+            np.concatenate(
+                [
+                    np.zeros(start_idx, dtype=bool),
+                    np.ones(max(0, token_len - start_idx), dtype=bool),
+                ]
+            )
+            if token_len > 1
+            else (np.zeros(1, dtype=bool) if token_len == 1 else np.array([], dtype=bool))
+            for token_len, start_idx in zip(token_lens, start_mask_indices, strict=False)
+        ]
 
         return full_mask
