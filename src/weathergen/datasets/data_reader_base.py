@@ -524,6 +524,76 @@ class DataReaderBase(metaclass=ABCMeta):
 
         return coords
 
+    def _normalize(
+        self, 
+        data: NDArray[DType], 
+        idx: list[int], 
+        mean: dict[int, float], 
+        stdev: dict[int, float], 
+        name: str,
+    ) -> NDArray[DType]:
+        """
+        Helper function to normalize data
+
+        Parameters
+        ----------
+        data :
+            data to be normalized
+        idx :
+            indices of channels to be normalized
+        mean :
+            mean values for channels
+        stdev :
+            standard deviation values for channels
+        name :
+            name of the data (for error messages)
+        
+        Returns
+        -------
+        Normalized data
+        """
+        # assert data.shape[-1] == len(idx), f"incorrect number of {name} channels"
+	    if data.shape[-1] != len(idx):
+		    raise ValueError(f"incorrect number of {name} channels: expected {len(idx)}, got {data.shape[-1]}")
+        for i, ch in enumerate(idx):
+            data[..., i] = (data[..., i] - mean[ch]) / stdev[ch]
+        return data
+
+    def _denormalize(
+        self,
+        data: NDArray[DType],
+        idx: list[int],
+        mean: dict[int, float],
+        stdev: dict[int, float],
+        name: str,
+    ) -> NDArray[DType]:
+        """
+        Helper function to denormalize data
+        
+        Parameters
+        ----------
+        data :
+            data to be denormalized
+        idx :
+            indices of channels to be denormalized
+        mean :
+            mean values for channels
+        stdev :
+            standard deviation values for channels
+        name :
+            name of the data (for error messages)
+       
+        Returns
+        -------
+        Denormalized data
+        """
+        # assert data.shape[-1] == len(idx), f"incorrect number of {name} channels"
+        if data.shape[-1] != len(idx):
+            raise ValueError(f"incorrect number of {name} channels: expected {len(idx)}, got {data.shape[-1]}")
+        for i, ch in enumerate(idx):
+            data[..., i] = (data[..., i] * stdev[ch]) + mean[ch]
+        return data
+
     def normalize_geoinfos(self, geoinfos: NDArray[DType]) -> NDArray[DType]:
         """
         Normalize geoinfos
@@ -537,12 +607,7 @@ class DataReaderBase(metaclass=ABCMeta):
         -------
         Normalized geoinfo
         """
-
-        assert geoinfos.shape[-1] == len(self.geoinfo_idx), "incorrect number of geoinfo channels"
-        for i, _ in enumerate(self.geoinfo_idx):
-            geoinfos[..., i] = (geoinfos[..., i] - self.mean_geoinfo[i]) / self.stdev_geoinfo[i]
-
-        return geoinfos
+        return self._normalize(geoinfos, self.geoinfo_idx, self.mean_geoinfo, self.stdev_geoinfo, "geoinfo")
 
     def normalize_source_channels(self, source: NDArray[DType]) -> NDArray[DType]:
         """
@@ -557,11 +622,7 @@ class DataReaderBase(metaclass=ABCMeta):
         -------
         Normalized data
         """
-        assert source.shape[-1] == len(self.source_idx), "incorrect number of source channels"
-        for i, ch in enumerate(self.source_idx):
-            source[..., i] = (source[..., i] - self.mean[ch]) / self.stdev[ch]
-
-        return source
+        return self._normalize(source, self.source_idx, self.mean, self.stdev, "source")
 
     def normalize_target_channels(self, target: NDArray[DType]) -> NDArray[DType]:
         """
@@ -576,11 +637,7 @@ class DataReaderBase(metaclass=ABCMeta):
         -------
         Normalized data
         """
-        assert target.shape[-1] == len(self.target_idx), "incorrect number of target channels"
-        for i, ch in enumerate(self.target_idx):
-            target[..., i] = (target[..., i] - self.mean[ch]) / self.stdev[ch]
-
-        return target
+        return self._normalize(target, self.target_idx, self.mean, self.stdev, "target")
 
     def denormalize_source_channels(self, source: NDArray[DType]) -> NDArray[DType]:
         """
@@ -595,11 +652,7 @@ class DataReaderBase(metaclass=ABCMeta):
         -------
         Denormalized data
         """
-        assert source.shape[-1] == len(self.source_idx), "incorrect number of source channels"
-        for i, ch in enumerate(self.source_idx):
-            source[..., i] = (source[..., i] * self.stdev[ch]) + self.mean[ch]
-
-        return source
+        return self._denormalize(source, self.source_idx, self.mean, self.stdev, "source")
 
     def denormalize_target_channels(self, data: NDArray[DType]) -> NDArray[DType]:
         """
@@ -614,11 +667,7 @@ class DataReaderBase(metaclass=ABCMeta):
         -------
         Denormalized data
         """
-        assert data.shape[-1] == len(self.target_idx), "incorrect number of target channels"
-        for i, ch in enumerate(self.target_idx):
-            data[..., i] = (data[..., i] * self.stdev[ch]) + self.mean[ch]
-
-        return data
+        return self._denormalize(target, self.target_idx, self.mean, self.stdev, "target")
 
 
 class DataReaderTimestep(DataReaderBase):
