@@ -655,7 +655,7 @@ class Model(torch.nn.Module):
             offsets_base = target_source_like_tokens_lens.sum(1).sum(0).cumsum(1)
             num_fsteps = target_source_like_tokens_lens.shape[
                 2
-            ]  # TODO: KCT, if there are diff no of tokens per fstep, this may fail
+            ] 
             tokens_all = []
             for fstep in range(num_fsteps):
                 tokens_all.append(
@@ -670,8 +670,6 @@ class Model(torch.nn.Module):
             for _, sb in enumerate(streams_data):
                 for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
                     for fstep in range(num_fsteps):
-                        # TODO: KCT: should we actually remove the below check and just
-                        # return an empty tensor?
                         if s.target_source_like_tokens_lens[fstep].sum() != 0:
                             idxs = s.target_source_like_idxs_embed[fstep]
                             idxs_pe = s.target_source_like_idxs_embed_pe[fstep]
