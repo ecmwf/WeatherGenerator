@@ -504,30 +504,24 @@ class WeatherGenReader(Reader):
         with ZarrIO(self.fname_zarr) as zio:
             return set(int(f) for f in zio.forecast_steps)
 
-    # TODO: get this from config
     def get_channels(self, stream: str) -> list[str]:
         """
-        Peek the channels of a target stream.
+        Get the list of channels for a given stream from the config.
 
         Parameters
         ----------
-        stream :
-            The name of the tar stream to peek.
-        fstep :
-            The forecast step to peek. Default is 0.
+        stream : str
+            The name of the stream to get channels for.
+
         Returns
         -------
-        channels :
-            A list of channel names in the tar stream.
+        list[str]
+            A list of channel names.
         """
-        with ZarrIO(self.fname_zarr) as zio:
-            dummy_out = zio.get_data(
-                list(self.get_samples())[0], stream, list(self.get_forecast_steps())[0]
-            )
-            channels = dummy_out.target.channels
-            _logger.debug(f"Peeked channels for stream {stream}: {channels}")
-
-        return channels
+        _logger.info(f"Getting channels for stream {stream}...")
+        all_channels = self.get_inference_stream_attr(stream, "val_target_channels")
+        _logger.info(f"Channels found in config: {all_channels}")
+        return all_channels
 
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """
