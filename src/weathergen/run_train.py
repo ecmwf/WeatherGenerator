@@ -18,8 +18,8 @@ import time
 import traceback
 from pathlib import Path
 
+import weathergen.common.config as config
 import weathergen.utils.cli as cli
-import weathergen.utils.config as config
 from weathergen.train.trainer import Trainer
 from weathergen.utils.logger import init_loggers
 
@@ -70,8 +70,22 @@ def inference_from_args(argl: list[str]):
 
 ####################################################################################################
 def train_continue() -> None:
+    """
+    Function to continue training for WeatherGenerator model.
+    Entry point for calling train_continue from the command line.
+    Configurations are set in the function body.
+
+    Args:
+      from_run_id (str): Run/model id of pretrained WeatherGenerator model to
+        continue training. Defaults to None.
+    Note: All model configurations are set in the function body.
+    """
+    train_continue_from_args(sys.argv[1:])
+
+
+def train_continue_from_args(argl: list[str]):
     parser = cli.get_continue_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argl)
 
     init_loggers()
 

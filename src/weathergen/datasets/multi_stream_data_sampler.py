@@ -12,6 +12,7 @@ import pathlib
 import numpy as np
 import torch
 
+from weathergen.common.io import IOReaderData
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
@@ -131,7 +132,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 ds_type = stream_info["type"]
                 logger.info(
                     f"Opening dataset with type: {ds_type}"
-                    + f"from stream config {stream_info['name']}.",
+                    + f" from stream config {stream_info['name']}.",
                 )
                 ds = dataset(filename=filename, **kwargs)
 
@@ -312,6 +313,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 time_win1 = self.time_window_handler.window(idx)
 
+                # Sample masking strategy once per batch item
+                if hasattr(self.tokenizer, "masker"):
+                    self.tokenizer.masker.set_batch_strategy()
+
                 streams_data: list[StreamData] = []
 
                 # for all streams
@@ -325,14 +330,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         # source window (of potentially multi-step length)
                         rdata: ReaderData = ds.get_source(idx)
 
+                        # rdata needs to be wrapped in a different class
+                        # to avoid unwanted dependencies => see IOReaderData docstring
+                        rdata_wrapped = IOReaderData.create(rdata)
+
                         if rdata.is_empty():
-                            stream_data.add_empty_source()
+                            stream_data.add_empty_source(rdata_wrapped)
                         else:
                             # TODO: handling of conversion from numpy to torch here and below
                             # TODO: this should only be collected in validation mode
-                            source_raw = torch.from_numpy(
-                                np.concatenate((rdata.coords, rdata.geoinfos, rdata.data), 1)
-                            )
 
                             (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                                 stream_info,
@@ -344,7 +350,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 ds,
                             )
 
-                            stream_data.add_source(source_raw, ss_lens, ss_cells, ss_centroids)
+                            stream_data.add_source(rdata_wrapped, ss_lens, ss_cells, ss_centroids)
 
                         # target
 
@@ -378,6 +384,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # merge inputs for sources and targets for current stream
                     stream_data.merge_inputs()
                     streams_data += [stream_data]
+
+                # Reset masking strategy for next batch item
+                if hasattr(self.tokenizer, "masker"):
+                    self.tokenizer.masker.reset_batch_strategy()
 
                 # skip completely empty batch item or when all targets are empty -> no grad
                 if not (all(s.empty() or s.target_empty() for s in streams_data)):

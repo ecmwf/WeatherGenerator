@@ -1,4 +1,4 @@
-streams_directory: "./config/streams/streams_test/"
+streams_directory: "./integration_tests/streams/"
 run_path: "./results"
 model_path: "./models"
 loss_fcts: [["mse", 1.0]]

@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
+from weathergen.common.config import Config
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -25,10 +26,12 @@ from weathergen.model.embeddings import (
 )
 from weathergen.model.layers import MLP
 from weathergen.model.utils import ActivationFactory
-from weathergen.utils.config import Config, get_dtype
+from weathergen.utils.utils import get_dtype
 
 
 class EmbeddingEngine:
+    name: "EmbeddingEngine"
+
     def __init__(self, cf: Config, sources_size) -> None:
         """
         Initialize the EmbeddingEngine with the configuration.
@@ -47,6 +50,8 @@ class EmbeddingEngine:
         :return: torch.nn.ModuleList containing the embedding layers.
         """
         for i, si in enumerate(self.cf.streams):
+            stream_name = si.get("name", i)
+
             if "diagnostic" in si and si["diagnostic"]:
                 self.embeds.append(torch.nn.Identity())
                 continue
@@ -66,12 +71,15 @@ class EmbeddingEngine:
                         norm_type=self.cf.norm_type,
                         embed_size_centroids=self.cf.embed_size_centroids,
                         unembed_mode=self.cf.embed_unembed_mode,
+                        stream_name=stream_name,
                     )
                 )
             elif si["embed"]["net"] == "linear":
                 self.embeds.append(
                     StreamEmbedLinear(
-                        self.sources_size[i] * si["token_size"], self.cf.ae_local_dim_embed
+                        self.sources_size[i] * si["token_size"],
+                        self.cf.ae_local_dim_embed,
+                        stream_name=stream_name,
                     )
                 )
             else:
@@ -80,6 +88,8 @@ class EmbeddingEngine:
 
 
 class LocalAssimilationEngine:
+    name: "LocalAssimilationEngine"
+
     def __init__(self, cf: Config) -> None:
         """
         Initialize the LocalAssimilationEngine with the configuration.
@@ -122,6 +132,8 @@ class LocalAssimilationEngine:
 
 
 class Local2GlobalAssimilationEngine:
+    name: "Local2GlobalAssimilationEngine"
+
     def __init__(self, cf: Config) -> None:
         """
         Initialize the Local2GlobalAssimilationEngine with the configuration.
@@ -183,6 +195,8 @@ class Local2GlobalAssimilationEngine:
 
 
 class GlobalAssimilationEngine:
+    name: "GlobalAssimilationEngine"
+
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
         """
         Initialize the GlobalAssimilationEngine with the configuration.
@@ -250,6 +264,8 @@ class GlobalAssimilationEngine:
 
 
 class ForecastingEngine:
+    name: "ForecastingEngine"
+
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
         """
         Initialize the ForecastingEngine with the configuration.
@@ -327,13 +343,13 @@ class ForecastingEngine:
 
 
 class EnsPredictionHead(torch.nn.Module):
-    #########################################
     def __init__(
         self,
         dim_embed,
         dim_out,
         ens_num_layers,
         ens_size,
+        stream_name: str,
         norm_type="LayerNorm",
         hidden_factor=2,
         final_activation: None | str = None,
@@ -341,6 +357,8 @@ class EnsPredictionHead(torch.nn.Module):
         """Constructor"""
 
         super(EnsPredictionHead, self).__init__()
+
+        self.name = f"EnsPredictionHead_{stream_name}"
 
         dim_internal = dim_embed * hidden_factor
         # norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
@@ -390,6 +408,7 @@ class TargetPredictionEngineClassic(nn.Module):
         tr_mlp_hidden_factor,
         softcap,
         tro_type,
+        stream_name: str,
     ):
         """
         Initialize the TargetPredictionEngine with the configuration.
@@ -403,6 +422,7 @@ class TargetPredictionEngineClassic(nn.Module):
         :param tro_type: Type of target readout (e.g., "obs_value").
         """
         super(TargetPredictionEngineClassic, self).__init__()
+        self.name = f"TargetPredictionEngine_{stream_name}"
 
         self.cf = cf
         self.dims_embed = dims_embed
@@ -496,6 +516,7 @@ class TargetPredictionEngine(nn.Module):
         tr_mlp_hidden_factor,
         softcap,
         tro_type,
+        stream_name: str,
     ):
         """
         Initialize the TargetPredictionEngine with the configuration.
@@ -519,6 +540,7 @@ class TargetPredictionEngine(nn.Module):
             LayerNorm that does not scale after the layer is applied
         """
         super(TargetPredictionEngine, self).__init__()
+        self.name = f"TargetPredictionEngine_{stream_name}"
 
         self.cf = cf
         self.dims_embed = dims_embed

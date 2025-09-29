@@ -7,26 +7,30 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-CERRA :
-  type : anemoi
-  filenames : ['cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi.zarr']
+IFS_ATMO :
+  type : fesom
+  filenames : ['atmos_all']
   loss_weight : 1.
+  source : null
+  target : null
+  target_exclude: ['msl', 'tsr', 'tsrc', 'z']
   masking_rate : 0.6
   masking_rate_none : 0.05
-  token_size : 512
+  token_size : 128
   embed : 
     net : transformer
     num_tokens : 1
-    num_heads : 2
+    num_heads : 8
     dim_embed : 256
     num_blocks : 2
   embed_target_coords :
     net : linear
     dim_embed : 256
   target_readout :
-    type : 'obs_value'
+    type : 'obs_value'  # token or obs_value
     num_layers : 2
     num_heads : 4
+    # sampling_rate : 0.2
   pred_head :
     ens_size : 1
     num_layers : 1
