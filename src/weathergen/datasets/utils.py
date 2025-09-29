@@ -679,7 +679,7 @@ def compute_offsets_scatter_embed(batch: StreamData, process: str) -> StreamData
     return batch
 
 
-def compute_offsets_scatter_embed_target_srclk(batch: StreamData) -> StreamData:
+def compute_offsets_scatter_embed_target_source_like(batch: StreamData) -> StreamData:
     """
     Compute auxiliary information for scatter operation that changes from stream-centric to
     cell-centric computations
@@ -696,16 +696,16 @@ def compute_offsets_scatter_embed_target_srclk(batch: StreamData) -> StreamData:
     """
 
     # collect source_tokens_lens for all stream datas
-    target_srclk_tokens_lens = torch.stack(
+    target_source_like_tokens_lens = torch.stack(
         [
             torch.stack(
                 [
                     torch.stack(
                         [
-                            s.target_srclk_tokens_lens[fstep]
-                            if len(s.target_srclk_tokens_lens[fstep]) > 0
+                            s.target_source_like_tokens_lens[fstep]
+                            if len(s.target_source_like_tokens_lens[fstep]) > 0
                             else torch.tensor([])
-                            for fstep in range(len(s.target_srclk_tokens_lens))
+                            for fstep in range(len(s.target_source_like_tokens_lens))
                         ]
                     )
                     for s in stl_b
@@ -716,8 +716,9 @@ def compute_offsets_scatter_embed_target_srclk(batch: StreamData) -> StreamData:
     )
 
     # precompute index sets for scatter operation after embed
-    offsets_base = target_srclk_tokens_lens.sum(1).sum(0).cumsum(1)
-    # shift the offsets for each fstep by one to the right, add a zero to the beginning the first token starts at 0
+    offsets_base = target_source_like_tokens_lens.sum(1).sum(0).cumsum(1)
+    # shift the offsets for each fstep by one to the right, add a zero to the
+    # beginning as the first token starts at 0
     zeros_col = torch.zeros(
         (offsets_base.shape[0], 1), dtype=offsets_base.dtype, device=offsets_base.device
     )
@@ -727,31 +728,31 @@ def compute_offsets_scatter_embed_target_srclk(batch: StreamData) -> StreamData:
     for ib, sb in enumerate(batch):
         for itype, s in enumerate(sb):
             for fstep in range(offsets.shape[0]):
-                if not (target_srclk_tokens_lens[ib, itype, fstep].sum() == 0):  # if not empty
-                    s.target_srclk_idxs_embed[fstep] = torch.cat(
+                if target_source_like_tokens_lens[ib, itype, fstep].sum() != 0:  # if not empty
+                    s.target_source_like_idxs_embed[fstep] = torch.cat(
                         [
                             torch.arange(offset, offset + token_len, dtype=torch.int64)
                             for offset, token_len in zip(
                                 offsets[fstep],
-                                target_srclk_tokens_lens[ib, itype, fstep],
+                                target_source_like_tokens_lens[ib, itype, fstep],
                                 strict=False,
                             )
                         ]
                     )
-                    s.target_srclk_idxs_embed_pe[fstep] = torch.cat(
+                    s.target_source_like_idxs_embed_pe[fstep] = torch.cat(
                         [
                             torch.arange(offset, offset + token_len, dtype=torch.int32)
                             for offset, token_len in zip(
                                 offsets_pe[fstep],
-                                target_srclk_tokens_lens[ib][itype][fstep],
+                                target_source_like_tokens_lens[ib][itype][fstep],
                                 strict=False,
                             )
                         ]
                     )
 
                 # advance offsets
-                offsets[fstep] += target_srclk_tokens_lens[ib][itype][fstep]
-                offsets_pe[fstep] += target_srclk_tokens_lens[ib][itype][fstep]
+                offsets[fstep] += target_source_like_tokens_lens[ib][itype][fstep]
+                offsets_pe[fstep] += target_source_like_tokens_lens[ib][itype][fstep]
 
     return batch
 

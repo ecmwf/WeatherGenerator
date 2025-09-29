@@ -551,10 +551,12 @@ class Model(torch.nn.Module):
         if self.cf.get("encode_targets_latent", False):
             with torch.no_grad():
                 tokens_targets = []
-                tokens_targets_srclk = self.embed_cells_targets_srclk(model_params, streams_data)
-                for fstep in range(len(tokens_targets_srclk)):
+                tokens_targets_source_like = self.embed_cells_targets_source_like(
+                    model_params, streams_data
+                )
+                for fstep in range(len(tokens_targets_source_like)):
                     tokens_target, _ = self.assimilate_local(
-                        model_params, tokens_targets_srclk[fstep], source_cell_lens
+                        model_params, tokens_targets_source_like[fstep], source_cell_lens
                     )
                     tokens_target = self.assimilate_global(model_params, tokens_target)
                     tokens_target_det = tokens_target.detach()  # explicitly detach as well
@@ -620,8 +622,11 @@ class Model(torch.nn.Module):
 
         return tokens_all
 
-    def embed_cells_targets_srclk(self, model_params: ModelParams, streams_data) -> torch.Tensor:
-        """Embeds target data similar to source tokens for each fstep and stream separately and rearranges it to cell-wise order
+    def embed_cells_targets_source_like(
+        self, model_params: ModelParams, streams_data
+    ) -> torch.Tensor:
+        """Embeds target data similar to source tokens for each fstep and stream separately and
+        rearranges it to cell-wise order
         Args:
             model_params : Query and embedding parameters
             streams_data : Used to initialize first tokens for pre-processing
@@ -629,16 +634,16 @@ class Model(torch.nn.Module):
             Tokens for local assimilation
         """
         with torch.no_grad():
-            target_srclk_tokens_lens = torch.stack(
+            target_source_like_tokens_lens = torch.stack(
                 [
                     torch.stack(
                         [
                             torch.stack(
                                 [
-                                    s.target_srclk_tokens_lens[fstep]
-                                    if len(s.target_srclk_tokens_lens[fstep]) > 0
+                                    s.target_source_like_tokens_lens[fstep]
+                                    if len(s.target_source_like_tokens_lens[fstep]) > 0
                                     else torch.tensor([])
-                                    for fstep in range(len(s.target_srclk_tokens_lens))
+                                    for fstep in range(len(s.target_source_like_tokens_lens))
                                 ]
                             )
                             for s in stl_b
@@ -647,10 +652,10 @@ class Model(torch.nn.Module):
                     for stl_b in streams_data
                 ]
             )
-            offsets_base = target_srclk_tokens_lens.sum(1).sum(0).cumsum(1)
-            num_fsteps = target_srclk_tokens_lens.shape[
+            offsets_base = target_source_like_tokens_lens.sum(1).sum(0).cumsum(1)
+            num_fsteps = target_source_like_tokens_lens.shape[
                 2
-            ]  # TODO: KCT, if there are diff no of tokens per fstep, this may fail
+            ] 
             tokens_all = []
             for fstep in range(num_fsteps):
                 tokens_all.append(
@@ -665,17 +670,17 @@ class Model(torch.nn.Module):
             for _, sb in enumerate(streams_data):
                 for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
                     for fstep in range(num_fsteps):
-                        # TODO: KCT: should we actually remove the below check and just return an empty tensor?
-                        if s.target_srclk_tokens_lens[fstep].sum() != 0:
-                            idxs = s.target_srclk_idxs_embed[fstep]
-                            idxs_pe = s.target_srclk_idxs_embed_pe[fstep]
+                        if s.target_source_like_tokens_lens[fstep].sum() != 0:
+                            idxs = s.target_source_like_idxs_embed[fstep]
+                            idxs_pe = s.target_source_like_idxs_embed_pe[fstep]
 
                             # create full scatter index
                             # (there's no broadcasting which is likely highly inefficient)
                             idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
                             x_embed = embed(
-                                s.target_srclk_tokens_cells[fstep], s.target_srclk_centroids[fstep]
+                                s.target_source_like_tokens_cells[fstep],
+                                s.target_source_like_centroids[fstep],
                             ).flatten(0, 1)
 
                             # scatter write to reorder from per stream to per cell ordering
