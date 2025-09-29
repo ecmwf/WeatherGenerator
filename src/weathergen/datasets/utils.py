@@ -725,7 +725,7 @@ def compute_offsets_scatter_embed_target_srclk(batch: StreamData) -> StreamData:
     for ib, sb in enumerate(batch):
         for itype, s in enumerate(sb):
             for fstep in range(offsets.shape[0]):
-                if not (target_srclk_tokens_lens[ib, itype, fstep].sum() == 0): # if not empty
+                if not (target_srclk_tokens_lens[ib, itype, fstep].sum() == 0):  # if not empty
                     s.target_srclk_idxs_embed[fstep] = torch.cat(
                         [
                             torch.arange(offset, offset + token_len, dtype=torch.int64)
