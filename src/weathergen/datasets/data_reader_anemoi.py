@@ -111,7 +111,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         self.target_channels = [ds.variables[i] for i in self.target_idx]
 
         # get target channel weights from stream config
-        # self.target_channel_weights = self.parse_target_channel_weights()
+        self.target_channel_weights = self.parse_target_channel_weights()
 
         self.geoinfo_channels = []
         self.geoinfo_idx = []
