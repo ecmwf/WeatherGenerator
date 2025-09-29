@@ -318,18 +318,50 @@ class ForecastingEngine:
                         )
                     )
                 # Add MLP block
-                self.fe_blocks.append(
-                    MLP(
-                        self.cf.ae_global_dim_embed,
-                        self.cf.ae_global_dim_embed,
-                        with_residual=True,
-                        dropout_rate=self.cf.fe_dropout_rate,
-                        norm_type=self.cf.norm_type,
-                        dim_aux=1,
-                        norm_eps=self.cf.mlp_norm_eps,
-                    )
+                use_moe = getattr(self.cf, "fe_mlp_type", "dense") == "moe"
+                mlp_common_kwargs = dict(
+                    dim_in=self.cf.ae_global_dim_embed,
+                    dim_out=self.cf.ae_global_dim_embed,
+                    with_residual=True,
+                    dropout_rate=self.cf.fe_dropout_rate,
+                    norm_type=self.cf.norm_type,
+                    dim_aux=1,
+                    norm_eps=self.cf.mlp_norm_eps,
                 )
-
+                # self.fe_blocks.append(
+                #     MLP(
+                #         self.cf.ae_global_dim_embed,
+                #         self.cf.ae_global_dim_embed,
+                #         with_residual=True,
+                #         dropout_rate=self.cf.fe_dropout_rate,
+                #         norm_type=self.cf.norm_type,
+                #         dim_aux=1,
+                #         norm_eps=self.cf.mlp_norm_eps,
+                #     )
+                # )
+                if use_moe:
+                    self.fe_blocks.append(
+                        MoEMLP(
+                            **mlp_common_kwargs,
+                            num_experts=getattr(self.cf, "fe_moe_num_experts", 8),
+                            top_k=getattr(self.cf, "fe_moe_top_k", 4),
+                            router_noisy_std=getattr(self.cf, "fe_moe_router_noisy_std", 0.0),
+                            hidden_factor=getattr(self.cf, "fe_moe_hidden_factor", 2),
+                        )
+                    )
+                else:
+                    self.fe_blocks.append(
+                        MLP(
+                            self.cf.ae_global_dim_embed,
+                            self.cf.ae_global_dim_embed,
+                            with_residual=True,
+                            dropout_rate=self.cf.fe_dropout_rate,
+                            norm_type=self.cf.norm_type,
+                            dim_aux=1,
+                            norm_eps=self.cf.mlp_norm_eps,
+                        )
+                    )
+                # ------------------------------------------------------------------
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
                 torch.nn.init.normal_(m.weight, mean=0, std=0.001)

@@ -152,3 +152,11 @@ run_id: ???
 train_log:
   # The period to log metrics (in number of batch steps)
   log_interval: 20
+  
+# Forecast MLP type: "dense" (default) or "moe"
+fe_mlp_type: "dense"    # set to "moe" to enable MoE
+
+# MoE-only params (ignored when fe_mlp_type != "moe")
+fe_moe_num_experts: 8
+fe_moe_top_k: 2
+fe_moe_hidden_factor: 0.5   # = HF_dense / 4
