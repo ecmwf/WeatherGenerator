@@ -717,7 +717,7 @@ def compute_offsets_scatter_embed_target_srclk(batch: StreamData) -> StreamData:
 
     # precompute index sets for scatter operation after embed
     offsets_base = target_srclk_tokens_lens.sum(1).sum(0).cumsum(1)
-    # take offset_base up to last col and append a 0 in the beginning per fstep
+    # shift the offsets for each fstep by one to the right, add a zero to the beginning the first token starts at 0
     zeros_col = torch.zeros(
         (offsets_base.shape[0], 1), dtype=offsets_base.dtype, device=offsets_base.device
     )

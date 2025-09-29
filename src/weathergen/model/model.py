@@ -665,7 +665,8 @@ class Model(torch.nn.Module):
             for _, sb in enumerate(streams_data):
                 for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
                     for fstep in range(num_fsteps):
-                        if not (s.target_srclk_tokens_lens[fstep].sum() == 0):
+                        # TODO: KCT: should we actually remove the below check and just return an empty tensor?
+                        if s.target_srclk_tokens_lens[fstep].sum() != 0:
                             idxs = s.target_srclk_idxs_embed[fstep]
                             idxs_pe = s.target_srclk_idxs_embed_pe[fstep]
 
