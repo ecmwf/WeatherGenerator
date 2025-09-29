@@ -389,7 +389,6 @@ class StreamData:
             self.source_tokens_cells = torch.tensor([])
             self.source_centroids = torch.tensor([])
 
-        # >>>>>>>
         # collect all source like tokens in current stream and add to batch sample list when non-empty
         for fstep in range(len(self.target_srclk_tokens_cells)):
             if torch.tensor([len(s) for s in self.target_srclk_tokens_cells[fstep]]).sum() > 0:
@@ -418,7 +417,6 @@ class StreamData:
                 self.target_srclk_tokens_lens[fstep] = torch.zeros([self.nhc_source])
                 self.target_srclk_tokens_cells[fstep] = torch.tensor([])
                 self.target_srclk_centroids[fstep] = torch.tensor([])
-        # <<<<<
 
         # targets
         for fstep in range(len(self.target_coords)):
