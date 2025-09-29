@@ -42,7 +42,7 @@ class TokenizerForecast(Tokenizer):
         times: np.array,
         time_win: tuple,
         normalizer,  # dataset,
-        use_normalizer: str,  # "source" or "target"
+        use_normalizer: str, # "source_normalizer" or "target_normalizer"
     ):
         init_loggers()
         token_size = stream_info["token_size"]

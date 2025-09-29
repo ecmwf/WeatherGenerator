@@ -386,7 +386,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                     np.concatenate((rdata.coords, rdata.geoinfos, rdata.data), 1)
                                 )
                                 (tt_cells_srclk, tt_lens_srclk, tt_centroids_srclk) = (
-                                    self.tokenizer.batchify_source(  # TODO: KCT, check if anything source related is happening in the function
+                                    self.tokenizer.batchify_source( 
                                         stream_info,
                                         torch.from_numpy(rdata.coords),
                                         torch.from_numpy(rdata.geoinfos),
