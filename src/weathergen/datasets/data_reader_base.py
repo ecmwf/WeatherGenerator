@@ -613,9 +613,12 @@ class DataReaderBase(metaclass=ABCMeta):
         -------
         Normalized geoinfo
         """
-        return self._normalize(
-            geoinfos, self.geoinfo_idx, self.mean_geoinfo, self.stdev_geoinfo, "geoinfo"
-        )
+
+        assert geoinfos.shape[-1] == len(self.geoinfo_idx), "incorrect number of geoinfo channels"
+        for i, _ in enumerate(self.geoinfo_idx):
+            geoinfos[..., i] = (geoinfos[..., i] - self.mean_geoinfo[i]) / self.stdev_geoinfo[i]
+
+        return geoinfos
 
     def normalize_source_channels(self, source: NDArray[DType]) -> NDArray[DType]:
         """
