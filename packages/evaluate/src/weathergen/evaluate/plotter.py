@@ -5,12 +5,15 @@ from pathlib import Path
 
 import cartopy
 import cartopy.crs as ccrs
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+import omegaconf as oc
 import xarray as xr
 from PIL import Image
 
-from weathergen.utils.config import _load_private_conf
+from weathergen.common.config import _load_private_conf
+from weathergen.evaluate.plot_utils import DefaultMarkerSize
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
@@ -193,6 +196,8 @@ class Plotter:
             # Remove NaNs
             targ = targ.dropna(dim="ipoint")
             prd = prd.dropna(dim="ipoint")
+            assert targ.size > 0, "Data array must not be empty or contain only NAs"
+            assert prd.size > 0, "Data array must not be empty or contain only NAs"
 
             if self.plot_subtimesteps:
                 ntimes_unique = len(np.unique(targ.valid_time))
@@ -215,7 +220,6 @@ class Plotter:
                     _logger.debug(
                         f"Plotting histogram for {var} at valid_time {valid_time}"
                     )
-
                 name = self.plot_histogram(targ_t, prd_t, hist_output_dir, var, tag=tag)
                 plot_names.append(name)
 
@@ -284,7 +288,7 @@ class Plotter:
         name = "_".join(filter(None, parts))
 
         fname = hist_output_dir / f"{name}.{self.image_format}"
-        logging.debug(f"Saving histogram to {fname}")
+        _logger.debug(f"Saving histogram to {fname}")
         plt.savefig(fname)
         plt.close()
 
@@ -327,21 +331,12 @@ class Plotter:
         """
         self.update_data_selection(select)
 
-        map_kwargs_save = (
-            {
-                key: value
-                for key, value in map_kwargs.copy().items()
-                if key not in variables
-            }
-            if map_kwargs is not None
-            else {}
-        )
-
-        if not hasattr(map_kwargs_save, "marker_size"):
-            # Set default marker size if not specified in maps_config
-            map_kwargs_save["marker_size"] = DefaultMarkerSize.get_marker_size(
-                self.stream
-            )
+        # copy global plotting options, not specific to any variable
+        map_kwargs_global = {
+            key: value
+            for key, value in (map_kwargs or {}).items()
+            if not isinstance(value, oc.DictConfig)
+        }
 
         # Basic map output directory for this stream
         map_output_dir = self.get_map_output_dir(tag)
@@ -370,12 +365,15 @@ class Plotter:
                 if valid_time is not None:
                     _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
 
+                da_t = da_t.dropna(dim="ipoint")
+                assert da_t.size > 0, "Data array must not be empty or contain only NAs"
+
                 name = self.scatter_plot(
                     da_t,
                     map_output_dir,
                     var,
                     tag=tag,
-                    map_kwargs=map_kwargs[var],
+                    map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
                 )
                 plot_names.append(name)
 
@@ -411,19 +409,29 @@ class Plotter:
         -------
             Name of the saved plot file.
         """
-        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
         # check for known keys in map_kwargs
-        marker_size_base = map_kwargs_save.pop("marker_size", 1)
+        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
+        marker_size_base = map_kwargs_save.pop(
+            "marker_size", DefaultMarkerSize.get_marker_size(self.stream)
+        )
         scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
         marker = map_kwargs_save.pop("marker", "o")
         vmin = map_kwargs_save.pop("vmin", None)
         vmax = map_kwargs_save.pop("vmax", None)
+        cmap = plt.get_cmap(map_kwargs_save.pop("colormap", "coolwarm"))
 
-        # Create figure and axis objects
-        fig = plt.figure(dpi=self.dpi_val)
-        ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
-        ax.coastlines()
+        if isinstance(map_kwargs_save.get("levels", False), oc.listconfig.ListConfig):
+            norm = mpl.colors.BoundaryNorm(
+                map_kwargs_save.pop("levels", None), cmap.N, extend="both"
+            )
+        else:
+            norm = mpl.colors.Normalize(
+                vmin=vmin,
+                vmax=vmax,
+                clip=False,
+            )
 
+        # scale marker size
         marker_size = marker_size_base
         if scale_marker_size:
             marker_size = np.clip(
@@ -432,18 +440,22 @@ class Plotter:
                 a_min=marker_size,
             )
 
+        # Create figure and axis objects
+        fig = plt.figure(dpi=self.dpi_val)
+        ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
+        ax.coastlines()
+
         valid_time = str(data["valid_time"][0].values.astype("datetime64[m]"))
 
         scatter_plt = ax.scatter(
             data["lon"],
             data["lat"],
             c=data,
-            cmap="coolwarm",
+            norm=norm,
+            cmap=cmap,
             s=marker_size,
             marker=marker,
             transform=ccrs.PlateCarree(),
-            vmin=vmin,
-            vmax=vmax,
             linewidths=0.0,  # only markers, avoids aliasing for very small markers
             **map_kwargs_save,
         )
@@ -541,14 +553,30 @@ class Plotter:
 
 
 class LinePlots:
-    def __init__(self, cfg: dict, output_basedir: str | Path):
-        self.cfg = cfg
-        self.image_format = cfg.image_format
-        self.dpi_val = cfg.get("dpi_val")
-        self.fig_size = cfg.get("fig_size", (8, 10))
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
+        """
+        Initialize the LinePlots class.
+
+        Parameters
+        ----------
+        plotter_cfg:
+            Configuration dictionary containing basic information for plotting.
+            Expected keys are:
+                - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
+                - dpi_val: DPI value for the saved images
+                - fig_size: Size of the figure (width, height) in inches
+        output_basedir:
+            Base directory under which the plots will be saved.
+            Expected scheme `<results_base_dir>/<run_id>`.
+        """
+
+        self.image_format = plotter_cfg.get("image_format")
+        self.dpi_val = plotter_cfg.get("dpi_val")
+        self.fig_size = plotter_cfg.get("fig_size")
+        self.log_scale = plotter_cfg.get("log_scale")
+        self.add_grid = plotter_cfg.get("add_grid")
 
         self.out_plot_dir = Path(output_basedir) / "line_plots"
-
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
@@ -643,7 +671,7 @@ class LinePlots:
                 dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1
             ]
             if non_zero_dims:
-                logging.info(
+                _logger.info(
                     f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
                 )
             averaged = data.mean(
@@ -668,6 +696,12 @@ class LinePlots:
         plt.title(title)
         plt.legend(frameon=False)
 
+        if self.add_grid:
+            plt.grid(True, linestyle="--", color="gray", alpha=0.5)
+
+        if self.log_scale:
+            plt.yscale("log")
+
         if print_summary:
             _logger.info(f"Summary values for {tag}")
             self.print_all_points_from_graph(fig)
@@ -676,49 +710,3 @@ class LinePlots:
         name = "_".join(filter(None, parts))
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
         plt.close()
-
-
-class DefaultMarkerSize:
-    """
-    Utility class for managing default configuration values, such as marker sizes
-    for various data streams.
-    """
-
-    _marker_size_stream = {
-        "era5": 2.5,
-        "imerg": 0.25,
-        "cerra": 0.1,
-    }
-
-    _default_marker_size = 0.5
-
-    @classmethod
-    def get_marker_size(cls, stream_name: str) -> float:
-        """
-        Get the default marker size for a given stream name.
-
-        Parameters
-        ----------
-        stream_name : str
-            The name of the stream.
-
-        Returns
-        -------
-        float
-            The default marker size for the stream.
-        """
-        return cls._marker_size_stream.get(
-            stream_name.lower(), cls._default_marker_size
-        )
-
-    @classmethod
-    def list_streams(cls):
-        """
-        List all streams with defined marker sizes.
-
-        Returns
-        -------
-        list[str]
-            List of stream names.
-        """
-        return list(cls._marker_size_stream.keys())
