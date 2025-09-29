@@ -26,11 +26,22 @@ if not _logger.handlers:
     _logger.addHandler(handler)
 
 
-## all functions
 def find_pl(all_variables):
     """
-    Find all the pressure levels for each variable and return a dictionary
+    Find all the pressure levels for each variable using regex and returns a dictionary
     mapping variable names to their corresponding pressure levels.
+    Parameters
+    ----------
+    all_variables : list of str
+        List of variable names with pressure levels (e.g.,'q_500','t_2m').
+    Returns
+    -------
+    tuple  
+        A tuple containing:
+        - var_dict: dict
+            Dictionary mapping variable names to lists of their corresponding pressure levels.
+        - pl: list of int
+            List of unique pressure levels found in the variable names.
     """
     var_dict = {}
     pl = []
@@ -52,6 +63,14 @@ def reshape_dataset(input_data_array):
     Reshape the input xarray DataArray to have dimensions (ipoint, pressure_level)
     for variables with multiple pressure levels, and (ipoint,) for surface variables.
     Removes ipoint to valid_time, lat, lon after splitting for each sample
+    Parameters
+    ----------
+    input_data_array : xarray.DataArray
+        Input xarray DataArray with dimensions (ipoint, channel).
+    Returns
+    -------
+    list of xarray.Dataset
+        List of xarray Datasets, one for each sample, with reshaped dimensions.
     """
     var_dict, pl = find_pl(input_data_array.channel.values)
     data_vars = {}
@@ -75,7 +94,6 @@ def reshape_dataset(input_data_array):
         for i in range(len(np.unique(reshaped_dataset.sample)))
     ]
     sampled_data = [remove_ipoint(sample) for sample in sampled_data]
-    # rename sample
     sampled_data = [ds.assign_coords(sample=i) for i, ds in enumerate(sampled_data)]
     return sampled_data
 
@@ -83,15 +101,34 @@ def reshape_dataset(input_data_array):
 def remove_ipoint(sample_data):
     """
     Remove ipoint dimension by setting it as index and unstacking.
+    Parameters
+    ----------
+    sample_data : xarray.Dataset
+        Input xarray Dataset with ipoint dimension.
+    Returns
+    -------
+    xarray.Dataset
+        xarray Dataset without ipoint dimension (replaced by valid_time, lat and lon).
     """
     sample_data = sample_data.set_index(ipoint=("valid_time", "lat", "lon")).unstack("ipoint")
-    ## TODO: regrid data to closest on a regularly spaced grid, current logic assigns a new lat, lon for each point
     return sample_data
 
 
 def add_conventions(stream, run_id, ds):
     """
     Add CF conventions to the dataset attributes.
+    Parameters
+    ----------
+    stream : str
+        Stream name to include in the title attribute.
+    run_id : str
+        Run ID to include in the title attribute.
+    ds : xarray.Dataset
+        Input xarray Dataset to add conventions to.
+    Returns
+    -------
+    xarray.Dataset
+        xarray Dataset with CF conventions added to attributes.
     """
     ds.attrs["title"] = f"WeatherGenerator Output for {run_id} using stream {stream}"
     ds.attrs["institution"] = "WeatherGenerator Project"
@@ -107,6 +144,16 @@ def add_conventions(stream, run_id, ds):
 def cf_parser(config, ds) -> xr.Dataset:
     """
     Parse the dataset according to the CF conventions specified in the config.
+    Parameters
+    ----------
+    config : OmegaConf
+        Loaded config for cf_parser function.
+    ds : xarray.Dataset
+        Input xarray Dataset to be parsed.
+    Returns
+    -------
+    xarray.Dataset
+        Parsed xarray Dataset with CF conventions applied.
     """
     # Start a new xarray dataset from scratch, it's easier than deleting / renaming (I tried!).
     variables = {}
@@ -132,7 +179,6 @@ def cf_parser(config, ds) -> xr.Dataset:
             dim_attributes["units"] = dim_dict["std_unit"]
         ds_attributes[dim_dict["wg"]] = dim_attributes
     for var_name in ds:
-        # TODO: better way to handle the ordering here
         dims = [
             "forecast_period",
             "pressure",
@@ -159,7 +205,6 @@ def cf_parser(config, ds) -> xr.Dataset:
                 standard_name=mapping[var_name]["std"],
                 units=mapping[var_name]["std_unit"],
             )
-            # ds_attributes['variable'] = attributes
             variables[mapping[var_name]["var"]] = xr.DataArray(
                 data=variable.values,
                 dims=dims,
@@ -174,30 +219,50 @@ def cf_parser(config, ds) -> xr.Dataset:
     return dataset
 
 
-def output_filename(type, run_id, output_dir, output_format, forecast_ref_time):
+def output_filename(prefix, run_id, output_dir, output_format, forecast_ref_time):
     """
-    Generate output filename based on type, run_id, sample index, output directory, format and forecast_ref_time.
+    Generate output filename based on prefix (should refer to type e.g. pred/targ), run_id, sample index, output directory, format and forecast_ref_time.
+    Parameters
+    ----------
+    prefix : str
+        Prefix for file name (e.g., 'pred' or 'targ').
+    run_id : str
+        Run ID to include in the filename.
+    output_dir : str
+        Directory to save the output file.
+    output_format : str
+        Output file format (currently only 'netcdf' supported).
+    forecast_ref_time : np.datetime64
+        Forecast reference time to include in the filename.
+    Returns
+    -------
+    Path
+        Full path to the output file.
     """
     if output_format not in ["netcdf"]:
         raise ValueError(f"Unsupported output format: {output_format}")
     file_extension = "nc"
     frt = np.datetime_as_string(forecast_ref_time, unit="h")
-    # out_fname = Path(output_dir) / f'{type}_{run_id}_{np.datetime_as_string(forecast_ref_time, unit="h")}.{file_extension}'
-    # documentation wants <type>_<forecast_reference_time>_<forecast_period>_<collection>.<extension>
-    # here multiple forecast steps are in one forecast so have amended to just use forecast reference time
-    out_fname = Path(output_dir) / f"{type}_{frt}_{run_id}.{file_extension}"
+    out_fname = Path(output_dir) / f"{prefix}_{frt}_{run_id}.{file_extension}"
     return out_fname
 
 
 def zarr_store(run_id):
     """
     Get the path to the Zarr store for a given run ID.
+    Parameters
+    ----------
+    run_id : str
+        Run ID to identify the Zarr store.
+    Returns
+    -------
+    Path
+        Path to the Zarr store.
     """
     run_results = (
         Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
     )
     zarr_path = run_results / "validation_epoch00000_rank0000.zarr"
-    # TODO: this might need to be more flexible for epochs and ranks
     if not zarr_path.exists() or not zarr_path.is_dir():
         raise FileNotFoundError(
             f"Zarr file {zarr_path} does not exist or is not a directory."
@@ -208,7 +273,22 @@ def zarr_store(run_id):
 def get_data(run_id: str, stream: str, type: str, fsteps=None, channels=None):
     """
     Retrieve data from Zarr store for a given run ID and stream.
-    type: 'target' or 'prediction'
+    Parameters
+    ----------
+    run_id : str
+        Run ID to identify the Zarr store.
+    stream : str
+        Stream name to retrieve data for (e.g., 'ERA5').
+    type : str
+        Type of data to retrieve ('target' or 'prediction').
+    fsteps : list of int, optional
+        List of forecast steps to retrieve. If None, retrieves all available forecast steps.
+    channels : list of str, optional
+        List of channels to retrieve. If None, retrieves all available channels.
+    Returns
+    -------
+    list of xarray.DataArray
+        List of xarray DataArrays for each forecast step.
     """
     # check type is valid
     if type not in ["target", "prediction"]:
@@ -262,6 +342,22 @@ def save_samples_to_netcdf(
 ):
     """
     Uses dictionary of pred/target xarray DataArrays to save each sample to a NetCDF file.
+    Parameters
+    ----------
+    type_str : str
+        Type of data ('pred' or 'targ') to include in the filename.
+    dict_sample_all_steps : dict
+        Dictionary where keys are sample indices and values are lists of xarray DataArrays for all the forecast steps
+    FSTEP_HOURS : np.timedelta64
+        Time difference between forecast steps (e.g., 6 hours).
+    run_id : str
+        Run ID to include in the filename.
+    output_dir : str
+        Directory to save the NetCDF files.
+    output_format : str
+        Output file format (currently only 'netcdf' supported).
+    config : OmegaConf
+        Loaded config for cf_parser function.
     """
     for sample_idx, array_list in dict_sample_all_steps.items():
         frt = array_list[0].coords["valid_time"].values[0] - FSTEP_HOURS
@@ -279,6 +375,15 @@ def save_samples_to_netcdf(
 def parse_args(args):
     """
     Parse command line arguments.
+
+    Parameters
+    ----------
+    args : list of str
+        List of command line arguments.
+    Returns
+    -------
+    argparse.Namespace
+        Parsed arguments.
     """
     parser = ArgumentParser()
     parser.add_argument(
@@ -329,31 +434,17 @@ if __name__ == "__main__":
     output_format = args.format
     stream = args.stream
 
-    # run_id = 'grwnhykd'
-    # stream = 'ERA5'
-    # output_dir = './test_output'
-    # output_format = 'netcdf'
-
     # Ensure output directory exists
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Load configuration
-    # TODO: get path from platform-env
-
     config_file = "../WeatherGenerator-private/evaluate/config_zarr2cf.yaml"
     config = OmegaConf.load(config_file)
     # check config loaded correctly
     assert config["variables"]["q"] is not None
 
     FSTEP_HOURS = np.timedelta64(6, "h")
-
-    # TODO: add checks to see if netcdf has alreaby been made
-    # TODO: overwrite clobber = True
-    # pverwriting needs to be fixed
-    # PermissionError: [Errno 13] Permission denied: '/p/home/jusers/owens1/jureca/WeatherGen/test_output1/pred_grwnhykd_sample0.nc'
-    # ds.close() needed to avoid this?
-    # for now either wipe folder between runs or use new folder/don't insepct inbetween
 
     for type in data_type:
         _logger.info(f"Starting processing {type} for run ID {run_id}.")
