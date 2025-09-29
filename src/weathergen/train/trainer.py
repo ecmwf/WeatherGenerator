@@ -42,6 +42,7 @@ from weathergen.model.attention import (
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
+from weathergen.model.ema import EMA
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
@@ -292,6 +293,10 @@ class Trainer(TrainerBase):
 
         if cf.compile_model:
             self.model = torch.compile(self.model, dynamic=True)
+
+        cf.ema = True
+        if cf.ema:
+            self.ema = EMA(self.model, halflife_steps=1e-3)
 
         # if with_fsdp then parameter count is unreliable
         if (is_root() and not cf.with_fsdp) or not cf.with_ddp:
@@ -579,6 +584,12 @@ class Trainer(TrainerBase):
             # update learning rate
             self.lr_scheduler.step()
 
+            # EMA update
+            self.ema.update(
+                self.cf.istep * self.world_size_original * self.cf.batch_size_per_gpu,
+                self.world_size_original * self.cf.batch_size_per_gpu,
+            )
+
             self.loss_unweighted_hist += [loss_values.losses_all]
             self.loss_model_hist += [loss_values.loss.item()]
             self.stdev_unweighted_hist += [loss_values.stddev_all]
@@ -595,7 +606,8 @@ class Trainer(TrainerBase):
             if bidx % self.checkpoint_freq == 0 and bidx > 0:
                 self.save_model(-1)
 
-            self.cf.istep += cf.batch_size_per_gpu
+            # Shouldn't this either be 1 or cf.batch_size_per_gpu * self.original
+            self.cf.istep += 1 # cf.batch_size_per_gpu
 
         self.dataset.advance()
 
@@ -621,7 +633,7 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds, _ = self.model(
+                        preds, _ = self.ema.forward_eval(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
 
