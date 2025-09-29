@@ -385,17 +385,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 target_raw_source_like = torch.from_numpy(
                                     np.concatenate((rdata.coords, rdata.geoinfos, rdata.data), 1)
                                 )
-                                (tt_cells_source_like, tt_lens_source_like, tt_centroids_source_like) = (
-                                    self.tokenizer.batchify_source(
-                                        stream_info,
-                                        torch.from_numpy(rdata.coords),
-                                        torch.from_numpy(rdata.geoinfos),
-                                        torch.from_numpy(rdata.data),
-                                        rdata.datetimes,
-                                        (time_win2.start, time_win2.end),
-                                        ds,
-                                        "target_normalizer",
-                                    )
+                                (
+                                    tt_cells_source_like,
+                                    tt_lens_source_like,
+                                    tt_centroids_source_like,
+                                ) = self.tokenizer.batchify_source(
+                                    stream_info,
+                                    torch.from_numpy(rdata.coords),
+                                    torch.from_numpy(rdata.geoinfos),
+                                    torch.from_numpy(rdata.data),
+                                    rdata.datetimes,
+                                    (time_win2.start, time_win2.end),
+                                    ds,
+                                    "target_normalizer",
                                 )
 
                                 stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t)

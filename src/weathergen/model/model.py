@@ -551,7 +551,9 @@ class Model(torch.nn.Module):
         if self.cf.get("encode_targets_latent", False):
             with torch.no_grad():
                 tokens_targets = []
-                tokens_targets_source_like = self.embed_cells_targets_source_like(model_params, streams_data)
+                tokens_targets_source_like = self.embed_cells_targets_source_like(
+                    model_params, streams_data
+                )
                 for fstep in range(len(tokens_targets_source_like)):
                     tokens_target, _ = self.assimilate_local(
                         model_params, tokens_targets_source_like[fstep], source_cell_lens
@@ -620,7 +622,9 @@ class Model(torch.nn.Module):
 
         return tokens_all
 
-    def embed_cells_targets_source_like(self, model_params: ModelParams, streams_data) -> torch.Tensor:
+    def embed_cells_targets_source_like(
+        self, model_params: ModelParams, streams_data
+    ) -> torch.Tensor:
         """Embeds target data similar to source tokens for each fstep and stream separately and
         rearranges it to cell-wise order
         Args:
@@ -677,7 +681,8 @@ class Model(torch.nn.Module):
                             idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
                             x_embed = embed(
-                                s.target_source_like_tokens_cells[fstep], s.target_source_like_centroids[fstep]
+                                s.target_source_like_tokens_cells[fstep],
+                                s.target_source_like_centroids[fstep],
                             ).flatten(0, 1)
 
                             # scatter write to reorder from per stream to per cell ordering

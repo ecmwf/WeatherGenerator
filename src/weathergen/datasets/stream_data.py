@@ -73,7 +73,9 @@ class StreamData:
         self.target_source_like_centroids = [[] for _ in range(forecast_steps + 1)]
 
         self.target_source_like_idxs_embed = [torch.tensor([]) for _ in range(forecast_steps + 1)]
-        self.target_source_like_idxs_embed_pe = [torch.tensor([]) for _ in range(forecast_steps + 1)]
+        self.target_source_like_idxs_embed_pe = [
+            torch.tensor([]) for _ in range(forecast_steps + 1)
+        ]
 
     def to_device(self, device="cuda") -> None:
         """
@@ -100,7 +102,9 @@ class StreamData:
         self.source_idxs_embed = self.source_idxs_embed.to(device, non_blocking=True)
         self.source_idxs_embed_pe = self.source_idxs_embed_pe.to(device, non_blocking=True)
 
-        self.target_source_like_raw = [t.to(device, non_blocking=True) for t in self.target_source_like_raw]
+        self.target_source_like_raw = [
+            t.to(device, non_blocking=True) for t in self.target_source_like_raw
+        ]
         self.target_source_like_tokens_lens = [
             t.to(device, non_blocking=True) for t in self.target_source_like_tokens_lens
         ]
@@ -150,7 +154,9 @@ class StreamData:
         """
 
         self.target_source_like_raw[fstep] += [torch.tensor([])]
-        self.target_source_like_tokens_lens[fstep] += [torch.zeros([self.nhc_source], dtype=torch.int32)]
+        self.target_source_like_tokens_lens[fstep] += [
+            torch.zeros([self.nhc_source], dtype=torch.int32)
+        ]
         self.target_source_like_tokens_cells[fstep] += [torch.tensor([])]
         self.target_source_like_centroids[fstep] += [torch.tensor([])]
 
@@ -392,7 +398,10 @@ class StreamData:
         # collect all source like tokens in current stream and add to
         # batch sample list when non-empty
         for fstep in range(len(self.target_source_like_tokens_cells)):
-            if torch.tensor([len(s) for s in self.target_source_like_tokens_cells[fstep]]).sum() > 0:
+            if (
+                torch.tensor([len(s) for s in self.target_source_like_tokens_cells[fstep]]).sum()
+                > 0
+            ):
                 self.target_source_like_raw[fstep] = torch.cat(self.target_source_like_raw[fstep])
 
                 # collect by merging entries per cells, preserving cell structure
