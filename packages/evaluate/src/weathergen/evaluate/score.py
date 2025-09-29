@@ -638,11 +638,14 @@ class Scores:
         xr.DataArray
             Change rate of the data array
         """
+
         if s1 is None:
             return xr.full_like(s0, np.nan)
         else:
-            # it needs to be in this order to preserve the s0 forecast_step
-            crate = np.abs(s0 - s1.values)
+            s1_aligned = s1.reindex_like(s0, method="nearest")
+            crate = np.abs(s0 - s1_aligned)
+            # Preserve all coordinates from s0
+            crate = crate.assign_coords(s0.coords)
             return crate
 
     def calc_froct(
