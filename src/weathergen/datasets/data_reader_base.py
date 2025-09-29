@@ -525,11 +525,11 @@ class DataReaderBase(metaclass=ABCMeta):
         return coords
 
     def _normalize(
-        self, 
-        data: NDArray[DType], 
-        idx: list[int], 
-        mean: dict[int, float], 
-        stdev: dict[int, float], 
+        self,
+        data: NDArray[DType],
+        idx: list[int],
+        mean: dict[int, float],
+        stdev: dict[int, float],
         name: str,
     ) -> NDArray[DType]:
         """
@@ -547,16 +547,19 @@ class DataReaderBase(metaclass=ABCMeta):
             standard deviation values for channels
         name :
             name of the data (for error messages)
-        
+
         Returns
         -------
         Normalized data
         """
         # assert data.shape[-1] == len(idx), f"incorrect number of {name} channels"
-	    if data.shape[-1] != len(idx):
-		    raise ValueError(f"incorrect number of {name} channels: expected {len(idx)}, got {data.shape[-1]}")
+        if data.shape[-1] != len(idx):
+            raise ValueError(
+                f"incorrect number of {name} channels: expected {len(idx)}, got {data.shape[-1]}"
+            )
         for i, ch in enumerate(idx):
             data[..., i] = (data[..., i] - mean[ch]) / stdev[ch]
+
         return data
 
     def _denormalize(
@@ -569,7 +572,7 @@ class DataReaderBase(metaclass=ABCMeta):
     ) -> NDArray[DType]:
         """
         Helper function to denormalize data
-        
+
         Parameters
         ----------
         data :
@@ -582,16 +585,19 @@ class DataReaderBase(metaclass=ABCMeta):
             standard deviation values for channels
         name :
             name of the data (for error messages)
-       
+
         Returns
         -------
         Denormalized data
         """
         # assert data.shape[-1] == len(idx), f"incorrect number of {name} channels"
         if data.shape[-1] != len(idx):
-            raise ValueError(f"incorrect number of {name} channels: expected {len(idx)}, got {data.shape[-1]}")
+            raise ValueError(
+                f"incorrect number of {name} channels: expected {len(idx)}, got {data.shape[-1]}"
+            )
         for i, ch in enumerate(idx):
             data[..., i] = (data[..., i] * stdev[ch]) + mean[ch]
+
         return data
 
     def normalize_geoinfos(self, geoinfos: NDArray[DType]) -> NDArray[DType]:
@@ -607,7 +613,9 @@ class DataReaderBase(metaclass=ABCMeta):
         -------
         Normalized geoinfo
         """
-        return self._normalize(geoinfos, self.geoinfo_idx, self.mean_geoinfo, self.stdev_geoinfo, "geoinfo")
+        return self._normalize(
+            geoinfos, self.geoinfo_idx, self.mean_geoinfo, self.stdev_geoinfo, "geoinfo"
+        )
 
     def normalize_source_channels(self, source: NDArray[DType]) -> NDArray[DType]:
         """
@@ -615,12 +623,12 @@ class DataReaderBase(metaclass=ABCMeta):
 
         Parameters
         ----------
-        data :
+        source :
             data to be normalized
 
         Returns
         -------
-        Normalized data
+        Normalized source data
         """
         return self._normalize(source, self.source_idx, self.mean, self.stdev, "source")
 
@@ -630,12 +638,12 @@ class DataReaderBase(metaclass=ABCMeta):
 
         Parameters
         ----------
-        data :
+        target :
             data to be normalized
 
         Returns
         -------
-        Normalized data
+        Normalized target data
         """
         return self._normalize(target, self.target_idx, self.mean, self.stdev, "target")
 
@@ -645,27 +653,27 @@ class DataReaderBase(metaclass=ABCMeta):
 
         Parameters
         ----------
-        data :
+        source :
             data to be denormalized
 
         Returns
         -------
-        Denormalized data
+        Denormalized source data
         """
         return self._denormalize(source, self.source_idx, self.mean, self.stdev, "source")
 
-    def denormalize_target_channels(self, data: NDArray[DType]) -> NDArray[DType]:
+    def denormalize_target_channels(self, target: NDArray[DType]) -> NDArray[DType]:
         """
         Denormalize target channels
 
         Parameters
         ----------
-        data :
+        target :
             data to be denormalized (target or pred)
 
         Returns
         -------
-        Denormalized data
+        Denormalized target data
         """
         return self._denormalize(target, self.target_idx, self.mean, self.stdev, "target")
 
