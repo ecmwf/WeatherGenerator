@@ -621,7 +621,8 @@ class Model(torch.nn.Module):
         return tokens_all
 
     def embed_cells_targets_source_like(self, model_params: ModelParams, streams_data) -> torch.Tensor:
-        """Embeds target data similar to source tokens for each fstep and stream separately and rearranges it to cell-wise order
+        """Embeds target data similar to source tokens for each fstep and stream separately and
+        rearranges it to cell-wise order
         Args:
             model_params : Query and embedding parameters
             streams_data : Used to initialize first tokens for pre-processing
@@ -665,7 +666,8 @@ class Model(torch.nn.Module):
             for _, sb in enumerate(streams_data):
                 for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
                     for fstep in range(num_fsteps):
-                        # TODO: KCT: should we actually remove the below check and just return an empty tensor?
+                        # TODO: KCT: should we actually remove the below check and just
+                        # return an empty tensor?
                         if s.target_source_like_tokens_lens[fstep].sum() != 0:
                             idxs = s.target_source_like_idxs_embed[fstep]
                             idxs_pe = s.target_source_like_idxs_embed_pe[fstep]
