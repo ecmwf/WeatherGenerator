@@ -551,12 +551,12 @@ class Model(torch.nn.Module):
         if self.cf.get("encode_targets_latent", False):
             with torch.no_grad():
                 tokens_targets = []
-                tokens_targets_source_like = self.embed_cells_targets_source_like(
-                    model_params, streams_data
-                )
-                for fstep in range(len(tokens_targets_source_like)):
+                for fstep in range(forecast_offset, forecast_offset + forecast_steps):
+                    tokens_targets_source_like = self.embed_cells(
+                        model_params, streams_data, mode="target", fstep=fstep
+                    )
                     tokens_target, _ = self.assimilate_local(
-                        model_params, tokens_targets_source_like[fstep], source_cell_lens
+                        model_params, tokens_targets_source_like, source_cell_lens
                     )
                     tokens_target = self.assimilate_global(model_params, tokens_target)
                     tokens_target_det = tokens_target.detach()  # explicitly detach as well
@@ -570,26 +570,35 @@ class Model(torch.nn.Module):
         return return_dict
 
     #########################################
-    def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
+    def embed_cells(
+        self, model_params: ModelParams, streams_data, mode: str = "source", fstep: int = None
+    ) -> torch.Tensor:
         """Embeds input data for each stream separately and rearranges it to cell-wise order
         Args:
             model_params : Query and embedding parameters
             streams_data : Used to initialize first tokens for pre-processing
+            mode: embedding "source" or "target" variables
+            fstep: forecast step to embed target data for (necessary if mode="target")
+
         Returns:
             Tokens for local assimilation
         """
+        assert mode in ["source", "target"], "mode must be either 'source' or 'target'"
+        assert not (mode == "target" and fstep is None), "fstep must be provided if mode='target'"
 
-        source_tokens_lens = torch.stack(
-            [
-                torch.stack(
-                    [
-                        s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
-                        for s in stl_b
-                    ]
-                )
-                for stl_b in streams_data
-            ]
-        )
+        source_tokens_lens = []
+        for stl_b in streams_data:  # loop over batch
+            source_tokens_lens_perbatch = []
+            for s in stl_b:  # loop over streams
+                # get either the source or target tokens lens depending on the mode
+                stl = s.source_tokens_lens if mode == "source" else s.target_source_like_tokens_lens[fstep]
+                if len(stl) > 0:
+                    source_tokens_lens_perbatch.append(stl)
+                else:
+                    source_tokens_lens_perbatch.append(torch.tensor([]))
+            source_tokens_lens.append(torch.stack(source_tokens_lens_perbatch))
+        source_tokens_lens = torch.stack(source_tokens_lens)
+
         offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
         tokens_all = torch.empty(
             (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=self.dtype, device="cuda"
@@ -597,14 +606,38 @@ class Model(torch.nn.Module):
 
         for _, sb in enumerate(streams_data):
             for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                if not s.source_empty():
-                    idxs = s.source_idxs_embed
-                    idxs_pe = s.source_idxs_embed_pe
+                src = (
+                    s.source_tokens_lens
+                    if mode == "source"
+                    else s.target_source_like_tokens_lens[fstep]
+                )
+                if src.sum() != 0:
+                    idxs = (
+                        s.source_idxs_embed
+                        if mode == "source"
+                        else s.target_source_like_idxs_embed[fstep]
+                    )
+                    idxs_pe = (
+                        s.source_idxs_embed_pe
+                        if mode == "source"
+                        else s.target_source_like_idxs_embed_pe[fstep]
+                    )
 
                     # create full scatter index
                     # (there's no broadcasting which is likely highly inefficient)
                     idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
+                    cells = (
+                        s.source_tokens_cells
+                        if mode == "source"
+                        else s.target_source_like_tokens_cells[fstep]
+                    )
+                    centroids = (
+                        s.source_centroids
+                        if mode == "source"
+                        else s.target_source_like_centroids[fstep]
+                    )
+                    
+                    x_embed = embed(cells, centroids).flatten(0, 1)
                     # there's undocumented limitation in flash_attn that will make embed fail if
                     # #tokens is too large; code below is a work around
                     # x_embed = torch.cat(
@@ -621,76 +654,6 @@ class Model(torch.nn.Module):
                     tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
 
         return tokens_all
-
-    def embed_cells_targets_source_like(
-        self, model_params: ModelParams, streams_data
-    ) -> torch.Tensor:
-        """Embeds target data similar to source tokens for each fstep and stream separately and
-        rearranges it to cell-wise order
-        Args:
-            model_params : Query and embedding parameters
-            streams_data : Used to initialize first tokens for pre-processing
-        Returns:
-            Tokens for local assimilation
-        """
-        with torch.no_grad():
-            target_source_like_tokens_lens = torch.stack(
-                [
-                    torch.stack(
-                        [
-                            torch.stack(
-                                [
-                                    s.target_source_like_tokens_lens[fstep]
-                                    if len(s.target_source_like_tokens_lens[fstep]) > 0
-                                    else torch.tensor([])
-                                    for fstep in range(len(s.target_source_like_tokens_lens))
-                                ]
-                            )
-                            for s in stl_b
-                        ]
-                    )
-                    for stl_b in streams_data
-                ]
-            )
-            offsets_base = target_source_like_tokens_lens.sum(1).sum(0).cumsum(1)
-            num_fsteps = target_source_like_tokens_lens.shape[
-                2
-            ] 
-            tokens_all = []
-            for fstep in range(num_fsteps):
-                tokens_all.append(
-                    torch.empty(
-                        (int(offsets_base[fstep][-1]), self.cf.ae_local_dim_embed),
-                        dtype=self.dtype,
-                        device="cuda",
-                    )
-                )
-
-            tokens_all_scattered = []
-            for _, sb in enumerate(streams_data):
-                for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                    for fstep in range(num_fsteps):
-                        if s.target_source_like_tokens_lens[fstep].sum() != 0:
-                            idxs = s.target_source_like_idxs_embed[fstep]
-                            idxs_pe = s.target_source_like_idxs_embed_pe[fstep]
-
-                            # create full scatter index
-                            # (there's no broadcasting which is likely highly inefficient)
-                            idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-
-                            x_embed = embed(
-                                s.target_source_like_tokens_cells[fstep],
-                                s.target_source_like_centroids[fstep],
-                            ).flatten(0, 1)
-
-                            # scatter write to reorder from per stream to per cell ordering
-                            tokens_all_fstep = tokens_all[fstep]
-                            tokens_all_fstep.scatter_(
-                                0, idxs, x_embed + model_params.pe_embed[idxs_pe]
-                            )
-                            tokens_all_scattered.append(tokens_all_fstep)
-
-        return tokens_all_scattered
 
     #########################################
     def assimilate_local(

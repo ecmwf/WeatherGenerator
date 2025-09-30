@@ -616,7 +616,7 @@ def get_target_coords_local_ffast(
     return a
 
 
-def compute_offsets_scatter_embed(batch: StreamData, process: str) -> StreamData:
+def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
     """
     Compute auxiliary information for scatter operation that changes from stream-centric to
     cell-centric computations
@@ -625,8 +625,6 @@ def compute_offsets_scatter_embed(batch: StreamData, process: str) -> StreamData
     ----------
     batch : str
         batch of stream data information for which offsets have to be computed
-    process : str
-        either 'target_normalizer' or 'source_normalizer'
 
     Returns
     -------
