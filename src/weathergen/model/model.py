@@ -555,12 +555,16 @@ class Model(torch.nn.Module):
                     model_params, streams_data
                 )
                 for fstep in range(len(tokens_targets_source_like)):
-                    tokens_target, _ = self.assimilate_local(
-                        model_params, tokens_targets_source_like[fstep], source_cell_lens
-                    )
-                    tokens_target = self.assimilate_global(model_params, tokens_target)
-                    tokens_target_det = tokens_target.detach()  # explicitly detach as well
-                    tokens_targets.append(tokens_target_det)
+                    if tokens_targets_source_like[fstep].sum()==0:
+                        # if the input is empty, return an empty tensor
+                        tokens_targets.append(torch.tensor([]).detach())
+                    else: 
+                        tokens_target, _ = self.assimilate_local(
+                            model_params, tokens_targets_source_like[fstep], source_cell_lens
+                        )
+                        tokens_target = self.assimilate_global(model_params, tokens_target)
+                        tokens_target_det = tokens_target.detach()  # explicitly detach as well
+                        tokens_targets.append(tokens_target_det)
 
         return_dict = {"preds_all": preds_all, "posteriors": posteriors}
         if self.cf.get("encode_targets_latent", False):
@@ -689,6 +693,8 @@ class Model(torch.nn.Module):
                                 0, idxs, x_embed + model_params.pe_embed[idxs_pe]
                             )
                             tokens_all_scattered.append(tokens_all_fstep)
+                        else:
+                            tokens_all_scattered.append(torch.tensor([]))
 
         return tokens_all_scattered
 
