@@ -549,18 +549,24 @@ class Model(torch.nn.Module):
 
         # now encode the targets into the latent space for all fsteps
         if self.cf.get("encode_targets_latent", False):
+            # since the targets are only used for the loss, we don't want to backprop through them
             with torch.no_grad():
                 tokens_targets = []
-                for fstep in range(forecast_offset, forecast_offset + forecast_steps):
+                # loop over all possible fsteps to include the offsetted targets as well
+                for fstep in range(0, forecast_offset + forecast_steps):
                     tokens_targets_source_like = self.embed_cells(
                         model_params, streams_data, mode="target", fstep=fstep
                     )
-                    tokens_target, _ = self.assimilate_local(
-                        model_params, tokens_targets_source_like, source_cell_lens
-                    )
-                    tokens_target = self.assimilate_global(model_params, tokens_target)
-                    tokens_target_det = tokens_target.detach()  # explicitly detach as well
-                    tokens_targets.append(tokens_target_det)
+                    if tokens_targets_source_like.numel() == 0:
+                        # if there was no date to embed, just append an empty tensor
+                        tokens_targets.append(torch.tensor([], dtype=self.dtype, device="cuda").detach())
+                    else:
+                        tokens_target, _ = self.assimilate_local(
+                            model_params, tokens_targets_source_like, source_cell_lens
+                        )
+                        tokens_target = self.assimilate_global(model_params, tokens_target)
+                        tokens_target_det = tokens_target.detach()  # explicitly detach as well
+                        tokens_targets.append(tokens_target_det)
 
         return_dict = {"preds_all": preds_all, "posteriors": posteriors}
         if self.cf.get("encode_targets_latent", False):
@@ -606,12 +612,13 @@ class Model(torch.nn.Module):
 
         for _, sb in enumerate(streams_data):
             for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                # check if the calculated lens are non-zero
-                if (source_tokens_lens.sum() == 0) and (mode == "target"):
-                    # nothing to embed, but we still want an empty tensor for the target.
-                    # we don't append an empty tensor for the source
-                    tokens_all.append(torch.tensor([], dtype=self.dtype, device="cuda"))
-                elif source_tokens_lens.sum() != 0:
+                # # check if the calculated lens are non-zero
+                # if (source_tokens_lens.sum() == 0) and (mode == "target"):
+                #     # nothing to embed, but we still want an empty tensor for the target.
+                #     # we don't append an empty tensor for the source
+                #     tokens_all.append(torch.tensor([], dtype=self.dtype, device="cuda"))
+                # el
+                if source_tokens_lens.sum() != 0:
                     # if there are tokens to embed, proceed as usual
                     idxs = (
                         s.source_idxs_embed
