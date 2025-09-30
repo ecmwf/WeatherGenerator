@@ -13,7 +13,7 @@ permissions:
   # Make permissions as restrictive as possible.
   # The action needs to read PR details and modify labels.
   pull-requests: write
-  contents: read
+  contents: write
   issues: write
 
 jobs:
