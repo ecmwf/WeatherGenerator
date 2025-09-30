@@ -2,12 +2,17 @@
 name: Sync issue labels to PR
 
 on:
-  pull_request:
+  # This runs the action within the context of the base branch, allowing it to access secrets.
+  # This is necessary because the action changes the labels (disallowed to external contributors).
+  # No other actions should be taken.
+  pull_request_target:
     types: [opened, edited, reopened, synchronize, ready_for_review]
 
 permissions:
+  # Make permissions as restrictive as possible.
+  # The action needs to read PR details and modify labels.
   pull-requests: write
-  contents: write
+  contents: read
   issues: write
 
 jobs:
