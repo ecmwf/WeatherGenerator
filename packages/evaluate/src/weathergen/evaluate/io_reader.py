@@ -518,9 +518,9 @@ class WeatherGenReader(Reader):
         list[str]
             A list of channel names.
         """
-        _logger.info(f"Getting channels for stream {stream}...")
+        _logger.debug(f"Getting channels for stream {stream}...")
         all_channels = self.get_inference_stream_attr(stream, "val_target_channels")
-        _logger.info(f"Channels found in config: {all_channels}")
+        _logger.debug(f"Channels found in config: {all_channels}")
         return all_channels
 
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
