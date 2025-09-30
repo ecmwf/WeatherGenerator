@@ -1,0 +1,13 @@
+name: PR Target Smoke
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  echo:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "PR:   ${{ github.event.pull_request.number }}"
+          echo "From: ${{ github.event.pull_request.head.label }}"
+          echo "To:   ${{ github.event.pull_request.base.label }}"
