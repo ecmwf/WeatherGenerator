@@ -40,7 +40,7 @@ class EmbeddingEngine:
         :param sources_size: List of source sizes for each stream.
         """
         self.cf = cf
-        self.sources_size = sources_size 
+        self.sources_size = sources_size
         self.embeds = torch.nn.ModuleList()
 
     def create(self) -> torch.nn.ModuleList:

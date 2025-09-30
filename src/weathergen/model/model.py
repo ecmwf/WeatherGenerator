@@ -555,10 +555,10 @@ class Model(torch.nn.Module):
                     model_params, streams_data
                 )
                 for fstep in range(len(tokens_targets_source_like)):
-                    if tokens_targets_source_like[fstep].sum()==0:
+                    if tokens_targets_source_like[fstep].sum() == 0:
                         # if the input is empty, return an empty tensor
                         tokens_targets.append(torch.tensor([]).detach())
-                    else: 
+                    else:
                         tokens_target, _ = self.assimilate_local(
                             model_params, tokens_targets_source_like[fstep], source_cell_lens
                         )
@@ -657,9 +657,7 @@ class Model(torch.nn.Module):
                 ]
             )
             offsets_base = target_source_like_tokens_lens.sum(1).sum(0).cumsum(1)
-            num_fsteps = target_source_like_tokens_lens.shape[
-                2
-            ] 
+            num_fsteps = target_source_like_tokens_lens.shape[2]
             tokens_all = []
             for fstep in range(num_fsteps):
                 tokens_all.append(
