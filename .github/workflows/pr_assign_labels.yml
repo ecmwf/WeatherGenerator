@@ -6,7 +6,7 @@ on:
   # This is necessary because the action changes the labels (disallowed to external contributors).
   # No other actions should be taken.
   pull_request_target:
-    types: [opened, edited, reopened, synchronize, ready_for_review]
+    # types: [opened, edited, reopened, synchronize, ready_for_review]
 
 
 permissions:
