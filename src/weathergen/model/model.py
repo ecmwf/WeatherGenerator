@@ -559,7 +559,9 @@ class Model(torch.nn.Module):
                     )
                     if tokens_targets_source_like.numel() == 0:
                         # if there was no date to embed, just append an empty tensor
-                        tokens_targets.append(torch.tensor([], dtype=self.dtype, device="cuda").detach())
+                        tokens_targets.append(
+                            torch.tensor([], dtype=self.dtype, device="cuda").detach()
+                        )
                     else:
                         tokens_target, _ = self.assimilate_local(
                             model_params, tokens_targets_source_like, source_cell_lens
@@ -597,7 +599,11 @@ class Model(torch.nn.Module):
             source_tokens_lens_perbatch = []
             for s in stl_b:  # loop over streams
                 # get either the source or target tokens lens depending on the mode
-                stl = s.source_tokens_lens if mode == "source" else s.target_source_like_tokens_lens[fstep]
+                stl = (
+                    s.source_tokens_lens
+                    if mode == "source"
+                    else s.target_source_like_tokens_lens[fstep]
+                )
                 if len(stl) > 0:
                     source_tokens_lens_perbatch.append(stl)
                 else:
@@ -644,7 +650,7 @@ class Model(torch.nn.Module):
                         if mode == "source"
                         else s.target_source_like_centroids[fstep]
                     )
-                    
+
                     x_embed = embed(cells, centroids).flatten(0, 1)
                     # there's undocumented limitation in flash_attn that will make embed fail if
                     # #tokens is too large; code below is a work around
