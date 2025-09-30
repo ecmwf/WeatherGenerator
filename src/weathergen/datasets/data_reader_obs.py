@@ -58,10 +58,12 @@ class DataReaderObs(DataReaderBase):
         # assert target_n_empty, "target is empty; at least one channels must be present."
 
         self.source_channels = self.select_channels(data_colnames, s_chs, s_chs_exclude)
-        self.source_idx = np.array([self.colnames.index(c) for c in self.source_channels])
+        self.source_idx = [self.colnames.index(c) for c in self.source_channels]
+        self.source_idx = np.array(self.source_idx, dtype=np.int64)
 
         self.target_channels = self.select_channels(data_colnames, t_chs, t_chs_exclude)
-        self.target_idx = np.array([self.colnames.index(c) for c in self.target_channels])
+        self.target_idx = [self.colnames.index(c) for c in self.target_channels]
+        self.target_idx = np.array(self.target_idx, dtype=np.int64)
 
         # determine idx for coords and geoinfos
         self.coords_idx = [self.colnames.index("lat"), self.colnames.index("lon")]
@@ -86,7 +88,7 @@ class DataReaderObs(DataReaderBase):
 
     def select_channels(
         self, colnames: list[str], cols_select: list[str] | None, cols_exclude: list[str] | None
-    ) -> None:
+    ) -> list:
         """
         Allow user to specify which columns they want to access.
         Get functions only returned for these specified columns.
