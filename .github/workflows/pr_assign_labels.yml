@@ -1,15 +1,18 @@
 # This workflow automatically applies labels from issues to pull requests that reference them.
 name: Sync issue labels to PR
 
-on:
-  # This runs the action within the context of the base branch, allowing it to access secrets.
-  # This is necessary because the action changes the labels (disallowed to external contributors).
-  # No other actions should be taken.
-  pull_request_target:
-    # types: [opened, edited, reopened, synchronize, ready_for_review]
-  pull_request:
-    types: [opened, edited, reopened, synchronize, ready_for_review]
+# on:
+#   # This runs the action within the context of the base branch, allowing it to access secrets.
+#   # This is necessary because the action changes the labels (disallowed to external contributors).
+#   # No other actions should be taken.
+#   pull_request_target:
+#     types: [opened, edited, reopened, synchronize, ready_for_review]
+#   # pull_request:
+#   #   types: [opened, edited, reopened, synchronize, ready_for_review]
 
+on:
+  pull_request_target:
+    types: [assigned, opened, synchronize, reopened]
 
 permissions:
   # Make permissions as restrictive as possible.
