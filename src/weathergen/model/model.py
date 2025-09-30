@@ -606,12 +606,13 @@ class Model(torch.nn.Module):
 
         for _, sb in enumerate(streams_data):
             for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                src = (
-                    s.source_tokens_lens
-                    if mode == "source"
-                    else s.target_source_like_tokens_lens[fstep]
-                )
-                if src.sum() != 0:
+                # check if the calculated lens are non-zero
+                if (source_tokens_lens.sum() == 0) and (mode == "target"):
+                    # nothing to embed, but we still want an empty tensor for the target.
+                    # we don't append an empty tensor for the source
+                    tokens_all.append(torch.tensor([], dtype=self.dtype, device="cuda"))
+                elif source_tokens_lens.sum() != 0:
+                    # if there are tokens to embed, proceed as usual
                     idxs = (
                         s.source_idxs_embed
                         if mode == "source"
