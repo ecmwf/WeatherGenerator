@@ -95,6 +95,11 @@ class Trainer(TrainerBase):
 
     def inference(self, cf, run_id_trained, epoch):
         # general initalization
+
+        # Asma: This is a quick fix, won't be useful in the future
+        # cf.batch_size_per_gpu = 1
+        # cf.batch_size_validation_per_gpu = 1
+        ######## End of stupid code
         self.init(cf)
 
         cf = self.cf
@@ -322,8 +327,11 @@ class Trainer(TrainerBase):
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
         # recover epoch when continuing run
+        print(f"self.num_ranks_original = {self.num_ranks_original}")
         if self.num_ranks_original is None:
             epoch_base = int(self.cf.istep / len(self.data_loader))
+        elif epoch_contd is not None:
+            epoch_base = epoch_contd + 1
         else:
             len_per_rank = (
                 len(self.dataset) // (self.num_ranks_original * cf.batch_size_per_gpu)
@@ -331,6 +339,7 @@ class Trainer(TrainerBase):
             epoch_base = int(
                 self.cf.istep / (min(len_per_rank, cf.samples_per_epoch) * self.num_ranks_original)
             )
+
 
         # torch.autograd.set_detect_anomaly(True)
         if cf.forecast_policy is not None:
@@ -345,6 +354,10 @@ class Trainer(TrainerBase):
         # validate once at the beginning as reference
         if cf.val_initial:
             self.validate(-1)
+
+        print(f"before training")
+        print(f"epoch_base = {epoch_base} cf.num_epochs = {cf.num_epochs}")
+        print(f"epoch_contd = {epoch_contd}")
 
         for epoch in range(epoch_base, cf.num_epochs):
             logger.info(f"Epoch {epoch} of {cf.num_epochs}: train.")

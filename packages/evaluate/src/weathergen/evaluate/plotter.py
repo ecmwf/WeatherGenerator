@@ -15,7 +15,7 @@ from PIL import Image
 from weathergen.common.config import _load_private_conf
 from weathergen.evaluate.plot_utils import DefaultMarkerSize
 
-work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
+work_dir = Path("./assets/cartopy" ) # Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
 cartopy.config["data_dir"] = str(work_dir)
 cartopy.config["pre_existing_data_dir"] = str(work_dir)
