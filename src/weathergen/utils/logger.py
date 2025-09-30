@@ -44,14 +44,14 @@ LOGGING_CONFIG = """
             "class": "logging.FileHandler",
             "level": "DEBUG",
             "formatter": "custom",
-            "filename": "log.text",
+            "filename": "{debug_filename}",
             "mode": "w"
         },
         "errorfile": {
             "class": "logging.FileHandler",
             "level": "ERROR",
             "formatter": "custom",
-            "filename": "error.txt",
+            "filename": "{error_filename}",
             "mode": "w"
         }
     },
@@ -125,7 +125,8 @@ def init_loggers(run_id, logging_config=None):
 
     # load the structure for logging config
     if logging_config is None:
-        logging_config = json.loads(LOGGING_CONFIG)
+        logging_config = json.loads(LOGGING_CONFIG.format(
+            debug_filename="debug.log", error_filename="error.log"))
 
     for _, handler in logging_config["handlers"].items():
         for k, v in handler.items():
@@ -147,3 +148,53 @@ def init_loggers(run_id, logging_config=None):
     logging.config.dictConfig(logging_config)
 
     logging.info(f"Logging set up. Logs are in {output_dir}")
+
+def _make_config(debug_filename, error_filename) -> dict:
+    return dict(
+        version=1,
+        disable_existing_loggers=False,
+        formatters={
+            "custom": {
+                "class": "weathergen.utils.logger.ColoredRelPathFormatter",
+                "format": \
+                    "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
+            }
+        },
+        handlers={
+            "stdout": {
+                "class": "logging.StreamHandler",
+                "level": "INFO",
+                "formatter": "custom",
+                "stream": "ext://sys.stdout"
+            },
+            "stderr": {
+                "class": "logging.StreamHandler",
+                "level": "ERROR",
+                "formatter": "custom",
+                "stream": "ext://sys.stderr"
+            },
+            "logfile": {
+                "class": "logging.FileHandler",
+                "level": "DEBUG",
+                "formatter": "custom",
+                "filename": debug_filename,
+                "mode": "w"
+            },
+            "errorfile": {
+                "class": "logging.FileHandler",
+                "level": "ERROR",
+                "formatter": "custom",
+                "filename": error_filename,
+                "mode": "w"
+            }
+        },
+        root={
+            "level": "DEBUG",
+            "handlers": [
+                "stderr",
+                "stdout",
+                "logfile",
+                "errorfile"
+            ]
+        }
+    )

@@ -11,13 +11,17 @@ import numpy as np
 import torch
 
 from weathergen.common.io import IOReaderData
-
+from weathergen.datasets.data_reader_base import ReaderData
+import astropy_healpix as hp
 
 class StreamData:
     """
     StreamData object that encapsulates all data the model ingests for one batch item
     for one stream.
     """
+
+    # TODO: comment
+    is_spoof: bool = False
 
     def __init__(self, idx: int, forecast_steps: int, nhc_source: int, nhc_target: int) -> None:
         """
@@ -106,7 +110,8 @@ class StreamData:
         None
         """
 
-        source = IOReaderData.spoof(source)
+        rdata = ReaderData(source.coords, source.geoinfos, source.data, source.datetimes)
+        source = spoof(source)
         self.source_raw += [source]
         self.source_tokens_lens += [torch.ones([self.nhc_source], dtype=torch.int32)]
         self.source_tokens_cells += [torch.tensor([])]
@@ -360,3 +365,43 @@ class StreamData:
                 self.target_tokens[fstep] = torch.tensor([])
                 self.target_tokens_lens[fstep] = torch.tensor([0])
                 self.target_coords_lens[fstep] = torch.tensor([])
+
+
+# TODO: other, nchannels unnneeded
+def spoof(healpix_level:int,
+        datetime, geoinfo_size, mean_of_data
+    ) -> ReaderData:
+        """
+        Spoof an instance from data_reader_base.ReaderData instance.
+        other should be such an instance.
+        """
+
+        hl = 5 # TODO: hardcoded, should be passed as argument
+        dx = 0.5
+        dy = 0.5
+        num_healpix_cells = 12 * 4**hl
+        lons, lats = hp.healpix_to_lonlat(
+            np.arange(0, num_healpix_cells), 2**hl, dx=dx, dy=dy, order="nested"
+        )
+        coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
+        geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
+
+        data = np.expand_dims(mean_of_data.astype(np.float32), axis=0).repeat(
+            coords.shape[0], axis=0
+        )
+        datetimes = np.array(datetime).repeat(coords.shape[0])
+
+        n_datapoints = len(data)
+
+        assert coords.shape == (n_datapoints, 2), (
+            "number of datapoints do not match data", coords.shape, (n_datapoints, 2)
+        )
+        assert geoinfos.shape[0] == n_datapoints, (
+            "number of datapoints do not match data", geoinfos.shape, (n_datapoints, geoinfo_size)
+        )
+        assert datetimes.shape[0] == n_datapoints, (
+            "number of datapoints do not match data", datetimes.shape, (n_datapoints,)
+        )
+
+        return ReaderData(coords, geoinfos, data, datetimes)
+

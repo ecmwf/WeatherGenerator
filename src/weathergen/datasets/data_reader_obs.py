@@ -88,7 +88,7 @@ class DataReaderObs(DataReaderBase):
 
     def select_channels(
         self, colnames: list[str], cols_select: list[str] | None, cols_exclude: list[str] | None
-    ) -> list:
+    ) -> list[str]:
         """
         Allow user to specify which columns they want to access.
         Get functions only returned for these specified columns.

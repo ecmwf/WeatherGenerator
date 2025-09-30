@@ -26,7 +26,7 @@ from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.icon_dataset import IconDataset
 from weathergen.datasets.masking import Masker
-from weathergen.datasets.stream_data import StreamData
+from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
@@ -341,9 +341,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                         sample_is_empty = rdata.is_empty()
                         if sample_is_empty:
-                            rdata = IOReaderData.spoof(
-                                rdata,
-                                len(stream_info.train_source_channels),
+                            rdata = spoof(
+                                self.healpix_level_source,
                                 time_win1.start,
                                 ds.get_geoinfo_size(),
                                 ds.mean[ds.source_idx],
@@ -378,9 +377,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                             sample_is_empty = rdata.is_empty()
                             if sample_is_empty:
-                                rdata = IOReaderData.spoof(
-                                    rdata,
-                                    len(stream_info.train_target_channels),
+                                rdata = spoof(
+                                    self.healpix_level_target,
                                     time_win1.start,
                                     ds.get_geoinfo_size(),
                                     ds.mean[ds.target_idx],
