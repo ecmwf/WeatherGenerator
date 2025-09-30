@@ -642,9 +642,8 @@ class Scores:
         if s1 is None:
             return xr.full_like(s0, np.nan)
         else:
-            s1_aligned = s1.reindex_like(s0, method="nearest")
-            crate = np.abs(s0 - s1_aligned)
-            # Preserve all coordinates from s0
+            crate = np.abs(s0 - s1)
+            # Preserve all coordinates from s0 (alternative: use s1.values above)
             crate = crate.assign_coords(s0.coords)
             return crate
 
