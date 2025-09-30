@@ -642,9 +642,7 @@ class Scores:
         if s1 is None:
             return xr.full_like(s0, np.nan)
         else:
-            crate = np.abs(s0 - s1)
-            # Preserve all coordinates from s0 (alternative: use s1.values above)
-            crate = crate.assign_coords(s0.coords)
+            crate = np.abs(s0 - s1.values)
             return crate
 
     def calc_froct(

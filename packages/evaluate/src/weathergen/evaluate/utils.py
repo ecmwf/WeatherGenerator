@@ -68,7 +68,7 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
         tars_next = da_tars.get(next_fstep, None)
         tars = da_tars.get(fstep, None)
         preds = da_preds.get(fstep, None)
-        
+
         # Reindex to match the current forecast step's coordinates if necessary
         preds_next = sort_by_coords(preds_next, preds)
         tars_next = sort_by_coords(tars_next, tars)
