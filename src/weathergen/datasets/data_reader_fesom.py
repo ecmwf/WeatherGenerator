@@ -65,6 +65,7 @@ class DataReaderFesom(DataReaderTimestep):
         self.geoinfo_channels = []
         self.geoinfo_idx = []
         self.properties = {}
+        self._lat_needs_conversion = False
 
         if len(self.filenames) == 0:
             name = stream_info["name"]
@@ -177,6 +178,14 @@ class DataReaderFesom(DataReaderTimestep):
         self.stdev[self.stdev <= 1e-5] = 1.0
 
         self.data = da.concatenate(reordered_data_arrays, axis=0)
+
+        first_timestep_lats = self.data[: self.mesh_size, self.lat_index].compute()
+        if np.any(first_timestep_lats > 90.0):
+            _logger.warning(
+                f"Latitude for stream '{self._stream_info['name']}' appears to be in a [0, 180] "
+                f"format. It will be automatically converted to the required [-90, 90] format."
+            )
+            self._lat_needs_conversion = True
 
         source_channels = self._stream_info.get("source")
         source_excl = self._stream_info.get("source_exclude")
@@ -304,6 +313,12 @@ class DataReaderFesom(DataReaderTimestep):
         data, lat, lon, datetimes = dask.compute(
             data_lazy, lat_lazy, lon_lazy, datetimes_lazy, scheduler="single-threaded"
         )
+
+        if self._lat_needs_conversion:
+            lat = 90.0 - lat
+
+        # Always ensure longitude is in [-180, 180]
+        lon = ((lon + 180.0) % 360.0) - 180.0
 
         coords = np.stack([lat, lon], axis=1)
         geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
