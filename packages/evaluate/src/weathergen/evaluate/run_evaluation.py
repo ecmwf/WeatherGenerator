@@ -14,10 +14,10 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
-from weathergen.evaluate.io_reader import Reader
+from weathergen.evaluate.io_reader import WeatherGenReader
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
@@ -69,7 +69,7 @@ def evaluate_from_config(cfg):
     metrics = cfg.evaluation.metrics
     regions = cfg.evaluation.get("regions", ["global"])
 
-    global_plotting_opts = cfg.get("global_plotting_options", DictConfig)
+    global_plotting_opts = cfg.get("global_plotting_options", {})
 
     # to get a structure like: scores_dict[metric][region][stream][run_id] = plot
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
@@ -77,7 +77,7 @@ def evaluate_from_config(cfg):
     for run_id, run in runs.items():
         _logger.info(f"RUN {run_id}: Getting data...")
 
-        reader = Reader(run, run_id, private_paths)
+        reader = WeatherGenReader(run, run_id, private_paths)
 
         for stream in reader.streams:
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
@@ -107,7 +107,7 @@ def evaluate_from_config(cfg):
                                 stream, metric_data, mode="evaluation"
                             )
 
-                            if not available_data.json_availability:
+                            if not available_data.score_availability:
                                 metrics_to_compute.append(metric)
                             else:
                                 # simply select the chosen eval channels, samples, fsteps here...
