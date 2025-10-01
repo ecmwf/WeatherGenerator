@@ -337,11 +337,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                         # rdata needs to be wrapped in a different class
                         # to avoid unwanted dependencies => see IOReaderData docstring
-                        rdata_wrapped = IOReaderData.create(rdata)
+                        rdata_wrapped: IOReaderData = IOReaderData.create(rdata)
 
                         sample_is_empty = rdata.is_empty()
                         if sample_is_empty:
-                            rdata = spoof(
+                            rdata_wrapped = spoof(
                                 self.healpix_level_source,
                                 time_win1.start,
                                 ds.get_geoinfo_size(),
@@ -351,10 +351,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         # TODO: this should only be collected in validation mode
                         (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                             stream_info,
-                            torch.from_numpy(rdata.coords),
-                            torch.from_numpy(rdata.geoinfos),
-                            torch.from_numpy(rdata.data),
-                            rdata.datetimes,
+                            torch.from_numpy(rdata_wrapped.coords),
+                            torch.from_numpy(rdata_wrapped.geoinfos),
+                            torch.from_numpy(rdata_wrapped.data),
+                            rdata_wrapped.datetimes,
                             (time_win1.start, time_win1.end),
                             ds,
                         )

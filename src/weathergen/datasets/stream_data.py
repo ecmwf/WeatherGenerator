@@ -370,18 +370,17 @@ class StreamData:
 # TODO: other, nchannels unnneeded
 def spoof(healpix_level:int,
         datetime, geoinfo_size, mean_of_data
-    ) -> ReaderData:
+    ) -> IOReaderData:
         """
         Spoof an instance from data_reader_base.ReaderData instance.
         other should be such an instance.
         """
 
-        hl = 5 # TODO: hardcoded, should be passed as argument
         dx = 0.5
         dy = 0.5
-        num_healpix_cells = 12 * 4**hl
+        num_healpix_cells = 12 * 4**healpix_level
         lons, lats = hp.healpix_to_lonlat(
-            np.arange(0, num_healpix_cells), 2**hl, dx=dx, dy=dy, order="nested"
+            np.arange(0, num_healpix_cells), 2**healpix_level, dx=dx, dy=dy, order="nested"
         )
         coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
         geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
@@ -403,5 +402,5 @@ def spoof(healpix_level:int,
             "number of datapoints do not match data", datetimes.shape, (n_datapoints,)
         )
 
-        return ReaderData(coords, geoinfos, data, datetimes)
+        return IOReaderData(coords, geoinfos, data, datetimes)
 
