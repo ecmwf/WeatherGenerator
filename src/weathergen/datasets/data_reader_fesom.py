@@ -66,6 +66,7 @@ class DataReaderFesom(DataReaderTimestep):
         self.geoinfo_idx = []
         self.properties = {}
         self._lat_needs_conversion = False
+        self._lon_needs_conversion = False
 
         if len(self.filenames) == 0:
             name = stream_info["name"]
@@ -180,12 +181,21 @@ class DataReaderFesom(DataReaderTimestep):
         self.data = da.concatenate(reordered_data_arrays, axis=0)
 
         first_timestep_lats = self.data[: self.mesh_size, self.lat_index].compute()
+        first_timestep_lons = self.data[: self.mesh_size, self.lon_index].compute()
+
         if np.any(first_timestep_lats > 90.0):
             _logger.warning(
                 f"Latitude for stream '{self._stream_info['name']}' appears to be in a [0, 180] "
                 f"format. It will be automatically converted to the required [-90, 90] format."
             )
             self._lat_needs_conversion = True
+
+        if np.any(first_timestep_lons > 180.0):
+            _logger.warning(
+                f"Longitude for stream '{self._stream_info['name']}' appears to be in a [0, 360] "
+                f"format. It will be automatically converted to the required [-180, 180] format."
+            )
+            self._lon_needs_conversion = True
 
         source_channels = self._stream_info.get("source")
         source_excl = self._stream_info.get("source_exclude")
@@ -317,8 +327,8 @@ class DataReaderFesom(DataReaderTimestep):
         if self._lat_needs_conversion:
             lat = 90.0 - lat
 
-        # Always ensure longitude is in [-180, 180]
-        lon = ((lon + 180.0) % 360.0) - 180.0
+        if self._lon_needs_conversion:
+            lon = ((lon + 180.0) % 360.0) - 180.0
 
         coords = np.stack([lat, lon], axis=1)
         geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
