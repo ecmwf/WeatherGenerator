@@ -10,7 +10,7 @@ authors = [
 requires-python = ">=3.12,<3.13"
 # TODO: split the plotting dependencies into their own dep groups, they are not required.
 dependencies = [
- 'torch==2.6.0',
+'torch==2.6.0+cu126',
  'numpy~=2.2',
  'astropy_healpix~=1.1.2',
  'zarr~=2.17',
@@ -22,7 +22,7 @@ dependencies = [
  'packaging',
  'wheel',
  'psutil',
- "flash-attn; sys_platform == 'linux'",
+ #"flash-attn",
  "polars~=1.25.2",
  "omegaconf~=2.3.0",
  "dask~=2025.5.1",
@@ -30,6 +30,7 @@ dependencies = [
  "numexpr>=2.11.0",
  "weathergen-common",
  "weathergen-evaluate",
+ "torch",
 ]
 
 [project.urls]
@@ -141,14 +142,26 @@ link-mode = "symlink"
 # Also, relatively recent versions are required to support workspaces.
 required-version = ">=0.7.0"
 
+environments = [
+ #   "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
 # Following the recommendations from https://docs.astral.sh/uv/guides/integration/pytorch
 # The current setup is:
 # linux == GPU + flashattention
 # windows == GPU
 # macos == CPU
 [[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126-aarch64"
+#url = "https://download.pytorch.org/whl/cu126"
+url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-linux_aarch64.whl#sha256=993e0e99c472df1d2746c3233ef8e88d992904fe75b8996a2c15439c43ff46c4"
 explicit = true
 
 
@@ -181,14 +194,15 @@ explicit = true
 [tool.uv.sources]
 weathergen-common = { workspace = true }
 weathergen-evaluate = { workspace = true }
-torch = [
-  { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-  { index = "pytorch-cpu", marker = "sys_platform == 'macosx'"},
-]
 # This URL was evaluated this way:
 # uv run ~/WeatherGenerator-private/hpc/hpc2020/ecmwf/get-flash-atten.sh
 flash-attn = [
-  { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'"  },
+  { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'"  },
+]
+torch = [
+  { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-linux_aarch64.whl", marker = 'sys_platform == "linux" and platform_machine == "aarch64"' },
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
+  { index = "pytorch-cpu", marker = "sys_platform == 'macosx'"},
 ]
 
 [tool.pytest.ini_options]
@@ -203,3 +217,4 @@ members = [
    "packages/evaluate",
    "packages/common"
 ]
+
