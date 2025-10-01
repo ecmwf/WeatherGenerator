@@ -22,7 +22,7 @@ dependencies = [
  'packaging',
  'wheel',
  'psutil',
- #"flash-attn",
+ "flash-attn==2.7.4",
  "polars~=1.25.2",
  "omegaconf~=2.3.0",
  "dask~=2025.5.1",
@@ -197,8 +197,11 @@ weathergen-evaluate = { workspace = true }
 # This URL was evaluated this way:
 # uv run ~/WeatherGenerator-private/hpc/hpc2020/ecmwf/get-flash-atten.sh
 flash-attn = [
-  { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'"  },
+  { url = "https://github.com/cathalobrien/get-flash-attn/releases/download/v0.1-alpha/flash_attn-2.7.4+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_aarch64.whl", marker = 'sys_platform == "linux" and platform_machine == "aarch64"' },
+  { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
+  { index = "pytorch-cpu", marker = "sys_platform == 'macosx'"},
 ]
+
 torch = [
   { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-linux_aarch64.whl", marker = 'sys_platform == "linux" and platform_machine == "aarch64"' },
   { index = "pytorch-cu126", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
