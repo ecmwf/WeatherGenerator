@@ -31,6 +31,7 @@ from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
     compute_idxs_predict,
     compute_offsets_scatter_embed,
+    compute_offsets_scatter_embed_target_source_like,
     compute_source_cell_lens,
 )
 from weathergen.utils.logger import logger
@@ -348,6 +349,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 rdata.datetimes,
                                 (time_win1.start, time_win1.end),
                                 ds,
+                                "source_normalizer",
                             )
 
                             stream_data.add_source(rdata_wrapped, ss_lens, ss_cells, ss_centroids)
@@ -367,6 +369,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                             if rdata.is_empty():
                                 stream_data.add_empty_target(fstep)
+                                stream_data.add_empty_target_source_like(fstep)
                             else:
                                 (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
                                     stream_info,
@@ -379,7 +382,32 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                     ds,
                                 )
 
+                                target_raw_source_like = torch.from_numpy(
+                                    np.concatenate((rdata.coords, rdata.geoinfos, rdata.data), 1)
+                                )
+                                (
+                                    tt_cells_source_like,
+                                    tt_lens_source_like,
+                                    tt_centroids_source_like,
+                                ) = self.tokenizer.batchify_source(
+                                    stream_info,
+                                    torch.from_numpy(rdata.coords),
+                                    torch.from_numpy(rdata.geoinfos),
+                                    torch.from_numpy(rdata.data),
+                                    rdata.datetimes,
+                                    (time_win2.start, time_win2.end),
+                                    ds,
+                                    "target_normalizer",
+                                )
+
                                 stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t)
+                                stream_data.add_target_source_like(
+                                    fstep,
+                                    target_raw_source_like,
+                                    tt_lens_source_like,
+                                    tt_cells_source_like,
+                                    tt_centroids_source_like,
+                                )
 
                     # merge inputs for sources and targets for current stream
                     stream_data.merge_inputs()
@@ -398,6 +426,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # compute offsets for scatter computation after embedding
             batch = compute_offsets_scatter_embed(batch)
+            batch = compute_offsets_scatter_embed_target_source_like(batch)
 
             # compute offsets and auxiliary data needed for prediction computation
             # (info is not per stream so separate data structure)

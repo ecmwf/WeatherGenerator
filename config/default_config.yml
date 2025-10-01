@@ -65,6 +65,7 @@ latent_noise_gamma: 2.0
 latent_noise_saturate_encodings: 5 
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
+encode_targets_latent: False
 
 loss_fcts:
   -
