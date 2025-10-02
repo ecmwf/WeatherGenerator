@@ -197,9 +197,6 @@ class Trainer(TrainerBase):
         with torch.device("meta"):
             self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
 
-        if cf.forecast_freeze_model:
-            self.model = self.model.freeze_weights_forecast()
-
         for name, module in self.model.named_modules():
             name = module.name if hasattr(module, "name") else name
             # avoid the whole model element which has name ''

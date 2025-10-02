@@ -99,7 +99,6 @@ def train_continue_from_args(argl: list[str]):
             forecast_delta_hrs=0,  # 12
             forecast_steps=1,  # [j for j in range(1,9) for i in range(4)]
             forecast_policy="fixed",  # 'sequential_random' # 'fixed' #'sequential' #_random'
-            forecast_freeze_model=True,
             forecast_att_dense_rate=1.0,  # 0.25
             fe_num_blocks=8,
             fe_num_heads=16,
