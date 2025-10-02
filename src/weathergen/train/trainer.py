@@ -516,6 +516,7 @@ class Trainer(TrainerBase):
                     kl = torch.cat([posterior.kl() for posterior in posteriors])
                     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
 
+            loss_scalar = loss_values.loss
             # backward pass
             self.grad_scaler.scale(loss_values.loss).backward()
 

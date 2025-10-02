@@ -136,7 +136,7 @@ class LossCalculator:
         loss_fct,
         stream_info,
         target: torch.Tensor,
-        pred: torch.Tensor,
+        pred,  # Tensor [S,N,C] or tuple handled by caller into samples
         substep_masks: list[torch.Tensor],
         weights_channels: torch.Tensor,
         weights_locations: torch.Tensor,
@@ -153,27 +153,37 @@ class LossCalculator:
         for mask_t in substep_masks:
             assert mask_t.sum() == len(weights_locations) if weights_locations is not None else True
 
-            # Route GMM NLL to params; others use samples
+            # Skip empty substeps outright
+            #if mask_t.sum() == 0:
+            #    continue
+
+            # Filter rows that have at least one finite target value
+            #tgt_rows = target[mask_t]  # [Nt, C]
+            #rows_mask = torch.isfinite(tgt_rows).any(dim=-1)  # [Nt]
+            #if rows_mask.sum() == 0:
+            #    continue
+
+            # Slice per-location weights to match filtered rows
+            #weights_points_t = (
+            #    weights_locations[rows_mask] if weights_locations is not None else None
+            #)
+
             if getattr(loss_fct, "__name__", "") == "gmm_nll":
                 assert gmm_params is not None, "GMM params are required for gmm_nll."
-                # Sub-select params for current substep
-                pi_t, mu_t, sg_t = (p[mask_t] for p in gmm_params)  # [Nt,K], [Nt,K,C], [Nt,K,C]
+                # Align params with the same rows
+                pi_t, mu_t, sg_t = (p[mask_t] for p in gmm_params)  # [Nt,K], [Nt,K,C],                                  # [Nt,C]
                 loss, loss_chs = loss_fct(target[mask_t], (pi_t, mu_t, sg_t), weights_channels, weights_locations)
             else:
-                # pred is samples [S,N,C]
-                loss, loss_chs = loss_fct(
-                    target[mask_t], pred[:, mask_t], weights_channels, weights_locations
-                )
+                # pred are ensemble samples [S,N,C]; align rows
+                loss, loss_chs = loss_fct(target[mask_t], pred[:, mask_t], weights_channels, weights_locations)
 
             # accumulate loss
             loss_lfct = loss_lfct + loss
             losses_chs += loss_chs.detach()
-            ctr_substeps += 1 if loss > 0.0 else 0
+            ctr_substeps += 1 if loss != 0.0 else 0 # count contributing substeps
 
-        # normalize over forecast steps in window
+        # normalize over contributing substeps
         losses_chs /= ctr_substeps if ctr_substeps > 0 else 1.0
-
-        # TODO: substep weight
         loss_lfct = loss_lfct / (ctr_substeps if ctr_substeps > 0 else 1.0)
 
         return loss_lfct, losses_chs
@@ -250,9 +260,6 @@ class LossCalculator:
                 if isinstance(pred, tuple) and len(pred) == 2:
                     pred, gmm_params = pred  # pred -> samples [S,N,C]
 
-                if not (target.shape[0] > 0 and pred.shape[0] > 0):
-                    continue
-
                 # reshape prediction tensor to match target's dimensions: extract data/coords and
                 # remove token dimension if it exists.
                 # expected final shape of pred is [ensemble_size, num_samples, num_channels].
@@ -283,14 +290,15 @@ class LossCalculator:
                         substep_masks,
                         weights_channels,
                         weights_locations,
-                        gmm_params=gmm_params,
+                        gmm_params=gmm_params,       # params or None
                     )
                     losses_all[stream_info.name][:, i_lfct] += loss_lfct_chs
 
                     # Add the weighted and normalized loss from this loss function to the total
                     # batch loss
                     loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct * stream_loss_weight)
-                    ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
+                    # NOTE: with nll loss, the loss can be negative, so we need to comment the if out
+                    ctr_loss_fcts += 1 if loss_lfct != 0.0 else 0  # if loss_lfct > 0.0 else 0
 
                 loss_fsteps = loss_fsteps + (loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0)
                 ctr_fsteps += 1 if ctr_loss_fcts > 0 else 0
@@ -313,6 +321,8 @@ class LossCalculator:
                 f"Loss is 0.0 for sample(s): {[sd[0].sample_idx.item() for sd in streams_data]}."
                 + "This will likely lead to errors in the optimization step."
             )
+
+            #import pdb; pdb.set_trace() 
 
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)

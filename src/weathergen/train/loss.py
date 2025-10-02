@@ -136,6 +136,7 @@ def gmm_nll(
 
     # Channel weighting
     loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
+
     return loss, loss_chs
 
 def ens_gaussian_nll(
