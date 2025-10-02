@@ -24,7 +24,6 @@ from weathergen.datasets.tokenizer_utils import (
 from weathergen.datasets.utils import (
     get_target_coords_local_ffast,
 )
-from weathergen.utils.logger import init_loggers
 
 
 class TokenizerMasking(Tokenizer):
@@ -49,7 +48,6 @@ class TokenizerMasking(Tokenizer):
         time_win: tuple,
         normalizer,  # dataset
     ):
-        init_loggers()
         token_size = stream_info["token_size"]
         is_diagnostic = stream_info.get("diagnostic", False)
         tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
@@ -245,6 +243,7 @@ class TokenizerMasking(Tokenizer):
             return [], 0
 
         num_selected = valid_mask.sum().item()
+        perm = torch.tensor(perm)
         selected_indices = perm[:num_selected]
         selected_indices = torch.zeros_like(perm).scatter(0, selected_indices, 1)
 
