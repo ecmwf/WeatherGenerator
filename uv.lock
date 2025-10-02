@@ -601,8 +601,8 @@ wheels = [
 
 [[package]]
 name = "flash-attn"
-version = "2.7.4"
-source = { url = "https://github.com/cathalobrien/get-flash-attn/releases/download/v0.1-alpha/flash_attn-2.7.4+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_aarch64.whl" }
+version = "2.7.3"
+source = { path = "../../../../capstor/store/cscs/userlab/ch17/flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl" }
 resolution-markers = [
     "platform_machine == 'aarch64' and platform_system == 'linux' and sys_platform == 'linux'",
     "platform_machine == 'aarch64' and platform_system != 'linux' and sys_platform == 'linux'",
@@ -612,7 +612,7 @@ dependencies = [
     { name = "torch", version = "2.6.0+cu126", source = { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-linux_aarch64.whl" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://github.com/cathalobrien/get-flash-attn/releases/download/v0.1-alpha/flash_attn-2.7.4+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_aarch64.whl", hash = "sha256:a5a55cf37ca54fd8c85cdaf721336f606ba85b7da8437c1d04f0c34af9603ae1" },
+    { filename = "flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl", hash = "sha256:7b52f161201b3fe98df274c75f5ced3edb90d4d2428e34a4dd95d0541f24b71a" },
 ]
 
 [package.metadata]
@@ -2063,7 +2063,7 @@ dependencies = [
     { name = "anemoi-datasets", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "astropy-healpix", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "dask", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "flash-attn", version = "2.7.4", source = { url = "https://github.com/cathalobrien/get-flash-attn/releases/download/v0.1-alpha/flash_attn-2.7.4+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_aarch64.whl" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
+    { name = "flash-attn", version = "2.7.3", source = { path = "../../../../capstor/store/cscs/userlab/ch17/flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "flash-attn", version = "2.7.4.post1", source = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "hatchling", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "matplotlib", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -2102,7 +2102,7 @@ requires-dist = [
     { name = "astropy-healpix", specifier = "~=1.1.2" },
     { name = "dask", specifier = "~=2025.5.1" },
     { name = "flash-attn", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'macosx')", specifier = "==2.7.4" },
-    { name = "flash-attn", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'", url = "https://github.com/cathalobrien/get-flash-attn/releases/download/v0.1-alpha/flash_attn-2.7.4+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_aarch64.whl" },
+    { name = "flash-attn", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'", path = "../../../../capstor/store/cscs/userlab/ch17/flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl" },
     { name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl" },
     { name = "flash-attn", marker = "sys_platform == 'macosx'", specifier = "==2.7.4", index = "https://download.pytorch.org/whl/cpu" },
     { name = "hatchling" },
