@@ -95,7 +95,6 @@ def train_continue_from_args(argl: list[str]):
             forecast_delta_hrs=0,  # 12
             forecast_steps=1,  # [j for j in range(1,9) for i in range(4)]
             forecast_policy="fixed",  # 'sequential_random' # 'fixed' #'sequential' #_random'
-            forecast_freeze_model=True,
             forecast_att_dense_rate=1.0,  # 0.25
             fe_num_blocks=8,
             fe_num_heads=16,
@@ -134,11 +133,12 @@ def train_continue_from_args(argl: list[str]):
     cf.run_history += [(args.from_run_id, cf.istep)]
 
     if args.finetune_forecast:
-        if cf.forecast_freeze_model:
+        if cf.freeze_modules != "":
             cf.with_fsdp = False
             import torch
 
             torch._dynamo.config.optimize_ddp = False
+
     trainer = Trainer()
     trainer.run(cf, args.from_run_id, args.epoch)
 
