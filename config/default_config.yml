@@ -127,7 +127,7 @@ weight_decay: 0.1
 norm_type: "LayerNorm"
 nn_module: "te"
 
-start_date: 199001010000
+start_date: 197901010000
 end_date: 202012310000
 start_date_val: 202101010000
 end_date_val: 202201010000

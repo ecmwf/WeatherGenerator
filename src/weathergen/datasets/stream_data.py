@@ -7,12 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import astropy_healpix as hp
 import numpy as np
 import torch
 
 from weathergen.common.io import IOReaderData
-from weathergen.datasets.data_reader_base import ReaderData
-import astropy_healpix as hp
+
 
 class StreamData:
     """
@@ -110,7 +110,6 @@ class StreamData:
         None
         """
 
-        rdata = ReaderData(source.coords, source.geoinfos, source.data, source.datetimes)
         source = spoof(source)
         self.source_raw += [source]
         self.source_tokens_lens += [torch.ones([self.nhc_source], dtype=torch.int32)]
@@ -368,39 +367,40 @@ class StreamData:
 
 
 # TODO: other, nchannels unnneeded
-def spoof(healpix_level:int,
-        datetime, geoinfo_size, mean_of_data
-    ) -> IOReaderData:
-        """
-        Spoof an instance from data_reader_base.ReaderData instance.
-        other should be such an instance.
-        """
+def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> IOReaderData:
+    """
+    Spoof an instance from data_reader_base.ReaderData instance.
+    other should be such an instance.
+    """
 
-        dx = 0.5
-        dy = 0.5
-        num_healpix_cells = 12 * 4**healpix_level
-        lons, lats = hp.healpix_to_lonlat(
-            np.arange(0, num_healpix_cells), 2**healpix_level, dx=dx, dy=dy, order="nested"
-        )
-        coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
-        geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
+    dx = 0.5
+    dy = 0.5
+    num_healpix_cells = 12 * 4**healpix_level
+    lons, lats = hp.healpix_to_lonlat(
+        np.arange(0, num_healpix_cells), 2**healpix_level, dx=dx, dy=dy, order="nested"
+    )
+    coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
+    geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
 
-        data = np.expand_dims(mean_of_data.astype(np.float32), axis=0).repeat(
-            coords.shape[0], axis=0
-        )
-        datetimes = np.array(datetime).repeat(coords.shape[0])
+    data = np.expand_dims(mean_of_data.astype(np.float32), axis=0).repeat(coords.shape[0], axis=0)
+    datetimes = np.array(datetime).repeat(coords.shape[0])
 
-        n_datapoints = len(data)
+    n_datapoints = len(data)
 
-        assert coords.shape == (n_datapoints, 2), (
-            "number of datapoints do not match data", coords.shape, (n_datapoints, 2)
-        )
-        assert geoinfos.shape[0] == n_datapoints, (
-            "number of datapoints do not match data", geoinfos.shape, (n_datapoints, geoinfo_size)
-        )
-        assert datetimes.shape[0] == n_datapoints, (
-            "number of datapoints do not match data", datetimes.shape, (n_datapoints,)
-        )
+    assert coords.shape == (n_datapoints, 2), (
+        "number of datapoints do not match data",
+        coords.shape,
+        (n_datapoints, 2),
+    )
+    assert geoinfos.shape[0] == n_datapoints, (
+        "number of datapoints do not match data",
+        geoinfos.shape,
+        (n_datapoints, geoinfo_size),
+    )
+    assert datetimes.shape[0] == n_datapoints, (
+        "number of datapoints do not match data",
+        datetimes.shape,
+        (n_datapoints,),
+    )
 
-        return IOReaderData(coords, geoinfos, data, datetimes)
-
+    return IOReaderData(coords, geoinfos, data, datetimes)
