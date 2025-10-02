@@ -17,8 +17,8 @@ import xarray as xr
 from tqdm import tqdm
 
 from weathergen.evaluate.io_reader import Reader
-from weathergen.evaluate.plot_utils import plot_metric_region
-from weathergen.evaluate.plotter import LinePlots, Plotter
+from weathergen.evaluate.plot_utils import plot_metric_region, sc_metric_region
+from weathergen.evaluate.plotter import LinePlots, Plotter, ScoreCards
 from weathergen.evaluate.score import VerifiedData, get_score
 
 _logger = logging.getLogger(__name__)
@@ -413,6 +413,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     regions = cfg.evaluation.get("regions", ["global"])
     plt_opt = cfg.get("global_plotting_options", {})
     eval_opt = cfg.get("evaluation", {})
+    score_cards = cfg.evaluation.get("score_cards", False)
 
     plot_cfg = {
         "image_format": plt_opt.get("image_format", "png"),
@@ -429,6 +430,12 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
             plot_metric_region(
                 metric, region, runs, scores_dict, plotter, print_summary
             )
+
+    if score_cards:
+        sc_plotter = ScoreCards(plot_cfg, summary_dir)
+        for region in regions:
+            for metric in metrics:
+                sc_metric_region(metric, region, runs, scores_dict, sc_plotter)
 
 
 ############# Utility functions ############

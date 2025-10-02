@@ -10,10 +10,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import omegaconf as oc
 import xarray as xr
+from matplotlib.lines import Line2D
 from PIL import Image
-
+from scipy.stats import wilcoxon
 from weathergen.common.config import _load_private_conf
-from weathergen.evaluate.plot_utils import DefaultMarkerSize
+
+from weathergen.evaluate.plot_utils import (
+    DefaultMarkerSize,
+)
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
@@ -710,3 +714,154 @@ class LinePlots:
         name = "_".join(filter(None, parts))
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
         plt.close()
+
+
+class ScoreCards:
+    """
+    Initialize the ScoreCards class.
+
+    Parameters
+    ----------
+    plotter_cfg:
+        Configuration dictionary containing basic information for plotting.
+        Expected keys are:
+            - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
+            - improvement: Size of the figure (width, height) in inches
+    output_basedir:
+        Base directory under which the score cards will be saved.
+    """
+
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
+        self.image_format = plotter_cfg.get("image_format")
+        self.improvement = plotter_cfg.get("improvement_scale", 0.2)
+        self.out_plot_dir = Path(output_basedir) / "score_cards"
+        _logger.info(f"Saving scorecards to: {self.out_plot_dir}")
+        if not os.path.exists(self.out_plot_dir):
+            _logger.info(f"Creating dir {self.out_plot_dir}")
+            os.makedirs(self.out_plot_dir, exist_ok=True)
+
+    def get_skill_score(self, score_model, score_ref, score_perf):
+        skill_score = (score_model - score_ref) / (score_perf - score_ref)
+
+        return skill_score
+
+    def plot(
+        self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
+    ):
+        n_runs, n_vars = len(runs), len(channels)
+
+        baseline = data[0]
+        baseline_means = baseline.mean(dim=["sample", "forecast_step"])
+
+        fig, ax = plt.subplots(figsize=(1.5 * n_runs, 1.2 * (n_vars - 1)))
+
+        skill_models = []
+
+        for i in range(1, n_runs):
+            skill_model = 0.0
+            for j, var in enumerate(channels):
+                baseline_score = baseline.sel({"channel": var})
+                model_score = data[i].sel({"channel": var})
+                diff = baseline_score - model_score
+                diff_mean = diff.mean()
+
+                if diff_mean > 0:
+                    alt = "greater"  # A better than B
+                    modus = "better"
+                    color = "blue"
+                elif diff_mean < 0:
+                    alt = "less"  # A worse than B
+                    modus = "worse"
+                    color = "red"
+                else:
+                    alt = "two-sided"  # Equal performance (conservative fallback)
+                    modus = "different"
+
+                # Perform Welch's t-test
+                stat, p = wilcoxon(diff, alternative=alt)
+                # t_stat, p_val = ttest_ind(baseline_rmse, model_rmse, equal_var=False)
+
+                # Determine color and orientation
+                skill = self.get_skill_score(model_score, baseline_score, 0.0).mean()
+                size = 200 * (
+                    abs(skill) / self.improvement + 0.1
+                )  # Add base size to all
+
+                skill_model += skill.values
+
+                # Triangle coordinates
+                x = i
+                y = j + 0.5  # First row is model 1 vs model 0
+
+                # Triangle shape: up or down
+                triangle = "^" if modus == "better" else "v"
+                ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
+
+                # Draw rectangle border for significance
+                if p < 0.05:
+                    lw = 2 if p < 0.01 else 1
+                    rect_color = color
+                    rect = plt.Rectangle(
+                        (x - 0.25, y - 0.25),
+                        0.5,
+                        0.5,
+                        fill=False,
+                        edgecolor=rect_color,
+                        linewidth=lw,
+                        zorder=2,
+                    )
+                    ax.add_patch(rect)
+
+            skill_models.append(skill_model / n_vars)
+
+        # Set axis labels
+        ylabels = [
+            f"{var}\n({baseline.coords['metric'].item().upper()}={baseline_means.sel({'channel': var}).values:.3f})"
+            for var in channels
+        ]
+        xlabels = [
+            f"{model_name}\nSkill: {skill_models[i]:.3f}"
+            for i, model_name in enumerate(runs[1::])
+        ]
+        ax.set_xticks(np.arange(1, n_runs))
+        ax.set_xticklabels(xlabels, fontsize=12)
+        ax.set_yticks(np.arange(n_vars) + 0.5)
+        ax.set_yticklabels(ylabels, fontsize=12)
+        for label in ax.get_yticklabels():
+            label.set_horizontalalignment("center")
+            label.set_x(-0.17)
+        ax.set_ylabel("Variable", fontsize=14)
+        ax.set_title(
+            f"Model Scorecard vs. Baseline '{runs[0]}'",
+            fontsize=16,
+            pad=20,
+        )
+        for x in np.arange(0.5, n_runs - 1, 1):
+            ax.axvline(
+                x, color="gray", linestyle="--", linewidth=0.5, zorder=0, alpha=0.5
+            )
+        ax.set_xlim(0.5, n_runs - 0.5)
+        ax.set_ylim(0, n_vars)
+
+        legend = [
+            Line2D(
+                [0],
+                [0],
+                marker="^",
+                color="white",
+                label=f"{self.improvement * 100:.0f}% improvement",
+                markerfacecolor="blue",
+                markersize=np.sqrt(200),
+            )
+        ]
+        plt.legend(handles=legend, loc="upper left", bbox_to_anchor=(1.02, 1.0))
+
+        print(f"Save plot to '{self.out_plot_dir}'...")
+        parts = ["score_card", tag]
+        name = "_".join(filter(None, parts))
+        plt.savefig(
+            f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
+            bbox_inches="tight",
+            dpi=300,
+        )
+        plt.close(fig)
