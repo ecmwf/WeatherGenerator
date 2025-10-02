@@ -13,9 +13,7 @@ import itertools
 import logging
 import pathlib
 import typing
-from copy import deepcopy
 
-import astropy_healpix as hp
 import dask.array as da
 import numpy as np
 import xarray as xr
