@@ -32,6 +32,7 @@ _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
 _DEFAULT_EVAL_CONFIG_DIR = _REPO_ROOT / "config/evaluate"
 
+
 def evaluate() -> None:
     # By default, arguments from the command line are read.
     evaluate_from_args(sys.argv[1:])
@@ -50,7 +51,7 @@ def evaluate_from_args(argl: list[str]) -> None:
     args = parser.parse_args(argl)
     if args.config:
         config = Path(args.config)
-    else: 
+    else:
         _logger.info("No config file provided, using the default template config.")
         config = Path(_DEFAULT_EVAL_CONFIG_DIR / "plot_config_template.yml")
     evaluate_from_config(OmegaConf.load(config))
