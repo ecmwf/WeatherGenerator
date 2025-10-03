@@ -467,6 +467,14 @@ class WeatherGenReader(Reader):
                 if da_tars_fs:
                     da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
                     da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
+                    if len(samples) == 1:
+                        # Ensure sample coordinate is repeated along ipoint even if only one sample
+                        da_tars_fs = da_tars_fs.assign_coords(
+                            sample=("ipoint", np.repeat(da_tars_fs.sample.values, len(da_tars_fs.ipoint)))
+                        )
+                        da_preds_fs = da_preds_fs.assign_coords(
+                            sample=("ipoint", np.repeat(da_preds_fs.sample.values, len(da_preds_fs.ipoint)))
+                        )
 
                     if set(channels) != set(all_channels):
                         _logger.debug(
