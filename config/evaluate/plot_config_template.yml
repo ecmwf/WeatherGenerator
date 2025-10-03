@@ -1,0 +1,64 @@
+image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
+dpi_val : 300
+summary_plots : true
+summary_dir: "./plots/"
+print_summary: false #print out score values on screen. it can be verbose
+
+evaluation:
+  metrics  : ["rmse", "mae"]
+
+# global_plotting_options:
+#   ERA5:
+#     2t: 
+#       vmin: 250
+#       vmax: 300
+#     marker_size: 2
+
+#MTM models
+run_ids :
+
+  grwnhykd:
+     results_base_dir : "/p/scratch/weatherai/shared_work/results/"
+     epoch: 0
+     rank: 0
+     streams:
+       ERA5:
+          channels: ["2t", "t_850", "q_850"]
+          evaluation:
+            forecast_step: "all"
+            sample: "all"
+          plotting: 
+            sample: [0]
+            forecast_step: "all"
+            plot_maps: true
+            plot_histograms: false
+       
+       NPPATMS:
+          channels: ["obsvalue_rawbt_1", "obsvalue_rawbt_5"]
+          evaluation: 
+            forecast_step: "all"
+            sample: "all"
+          plotting: 
+            sample: [0]
+            forecast_step: [1, 2]
+            plot_maps: false
+            plot_histograms: false
+            plot_animations: true
+        
+  z51gxtjl:
+    label: "forecast ERA5"
+    epoch: 0
+    rank: 0
+    streams:
+      ERA5:
+        channels: ["2t", "t_850"]
+        evaluation:
+          forecast_step: "all"
+          sample: "all"
+        plotting: 
+          sample: [0]
+          forecast_step: [1, 2, 3, 4]
+          plot_maps: true
+          plot_histograms: true 
+          plot_animations: false
+
