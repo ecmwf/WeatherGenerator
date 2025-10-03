@@ -1,3 +1,5 @@
+# ruff: noqa: T201
+
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -7,11 +9,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datetime
-import errno
-import logging
 import os
-import socket
 
 import pynvml
 import torch
@@ -22,7 +20,7 @@ from weathergen.common.config import Config
 from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.distributed import is_root
 
-_logger = logging.getLogger(__name__)
+PORT = 1345
 
 
 class TrainerBase:
@@ -68,90 +66,84 @@ class TrainerBase:
 
     @staticmethod
     def init_ddp(cf):
+        """Initializes the distributed environment."""
         rank = 0
-        num_ranks = 1
+        local_rank = 0
 
-        master_node = os.environ.get("MASTER_ADDR", "-1")
-        if master_node == "-1":
-            cf.with_ddp = False
-            cf.rank = rank
-            cf.num_ranks = num_ranks
-            _logger.info(
-                "DDP not initialized. MASTER_ADDR not set. Running in single process mode."
-            )
-            _logger.info(f"rank: {rank} has run_id: {cf.run_id}")
+        if not dist.is_available():
+            print("Distributed training is not available.")
             return
 
-        local_rank = int(os.environ.get("SLURM_LOCALID"))
-        ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
-        rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
-        num_ranks = int(os.environ.get("SLURM_NTASKS"))
-        _logger.info(
-            f"DDP initialization: local_rank={local_rank}, ranks_per_node={ranks_per_node}, "
-            f"rank={rank}, num_ranks={num_ranks}"
-        )
+        # dist.set_debug_level(dist.DebugLevel.DETAIL)
+        world_size = int(os.environ.get("WORLD_SIZE", "-1"))
+        if world_size == -1:
+            # Called using SLURM instead of torchrun
+            world_size = int(os.environ.get("SLURM_NTASKS", "1"))
 
-        if rank == 0:
-            # Check that port 1345 is available, raise an error if not
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                try:
-                    s.bind((master_node, 1345))
-                except OSError as e:
-                    if e.errno == errno.EADDRINUSE:
-                        _logger.error(
-                            (
-                                f"Port 1345 is already in use on {master_node}.",
-                                " Please check your network configuration.",
-                            )
-                        )
-                        raise
-                    else:
-                        _logger.error(f"Error while binding to port 1345 on {master_node}: {e}")
-                        raise
+        if not dist.is_initialized() and world_size > 1:
+            # These environment variables are typically set by the launch utility
+            # (e.g., torchrun, Slurm)
+            local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
+            if local_rank == -1:
+                # Called using SLURM instead of torchrun
+                local_rank = int(os.environ.get("SLURM_LOCALID"))
+            rank = int(os.environ.get("RANK", "-1"))
+            if rank == -1:
+                ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
+                rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
+            master_addr = os.environ.get("MASTER_ADDR", "localhost")
+            master_port = os.environ.get("MASTER_PORT", f"{PORT}")  # Default port
 
-        _logger.info(
-            f"Initializing DDP with rank {rank} out of {num_ranks} on master_node:{master_node}."
-        )
+            if torch.accelerator.is_available():
+                device_type = torch.accelerator.current_accelerator()
+                device = torch.device(f"{device_type}:{local_rank}")
+                torch.accelerator.set_device_index(local_rank)
+                print(f"DDP initialization: device={device}, rank={rank}, world_size={world_size}")
+            else:
+                device = torch.device("cpu")
+                print(f"Running on device {device}")
 
-        dist.init_process_group(
-            backend="nccl",
-            init_method="tcp://" + master_node + ":1345",
-            timeout=datetime.timedelta(seconds=240),
-            world_size=num_ranks,
-            rank=rank,
-            device_id=torch.device("cuda", local_rank),
-        )
-        if is_root():
-            _logger.info("DDP initialized: root.")
-        # Wait for all ranks to reach this point
-        dist.barrier()
+            backend = torch.distributed.get_default_backend_for_device(device)
+            torch.distributed.init_process_group(
+                backend=backend,
+                world_size=world_size,
+                device_id=device,
+                rank=rank,
+                init_method=f"tcp://{master_addr}:{master_port}",
+            )
+            print(f"Process group initialized ({backend}).")
 
-        # communicate run id to all nodes
-        len_run_id = len(cf.run_id)
-        run_id_int = torch.zeros(len_run_id, dtype=torch.int32).cuda()
-        if is_root():
-            _logger.info(f"Communicating run_id to all nodes: {cf.run_id}")
-            run_id_int = str_to_tensor(cf.run_id).cuda()
-        dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
-        if not is_root():
-            cf.run_id = tensor_to_str(run_id_int)
-        _logger.info(f"rank: {rank} has run_id: {cf.run_id}")
+            if is_root():
+                print("DDP initialized: root.")
+            # Wait for all ranks to reach this point
 
-        # communicate data_loader_rng_seed
-        if hasattr(cf, "data_loader_rng_seed"):
-            if cf.data_loader_rng_seed is not None:
-                l_seed = torch.tensor(
-                    [cf.data_loader_rng_seed if rank == 0 else 0], dtype=torch.int32
-                ).cuda()
-                dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
-                cf.data_loader_rng_seed = l_seed.item()
+            dist.barrier()
+            # communicate run id to all nodes
+            len_run_id = len(cf.run_id)
+            run_id_int = torch.zeros(len_run_id, dtype=torch.int32).to(device)
+            if is_root():
+                print(f"Communicating run_id to all nodes: {cf.run_id}")
+                run_id_int = str_to_tensor(cf.run_id).to(device)
+            dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
+            if not is_root():
+                cf.run_id = tensor_to_str(run_id_int)
+            print(f"rank: {rank} has run_id: {cf.run_id}")
 
-        # TODO: move outside of the config
+            # communicate data_loader_rng_seed
+            if hasattr(cf, "data_loader_rng_seed"):
+                if cf.data_loader_rng_seed is not None:
+                    l_seed = torch.tensor(
+                        [cf.data_loader_rng_seed if rank == 0 else 0], dtype=torch.int32
+                    ).cuda()
+                    dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
+                    cf.data_loader_rng_seed = l_seed.item()
+
+        cf.world_size = world_size
         cf.rank = rank
-        cf.num_ranks = num_ranks
-        cf.with_ddp = True
+        cf.local_rank = local_rank
+        cf.with_ddp = world_size > 1
 
-        return
+        return cf
 
     def init_perf_monitoring(self):
         self.device_handles, self.device_names = [], []

@@ -232,6 +232,11 @@ class LossCalculator:
 
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
+            stream_is_spoof = streams_data[i_batch][i_stream_info].is_spoof
+            if stream_is_spoof:
+                mask = torch.tensor(0.0, device=self.device, requires_grad=False)
+            else:
+                mask = torch.tensor(1.0, device=self.device, requires_grad=False)
             for fstep, target in enumerate(targets):
                 # skip if either target or prediction has no data points
                 pred = preds[fstep][i_stream_info]
@@ -269,7 +274,7 @@ class LossCalculator:
                         weights_channels,
                         weights_locations,
                     )
-                    losses_all[stream_info.name][:, i_lfct] += loss_lfct_chs
+                    losses_all[stream_info.name][:, i_lfct] += mask * loss_lfct_chs
 
                     # Add the weighted and normalized loss from this loss function to the total
                     # batch loss
@@ -279,8 +284,8 @@ class LossCalculator:
                 loss_fsteps = loss_fsteps + (loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0)
                 ctr_fsteps += 1 if ctr_loss_fcts > 0 else 0
 
-            loss = loss + (loss_fsteps / (ctr_fsteps if ctr_fsteps > 0 else 1.0))
-            ctr_streams += 1 if ctr_fsteps > 0 else 0
+            loss = loss + ((mask * loss_fsteps) / (ctr_fsteps if ctr_fsteps > 0 else 1.0))
+            ctr_streams += 1 if ctr_fsteps > 0 and not stream_is_spoof else 0
 
             # normalize by forecast step
             losses_all[stream_info.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
