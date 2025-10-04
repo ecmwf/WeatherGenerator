@@ -13,8 +13,8 @@ import xarray as xr
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
-
 from weathergen.common.config import _load_private_conf
+
 from weathergen.evaluate.plot_utils import (
     DefaultMarkerSize,
 )
@@ -862,3 +862,87 @@ class ScoreCards:
         size = 200 * (1 - (1 / (1 + abs(skill) / self.improvement)))  # Add base size to all
 
         return x, y, alt, color, triangle, size
+
+
+class BarPlots:
+    """
+    Initialize the BarPlots class.
+
+    Parameters
+    ----------
+    plotter_cfg:
+        Configuration dictionary containing basic information for plotting.
+        Expected keys are:
+            - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
+            - improvement: Size of the figure (width, height) in inches
+    output_basedir:
+        Base directory under which the score cards will be saved.
+    """
+
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
+        self.image_format = plotter_cfg.get("image_format")
+        self.dpi_val = plotter_cfg.get("dpi_val")
+        self.cmap = plotter_cfg.get("cmap", "bwr")
+        self.out_plot_dir = Path(output_basedir) / "bar_plots"
+        _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
+        if not os.path.exists(self.out_plot_dir):
+            _logger.info(f"Creating dir {self.out_plot_dir}")
+            os.makedirs(self.out_plot_dir, exist_ok=True)
+
+    def plot(
+        self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
+    ):
+        for run_index in range(1, len(runs)):
+            ratio_score = self.calc_ratio_per_run_id(data, channels, run_index)
+
+            fig, ax = (
+                plt.figure(figsize=(1.2 * (len(channels) - 1), 7), dpi=self.dpi_val),
+                plt.gca(),
+            )
+
+            ax.barh(
+                np.arange(len(ratio_score)),
+                ratio_score,
+                color=self.colors(ratio_score),
+                align="center",
+                edgecolor="black",
+                linewidth=0.5,
+            )
+            ax.set_yticks(np.arange(len(ratio_score)), labels=channels)
+            ax.invert_yaxis()
+            ax.set_xlabel(
+                f"Relative RMSE: Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
+            )
+
+            print(f"Save plot to '{self.out_plot_dir}'...")
+            parts = ["bar_plot_compare", runs[0], runs[run_index], tag]
+            name = "_".join(filter(None, parts))
+            plt.savefig(
+                f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
+                bbox_inches="tight",
+                dpi=self.dpi_val,
+            )
+            plt.close(fig)
+
+    def calc_ratio_per_run_id(self, data, channels, run_index):
+        ratio_score = []
+        for _, var in enumerate(channels):
+            baseline_score = (
+                data[0].sel({"channel": var}).mean(dim=["sample", "forecast_step"])
+            )
+            model_score = (
+                data[run_index]
+                .sel({"channel": var})
+                .mean(dim=["sample", "forecast_step"])
+            )
+
+            ratio_score.append(model_score / baseline_score)
+
+        ratio_score = np.array(ratio_score) - 1
+        return ratio_score
+
+    def colors(self, ratio_score: np.array):
+        ratio_score_centered = 1.0 - ((ratio_score / (ratio_score / 0.5).min()) + 0.5)
+        cmap = plt.get_cmap("bwr")
+        colors = [cmap(v) for v in ratio_score_centered]
+        return colors
