@@ -216,12 +216,14 @@ class Trainer(TrainerBase):
 
         if cf.with_ddp and cf.with_fsdp:
             fsdp_kwargs = {
-                "mp_policy": MixedPrecisionPolicy(
-                    param_dtype=self.mixed_precision_dtype,
-                    reduce_dtype=torch.float32,
-                )
-                if cf.with_mixed_precision
-                else None,
+                "mp_policy": (
+                    MixedPrecisionPolicy(
+                        param_dtype=self.mixed_precision_dtype,
+                        reduce_dtype=torch.float32,
+                    )
+                    if cf.with_mixed_precision
+                    else None
+                ),
             }
             modules_to_shard = (
                 MLP,
@@ -252,12 +254,14 @@ class Trainer(TrainerBase):
                     fully_shard(module, **fsdp_kwargs)
 
             full_precision_fsdp_kwargs = {
-                "mp_policy": MixedPrecisionPolicy(
-                    param_dtype=torch.float32,
-                    reduce_dtype=torch.float32,
-                )
-                if cf.with_mixed_precision
-                else None,
+                "mp_policy": (
+                    MixedPrecisionPolicy(
+                        param_dtype=torch.float32,
+                        reduce_dtype=torch.float32,
+                    )
+                    if cf.with_mixed_precision
+                    else None
+                ),
             }
             for module in self.model.pred_adapter_kv.modules():
                 if isinstance(module, modules_to_shard):
@@ -274,11 +278,12 @@ class Trainer(TrainerBase):
             for tensor in itertools.chain(self.model.parameters(), self.model.buffers()):
                 assert tensor.device == torch.device("meta")
 
+        # if new modules are added (e.g., for fine-tuning), they are moved from
+        # the meta device and have initial weights before loading a checkpoint.
+        self.model.to_empty(device="cuda")
+        self.model.reset_parameters()
         # load model if specified
-        if run_id_contd is None:
-            self.model.to_empty(device="cuda")
-            self.model.reset_parameters()
-        else:
+        if run_id_contd is not None:
             if is_root():
                 logger.info(f"Continuing run with id={self.cf.from_run_id} at epoch {epoch_contd}.")
             self.load_model(self.cf.from_run_id, epoch_contd)
