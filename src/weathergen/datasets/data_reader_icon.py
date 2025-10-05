@@ -17,6 +17,7 @@ import numpy as np
 import xarray as xr
 import zarr
 
+from weathergen.datasets.data_reader_anemoi import _clip_lat, _clip_lon
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
     ReaderData,
@@ -24,9 +25,6 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
     check_reader_data,
 )
-
-from weathergen.datasets.data_reader_anemoi import _clip_lat, _clip_lon
-
 
 # from dask.diagnostics import ProgressBar
 
@@ -128,8 +126,8 @@ class DataReaderIconBase(DataReaderTimestep):
             self.lon = self.ds[lon_attribute][:].astype("f")
 
         # Extract coordinates and pressure level
-        self.lat =  _clip_lat(self.lat)
-        self.lon =  _clip_lon(self.lon)
+        self.lat = _clip_lat(self.lat)
+        self.lon = _clip_lon(self.lon)
 
         # Placeholder; currently unused
         self.step_hrs = 1
@@ -297,7 +295,7 @@ class DataReaderIconBase(DataReaderTimestep):
                 # print(f"loading {ch}...")
                 ch_parts = ch.split("_")
                 # retrieving profile channels
-                if len(ch_parts) == 2 and ch_parts[1] in self.levels :
+                if len(ch_parts) == 2 and ch_parts[1] in self.levels:
                     ch_ = ch_parts[0]
                     plev_int = ch_parts[1]
                     da = self.ds[ch_].assign_coords(plev=("plev", self.levels))
@@ -317,7 +315,7 @@ class DataReaderIconBase(DataReaderTimestep):
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
-            
+
         # Empty geoinfos
         geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
 
@@ -349,7 +347,7 @@ class DataReaderIcon(DataReaderIconBase):
         self.colnames = list(self.ds)
         self.cols_idx = np.array(list(np.arange(len(self.colnames))))
 
-        # get pressure levels 
+        # get pressure levels
         # TODO Julius ?
         self.levels = []
 
@@ -374,6 +372,7 @@ class DataReaderIcon(DataReaderIconBase):
             tw_handler,
             stream_info,
         )
+
     # TODO Julius ?
     def select_by_level(self):
         return
@@ -405,13 +404,13 @@ class DataReaderIconCmip6(DataReaderIconBase):
         # Open the dataset using Xarray with Zarr engine
         self.ds = xr.open_dataset(mapper, engine="zarr", consolidated=True, chunks={"time": 1})
 
-        # get pressure levels 
+        # get pressure levels
         # TODO add self.dataset_levels
         self.levels = stream_info["pressure_levels"]
 
         # Column (variable) names and indices
         self.colnames, self.cols_idx = self.get_cols(stream_info["variables"])
-    
+
         # Determine temporal frequency from dataset metadata
         frequency_attr = self.ds.attrs["frequency"]
         self.temporal_frequency = frequencies[frequency_attr]
@@ -434,7 +433,7 @@ class DataReaderIconCmip6(DataReaderIconBase):
             stream_info,
         )
 
-    def get_cols(self, channels: list[str])-> (list[str], list[int]) : 
+    def get_cols(self, channels: list[str]) -> (list[str], list[int]):
         """
         TBD
         """
