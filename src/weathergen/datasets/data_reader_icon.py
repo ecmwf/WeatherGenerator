@@ -25,6 +25,9 @@ from weathergen.datasets.data_reader_base import (
     check_reader_data,
 )
 
+from weathergen.datasets.data_reader_anemoi import _clip_lat, _clip_lon
+
+
 # from dask.diagnostics import ProgressBar
 
 
@@ -124,6 +127,10 @@ class DataReaderIconBase(DataReaderTimestep):
             self.lat = self.ds[lat_attribute][:].astype("f")
             self.lon = self.ds[lon_attribute][:].astype("f")
 
+        # Extract coordinates and pressure level
+        self.lat =  _clip_lat(self.lat)
+        self.lon =  _clip_lon(self.lon)
+
         # Placeholder; currently unused
         self.step_hrs = 1
 
@@ -141,19 +148,20 @@ class DataReaderIconBase(DataReaderTimestep):
         )
 
         # === Channel selection ===
-
-        # Source channels
-        source_channels = stream_info.get("source_channels")
+        source_channels = stream_info.get("source")
         if source_channels:
             self.source_channels, self.source_idx = self.select(source_channels)
+        elif getattr(self, "levels", None):
+            self.source_channels, self.source_idx = self.select_by_level("source")
         else:
             self.source_channels = self.colnames
             self.source_idx = self.cols_idx
 
-        # Target channels
-        target_channels = stream_info.get("target_channels")
+        target_channels = stream_info.get("target")
         if target_channels:
             self.target_channels, self.target_idx = self.select(target_channels)
+        elif getattr(self, "levels", None):
+            self.target_channels, self.target_idx = self.select_by_level("target")
         else:
             self.target_channels = self.colnames
             self.target_idx = self.cols_idx
@@ -161,10 +169,11 @@ class DataReaderIconBase(DataReaderTimestep):
         # Ensure all selected channels have valid standard deviations
         selected_channel_indices = list(set(self.source_idx).union(set(self.target_idx)))
         non_positive_stds = np.where(self.stdev[selected_channel_indices] <= 0)[0]
-        assert len(non_positive_stds) == 0, (
-            f"Abort: Encountered non-positive standard deviations for selected columns "
-            f"{[self.colnames[selected_channel_indices][i] for i in non_positive_stds]}."
-        )
+        if len(non_positive_stds) != 0:
+            bad_vars = [self.colnames[selected_channel_indices[i]] for i in non_positive_stds]
+            raise ValueError(
+                f"Abort: Encountered non-positive standard deviations for selected columns {bad_vars}."
+            )
 
         # === Geo-info channels (currently unused) ===
         self.geoinfo_channels = []
@@ -190,6 +199,32 @@ class DataReaderIconBase(DataReaderTimestep):
         mask = [np.array([f in c for f in ch_filters]).any() for c in self.colnames]
 
         selected_cols_idx = self.cols_idx[np.where(mask)[0]]
+        selected_colnames = [self.colnames[int(i)] for i in np.where(mask)[0]]
+
+        return selected_colnames, selected_cols_idx
+
+    def select_by_level(self, ch_type: str) -> tuple[list[str], np.ndarray]:
+        """
+        Select channels constrained by allowed pressure levels and optional excludes.
+        ch_type: "source" or "target" (for *_exclude key in stream_info)
+        """
+        channels_exclude = self.stream_info.get(f"{ch_type}_exclude", [])
+        allowed_levels = set(self.levels) if getattr(self, "levels", None) else set()
+
+        new_colnames: list[str] = []
+        for ch in self.colnames:
+            parts = ch.split("_")
+            # Profile channel if exactly one level suffix exists
+            if len(parts) == 2 and parts != "":
+                level = parts[1]
+                if (not allowed_levels or level in allowed_levels) and ch not in channels_exclude:
+                    new_colnames.append(ch)
+            else:
+                if ch not in channels_exclude:
+                    new_colnames.append(ch)
+
+        mask = [c in new_colnames for c in self.colnames]
+        selected_cols_idx = self.cols_idx[np.where(mask)]
         selected_colnames = [self.colnames[int(i)] for i in np.where(mask)[0]]
 
         return selected_colnames, selected_cols_idx
@@ -258,10 +293,18 @@ class DataReaderIconBase(DataReaderTimestep):
 
         try:
             data_per_channel = []
-            for ch_ in channels:
-                # print(f"Reading {ch_}...", flush=True)
-                # Slice the Dask array
-                da = self.ds[ch_].data[t_idxs_start:t_idxs_end, ...]
+            for ch in channels:
+                # print(f"loading {ch}...")
+                ch_parts = ch.split("_")
+                # retrieving profile channels
+                if len(ch_parts) == 2 and ch_parts[1] in self.levels :
+                    ch_ = ch_parts[0]
+                    plev_int = ch_parts[1]
+                    da = self.ds[ch_].assign_coords(plev=("plev", self.levels))
+                    da = da.sel(plev=plev_int).data[t_idxs_start:t_idxs_end, ...]
+                else:
+                    # Slice the Dask array
+                    da = self.ds[ch].data[t_idxs_start:t_idxs_end, ...]
                 # Flatten each time step and compute
                 # with ProgressBar():
                 data_arr = da.reshape(-1, 1).compute(scheduler="synchronous")
@@ -274,10 +317,7 @@ class DataReaderIconBase(DataReaderTimestep):
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
-
-        # print(f"data.shape = {data.shape}")
-        # print(f"coords.shape = {coords.shape}")
-
+            
         # Empty geoinfos
         geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
 
@@ -309,6 +349,10 @@ class DataReaderIcon(DataReaderIconBase):
         self.colnames = list(self.ds)
         self.cols_idx = np.array(list(np.arange(len(self.colnames))))
 
+        # get pressure levels 
+        # TODO Julius ?
+        self.levels = []
+
         # Will be inferred later based on the dataset’s time variable
         self.temporal_frequency = None
 
@@ -330,6 +374,9 @@ class DataReaderIcon(DataReaderIconBase):
             tw_handler,
             stream_info,
         )
+    # TODO Julius ?
+    def select_by_level(self):
+        return
 
 
 ##########################
@@ -358,10 +405,13 @@ class DataReaderIconCmip6(DataReaderIconBase):
         # Open the dataset using Xarray with Zarr engine
         self.ds = xr.open_dataset(mapper, engine="zarr", consolidated=True, chunks={"time": 1})
 
-        # Column (variable) names and indices
-        self.colnames = stream_info["variables"]
-        self.cols_idx = np.array(list(np.arange(len(self.colnames))))
+        # get pressure levels 
+        # TODO add self.dataset_levels
+        self.levels = stream_info["pressure_levels"]
 
+        # Column (variable) names and indices
+        self.colnames, self.cols_idx = self.get_cols(stream_info["variables"])
+    
         # Determine temporal frequency from dataset metadata
         frequency_attr = self.ds.attrs["frequency"]
         self.temporal_frequency = frequencies[frequency_attr]
@@ -383,3 +433,21 @@ class DataReaderIconCmip6(DataReaderIconBase):
             tw_handler,
             stream_info,
         )
+
+    def get_cols(self, channels: list[str])-> (list[str], list[int]) : 
+        """
+        TBD
+        """
+        colnames = []
+        for ch in channels:
+            coords_list = list(self.ds[ch].coords)
+            if "plev" not in coords_list:
+                colnames.append(f"{ch}")
+            else:
+                dataset_levels = self.ds[ch]["plev"][0, :].values
+                for level in dataset_levels:
+                    colnames.append(f"{ch}_{int(level)}")
+
+        cols_idx = np.array(list(np.arange(len(colnames))))
+
+        return colnames, cols_idx
