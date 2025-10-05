@@ -6,7 +6,6 @@ start_date_val: 201001011100
 end_date_val: 201912311200
 
 num_epochs: 200 # 10
-step_hrs: 24
 
 # samples_per_epoch: 100 #  works # 100 works
 # samples_per_validation: 100 
@@ -16,4 +15,7 @@ loader_num_workers: 16
 masking_rate: 0.8
 multiprocessing_method: "spawn"
 
-forecast_offset : 1 
+# forecast_offset : 1 
+
+len_hrs: 24
+step_hrs: 24
