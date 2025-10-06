@@ -1,4 +1,6 @@
 #!/usr/bin/env -S uv run
+
+# ruff: noqa: T201
 """
 Checks that all pyproject.toml files are consistent for select sections
 USAGE EXAMPLE: ./scripts/actions.sh toml-check from the root of the repo
@@ -24,7 +26,7 @@ def check_toml_key(main_toml_dict, other_toml_dict, list_keys, name):
             f"{list_keys} mismatch with main pyproject.toml and {name} pyproject.toml"
         )
     except Exception as e:
-        if type(e) == KeyError:
+        if type(e) is KeyError:
             print(
                 f"""KeyError: '{list_keys}' not found in {name} pyproject.toml, 
                 please populate this field"""
