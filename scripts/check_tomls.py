@@ -7,50 +7,56 @@ USAGE EXAMPLE: ./scripts/actions.sh toml-check from the root of the repo
 import tomllib
 from pathlib import Path
 
-_REPO_ROOT = Path(
-    __file__
-).parent.parent
+_REPO_ROOT = Path(__file__).parent.parent
+
 
 def loop_keys(toml_dict, list_keys):
     for i in list_keys:
         toml_dict = toml_dict[i]
     return toml_dict
 
+
 def check_toml_key(main_toml_dict, other_toml_dict, list_keys, name):
     try:
         main_value = loop_keys(main_toml_dict, list_keys)
         other_value = loop_keys(other_toml_dict, list_keys)
-        assert main_value == other_value, f"{list_keys} mismatch with main pyproject.toml and {name} pyproject.toml"
+        assert main_value == other_value, (
+            f"{list_keys} mismatch with main pyproject.toml and {name} pyproject.toml"
+        )
     except Exception as e:
-        if type(e) ==  KeyError:
-            print(f"KeyError: '{list_keys}' not found in {name} pyproject.toml, please populate this field to match main pyproject.toml")
+        if type(e) == KeyError:
+            print(
+                f"""KeyError: '{list_keys}' not found in {name} pyproject.toml, 
+                please populate this field"""
+            )
         else:
             print(e)
 
+
 def check_tomls(main_toml, *tomls):
     main_toml_dict = {}
-    with open(main_toml, 'rb') as toml_file:
+    with open(main_toml, "rb") as toml_file:
         main_toml_dict = tomllib.load(toml_file)
     all_tomls = {}
     for toml in tomls:
         toml_dict = {}
-        with open(toml, 'rb') as toml_file:
+        with open(toml, "rb") as toml_file:
             toml_dict = tomllib.load(toml_file)
         all_tomls[str(toml)] = toml_dict
     for name, toml_dict in all_tomls.items():
         # shorten name to package path
-        name =name.split("/")[-2]
+        name = name.split("/")[-2]
         # check build system is the same
-        check_toml_key(main_toml_dict, toml_dict, ['build-system'], name)
+        check_toml_key(main_toml_dict, toml_dict, ["build-system"], name)
         # check python version is the same
-        check_toml_key(main_toml_dict, toml_dict, ['requires-python'], name)
+        check_toml_key(main_toml_dict, toml_dict, ["requires-python"], name)
         # check project.version/authors/urls are the same
-        for key in ['version', 'authors', 'urls']:
-            check_toml_key(main_toml_dict['project'], toml_dict['project'], [key], name)
+        for key in ["version", "authors", "urls"]:
+            check_toml_key(main_toml_dict["project"], toml_dict["project"], [key], name)
         # check tool.ruff is the same
-        check_toml_key(main_toml_dict, toml_dict, ['tool', 'ruff'], name)
-        #check tool uv is the same
-        check_toml_key(main_toml_dict, toml_dict, ['tool', 'uv'], name)
+        check_toml_key(main_toml_dict, toml_dict, ["tool", "ruff"], name)
+        # check tool uv is the same
+        check_toml_key(main_toml_dict, toml_dict, ["tool", "uv"], name)
 
 
 if __name__ == "__main__":
@@ -58,5 +64,3 @@ if __name__ == "__main__":
     eval_toml = _REPO_ROOT / "packages" / "evaluate" / "pyproject.toml"
     common_toml = _REPO_ROOT / "packages" / "common" / "pyproject.toml"
     check_tomls(main_toml, eval_toml, common_toml)
-
-
