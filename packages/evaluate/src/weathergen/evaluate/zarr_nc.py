@@ -11,8 +11,8 @@ import xarray as xr
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
-from weathergen.common.io import ZarrIO
 from weathergen.common.config import _REPO_ROOT, _load_private_conf
+from weathergen.common.io import ZarrIO
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -36,7 +36,7 @@ def find_pl(all_variables):
         List of variable names with pressure levels (e.g.,'q_500','t_2m').
     Returns
     -------
-    tuple  
+    tuple
         A tuple containing:
         - var_dict: dict
             Dictionary mapping variable names to lists of their corresponding pressure levels.
@@ -110,7 +110,9 @@ def remove_ipoint(sample_data):
     xarray.Dataset
         xarray Dataset without ipoint dimension (replaced by valid_time, lat and lon).
     """
-    sample_data = sample_data.set_index(ipoint=("valid_time", "lat", "lon")).unstack("ipoint")
+    sample_data = sample_data.set_index(ipoint=("valid_time", "lat", "lon")).unstack(
+        "ipoint"
+    )
     return sample_data
 
 
