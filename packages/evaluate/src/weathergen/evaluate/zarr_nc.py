@@ -12,7 +12,7 @@ from omegaconf import OmegaConf
 from tqdm import tqdm
 
 from weathergen.common.io import ZarrIO
-from weathergen.utils.config import _load_private_conf
+from weathergen.common.config import _REPO_ROOT, _load_private_conf
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -439,7 +439,7 @@ if __name__ == "__main__":
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Load configuration
-    config_file = "../WeatherGenerator-private/evaluate/config_zarr2cf.yaml"
+    config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2cf.yaml")
     config = OmegaConf.load(config_file)
     # check config loaded correctly
     assert config["variables"]["q"] is not None
