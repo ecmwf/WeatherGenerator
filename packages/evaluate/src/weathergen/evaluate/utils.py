@@ -413,7 +413,6 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     regions = cfg.evaluation.get("regions", ["global"])
     plt_opt = cfg.get("global_plotting_options", {})
     eval_opt = cfg.get("evaluation", {})
-    score_cards = cfg.evaluation.get("score_cards", False)
 
     plot_cfg = {
         "image_format": plt_opt.get("image_format", "png"),
@@ -424,17 +423,14 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     }
 
     plotter = LinePlots(plot_cfg, summary_dir)
+    sc_plotter = ScoreCards(plot_cfg, summary_dir)
 
     for region in regions:
         for metric in metrics:
             plot_metric_region(
                 metric, region, runs, scores_dict, plotter, print_summary
             )
-
-    if score_cards:
-        sc_plotter = ScoreCards(plot_cfg, summary_dir)
-        for region in regions:
-            for metric in metrics:
+            if eval_opt.get("score_cards", False):
                 sc_metric_region(metric, region, runs, scores_dict, sc_plotter)
 
 

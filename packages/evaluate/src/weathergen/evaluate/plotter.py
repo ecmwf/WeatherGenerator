@@ -13,8 +13,8 @@ import xarray as xr
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
-from weathergen.common.config import _load_private_conf
 
+from weathergen.common.config import _load_private_conf
 from weathergen.evaluate.plot_utils import (
     DefaultMarkerSize,
 )
@@ -740,11 +740,6 @@ class ScoreCards:
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
-    def get_skill_score(self, score_model, score_ref, score_perf):
-        skill_score = (score_model - score_ref) / (score_perf - score_ref)
-
-        return skill_score
-
     def plot(
         self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
     ):
@@ -760,42 +755,20 @@ class ScoreCards:
         for i in range(1, n_runs):
             skill_model = 0.0
             for j, var in enumerate(channels):
-                baseline_score = baseline.sel({"channel": var})
-                model_score = data[i].sel({"channel": var})
-                diff = baseline_score - model_score
-                diff_mean = diff.mean()
+                diff, diff_mean, skill = self.compare_models(data, baseline, i, var)
+                skill_model += skill.values
 
-                if diff_mean > 0:
-                    alt = "greater"  # A better than B
-                    modus = "better"
-                    color = "blue"
-                elif diff_mean < 0:
-                    alt = "less"  # A worse than B
-                    modus = "worse"
-                    color = "red"
-                else:
-                    alt = "two-sided"  # Equal performance (conservative fallback)
-                    modus = "different"
+                # Get symbols based on difference and performance as well as coordinates
+                # for the position of the triangles.
+
+                x, y, alt, color, triangle, size = self.get_plot_symbols(
+                    i, j, skill, diff_mean
+                )
+
+                ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
 
                 # Perform Welch's t-test
                 stat, p = wilcoxon(diff, alternative=alt)
-                # t_stat, p_val = ttest_ind(baseline_rmse, model_rmse, equal_var=False)
-
-                # Determine color and orientation
-                skill = self.get_skill_score(model_score, baseline_score, 0.0).mean()
-                size = 200 * (
-                    abs(skill) / self.improvement + 0.1
-                )  # Add base size to all
-
-                skill_model += skill.values
-
-                # Triangle coordinates
-                x = i
-                y = j + 0.5  # First row is model 1 vs model 0
-
-                # Triangle shape: up or down
-                triangle = "^" if modus == "better" else "v"
-                ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
 
                 # Draw rectangle border for significance
                 if p < 0.05:
@@ -857,7 +830,7 @@ class ScoreCards:
         plt.legend(handles=legend, loc="upper left", bbox_to_anchor=(1.02, 1.0))
 
         print(f"Save plot to '{self.out_plot_dir}'...")
-        parts = ["score_card", tag]
+        parts = ["score_card", tag] + runs
         name = "_".join(filter(None, parts))
         plt.savefig(
             f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
@@ -865,3 +838,44 @@ class ScoreCards:
             dpi=300,
         )
         plt.close(fig)
+
+    def compare_models(self, data, baseline, i, var):
+        baseline_score = baseline.sel({"channel": var}).mean(dim="sample")
+        model_score = data[i].sel({"channel": var}).mean(dim="sample")
+        diff = baseline_score - model_score
+        diff_mean = diff.mean()
+
+        skill = self.get_skill_score(model_score, baseline_score, 0.0).mean()
+        return diff, diff_mean, skill
+
+    def get_skill_score(self, score_model, score_ref, score_perf):
+        skill_score = (score_model - score_ref) / (score_perf - score_ref)
+
+        return skill_score
+
+    def get_plot_symbols(self, i, j, skill, diff_mean):
+        if diff_mean > 0:
+            # A better than B
+            alt = "greater"
+            modus = "better"
+            color = "blue"
+        elif diff_mean < 0:
+            # A worse than B
+            alt = "less"
+            modus = "worse"
+            color = "red"
+        else:
+            # Equal performance (conservative fallback)
+            alt = "two-sided"
+            modus = "different"
+
+        triangle = "^" if modus == "better" else "v"
+
+        # Triangle coordinates
+        x = i
+        # First row is model 1 vs model 0
+        y = j + 0.5
+
+        size = 200 * (abs(skill) / self.improvement + 0.1)  # Add base size to all
+
+        return x, y, alt, color, triangle, size
