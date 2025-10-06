@@ -71,27 +71,31 @@ def calc_scores_per_stream(
 
     available_data = reader.check_availability(stream, mode="evaluation")
 
-    output_data = reader.get_data(
+    fsteps   = available_data.fsteps
+    samples  = available_data.samples
+    channels = available_data.channels
+    
+    output_data  = reader.get_data(
         stream,
-        region=region,
-        fsteps=available_data.fsteps,
-        samples=available_data.samples,
-        channels=available_data.channels,
+        region   = region,
+        fsteps   = fsteps,
+        samples  = samples,
+        channels = channels,
         return_counts=True,
     )
 
     da_preds = output_data.prediction
-    da_tars = output_data.target
+    da_tars  = output_data.target
     points_per_sample = output_data.points_per_sample
 
     # get coordinate information from retrieved data
-    fsteps = [int(k) for k in da_tars.keys()]
+    #fsteps = [int(k) for k in da_tars.keys()]
 
-    first_da = list(da_preds.values())[0]
+    #first_da = list(da_preds.values())[0]
 
     # TODO: improve the way we handle samples.
-    samples = list(np.atleast_1d(np.unique(first_da.sample.values)))
-    channels = list(np.atleast_1d(first_da.channel.values))
+    #samples = list(np.atleast_1d(np.unique(first_da.sample.values)))
+    #channels = list(np.atleast_1d(first_da.channel.values))
 
     metric_list = []
 
@@ -147,8 +151,7 @@ def calc_scores_per_stream(
             continue
 
         metric_list.append(combined_metrics)
-
-        metric_stream.loc[{"forecast_step": int(fstep)}] = combined_metrics
+        metric_stream.loc[{"forecast_step": int(fstep), "sample": combined_metrics.sample}] = combined_metrics
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
