@@ -70,13 +70,8 @@ def inference_from_args(argl: list[str]):
 
     cf.run_history += [(args.from_run_id, cf.istep)]
 
-<<<<<<< HEAD
-    trainer = Trainer(cf.log_intervals)
-    trainer.inference(cf, devices, args.from_run_id, args.epoch)
-=======
     trainer = Trainer(cf.train_log_freq)
-    trainer.inference(cf, args.from_run_id, args.epoch)
->>>>>>> acf76bd (rename `log_intevals` to `train_log_freq`)
+    trainer.inference(cf, devices, args.from_run_id, args.epoch)
 
 
 ####################################################################################################
