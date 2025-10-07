@@ -638,10 +638,10 @@ class Scores:
         xr.DataArray
             Change rate of the data array
         """
+
         if s1 is None:
             return xr.full_like(s0, np.nan)
         else:
-            # it needs to be in this order to preserve the s0 forecast_step
             crate = np.abs(s0 - s1.values)
             return crate
 

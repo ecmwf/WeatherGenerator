@@ -124,7 +124,7 @@ class StreamEmbedTransformer(torch.nn.Module):
             assert self.unembed_mode == "block"  # only supported mode at the moment
             # padding needed if the unembedded columns cannot be concatenated to dim_out (e.g GPSRO)
             self.pad = self.dim_out % token_size
-            self.out_pad = torch.nn.Parameter(torch.zeros(self.pad))
+            self.out_pad = torch.nn.Parameter(torch.zeros(self.pad), requires_grad=False)
             self.unembed = torch.nn.Linear(
                 self.dim_embed,
                 self.num_tokens * ((self.dim_out - embed_size_centroids) // token_size),
