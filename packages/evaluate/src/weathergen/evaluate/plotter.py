@@ -13,8 +13,8 @@ import xarray as xr
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
-
 from weathergen.common.config import _load_private_conf
+
 from weathergen.evaluate.plot_utils import (
     DefaultMarkerSize,
 )
@@ -748,7 +748,7 @@ class ScoreCards:
         baseline = data[0]
         baseline_means = baseline.mean(dim=["sample", "forecast_step"])
 
-        fig, ax = plt.subplots(figsize=(1.5 * n_runs, 1.2 * (n_vars - 1)))
+        fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_vars))
 
         skill_models = []
 
@@ -876,6 +876,8 @@ class ScoreCards:
         # First row is model 1 vs model 0
         y = j + 0.5
 
-        size = 200 * (abs(skill) / self.improvement + 0.1)  # Add base size to all
+        size = 200 * (
+            1 - (1 / (1 + abs(skill) / self.improvement))
+        )  # Add base size to all
 
         return x, y, alt, color, triangle, size
