@@ -156,6 +156,7 @@ class Trainer(TrainerBase):
         self.init(cf, devices)
         cf = self.cf
 
+        # TODO: do not define new members outside of the init!!
         self.device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
 
@@ -674,6 +675,9 @@ class Trainer(TrainerBase):
         self.dataset_val.advance()
 
     def batch_to_device(self, batch):
+        # TODO: do not define new members outside of the init!!
+        self.device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{self.device_type}:{self.cf.local_rank}")
         # forecast_steps is dropped here from the batch
         return (
             [[d.to_device(self.device) for d in db] for db in batch[0]],
