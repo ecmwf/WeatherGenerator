@@ -11,6 +11,8 @@ requires-python = ">=3.12,<3.13"
 # TODO: split the plotting dependencies into their own dep groups, they are not required.
 dependencies = [
  'torch==2.6.0+cu126',
+ # The first version of triton that is officially published for x86_64 and aarch64.
+ # Note: will need to update to torch > 2.6 to use it.
  'pytorch-triton==3.3.0',
  'numpy~=2.2',
  'astropy_healpix~=1.1.2',
@@ -207,7 +209,7 @@ flash-attn = [
 pytorch-triton = [
   { url = "https://download.pytorch.org/whl/pytorch_triton-3.3.0-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
   { url = "https://download.pytorch.org/whl/pytorch_triton-3.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
-# TODO: add CPU version
+# TODO: add CPU version for other platforms
 ]
 
 torch = [
