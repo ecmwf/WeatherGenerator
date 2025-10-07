@@ -18,7 +18,7 @@ from scipy.spatial import cKDTree
 from tqdm import tqdm
 
 from weathergen.evaluate.io_reader import Reader
-from weathergen.evaluate.plot_utils import plot_metric_region, sc_metric_region
+from weathergen.evaluate.plot_utils import plot_metric_region, score_card_metric_region
 from weathergen.evaluate.plotter import LinePlots, Plotter, ScoreCards
 from weathergen.evaluate.score import VerifiedData, get_score
 
@@ -471,7 +471,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
                 metric, region, runs, scores_dict, plotter, print_summary
             )
             if eval_opt.get("score_cards", False):
-                sc_metric_region(metric, region, runs, scores_dict, sc_plotter)
+                score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
 
 
 ############# Utility functions ############

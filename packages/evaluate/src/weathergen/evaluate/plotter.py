@@ -13,8 +13,8 @@ import xarray as xr
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
-
 from weathergen.common.config import _load_private_conf
+
 from weathergen.evaluate.plot_utils import (
     DefaultMarkerSize,
 )
@@ -735,7 +735,6 @@ class ScoreCards:
         self.image_format = plotter_cfg.get("image_format")
         self.improvement = plotter_cfg.get("improvement_scale", 0.2)
         self.out_plot_dir = Path(output_basedir) / "score_cards"
-        _logger.info(f"Saving scorecards to: {self.out_plot_dir}")
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
@@ -744,12 +743,9 @@ class ScoreCards:
         self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
     ):
         n_runs, n_vars = len(runs), len(channels)
-
-        baseline = data[0]
-        baseline_means = baseline.mean(dim=["sample", "forecast_step"])
-
         fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_vars))
 
+        baseline = data[0]
         skill_models = []
 
         for i in range(1, n_runs):
@@ -789,7 +785,7 @@ class ScoreCards:
 
         # Set axis labels
         ylabels = [
-            f"{var}\n({baseline.coords['metric'].item().upper()}={baseline_means.sel({'channel': var}).values:.3f})"
+            f"{var}\n({baseline.coords['metric'].item().upper()}={baseline.sel({'channel': var}).mean(dim=['sample', 'forecast_step']).values:.3f})"
             for var in channels
         ]
         xlabels = [
@@ -797,9 +793,9 @@ class ScoreCards:
             for i, model_name in enumerate(runs[1::])
         ]
         ax.set_xticks(np.arange(1, n_runs))
-        ax.set_xticklabels(xlabels, fontsize=12)
+        ax.set_xticklabels(xlabels, fontsize=10)
         ax.set_yticks(np.arange(n_vars) + 0.5)
-        ax.set_yticklabels(ylabels, fontsize=12)
+        ax.set_yticklabels(ylabels, fontsize=10)
         for label in ax.get_yticklabels():
             label.set_horizontalalignment("center")
             label.set_x(-0.17)
@@ -829,7 +825,8 @@ class ScoreCards:
         ]
         plt.legend(handles=legend, loc="upper left", bbox_to_anchor=(1.02, 1.0))
 
-        print(f"Save plot to '{self.out_plot_dir}'...")
+        _logger.info(f"Saving scorecards to: {self.out_plot_dir}")
+
         parts = ["score_card", tag] + runs
         name = "_".join(filter(None, parts))
         plt.savefig(
@@ -839,14 +836,31 @@ class ScoreCards:
         )
         plt.close(fig)
 
-    def compare_models(self, data, baseline, i, var):
-        baseline_score = baseline.sel({"channel": var}).mean(dim="sample")
-        model_score = data[i].sel({"channel": var}).mean(dim="sample")
-        diff = baseline_score - model_score
-        diff_mean = diff.mean()
+    def compare_models(self, data, baseline, i, var, x_dim="forecast_step"):
+        baseline_var = baseline.sel({"channel": var})
+        data_var = data[i].sel({"channel": var})
 
-        skill = self.get_skill_score(model_score, baseline_score, 0.0).mean()
-        return diff, diff_mean, skill
+        non_zero_dims = [
+            dim
+            for dim in baseline_var.dims
+            if dim != x_dim and baseline_var[dim].shape[0] > 1
+        ]
+
+        if non_zero_dims:
+            _logger.info(
+                f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
+            )
+
+        baseline_score = baseline_var.mean(
+            dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
+        )
+        model_score = data_var.mean(
+            dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True
+        )
+        diff = baseline_score - model_score
+
+        skill = self.get_skill_score(model_score, baseline_score, 0.0)
+        return diff, diff.mean(dim=x_dim), skill.mean(dim=x_dim)
 
     def get_skill_score(self, score_model, score_ref, score_perf):
         skill_score = (score_model - score_ref) / (score_perf - score_ref)

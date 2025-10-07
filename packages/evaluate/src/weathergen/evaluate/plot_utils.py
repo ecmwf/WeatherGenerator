@@ -117,13 +117,13 @@ def plot_metric_region(
                 )
 
 
-def sc_metric_region(
+def score_card_metric_region(
     metric: str,
     region: str,
     runs: dict,
     scores_dict: dict,
-    plotter: object,
-):
+    sc_plotter: object,
+) -> None:
     """
     Create score cards for all streams and channels for a given metric and region.
 
@@ -137,7 +137,7 @@ def sc_metric_region(
         Dictionary containing the config for all runs
     scores_dict : dict
         The dictionary containing all computed metrics.
-    plotter:
+    sc_plotter:
         Plotter object to handle the plotting part
     """
     streams_set = collect_streams(runs)
@@ -171,7 +171,7 @@ def sc_metric_region(
         if selected_data and len(selected_data) > 1.0:
             _logger.info(f"Creating score cards for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
-            plotter.plot(selected_data, run_ids, channels_common, name)
+            sc_plotter.plot(selected_data, run_ids, channels_common, name)
         else:
             _logger.info(
                 f"Only one run_id under stream: {stream}. Creating score card is skipped..."
