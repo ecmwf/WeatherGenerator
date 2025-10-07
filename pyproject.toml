@@ -11,6 +11,7 @@ requires-python = ">=3.12,<3.13"
 # TODO: split the plotting dependencies into their own dep groups, they are not required.
 dependencies = [
  'torch==2.6.0+cu126',
+ 'pytorch-triton==3.3.0',
  'numpy~=2.2',
  'astropy_healpix~=1.1.2',
  'zarr~=2.17',
@@ -31,6 +32,7 @@ dependencies = [
  "weathergen-common",
  "weathergen-evaluate",
  "torch",
+ "pytorch-triton>=0.0.1",
 ]
 
 [project.urls]
@@ -197,9 +199,15 @@ flash-attn = [
 # TODO: open issue
 #  { url = "https://github.com/cathalobrien/get-flash-attn/releases/download/v0.1-alpha/flash_attn-2.7.4+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
 #  { path = "/capstor/store/cscs/userlab/ch17/flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
-  { url = " https://object-store.os-api.cci1.ecmwf.int/weathergenerator-dev/wheels/flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+  { url = "https://object-store.os-api.cci1.ecmwf.int/weathergenerator-dev/wheels/flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
   { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
   { index = "pytorch-cpu", marker = "sys_platform == 'macosx'"},
+]
+
+pytorch-triton = [
+  { url = "https://download.pytorch.org/whl/pytorch_triton-3.3.0-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+  { url = "https://download.pytorch.org/whl/pytorch_triton-3.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
+# TODO: add CPU version
 ]
 
 torch = [
