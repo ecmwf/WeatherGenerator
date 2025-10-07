@@ -30,8 +30,6 @@ _logger = logging.getLogger(__name__)
 
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
-_DEFAULT_EVAL_CONFIG_DIR = _REPO_ROOT / "config/evaluate"
-
 
 def evaluate() -> None:
     # By default, arguments from the command line are read.
@@ -45,6 +43,7 @@ def evaluate_from_args(argl: list[str]) -> None:
     parser.add_argument(
         "--config",
         type=str,
+        default=None,
         help="Path to the configuration yaml file for plotting. e.g. config/plottig_config.yaml",
     )
 
@@ -52,8 +51,10 @@ def evaluate_from_args(argl: list[str]) -> None:
     if args.config:
         config = Path(args.config)
     else:
-        _logger.info("No config file provided, using the default template config.")
-        config = Path(_DEFAULT_EVAL_CONFIG_DIR / "plot_config_template.yml")
+        _logger.info(
+            "No config file provided, using the default template config (please edit accordingly)"
+        )
+        config = Path(_REPO_ROOT / "config" / "evaluate" / "eval_config.yml")
     evaluate_from_config(OmegaConf.load(config))
 
 

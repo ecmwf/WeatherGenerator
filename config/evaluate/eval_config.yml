@@ -23,6 +23,7 @@ evaluation:
   print_summary: false #print out score values on screen. it can be verbose
   log_scale: false
   add_grid: false
+  score_cards: false
 
 run_ids :
   ar40mckx:
