@@ -4,6 +4,7 @@ import logging
 import re
 import sys
 from argparse import ArgumentParser
+from multiprocessing import Pool
 from pathlib import Path
 
 import numpy as np
@@ -272,9 +273,42 @@ def zarr_store(run_id):
     return zarr_path
 
 
-def get_data(run_id: str, stream: str, type: str, fsteps=None, channels=None):
+def get_data_worker(args):
     """
-    Retrieve data from Zarr store for a given run ID and stream.
+    Worker function to retrieve data for a single sample and forecast step.
+    Parameters
+    ----------
+    args : tuple
+        Tuple containing (sample, fstep, run_id, stream, type).
+    Returns
+    -------
+    xarray.DataArray
+        xarray DataArray for the specified sample and forecast step.
+    """
+    sample, fstep, run_id, stream, type = args
+    fname_zarr = zarr_store(run_id)
+    try:
+        with ZarrIO(fname_zarr) as zio:
+            out = zio.get_data(sample, stream, fstep)
+            if type == "target":
+                data = out.target.as_xarray()
+            elif type == "prediction":
+                data = out.prediction.as_xarray()
+        return data.squeeze()
+    except Exception as e:
+        _logger.error(
+            f"[get_data_worker ERROR] sample={sample}, fstep={fstep} failed: {e}"
+        )
+        return None
+
+
+def get_data(
+    run_id: str, stream: str, type: str, fsteps=None, channels=None, n_processes=4
+):
+    """
+    Retrieve data from Zarr store and return as a list of xarray DataArrays for each forecast step.
+    Using multiprocessing to speed up data retrieval.
+
     Parameters
     ----------
     run_id : str
@@ -291,45 +325,51 @@ def get_data(run_id: str, stream: str, type: str, fsteps=None, channels=None):
     -------
     list of xarray.DataArray
         List of xarray DataArrays for each forecast step.
+
     """
-    # check type is valid
     if type not in ["target", "prediction"]:
         raise ValueError(f"Invalid type: {type}. Must be 'target' or 'prediction'.")
+
     fname_zarr = zarr_store(run_id)
     with ZarrIO(fname_zarr) as zio:
-        zio_forecast_steps = zio.forecast_steps
-        samples = zio.samples
+        zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
+        samples = sorted([int(sample) for sample in zio.samples])
         dummy_out = zio.get_data(0, stream, zio_forecast_steps[0])
         all_channels = dummy_out.target.channels
         channels = all_channels if channels is None else channels
 
-        fsteps = zio_forecast_steps if fsteps is None else fsteps
-        fsteps = sorted([int(fstep) for fstep in fsteps])
-        samples = sorted([int(sample) for sample in samples])
+    fsteps = (
+        zio_forecast_steps
+        if fsteps is None
+        else sorted([int(fstep) for fstep in fsteps])
+    )
+
     da_list = []
-    for fstep in range(1, len(fsteps)):
+    for fstep in fsteps:
+        step_tasks = [(sample, fstep, run_id, stream, type) for sample in samples]
         da_fs = []
-        for sample in tqdm(
-            samples,
-            desc=f"Processing {run_id} - stream: {stream} - forecast step: {fstep}",
-        ):
-            with ZarrIO(fname_zarr) as zio:
-                out = zio.get_data(sample, stream, fstep)
-                if type == "target":
-                    data = out.target.as_xarray()
-                elif type == "prediction":
-                    data = out.prediction.as_xarray()
-            da_fs.append(data.squeeze())
-        da_fs = xr.concat(da_fs, dim="ipoint")
-        if set(channels) != set(all_channels):
-            available_channels = da_fs.channel.values
-            existing_channels = [ch for ch in channels if ch in available_channels]
-            if len(existing_channels) < len(channels):
-                _logger.info(
-                    f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
-                )
-            da_fs = da_fs.sel(channel=existing_channels)
-        da_list.append(da_fs)
+
+        with Pool(processes=n_processes) as pool:
+            for result in tqdm(
+                pool.imap_unordered(get_data_worker, step_tasks, chunksize=1),
+                total=len(step_tasks),
+                desc=f"Processing {run_id} - stream: {stream} - forecast step: {fstep}",
+            ):
+                if result is not None:
+                    da_fs.append(result)
+
+        if da_fs:
+            da_fs = xr.concat(da_fs, dim="ipoint")
+            if set(channels) != set(all_channels):
+                available_channels = da_fs.channel.values
+                existing_channels = [ch for ch in channels if ch in available_channels]
+                if len(existing_channels) < len(channels):
+                    _logger.info(
+                        f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
+                    )
+                da_fs = da_fs.sel(channel=existing_channels)
+            da_list.append(da_fs)
+
     return da_list
 
 
