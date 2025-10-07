@@ -10,7 +10,8 @@ authors = [
 requires-python = ">=3.12,<3.13"
 # TODO: split the plotting dependencies into their own dep groups, they are not required.
 dependencies = [
- 'torch==2.6.0+cu126',
+ 'torch==2.6.0',
+# 'torch==2.6.0+cu126',
  # The first version of triton that is officially published for x86_64 and aarch64.
  # Note: will need to update to torch > 2.6 to use it.
  'pytorch-triton==3.3.0',
@@ -153,6 +154,14 @@ environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
+# Using extra marker to segregate CPU-only config (testing).
+conflicts = [
+  [
+    { extra = "cpu" },
+    { extra = "cu128" },
+  ],
+]
+
 # Following the recommendations from https://docs.astral.sh/uv/guides/integration/pytorch
 # The current setup is:
 # linux == GPU + flashattention
@@ -217,6 +226,7 @@ torch = [
   { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-linux_aarch64.whl", marker = 'sys_platform == "linux" and platform_machine == "aarch64"' },
   { index = "pytorch-cu126", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
   { index = "pytorch-cpu", marker = "sys_platform == 'macosx'"},
+  { index = "pytorch-cpu", marker = "sys_platform == 'linux'", extra='cpu'},
 ]
 
 [tool.pytest.ini_options]
