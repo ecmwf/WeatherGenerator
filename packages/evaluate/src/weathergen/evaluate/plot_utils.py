@@ -174,12 +174,12 @@ def score_card_metric_region(
             )
 
 
-def br_metric_region(
+def bar_plot_metric_region(
     metric: str,
     region: str,
     runs: dict,
     scores_dict: dict,
-    plotter: object,
+    br_plotter: object,
 ):
     """
     Create bar plots for all streams and run_ids for a given metric and region.
@@ -228,7 +228,7 @@ def br_metric_region(
         if selected_data and len(selected_data) > 1.0:
             _logger.info(f"Creating bar plots for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
-            plotter.plot(selected_data, run_ids, channels_common, name)
+            br_plotter.plot(selected_data, run_ids, channels_common, name)
         else:
             _logger.info(
                 f"Only one run_id for ({region}) region under stream : {stream}. Creating bar plot is skipped..."
