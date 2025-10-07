@@ -25,7 +25,7 @@ ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 256
 ae_global_num_blocks: 8
-ae_global_num_heads: 8
+ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
 ae_global_att_dense_rate: 0.2
@@ -43,6 +43,7 @@ pred_mlp_adaln: True
 forecast_offset : 0
 forecast_delta_hrs: 0
 forecast_steps: 1
+forecast_policy: "diffusion"
 forecast_freeze_model: False
 forecast_att_dense_rate: 1.0
 fe_num_blocks: 2

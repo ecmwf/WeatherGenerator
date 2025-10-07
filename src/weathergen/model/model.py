@@ -584,7 +584,7 @@ class Model(torch.nn.Module):
                     res_tokens, weights = self.edm_denoise(model_params, tokens, tokens_targets[fstep - forecast_offset])
                 else:
                     logger.info('sampling step')
-                    res_tokens, weights = self.edm_sample(model_params, tokens)
+                    res_tokens = self.edm_sample(model_params, tokens) #NOTE: weights are set to default 1s during sampling...
                 tokens = tokens + res_tokens
                 tokens_all += [res_tokens]
 
