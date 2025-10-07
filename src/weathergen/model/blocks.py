@@ -16,6 +16,7 @@ from weathergen.model.attention import (
 )
 from weathergen.model.layers import MLP
 from weathergen.model.norms import AdaLayerNormLayer
+from weathergen.utils.utils import get_dtype
 
 
 class SelfAttentionBlock(nn.Module):
@@ -199,22 +200,40 @@ class OriginalPredictionBlock(nn.Module):
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
 
         self.block = nn.ModuleList()
+
         # Multi-Cross Attention Head
         self.block.append(
             MultiCrossAttentionHeadVarlen(
                 dim_in,
-                dim_kv,
-                num_heads,
+                self.cf.ae_global_dim_embed,
+                self.cf.streams[0]["target_readout"]["num_heads"],
                 dim_head_proj=self.tr_dim_head_proj,
                 with_residual=True,
-                **attention_kwargs,
+                with_qk_lnorm=True,
+                dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                with_flash=self.cf.with_flash_attention,
+                norm_type=attention_kwargs["norm_type"],
+                softcap=0.0,
+                dim_aux=dim_aux,
+                norm_eps=attention_kwargs["norm_eps"],
+                attention_dtype=get_dtype(self.cf.attention_dtype),
             )
         )
 
         # Optional Self-Attention Head
         if self.cf.pred_self_attention:
             self.block.append(
-                MultiSelfAttentionHeadVarlen(dim_in, num_heads=num_heads, **attention_kwargs)
+                MultiSelfAttentionHeadVarlen(
+                    dim_in,
+                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                    dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                    with_qk_lnorm=True,
+                    with_flash=self.cf.with_flash_attention,
+                    norm_type=self.cf.norm_type,
+                    dim_aux=dim_aux,
+                    norm_eps=self.cf.norm_eps,
+                    attention_dtype=get_dtype(self.cf.attention_dtype),
+                )
             )
 
         # MLP Block
@@ -222,12 +241,12 @@ class OriginalPredictionBlock(nn.Module):
             MLP(
                 dim_in,
                 dim_out,
-                with_residual=(self.cf.pred_dyadic_dims or self.tro_type == "obs_value"),
+                with_residual=True,
                 hidden_factor=self.tr_mlp_hidden_factor,
                 dropout_rate=0.1,  # Assuming dropout_rate is 0.1
-                norm_type=attention_kwargs["norm_type"],
-                dim_aux=dim_aux,
-                norm_eps=mlp_norm_eps,
+                norm_type=self.cf.norm_type,
+                dim_aux=(dim_aux if self.cf.pred_mlp_adaln else None),
+                norm_eps=self.cf.mlp_norm_eps,
             )
         )
 

@@ -9,8 +9,8 @@
 
 import logging
 
+import weathergen.common.config as config
 import weathergen.common.io as io
-import weathergen.utils.config as config
 
 _logger = logging.getLogger(__name__)
 
@@ -35,7 +35,8 @@ def write_output(
 
     _logger.debug(f"Using output streams: {output_streams} from streams: {stream_names}")
 
-    channels: list[list[str]] = [list(stream.val_target_channels) for stream in cf.streams]
+    target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in cf.streams]
+    source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in cf.streams]
 
     geoinfo_channels = [[] for _ in cf.streams]  # TODO obtain channels
 
@@ -55,7 +56,8 @@ def write_output(
         targets_times_all,
         targets_lens,
         output_streams,
-        channels,
+        target_channels,
+        source_channels,
         geoinfo_channels,
         sample_start,
         cf.forecast_offset,

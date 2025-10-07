@@ -27,9 +27,10 @@ dependencies = [
  "omegaconf~=2.3.0",
  "dask~=2025.5.1",
  "hatchling",
- "weathergen-common",
- "seaborn>=0.13.2",
  "numexpr>=2.11.0",
+ "weathergen-common",
+ "weathergen-evaluate",
+ "seaborn>=0.13.2",
 ]
 
 [project.urls]
@@ -42,7 +43,7 @@ Issues = "https://github.com/ecmwf/WeatherGenerator/issues"
 train = "weathergen.run_train:train"
 train_continue = "weathergen.run_train:train_continue"
 inference = "weathergen.run_train:inference"
-plot = "weathergen.evaluate.plot:plot"
+evaluate = "weathergen.evaluate.run_evaluation:evaluate"
 plot_train = "weathergen.utils.plot_training:plot_train"
 
 [build-system]
@@ -61,6 +62,8 @@ dev = [
  "pytest-mock>=3.14.1",
  "ruff==0.9.7",
  "tensorboard>=2.20.0",
+ "pdbpp>=0.11.7",
+ "pyrefly==0.33.0",
 ]
 
 
@@ -125,7 +128,7 @@ line-ending = "lf"
 
 [tool.uv]
 # Most work is done a distributed filesystem, where hardlink is not always possible.
-# Also, trying to resolve some permissions issue, see #344.
+# Also, trying to resolve some permissions issue, see 44.
 link-mode = "symlink"
 # This guarantees that the build is deterministic and will not be impacted 
 # by future releases of dependencies or sub-dependencies. 
@@ -148,6 +151,27 @@ required-version = ">=0.7.0"
 name = "pytorch-cu124"
 url = "https://download.pytorch.org/whl/cu124"
 explicit = true
+
+
+[tool.pyrefly]
+project-includes = ["src/"]
+project-excludes = [
+]
+
+[tool.pyrefly.errors]
+bad-argument-type = false
+unsupported-operation = false
+missing-attribute = false
+no-matching-overload = false
+bad-context-manager = false
+
+# To do:
+bad-assignment = false
+bad-return = false
+index-error = false
+not-iterable = false
+not-callable = false
+
 
 
 [[tool.uv.index]]

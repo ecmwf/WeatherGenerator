@@ -9,7 +9,7 @@
 
 CERRA :
   type : anemoi
-  filenames : ['cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi.zarr']
+  filenames : ['cerra-rr-an-oper-se-al-ec-mars-5p5km-1985-2023-3h-v2.zarr']
   loss_weight : 1.
   masking_rate : 0.6
   masking_rate_none : 0.05

@@ -14,16 +14,15 @@ import os
 import subprocess
 from pathlib import Path
 
-import torch
 import yaml
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from weathergen.train.utils import get_run_id
 
-_REPO_ROOT = Path(__file__).parent.parent.parent.parent  # TODO use importlib for resources
+_REPO_ROOT = Path(
+    __file__
+).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
-_DEFAULT_MODEL_PATH = _REPO_ROOT / "models"
-_DEFAULT_RESULT_PATH = _REPO_ROOT / "results"
 
 _logger = logging.getLogger(__name__)
 
@@ -65,13 +64,21 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
     Load a configuration file from a given run_id and epoch.
     If run_id is a full path, loads it from the full path.
     """
-
     if Path(run_id).exists():  # load from the full path if a full path is provided
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
     else:
-        path_models = Path(model_path or _DEFAULT_MODEL_PATH)
-        fname = path_models / run_id / _get_model_config_file_name(run_id, epoch)
+        # Load model config here. In case model_path is not provided, get it from private conf
+        if model_path is None:
+            pconf = _load_private_conf()
+            model_path = _get_config_attribute(
+                config=pconf, attribute_name="model_path", fallback="models"
+            )
+        model_path = Path(model_path)
+        fname = model_path / run_id / _get_model_config_file_name(run_id, epoch)
+        assert fname.exists(), (
+            "The fallback path to the model does not exist. Please provide a `model_path`."
+        )
 
     _logger.info(f"Loading config from specified run_id and epoch: {fname}")
 
@@ -130,6 +137,8 @@ def load_config(
             c = _load_streams_in_config(c)
             overwrite_configs.append(c)
 
+    private_config = set_paths(private_config)
+
     if from_run_id is None:
         base_config = _load_default_conf()
     else:
@@ -146,11 +155,6 @@ def _load_streams_in_config(config: Config) -> Config:
     config = config.copy()
     if streams_directory is not None:
         streams_directory = Path(streams_directory)
-        if not streams_directory.is_dir():
-            msg = f"Streams directory {streams_directory} does not exist."
-            raise FileNotFoundError(msg)
-
-        _logger.info(f"Loading streams from {streams_directory}")
         config.streams = load_streams(streams_directory)
     return config
 
@@ -235,7 +239,7 @@ def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
     return overwrite_config
 
 
-def _load_private_conf(private_home: Path | None) -> DictConfig:
+def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     "Return the private configuration."
     "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
 
@@ -246,7 +250,7 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
 
     elif "WEATHERGEN_PRIVATE_CONF" in os.environ:
         private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
-        _logger.info(f"Loading private config fromWEATHERGEN_PRIVATE_CONF:{private_home}.")
+        _logger.info(f"Loading private config from WEATHERGEN_PRIVATE_CONF:{private_home}.")
 
     elif env_script_path.is_file():
         _logger.info(f"Loading private config from platform-env.py: {env_script_path}.")
@@ -282,9 +286,6 @@ def _load_private_conf(private_home: Path | None) -> DictConfig:
             "WEATHERGEN_PRIVATE_CONF or provide a path."
         )
     private_cf = OmegaConf.load(private_home)
-    private_cf["model_path"] = (
-        private_cf["model_path"] if "model_path" in private_cf.keys() else None
-    )
 
     if "secrets" in private_cf:
         del private_cf["secrets"]
@@ -298,9 +299,29 @@ def _load_default_conf() -> Config:
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
+    # TODO: might want to put this into config later instead of hardcoding it here...
+    streams_history = {
+        "streams_anemoi": "era5_1deg",
+        "streams_mixed": "era5_nppatms_synop",
+        "streams_ocean": "fesom",
+        "streams_icon": "icon",
+        "streams_mixed_experimental": "cerra_seviri",
+    }
     if not streams_directory.is_dir():
-        msg = f"Streams directory {streams_directory} does not exist."
-        raise FileNotFoundError(msg)
+        streams_directory_config = streams_directory
+        dirs = [streams_directory]
+        while streams_directory.name in streams_history and not streams_directory.is_dir():
+            streams_directory = streams_directory.with_name(streams_history[streams_directory.name])
+            dirs.append(streams_directory)
+        if not streams_directory.is_dir():
+            msg = f"Could not find stream directory, nor its history: {[str(dir) for dir in dirs]}"
+            raise FileNotFoundError(msg)
+        _logger.info(
+            f"Streams directory {streams_directory} found in "
+            f"history for {streams_directory_config}. "
+            "Note: This change will not be reflected in the config. "
+            "Please update the 'streams_directory' variable manually."
+        )
 
     # read all reportypes from directory, append to existing ones
     streams_directory = streams_directory.absolute()
@@ -310,7 +331,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
     streams = {}
     # exclude temp files starting with "." or "#" (eg. emacs, vim, macos savefiles)
     stream_files = sorted(streams_directory.rglob("[!.#]*.yml"))
-    _logger.info(f"discover stream configs: {', '.join(map(str, stream_files))}")
+    _logger.info(f"Discover stream configs: {', '.join(map(str, stream_files))}")
     for config_file in stream_files:
         try:
             config = OmegaConf.load(config_file)
@@ -345,11 +366,27 @@ def load_streams(streams_directory: Path) -> list[Config]:
 def set_paths(config: Config) -> Config:
     """Set the configs run_path model_path attributes to default values if not present."""
     config = config.copy()
-    # pathlib.Path are not json serializable, so we convert them to str
-    config.run_path = config.get("run_path", None) or str(_DEFAULT_RESULT_PATH)
-    config.model_path = config.get("model_path", None) or str(_DEFAULT_MODEL_PATH)
+    config.run_path = _get_config_attribute(
+        config=config, attribute_name="run_path", fallback="results"
+    )
+    config.model_path = _get_config_attribute(
+        config=config, attribute_name="model_path", fallback="models"
+    )
 
     return config
+
+
+def _get_config_attribute(config: Config, attribute_name: str, fallback: str) -> str:
+    """Get an attribute from a Config. If not available, fall back to path_shared_working_dir
+    concatenated with the desired fallback path. Raise an error if neither the attribute nor a
+    fallback is specified."""
+    attribute = OmegaConf.select(config, attribute_name)
+    fallback_root = OmegaConf.select(config, "path_shared_working_dir")
+    assert attribute is not None or fallback_root is not None, (
+        f"Must specify `{attribute_name}` in config if `path_shared_working_dir` is None in config"
+    )
+    attribute = attribute if attribute else fallback_root + fallback
+    return attribute
 
 
 def get_path_run(config: Config) -> Path:
@@ -369,17 +406,51 @@ def get_path_output(config: Config, epoch: int) -> Path:
     return base_path / fname
 
 
-def get_dtype(value: str) -> torch.dtype:
+def validate_forecast_policy_and_steps(cf: OmegaConf):
     """
-    changes the conf value to a torch dtype
+    Validates the forecast policy and steps within a configuration object.
+
+    This method enforces specific rules for the `forecast_steps` attribute, which can be
+    either a single integer or a list of integers, ensuring consistency with the
+    `forecast_policy` attribute.
+
+    The validation logic is as follows:
+    - If `cf.forecast_steps` is a single integer, a `forecast_policy` must be defined
+    (i.e., not None or empty) only if `forecast_steps` is unequal to 0.
+    - If `cf.forecast_steps` is a list, it must be non-empty, and all of its elements
+    must be non-negative integers. Additionally, a `forecast_policy` must be
+    defined if any of the forecast steps in the list are greater than 0.
+
+    Args:
+        cf (OmegaConf): The configuration object containing the `forecast_steps`
+                        and `forecast_policy` attributes.
+
+    Raises:
+        TypeError: If `cf.forecast_steps` is not an integer or a non-empty list.
+        AssertionError: If a `forecast_policy` is required but not provided, or
+                        if `forecast_step` is negative while `forecast_policy` is provided, or
+                        if any of the forecast steps in a list are negative.
     """
-    if value == "bf16":
-        return torch.bfloat16
-    elif value == "fp16":
-        return torch.float16
-    elif value == "fp32":
-        return torch.float32
-    else:
-        raise NotImplementedError(
-            f"Dtype {value} is not recognized, choose either, bf16, fp16, or fp32"
+    provide_forecast_policy = (
+        "A 'forecast_policy' must be specified when 'forecast_steps' is not zero. "
+    )
+    valid_forecast_policies = (
+        "Valid values for 'forecast_policy' are, e.g., 'fixed' when using constant "
+        "forecast steps throughout the training, or 'sequential' when varying the forecast "
+        "steps over epochs, such as, e.g., 'forecast_steps: [2, 2, 4, 4]'. "
+    )
+    valid_forecast_steps = (
+        "'forecast_steps' must be a positive integer or a non-empty list of positive integers. "
+    )
+    if isinstance(cf.forecast_steps, int):
+        assert cf.forecast_policy and cf.forecast_steps > 0 if cf.forecast_steps != 0 else True, (
+            provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
         )
+    elif isinstance(cf.forecast_steps, ListConfig) and len(cf.forecast_steps) > 0:
+        assert (
+            cf.forecast_policy and all(step >= 0 for step in cf.forecast_steps)
+            if any(n > 0 for n in cf.forecast_steps)
+            else True
+        ), provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
+    else:
+        raise TypeError(valid_forecast_steps)

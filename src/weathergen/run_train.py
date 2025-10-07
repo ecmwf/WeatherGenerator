@@ -11,14 +11,15 @@
 The entry point for training and inference weathergen-atmo
 """
 
+import logging
 import pdb
 import sys
 import time
 import traceback
 from pathlib import Path
 
+import weathergen.common.config as config
 import weathergen.utils.cli as cli
-import weathergen.utils.config as config
 from weathergen.train.trainer import Trainer
 from weathergen.utils.logger import init_loggers
 
@@ -37,8 +38,6 @@ def inference_from_args(argl: list[str]):
     """
     parser = cli.get_inference_parser()
     args = parser.parse_args(argl)
-
-    init_loggers()
 
     inference_overwrite = dict(
         shuffle=False,
@@ -60,8 +59,10 @@ def inference_from_args(argl: list[str]):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
+    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
+    init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
+
     cf.run_history += [(args.from_run_id, cf.istep)]
-    cf = config.set_paths(cf)
 
     trainer = Trainer()
     trainer.inference(cf, args.from_run_id, args.epoch)
@@ -69,8 +70,22 @@ def inference_from_args(argl: list[str]):
 
 ####################################################################################################
 def train_continue() -> None:
+    """
+    Function to continue training for WeatherGenerator model.
+    Entry point for calling train_continue from the command line.
+    Configurations are set in the function body.
+
+    Args:
+      from_run_id (str): Run/model id of pretrained WeatherGenerator model to
+        continue training. Defaults to None.
+    Note: All model configurations are set in the function body.
+    """
+    train_continue_from_args(sys.argv[1:])
+
+
+def train_continue_from_args(argl: list[str]):
     parser = cli.get_continue_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argl)
 
     init_loggers()
 
@@ -80,7 +95,6 @@ def train_continue() -> None:
             forecast_delta_hrs=0,  # 12
             forecast_steps=1,  # [j for j in range(1,9) for i in range(4)]
             forecast_policy="fixed",  # 'sequential_random' # 'fixed' #'sequential' #_random'
-            forecast_freeze_model=True,
             forecast_att_dense_rate=1.0,  # 0.25
             fe_num_blocks=8,
             fe_num_heads=16,
@@ -112,16 +126,19 @@ def train_continue() -> None:
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
+    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
+    init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
+
     # track history of run to ensure traceability of results
     cf.run_history += [(args.from_run_id, cf.istep)]
-    cf = config.set_paths(cf)
 
     if args.finetune_forecast:
-        if cf.forecast_freeze_model:
+        if cf.freeze_modules != "":
             cf.with_fsdp = False
             import torch
 
             torch._dynamo.config.optimize_ddp = False
+
     trainer = Trainer()
     trainer.run(cf, args.from_run_id, args.epoch)
 
@@ -147,14 +164,15 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     parser = cli.get_train_parser()
     args = parser.parse_args(argl)
 
-    init_loggers()
-
     cli_overwrite = config.from_cli_arglist(args.options)
+
     cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
     cf = config.set_run_id(cf, args.run_id, False)
 
+    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
+    init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
+
     cf.streams = config.load_streams(Path(cf.streams_directory))
-    cf = config.set_paths(cf)
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision

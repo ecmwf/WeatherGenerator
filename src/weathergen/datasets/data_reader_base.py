@@ -71,8 +71,24 @@ def str_to_datetime64(s: str | int | NPDT64) -> NPDT64:
     """
     if isinstance(s, datetime64):
         return s
-    format_str = "%Y%m%d%H%M%S"
-    return np.datetime64(datetime.datetime.strptime(str(s), format_str))
+    s_str = str(s)
+
+    supported_formats = [
+        "%Y%m%d%H%M%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+    ]
+
+    for fmt in supported_formats:
+        try:
+            dt_obj = datetime.datetime.strptime(s_str, fmt)
+            return np.datetime64(dt_obj)
+        except ValueError:
+            pass
+
+    raise ValueError(f"Unable to parse the date string '{s}'. Original string might be invalid.")
 
 
 def str_to_timedelta(s: str | datetime.timedelta) -> pd.Timedelta:
@@ -237,7 +253,6 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     )
     assert rdata.geoinfos.ndim == 2, f"geoinfos must be 2D, got {rdata.geoinfos.shape}"
     assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
-    assert rdata.data.shape[1] > 0, f"data must have at least one channel {rdata.data.shape}"
     assert rdata.datetimes.ndim == 1, f"datetimes must be 1D {rdata.datetimes.shape}"
 
     assert rdata.coords.shape[0] == rdata.data.shape[0], "coords and data must have same length"
@@ -255,16 +270,18 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
         f"{rdata.datetimes.shape[0]}"
     )
 
-    assert np.logical_and(
-        rdata.datetimes >= dtr.start,
-        # rdata.datetimes < dtr.end  # TODO: enforce monotonicty also for obs
-        rdata.datetimes <= dtr.end,
-    ).all(), f"datetimes for data points violate window {dtr}."
+    assert np.logical_and(rdata.datetimes >= dtr.start, rdata.datetimes < dtr.end).all(), (
+        f"datetimes for data points violate window {dtr}."
+    )
 
 
 class DataReaderBase(metaclass=ABCMeta):
     """
     Base class for data readers.
+
+    Coordinates must be provided in standard geographical format:
+    latitude in degrees from -90 (South) to +90 (North),
+    and longitude in degrees from -180 (West) to +180 (East).
     """
 
     # The fields that need to be set by the child classes

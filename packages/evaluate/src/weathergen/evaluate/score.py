@@ -71,12 +71,15 @@ class VerifiedData:
 
     prediction: xr.DataArray
     ground_truth: xr.DataArray
+    prediction_next: xr.DataArray
+    ground_truth_next: xr.DataArray
 
     def __post_init__(self):
         # Perform checks on initialization
         self._validate_dimensions()
         self._validate_broadcastability()
 
+    # TODO: add checks for prediction_next, ground_truth_next
     def _validate_dimensions(self):
         # Ensure all dimensions in truth are in forecast (or equal)
         missing_dims = set(self.ground_truth.dims) - set(self.prediction.dims)
@@ -85,6 +88,7 @@ class VerifiedData:
                 f"Truth data has extra dimensions not found in forecast: {missing_dims}"
             )
 
+    # TODO: add checks for prediction_next, ground_truth_next
     def _validate_broadcastability(self):
         try:
             # Attempt broadcast
@@ -175,6 +179,8 @@ class Scores:
             "rmse": self.calc_rmse,
             "bias": self.calc_bias,
             "acc": self.calc_acc,
+            "froct": self.calc_froct,
+            "troct": self.calc_troct,
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
@@ -257,7 +263,15 @@ class Scores:
 
         arg_names: list[str] = inspect.getfullargspec(f).args[1:]
 
-        args = {"p": data.prediction, "gt": data.ground_truth}
+        if score_name in ["froct", "troct"]:
+            args = {
+                "p": data.prediction,
+                "gt": data.ground_truth,
+                "p_next": data.prediction_next,
+                "gt_next": data.ground_truth_next,
+            }
+        else:
+            args = {"p": data.prediction, "gt": data.ground_truth}
 
         # Add group_by_coord if provided
         if group_by_coord is not None:
@@ -446,7 +460,7 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         group_by_coord: str | None = None,
-        scale_dims: list = None,
+        scale_dims: list | None = None,
     ):
         """
         Calculate the L1 error norm of forecast data w.r.t. reference data.
@@ -477,19 +491,38 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         group_by_coord: str | None = None,
-        scale_dims: list = None,
+        scale_dims: list | None = None,
+        squared_l2: bool = False,
     ):
         """
         Calculate the L2 error norm of forecast data w.r.t. reference data.
-        Note that the L2 error norm is calculated as the sum of absolute differences.
-        If scale_dims is not None, the L2 will scaled by the number of elements in the average dimensions.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the L2 score.
+        scale_dims: list | None
+            List of dimensions over which the L2 score will be scaled.
+            If provided, the L2 score will be divided by the product of the sizes of these dimensions.
+        squared_l2: bool
+            If True, the L2 score will be returned as the sum of squared differences.
+            If False, the L2 score will be returned as the square root of the sum of squared differences.
+            Default is False, i.e. the L2 score is returned as the square root of the sum of squared differences.
         """
-        l2 = np.sqrt(np.square(p - gt))
+        l2 = np.square(p - gt)
 
         if group_by_coord:
             l2 = l2.groupby(group_by_coord)
 
         l2 = self._sum(l2)
+
+        if not squared_l2:
+            l2 = np.sqrt(l2)
 
         if scale_dims:
             scale_dims = to_list(scale_dims)
@@ -584,6 +617,111 @@ class Scores:
         rmse = np.sqrt(self.calc_mse(p, gt, group_by_coord))
 
         return rmse
+
+    def calc_change_rate(
+        self,
+        s0: xr.DataArray,
+        s1: xr.DataArray,
+    ):
+        """
+        Calculate the "change rate" of a data array as the mean absolute difference between two consecutive time steps.
+
+        Parameters
+        ----------
+        s0: xr.DataArray
+            Data array at time step t0
+        s1: xr.DataArray
+            Data array at time step t1
+
+        Returns
+        -------
+        xr.DataArray
+            Change rate of the data array
+        """
+        if s1 is None:
+            return xr.full_like(s0, np.nan)
+        else:
+            # it needs to be in this order to preserve the s0 forecast_step
+            crate = np.abs(s0 - s1.values)
+            return crate
+
+    def calc_froct(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        p_next: xr.DataArray,
+        gt_next: xr.DataArray,
+        group_by_coord: str | None = None,
+    ):
+        """
+        Calculate forecast rate of change over time
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array (not used in calculation, but kept for consistency)
+        p_next: xr.DataArray
+            Next forecast step data array
+        gt_next: xr.DataArray
+            Next ground truth step data array (not used in calculation, but kept for consistency)
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the FROCT score.
+        """
+        if self._agg_dims is None:
+            raise ValueError(
+                "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
+            )
+
+        froct = self.calc_change_rate(p, p_next)
+
+        if group_by_coord:
+            froct = froct.groupby(group_by_coord)
+
+        froct = self._mean(froct)
+
+        return froct
+
+    def calc_troct(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        gt_next: xr.DataArray,
+        p_next: xr.DataArray,
+        group_by_coord: str | None = None,
+    ):
+        """
+        Calculate target rate of change over time
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array (not used in calculation, but kept for consistency)
+        gt: xr.DataArray
+            Ground truth data array
+        p_next: xr.DataArray
+            Next forecast step data array (not used in calculation, but kept for consistency)
+        gt_next: xr.DataArray
+            Next ground truth step data array
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the FROCT score.
+        """
+        if self._agg_dims is None:
+            raise ValueError(
+                "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
+            )
+
+        troct = self.calc_change_rate(gt, gt_next)
+
+        if group_by_coord:
+            troct = troct.groupby(group_by_coord)
+
+        troct = self._mean(troct)
+
+        return troct
 
     def calc_acc(
         self,
