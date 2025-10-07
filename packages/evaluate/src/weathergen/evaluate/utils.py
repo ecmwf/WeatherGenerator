@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from weathergen.evaluate.io_reader import Reader
 from weathergen.evaluate.plot_utils import (
-    br_metric_region,
+    bar_plot_metric_region,
     plot_metric_region,
     score_card_metric_region,
 )
@@ -412,7 +412,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
             if eval_opt.get("score_cards", False):
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
             if eval_opt.get("bar_plots", False):
-                br_metric_region(metric, region, runs, scores_dict, br_plotter)
+                bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
 
 
 ############# Utility functions ############
