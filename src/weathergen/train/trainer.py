@@ -278,12 +278,10 @@ class Trainer(TrainerBase):
             for tensor in itertools.chain(self.model.parameters(), self.model.buffers()):
                 assert tensor.device == torch.device("meta")
 
-        # if new modules are added (e.g., for fine-tuning), they are moved from
-        # the meta device and have initial weights before loading a checkpoint.
-        self.model.to_empty(device="cuda")
-        self.model.reset_parameters()
-        # load model if specified
-        if run_id_contd is not None:
+        if run_id_contd is None:
+            self.model.to_empty(device="cuda")
+            self.model.reset_parameters()
+        else:
             if is_root():
                 logger.info(f"Continuing run with id={self.cf.from_run_id} at epoch {epoch_contd}.")
             self.load_model(self.cf.from_run_id, epoch_contd)
@@ -718,6 +716,25 @@ class Trainer(TrainerBase):
                 maybe_sharded_sd[k.replace("module.", "")] = params[k]
         # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
         mkeys, ukeys = self.model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
+
+        if mkeys:
+            # Get the unique parent modules for the missing parameters
+            new_modules_to_init = {key.rsplit(".", 1)[0] for key in mkeys}
+
+            # Find the highest-level "root" new modules to avoid redundant initializations
+            root_new_modules = set()
+            for path in sorted(list(new_modules_to_init)):
+                if not any(path.startswith(root + ".") for root in root_new_modules):
+                    root_new_modules.add(path)
+
+            # Get all modules for quick lookup and initialize the new ones
+            all_modules = dict(self.model.named_modules())
+            for path in root_new_modules:
+                if is_root():
+                    logger.info(f"Initializing new module not found in checkpoint: {path}")
+                module_to_init = all_modules[path]
+                module_to_init.to_empty(device="cuda")
+                module_to_init.reset_parameters()
 
         if not is_model_sharded:
             self.model = self.model.to(self.device)
