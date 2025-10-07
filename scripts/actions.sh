@@ -47,13 +47,14 @@ case "$1" in
   unit-test)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run pytest src/
+      uv --config-file uv_test.toml sync
+      uv --config-file uv_test.toml run pytest src/
     )
     ;;
   integration-test)
     (
       cd "$SCRIPT_DIR" || exit 1
-      srun uv run --offline pytest ./integration_tests/small1_test.py --verbose -s
+      uv run --offline pytest ./integration_tests/small1_test.py --verbose -s
     )
     ;;
   create-links)
