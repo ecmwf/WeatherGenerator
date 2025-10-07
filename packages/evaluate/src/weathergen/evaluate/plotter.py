@@ -713,6 +713,7 @@ class ScoreCards:
 
     def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
         self.image_format = plotter_cfg.get("image_format")
+        self.dpi_val = plotter_cfg.get("dpi_val")
         self.improvement = plotter_cfg.get("improvement_scale", 0.2)
         self.out_plot_dir = Path(output_basedir) / "score_cards"
         if not os.path.exists(self.out_plot_dir):
@@ -726,16 +727,18 @@ class ScoreCards:
         baseline = data[0]
         skill_models = []
 
-        for i in range(1, n_runs):
+        for run_index in range(1, n_runs):
             skill_model = 0.0
-            for j, var in enumerate(channels):
-                diff, diff_mean, skill = self.compare_models(data, baseline, i, var)
+            for var_index, var in enumerate(channels):
+                diff, diff_mean, skill = self.compare_models(data, baseline, run_index, var)
                 skill_model += skill.values
 
                 # Get symbols based on difference and performance as well as coordinates
                 # for the position of the triangles.
 
-                x, y, alt, color, triangle, size = self.get_plot_symbols(i, j, skill, diff_mean)
+                x, y, alt, color, triangle, size = self.get_plot_symbols(
+                    run_index, var_index, skill, diff_mean
+                )
 
                 ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
 
@@ -805,7 +808,7 @@ class ScoreCards:
         plt.savefig(
             f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
             bbox_inches="tight",
-            dpi=300,
+            dpi=self.dpi_val,
         )
         plt.close(fig)
 
@@ -836,7 +839,7 @@ class ScoreCards:
 
         return skill_score
 
-    def get_plot_symbols(self, i, j, skill, diff_mean):
+    def get_plot_symbols(self, run_index, var_index, skill, diff_mean):
         if diff_mean > 0:
             # A better than B
             alt = "greater"
@@ -855,9 +858,9 @@ class ScoreCards:
         triangle = "^" if modus == "better" else "v"
 
         # Triangle coordinates
-        x = i
+        x = run_index
         # First row is model 1 vs model 0
-        y = j + 0.5
+        y = var_index + 0.5
 
         size = 200 * (1 - (1 / (1 + abs(skill) / self.improvement)))  # Add base size to all
 
@@ -889,14 +892,12 @@ class BarPlots:
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
-    def plot(
-        self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
-    ):
+    def plot(self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str):
         for run_index in range(1, len(runs)):
             ratio_score = self.calc_ratio_per_run_id(data, channels, run_index)
 
             fig, ax = (
-                plt.figure(figsize=(1.2 * (len(channels) - 1), 7), dpi=self.dpi_val),
+                plt.figure(figsize=(7, 1.2 * len(channels)), dpi=self.dpi_val),
                 plt.gca(),
             )
 
@@ -911,10 +912,10 @@ class BarPlots:
             ax.set_yticks(np.arange(len(ratio_score)), labels=channels)
             ax.invert_yaxis()
             ax.set_xlabel(
-                f"Relative RMSE: Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
+                f"Relative {data[0].coords['metric'].item().upper()}: Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
             )
 
-            print(f"Save plot to '{self.out_plot_dir}'...")
+            _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
             parts = ["bar_plot_compare", runs[0], runs[run_index], tag]
             name = "_".join(filter(None, parts))
             plt.savefig(
@@ -924,16 +925,27 @@ class BarPlots:
             )
             plt.close(fig)
 
-    def calc_ratio_per_run_id(self, data, channels, run_index):
+    def calc_ratio_per_run_id(self, data, channels, run_index, x_dim="channel"):
         ratio_score = []
+
         for _, var in enumerate(channels):
-            baseline_score = (
-                data[0].sel({"channel": var}).mean(dim=["sample", "forecast_step"])
+            baseline_var = data[0].sel({"channel": var})
+            data_var = data[run_index].sel({"channel": var})
+
+            non_zero_dims = [
+                dim for dim in baseline_var.dims if dim != x_dim and baseline_var[dim].shape[0] > 1
+            ]
+
+            if non_zero_dims:
+                _logger.info(
+                    f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
+                )
+
+            baseline_score = baseline_var.mean(
+                dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
             )
-            model_score = (
-                data[run_index]
-                .sel({"channel": var})
-                .mean(dim=["sample", "forecast_step"])
+            model_score = data_var.mean(
+                dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True
             )
 
             ratio_score.append(model_score / baseline_score)
@@ -942,7 +954,7 @@ class BarPlots:
         return ratio_score
 
     def colors(self, ratio_score: np.array):
-        ratio_score_centered = 1.0 - ((ratio_score / (ratio_score / 0.5).min()) + 0.5)
+        max_val = np.abs(ratio_score).max()
         cmap = plt.get_cmap("bwr")
-        colors = [cmap(v) for v in ratio_score_centered]
+        colors = [cmap(0.5 + v / (2 * max_val)) for v in ratio_score]
         return colors
