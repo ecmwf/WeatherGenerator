@@ -140,10 +140,13 @@ def calc_scores_per_stream(
                 f"No data available for stream {stream} at forecast step {fstep} in region {region}. Skipping metrics calculation."
             )
             continue
-
+        
         metric_list.append(combined_metrics)
+
+        assert int(combined_metrics.forecast_step) == int(fstep), "Different steps in data and metrics. Please check."
+
         metric_stream.loc[
-            {"forecast_step": int(fstep), "sample": combined_metrics.sample}
+            {"forecast_step": int(combined_metrics.forecast_step), "sample": combined_metrics.sample}
         ] = combined_metrics
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
