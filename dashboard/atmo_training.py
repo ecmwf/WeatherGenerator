@@ -8,7 +8,7 @@ from plotly.subplots import make_subplots
 
 from weathergen.dashboard.metrics import all_runs, latest_runs, setup_mflow
 
-_logger = logging.getLogger(__name__)
+_logger = logging.getLogger("atmo_training")
 
 
 logging.basicConfig(level=logging.INFO)
@@ -73,9 +73,10 @@ st.markdown("## Train")
 
 st.plotly_chart(make_plot(runs.filter(pl.col("tags.stage") == "train")))
 
-st.markdown("# Validation")
+# TODO: blows up on cloud streamlit
+# st.markdown("# Validation")
 
-st.plotly_chart(make_plot(runs.filter(pl.col("tags.stage") == "val")))
+# st.plotly_chart(make_plot(runs.filter(pl.col("tags.stage") == "val")))
 
 
 st.markdown("""
@@ -96,6 +97,8 @@ train_runs = train_runs.with_columns(
         / (pl.lit(max_end_date) - pl.lit(min_end_date))
     ).alias("idx")
 )
+
+_logger.info("Number of training runs: %d", len(train_runs))
 
 
 st.plotly_chart(

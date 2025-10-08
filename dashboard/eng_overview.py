@@ -10,7 +10,7 @@ from polars import col as C
 
 from weathergen.dashboard.metrics import all_runs, latest_runs, setup_mflow
 
-_logger = logging.getLogger(__name__)
+_logger = logging.getLogger("eng_overview")
 
 
 logging.basicConfig(level=logging.INFO)
