@@ -7,19 +7,24 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import glob
 import logging
 from pathlib import Path
 from typing import override
 
+import dask
+import dask.array as da
 import numpy as np
 import zarr
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
+    DTRange,
+    NDArray,
     ReaderData,
     TimeWindowHandler,
     TIndex,
-    check_reader_data,
+    t_epsilon,
 )
 
 _logger = logging.getLogger(__name__)
@@ -29,46 +34,8 @@ class DataReaderFesom(DataReaderTimestep):
     """
     A dataset class for handling temporal windows of FESOM model output data stored in Zarr format.
 
-    Parameters
-    ----------
-    start : datetime | int
-        Start time of the data period as datetime object or integer in "%Y%m%d%H%M" format
-    end : datetime | int
-        End time of the data period (inclusive) with same format as start
-    len_hrs : int
-        Length of temporal windows in days
-    step_hrs : int
-        (Currently unused) Intended step size between windows in hours
-    filename : Path
-        Path to Zarr dataset containing FESOM output
-    stream_info : dict
-        Dictionary with "source" and "target" keys specifying channel subsets to use
-        (e.g., {"source": ["temp"], "target": ["salinity"]})
-
-    Attributes
-    ----------
-    len_hrs : int
-        Temporal window length in days
-    mesh_size : int
-        Number of nodes in the FESOM mesh
-    source_channels : list[str]
-        Names of selected source channels
-    target_channels : list[str]
-        Names of selected target channels
-    mean : np.ndarray
-        Per-channel means for normalization (includes coordinates)
-    stdev : np.ndarray
-        Per-channel standard deviations for normalization (includes coordinates)
-    properties : dict
-        Dataset metadata including 'stream_id' from Zarr attributes
-
-    Notes
-    -----
-    - Automatically handles datetime conversion and alignment with dataset time axis
-    - Returns empty data containers if requested period doesn't overlap with dataset
-    - Implements coordinate normalization using sinusoidal projections
-    - Provides channel-wise normalization/denormalization for source/target variables
-    - Uses Zarr's orthogonal indexing for efficient data access
+    This class is optimized for use with multiple dataloader workers by implementing
+    lazy initialization of file handles and efficient, batched data reads.
     """
 
     def __init__(
@@ -77,102 +44,193 @@ class DataReaderFesom(DataReaderTimestep):
         filename: Path,
         stream_info: dict,
     ) -> None:
-        self.filename = filename
-        self.ds = zarr.open(filename, mode="r")
-        self.mesh_size = self.ds.data.attrs["nod2"]
+        # Store configuration but DO NOT open files here
+        self.filenames = sorted(glob.glob(str(filename) + "/*"))
+        self._tw_handler = tw_handler
+        self._stream_info = stream_info
 
-        self.time = self.ds["dates"]
-
-        # TODO: time conversion to datetime64 should happen here.
-        start_ds = self.time[0][0]
-        end_ds = self.time[-1][0]
-
-        if start_ds > tw_handler.t_end or end_ds < tw_handler.t_start:
-            name = stream_info["name"]
-            _logger.warning(f"{name} is not supported over data loader window. Stream is skipped.")
-            super().__init__(tw_handler, stream_info)
+        if len(self.filenames) == 0:
             self.init_empty()
+            self._initialized = True
             return
 
-        period = self.time[self.mesh_size][0] - self.time[0][0]
+        # Initialize data-dependent attributes to None. They will be set by _lazy_init.
+        self.time: da.Array | None = None
+        self.data: da.Array | None = None
+        self.len = 0  # Default length is 0 until initialized
+        self.source_channels = []
+        self.source_idx = []
+        self.target_channels = []
+        self.target_idx = []
+        self.geoinfo_channels = []
+        self.geoinfo_idx = []
+        self.properties = {}
+        self._lat_needs_conversion = False
+        self._lon_needs_conversion = False
 
-        if tw_handler.t_start > start_ds:
-            self.start_idx = ((tw_handler.t_start - start_ds) // period + 1) * self.mesh_size
+        if len(self.filenames) == 0:
+            name = stream_info["name"]
+            _logger.warning(
+                f"{name} couldn't find any files matching {filename}. Stream is skipped."
+            )
+            super().__init__(tw_handler, stream_info)
+            self.init_empty()
+            # No need to return, the length is 0, so it will be skipped.
+
+        # We call super() last, after we know if the stream is valid or not.
+        # We also pass dummy values, as the real ones will be set in _lazy_init.
+        super().__init__(self._tw_handler, self._stream_info)
+
+        # This flag ensures initialization happens only once per worker
+        self._initialized = False
+
+    def _lazy_init(self) -> None:
+        """
+        Initializes the dataset object. This method is called once per worker process
+        to ensure dask scheduler is not shared between them.
+        """
+        if self._initialized:
+            return
+
+        # Each worker now opens its own file handles safely
+        groups: list[zarr.Group] = [zarr.open_group(name, mode="r") for name in self.filenames]
+        times: list[zarr.Array] = [group["dates"] for group in groups]
+        self.time = da.concatenate(times, axis=0)
+
+        # Use the first group for metadata
+        first_group = groups[0]
+        if "nod2" in first_group.data.attrs:
+            self.mesh_size = first_group.data.attrs["nod2"]
+        else:
+            self.mesh_size = first_group.data.attrs["n_points"]
+
+        # Metadata reading is cheap, but let's do it with the rest of the init
+        start_ds = self.time[0][0].compute()
+        end_ds = self.time[-1][0].compute()
+
+        if start_ds > self._tw_handler.t_end or end_ds < self._tw_handler.t_start:
+            name = self._stream_info["name"]
+            _logger.warning(f"{name} is not supported over data loader window. Stream is skipped.")
+            self.init_empty()
+            self._initialized = True
+            return
+
+        period = (self.time[self.mesh_size][0] - self.time[0][0]).compute()
+
+        # Re-initialize the parent class with correct time info
+        super().__init__(self._tw_handler, self._stream_info, start_ds, end_ds, period)
+
+        if self._tw_handler.t_start > start_ds:
+            self.start_idx = ((self._tw_handler.t_start - start_ds) // period + 1) * self.mesh_size
         else:
             self.start_idx = 0
 
-        self.end_idx = ((tw_handler.t_end - start_ds) // period + 1) * self.mesh_size
+        self.end_idx = ((self._tw_handler.t_end - start_ds) // period + 1) * self.mesh_size
 
         if self.end_idx > len(self.time):
-            self.end_idx = len(self.time) - 1
+            self.end_idx = len(self.time)
 
         self.len = (self.end_idx - self.start_idx) // self.mesh_size
 
-        assert self.end_idx > self.start_idx, (
-            f"Abort: Final index of {self.end_idx} is the same"
-            f"of larger than start index {self.start_idx}"
-        )
+        # Check for a valid length after calculations
+        if self.len <= 0:
+            self.init_empty()
+            self._initialized = True
+            return
 
-        super().__init__(
-            tw_handler,
-            stream_info,
-            start_ds,
-            end_ds,
-            period,
-        )
-
-        self.colnames: list[str] = list(self.ds.data.attrs["colnames"])
+        self.colnames: list[str] = list(first_group.data.attrs["colnames"])
         self.cols_idx = list(np.arange(len(self.colnames)))
-        self.lat_index = list(self.colnames).index("lat")
-        self.lon_index = list(self.colnames).index("lon")
-        self.colnames.remove("lat")
-        self.colnames.remove("lon")
+        self.lat_index = self.colnames.index("lat")
+        self.lon_index = self.colnames.index("lon")
+
+        reordered_data_arrays: list[zarr.Group] = []
+
+        for group in groups:
+            local_colnames = group["data"].attrs["colnames"]
+
+            # If the order is already correct, no need to do anything.
+            if local_colnames == self.colnames:
+                reordered_data_arrays.append(da.from_zarr(group["data"]))
+            else:
+                # Create the list of indices to re-shuffle the columns.
+                reorder_indices = [local_colnames.index(name) for name in self.colnames]
+
+                # Lazily re-index the dask array. This operation is not executed immediately.
+                dask_array = da.from_zarr(group["data"])
+                reordered_array = dask_array[:, reorder_indices]
+                reordered_data_arrays.append(reordered_array)
+
+        # Modify a copy, not the original list while iterating
+        temp_colnames = list(self.colnames)
+        temp_colnames.remove("lat")
+        temp_colnames.remove("lon")
+        self.colnames = temp_colnames
+
         self.cols_idx.remove(self.lat_index)
         self.cols_idx.remove(self.lon_index)
         self.cols_idx = np.array(self.cols_idx)
 
-        # Ignore step_hrs, idk how it supposed to work
-        # TODO, TODO, TODO:
-        self.step_hrs = 1
+        self.properties = {"stream_id": first_group.data.attrs["obs_id"]}
 
-        self.data = self.ds["data"]
-
-        self.properties = {
-            "stream_id": self.ds.data.attrs["obs_id"],
-        }
-
-        self.mean = np.concatenate((np.array([0, 0]), np.array(self.ds.data.attrs["means"])))
+        self.mean = np.concatenate((np.array([0, 0]), np.array(first_group.data.attrs["means"])))
         self.stdev = np.sqrt(
-            np.concatenate((np.array([1, 1]), np.array(self.ds.data.attrs["std"])))
+            np.concatenate((np.array([1, 1]), np.array(first_group.data.attrs["std"])))
         )
+        self.stdev[self.stdev <= 1e-5] = 1.0
 
-        source_channels = stream_info.get("source")
-        if source_channels:
-            self.source_channels, self.source_idx = self.select(source_channels)
-        else:
-            self.source_channels = self.colnames
-            self.source_idx = self.cols_idx
+        self.data = da.concatenate(reordered_data_arrays, axis=0)
 
-        target_channels = stream_info.get("target")
-        if target_channels:
-            self.target_channels, self.target_idx = self.select(target_channels)
-        else:
-            self.target_channels = self.colnames
-            self.target_idx = self.cols_idx
+        first_timestep_lats = self.data[: self.mesh_size, self.lat_index].compute()
+        first_timestep_lons = self.data[: self.mesh_size, self.lon_index].compute()
+
+        if np.any(first_timestep_lats > 90.0):
+            _logger.warning(
+                f"Latitude for stream '{self._stream_info['name']}' appears to be in a [0, 180] "
+                f"format. It will be automatically converted to the required [-90, 90] format."
+            )
+            self._lat_needs_conversion = True
+
+        if np.any(first_timestep_lons > 180.0):
+            _logger.warning(
+                f"Longitude for stream '{self._stream_info['name']}' appears to be in a [0, 360] "
+                f"format. It will be automatically converted to the required [-180, 180] format."
+            )
+            self._lon_needs_conversion = True
+
+        source_channels = self._stream_info.get("source")
+        source_excl = self._stream_info.get("source_exclude")
+        self.source_channels, self.source_idx = self.select_channels(source_channels, source_excl)
+
+        target_channels = self._stream_info.get("target")
+        target_excl = self._stream_info.get("target_exclude")
+        self.target_channels, self.target_idx = self.select_channels(target_channels, target_excl)
 
         self.geoinfo_channels = []
         self.geoinfo_idx = []
 
-    def select(self, ch_filters: list[str]) -> None:
+        self._initialized = True
+
+    def select_channels(
+        self, ch_filters: list[str] | None, excl: list[str] | None = None
+    ) -> tuple[list[str], NDArray]:
         """
         Allow user to specify which columns they want to access.
         Get functions only returned for these specified columns.
         """
-        mask = [np.array([f in c for f in ch_filters]).any() for c in self.colnames]
+        if excl and ch_filters:
+            mask = [
+                any(f == c for f in ch_filters) and all(ex not in c for ex in excl)
+                for c in self.colnames
+            ]
+        elif ch_filters:
+            mask = [any(f == c for f in ch_filters) for c in self.colnames]
+        elif excl:
+            mask = [all(ex not in c for ex in excl) for c in self.colnames]
+        else:
+            return self.colnames, self.cols_idx
 
         selected_cols_idx = self.cols_idx[np.where(mask)[0]]
         selected_colnames = [self.colnames[i] for i in np.where(mask)[0]]
-
         return selected_colnames, selected_cols_idx
 
     @override
@@ -182,55 +240,99 @@ class DataReaderFesom(DataReaderTimestep):
 
     @override
     def length(self) -> int:
-        """
-        Length of dataset
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        length of dataset
-        """
+        # Make sure initialization has happened before returning length
+        self._lazy_init()
         return self.len
 
     @override
-    def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
+    def _get_dataset_idxs(self, idx: TIndex) -> tuple[NDArray, DTRange]:
         """
-        Get data for window
+        Get dataset indexes for a given time window index, when the dataset is periodic.
+
+        This function assumes state of a variable is persistent, thus if no data is found
+        in the time window, last measurement is used before the beggining of the windows is used.
 
         Parameters
         ----------
-        idx : int
-            Index of temporal window
-        channels_idx : np.array
-            Selection of channels
+        idx : TIndex
+            Index of the time window.
 
         Returns
         -------
-        data (coords, geoinfos, data, datetimes)
+        NDArray[np.int64]
+            Array of dataset indexes corresponding to the time window.
         """
+        tw_handler = self.time_window_handler
 
+        # Function is separated from the class to allow testing without instantiating the class.
+        dtr = tw_handler.window(idx)
+        # If there is no or only marginal overlap with the dataset, return empty index ranges
+        if (
+            not self.data_start_time
+            or not self.data_end_time
+            or dtr.end < self.data_start_time
+            or dtr.start > self.data_end_time
+            or dtr.start < self.data_start_time
+            or dtr.end > self.data_end_time
+            or (self.data_end_time is not None and dtr.start > self.data_end_time)
+        ):
+            return (np.array([], dtype=np.int64), dtr)
+
+        # relative time in dataset
+        delta_t_start = dtr.start - self.data_start_time
+        delta_t_end = dtr.end - self.data_start_time - t_epsilon
+        assert isinstance(delta_t_start, np.timedelta64), "delta_t_start must be timedelta64"
+        start_didx = delta_t_start // self.period
+        end_didx = delta_t_end // self.period
+
+        # adjust start_idx if not exactly on start time
+        if (delta_t_start % self.period) > np.timedelta64(0, "s"):
+            # empty window in between two timesteps
+            if start_didx == end_didx:
+                return (np.array([start_didx], dtype=np.int64), dtr)
+            start_didx += 1
+
+        end_didx = start_didx + int((dtr.end - dtr.start - t_epsilon) / self.period)
+
+        return (np.arange(start_didx, end_didx + 1, dtype=np.int64), dtr)
+
+    @override
+    def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
+        self._lazy_init()
         (t_idxs, dtr) = self._get_dataset_idxs(idx)
-
-        if self.ds is None or self.len == 0 or len(t_idxs) == 0:
+        if self.len == 0 or len(t_idxs) == 0:
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
-        # TODO: handle sub-sampling
         start_row = t_idxs[0] * self.mesh_size
         end_row = (t_idxs[-1] + 1) * self.mesh_size
-        data = self.data.oindex[start_row:end_row, channels_idx]
 
-        lat = np.expand_dims(self.data.oindex[start_row:end_row, self.lat_index], 1)
-        lon = np.expand_dims(self.data.oindex[start_row:end_row, self.lon_index], 1)
+        # Note: we read all columns from start_row to end_row once,
+        # then select the ones we need. This is more efficient for Zarr.
+        full_data_slice = self.data[start_row:end_row]
+        time_slice = self.time[start_row:end_row]
 
-        coords = np.concatenate([lat, lon], 1)
-        # empty geoinfos
+        # Define the specific slices we need from the larger block
+        data_lazy = full_data_slice[:, channels_idx]
+        lat_lazy = full_data_slice[:, self.lat_index]
+        lon_lazy = full_data_slice[:, self.lon_index]
+        datetimes_lazy = time_slice
+
+        # Dask optimizes this to a single (or few) efficient read operation(s).
+        data, lat, lon, datetimes = dask.compute(
+            data_lazy, lat_lazy, lon_lazy, datetimes_lazy, scheduler="single-threaded"
+        )
+
+        if self._lat_needs_conversion:
+            lat = 90.0 - lat
+
+        if self._lon_needs_conversion:
+            lon = ((lon + 180.0) % 360.0) - 180.0
+
+        coords = np.stack([lat, lon], axis=1)
         geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
-        datetimes = np.squeeze(self.time[start_row:end_row])
+        datetimes = np.squeeze(datetimes)
 
         rd = ReaderData(
             coords=coords,
@@ -238,6 +340,5 @@ class DataReaderFesom(DataReaderTimestep):
             data=data,
             datetimes=datetimes,
         )
-        check_reader_data(rd, dtr)
 
         return rd

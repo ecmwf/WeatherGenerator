@@ -21,7 +21,7 @@ import numpy as np
 import polars as pl
 from torch import Tensor
 
-import weathergen.utils.config as config
+import weathergen.common.config as config
 from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 
 _weathergen_timestamp = "weathergen.timestamp"
@@ -120,12 +120,10 @@ class TrainLogger:
         log_vals += [lr]
 
         for st in self.cf.streams:
-            st_name = st["name"]
-            loss = losses_all[st_name]
-            stddev = stddev_all[st_name]
+            loss = losses_all[st["name"]]
+            stddev = stddev_all[st["name"]]
 
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts):
-                lf_name = _clean_name(lf_name)
                 metrics[_key_loss(st["name"], lf_name)] = loss[:, :, j].nanmean().item()
 
                 for k, ch_n in enumerate(st.train_target_channels):
@@ -134,7 +132,7 @@ class TrainLogger:
                     )
                 log_vals += [loss[:, :, j].nanmean().item()]
 
-            metrics[_key_stddev(st_name)] = stddev.nanmean().item()
+            metrics[_key_stddev(st["name"])] = stddev.nanmean().item()
 
             log_vals += [stddev.nanmean().item()]
 
@@ -144,10 +142,8 @@ class TrainLogger:
         log_vals = []
         log_vals += [perf_gpu]
         log_vals += [perf_mem]
-        if perf_gpu > 0.0:
-            metrics[_performance_gpu] = perf_gpu
-        if perf_mem > 0.0:
-            metrics[_performance_memory] = perf_mem
+        metrics[_performance_gpu] = perf_gpu
+        metrics[_performance_memory] = perf_mem
         self.log_metrics("train", metrics)
         with open(self.path_run / (self.cf.run_id + "_perf_log.txt"), "ab") as f:
             np.savetxt(f, log_vals)
@@ -166,16 +162,17 @@ class TrainLogger:
         log_vals += [samples]
 
         for st in self.cf.streams:
-            st_name = st["name"]
-            loss = losses_all[st_name]
-            stddev = stddev_all[st_name]
+            loss = losses_all[st["name"]]
+            stddev = stddev_all[st["name"]]
             for j, (lf_name, _) in enumerate(self.cf.loss_fcts_val):
-                metrics[_key_loss(st_name, lf_name)] = loss[:, :, j].nanmean().item()
+                metrics[_key_loss(st["name"], lf_name)] = loss[:, :, j].nanmean().item()
                 for k, ch_n in enumerate(st.val_target_channels):
-                    metrics[_key_loss_chn(st_name, lf_name, ch_n)] = loss[:, k, j].nanmean().item()
+                    metrics[_key_loss_chn(st["name"], lf_name, ch_n)] = (
+                        loss[:, k, j].nanmean().item()
+                    )
                 log_vals += [loss[:, :, j].nanmean().item()]
 
-            metrics[_key_stddev(st_name)] = stddev.nanmean().item()
+            metrics[_key_stddev(st["name"])] = stddev.nanmean().item()
             log_vals += [stddev.nanmean().item()]
 
         self.log_metrics("val", metrics)
@@ -429,24 +426,30 @@ def clean_df(df, columns: list[str] | None):
     return df
 
 
-def _clean_name(n: str) -> str:
-    """Cleans the stream name to only retain alphanumeric characters"""
-    return "".join([c for c in n if c.isalnum()])
+def clean_name(s: str) -> str:
+    """
+    Remove all characters from a string except letters, digits, and underscores.
+
+    Args:
+        s (str): The input string.
+
+    Returns:
+        str: A new string containing only alphanumeric characters and underscores,
+             in the same order and capitalization as they appeared in the input.
+    """
+    return "".join(c for c in s if c.isalnum() or c == "_")
 
 
 def _key_loss(st_name: str, lf_name: str) -> str:
-    st_name = _clean_name(st_name)
-    lf_name = _clean_name(lf_name)
+    st_name = clean_name(st_name)
     return f"stream.{st_name}.loss_{lf_name}.loss_avg"
 
 
 def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
-    st_name = _clean_name(st_name)
-    lf_name = _clean_name(lf_name)
-    ch_name = _clean_name(ch_name)
+    st_name = clean_name(st_name)
     return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
 
 
 def _key_stddev(st_name: str) -> str:
-    st_name = _clean_name(st_name)
+    st_name = clean_name(st_name)
     return f"stream.{st_name}.stddev_avg"

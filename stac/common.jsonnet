@@ -42,7 +42,13 @@
       roles: ['provider'],
       url: 'https://www.cma.gov.cn/',
     },
+    awi: {
+      name: 'AWI',
+      roles: ['provider'],
+      url: 'https://www.awi.de',
+    },
   },
+
   hpc: {
     leonardo: 'leonardo',
     hpc2020: 'hpc2020',

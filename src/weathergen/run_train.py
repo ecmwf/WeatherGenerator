@@ -18,10 +18,12 @@ import time
 import traceback
 from pathlib import Path
 
+import weathergen.common.config as config
 import weathergen.utils.cli as cli
-import weathergen.utils.config as config
 from weathergen.train.trainer import Trainer
 from weathergen.utils.logger import init_loggers
+
+logger = logging.getLogger(__name__)
 
 
 def inference():
@@ -59,13 +61,17 @@ def inference_from_args(argl: list[str]):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
-    init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
+    devices = Trainer.init_torch()
+    cf = Trainer.init_ddp(cf)
+
+    init_loggers(cf.run_id)
+
+    logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
 
     cf.run_history += [(args.from_run_id, cf.istep)]
 
     trainer = Trainer()
-    trainer.inference(cf, args.from_run_id, args.epoch)
+    trainer.inference(cf, devices, args.from_run_id, args.epoch)
 
 
 ####################################################################################################
@@ -87,15 +93,12 @@ def train_continue_from_args(argl: list[str]):
     parser = cli.get_continue_parser()
     args = parser.parse_args(argl)
 
-    init_loggers()
-
     if args.finetune_forecast:
         finetune_overwrite = dict(
             training_mode="forecast",
             forecast_delta_hrs=0,  # 12
             forecast_steps=1,  # [j for j in range(1,9) for i in range(4)]
             forecast_policy="fixed",  # 'sequential_random' # 'fixed' #'sequential' #_random'
-            forecast_freeze_model=True,
             forecast_att_dense_rate=1.0,  # 0.25
             fe_num_blocks=8,
             fe_num_heads=16,
@@ -127,20 +130,16 @@ def train_continue_from_args(argl: list[str]):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
-    init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
+    devices = Trainer.init_torch()
+    cf = Trainer.init_ddp(cf)
+
+    init_loggers(cf.run_id)
 
     # track history of run to ensure traceability of results
     cf.run_history += [(args.from_run_id, cf.istep)]
 
-    if args.finetune_forecast:
-        if cf.forecast_freeze_model:
-            cf.with_fsdp = False
-            import torch
-
-            torch._dynamo.config.optimize_ddp = False
     trainer = Trainer()
-    trainer.run(cf, args.from_run_id, args.epoch)
+    trainer.run(cf, devices, args.from_run_id, args.epoch)
 
 
 ####################################################################################################
@@ -169,19 +168,26 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
     cf = config.set_run_id(cf, args.run_id, False)
 
-    fname_debug_logging = f"./logs/debug_log_{cf.run_id}.txt"
-    init_loggers(logging_level=logging.DEBUG, debug_output_streams=fname_debug_logging)
+    cf.data_loader_rng_seed = int(time.time())
+    devices = Trainer.init_torch()
+    cf = Trainer.init_ddp(cf)
+
+    # if cf.rank == 0:
+    # this line should probably come after the processes have been sorted out else we get lots
+    # of duplication due to multiple process in the multiGPU case
+    init_loggers(cf.run_id)
+
+    logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
 
     cf.streams = config.load_streams(Path(cf.streams_directory))
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
-    cf.data_loader_rng_seed = int(time.time())
 
     trainer = Trainer(checkpoint_freq=250, print_freq=10)
 
     try:
-        trainer.run(cf)
+        trainer.run(cf, devices)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()

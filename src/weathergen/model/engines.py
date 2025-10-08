@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
+from weathergen.common.config import Config
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -25,7 +26,7 @@ from weathergen.model.embeddings import (
 )
 from weathergen.model.layers import MLP
 from weathergen.model.utils import ActivationFactory
-from weathergen.utils.config import Config, get_dtype
+from weathergen.utils.utils import get_dtype
 
 
 class EmbeddingEngine:
@@ -384,7 +385,6 @@ class EnsPredictionHead(torch.nn.Module):
                 self.pred_heads[-1].append(fal)
 
     #########################################
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
     def forward(self, toks):
         preds = []
         for pred_head in self.pred_heads:

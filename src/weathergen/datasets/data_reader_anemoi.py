@@ -253,7 +253,7 @@ class DataReaderAnemoi(DataReaderTimestep):
             ]
         )
 
-        return chs_idx
+        return np.array(chs_idx, dtype=np.int64)
 
 
 def _clip_lat(lats: NDArray) -> NDArray[np.float32]:

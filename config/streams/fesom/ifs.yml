@@ -7,17 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-ERA5 :
-  type : anemoi
-  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
-  source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp']
-  target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp']
+IFS_ATMO :
+  type : fesom
+  filenames : ['atmos_all']
   loss_weight : 1.
+  source : null
+  target : null
+  target_exclude: ['msl', 'tsr', 'tsrc', 'z']
   masking_rate : 0.6
   masking_rate_none : 0.05
-  token_size : 8
-  tokenize_spacetime : True
-  max_num_targets: -1
+  token_size : 128
   embed : 
     net : transformer
     num_tokens : 1
