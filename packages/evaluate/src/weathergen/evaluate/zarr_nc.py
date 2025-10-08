@@ -498,12 +498,19 @@ if __name__ == "__main__":
             for j in range(n_samples):
                 _logger.info(f"Processing sample {j}, forecast step {i + 1}")
                 dict_sample_all_steps.setdefault(j, []).append(fs_i_all_sample[j])
-        save_samples_to_netcdf(
-            str(type)[:4],
-            dict_sample_all_steps,
-            FSTEP_HOURS,
-            run_id,
-            output_dir,
-            output_format,
-            config,
-        )
+        #check dict_sample_all_steps is not empty
+        assert dict_sample_all_steps, "No data to save, dict_sample_all_steps is empty."
+        try:
+            _logger.info(f"Saving {type} data to {output_format} format in {output_dir}.")
+            save_samples_to_netcdf(
+                str(type)[:4],
+                dict_sample_all_steps,
+                FSTEP_HOURS,
+                run_id,
+                output_dir,
+                output_format,
+                config,
+            )#
+        except Exception as e:
+            _logger.error(f"Error saving {type} data: {e}")
+        _logger.info(f"Finished processing {type} for run ID {run_id}.")
