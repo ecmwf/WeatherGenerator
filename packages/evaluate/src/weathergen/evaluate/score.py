@@ -619,7 +619,10 @@ class Scores:
 
         return rmse
 
-    def sort_by_coords(self, da_to_sort, da_reference):
+    @staticmethod
+    def sort_by_coords(
+        da_to_sort: xr.DataArray, da_reference: xr.DataArray
+    ) -> xr.DataArray:
         """
         Sorts one xarray.DataArray's coordinate ordering to match a reference array using KDTree.
 
@@ -672,9 +675,10 @@ class Scores:
         unmatched_mask = ~np.isfinite(dist)
         if np.any(unmatched_mask):
             n_unmatched = np.sum(unmatched_mask)
-            raise ValueError(
-                f"Found {n_unmatched} reference coordinates with no matching coordinates in array to sort"
+            _logger.info(
+                f"Found {n_unmatched} reference coordinates with no matching coordinates in array to sort. Returning NaN DataArray."
             )
+            return xr.full_like(da_to_sort, np.nan)
 
         # Reorder da_to_sort to match reference ordering
         return da_to_sort.isel(ipoint=indices)
