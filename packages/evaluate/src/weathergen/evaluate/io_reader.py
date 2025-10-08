@@ -15,8 +15,7 @@ import numpy as np
 import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
-
-from weathergen.common.config import load_config, load_model_config
+from weathergen.common.config import _load_private_conf, load_config, load_model_config
 from weathergen.common.io import ZarrIO
 from weathergen.evaluate.derived_channels import DeriveChannels
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
@@ -77,8 +76,8 @@ class Reader:
             config with plotting and evaluation options for that run id
         run_id : str
             run id of the model
-        private_paths: lists
-            list of private paths for the supported HPC
+        private_paths: dict
+            dictionary of private paths for the supported HPC
         """
         self.eval_cfg = eval_cfg
         self.run_id = run_id
@@ -283,9 +282,12 @@ class WeatherGenReader(Reader):
         self.inference_cfg = self.get_inference_config()
 
         if not self.results_base_dir:
-            self.results_base_dir = Path(self.inference_cfg["run_path"])
+            pcfg = _load_private_conf()
+            self.results_base_dir = (
+                Path(pcfg.get("path_shared_working_dir")) / "results"
+            )
             _logger.info(
-                f"Results directory obtained from model config: {self.results_base_dir}"
+                f"Results directory obtained from private config: {self.results_base_dir}"
             )
         else:
             _logger.info(f"Results directory parsed: {self.results_base_dir}")
