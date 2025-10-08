@@ -517,6 +517,27 @@ class WeatherGenReader(Reader):
 
     ######## reader utils ########
 
+    def get_stream(self, stream: str):
+        """
+        returns the dictionary associated to a particular stream.
+        Returns an empty dictionary if the stream does not exist in the Zarr file.  
+
+        Parameters
+        ----------
+        stream: str
+            the stream name
+
+        Returns
+        -------
+        dict
+            the config dictionary associated to that stream
+        """
+        stream_dict = {}
+        with ZarrIO(self.fname_zarr) as zio:
+            if stream in zio.streams:
+                stream_dict = self.eval_cfg.streams.get(stream, {})
+        return stream_dict
+
     def get_samples(self) -> set[int]:
         with ZarrIO(self.fname_zarr) as zio:
             return set(int(s) for s in zio.samples)
