@@ -14,15 +14,45 @@ from pathlib import Path
 import numpy as np
 import omegaconf as oc
 import xarray as xr
+from scipy.spatial import cKDTree
 from tqdm import tqdm
 
 from weathergen.evaluate.io_reader import Reader
-from weathergen.evaluate.plot_utils import plot_metric_region
-from weathergen.evaluate.plotter import LinePlots, Plotter
+from weathergen.evaluate.plot_utils import plot_metric_region, score_card_metric_region
+from weathergen.evaluate.plotter import LinePlots, Plotter, ScoreCards
 from weathergen.evaluate.score import VerifiedData, get_score
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
+
+
+def sort_by_coords(da_to_sort, da_reference):
+    """Sort da_to_sort to match da_reference's coordinate ordering using KDTree."""
+
+    # Extract coordinates
+    ref_lats = da_reference.lat.values
+    ref_lons = da_reference.lon.values
+    sort_lats = da_to_sort.lat.values
+    sort_lons = da_to_sort.lon.values
+
+    # Build KDTree on coordinates to sort
+    sort_coords = np.column_stack((sort_lats, sort_lons))
+    tree = cKDTree(sort_coords)
+
+    # Find nearest neighbors for reference coordinates
+    ref_coords = np.column_stack((ref_lats, ref_lons))
+    dist, indices = tree.query(ref_coords, distance_upper_bound=1e-5)
+
+    # Check for unmatched coordinates
+    unmatched_mask = ~np.isfinite(dist)
+    if np.any(unmatched_mask):
+        n_unmatched = np.sum(unmatched_mask)
+        raise ValueError(
+            f"Found {n_unmatched} reference coordinates with no matching coordinates in array to sort"
+        )
+
+    # Reorder da_to_sort to match reference ordering
+    return da_to_sort.isel(ipoint=indices)
 
 
 def get_next_data(fstep, da_preds, da_tars, fsteps):
@@ -36,6 +66,12 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
     if next_fstep is not None:
         preds_next = da_preds.get(next_fstep, None)
         tars_next = da_tars.get(next_fstep, None)
+        tars = da_tars.get(fstep, None)
+        preds = da_preds.get(fstep, None)
+
+        # Reindex to match the current forecast step's coordinates if necessary
+        preds_next = sort_by_coords(preds_next, preds)
+        tars_next = sort_by_coords(tars_next, tars)
     else:
         preds_next = None
         tars_next = None
@@ -71,27 +107,22 @@ def calc_scores_per_stream(
 
     available_data = reader.check_availability(stream, mode="evaluation")
 
+    fsteps = available_data.fsteps
+    samples = available_data.samples
+    channels = available_data.channels
+
     output_data = reader.get_data(
         stream,
         region=region,
-        fsteps=available_data.fsteps,
-        samples=available_data.samples,
-        channels=available_data.channels,
+        fsteps=fsteps,
+        samples=samples,
+        channels=channels,
         return_counts=True,
     )
 
     da_preds = output_data.prediction
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
-
-    # get coordinate information from retrieved data
-    fsteps = [int(k) for k in da_tars.keys()]
-
-    first_da = list(da_preds.values())[0]
-
-    # TODO: improve the way we handle samples.
-    samples = list(np.atleast_1d(np.unique(first_da.sample.values)))
-    channels = list(np.atleast_1d(first_da.channel.values))
 
     metric_list = []
 
@@ -148,7 +179,16 @@ def calc_scores_per_stream(
 
         metric_list.append(combined_metrics)
 
-        metric_stream.loc[{"forecast_step": int(fstep)}] = combined_metrics
+        assert int(combined_metrics.forecast_step) == int(fstep), (
+            "Different steps in data and metrics. Please check."
+        )
+
+        metric_stream.loc[
+            {
+                "forecast_step": int(combined_metrics.forecast_step),
+                "sample": combined_metrics.sample,
+            }
+        ] = combined_metrics
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
@@ -423,12 +463,15 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     }
 
     plotter = LinePlots(plot_cfg, summary_dir)
+    sc_plotter = ScoreCards(plot_cfg, summary_dir)
 
     for region in regions:
         for metric in metrics:
             plot_metric_region(
                 metric, region, runs, scores_dict, plotter, print_summary
             )
+            if eval_opt.get("score_cards", False):
+                score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
 
 
 ############# Utility functions ############
