@@ -102,6 +102,8 @@ class Trainer(TrainerBase):
         self.init(cf, devices)
 
         cf = self.cf
+        self.device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
 
         # !! modifies config: adds config.streams[i].<stage>_source_channels
         # and config.streams[i].<stage>_target_channels !!
@@ -136,7 +138,7 @@ class Trainer(TrainerBase):
         self.model = self.model.to(self.devices[0])
         self.model.load(run_id_trained, epoch)
         logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
-        self.model_params = ModelParams().create(cf)
+        self.model_params = ModelParams(cf).create(cf)
         self.model_params = self.model_params.to(self.devices[0])
         logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
 
