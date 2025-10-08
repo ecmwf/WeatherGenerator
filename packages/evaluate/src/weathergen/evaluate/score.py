@@ -678,7 +678,7 @@ class Scores:
             _logger.info(
                 f"Found {n_unmatched} reference coordinates with no matching coordinates in array to sort. Returning NaN DataArray."
             )
-            return xr.full_like(da_to_sort, np.nan)
+            return xr.full_like(da_reference, np.nan)
 
         # Reorder da_to_sort to match reference ordering
         return da_to_sort.isel(ipoint=indices)
