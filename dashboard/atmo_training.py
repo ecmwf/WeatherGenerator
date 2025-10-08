@@ -73,10 +73,9 @@ st.markdown("## Train")
 
 st.plotly_chart(make_plot(runs.filter(pl.col("tags.stage") == "train")))
 
-# TODO: blows up on cloud streamlit
-# st.markdown("# Validation")
+st.markdown("# Validation")
 
-# st.plotly_chart(make_plot(runs.filter(pl.col("tags.stage") == "val")))
+st.plotly_chart(make_plot(runs.filter(pl.col("tags.stage") == "val")))
 
 
 st.markdown("""

@@ -8,7 +8,6 @@ from functools import lru_cache
 import mlflow
 import mlflow.client
 import polars as pl
-import simple_cache
 import streamlit as st
 
 _logger = logging.getLogger(__name__)
@@ -29,7 +28,6 @@ class MlFlowUpload:
     experiment_name = "/Shared/weathergen-dev/core-model/defaultExperiment"
 
 
-# @lru_cache(maxsize=1)
 @st.cache_resource(ttl=_ttl_sec)
 def setup_mflow():
     # os.environ["DATABRICKS_HOST"] = None

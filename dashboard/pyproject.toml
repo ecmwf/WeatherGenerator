@@ -11,7 +11,7 @@ dependencies = [
     "plotly~=6.1.2",
     "polars~=1.30.0",
     "requests~=2.32.4",
-    "simple-cache>=0.35",
+#    "simple-cache>=0.35",
     "streamlit>=1.46.0",
     "streamlit-authenticator>=0.4.2",
     "watchdog",
