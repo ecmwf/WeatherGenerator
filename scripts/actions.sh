@@ -7,7 +7,7 @@ case "$1" in
   sync)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv sync --all-packages
+      uv sync --all-packages --extra gpu
     )
     ;;
   lint)
@@ -34,7 +34,7 @@ case "$1" in
        src/ scripts/ packages/
     )
     ;;
-  type-check-experimental)
+  type-check)
     (
       cd "$SCRIPT_DIR/packages/common" || exit 1
       uv run --all-packages pyrefly check
@@ -47,13 +47,15 @@ case "$1" in
   unit-test)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run pytest src/
+      uv sync --extra cpu 
+      uv run --extra cpu pytest src/
     )
     ;;
   integration-test)
     (
       cd "$SCRIPT_DIR" || exit 1
-      srun uv run --offline pytest ./integration_tests/small1_test.py --verbose
+      uv sync --offline --all-packages --extra gpu
+      uv run --offline pytest ./integration_tests/small1_test.py --verbose -s
     )
     ;;
   create-links)
@@ -110,7 +112,7 @@ case "$1" in
     )
     ;;
   *)
-    echo "Usage: $0 {sync|lint|lint-check|unit-test|integration-test|create-links|create-jupyter-kernel|jupytext-sync}"
+    echo "Usage: $0 {sync|lint|lint-check|type-check|unit-test|integration-test|create-links|create-jupyter-kernel|jupytext-sync}"
     exit 1
     ;;
 esac

@@ -24,7 +24,7 @@ DUMMY_OVERWRITES = [("num_epochs", 42), ("healpix_level", 42)]
 DUMMY_STREAM_CONF = {
     "ERA5": {
         "type": "anemoi",
-        "filenames": ["aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr"],
+        "filenames": ["aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr"],
         "source": ["u_", "v_", "10u", "10v"],
         "target": ["10u", "10v"],
         "loss_weight": 1.0,
