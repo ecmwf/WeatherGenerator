@@ -7,7 +7,7 @@ case "$1" in
   sync)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv sync --all-packages --extra gpu --extra dev
+      uv sync --all-packages --extra gpu
     )
     ;;
   lint)
