@@ -42,9 +42,9 @@ if st.session_state.get("authentication_status"):
         }
     )
     pg.run()
-    st.sidebar.image(
-        "https://github.com/ecmwf/WeatherGenerator/raw/develop/assets/weathergenerator_logo.png"
-    )
+    # st.sidebar.image(
+    #     "https://github.com/ecmwf/WeatherGenerator/raw/develop/assets/weathergenerator_logo.png"
+    # )
     st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/e/e1/ECMWF_logo.svg")
     st.sidebar.markdown("[weathergenerator.eu](https://weathergenerator.eu)")
     authenticator.logout()

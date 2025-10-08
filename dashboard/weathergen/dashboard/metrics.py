@@ -9,6 +9,7 @@ import mlflow
 import mlflow.client
 import polars as pl
 import simple_cache
+import streamlit as st
 
 _logger = logging.getLogger(__name__)
 
@@ -37,11 +38,14 @@ def setup_mflow():
     mlflow_client = mlflow.client.MlflowClient(
         tracking_uri=MlFlowUpload.tracking_uri, registry_uri=MlFlowUpload.registry_uri
     )
+    _logger.info("MLFlow tracking URI: %s", mlflow.get_tracking_uri())
     return mlflow_client
 
 
-@simple_cache.cache_it(filename=".latest_runs_all_stages.cache", ttl=_ttl_sec)
+# @simple_cache.cache_it(filename=".latest_runs_all_stages.cache", ttl=_ttl_sec)
+@st.cache_data(ttl=_ttl_sec)
 def latest_runs():
+    _logger.info("Downloading latest runs from MLFlow")
     runs_pdf = pl.DataFrame(
         mlflow.search_runs(
             experiment_ids=[experiment_id],
@@ -59,12 +63,14 @@ def latest_runs():
     return latest_run_by_exp
 
 
-@simple_cache.cache_it(filename=".all_runs.cache", ttl=_ttl_sec)
+@st.cache_data(ttl=_ttl_sec)
 def all_runs():
+    _logger.info("Downloading all runs from MLFlow")
     runs_pdf = pl.DataFrame(
         mlflow.search_runs(
             experiment_ids=[experiment_id],
             # filter_string="status='FINISHED' AND tags.completion_status = 'success'",
         )
     )
+    _logger.info("Number of all runs: %d", len(runs_pdf))
     return runs_pdf
