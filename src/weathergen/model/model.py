@@ -865,6 +865,7 @@ class Model(torch.nn.Module):
         for it, block in enumerate(self.fe_blocks):
             aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
             print(f'block type is {type(block)}')
+            block.reset_block_mask()
             tokens = checkpoint(block, tokens, noise_conditioning, aux_info, use_reentrant=False)
 
         return tokens

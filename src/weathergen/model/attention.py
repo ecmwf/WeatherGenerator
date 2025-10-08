@@ -232,6 +232,11 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         # define block mask
         def mask_block_local(batch, head, idx_q, idx_kv):
             return (idx_q // block_factor) == (idx_kv // block_factor)
+        
+        #NOTE: hotfix
+        self.block_factor = block_factor
+        self.qkv_len = qkv_len
+
 
         self.block_mask = create_block_mask(
             mask_block_local, B=None, H=None, Q_LEN=qkv_len, KV_LEN=qkv_len
@@ -243,6 +248,20 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         if with_noise_conditioning:
             self.noise_conditioning = LinearNormConditioning(dim_embed, dtype=self.dtype)
 
+        self.reinit_block_mask = False #NOTE: hotfix
+
+    def reset_block_mask(self):
+        if not self.reinit_block_mask:
+            def mask_block_local(batch, head, idx_q, idx_kv):
+                return (idx_q // self.block_factor) == (idx_kv // self.block_factor)
+
+            self.block_mask = create_block_mask(
+                mask_block_local, B=None, H=None, Q_LEN=self.qkv_len, KV_LEN=self.qkv_len
+            )
+            print("Reinitialized block mask in Local Attention")
+            print(f'Block factor: {self.block_factor}, QKV len: {self.qkv_len}, Mask shape: {self.block_mask.shape}')
+            exit()
+            self.reinit_block_mask = True
 
     def forward(self, x, noise_embedding=None, ada_ln_aux=None):
 
