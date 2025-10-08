@@ -35,9 +35,3 @@ ERA5 :
   pred_head :
     ens_size : 1
     num_layers : 1
-  channel_weights :
-    q_50: 0.1
-    f_50: 0.5
-    2t: 2.0
-    10u: 2.0
-    10v: 2.0
