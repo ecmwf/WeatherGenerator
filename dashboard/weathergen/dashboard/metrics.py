@@ -29,7 +29,8 @@ class MlFlowUpload:
     experiment_name = "/Shared/weathergen-dev/core-model/defaultExperiment"
 
 
-@lru_cache(maxsize=1)
+# @lru_cache(maxsize=1)
+@st.cache_resource(ttl=_ttl_sec)
 def setup_mflow():
     # os.environ["DATABRICKS_HOST"] = None
     # os.environ["DATABRICKS_TOKEN"] = None
@@ -42,8 +43,7 @@ def setup_mflow():
     return mlflow_client
 
 
-# @simple_cache.cache_it(filename=".latest_runs_all_stages.cache", ttl=_ttl_sec)
-@st.cache_data(ttl=_ttl_sec)
+@st.cache_data(ttl=_ttl_sec, max_entries=2)
 def latest_runs():
     _logger.info("Downloading latest runs from MLFlow")
     runs_pdf = pl.DataFrame(
@@ -63,7 +63,7 @@ def latest_runs():
     return latest_run_by_exp
 
 
-@st.cache_data(ttl=_ttl_sec)
+@st.cache_data(ttl=_ttl_sec, max_entries=2)
 def all_runs():
     _logger.info("Downloading all runs from MLFlow")
     runs_pdf = pl.DataFrame(
