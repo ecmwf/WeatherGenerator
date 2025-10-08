@@ -14,7 +14,6 @@ from pathlib import Path
 import numpy as np
 import omegaconf as oc
 import xarray as xr
-from scipy.spatial import cKDTree
 from tqdm import tqdm
 
 from weathergen.evaluate.io_reader import Reader
