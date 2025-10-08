@@ -10,10 +10,6 @@ authors = [
 requires-python = ">=3.12,<3.13"
 # TODO: split the plotting dependencies into their own dep groups, they are not required.
 dependencies = [
-#{ name = "torch", version="2.6.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker='extra=="cpu"'},
-#  { name = "torch", version="2.6.0+cu126", marker='extra!="cpu"'},
-# 'torch==2.6.0',
-# 'torch==2.6.0+cu126',
  # The first version of triton that is officially published for x86_64 and aarch64.
  # Note: will need to update to torch > 2.6 to use it.
 # 'pytorch-triton==3.3.0',
@@ -35,20 +31,8 @@ dependencies = [
  "numexpr>=2.11.0",
  "weathergen-common",
  "weathergen-evaluate",
-# "torch",
-# "pytorch-triton>=0.0.1",
 ]
 
-[project.optional-dependencies]
-
-cpu = [
-  'torch==2.6.0',
-]
-
-gpu = [
-  'torch==2.6.0+cu126',
-  "flash-attn==2.7.4",
-]
 
 [project.urls]
 Homepage = "https://www.weathergenerator.eu"
@@ -143,6 +127,24 @@ ignore = [
 line-ending = "lf"
 
 
+
+# Torch listed as optional dependencies.
+# uv and python can only filter dependencies by platform, not by capability.
+# We need to support:
+# x86_64: cpu (unit tests) + gpu 
+# aarch64: gpu
+[project.optional-dependencies]
+
+cpu = [
+  'torch==2.6.0',
+]
+
+gpu = [
+  'torch==2.6.0+cu126',
+  # flash-attn also has a torch dependency.
+  "flash-attn==2.7.4",
+]
+
 [tool.uv]
 # Most work is done a distributed filesystem, where hardlink is not always possible.
 # Also, trying to resolve some permissions issue, see 44.
@@ -166,7 +168,8 @@ environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
-constraint-dependencies = ["torch<2.7"]
+# Required to handle flash-attn
+#constraint-dependencies = ["torch<2.7"]
 
 conflicts = [
   [
