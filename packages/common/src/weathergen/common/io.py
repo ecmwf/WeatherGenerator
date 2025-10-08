@@ -49,7 +49,7 @@ class IOReaderData:
     datetimes: NDArray[NPDT64]
 
     @classmethod
-    def create(cls, other: typing.Any) -> typing.Self:
+    def create(cls, other: typing.Any) -> "IOReaderData":
         """
         create an instance from data_reader_base.ReaderData instance.
 
