@@ -17,7 +17,13 @@ setup_mflow()
 
 
 
-st.markdown("# Training overview")
+st.markdown("""
+            
+# Training overview
+ 
+Note: num_samples only shows the number of sample per run.
+It does not include chained runs or total steps with finetuning included. 
+""")
 
 runs = latest_runs()
 all_runs_pdf = all_runs()
@@ -27,7 +33,7 @@ all_runs_pdf = all_runs()
 accepted_metrics = [
     f"metrics.stream.{stream}.loss_mse.loss_avg"
     for stream in ["ERA5", "SurfaceCombined", "NPPATMS"]
-] + ["metrics.num_samples"]
+] + ["metrics.num_samples"] + ["metrics.loss_avg_mean"]
 
 
 def make_plot(df):
@@ -75,6 +81,8 @@ st.markdown("""
 
 Hypothesis: loss ~ O(num_samples ^ {-alpha})
             
+
+The deep blue dots are the most recent runs, the light blue are the eldest.
 """)
 
 train_runs = runs.filter(pl.col("tags.stage") == "train")
