@@ -10,9 +10,6 @@ authors = [
 requires-python = ">=3.12,<3.13"
 # TODO: split the plotting dependencies into their own dep groups, they are not required.
 dependencies = [
- # The first version of triton that is officially published for x86_64 and aarch64.
- # Note: will need to update to torch > 2.6 to use it.
-# 'pytorch-triton==3.3.0',
  'numpy~=2.2',
  'astropy_healpix~=1.1.2',
  'zarr~=2.17',
@@ -65,6 +62,25 @@ dev = [
  "tensorboard>=2.20.0",
  "pdbpp>=0.11.7",
  "pyrefly==0.33.0",
+]
+
+
+# Torch listed as optional dependencies.
+# uv and python can only filter dependencies by platform, not by capability.
+# Following the recommendations from https://docs.astral.sh/uv/guides/integration/pytorch
+# We need to support:
+# x86_64: cpu (unit tests) + gpu 
+# aarch64: gpu
+[project.optional-dependencies]
+
+cpu = [
+  'torch==2.6.0',
+]
+
+gpu = [
+  'torch==2.6.0+cu126',
+  # flash-attn also has a torch dependency.
+  "flash-attn",
 ]
 
 
@@ -128,23 +144,6 @@ line-ending = "lf"
 
 
 
-# Torch listed as optional dependencies.
-# uv and python can only filter dependencies by platform, not by capability.
-# Following the recommendations from https://docs.astral.sh/uv/guides/integration/pytorch
-# We need to support:
-# x86_64: cpu (unit tests) + gpu 
-# aarch64: gpu
-[project.optional-dependencies]
-
-cpu = [
-  'torch==2.6.0',
-]
-
-gpu = [
-  'torch==2.6.0+cu126',
-  # flash-attn also has a torch dependency.
-  "flash-attn==2.7.4",
-]
 
 [tool.uv]
 # Most work is done a distributed filesystem, where hardlink is not always possible.
@@ -224,8 +223,10 @@ flash-attn = [
 #  { url = "https://github.com/cathalobrien/get-flash-attn/releases/download/v0.1-alpha/flash_attn-2.7.4+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
 # This version was rebuilt locally on santis and uploaded.
   { url = "https://object-store.os-api.cci1.ecmwf.int/weathergenerator-dev/wheels/flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
-  { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
-  { index = "pytorch-cpu", marker = "sys_platform == 'macosx'"},
+#  { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiTRUE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
+#  { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
+  { url = "https://github.com/cathalobrien/get-flash-attn/releases/download/v0.1-alpha/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" , extra="gpu"},
+#  { index = "pytorch-cpu", marker = "sys_platform == 'macosx'"},
 ]
 
 
@@ -233,6 +234,7 @@ torch = [
 # Explicit pin for GPU
   { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-linux_aarch64.whl", marker = 'sys_platform == "linux" and platform_machine == "aarch64"', extra="gpu" },
   { index = "pytorch-cu126", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'", extra="gpu" },
+#  { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl", marker = 'sys_platform == "linux"  and platform_machine == "x86_64"', extra="gpu" },
 #  { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl", marker = 'sys_platform == "linux"  and platform_machine == "x86_64"', extra="gpu" },
 # Use the public repo for CPU versions.
   { index = "pytorch-cpu", extra="cpu" },
