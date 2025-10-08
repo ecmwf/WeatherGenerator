@@ -3,10 +3,8 @@ import logging
 import plotly.express as px
 import plotly.graph_objects as go
 import polars as pl
-import polars.selectors as ps
 import streamlit as st
 from plotly.subplots import make_subplots
-from polars import col as C
 
 from weathergen.dashboard.metrics import all_runs, latest_runs, setup_mflow
 
@@ -18,41 +16,12 @@ _logger.info("Setting up MLFlow")
 setup_mflow()
 
 
+
+st.markdown("# Training overview")
+
 runs = latest_runs()
-
-st.markdown("# Overview")
-
-
 all_runs_pdf = all_runs()
 
-st.markdown("""The number of runs by month and by HPC.""")
-# TODO: this is here just the number of root run ids.
-#  Does not count how many tries or how many validation experiments were run.
-all_runs_stats = (
-    all_runs_pdf
-    # Remove metrics and tags
-    .select(~ps.starts_with("metrics"))
-    .select(~ps.starts_with("params"))
-    # Just keep roots
-    .filter(C("tags.mlflow.parentRunId").is_null())
-    # Put a month column
-    .with_columns(pl.date(C("start_time").dt.year(), C("start_time").dt.month(), 1).alias("month"))
-)
-
-# st.dataframe(all_runs_stats.group_by("month", "tags.hpc").agg(pl.count("run_id")))
-
-
-st.plotly_chart(
-    px.bar(
-        (all_runs_stats.group_by("month", "tags.hpc").agg(pl.count("run_id"))).to_pandas(),
-        x="month",
-        y="run_id",
-        color="tags.hpc",
-    )
-)
-
-
-st.markdown("# Training metrics")
 
 
 accepted_metrics = [
@@ -101,6 +70,13 @@ st.markdown("# Validation")
 st.plotly_chart(make_plot(runs.filter(pl.col("tags.stage") == "val")))
 
 
+st.markdown("""
+# Scaling
+
+Hypothesis: loss ~ O(num_samples ^ {-alpha})
+            
+""")
+
 train_runs = runs.filter(pl.col("tags.stage") == "train")
 min_end_date = train_runs["start_time"].cast(pl.Float64).min()
 max_end_date = train_runs["start_time"].cast(pl.Float64).max()
@@ -110,13 +86,13 @@ train_runs = train_runs.with_columns(
         / (pl.lit(max_end_date) - pl.lit(min_end_date))
     ).alias("idx")
 )
-train_runs["idx"]
+
 
 st.plotly_chart(
     px.scatter(
         train_runs.to_pandas(),
         x="metrics.num_samples",
-        y="metrics.loss_avg_0_mean",
+        y="metrics.loss_avg_mean",
         color="idx",
         hover_data=["start_time", "tags.hpc", "tags.uploader"],
         log_y=True,

@@ -33,14 +33,19 @@ except Exception as e:
 
 if st.session_state.get("authentication_status"):
     pg = st.navigation(
-        [
-            # The overview page
-            st.Page("a_overview.py"),
-            # The data page
-            st.Page("b_data.py"),
-        ]
+        {
+            "Data": [
+            st.Page("data_overview.py", title="overview")
+        ], "Engineering": [
+            st.Page("eng_overview.py", title="overview")
+    ], "Model:atmo": [
+            st.Page("atmo_training.py", title="training"),
+    ]}
     )
     pg.run()
+    st.sidebar.image("https://github.com/ecmwf/WeatherGenerator/raw/develop/assets/weathergenerator_logo.png")
+    st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/e/e1/ECMWF_logo.svg")
+    st.sidebar.markdown("[weathergenerator.eu](https://weathergenerator.eu)")
     authenticator.logout()
 elif st.session_state.get("authentication_status") is False:
     st.error("Username/password is incorrect")

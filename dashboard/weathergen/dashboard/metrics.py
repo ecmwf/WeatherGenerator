@@ -18,9 +18,8 @@ project = "WeatherGenerator"
 experiment_id = "384213844828345"
 all_stages = ["train", "val"]
 
-# Cache TTL
-# _ttl_sec = 120
-_ttl_sec = 0
+# Cache TTL in seconds
+_ttl_sec = 120
 
 
 class MlFlowUpload:
