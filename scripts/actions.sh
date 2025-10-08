@@ -48,7 +48,7 @@ case "$1" in
     (
       cd "$SCRIPT_DIR" || exit 1
       uv sync --extra cpu 
-      uv --config-file uv_test.toml run --extra cpu pytest src/
+      uv run --extra cpu pytest src/
     )
     ;;
   integration-test)
