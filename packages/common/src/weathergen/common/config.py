@@ -16,6 +16,7 @@ from pathlib import Path
 
 import yaml
 from omegaconf import DictConfig, ListConfig, OmegaConf
+from omegaconf.omegaconf import open_dict
 
 from weathergen.train.utils import get_run_id
 
@@ -143,7 +144,9 @@ def load_config(
         base_config = _load_default_conf()
     else:
         base_config = load_model_config(from_run_id, epoch, private_config.get("model_path", None))
-
+        from_run_id = base_config.run_id
+    with open_dict(base_config):
+        base_config.from_run_id = from_run_id
     # use OmegaConf.unsafe_merge if too slow
     return OmegaConf.merge(base_config, private_config, *overwrite_configs)
 
