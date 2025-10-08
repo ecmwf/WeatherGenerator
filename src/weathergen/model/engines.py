@@ -317,6 +317,7 @@ class ForecastingEngine:
                         )
                     )
                 else:
+                    print(f'diff factor is {diff_factor}')
                     self.fe_blocks.append(
                         MultiSelfAttentionHeadLocal(
                             self.cf.ae_global_dim_embed,
