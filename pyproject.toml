@@ -166,6 +166,7 @@ required-version = ">=0.7.0"
 #environments = [
 #    "sys_platform == 'linux' and platform_machine == 'aarch64'",
 #    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+#    "sys_platform == 'macosx'",
 #]
 
 # One can only have cpu or gpu.
@@ -214,8 +215,6 @@ weathergen-common = { workspace = true }
 weathergen-evaluate = { workspace = true }
 
 
-# This URL was evaluated this way:
-# uv run ~/WeatherGenerator-private/hpc/hpc2020/ecmwf/get-flash-atten.sh
 flash-attn = [
 # The build of Cathal O'Brien is not compatible with the libc build on santis.
 # Hardcode the reference to the swiss cluster for the time being.
@@ -238,7 +237,8 @@ torch = [
 #  { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl", marker = 'sys_platform == "linux"  and platform_machine == "x86_64"', extra="gpu" },
 # Use the public repo for CPU versions.
   { index = "pytorch-cpu", extra="cpu" },
-  { index = "pytorch-cpu", marker = "sys_platform == 'macosx'"},
+  { index = "pytorch-cpu", marker = "sys_platform == 'macosx'", extra="cpu"},
+  { index = "pytorch-cu126", marker = "sys_platform == 'macosx'", extra="gpu"},
 ]
 
 [tool.pytest.ini_options]
