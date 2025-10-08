@@ -49,4 +49,24 @@ st.plotly_chart(
     )
 )
 
+st.markdown(
+"""
+            
+**The number of GPUs by run.**
+
+(only includes runs for which evaluation data has been uploaded)
+
+""")
+
+st.plotly_chart(
+    px.scatter(
+        all_runs_pdf.filter(pl.col("params.num_ranks").is_not_null()).select(["params.num_ranks", "start_time", "tags.hpc"]).to_pandas(),
+        y="params.num_ranks",
+        x="start_time",
+        color="tags.hpc",
+        # hover_data=["start_time", "tags.uploader"],
+        log_y=True,
+    )
+)
+
 

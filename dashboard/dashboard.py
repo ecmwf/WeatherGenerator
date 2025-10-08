@@ -36,9 +36,11 @@ if st.session_state.get("authentication_status"):
         {
             "Data": [
             st.Page("data_overview.py", title="overview")
-        ], "Engineering": [
+        ], 
+        "Engineering": [
             st.Page("eng_overview.py", title="overview")
-    ], "Model:atmo": [
+    ], 
+    "Model:atmo": [
             st.Page("atmo_training.py", title="training"),
     ]}
     )
