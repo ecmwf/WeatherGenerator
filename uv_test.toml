@@ -1,5 +1,15 @@
-[sources]
+[[index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
-torch = [
-  { url = "https://download.pytorch.org/whl/cpu" },
-]
+
+#[sources]
+
+#torch = [
+#  { url = "https://download.pytorch.org/whl/cpu" },
+#]
+
+#flash-attn = [
+#  { index = "pytorch-cpu"},
+#]
