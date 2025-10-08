@@ -433,9 +433,9 @@ def plot_loss_per_stream(
         for line in legend.get_lines():
             line.set(alpha=1.0)
         plt.grid(True, which="both", ls="-")
-        plt.yscale("log")
+        #plt.yscale("log")
         # cap at 1.0 in case of divergence of run (through normalziation, max should be around 1.0)
-        plt.ylim([0.95 * min_val, (None if max_val < 2.0 else min(1.1, 1.025 * max_val))])
+        #plt.ylim([0.95 * min_val, (None if max_val < 2.0 else min(1.1, 1.025 * max_val))])
         if x_scale_log:
             plt.xscale("log")
         plt.title(stream_name)
@@ -547,7 +547,7 @@ def plot_loss_per_run(
     legend = plt.legend(legend_str, loc="lower left")
     for line in legend.get_lines():
         line.set(alpha=1.0)
-    plt.yscale("log")
+    #plt.yscale("log")
     if x_scale_log:
         plt.xscale("log")
     plt.grid(True, which="both", ls="-")
@@ -701,6 +701,7 @@ def plot_train(args=None):
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
+        errs=["loss_mse", "gmm_nll", "ens_gaussian_nll"],
     )
     plot_loss_per_stream(
         ["val"],
@@ -711,6 +712,7 @@ def plot_train(args=None):
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
+        errs=["loss_mse", "gmm_nll", "ens_gaussian_nll"],
     )
     plot_loss_per_stream(
         ["train"],
@@ -721,6 +723,7 @@ def plot_train(args=None):
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
+        errs=["loss_mse", "gmm_nll", "ens_gaussian_nll"],
     )
 
     # plot all cols for all run_ids
@@ -732,6 +735,7 @@ def plot_train(args=None):
             run_data,
             get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
             plot_dir=out_dir,
+            errs=["loss_mse", "gmm_nll", "ens_gaussian_nll"],
         )
     plot_loss_per_run(
         ["val"],
@@ -740,6 +744,7 @@ def plot_train(args=None):
         run_data,
         get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
         plot_dir=out_dir,
+        errs=["loss_mse", "gmm_nll", "ens_gaussian_nll"],
     )
 
 

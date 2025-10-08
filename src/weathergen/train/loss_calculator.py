@@ -153,21 +153,6 @@ class LossCalculator:
         for mask_t in substep_masks:
             assert mask_t.sum() == len(weights_locations) if weights_locations is not None else True
 
-            # Skip empty substeps outright
-            #if mask_t.sum() == 0:
-            #    continue
-
-            # Filter rows that have at least one finite target value
-            #tgt_rows = target[mask_t]  # [Nt, C]
-            #rows_mask = torch.isfinite(tgt_rows).any(dim=-1)  # [Nt]
-            #if rows_mask.sum() == 0:
-            #    continue
-
-            # Slice per-location weights to match filtered rows
-            #weights_points_t = (
-            #    weights_locations[rows_mask] if weights_locations is not None else None
-            #)
-
             if getattr(loss_fct, "__name__", "") == "gmm_nll":
                 assert gmm_params is not None, "GMM params are required for gmm_nll."
                 # Align params with the same rows
@@ -182,8 +167,9 @@ class LossCalculator:
             losses_chs += loss_chs.detach()
             ctr_substeps += 1 if loss != 0.0 else 0 # count contributing substeps
 
-        # normalize over contributing substeps
+        # normalize over forecast steps in window
         losses_chs /= ctr_substeps if ctr_substeps > 0 else 1.0
+        # TODO: substep weight
         loss_lfct = loss_lfct / (ctr_substeps if ctr_substeps > 0 else 1.0)
 
         return loss_lfct, losses_chs
@@ -246,6 +232,8 @@ class LossCalculator:
         for i_stream_info, stream_info in enumerate(self.cf.streams):
             # extract target tokens for current stream from the specified forecast offset onwards
             targets = streams_data[i_batch][i_stream_info].target_tokens[self.cf.forecast_offset :]
+    
+            #import pdb; pdb.set_trace()
 
             stream_data = streams_data[i_batch][i_stream_info]
 
@@ -280,6 +268,9 @@ class LossCalculator:
                 # accumulate loss from different loss functions
                 loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
                 ctr_loss_fcts = 0
+                
+                #import pdb; pdb.set_trace()
+
                 for i_lfct, (loss_fct, loss_fct_weight) in enumerate(self.loss_fcts):
                     # loss for current loss function
                     loss_lfct, loss_lfct_chs = LossCalculator._loss_per_loss_function(

@@ -99,6 +99,21 @@ class Trainer(TrainerBase):
 
         cf = self.cf
 
+        #print("What is the cf in inference", cf)
+        #print("What is cf.loss_fcts_val", cf.loss_fcts_val)
+
+
+        # overwrite filenames in cf 
+        for i, st in enumerate(cf.streams):
+            if st.type == "anemoi":
+                st.filenames = ['/iopsstor/scratch/cscs/shickman/testing_data/aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr']
+        #        st.loss_fcts_val = [["mse", 1.0]]
+                cf.streams[i] = st
+        
+        cf.loss_fcts_val = [["mse", 1.0]]
+        print("What is cf.loss_fcts_val", cf.loss_fcts_val)
+
+
         # !! modifies config: adds config.streams[i].<stage>_source_channels
         # and config.streams[i].<stage>_target_channels !!
         self.dataset_val = MultiStreamDataSampler(

@@ -36,4 +36,4 @@ ERA5 :
     ens_size : 8
     num_layers : 1
     distribution : gmm
-    num_components : 8
+    num_components : 4

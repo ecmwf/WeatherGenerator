@@ -873,9 +873,6 @@ class Model(torch.nn.Module):
             ens_size = self.cf.streams[ii]["pred_head"].get("ens_size", 8)
             if pred_dist == "gmm":
 
-                
-                #print(f"Predicting GMM with {ens_size} samples and {head}")
-
                 # 1) raw params
                 raw_logits, raw_means, raw_log_scales = checkpoint(head, tc_tokens, use_reentrant=False)
                 # 2) valid params
