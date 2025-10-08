@@ -102,6 +102,8 @@ class Trainer(TrainerBase):
         self.init(cf, devices)
 
         cf = self.cf
+        self.device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
 
         # !! modifies config: adds config.streams[i].<stage>_source_channels
         # and config.streams[i].<stage>_target_channels !!
