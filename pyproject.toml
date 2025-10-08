@@ -163,10 +163,10 @@ required-version = ">=0.7.0"
 
 # The supported environments
 # TODO: add macos and windows (CPU only, for running tests)
-environments = [
-    "sys_platform == 'linux' and platform_machine == 'aarch64'",
-    "sys_platform == 'linux' and platform_machine == 'x86_64'",
-]
+#environments = [
+#    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+#    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+#]
 
 # One can only have cpu or gpu.
 conflicts = [
@@ -238,6 +238,7 @@ torch = [
 #  { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl", marker = 'sys_platform == "linux"  and platform_machine == "x86_64"', extra="gpu" },
 # Use the public repo for CPU versions.
   { index = "pytorch-cpu", extra="cpu" },
+  { index = "pytorch-cpu", marker = "sys_platform == 'macosx'"},
 ]
 
 [tool.pytest.ini_options]
