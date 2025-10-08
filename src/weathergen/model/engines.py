@@ -297,6 +297,7 @@ class ForecastingEngine:
         :return: torch.nn.ModuleList containing the forecasting blocks.
         """
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
+        diff_factor = 2 if self.cf.forecast_policy == "diffusion" else 1 #NOTE: this is a hot fix to handle conditioning on previous state via concatenation...
         if self.cf.forecast_policy is not None:
             for i in range(self.cf.fe_num_blocks):
                 # Alternate between global and local attention
@@ -320,8 +321,8 @@ class ForecastingEngine:
                         MultiSelfAttentionHeadLocal(
                             self.cf.ae_global_dim_embed,
                             num_heads=self.cf.fe_num_heads,
-                            qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
-                            block_factor=self.cf.ae_global_block_factor,
+                            qkv_len=self.num_healpix_cells * self.cf.fe_local_num_queries * diff_factor,
+                            block_factor=self.cf.fe_global_block_factor,
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,

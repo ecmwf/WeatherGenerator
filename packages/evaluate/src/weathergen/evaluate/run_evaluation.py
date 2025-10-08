@@ -20,7 +20,6 @@ from weathergen.common.config import _REPO_ROOT
 from weathergen.evaluate.io_reader import Reader
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
-    check_availability,
     metric_list_to_json,
     plot_data,
     plot_summary,

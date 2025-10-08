@@ -42,14 +42,14 @@ pred_mlp_adaln: True
 # one is training an auto-encoder
 forecast_offset : 0
 forecast_delta_hrs: 0
-forecast_steps: 0
-forecast_policy: null
+forecast_steps: 1
+forecast_policy: "diffusion"
 forecast_freeze_model: False
-forecast_att_dense_rate: 1.0
-fe_num_blocks: 0
-fe_num_heads: 16
+forecast_att_dense_rate: 0.2
 fe_global_block_factor: 32
 fe_local_num_queries: 1
+fe_num_blocks: 8
+fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diff_sigma_min: 0.02
@@ -72,7 +72,7 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
-loss_fcts:
+loss_fcts_lat:
   -
     - "mse"
     - 1.0
@@ -91,7 +91,7 @@ freeze_modules: ""
 
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "masking"
+training_mode: "forecast"
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
