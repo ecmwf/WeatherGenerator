@@ -16,7 +16,6 @@ _logger.info("Setting up MLFlow")
 setup_mflow()
 
 
-
 st.markdown("""
             
 # Training overview
@@ -29,11 +28,14 @@ runs = latest_runs()
 all_runs_pdf = all_runs()
 
 
-
-accepted_metrics = [
-    f"metrics.stream.{stream}.loss_mse.loss_avg"
-    for stream in ["ERA5", "SurfaceCombined", "NPPATMS"]
-] + ["metrics.num_samples"] + ["metrics.loss_avg_mean"]
+accepted_metrics = (
+    [
+        f"metrics.stream.{stream}.loss_mse.loss_avg"
+        for stream in ["ERA5", "SurfaceCombined", "NPPATMS"]
+    ]
+    + ["metrics.num_samples"]
+    + ["metrics.loss_avg_mean"]
+)
 
 
 def make_plot(df):

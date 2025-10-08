@@ -14,7 +14,7 @@ case "$1" in
     (
       cd "$SCRIPT_DIR" || exit 1
       uv run --no-project --with "ruff==0.12.2" ruff format --target-version py312 \
-        src/ scripts/ packages/ \
+        src/ scripts/ packages/ dashboard/ \
         && \
       uv run --no-project --with "ruff==0.12.2" \
         ruff check --target-version py312 \
