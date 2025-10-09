@@ -20,7 +20,7 @@ class LearningRateScheduler:
         self,
         optimizer,
         batch_size,
-        num_ranks,
+        world_size,
         lr_start,
         lr_max,
         lr_final_decay,
@@ -47,7 +47,7 @@ class LearningRateScheduler:
 
         self.optimizer = optimizer
         self.batch_size = batch_size
-        self.num_ranks = num_ranks
+        self.world_size = world_size
 
         self.n_steps_warmup = n_steps_warmup
         self.n_steps_decay = n_steps_decay
@@ -56,9 +56,9 @@ class LearningRateScheduler:
         if scaling_policy == "const":
             kappa = 1
         elif scaling_policy == "sqrt":
-            kappa = np.sqrt(batch_size * self.num_ranks)
+            kappa = np.sqrt(batch_size * self.world_size)
         elif scaling_policy == "linear":
-            kappa = batch_size * self.num_ranks
+            kappa = batch_size * self.world_size
         else:
             assert False, "unsupported learning rate policy"
 
