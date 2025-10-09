@@ -14,7 +14,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
 from weathergen.evaluate.io_reader import WeatherGenReader
@@ -69,7 +69,7 @@ def evaluate_from_config(cfg):
     metrics = cfg.evaluation.metrics
     regions = cfg.evaluation.get("regions", ["global"])
 
-    global_plotting_opts = cfg.get("global_plotting_options", DictConfig)
+    global_plotting_opts = cfg.get("global_plotting_options", {})
 
     # to get a structure like: scores_dict[metric][region][stream][run_id] = plot
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))

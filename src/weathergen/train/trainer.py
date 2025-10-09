@@ -215,9 +215,6 @@ class Trainer(TrainerBase):
                 )
             logger.info(f"Loaded model id={run_id_contd}.")
 
-        if cf.forecast_freeze_model:
-            self.model = self.model.freeze_weights_forecast()
-
         for name, module in self.model.named_modules():
             name = module.name if hasattr(module, "name") else name
             # avoid the whole model element which has name ''

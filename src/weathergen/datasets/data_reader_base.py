@@ -71,8 +71,24 @@ def str_to_datetime64(s: str | int | NPDT64) -> NPDT64:
     """
     if isinstance(s, datetime64):
         return s
-    format_str = "%Y%m%d%H%M%S"
-    return np.datetime64(datetime.datetime.strptime(str(s), format_str))
+    s_str = str(s)
+
+    supported_formats = [
+        "%Y%m%d%H%M%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+    ]
+
+    for fmt in supported_formats:
+        try:
+            dt_obj = datetime.datetime.strptime(s_str, fmt)
+            return np.datetime64(dt_obj)
+        except ValueError:
+            pass
+
+    raise ValueError(f"Unable to parse the date string '{s}'. Original string might be invalid.")
 
 
 def str_to_timedelta(s: str | datetime.timedelta) -> pd.Timedelta:
@@ -262,6 +278,10 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
 class DataReaderBase(metaclass=ABCMeta):
     """
     Base class for data readers.
+
+    Coordinates must be provided in standard geographical format:
+    latitude in degrees from -90 (South) to +90 (North),
+    and longitude in degrees from -180 (West) to +180 (East).
     """
 
     # The fields that need to be set by the child classes
