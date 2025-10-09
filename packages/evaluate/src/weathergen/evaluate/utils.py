@@ -87,8 +87,6 @@ def calc_scores_per_stream(
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
 
-    metric_list = []
-
     metric_stream = xr.DataArray(
         np.full(
             (len(samples), len(fsteps), len(channels), len(metrics)),
@@ -140,8 +138,6 @@ def calc_scores_per_stream(
             )
             continue
 
-        metric_list.append(combined_metrics)
-
         assert int(combined_metrics.forecast_step) == int(fstep), (
             "Different steps in data and metrics. Please check."
         )
@@ -154,9 +150,6 @@ def calc_scores_per_stream(
         ] = combined_metrics
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
-
-    metric_stream = xr.concat(metric_list, dim="forecast_step")
-    metric_stream = metric_stream.assign_coords({"forecast_step": fsteps})
 
     return metric_stream, points_per_sample
 
