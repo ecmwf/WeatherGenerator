@@ -505,10 +505,8 @@ class Trainer(TrainerBase):
 
         self.optimizer.zero_grad()
 
-        # Unweighted loss, real weighted loss, std for losses that need it
         self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
-        # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
             forecast_steps = batch[-1]
@@ -527,11 +525,19 @@ class Trainer(TrainerBase):
                     preds=preds,
                     streams_data=batch[0],
                 )
+                
+                # Add KL regularization if using stochastic latents
                 if cf.latent_noise_kl_weight > 0.0:
-                    kl = torch.cat([posterior.kl() for posterior in posteriors])
-                    loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
+                    # Posteriors is a list of posteriors (one per chunk)
+                    # Filter out None values (from chunks without data)
+                    valid_posteriors = [p for p in posteriors if p is not None]
+                    if len(valid_posteriors) > 0:
+                        kl = torch.cat([posterior.kl() for posterior in valid_posteriors])
+                        kl_loss = kl.mean()
+                        loss_values.loss = loss_values.loss + cf.latent_noise_kl_weight * kl_loss
 
             loss_scalar = loss_values.loss
+            
             # backward pass
             self.grad_scaler.scale(loss_values.loss).backward()
 
@@ -559,7 +565,7 @@ class Trainer(TrainerBase):
             if bidx % log_interval == 0:
                 self._log(TRAIN)
 
-            # save checkpoint (with designation _latest)
+            # save checkpoint
             if bidx % self.checkpoint_freq == 0 and bidx > 0:
                 self.save_model(-1)
 

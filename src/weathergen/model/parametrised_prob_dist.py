@@ -35,9 +35,32 @@ class DiagonalGaussianDistribution:
         if self.deterministic:
             self.var = self.std = torch.zeros_like(self.mean).to(device=self.parameters.device)
 
-    def sample(self):
-        x = self.mean + self.std * torch.randn(self.mean.shape).to(device=self.parameters.device)
-        return x
+    # NOTE: old sampling code
+    #def sample(self):
+    #    x = self.mean + self.std * torch.randn(self.mean.shape).to(device=self.parameters.device)
+    #    return x
+
+    def sample(self, num_samples=1):
+        """
+        Draw samples from the distribution.
+        
+        Args:
+            num_samples: Number of independent samples to draw
+            
+        Returns:
+            Tensor of shape [num_samples, *mean.shape] if num_samples > 1,
+            otherwise shape [*mean.shape]
+        """
+        if num_samples == 1:
+            x = self.mean + self.std * torch.randn(self.mean.shape).to(device=self.parameters.device)
+            return x
+        else:
+            # Generate multiple samples efficiently
+            samples = []
+            for _ in range(num_samples):
+                eps = torch.randn_like(self.mean)
+                samples.append(self.mean + self.std * eps)
+            return torch.stack(samples, dim=0)  # [num_samples, *mean.shape]
 
     def kl(self, other=None):
         if self.deterministic:
@@ -102,19 +125,77 @@ class LatentInterpolator(nn.Module):
             else nn.Identity(),
         )
 
-    def interpolate_with_noise(self, z, batch_size=1, sampling=False, noise_level=-1):
+    # NOTE: old interpolate_with_noise code
+    #def interpolate_with_noise(self, z, batch_size=1, sampling=False, noise_level=-1):
+    #    assert batch_size == 1, (
+    #        "Given how we chunk in assimilate_local, dealing with batch_size greater than 1 is not "
+    #        + "supported at the moment"
+    #    )
+    #    self.diag_gaussian.reset_parameters(self.mean_and_var(z))
+    #    z_latents = self.diag_gaussian.sample() if sampling else self.diag_gaussian.mean
+    #
+    #    if self.training and self.gamma > 0.0:
+    #        device = z_latents.device
+    #        s = z_latents.shape
+    #        if noise_level > 0.0:
+    #            noise_level_tensor = torch.full(batch_size, noise_level, device=device)
+    #        else:
+    #            noise_level_tensor = torch.rand(batch_size, device=device)
+    #        noise = torch.randn(s, device=device) * self.gamma
+    #        if self.use_additive_noise:
+    #            z_latents = z_latents + noise_level_tensor * noise
+    #        else:
+    #            z_latents = (1 - noise_level_tensor) * z_latents + noise_level_tensor * noise
+    #
+    #    return z_latents, self.diag_gaussian
+
+    def interpolate_with_noise(
+        self, 
+        z, 
+        batch_size=1, 
+        sampling=False, 
+        noise_level=-1,
+        num_samples=1,
+    ):
+        """
+        Process latents through the stochastic bottleneck.
+        
+        Args:
+            z: Input latent tensor
+            batch_size: Batch size (must be 1 for current implementation)
+            sampling: Whether to sample (True) or use mean (False)
+            noise_level: Training noise level (-1 for random)
+            num_samples: Number of samples to draw from posterior (for inference ensembles)
+            
+        Returns:
+            z_latents: Sampled or mean latents. Shape depends on num_samples:
+                - If num_samples == 1: original shape
+                - If num_samples > 1: [num_samples, *original_shape]
+            posterior: The DiagonalGaussianDistribution object
+        """
         assert batch_size == 1, (
             "Given how we chunk in assimilate_local, dealing with batch_size greater than 1 is not "
             + "supported at the moment"
         )
+        
+        # Compute posterior parameters
         self.diag_gaussian.reset_parameters(self.mean_and_var(z))
-        z_latents = self.diag_gaussian.sample() if sampling else self.diag_gaussian.mean
+        
+        # Draw sample(s)
+        if sampling:
+            z_latents = self.diag_gaussian.sample(num_samples=num_samples)
+        else:
+            z_latents = self.diag_gaussian.mean
+            if num_samples > 1:
+                # Return mean repeated for consistency
+                z_latents = z_latents.unsqueeze(0).expand(num_samples, *z_latents.shape)
 
-        if self.training and self.gamma > 0.0:
+        # Training-time noise injection (only applied during training with num_samples==1)
+        if self.training and self.gamma > 0.0 and num_samples == 1:
             device = z_latents.device
             s = z_latents.shape
             if noise_level > 0.0:
-                noise_level_tensor = torch.full(batch_size, noise_level, device=device)
+                noise_level_tensor = torch.full((batch_size,), noise_level, device=device)
             else:
                 noise_level_tensor = torch.rand(batch_size, device=device)
             noise = torch.randn(s, device=device) * self.gamma

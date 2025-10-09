@@ -522,59 +522,126 @@ class Model(torch.nn.Module):
     def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
         """Performs the forward pass of the model to generate forecasts
 
-        Tokens are processed through the model components, which were defined in the create method.
+        During training: Single forward pass with KL regularization
+        During inference: Optionally generates ensembles by re-sampling latent posterior
+        
         Args:
             model_params : Query and embedding parameters
-            batch :
-                streams_data : Contains tokenized source data and target data for each dataset and
-                    each stream
-                source_cell_lens : Used to identify range of tokens to use from generated tokens in
-                    cell embedding
-                target_coords_idxs : Indices of target coordinates for each dataset.
+            batch : Input batch data
             forecast_offset : Starting index for iteration
             forecast_steps : Number of forecast steps to calculate from forecast_offset
+            
         Returns:
-            A list containing all prediction results
+            preds_all: List of predictions for each forecast step
+            posteriors: List of posterior distributions (for KL loss)
         """
 
         (streams_data, source_cell_lens, target_coords_idxs) = batch
+
+        # Determine number of ensemble members
+        num_ensemble = 1
+        if not self.training and self.cf.get("num_ensemble_members", 1) > 1:
+            num_ensemble = self.cf.num_ensemble_members
 
         # embed
         tokens = self.embed_cells(model_params, streams_data)
 
         # local assimilation engine and adapter
-        tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
+        # This returns either:
+        #   - Training: single latent + posterior
+        #   - Inference with ensemble: list of sampled latents + posterior
+        tokens_list, posteriors = self.assimilate_local(
+            model_params, tokens, source_cell_lens, num_ensemble=num_ensemble
+        )
 
-        tokens = self.assimilate_global(model_params, tokens)
+        # Generate predictions for each ensemble member
+        preds_all_ensemble = []
+        
+        for tokens in tokens_list:
+            # global assimilation
+            tokens = self.assimilate_global(model_params, tokens)
 
-        # roll-out in latent space
-        preds_all = []
-        for fstep in range(forecast_offset, forecast_offset + forecast_steps):
-            # prediction
-            preds_all += [
+            # roll-out in latent space
+            preds_member = []
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps):
+                # prediction
+                preds_member.append(
+                    self.predict(
+                        model_params,
+                        fstep,
+                        tokens,
+                        streams_data,
+                        target_coords_idxs,
+                    )
+                )
+                tokens = self.forecast(model_params, tokens)
+
+            # prediction for final step
+            preds_member.append(
                 self.predict(
                     model_params,
-                    fstep,
+                    forecast_offset + forecast_steps,
                     tokens,
                     streams_data,
                     target_coords_idxs,
                 )
-            ]
-
-            tokens = self.forecast(model_params, tokens)
-
-        # prediction for final step
-        preds_all += [
-            self.predict(
-                model_params,
-                forecast_offset + forecast_steps,
-                tokens,
-                streams_data,
-                target_coords_idxs,
             )
-        ]
+            
+            preds_all_ensemble.append(preds_member)
+
+        # Restructure: from [ensemble][fstep][stream] to [fstep][stream] with ensemble dim
+        preds_all = self._combine_ensemble_predictions(preds_all_ensemble)
 
         return preds_all, posteriors
+
+    def _combine_ensemble_predictions(self, preds_all_ensemble):
+        """
+        Combine predictions from multiple ensemble members.
+        
+        Input structure: [num_ensemble][num_fsteps][num_streams]
+        Output structure: [num_fsteps][num_streams] where each prediction
+                         has ensemble dimension added
+        
+        For deterministic heads: Stack predictions -> [ensemble_size, N, C]
+        For GMM heads: Keep first member's params (they're identical across ensemble)
+        """
+        if len(preds_all_ensemble) == 1:
+            # No ensemble, return as-is but ensure shape [1, N, C]
+            return [
+                [
+                    pred.unsqueeze(0) if not isinstance(pred, tuple) else pred
+                    for pred in fstep_preds
+                ]
+                for fstep_preds in preds_all_ensemble[0]
+            ]
+        
+        num_fsteps = len(preds_all_ensemble[0])
+        num_streams = len(preds_all_ensemble[0][0])
+        
+        combined = []
+        for fstep_idx in range(num_fsteps):
+            fstep_combined = []
+            for stream_idx in range(num_streams):
+                # Gather predictions from all ensemble members for this fstep/stream
+                stream_preds = [
+                    preds_all_ensemble[ens_idx][fstep_idx][stream_idx]
+                    for ens_idx in range(len(preds_all_ensemble))
+                ]
+                
+                # Check if GMM (tuple) or deterministic
+                if isinstance(stream_preds[0], tuple):
+                    # GMM: all members have same params, just return first
+                    # (GMM params don't benefit from ensemble sampling here)
+                    fstep_combined.append(stream_preds[0])
+                else:
+                    # Deterministic: stack predictions along ensemble dimension
+                    # Each pred is [N, C], stack to [ensemble_size, N, C]
+                    stacked = torch.stack(stream_preds, dim=0)
+                    fstep_combined.append(stacked)
+            
+            combined.append(fstep_combined)
+        
+        return combined
 
     #########################################
     def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
@@ -631,16 +698,24 @@ class Model(torch.nn.Module):
 
     #########################################
     def assimilate_local(
-        self, model_params: ModelParams, tokens: torch.Tensor, cell_lens: torch.Tensor
-    ) -> torch.Tensor:
-        """Processes embedded tokens locally and prepares them for the global assimilation
+        self, 
+        model_params: ModelParams, 
+        tokens: torch.Tensor, 
+        cell_lens: torch.Tensor,
+        num_ensemble: int = 1,
+    ) -> tuple[list[torch.Tensor], list]:
+        """Processes embedded tokens locally with optional ensemble generation
+        
         Args:
             model_params : Query and embedding parameters
             tokens : Input tokens to be processed by local assimilation
-            cell_lens : Used to identify range of tokens to use from generated tokens in cell
-                embedding
+            cell_lens : Token lengths per cell
+            num_ensemble : Number of ensemble members to generate (only during inference)
+            
         Returns:
-            Tokens for global assimilation
+            tokens_global_list: List of global tokens (length 1 during training, 
+                               num_ensemble during inference)
+            posteriors: List of posterior distributions for KL loss
         """
 
         batch_size = (
@@ -648,9 +723,6 @@ class Model(torch.nn.Module):
         )
 
         s = self.q_cells.shape
-        # print( f'{np.prod(np.array(tokens.shape))} :: {np.prod(np.array(s))}'
-        #        + ':: {np.prod(np.array(tokens.shape))/np.prod(np.array(s))}')
-        # TODO: test if positional encoding is needed here
         if self.cf.ae_local_queries_per_cell:
             tokens_global = (self.q_cells + model_params.pe_global).repeat(batch_size, 1, 1)
         else:
@@ -662,36 +734,14 @@ class Model(torch.nn.Module):
             + [model_params.q_cells_lens[1:] for _ in range(batch_size)]
         )
 
-        # # local assimilation model
-        # for block in self.ae_local_blocks:
-        #     tokens = checkpoint(block, tokens, cell_lens, use_reentrant=False)
-
-        # if self.cf.latent_noise_kl_weight > 0.0:
-        #     tokens, posteriors = self.interpolate_latents.interpolate_with_noise(
-        #         tokens, sampling=self.training
-        #     )
-        # else:
-        #     tokens, posteriors = tokens, 0.0
-
-        # for block in self.ae_adapter:
-        #     tokens_global = checkpoint(
-        #         block,
-        #         tokens_global,
-        #         tokens,
-        #         q_cells_lens,
-        #         cell_lens,
-        #         use_reentrant=False,
-        #     )
-
-        # work around to bug in flash attention for hl>=5
-
+        # Work around for flash attention bug with hl>=5
         cell_lens = cell_lens[1:]
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_all = []
-        posteriors = []
+        posteriors_all = []
         zero_pad = torch.zeros(1, device="cuda", dtype=torch.int32)
+        
         for i in range((cell_lens.shape[0]) // clen):
-            # make sure we properly catch all elements in last chunk
             i_end = (i + 1) * clen if i < (cell_lens.shape[0] // clen) - 1 else cell_lens.shape[0]
             l0, l1 = (
                 (0 if i == 0 else cell_lens[: i * clen].cumsum(0)[-1]),
@@ -704,41 +754,88 @@ class Model(torch.nn.Module):
             q_cells_lens_c = q_cells_lens[: cell_lens_c.shape[0]]
 
             if l0 == l1 or tokens_c.shape[0] == 0:
-                tokens_global_all += [tokens_global_c]
+                tokens_global_all.append(tokens_global_c)
                 continue
 
+            # Local assimilation blocks
             for block in self.ae_local_blocks:
                 tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=False)
 
+            # Stochastic bottleneck: sample once during training, multiple times during inference
             if self.cf.latent_noise_kl_weight > 0.0:
-                tokens_c, posteriors_c = self.interpolate_latents.interpolate_with_noise(
-                    tokens_c, sampling=self.training
+                tokens_c_sampled, posterior_c = self.interpolate_latents.interpolate_with_noise(
+                    tokens_c, 
+                    sampling=True,  # Always sample to get stochasticity
+                    num_samples=num_ensemble,
                 )
-                posteriors += [posteriors_c]
+                posteriors_all.append(posterior_c)
             else:
-                tokens_c, posteriors = tokens_c, 0.0
+                # No stochastic latents - just repeat tokens for ensemble
+                tokens_c_sampled = tokens_c
+                if num_ensemble > 1:
+                    tokens_c_sampled = tokens_c.unsqueeze(0).expand(num_ensemble, *tokens_c.shape)
+                posteriors_all.append(None)
 
-            for block in self.ae_adapter:
-                tokens_global_c = checkpoint(
-                    block,
-                    tokens_global_c,
-                    tokens_c,
-                    q_cells_lens_c,
-                    cell_lens_c,
-                    use_reentrant=False,
-                )
+            # Handle ensemble dimension in adapter
+            # tokens_c_sampled is either:
+            #   - [N, D] if num_ensemble == 1
+            #   - [num_ensemble, N, D] if num_ensemble > 1
+            
+            if num_ensemble == 1:
+                # Training or single-member inference
+                for block in self.ae_adapter:
+                    tokens_global_c = checkpoint(
+                        block,
+                        tokens_global_c,
+                        tokens_c_sampled,
+                        q_cells_lens_c,
+                        cell_lens_c,
+                        use_reentrant=False,
+                    )
+                tokens_global_all.append(tokens_global_c)
+            else:
+                # Multi-member ensemble inference: process each sample separately
+                tokens_global_c_list = []
+                for sample_idx in range(num_ensemble):
+                    tokens_c_sample = tokens_c_sampled[sample_idx]
+                    tokens_global_c_sample = tokens_global_c.clone()
+                    
+                    for block in self.ae_adapter:
+                        tokens_global_c_sample = checkpoint(
+                            block,
+                            tokens_global_c_sample,
+                            tokens_c_sample,
+                            q_cells_lens_c,
+                            cell_lens_c,
+                            use_reentrant=False,
+                        )
+                    tokens_global_c_list.append(tokens_global_c_sample)
+                
+                tokens_global_all.append(torch.stack(tokens_global_c_list, dim=0))
 
-            tokens_global_all += [tokens_global_c]
-
-        tokens_global = torch.cat(tokens_global_all)
-
-        # recover batch dimension and build global token list
-        tokens_global = (
-            tokens_global.reshape([batch_size, self.num_healpix_cells, s[-2], s[-1]])
-            + model_params.pe_global
-        ).flatten(1, 2)
-
-        return tokens_global, posteriors
+        # Combine chunks and reshape
+        if num_ensemble == 1:
+            tokens_global = torch.cat(tokens_global_all)
+            tokens_global = (
+                tokens_global.reshape([batch_size, self.num_healpix_cells, s[-2], s[-1]])
+                + model_params.pe_global
+            ).flatten(1, 2)
+            return [tokens_global], posteriors_all
+        else:
+            # Stack ensemble members: [num_ensemble, num_chunks, ...]
+            tokens_global_stacked = torch.stack(tokens_global_all, dim=1)
+            
+            tokens_global_list = []
+            for sample_idx in range(num_ensemble):
+                tokens_sample = torch.cat([tokens_global_stacked[sample_idx, chunk_idx] 
+                                          for chunk_idx in range(tokens_global_stacked.shape[1])])
+                tokens_sample = (
+                    tokens_sample.reshape([batch_size, self.num_healpix_cells, s[-2], s[-1]])
+                    + model_params.pe_global
+                ).flatten(1, 2)
+                tokens_global_list.append(tokens_sample)
+            
+            return tokens_global_list, posteriors_all
 
     #########################################
     def assimilate_global(self, model_params: ModelParams, tokens: torch.Tensor) -> torch.Tensor:
