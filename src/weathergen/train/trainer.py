@@ -930,12 +930,23 @@ class Trainer(TrainerBase):
 
         TODO test DDP case
         """
-        grad_norms = {"total_grad_norm": total_norm.item()}
-        self.last_grad_norm = total_norm.item()
-        for name, param in self.ddp_model.named_parameters():
+        self.last_grad_norm = (
+            total_norm.full_tensor().item() if self.cf.world_size > 1 else total_norm.item()
+        )
+        grad_norms = {"total_grad_norm": self.last_grad_norm}
+        for name, param in self.model.named_parameters():
             if param.grad is not None:
-                grad_norms["grad_norm_" + name] = param.grad.norm().item()
-        self.train_logger.log_metrics(TRAIN, grad_norms)
+                # grad_norms["grad_norm_" + name] = param.grad.norm().item()
+                grad_norms["grad_norm_" + name] = (
+                    param.grad.norm().full_tensor().item()
+                    if self.cf.world_size > 1
+                    else param.grad.norm().item()
+                )
+
+        # print(".item():", param.grad.norm().item())
+        # print(".full_tensor().item()", param.grad.norm().full_tensor().item())
+        if is_root():
+            self.train_logger.log_metrics(TRAIN, grad_norms)
 
     def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
         if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:
