@@ -15,18 +15,6 @@ from tqdm import tqdm
 from weathergen.common.config import _REPO_ROOT, _load_private_conf
 from weathergen.common.io import ZarrIO
 
-_logger = logging.getLogger(__name__)
-_logger.setLevel(logging.INFO)
-
-if not _logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-    handler.setFormatter(formatter)
-    _logger.addHandler(handler)
-
-
 def find_pl(all_variables):
     """
     Find all the pressure levels for each variable using regex and returns a dictionary
@@ -133,6 +121,7 @@ def add_conventions(stream, run_id, ds):
     xarray.Dataset
         xarray Dataset with CF conventions added to attributes.
     """
+    ds = ds.copy()
     ds.attrs["title"] = f"WeatherGenerator Output for {run_id} using stream {stream}"
     ds.attrs["institution"] = "WeatherGenerator Project"
     ds.attrs["source"] = "WeatherGenerator v0.0"
@@ -303,7 +292,7 @@ def get_data_worker(args):
 
 
 def get_data(
-    run_id: str, stream: str, type: str, fsteps=None, channels=None, n_processes=4
+    run_id: str, stream: str, type: str, fsteps, channels, n_processes
 ):
     """
     Retrieve data from Zarr store and return as a list of xarray DataArrays for each forecast step.
@@ -401,17 +390,23 @@ def save_samples_to_netcdf(
     config : OmegaConf
         Loaded config for cf_parser function.
     """
-    for sample_idx, array_list in dict_sample_all_steps.items():
+    for item in tqdm(dict_sample_all_steps.items(), desc="Saving samples to NetCDF"):
+        sample_idx, array_list = item
         frt = array_list[0].coords["valid_time"].values[0] - FSTEP_HOURS
         sample_all_steps = xr.concat(array_list, dim="forecast_step")
         out_fname = output_filename(type_str, run_id, output_dir, output_format, frt)
-        _logger.info(f"Saving sample {sample_idx} to {out_fname}...")
-        sample_all_steps = sample_all_steps.assign_coords(forecast_ref_time=frt)
-        stream = str(sample_all_steps.coords["stream"].values)
-        sample_all_steps = sample_all_steps.drop_vars("sample")
-        sample_all_steps = cf_parser(config, sample_all_steps)
-        sample_all_steps = add_conventions(stream, run_id, sample_all_steps)
-        sample_all_steps.to_netcdf(out_fname, mode="w")
+        # check if file already exists
+        if out_fname.exists():
+            _logger.info(f"File {out_fname} already exists. Skipping.")
+            continue
+        else:
+            _logger.info(f"Saving sample {sample_idx} to {out_fname}...")
+            sample_all_steps = sample_all_steps.assign_coords(forecast_ref_time=frt)
+            stream = str(sample_all_steps.coords["stream"].values)
+            sample_all_steps = sample_all_steps.drop_vars("sample")
+            sample_all_steps = cf_parser(config, sample_all_steps)
+            sample_all_steps = add_conventions(stream, run_id, sample_all_steps)
+            sample_all_steps.to_netcdf(out_fname, mode="w")
 
 
 def parse_args(args):
@@ -461,6 +456,30 @@ def parse_args(args):
         choices=["ERA5"],
         help="Stream name to retrieve data for",
     )
+
+    parser.add_argument(
+        "--fsteps",
+        type=int,
+        nargs="+",
+        default=None,
+        help="List of forecast steps to retrieve (e.g., 1 2 3). If not provided, retrieves all available forecast steps.",
+    )
+
+    parser.add_argument(
+        "--channels",
+        type=str,
+        nargs="+",
+        default=None,
+        help="List of channels to retrieve (e.g., 'q_500 t_2m'). If not provided, retrieves all available channels.",
+    )
+
+    parser.add_argument(
+        "--n-processes",
+        type=int,
+        default=4,
+        help="Number of parallel processes to use for data retrieval",
+    )
+
     args, unknown_args = parser.parse_known_args(args)
     if unknown_args:
         _logger.warning(f"Unknown arguments: {unknown_args}")
@@ -468,6 +487,18 @@ def parse_args(args):
 
 
 if __name__ == "__main__":
+    _logger = logging.getLogger(__name__)
+    _logger.setLevel(logging.INFO)
+
+    if not _logger.handlers:
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        handler.setFormatter(formatter)
+        _logger.addHandler(handler)
+
+
     # Get run_id zarr data as lists of xarray DataArrays
     args = parse_args(sys.argv[1:])
     run_id = args.run_id
@@ -475,6 +506,9 @@ if __name__ == "__main__":
     output_dir = args.output_dir
     output_format = args.format
     stream = args.stream
+    fsteps = args.fsteps
+    channels = args.channels
+    n_processes = args.n_processes
 
     # Ensure output directory exists
     out_dir = Path(output_dir)
@@ -490,7 +524,7 @@ if __name__ == "__main__":
 
     for type in data_type:
         _logger.info(f"Starting processing {type} for run ID {run_id}.")
-        da_list = get_data(run_id, stream, type)
+        da_list = get_data(run_id, stream, type, fsteps, channels, n_processes)
         n_samples = len(np.unique(da_list[0].sample))
         dict_sample_all_steps = {}
         for i, da_type in enumerate(da_list):
@@ -498,10 +532,12 @@ if __name__ == "__main__":
             for j in range(n_samples):
                 _logger.info(f"Processing sample {j}, forecast step {i + 1}")
                 dict_sample_all_steps.setdefault(j, []).append(fs_i_all_sample[j])
-        #check dict_sample_all_steps is not empty
+        # check dict_sample_all_steps is not empty
         assert dict_sample_all_steps, "No data to save, dict_sample_all_steps is empty."
         try:
-            _logger.info(f"Saving {type} data to {output_format} format in {output_dir}.")
+            _logger.info(
+                f"Saving {type} data to {output_format} format in {output_dir}."
+            )
             save_samples_to_netcdf(
                 str(type)[:4],
                 dict_sample_all_steps,
@@ -510,7 +546,7 @@ if __name__ == "__main__":
                 output_dir,
                 output_format,
                 config,
-            )#
+            )
         except Exception as e:
-            _logger.error(f"Error saving {type} data: {e}")
+            _logger.info(f"Error saving {type} data: {e}")
         _logger.info(f"Finished processing {type} for run ID {run_id}.")
