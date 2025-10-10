@@ -5,12 +5,19 @@ from pathlib import Path
 
 import cartopy
 import cartopy.crs as ccrs
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+import omegaconf as oc
 import xarray as xr
+from matplotlib.lines import Line2D
 from PIL import Image
+from scipy.stats import wilcoxon
 
-from weathergen.utils.config import _load_private_conf
+from weathergen.common.config import _load_private_conf
+from weathergen.evaluate.plot_utils import (
+    DefaultMarkerSize,
+)
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
@@ -193,6 +200,8 @@ class Plotter:
             # Remove NaNs
             targ = targ.dropna(dim="ipoint")
             prd = prd.dropna(dim="ipoint")
+            assert targ.size > 0, "Data array must not be empty or contain only NAs"
+            assert prd.size > 0, "Data array must not be empty or contain only NAs"
 
             if self.plot_subtimesteps:
                 ntimes_unique = len(np.unique(targ.valid_time))
@@ -215,7 +224,6 @@ class Plotter:
                     _logger.debug(
                         f"Plotting histogram for {var} at valid_time {valid_time}"
                     )
-
                 name = self.plot_histogram(targ_t, prd_t, hist_output_dir, var, tag=tag)
                 plot_names.append(name)
 
@@ -284,7 +292,7 @@ class Plotter:
         name = "_".join(filter(None, parts))
 
         fname = hist_output_dir / f"{name}.{self.image_format}"
-        logging.debug(f"Saving histogram to {fname}")
+        _logger.debug(f"Saving histogram to {fname}")
         plt.savefig(fname)
         plt.close()
 
@@ -327,21 +335,12 @@ class Plotter:
         """
         self.update_data_selection(select)
 
-        map_kwargs_save = (
-            {
-                key: value
-                for key, value in map_kwargs.copy().items()
-                if key not in variables
-            }
-            if map_kwargs is not None
-            else {}
-        )
-
-        if not hasattr(map_kwargs_save, "marker_size"):
-            # Set default marker size if not specified in maps_config
-            map_kwargs_save["marker_size"] = DefaultMarkerSize.get_marker_size(
-                self.stream
-            )
+        # copy global plotting options, not specific to any variable
+        map_kwargs_global = {
+            key: value
+            for key, value in (map_kwargs or {}).items()
+            if not isinstance(value, oc.DictConfig)
+        }
 
         # Basic map output directory for this stream
         map_output_dir = self.get_map_output_dir(tag)
@@ -370,12 +369,15 @@ class Plotter:
                 if valid_time is not None:
                     _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
 
+                da_t = da_t.dropna(dim="ipoint")
+                assert da_t.size > 0, "Data array must not be empty or contain only NAs"
+
                 name = self.scatter_plot(
                     da_t,
                     map_output_dir,
                     var,
                     tag=tag,
-                    map_kwargs=map_kwargs[var],
+                    map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
                 )
                 plot_names.append(name)
 
@@ -411,19 +413,29 @@ class Plotter:
         -------
             Name of the saved plot file.
         """
-        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
         # check for known keys in map_kwargs
-        marker_size_base = map_kwargs_save.pop("marker_size", 1)
+        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
+        marker_size_base = map_kwargs_save.pop(
+            "marker_size", DefaultMarkerSize.get_marker_size(self.stream)
+        )
         scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
         marker = map_kwargs_save.pop("marker", "o")
         vmin = map_kwargs_save.pop("vmin", None)
         vmax = map_kwargs_save.pop("vmax", None)
+        cmap = plt.get_cmap(map_kwargs_save.pop("colormap", "coolwarm"))
 
-        # Create figure and axis objects
-        fig = plt.figure(dpi=self.dpi_val)
-        ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
-        ax.coastlines()
+        if isinstance(map_kwargs_save.get("levels", False), oc.listconfig.ListConfig):
+            norm = mpl.colors.BoundaryNorm(
+                map_kwargs_save.pop("levels", None), cmap.N, extend="both"
+            )
+        else:
+            norm = mpl.colors.Normalize(
+                vmin=vmin,
+                vmax=vmax,
+                clip=False,
+            )
 
+        # scale marker size
         marker_size = marker_size_base
         if scale_marker_size:
             marker_size = np.clip(
@@ -432,18 +444,22 @@ class Plotter:
                 a_min=marker_size,
             )
 
+        # Create figure and axis objects
+        fig = plt.figure(dpi=self.dpi_val)
+        ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
+        ax.coastlines()
+
         valid_time = str(data["valid_time"][0].values.astype("datetime64[m]"))
 
         scatter_plt = ax.scatter(
             data["lon"],
             data["lat"],
             c=data,
-            cmap="coolwarm",
+            norm=norm,
+            cmap=cmap,
             s=marker_size,
             marker=marker,
             transform=ccrs.PlateCarree(),
-            vmin=vmin,
-            vmax=vmax,
             linewidths=0.0,  # only markers, avoids aliasing for very small markers
             **map_kwargs_save,
         )
@@ -541,14 +557,30 @@ class Plotter:
 
 
 class LinePlots:
-    def __init__(self, cfg: dict, output_basedir: str | Path):
-        self.cfg = cfg
-        self.image_format = cfg.image_format
-        self.dpi_val = cfg.get("dpi_val")
-        self.fig_size = cfg.get("fig_size", (8, 10))
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
+        """
+        Initialize the LinePlots class.
+
+        Parameters
+        ----------
+        plotter_cfg:
+            Configuration dictionary containing basic information for plotting.
+            Expected keys are:
+                - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
+                - dpi_val: DPI value for the saved images
+                - fig_size: Size of the figure (width, height) in inches
+        output_basedir:
+            Base directory under which the plots will be saved.
+            Expected scheme `<results_base_dir>/<run_id>`.
+        """
+
+        self.image_format = plotter_cfg.get("image_format")
+        self.dpi_val = plotter_cfg.get("dpi_val")
+        self.fig_size = plotter_cfg.get("fig_size")
+        self.log_scale = plotter_cfg.get("log_scale")
+        self.add_grid = plotter_cfg.get("add_grid")
 
         self.out_plot_dir = Path(output_basedir) / "line_plots"
-
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
@@ -643,7 +675,7 @@ class LinePlots:
                 dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1
             ]
             if non_zero_dims:
-                logging.info(
+                _logger.info(
                     f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
                 )
             averaged = data.mean(
@@ -668,6 +700,12 @@ class LinePlots:
         plt.title(title)
         plt.legend(frameon=False)
 
+        if self.add_grid:
+            plt.grid(True, linestyle="--", color="gray", alpha=0.5)
+
+        if self.log_scale:
+            plt.yscale("log")
+
         if print_summary:
             _logger.info(f"Summary values for {tag}")
             self.print_all_points_from_graph(fig)
@@ -678,47 +716,182 @@ class LinePlots:
         plt.close()
 
 
-class DefaultMarkerSize:
+class ScoreCards:
     """
-    Utility class for managing default configuration values, such as marker sizes
-    for various data streams.
+    Initialize the ScoreCards class.
+
+    Parameters
+    ----------
+    plotter_cfg:
+        Configuration dictionary containing basic information for plotting.
+        Expected keys are:
+            - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
+            - improvement: Size of the figure (width, height) in inches
+    output_basedir:
+        Base directory under which the score cards will be saved.
     """
 
-    _marker_size_stream = {
-        "era5": 2.5,
-        "imerg": 0.25,
-        "cerra": 0.1,
-    }
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
+        self.image_format = plotter_cfg.get("image_format")
+        self.improvement = plotter_cfg.get("improvement_scale", 0.2)
+        self.out_plot_dir = Path(output_basedir) / "score_cards"
+        if not os.path.exists(self.out_plot_dir):
+            _logger.info(f"Creating dir {self.out_plot_dir}")
+            os.makedirs(self.out_plot_dir, exist_ok=True)
 
-    _default_marker_size = 0.5
+    def plot(
+        self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
+    ):
+        n_runs, n_vars = len(runs), len(channels)
+        fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_vars))
 
-    @classmethod
-    def get_marker_size(cls, stream_name: str) -> float:
-        """
-        Get the default marker size for a given stream name.
+        baseline = data[0]
+        skill_models = []
 
-        Parameters
-        ----------
-        stream_name : str
-            The name of the stream.
+        for i in range(1, n_runs):
+            skill_model = 0.0
+            for j, var in enumerate(channels):
+                diff, diff_mean, skill = self.compare_models(data, baseline, i, var)
+                skill_model += skill.values
 
-        Returns
-        -------
-        float
-            The default marker size for the stream.
-        """
-        return cls._marker_size_stream.get(
-            stream_name.lower(), cls._default_marker_size
+                # Get symbols based on difference and performance as well as coordinates
+                # for the position of the triangles.
+
+                x, y, alt, color, triangle, size = self.get_plot_symbols(
+                    i, j, skill, diff_mean
+                )
+
+                ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
+
+                # Perform Welch's t-test
+                stat, p = wilcoxon(diff, alternative=alt)
+
+                # Draw rectangle border for significance
+                if p < 0.05:
+                    lw = 2 if p < 0.01 else 1
+                    rect_color = color
+                    rect = plt.Rectangle(
+                        (x - 0.25, y - 0.25),
+                        0.5,
+                        0.5,
+                        fill=False,
+                        edgecolor=rect_color,
+                        linewidth=lw,
+                        zorder=2,
+                    )
+                    ax.add_patch(rect)
+
+            skill_models.append(skill_model / n_vars)
+
+        # Set axis labels
+        ylabels = [
+            f"{var}\n({baseline.coords['metric'].item().upper()}={baseline.sel({'channel': var}).mean(dim=['sample', 'forecast_step']).values:.3f})"
+            for var in channels
+        ]
+        xlabels = [
+            f"{model_name}\nSkill: {skill_models[i]:.3f}"
+            for i, model_name in enumerate(runs[1::])
+        ]
+        ax.set_xticks(np.arange(1, n_runs))
+        ax.set_xticklabels(xlabels, fontsize=10)
+        ax.set_yticks(np.arange(n_vars) + 0.5)
+        ax.set_yticklabels(ylabels, fontsize=10)
+        for label in ax.get_yticklabels():
+            label.set_horizontalalignment("center")
+            label.set_x(-0.17)
+        ax.set_ylabel("Variable", fontsize=14)
+        ax.set_title(
+            f"Model Scorecard vs. Baseline '{runs[0]}'",
+            fontsize=16,
+            pad=20,
         )
+        for x in np.arange(0.5, n_runs - 1, 1):
+            ax.axvline(
+                x, color="gray", linestyle="--", linewidth=0.5, zorder=0, alpha=0.5
+            )
+        ax.set_xlim(0.5, n_runs - 0.5)
+        ax.set_ylim(0, n_vars)
 
-    @classmethod
-    def list_streams(cls):
-        """
-        List all streams with defined marker sizes.
+        legend = [
+            Line2D(
+                [0],
+                [0],
+                marker="^",
+                color="white",
+                label=f"{self.improvement * 100:.0f}% improvement",
+                markerfacecolor="blue",
+                markersize=np.sqrt(200),
+            )
+        ]
+        plt.legend(handles=legend, loc="upper left", bbox_to_anchor=(1.02, 1.0))
 
-        Returns
-        -------
-        list[str]
-            List of stream names.
-        """
-        return list(cls._marker_size_stream.keys())
+        _logger.info(f"Saving scorecards to: {self.out_plot_dir}")
+
+        parts = ["score_card", tag] + runs
+        name = "_".join(filter(None, parts))
+        plt.savefig(
+            f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
+            bbox_inches="tight",
+            dpi=300,
+        )
+        plt.close(fig)
+
+    def compare_models(self, data, baseline, i, var, x_dim="forecast_step"):
+        baseline_var = baseline.sel({"channel": var})
+        data_var = data[i].sel({"channel": var})
+
+        non_zero_dims = [
+            dim
+            for dim in baseline_var.dims
+            if dim != x_dim and baseline_var[dim].shape[0] > 1
+        ]
+
+        if non_zero_dims:
+            _logger.info(
+                f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
+            )
+
+        baseline_score = baseline_var.mean(
+            dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
+        )
+        model_score = data_var.mean(
+            dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True
+        )
+        diff = baseline_score - model_score
+
+        skill = self.get_skill_score(model_score, baseline_score, 0.0)
+        return diff, diff.mean(dim=x_dim), skill.mean(dim=x_dim)
+
+    def get_skill_score(self, score_model, score_ref, score_perf):
+        skill_score = (score_model - score_ref) / (score_perf - score_ref)
+
+        return skill_score
+
+    def get_plot_symbols(self, i, j, skill, diff_mean):
+        if diff_mean > 0:
+            # A better than B
+            alt = "greater"
+            modus = "better"
+            color = "blue"
+        elif diff_mean < 0:
+            # A worse than B
+            alt = "less"
+            modus = "worse"
+            color = "red"
+        else:
+            # Equal performance (conservative fallback)
+            alt = "two-sided"
+            modus = "different"
+
+        triangle = "^" if modus == "better" else "v"
+
+        # Triangle coordinates
+        x = i
+        # First row is model 1 vs model 0
+        y = j + 0.5
+
+        size = 200 * (
+            1 - (1 / (1 + abs(skill) / self.improvement))
+        )  # Add base size to all
+
+        return x, y, alt, color, triangle, size

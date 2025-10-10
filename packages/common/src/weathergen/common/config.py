@@ -14,13 +14,15 @@ import os
 import subprocess
 from pathlib import Path
 
-import torch
 import yaml
 from omegaconf import DictConfig, ListConfig, OmegaConf
+from omegaconf.omegaconf import open_dict
 
 from weathergen.train.utils import get_run_id
 
-_REPO_ROOT = Path(__file__).parent.parent.parent.parent  # TODO use importlib for resources
+_REPO_ROOT = Path(
+    __file__
+).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
 
 _logger = logging.getLogger(__name__)
@@ -142,7 +144,9 @@ def load_config(
         base_config = _load_default_conf()
     else:
         base_config = load_model_config(from_run_id, epoch, private_config.get("model_path", None))
-
+        from_run_id = base_config.run_id
+    with open_dict(base_config):
+        base_config.from_run_id = from_run_id
     # use OmegaConf.unsafe_merge if too slow
     return OmegaConf.merge(base_config, private_config, *overwrite_configs)
 
@@ -405,20 +409,33 @@ def get_path_output(config: Config, epoch: int) -> Path:
     return base_path / fname
 
 
-def get_dtype(value: str) -> torch.dtype:
+def get_shared_wg_path(local_path: str | Path) -> Path:
     """
-    changes the conf value to a torch dtype
+    Resolves a local, relative path to an absolute path within the configured shared working
+    directory.
+
+    This utility function retrieves the base path defined for the shared WeatherGenerator (WG)
+    working directory from the private configuration and appends the provided local path segment.
+
+    Parameters
+    ----------
+    local_path : str or Path
+        The local or relative path segment (e.g., 'results', 'models', 'output') that needs
+        to be located within the shared working directory structure.
+
+    Returns
+    -------
+    Path
+        The absolute pathlib.Path object pointing to the specified location
+        within the shared working directory.
+
+    Notes
+    -----
+    The shared working directory base is retrieved from the 'path_shared_working_dir'
+    key found in the private configuration loaded by `_load_private_conf()`.
     """
-    if value == "bf16":
-        return torch.bfloat16
-    elif value == "fp16":
-        return torch.float16
-    elif value == "fp32":
-        return torch.float32
-    else:
-        raise NotImplementedError(
-            f"Dtype {value} is not recognized, choose either, bf16, fp16, or fp32"
-        )
+    pcfg = _load_private_conf()
+    return Path(pcfg.get("path_shared_working_dir")) / local_path
 
 
 def validate_forecast_policy_and_steps(cf: OmegaConf):

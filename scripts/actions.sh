@@ -7,26 +7,55 @@ case "$1" in
   sync)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv sync --all-packages
+      uv sync --all-packages --extra gpu
     )
     ;;
   lint)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run --no-project --with "ruff==0.9.7" ruff format --target-version py312 && \
-      uv run --no-project --with "ruff==0.9.7" ruff check --fix
+      uv run --no-project --with "ruff==0.12.2" ruff format --target-version py312 \
+        src/ scripts/ packages/ \
+        && \
+      uv run --no-project --with "ruff==0.12.2" \
+        ruff check --target-version py312 \
+        --fix  \
+        src/ scripts/ packages/
+    )
+    ;;
+  lint-check)
+    (
+      cd "$SCRIPT_DIR" || exit 1
+      uv run --no-project --with "ruff==0.12.2" ruff format --target-version py312 \
+        -n \
+        src/ scripts/ packages/ \
+        && \
+      uv run --no-project --with "ruff==0.12.2" \
+       ruff check  --target-version py312  \
+       src/ scripts/ packages/
+    )
+    ;;
+  type-check)
+    (
+      cd "$SCRIPT_DIR/packages/common" || exit 1
+      uv run --all-packages pyrefly check
+      cd "$SCRIPT_DIR/packages/evaluate" || exit 1
+      uv run --all-packages pyrefly check
+      cd "$SCRIPT_DIR" || exit 1
+      uv run --all-packages pyrefly check
     )
     ;;
   unit-test)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run pytest src/
+      uv sync --extra cpu 
+      uv run --extra cpu pytest src/
     )
     ;;
   integration-test)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run pytest ./integration_tests/small1_test.py --verbose
+      uv sync --offline --all-packages --extra gpu
+      uv run --offline pytest ./integration_tests/small1_test.py --verbose -s
     )
     ;;
   create-links)
@@ -83,7 +112,7 @@ case "$1" in
     )
     ;;
   *)
-    echo "Usage: $0 {sync|lint|unit-test|integration-test|create-links|create-jupyter-kernel|jupytext-sync}"
+    echo "Usage: $0 {sync|lint|lint-check|type-check|unit-test|integration-test|create-links|create-jupyter-kernel|jupytext-sync}"
     exit 1
     ;;
 esac

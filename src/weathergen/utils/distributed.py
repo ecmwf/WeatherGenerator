@@ -70,7 +70,7 @@ def ddp_average(data: torch.Tensor) -> torch.Tensor:
         tensor with same shape as data, but entries averaged across all DDP ranks
     """
     if _is_distributed_initialized():
-        dist.all_reduce(data.cuda(), op=dist.ReduceOp.AVG)
+        dist.all_reduce(data, op=dist.ReduceOp.AVG)
     return data.cpu()
 
 

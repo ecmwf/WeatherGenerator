@@ -23,7 +23,6 @@ from weathergen.datasets.tokenizer_utils import (
 from weathergen.datasets.utils import (
     get_target_coords_local_ffast,
 )
-from weathergen.utils.logger import init_loggers
 
 
 class TokenizerForecast(Tokenizer):
@@ -43,7 +42,6 @@ class TokenizerForecast(Tokenizer):
         time_win: tuple,
         normalizer,  # dataset
     ):
-        init_loggers()
         token_size = stream_info["token_size"]
         is_diagnostic = stream_info.get("diagnostic", False)
         tokenize_spacetime = stream_info.get("tokenize_spacetime", False)

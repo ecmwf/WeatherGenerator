@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import astropy_healpix as hp
 import numpy as np
 import torch
 
@@ -18,6 +19,9 @@ class StreamData:
     StreamData object that encapsulates all data the model ingests for one batch item
     for one stream.
     """
+
+    # TODO: comment
+    is_spoof: bool = False
 
     def __init__(self, idx: int, forecast_steps: int, nhc_source: int, nhc_target: int) -> None:
         """
@@ -106,8 +110,9 @@ class StreamData:
         None
         """
 
+        source = spoof(source)
         self.source_raw += [source]
-        self.source_tokens_lens += [torch.zeros([self.nhc_source], dtype=torch.int32)]
+        self.source_tokens_lens += [torch.ones([self.nhc_source], dtype=torch.int32)]
         self.source_tokens_cells += [torch.tensor([])]
         self.source_centroids += [torch.tensor([])]
 
@@ -142,7 +147,7 @@ class StreamData:
 
         Parameters
         ----------
-        ss_raw : torch.tensor( number of data points in time window , number of channels )
+        ss_raw : IOReaderData( dataclass containing coords, geoinfos, data, and datetimes )
         ss_lens : torch.tensor( number of healpix cells )
         ss_cells : list( number of healpix cells )
             [ torch.tensor( tokens per cell, token size, number of channels) ]
@@ -359,3 +364,43 @@ class StreamData:
                 self.target_tokens[fstep] = torch.tensor([])
                 self.target_tokens_lens[fstep] = torch.tensor([0])
                 self.target_coords_lens[fstep] = torch.tensor([])
+
+
+# TODO: other, nchannels unnneeded
+def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> IOReaderData:
+    """
+    Spoof an instance from data_reader_base.ReaderData instance.
+    other should be such an instance.
+    """
+
+    dx = 0.5
+    dy = 0.5
+    num_healpix_cells = 12 * 4**healpix_level
+    lons, lats = hp.healpix_to_lonlat(
+        np.arange(0, num_healpix_cells), 2**healpix_level, dx=dx, dy=dy, order="nested"
+    )
+    coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
+    geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
+
+    data = np.expand_dims(mean_of_data.astype(np.float32), axis=0).repeat(coords.shape[0], axis=0)
+    datetimes = np.array(datetime).repeat(coords.shape[0])
+
+    n_datapoints = len(data)
+
+    assert coords.shape == (n_datapoints, 2), (
+        "number of datapoints do not match data",
+        coords.shape,
+        (n_datapoints, 2),
+    )
+    assert geoinfos.shape[0] == n_datapoints, (
+        "number of datapoints do not match data",
+        geoinfos.shape,
+        (n_datapoints, geoinfo_size),
+    )
+    assert datetimes.shape[0] == n_datapoints, (
+        "number of datapoints do not match data",
+        datetimes.shape,
+        (n_datapoints,),
+    )
+
+    return IOReaderData(coords, geoinfos, data, datetimes)
