@@ -590,6 +590,15 @@ class Model(torch.nn.Module):
                 )
             ]
 
+            breakpoint()
+
+            if self.training:
+                # tokens = tokens + ((torch.rand_like(tokens)*6e-4)-3e-4) * torch.norm(tokens)  # uniform
+                tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * 1e-4  # normal
+                # Laplace noise (heavy tail)
+                # lap_dist = torch.distributions.Laplace(loc=0.0, scale=7.071*1e-5)
+                # tokens = tokens + lap_dist.sample(tokens.shape).to(device=tokens.device)
+
             tokens = self.forecast(model_params, tokens)
 
         # prediction for final step
