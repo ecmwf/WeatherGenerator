@@ -3,12 +3,12 @@ description: A task or issue that should take less than a week to complete.
 title: "[ISSUE] "
 
 body:
-  - type: markdown
+  - type: textarea
+    id: description
     attributes:
-      value: |
-        Describe the task. It can be a feature, documentation, etc.
-        
-        Be specific and provide context.
+      label: Describe the task. It can be a feature, documentation, etc.
+      description: Be specific and provide context.
+      placeholder: "Describe the task here..."
 
   - type: input
     id: hedgedoc_url
