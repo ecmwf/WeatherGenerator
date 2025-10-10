@@ -1,3 +1,5 @@
+# This file controls the conversion from Zarr format to CF-compliant NetCDF files in weathergen.evaluate.zarr_nc.zarr_to_netcdf.
+# It defines the mapping of variable and dimension names, their standard names, units, and level types.
 variables:
   q:
     var: q
