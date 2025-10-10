@@ -37,6 +37,7 @@ if not _logger.handlers:
     handler.setFormatter(formatter)
     _logger.addHandler(handler)
 
+
 def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
     """
     Find all the pressure levels for each variable using regex and returns a dictionary
@@ -257,8 +258,8 @@ def get_data(
     fsteps: list,
     channels: list,
     n_processes: list,
-    epoch:int,
-    rank:int,
+    epoch: int,
+    rank: int,
     output_dir: str,
     output_format: str,
     config: OmegaConf,
@@ -307,7 +308,10 @@ def get_data(
     with Pool(processes=n_processes, maxtasksperchild=5) as pool:
         for sample_idx in tqdm(samples):
             da_fs = []
-            step_tasks = [(sample_idx, fstep, run_id, stream, type, epoch, rank) for fstep in fsteps]
+            step_tasks = [
+                (sample_idx, fstep, run_id, stream, type, epoch, rank)
+                for fstep in fsteps
+            ]
             for result in tqdm(
                 pool.imap_unordered(get_data_worker, step_tasks, chunksize=1),
                 total=len(step_tasks),
@@ -335,10 +339,11 @@ def get_data(
             _logger.info(
                 f"Saving sample {sample_idx} data to {output_format} format in {output_dir}."
             )
+            FSTEP_HOURS = np.datetime64(6, "h")
             save_sample_to_netcdf(
                 str(type)[:4],
                 da_fs,
-                np.timedelta64(6, "h"),
+                FSTEP_HOURS,
                 run_id,
                 output_dir,
                 output_format,
@@ -351,7 +356,7 @@ def get_data(
 def save_sample_to_netcdf(
     type_str,
     array_list,
-    FSTEP_HOURS,
+    fstep_hours,
     run_id,
     output_dir,
     output_format,
@@ -365,7 +370,7 @@ def save_sample_to_netcdf(
         Type of data ('pred' or 'targ') to include in the filename.
     dict_sample_all_steps : dict
         Dictionary where keys is sample index and values is a list of xarray DataArrays for all the forecast steps
-    FSTEP_HOURS : np.timedelta64
+    fstep_hours : np.timedelta64
         Time difference between forecast steps (e.g., 6 hours).
     run_id : str
         Run ID to include in the filename.
@@ -377,7 +382,7 @@ def save_sample_to_netcdf(
         Loaded config for cf_parser function.
     """
     # find forecast_ref_time
-    frt = array_list[0].valid_time.values[0] - FSTEP_HOURS * int(
+    frt = array_list[0].valid_time.values[0] - fstep_hours * int(
         array_list[0].forecast_step.values
     )
     out_fname = output_filename(type_str, run_id, output_dir, output_format, frt)
@@ -399,7 +404,7 @@ def save_sample_to_netcdf(
         sample_all_steps = sample_all_steps.drop_vars("sample")
         sample_all_steps = cf_parser(config, sample_all_steps)
         # add forecast_period attributes
-        n_hours = FSTEP_HOURS.astype("int64")
+        n_hours = fstep_hours.astype("int64")
         sample_all_steps["forecast_period"] = (
             sample_all_steps["forecast_period"] * n_hours
         )
@@ -507,12 +512,14 @@ def parse_args(args: list) -> argparse.Namespace:
         _logger.warning(f"Unknown arguments: {unknown_args}")
     return args
 
+
 def export() -> None:
     # By default, arguments from the command line are read.
     export_from_args(sys.argv[1:])
 
+
 def export_from_args(args: list) -> None:
-   # Get run_id zarr data as lists of xarray DataArrays
+    # Get run_id zarr data as lists of xarray DataArrays
     args = parse_args(sys.argv[1:])
     run_id = args.run_id
     data_type = args.type
@@ -536,8 +543,6 @@ def export_from_args(args: list) -> None:
     # check config loaded correctly
     assert config["variables"]["q"] is not None
 
-    FSTEP_HOURS = np.timedelta64(6, "h")
-
     for type in data_type:
         _logger.info(f"Starting processing {type} for run ID {run_id}.")
         get_data(
@@ -555,6 +560,7 @@ def export_from_args(args: list) -> None:
             config,
         )
         _logger.info(f"Finished processing {type} for run ID {run_id}.")
+
 
 if __name__ == "__main__":
     export()
