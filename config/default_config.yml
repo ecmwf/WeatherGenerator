@@ -1,4 +1,4 @@
-streams_directory: "./config/streams/streams_anemoi/"
+streams_directory: "./config/streams/era5_1deg/"
 
 embed_orientation: "channels"
 embed_local_coords: True
@@ -10,7 +10,7 @@ embed_dropout_rate: 0.1
 target_cell_local_prediction: True
 
 ae_local_dim_embed: 1024
-ae_local_num_blocks: 0
+ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
@@ -24,11 +24,13 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 4
+ae_global_num_blocks: 8
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
-ae_global_att_dense_rate: 0.2
+# TODO: switching to < 1 triggers triton-related issues.
+# See https://github.com/ecmwf/WeatherGenerator/issues/1050
+ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 
@@ -40,13 +42,12 @@ pred_mlp_adaln: True
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-forecast_offset : 1
+forecast_offset : 0
 forecast_delta_hrs: 0
-forecast_steps: 2
-forecast_policy: "fixed"
-forecast_freeze_model: False
+forecast_steps: 0
+forecast_policy: null
 forecast_att_dense_rate: 1.0
-fe_num_blocks: 8
+fe_num_blocks: 0
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -62,6 +63,12 @@ attention_dtype: bf16
 mlp_norm_eps: 1e-5
 norm_eps: 1e-4
 
+latent_noise_kl_weight: 0.0 # 1e-5
+latent_noise_gamma: 2.0
+latent_noise_saturate_encodings: 5 
+latent_noise_use_additive_noise: False
+latent_noise_deterministic_latents: True 
+
 loss_fcts:
   -
     - "mse"
@@ -74,35 +81,44 @@ loss_fcts_val:
 batch_size_per_gpu: 1
 batch_size_validation_per_gpu: 1
 
+# a regex that needs to fully match the name of the modules you want to freeze
+# e.g. ".*ERA5" will match any module whose name ends in ERA5\
+# encoders and decoders that exist per stream have the stream name attached at the end
+freeze_modules: ""
+
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "forecast"
+training_mode: "masking"
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
 # note that a sampled masking rate leads to varying requirements
 masking_rate_sampling: True
-# sample a subset of all target points, useful e.g. to reduce memory requirements
+# sample a subset of all target points, useful e.g. to reduce memory requirements (also can specify per-stream)
 sampling_rate_target: 1.0
-# include a masking strategy here, currently only supporting "random", "block", "healpix" and "channel"
+# include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "causal" and "combination"
 masking_strategy: "random"
 # masking_strategy_config is a dictionary of additional parameters for the masking strategy
 # required for "healpix" and "channel" masking strategies
 # "healpix": requires healpix mask level to be specified with `hl_mask`
-# "channel": requires "mode" to be specified, "per_cell" or "global", 
-masking_strategy_config: {"hl_mask": 3}
+# "channel": requires "mode" to be specified, "per_cell" or "global",
+masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
+                          "probabilities": [0.34, 0.33, 0.33],
+                          "hl_mask": 3, "mode": "per_cell",
+                          "same_strategy_per_batch": false
+                          }
 
-num_epochs: 64
+num_epochs: 32
 samples_per_epoch: 4096
 samples_per_validation: 512
 shuffle: True
 
 lr_scaling_policy: "sqrt"
 lr_start: 1e-6
-lr_max: 0.0001
-lr_final_decay: 2e-6
+lr_max: 5e-5
+lr_final_decay: 1e-6
 lr_final: 0.0
-lr_steps_warmup: 256
+lr_steps_warmup: 512 
 lr_steps_cooldown: 512
 lr_policy_warmup: "cosine"
 lr_policy_decay: "linear"
