@@ -27,6 +27,7 @@ body:
       options:
         - label: datasets, data readers, data preparation and transfer
         - label: model
+        - label: science
         - label: infrastructure and engineering
         - label: evaluation, export and visualization
         - label: documentation

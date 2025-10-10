@@ -7,8 +7,10 @@ body:
     attributes:
       label: What happened?
       description: |
-        Actual Results: What happened when you got the bug?
         Expected Results: What was supposed to happen?
+
+        Actual Results: What happened when you got the bug?
+        
         Additional Information: Add anything else you feel we need to know e.g. The exact error message printed
     validations:
       required: true
