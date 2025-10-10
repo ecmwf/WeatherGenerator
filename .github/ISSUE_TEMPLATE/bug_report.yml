@@ -26,7 +26,7 @@ body:
         - command run
         - if applicable: node configuration
     validations:
-      required: "false"
+      required: false
   - type: input
     id: data
     attributes:
