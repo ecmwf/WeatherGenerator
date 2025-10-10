@@ -278,6 +278,10 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
 class DataReaderBase(metaclass=ABCMeta):
     """
     Base class for data readers.
+
+    Coordinates must be provided in standard geographical format:
+    latitude in degrees from -90 (South) to +90 (North),
+    and longitude in degrees from -180 (West) to +180 (East).
     """
 
     # The fields that need to be set by the child classes
@@ -287,6 +291,7 @@ class DataReaderBase(metaclass=ABCMeta):
     source_idx: list[int] = abstract_attribute()
     target_idx: list[int] = abstract_attribute()
     geoinfo_idx: list[int] = abstract_attribute()
+    target_channel_weights: list[float] = abstract_attribute()
 
     def __init__(
         self,
@@ -308,6 +313,7 @@ class DataReaderBase(metaclass=ABCMeta):
 
         self.time_window_handler = tw_handler
         self.stream_info = stream_info
+        self.target_channel_weights = None
 
     def init_empty(self) -> None:
         """
@@ -320,6 +326,7 @@ class DataReaderBase(metaclass=ABCMeta):
         self.source_idx = []
         self.target_idx = []
         self.geoinfo_idx = []
+        self.target_channel_weights = []
 
         self.mean = np.zeros(0)
         self.stdev = np.ones(0)
@@ -456,6 +463,28 @@ class DataReaderBase(metaclass=ABCMeta):
         size of geoinfos
         """
         return len(self.geoinfo_idx)
+
+    def parse_target_channel_weights(
+        self,
+    ) -> list[float] | None:
+        target_channel_weights = [
+            self.stream_info["channel_weights"].get(ch, 1.0)
+            if self.stream_info.get("channel_weights", None)
+            else 1.0
+            for ch in self.target_channels
+        ]
+
+        if self.stream_info.get("channel_weights", None) is not None:
+            # Check whether all given channel_weights could be matched to a channel.
+            ch_unmatched = [
+                ch for ch in self.stream_info["channel_weights"] if ch not in self.target_channels
+            ]
+            if len(ch_unmatched) > 0:
+                _logger.info(
+                    f"Unmatched channel_weights in {self.stream_info.name}: {ch_unmatched}"
+                )
+
+        return target_channel_weights
 
     def normalize_coords(self, coords: NDArray[DType]) -> NDArray[DType]:
         """

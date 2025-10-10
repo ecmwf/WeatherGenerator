@@ -110,6 +110,9 @@ class DataReaderAnemoi(DataReaderTimestep):
         self.target_idx = self.select_channels(ds0, "target")
         self.target_channels = [ds.variables[i] for i in self.target_idx]
 
+        # get target channel weights from stream config
+        self.target_channel_weights = self.parse_target_channel_weights()
+
         self.geoinfo_channels = []
         self.geoinfo_idx = []
 
@@ -250,7 +253,7 @@ class DataReaderAnemoi(DataReaderTimestep):
             ]
         )
 
-        return chs_idx
+        return np.array(chs_idx, dtype=np.int64)
 
 
 def _clip_lat(lats: NDArray) -> NDArray[np.float32]:
