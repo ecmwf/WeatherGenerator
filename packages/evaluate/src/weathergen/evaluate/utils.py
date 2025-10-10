@@ -141,11 +141,12 @@ def calc_scores_per_stream(
         assert int(combined_metrics.forecast_step) == int(fstep), (
             "Different steps in data and metrics. Please check."
         )
-
+    
         metric_stream.loc[
             {
                 "forecast_step": int(combined_metrics.forecast_step),
                 "sample": combined_metrics.sample,
+                "channel": combined_metrics.channel,
             }
         ] = combined_metrics
 
