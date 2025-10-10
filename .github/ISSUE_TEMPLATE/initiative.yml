@@ -32,7 +32,7 @@ body:
     attributes:
       label: URL to the design document
       description: Paste a link to logs, screenshots, or related resources
-      placeholder: ""
+      placeholder: "link to doc on sharepoint"
     validations:
       required: false
 
