@@ -26,7 +26,7 @@ from weathergen.datasets.data_reader_base import (
     check_reader_data,
 )
 
-# from dask.diagnostics import ProgressBar
+from dask.diagnostics import ProgressBar
 
 
 _logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class DataReaderIconBase(DataReaderTimestep):
         Parameters
         ----------
         tw_handler : TimeWindowHandler
-            Handles temporal slicing and mapping from time indices to datetime
+            Handles temporal slicing and mapping from time indices to datetimes
         stream_info : dict
             Stream metadata
         """
@@ -215,7 +215,8 @@ class DataReaderIconBase(DataReaderTimestep):
             # Profile channel if exactly one level suffix exists
             if len(parts) == 2 and parts != "":
                 level = parts[1]
-                if (not allowed_levels or level in allowed_levels) and ch not in channels_exclude:
+                ch_base = parts[0]
+                if (not allowed_levels or level in allowed_levels) and ch_base not in channels_exclude:
                     new_colnames.append(ch)
             else:
                 if ch not in channels_exclude:
@@ -246,88 +247,6 @@ class DataReaderIconBase(DataReaderTimestep):
         length of dataset
         """
         return self.len
-
-    @override
-    def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
-        """
-        Get data for temporal window
-
-        Parameters
-        ----------
-        idx : int
-            Index of temporal window
-        channels_idx : list[int]
-            Selection of channels
-
-        Returns
-        -------
-        ReaderData
-        """
-        (t_idxs, dtr) = self._get_dataset_idxs(idx)
-
-        if self.ds is None or self.len == 0 or len(t_idxs) == 0:
-            return ReaderData.empty(
-                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
-            )
-
-        # Determine time slice indices
-        t_idxs_start = t_idxs[0]
-        t_idxs_end = t_idxs[-1] + 1
-        n_times = t_idxs_end - t_idxs_start
-
-        # Determine total number of rows (time steps * mesh_size)
-        total_rows = n_times * self.mesh_size
-
-        # datetime: repeat each datetime for each grid point
-        datetimes = np.repeat(self.time[t_idxs_start:t_idxs_end], self.mesh_size, axis=0)
-
-        # lat/lon coordinates: tile to match the time dimension
-        lat = np.tile(self.lat.values[:, np.newaxis], (n_times, 1))
-        lon = np.tile(self.lon.values[:, np.newaxis], (n_times, 1))
-        coords = np.concatenate([lat, lon], axis=1)
-
-        # Select channels
-        channels = np.array(self.colnames)[channels_idx]
-
-        try:
-            data_per_channel = []
-            for ch in channels:
-                # print(f"loading {ch}...")
-                ch_parts = ch.split("_")
-                # retrieving profile channels
-                if len(ch_parts) == 2 and ch_parts[1] in self.levels:
-                    ch_ = ch_parts[0]
-                    plev_int = ch_parts[1]
-                    da = self.ds[ch_].assign_coords(plev=("plev", self.levels))
-                    da = da.sel(plev=plev_int).data[t_idxs_start:t_idxs_end, ...]
-                else:
-                    # Slice the Dask array
-                    da = self.ds[ch].data[t_idxs_start:t_idxs_end, ...]
-                # Flatten each time step and compute
-                # with ProgressBar():
-                data_arr = da.reshape(-1, 1).compute(scheduler="synchronous")
-                data_per_channel.append(data_arr)
-            # Concatenate along channel axis
-            data = np.concatenate(data_per_channel, axis=1)
-
-        except Exception as e:
-            _logger.debug(f"Date not present in ICON dataset: {str(e)}. Skipping.")
-            return ReaderData.empty(
-                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
-            )
-
-        # Empty geoinfos
-        geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
-
-        rd = ReaderData(
-            coords=coords,
-            geoinfos=geoinfos,
-            data=data,
-            datetimes=datetimes,
-        )
-        check_reader_data(rd, dtr)
-
-        return rd
 
 
 ##########################
@@ -376,6 +295,74 @@ class DataReaderIcon(DataReaderIconBase):
     # TODO Julius ?
     def select_by_level(self):
         return
+
+    @override
+    def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
+        """
+        Get data for temporal window
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+        channels_idx : np.array
+            Selection of channels
+        Returns
+        -------
+        data (coords, geoinfos, data, datetimes)
+        """
+
+        (t_idxs, dtr) = self._get_dataset_idxs(idx)
+
+        if self.ds is None or self.len == 0 or len(t_idxs) == 0:
+            return ReaderData.empty(
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
+
+        # TODO: handle sub-sampling
+
+        t_idxs_start = t_idxs[0]
+        t_idxs_end = t_idxs[-1] + 1
+
+        # datetimes
+        datetimes = np.asarray(self.time[t_idxs_start:t_idxs_end])
+
+        # lat/lon coordinates + tiling to match time steps
+        lat = self.lat.values[:, np.newaxis]
+        lon = self.lon.values[:, np.newaxis]
+
+        lat = np.tile(lat, len(datetimes))
+        lon = np.tile(lon, len(datetimes))
+
+        coords = np.concatenate([lat, lon], axis=1)
+
+        # time coordinate repeated to match grid points
+        datetimes = np.repeat(datetimes, self.mesh_size).reshape(-1, 1)
+        datetimes = np.squeeze(datetimes)
+
+        # expanding indexes for data
+        start_row = t_idxs_start * self.mesh_size
+        end_row = t_idxs_end * self.mesh_size
+
+        # data
+        channels = np.array(self.colnames)[channels_idx]
+
+        data_reshaped = [
+            np.asarray(self.ds[ch_]).reshape(-1, 1)[start_row:end_row] for ch_ in channels
+        ]
+        data = np.concatenate(data_reshaped, axis=1)
+
+        # empty geoinfos
+        geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
+
+        rd = ReaderData(
+            coords=coords,
+            geoinfos=geoinfos,
+            data=data,
+            datetimes=datetimes,
+        )
+        check_reader_data(rd, dtr)
+
+        return rd
 
 
 ##########################
@@ -450,3 +437,88 @@ class DataReaderIconCmip6(DataReaderIconBase):
         cols_idx = np.array(list(np.arange(len(colnames))))
 
         return colnames, cols_idx
+
+    @override
+    def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
+        """
+        Get data for temporal window
+
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+        channels_idx : list[int]
+            Selection of channels
+
+        Returns
+        -------
+        ReaderData
+        """
+        (t_idxs, dtr) = self._get_dataset_idxs(idx)
+        # dtr is a time window object it has the attributes t_start_win and t_end_win
+
+        if self.ds is None or self.len == 0 or len(t_idxs) == 0:
+            return ReaderData.empty(
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
+
+        # Select channels
+        channels = np.array(self.colnames)[channels_idx]
+
+        start_ts = dtr.start
+        end_ts = dtr.end -  np.timedelta64(1, "h")
+
+        try:
+            data_per_channel = []
+            datetimes = []
+            coords = []
+
+            for ch in channels:
+                ch_parts = ch.split("_")
+                if hasattr(self, "levels") and self.levels and len(ch_parts) == 2 and ch_parts[1] in self.levels:
+                    ch_ = ch_parts[0]
+                    plev_int = ch_parts[1]
+                    levels_all = self.ds[ch_]["plev"][0].values
+                    da = self.ds[ch_].assign_coords(plev=("plev", levels_all))
+                    da = da.sel(plev=plev_int, time=slice(start_ts, end_ts))
+                else:
+                    da = self.ds[ch].sel(time=slice(start_ts, end_ts))
+                data_arr = da.compute(scheduler="synchronous")
+
+                if not data_per_channel:
+                    # datetimes
+                    datetimes = np.repeat(data_arr.time.values, self.mesh_size).reshape(-1, 1)
+                    datetimes = np.squeeze(datetimes)
+
+                    # coords
+                    n_times = len(data_arr.time)
+                    lat = np.tile(data_arr.latitude.values[:, np.newaxis], (n_times, 1))
+                    lon = np.tile(data_arr.longitude.values[:, np.newaxis], (n_times, 1))
+
+                    coords = np.concatenate([lat, lon], axis=1)
+
+                # data
+                data_per_channel.append(np.asarray(data_arr.data.reshape(-1, 1)))
+
+            data = np.concatenate(data_per_channel, axis=1)
+        except Exception as e:
+            _logger.debug(f"Date not present in ICON dataset: {str(e)}. Skipping.")
+            return ReaderData.empty(
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
+        if data_per_channel[0].shape[0] == 0:
+            return ReaderData.empty(
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
+
+        # Empty geoinfos
+        geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
+
+        rd = ReaderData(
+            coords=coords,
+            geoinfos=geoinfos,
+            data=data,
+            datetimes=datetimes,
+        )
+        check_reader_data(rd, dtr)
+        return rd
