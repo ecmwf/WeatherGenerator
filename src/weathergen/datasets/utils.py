@@ -158,7 +158,7 @@ def locs_to_ctr_coords(ctrs_r3, locs: list[torch.Tensor]) -> list:
     point_rotations = ctrs_rots[batch_indices]
 
     # Single vectorized batch matrix multiplication
-    rotated_points = torch.bmm(point_rotations, all_points.unsqueeze(-1)).squeeze(-1)
+    rotated_points = torch.bmm(point_rotations, all_points.unsqueeze(-1).to(dtype=point_rotations.dtype)).squeeze(-1)
 
     # Split back using tensor operations
     local_locs = torch.split(rotated_points, lengths.tolist())
@@ -224,7 +224,7 @@ def locs_to_cell_coords_ctrs(
     rotations_selected = healpix_centers_rots[batch_indices]
 
     # Vectorized matrix multiplication
-    local_locs = torch.bmm(rotations_selected, all_points.unsqueeze(-1)).squeeze(-1)
+    local_locs = torch.bmm(rotations_selected, all_points.unsqueeze(-1).to(dtype=rotations_selected.dtype)).squeeze(-1)
 
     return local_locs
 

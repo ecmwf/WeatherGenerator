@@ -305,7 +305,9 @@ def _coords_local(
     # adding a dummy dimension to posr3
     # numpoints x 3 x 1
     posr3_sel = posr3[idxs_ords_c].unsqueeze(-1)
-    vec_rot = torch.bmm(rots, posr3_sel)
+    # print(f"rots = {rots} type(rots) = {type(rots)}", flush=True)
+    # print(f"posr3_sel = {posr3_sel} type(posr3_sel) = {type(posr3_sel)}", flush=True)
+    vec_rot = torch.bmm(rots, posr3_sel.to(dtype=rots.dtype))
     vec_rot = vec_rot.squeeze(-1)
     vec_scaled = n_coords(r3tos2(vec_rot).to(fp32))
     # split back to ragged list
