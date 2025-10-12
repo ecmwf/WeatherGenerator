@@ -14,6 +14,7 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 import xarray as xr
+from scipy.spatial import cKDTree
 
 from weathergen.evaluate.score_utils import to_list
 
@@ -71,12 +72,15 @@ class VerifiedData:
 
     prediction: xr.DataArray
     ground_truth: xr.DataArray
+    prediction_next: xr.DataArray
+    ground_truth_next: xr.DataArray
 
     def __post_init__(self):
         # Perform checks on initialization
         self._validate_dimensions()
         self._validate_broadcastability()
 
+    # TODO: add checks for prediction_next, ground_truth_next
     def _validate_dimensions(self):
         # Ensure all dimensions in truth are in forecast (or equal)
         missing_dims = set(self.ground_truth.dims) - set(self.prediction.dims)
@@ -85,6 +89,7 @@ class VerifiedData:
                 f"Truth data has extra dimensions not found in forecast: {missing_dims}"
             )
 
+    # TODO: add checks for prediction_next, ground_truth_next
     def _validate_broadcastability(self):
         try:
             # Attempt broadcast
@@ -175,6 +180,8 @@ class Scores:
             "rmse": self.calc_rmse,
             "bias": self.calc_bias,
             "acc": self.calc_acc,
+            "froct": self.calc_froct,
+            "troct": self.calc_troct,
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
@@ -257,7 +264,15 @@ class Scores:
 
         arg_names: list[str] = inspect.getfullargspec(f).args[1:]
 
-        args = {"p": data.prediction, "gt": data.ground_truth}
+        if score_name in ["froct", "troct"]:
+            args = {
+                "p": data.prediction,
+                "gt": data.ground_truth,
+                "p_next": data.prediction_next,
+                "gt_next": data.ground_truth_next,
+            }
+        else:
+            args = {"p": data.prediction, "gt": data.ground_truth}
 
         # Add group_by_coord if provided
         if group_by_coord is not None:
@@ -603,6 +618,178 @@ class Scores:
         rmse = np.sqrt(self.calc_mse(p, gt, group_by_coord))
 
         return rmse
+
+    @staticmethod
+    def sort_by_coords(
+        da_to_sort: xr.DataArray, da_reference: xr.DataArray
+    ) -> xr.DataArray:
+        """
+        Sorts one xarray.DataArray's coordinate ordering to match a reference array using KDTree.
+
+        This method finds the nearest neighbor in `da_to_sort` for every coordinate in
+        `da_reference`, effectively reordering `da_to_sort` along its indexed dimension to align
+        with the sequence of coordinates in the reference.
+
+        Parameters
+        ----------
+        da_to_sort : xr.DataArray
+            The DataArray whose coordinate ordering needs to be matched.
+            Must contain 'lat' and 'lon' coordinates and an indexed dimension (e.g., 'ipoint').
+        da_reference : xr.DataArray
+            The DataArray providing the target coordinate ordering (the template). Must contain
+            'lat' and 'lon' coordinates.
+
+        Returns
+        -------
+        xr.DataArray
+            A new DataArray with the data from `da_to_sort` reordered to match the
+            coordinate sequence of `da_reference`.
+
+        Raises
+        ------
+        ValueError
+            If any reference coordinate does not have a matching coordinate in
+            `da_to_sort` within the allowed distance tolerance (1e-5).
+
+        Notes
+        -----
+        The matching uses `scipy.spatial.cKDTree.query` with a strict distance threshold
+        (`distance_upper_bound=1e-5`) to ensure precise one-to-one alignment.
+        """
+
+        # Extract coordinates
+        ref_lats = da_reference.lat.values
+        ref_lons = da_reference.lon.values
+        sort_lats = da_to_sort.lat.values
+        sort_lons = da_to_sort.lon.values
+
+        # Build KDTree on coordinates to sort
+        sort_coords = np.column_stack((sort_lats, sort_lons))
+        tree = cKDTree(sort_coords)
+
+        # Find nearest neighbors for reference coordinates
+        ref_coords = np.column_stack((ref_lats, ref_lons))
+        dist, indices = tree.query(ref_coords, distance_upper_bound=1e-5)
+
+        # Check for unmatched coordinates
+        unmatched_mask = ~np.isfinite(dist)
+        if np.any(unmatched_mask):
+            n_unmatched = np.sum(unmatched_mask)
+            _logger.info(
+                f"Found {n_unmatched} reference coordinates with no matching coordinates in array to sort. Returning NaN DataArray."
+            )
+            return xr.full_like(da_reference, np.nan)
+
+        # Reorder da_to_sort to match reference ordering
+        return da_to_sort.isel(ipoint=indices)
+
+    def calc_change_rate(
+        self,
+        s0: xr.DataArray,
+        s1: xr.DataArray,
+    ):
+        """
+        Calculate the "change rate" of a data array as the mean absolute difference between two consecutive time steps.
+
+        Parameters
+        ----------
+        s0: xr.DataArray
+            Data array at time step t0
+        s1: xr.DataArray
+            Data array at time step t1
+
+        Returns
+        -------
+        xr.DataArray
+            Change rate of the data array
+        """
+
+        if s1 is None:
+            return xr.full_like(s0, np.nan)
+        else:
+            # Sort the coordinates of subsequent time steps to match each other. Can be removed
+            # once unshuffling is solved elsewhere
+            s1 = self.sort_by_coords(da_to_sort=s1, da_reference=s0)
+            crate = np.abs(s0 - s1.values)
+            return crate
+
+    def calc_froct(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        p_next: xr.DataArray,
+        gt_next: xr.DataArray,
+        group_by_coord: str | None = None,
+    ):
+        """
+        Calculate forecast rate of change over time
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array (not used in calculation, but kept for consistency)
+        p_next: xr.DataArray
+            Next forecast step data array
+        gt_next: xr.DataArray
+            Next ground truth step data array (not used in calculation, but kept for consistency)
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the FROCT score.
+        """
+        if self._agg_dims is None:
+            raise ValueError(
+                "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
+            )
+
+        froct = self.calc_change_rate(p, p_next)
+
+        if group_by_coord:
+            froct = froct.groupby(group_by_coord)
+
+        froct = self._mean(froct)
+
+        return froct
+
+    def calc_troct(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        gt_next: xr.DataArray,
+        p_next: xr.DataArray,
+        group_by_coord: str | None = None,
+    ):
+        """
+        Calculate target rate of change over time
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array (not used in calculation, but kept for consistency)
+        gt: xr.DataArray
+            Ground truth data array
+        p_next: xr.DataArray
+            Next forecast step data array (not used in calculation, but kept for consistency)
+        gt_next: xr.DataArray
+            Next ground truth step data array
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the FROCT score.
+        """
+        if self._agg_dims is None:
+            raise ValueError(
+                "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
+            )
+
+        troct = self.calc_change_rate(gt, gt_next)
+
+        if group_by_coord:
+            troct = troct.groupby(group_by_coord)
+
+        troct = self._mean(troct)
+
+        return troct
 
     def calc_acc(
         self,
