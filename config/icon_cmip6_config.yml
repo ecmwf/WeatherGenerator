@@ -17,5 +17,5 @@ multiprocessing_method: "spawn"
 
 # forecast_offset : 1 
 
-len_hrs: 24
+len_hrs: 745
 step_hrs: 24
