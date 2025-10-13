@@ -38,6 +38,11 @@ from weathergen.model.utils import get_num_parameters
 from weathergen.utils.logger import logger
 from weathergen.utils.utils import get_dtype
 
+# Add at the top with other imports
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend
+import matplotlib.pyplot as plt
+
 
 class ModelParams(torch.nn.Module):
     """Creation of query and embedding parameters of the model."""
@@ -192,6 +197,17 @@ class Model(torch.nn.Module):
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
+
+
+        # Add tracking lists for plots
+        self.diagnostic_history = {
+            'latent_std': [],
+            'latent_diff': [],
+            'pred_diff': [],
+            'steps': []
+        }
+        self.current_step = 0
+
 
     #########################################
     def create(self) -> "Model":
@@ -524,9 +540,18 @@ class Model(torch.nn.Module):
         (streams_data, source_cell_lens, target_coords_idxs) = batch
 
         # Determine number of ensemble members
-        num_ensemble = 1
-        if not self.training and self.cf.get("num_ensemble_members", 1) > 1:
+        # ALWAYS use ensemble during training if we have stochastic latents
+        if self.training and self.cf.latent_noise_kl_weight > 0.0:
+            num_ensemble = self.cf.get("num_ensemble_members", 8)
+        elif not self.training and self.cf.get("num_ensemble_members", 1) > 1:
             num_ensemble = self.cf.num_ensemble_members
+        else:
+            num_ensemble = 1
+    
+        # DEBUG: Print to verify ensemble sampling
+        #if self.training:
+        #    print(f"[TRAIN] num_ensemble={num_ensemble}, stochastic_latents={self.cf.latent_noise_kl_weight > 0.0}")
+
 
         # embed
         tokens = self.embed_cells(model_params, streams_data)
@@ -538,6 +563,11 @@ class Model(torch.nn.Module):
         tokens_list, posteriors = self.assimilate_local(
             model_params, tokens, source_cell_lens, num_ensemble=num_ensemble
         )
+
+        # DEBUG: Verify we got multiple samples during training
+        #if self.training:
+        #    print(f"[TRAIN] Generated {len(tokens_list)} ensemble members from latent sampling")
+
 
         # Generate predictions for each ensemble member
         preds_all_ensemble = []
@@ -577,6 +607,56 @@ class Model(torch.nn.Module):
         # Restructure: from [ensemble][fstep][stream] to [fstep][stream] with ensemble dim
         preds_all = self._combine_ensemble_predictions(preds_all_ensemble)
 
+        # DEBUG: Verify ensemble dimension in predictions
+        #if self.training:
+        #    for fstep_idx, fstep_preds in enumerate(preds_all):
+        #        for stream_idx, pred in enumerate(fstep_preds):
+        #            if isinstance(pred, tuple):
+        #                # GMM case
+        #                samples, params = pred
+        #                print(f"[TRAIN] fstep={fstep_idx}, stream={stream_idx}: GMM samples shape={samples.shape}")
+        #            else:
+        #                # Deterministic ensemble case
+        #                print(f"[TRAIN] fstep={fstep_idx}, stream={stream_idx}: ensemble shape={pred.shape}")
+        #    #print(f"[TRAIN] Expected shape: [{num_ensemble}, N, C]")
+
+        # Collect diagnostics during training
+        if self.training and len(preds_all_ensemble) > 1:
+            # Latent variance (from last chunk)
+            if self.cf.latent_noise_kl_weight > 0.0 and len(posteriors) > 0:
+                valid_posteriors = [p for p in posteriors if p is not None]
+                if len(valid_posteriors) > 0:
+                    latent_std = torch.stack([p.std.mean() for p in valid_posteriors]).mean().item()
+                else:
+                    latent_std = 0.0
+            else:
+                latent_std = 0.0
+            
+            # Latent difference (from assimilate_local tracking)
+            if hasattr(self, '_last_latent_diff'):
+                latent_diff = self._last_latent_diff
+            else:
+                latent_diff = 0.0
+            
+            # Prediction difference
+            pred0 = preds_all_ensemble[0][0][0]
+            pred1 = preds_all_ensemble[1][0][0]
+            if isinstance(pred0, tuple):
+                pred0, pred1 = pred0[0], pred1[0]
+            pred_diff = (pred0 - pred1).abs().mean().item() if pred0.numel() > 0 else 0.0
+            
+            # Store
+            self.diagnostic_history['latent_std'].append(latent_std)
+            self.diagnostic_history['latent_diff'].append(latent_diff)
+            self.diagnostic_history['pred_diff'].append(pred_diff)
+            self.diagnostic_history['steps'].append(self.current_step)
+            
+            # Plot every 250 steps
+            if self.current_step % 250 == 0:
+                self._plot_diagnostics()
+            
+            self.current_step += 1
+    
         return preds_all, posteriors
 
     def _combine_ensemble_predictions(self, preds_all_ensemble):
@@ -725,6 +805,10 @@ class Model(torch.nn.Module):
         tokens_global_all = []
         posteriors_all = []
         zero_pad = torch.zeros(1, device="cuda", dtype=torch.int32)
+
+        # DEBUG: Track variance statistics
+        if self.training and self.cf.latent_noise_kl_weight > 0.0:
+            variance_stats = []
         
         for i in range((cell_lens.shape[0]) // clen):
             i_end = (i + 1) * clen if i < (cell_lens.shape[0] // clen) - 1 else cell_lens.shape[0]
@@ -754,6 +838,16 @@ class Model(torch.nn.Module):
                     num_samples=num_ensemble,
                 )
                 posteriors_all.append(posterior_c)
+
+                # DEBUG: Check variance
+                if self.training:
+                    variance_stats.append({
+                        'chunk': i,
+                        'mean_std': posterior_c.std.mean().item(),
+                        'max_std': posterior_c.std.max().item(),
+                        'min_std': posterior_c.std.min().item(),
+                    })
+
             else:
                 # No stochastic latents - just repeat tokens for ensemble
                 tokens_c_sampled = tokens_c
@@ -798,6 +892,15 @@ class Model(torch.nn.Module):
                 
                 tokens_global_all.append(torch.stack(tokens_global_c_list, dim=0))
 
+        # DEBUG: Print variance statistics
+        #if self.training and self.cf.latent_noise_kl_weight > 0.0:
+        #    if len(variance_stats) > 0:
+        #        mean_stds = [s['mean_std'] for s in variance_stats]
+        #        print(f"[LATENT VARIANCE] mean_std across chunks: {sum(mean_stds)/len(mean_stds):.4f}")
+        #        print(f"[LATENT VARIANCE] range: [{min(mean_stds):.4f}, {max(mean_stds):.4f}]")
+
+        
+        
         # Combine chunks and reshape
         if num_ensemble == 1:
             tokens_global = torch.cat(tokens_global_all)
@@ -819,6 +922,15 @@ class Model(torch.nn.Module):
                     + model_params.pe_global
                 ).flatten(1, 2)
                 tokens_global_list.append(tokens_sample)
+
+            # At the end, after computing tokens_global_list:
+            if self.training and len(tokens_global_list) > 1:
+                diff = (tokens_global_list[0] - tokens_global_list[1]).abs().mean().item()
+                self._last_latent_diff = diff  # Store for plotting
+                # print(f"[ASSIMILATE_LOCAL] Mean difference between member 0 and 1: {diff:.6f}")
+                if diff < 1e-6:
+                    print(f"[WARNING] Ensemble members are identical! Check sampling.")
+            
             
             return tokens_global_list, posteriors_all
 
@@ -980,3 +1092,36 @@ class Model(torch.nn.Module):
                 preds_tokens += [checkpoint(head, tc_tokens, use_reentrant=False)]
 
         return preds_tokens
+
+    def _plot_diagnostics(self):
+        """Create a simple 3-panel diagnostic plot"""
+        fig, axes = plt.subplots(3, 1, figsize=(10, 8))
+        
+        steps = self.diagnostic_history['steps']
+        
+        # Panel 1: Latent variance
+        axes[0].plot(steps, self.diagnostic_history['latent_std'], 'b-', linewidth=1)
+        axes[0].set_ylabel('Latent Std', fontsize=10)
+        axes[0].grid(True, alpha=0.3)
+        axes[0].set_title('Ensemble Diagnostics', fontsize=12)
+        
+        # Panel 2: Latent space difference
+        axes[1].plot(steps, self.diagnostic_history['latent_diff'], 'g-', linewidth=1)
+        axes[1].set_ylabel('Latent |m0-m1|', fontsize=10)
+        axes[1].grid(True, alpha=0.3)
+        
+        # Panel 3: Prediction space difference
+        axes[2].plot(steps, self.diagnostic_history['pred_diff'], 'r-', linewidth=1)
+        axes[2].set_ylabel('Pred |m0-m1|', fontsize=10)
+        axes[2].set_xlabel('Training Step', fontsize=10)
+        axes[2].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        # Save to model directory
+        save_path = Path(self.cf.model_path) / self.cf.run_id / 'ensemble_diagnostics.png'
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, dpi=100, bbox_inches='tight')
+        plt.close()
+        
+        print(f"[DIAGNOSTICS] Plot saved to {save_path}")

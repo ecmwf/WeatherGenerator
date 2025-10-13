@@ -71,18 +71,144 @@ def mse_ens(target, ens, mu, stddev):
     return torch.stack([mse_loss(target, mem) for mem in ens], 0).mean()
 
 
-def kernel_crps(target, ens, mu, stddev, fair=True):
-    ens_size = ens.shape[0]
-    mae = torch.stack([(target - mem).abs().mean() for mem in ens], 0).mean()
+#def kernel_crps(target, ens, mu, stddev, fair=True):
+#    ens_size = ens.shape[0]
+#    mae = torch.stack([(target - mem).abs().mean() for mem in ens], 0).mean()
+#
+#    if ens_size == 1:
+#        return mae
+#
+#    coef = -1.0 / (2.0 * ens_size * (ens_size - 1)) if fair else -1.0 / (2.0 * ens_size**2)
+#    ens_var = coef * torch.tensor([(p1 - p2).abs().sum() for p1 in ens for p2 in ens]).sum()
+#    ens_var /= ens.shape[1]
+#
+#    return mae + ens_var
+
+def kernel_crps(
+    target: torch.Tensor,
+    pred: torch.Tensor,  # [S, N, C]
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+    fair: bool = True,
+):
+    """
+    Compute kernel CRPS for ensemble predictions.
+    
+    Args:
+        target: [N, C] ground truth
+        pred: [S, N, C] ensemble members
+        weights_channels: [C] or None
+        weights_points: [N] or None
+        fair: whether to use fair CRPS (exclude self-comparisons)
+    
+    Returns:
+        loss: scalar
+        loss_chs: [C] per-channel CRPS (after location weighting)
+    """
+    # Ensure correct dtypes
+    target = target.float()
+    pred = pred.float()
+
+    # print("In the loss what is the pred shape", pred.shape)
+    
+    # Mask NaNs
+    mask_nan = ~torch.isnan(target)
+    target_masked = torch.where(mask_nan, target, torch.zeros_like(target))
+    
+    ens_size = pred.shape[0]  # S
+    
+    # Term 1: MAE between each member and target
+    # Shape: [S, N, C] -> mean over S -> [N, C]
+    mae_per_member = torch.abs(pred - target_masked.unsqueeze(0))  # [S, N, C]
+    mae = mae_per_member.mean(dim=0)  # [N, C]
+    
+    # Zero out masked locations
+    mae = torch.where(mask_nan, mae, torch.zeros_like(mae))
+    
+    # Term 2: Ensemble variability (pairwise distances)
+    if ens_size == 1:
+        ens_var = torch.zeros_like(mae)
+    else:
+        # Compute |pred_i - pred_j| for all pairs
+        # Broadcasting: [S, 1, N, C] - [1, S, N, C] -> [S, S, N, C]
+        pairwise_diff = torch.abs(
+            pred.unsqueeze(1) - pred.unsqueeze(0)
+        )  # [S, S, N, C]
+        
+        # Sum over all pairs and normalize
+        if fair:
+            # Exclude diagonal (i==j)
+            coef = -1.0 / (2.0 * ens_size * (ens_size - 1))
+        else:
+            coef = -1.0 / (2.0 * ens_size ** 2)
+        
+        ens_var = coef * pairwise_diff.sum(dim=(0, 1))  # [N, C]
+    
+    # Combine terms per channel
+    crps_ch = mae + ens_var  # [N, C]
+    
+    # Apply location weights
+    if weights_points is not None:
+        crps_ch = (crps_ch.transpose(1, 0) * weights_points).transpose(1, 0)
+    
+    # Per-channel mean across locations
+    loss_chs = crps_ch.mean(dim=0)  # [C]
+    
+    # Apply channel weights and compute scalar loss
+    if weights_channels is not None:
+        loss = torch.mean(loss_chs * weights_channels)
+    else:
+        loss = torch.mean(loss_chs)
+    
+    return loss, loss_chs
+
+def kernel_crps_lessig(
+    target,
+    pred,
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+    fair=True,
+):
+    """
+    Compute kernel CRPS
+
+    Params:
+    target : shape ( num_data_points , num_channels )
+    pred : shape ( ens_dim , num_data_points , num_channels)
+    weights_channels : shape = (num_channels,)
+    weights_points : shape = (num_data_points)
+
+    """
+
+    print("In the lessig loss what is the pred shape", pred.shape)
+
+    preds = pred.permute([2, 1, 0]).unsqueeze(0).to(torch.float32)
+    targets = target.permute([1, 0]).unsqueeze(0).to(torch.float32)
+
+    print("In the lessig loss what is the pred shape", preds.shape)
+
+    ens_size = preds.shape[-1]
+    mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
 
     if ens_size == 1:
         return mae
 
-    coef = -1.0 / (2.0 * ens_size * (ens_size - 1)) if fair else -1.0 / (2.0 * ens_size**2)
-    ens_var = coef * torch.tensor([(p1 - p2).abs().sum() for p1 in ens for p2 in ens]).sum()
-    ens_var /= ens.shape[1]
+    ens_n = -1.0 / (ens_size * (ens_size - 1)) if fair else -1.0 / (ens_size**2)
 
-    return mae + ens_var
+    abs = torch.abs
+    ens_var = torch.zeros(size=preds.shape[:-1], device=preds.device)
+    # loop to reduce memory usage
+    for i in range(ens_size):
+        ens_var += torch.sum(ens_n * abs(preds[..., i].unsqueeze(-1) - preds[..., i + 1 :]), dim=-1)
+
+    # apply weighting
+    kcrps_locs_chs = mae + ens_var
+    if weights_points is not None:
+        kcrps_locs_chs = kcrps_locs_chs * weights_points
+    kcrps_chs = torch.mean(torch.mean(kcrps_locs_chs, 0), -1) * weights_channels
+
+    return torch.mean(kcrps_chs), kcrps_chs
+
 
 def gmm_nll(
     target: torch.Tensor,
