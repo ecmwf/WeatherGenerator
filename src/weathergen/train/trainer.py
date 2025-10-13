@@ -219,12 +219,14 @@ class Trainer(TrainerBase):
 
         if cf.with_ddp and cf.with_fsdp:
             fsdp_kwargs = {
-                "mp_policy": MixedPrecisionPolicy(
-                    param_dtype=self.mixed_precision_dtype,
-                    reduce_dtype=torch.float32,
-                )
-                if cf.with_mixed_precision
-                else None,
+                "mp_policy": (
+                    MixedPrecisionPolicy(
+                        param_dtype=self.mixed_precision_dtype,
+                        reduce_dtype=torch.float32,
+                    )
+                    if cf.with_mixed_precision
+                    else None
+                ),
             }
             modules_to_shard = (
                 MLP,
@@ -255,12 +257,14 @@ class Trainer(TrainerBase):
                     fully_shard(module, **fsdp_kwargs)
 
             full_precision_fsdp_kwargs = {
-                "mp_policy": MixedPrecisionPolicy(
-                    param_dtype=torch.float32,
-                    reduce_dtype=torch.float32,
-                )
-                if cf.with_mixed_precision
-                else None,
+                "mp_policy": (
+                    MixedPrecisionPolicy(
+                        param_dtype=torch.float32,
+                        reduce_dtype=torch.float32,
+                    )
+                    if cf.with_mixed_precision
+                    else None
+                ),
             }
             for module in self.model.pred_adapter_kv.modules():
                 if isinstance(module, modules_to_shard):
@@ -277,7 +281,6 @@ class Trainer(TrainerBase):
             for tensor in itertools.chain(self.model.parameters(), self.model.buffers()):
                 assert tensor.device == torch.device("meta")
 
-        # load model if specified
         if run_id_contd is None:
             self.model.to_empty(device="cuda")
             self.model.reset_parameters()
@@ -701,6 +704,14 @@ class Trainer(TrainerBase):
         params = torch.load(
             path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
         )
+
+        model_state_dict = self.model.state_dict()
+        params = {
+            k: v
+            for k, v in params.items()
+            if k in model_state_dict and v.shape == model_state_dict[k].shape
+        }
+
         is_model_sharded = self.cf.with_ddp and self.cf.with_fsdp
         if is_model_sharded:
             meta_sharded_sd = self.model.state_dict()
@@ -719,6 +730,25 @@ class Trainer(TrainerBase):
                 maybe_sharded_sd[k.replace("module.", "")] = params[k]
         # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
         mkeys, ukeys = self.model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
+
+        if mkeys:
+            # Get the unique parent modules for the missing parameters
+            new_modules_to_init = {key.rsplit(".", 1)[0] for key in mkeys}
+
+            # Find the highest-level "root" new modules to avoid redundant initializations
+            root_new_modules = set()
+            for path in sorted(list(new_modules_to_init)):
+                if not any(path.startswith(root + ".") for root in root_new_modules):
+                    root_new_modules.add(path)
+
+            # Get all modules for quick lookup and initialize the new ones
+            all_modules = dict(self.model.named_modules())
+            for path in root_new_modules:
+                if is_root():
+                    logger.info(f"Initializing new module not found in checkpoint: {path}")
+                module_to_init = all_modules[path]
+                module_to_init.to_empty(device="cuda")
+                module_to_init.reset_parameters()
 
         if not is_model_sharded:
             self.model = self.model.to(self.device)
