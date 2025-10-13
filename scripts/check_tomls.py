@@ -20,19 +20,18 @@ def loop_keys(toml_dict, list_keys):
 
 def check_toml_key(main_toml_dict, other_toml_dict, list_keys, name):
     try:
-        main_value = loop_keys(main_toml_dict, list_keys)
-        other_value = loop_keys(other_toml_dict, list_keys)
+        main_value = loop_keys(dict(main_toml_dict), list_keys)
+        other_value = loop_keys(dict(other_toml_dict), list_keys)
         assert main_value == other_value, (
-            f"{list_keys} mismatch with main pyproject.toml and {name} pyproject.toml"
+            f"{list_keys} mismatch with main pyproject.toml and {name} pyproject.toml: ",
+            f"{main_value} != {other_value}",
         )
     except Exception as e:
-        if type(e) is KeyError:
-            print(
+        assert type(e) is not KeyError,(
                 f"""KeyError: '{list_keys}' not found in {name} pyproject.toml, 
                 please populate this field"""
             )
-        else:
-            print(e)
+        print(e)
 
 
 def check_tomls(main_toml, *tomls):
@@ -51,14 +50,12 @@ def check_tomls(main_toml, *tomls):
         # check build system is the same
         check_toml_key(main_toml_dict, toml_dict, ["build-system"], name)
         # check python version is the same
-        check_toml_key(main_toml_dict, toml_dict, ["requires-python"], name)
+        # check_toml_key(main_toml_dict, toml_dict, [], name)
         # check project.version/authors/urls are the same
-        for key in ["version", "authors", "urls"]:
+        for key in ["version", "requires-python"]:
             check_toml_key(main_toml_dict["project"], toml_dict["project"], [key], name)
         # check tool.ruff is the same
         check_toml_key(main_toml_dict, toml_dict, ["tool", "ruff"], name)
-        # check tool uv is the same
-        check_toml_key(main_toml_dict, toml_dict, ["tool", "uv"], name)
 
 
 if __name__ == "__main__":

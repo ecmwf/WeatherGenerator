@@ -90,23 +90,17 @@ class Plotter:
         self.select = select
 
         if "sample" not in select:
-            _logger.warning(
-                "No sample in the selection. Might lead to unexpected results."
-            )
+            _logger.warning("No sample in the selection. Might lead to unexpected results.")
         else:
             self.sample = select["sample"]
 
         if "stream" not in select:
-            _logger.warning(
-                "No stream in the selection. Might lead to unexpected results."
-            )
+            _logger.warning("No stream in the selection. Might lead to unexpected results.")
         else:
             self.stream = select["stream"]
 
         if "forecast_step" not in select:
-            _logger.warning(
-                "No forecast_step in the selection. Might lead to unexpected results."
-            )
+            _logger.warning("No forecast_step in the selection. Might lead to unexpected results.")
         else:
             self.fstep = select["forecast_step"]
 
@@ -205,21 +199,15 @@ class Plotter:
                     f"Creating histograms for {ntimes_unique} valid times of variable {var}."
                 )
 
-                groups = zip(
-                    targ.groupby("valid_time"), prd.groupby("valid_time"), strict=False
-                )
+                groups = zip(targ.groupby("valid_time"), prd.groupby("valid_time"), strict=False)
             else:
                 _logger.info(f"Plotting histogram for all valid times of {var}")
 
-                groups = [
-                    ((None, targ), (None, prd))
-                ]  # wrap once with dummy valid_time
+                groups = [((None, targ), (None, prd))]  # wrap once with dummy valid_time
 
             for (valid_time, targ_t), (_, prd_t) in groups:
                 if valid_time is not None:
-                    _logger.debug(
-                        f"Plotting histogram for {var} at valid_time {valid_time}"
-                    )
+                    _logger.debug(f"Plotting histogram for {var} at valid_time {valid_time}")
                 name = self.plot_histogram(targ_t, prd_t, hist_output_dir, var, tag=tag)
                 plot_names.append(name)
 
@@ -460,9 +448,7 @@ class Plotter:
             **map_kwargs_save,
         )
 
-        plt.colorbar(
-            scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}"
-        )
+        plt.colorbar(scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}")
         plt.title(f"{self.stream}, {varname} : fstep = {self.fstep:03} ({valid_time})")
         ax.set_global()
         ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
@@ -583,9 +569,7 @@ class LinePlots:
 
         _logger.info(f"Saving summary plots to: {self.out_plot_dir}")
 
-    def _check_lengths(
-        self, data: xr.DataArray | list, labels: str | list
-    ) -> tuple[list, list]:
+    def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
         """
         Check if the lengths of data and labels match.
 
@@ -612,9 +596,7 @@ class LinePlots:
         data_list = [data] if type(data) == xr.DataArray else data
         label_list = [labels] if type(labels) == str else labels
 
-        assert len(data_list) == len(label_list), (
-            "Compare::plot - Data and Labels do not match"
-        )
+        assert len(data_list) == len(label_list), "Compare::plot - Data and Labels do not match"
 
         return data_list, label_list
 
@@ -667,9 +649,7 @@ class LinePlots:
         fig = plt.figure(figsize=(12, 6), dpi=self.dpi_val)
 
         for i, data in enumerate(data_list):
-            non_zero_dims = [
-                dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1
-            ]
+            non_zero_dims = [dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1]
             if non_zero_dims:
                 _logger.info(
                     f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."

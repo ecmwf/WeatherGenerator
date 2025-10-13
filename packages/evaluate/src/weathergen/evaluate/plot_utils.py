@@ -103,9 +103,7 @@ def plot_metric_region(
                 run_ids.append(run_id)
 
             if selected_data:
-                _logger.info(
-                    f"Creating plot for {metric} - {region} - {stream} - {ch}."
-                )
+                _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
                 name = "_".join([metric, region] + sorted(set(run_ids)) + [stream, ch])
                 plotter.plot(
                     selected_data,
@@ -146,9 +144,7 @@ class DefaultMarkerSize:
         float
             The default marker size for the stream.
         """
-        return cls._marker_size_stream.get(
-            stream_name.lower(), cls._default_marker_size
-        )
+        return cls._marker_size_stream.get(stream_name.lower(), cls._default_marker_size)
 
     @classmethod
     def list_streams(cls):

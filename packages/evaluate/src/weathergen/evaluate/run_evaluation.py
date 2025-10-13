@@ -37,9 +37,7 @@ def evaluate() -> None:
 
 
 def evaluate_from_args(argl: list[str]) -> None:
-    parser = argparse.ArgumentParser(
-        description="Fast evaluation of WeatherGenerator runs."
-    )
+    parser = argparse.ArgumentParser(description="Fast evaluation of WeatherGenerator runs.")
     parser.add_argument(
         "--config",
         type=str,
@@ -111,12 +109,10 @@ def evaluate_from_config(cfg):
                                 metrics_to_compute.append(metric)
                             else:
                                 # simply select the chosen eval channels, samples, fsteps here...
-                                scores_dict[metric][region][stream][run_id] = (
-                                    metric_data.sel(
-                                        sample=available_data.samples,
-                                        channel=available_data.channels,
-                                        forecast_step=available_data.fsteps,
-                                    )
+                                scores_dict[metric][region][stream][run_id] = metric_data.sel(
+                                    sample=available_data.samples,
+                                    channel=available_data.channels,
+                                    forecast_step=available_data.fsteps,
                                 )
                         except (FileNotFoundError, KeyError):
                             metrics_to_compute.append(metric)

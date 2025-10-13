@@ -53,7 +53,7 @@ case "$1" in
   toml-check)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run python scripts/check_tomls.py
+      uv run --no-project python scripts/check_tomls.py
     )
     ;;
   integration-test)

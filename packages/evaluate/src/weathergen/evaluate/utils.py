@@ -65,9 +65,7 @@ def calc_scores_per_stream(
     Tuple of xarray DataArray containing the scores and the number of points per sample.
     """
 
-    _logger.info(
-        f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}..."
-    )
+    _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
 
     available_data = reader.check_availability(stream, mode="evaluation")
 
@@ -108,9 +106,7 @@ def calc_scores_per_stream(
         },
     )
 
-    for (fstep, tars), (_, preds) in zip(
-        da_tars.items(), da_preds.items(), strict=False
-    ):
+    for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         _logger.debug(f"Verifying data for stream {stream}...")
 
         preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
@@ -118,9 +114,7 @@ def calc_scores_per_stream(
         if preds.ipoint.size > 0:
             score_data = VerifiedData(preds, tars, preds_next, tars_next)
             # Build up computation graphs for all metrics
-            _logger.debug(
-                f"Build computation graphs for metrics for stream {stream}..."
-            )
+            _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
 
             combined_metrics = [
                 get_score(
@@ -198,9 +192,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
         "image_format": global_plotting_opts.get("image_format", "png"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
-        "plot_subtimesteps": reader.get_inference_stream_attr(
-            stream, "tokenize_spacetime", False
-        ),
+        "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
     }
 
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
@@ -244,15 +236,11 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
 
     plot_names = []
 
-    for (fstep, tars), (_, preds) in zip(
-        da_tars.items(), da_preds.items(), strict=False
-    ):
+    for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         plot_chs = list(np.atleast_1d(tars.channel.values))
         plot_samples = list(np.unique(tars.sample.values))
 
-        for sample in tqdm(
-            plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"
-        ):
+        for sample in tqdm(plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"):
             plots = []
 
             data_selection = {
@@ -272,9 +260,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
                 plots.extend([map_tar, map_pred])
 
             if plot_histograms:
-                h = plotter.create_histograms_per_sample(
-                    tars, preds, plot_chs, data_selection
-                )
+                h = plotter.create_histograms_per_sample(tars, preds, plot_chs, data_selection)
                 plots.append(h)
 
             plotter = plotter.clean_data_selection()
@@ -283,12 +269,8 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
 
     if plot_animations:
         plot_fsteps = da_tars.keys()
-        h = plotter.animation(
-            plot_samples, plot_fsteps, plot_chs, data_selection, "preds"
-        )
-        h = plotter.animation(
-            plot_samples, plot_fsteps, plot_chs, data_selection, "targets"
-        )
+        h = plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "preds")
+        h = plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
 
     return plot_names
 
@@ -339,9 +321,7 @@ def metric_list_to_json(
             metric_now = metrics_stream.sel(metric=metric)
 
             # Save as individual DataArray, not Dataset
-            metric_now.attrs["npoints_per_sample"] = (
-                npoints_sample_stream.values.tolist()
-            )
+            metric_now.attrs["npoints_per_sample"] = npoints_sample_stream.values.tolist()
             metric_dict = metric_now.to_dict()
 
             # Match the expected filename pattern
@@ -426,9 +406,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
 
     for region in regions:
         for metric in metrics:
-            plot_metric_region(
-                metric, region, runs, scores_dict, plotter, print_summary
-            )
+            plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
 
 
 ############# Utility functions ############
@@ -476,9 +454,7 @@ def common_ranges(
 
             list_min = calc_bounds(data_tars, data_preds, var, "min")
 
-            maps_config.update(
-                {var: {"vmax": float(max(list_max)), "vmin": float(min(list_min))}}
-            )
+            maps_config.update({var: {"vmax": float(max(list_max)), "vmin": float(min(list_min))}})
 
     return maps_config
 
