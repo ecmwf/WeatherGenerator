@@ -86,19 +86,26 @@ def kernel_crps(
     weights_channels : shape = (num_channels,)
     weights_points : shape = (num_data_points)
 
+    Returns:
+    loss: scalar - overall weighted CRPS
+    loss_chs: [C] - per-channel CRPS (location-weighted, not channel-weighted)
     """
 
+    ens_size = pred.shape[0]
+    assert ens_size > 1, "Ensemble size has to be greater than 1 for kernel CRPS."
+
+    assert len(pred.shape) == 3, "if data has batch dimension, remove unsqueeze() below"
     preds = pred.permute([2, 1, 0]).unsqueeze(0).to(torch.float32)
     targets = target.permute([1, 0]).unsqueeze(0).to(torch.float32)
 
-    ens_size = preds.shape[-1]
+    # replace NaN by 0
+    mask_nan = ~torch.isnan(targets)
+    targets = torch.where(mask_nan, targets, 0)
+    preds = torch.where(mask_nan, preds.permute([3, 0, 1, 2]), 0).permute([1, 2, 3, 0])
+
     mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
 
-    if ens_size == 1:
-        return mae
-
     ens_n = -1.0 / (ens_size * (ens_size - 1)) if fair else -1.0 / (ens_size**2)
-
     abs = torch.abs
     ens_var = torch.zeros(size=preds.shape[:-1], device=preds.device)
     # loop to reduce memory usage
@@ -109,7 +116,9 @@ def kernel_crps(
     kcrps_locs_chs = mae + ens_var
     if weights_points is not None:
         kcrps_locs_chs = kcrps_locs_chs * weights_points
-    kcrps_chs = torch.mean(torch.mean(kcrps_locs_chs, 0), -1) * weights_channels
+    kcrps_chs = torch.mean(torch.mean(kcrps_locs_chs, 0), -1)
+    if weights_channels is not None:
+        kcrps_chs = kcrps_chs * weights_channels
 
     return torch.mean(kcrps_chs), kcrps_chs
 
