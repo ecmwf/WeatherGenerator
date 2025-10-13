@@ -926,9 +926,10 @@ class Trainer(TrainerBase):
     def _log_instant_grad_norms(self, stage: Stage, total_norm):
         """
         Log instantaneous grad norms, we do not average because of the cost and because we want to
-        measure the actual values
+        measure the actual values.
 
-        TODO test DDP case
+        Note: When using FSDP2, we need full_tensor().item() instead of .item(), see here:
+        https://gist.github.com/Kai-46/a9835ef3f36e76d06afee6c11f388144
         """
         self.last_grad_norm = (
             total_norm.full_tensor().item() if self.cf.world_size > 1 else total_norm.item()
