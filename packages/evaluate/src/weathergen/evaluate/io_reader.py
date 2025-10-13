@@ -16,8 +16,9 @@ import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
 
-from weathergen.common.config import load_config, load_model_config
+from weathergen.common.config import get_shared_wg_path, load_config, load_model_config
 from weathergen.common.io import ZarrIO
+from weathergen.evaluate.derived_channels import DeriveChannels
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
 
 _logger = logging.getLogger(__name__)
@@ -66,7 +67,9 @@ class DataAvailability:
 
 
 class Reader:
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
+    def __init__(
+        self, eval_cfg: dict, run_id: str, private_paths: dict[str, str] | None = None
+    ):
         """
         Generic data reader class.
 
@@ -76,8 +79,8 @@ class Reader:
             config with plotting and evaluation options for that run id
         run_id : str
             run id of the model
-        private_paths: lists
-            list of private paths for the supported HPC
+        private_paths: dict[srt, str]
+            dictionary of private paths for the supported HPC
         """
         self.eval_cfg = eval_cfg
         self.run_id = run_id
@@ -282,9 +285,9 @@ class WeatherGenReader(Reader):
         self.inference_cfg = self.get_inference_config()
 
         if not self.results_base_dir:
-            self.results_base_dir = Path(self.inference_cfg["run_path"])
+            self.results_base_dir = Path(get_shared_wg_path("results"))
             _logger.info(
-                f"Results directory obtained from model config: {self.results_base_dir}"
+                f"Results directory obtained from private config: {self.results_base_dir}"
             )
         else:
             _logger.info(f"Results directory parsed: {self.results_base_dir}")
@@ -405,6 +408,12 @@ class WeatherGenReader(Reader):
             channels = channels or stream_cfg.get("channels", all_channels)
             channels = to_list(channels)
 
+            dc = DeriveChannels(
+                all_channels,
+                channels,
+                stream_cfg,
+            )
+
             da_tars, da_preds = [], []
 
             if return_counts:
@@ -460,27 +469,41 @@ class WeatherGenReader(Reader):
                 if da_tars_fs:
                     da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
                     da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
+                    if len(samples) == 1:
+                        # Ensure sample coordinate is repeated along ipoint even if only one sample
+                        da_tars_fs = da_tars_fs.assign_coords(
+                            sample=(
+                                "ipoint",
+                                np.repeat(
+                                    da_tars_fs.sample.values, len(da_tars_fs.ipoint)
+                                ),
+                            )
+                        )
+                        da_preds_fs = da_preds_fs.assign_coords(
+                            sample=(
+                                "ipoint",
+                                np.repeat(
+                                    da_preds_fs.sample.values, len(da_preds_fs.ipoint)
+                                ),
+                            )
+                        )
 
                     if set(channels) != set(all_channels):
                         _logger.debug(
                             f"Restricting targets and predictions to channels {channels} for stream {stream}..."
                         )
-                        available_channels = da_tars_fs.channel.values
-                        existing_channels = [
-                            ch for ch in channels if ch in available_channels
-                        ]
-                        if len(existing_channels) < len(channels):
-                            _logger.warning(
-                                f"The following channels were not found: {list(set(channels) - set(existing_channels))}. Skipping them."
-                            )
 
-                        da_tars_fs = da_tars_fs.sel(channel=existing_channels)
-                        da_preds_fs = da_preds_fs.sel(channel=existing_channels)
+                        da_tars_fs, da_preds_fs, channels = dc.get_derived_channels(
+                            da_tars_fs, da_preds_fs
+                        )
+
+                        da_tars_fs = da_tars_fs.sel(channel=channels)
+                        da_preds_fs = da_preds_fs.sel(channel=channels)
 
                     da_tars.append(da_tars_fs)
                     da_preds.append(da_preds_fs)
-                if return_counts:
-                    points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
+                    if return_counts:
+                        points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
 
             # Safer than a list
             da_tars = {
@@ -496,6 +519,27 @@ class WeatherGenReader(Reader):
 
     ######## reader utils ########
 
+    def get_stream(self, stream: str):
+        """
+        returns the dictionary associated to a particular stream.
+        Returns an empty dictionary if the stream does not exist in the Zarr file.  
+
+        Parameters
+        ----------
+        stream: str
+            the stream name
+
+        Returns
+        -------
+        dict
+            the config dictionary associated to that stream
+        """
+        stream_dict = {}
+        with ZarrIO(self.fname_zarr) as zio:
+            if stream in zio.streams:
+                stream_dict = self.eval_cfg.streams.get(stream, {})
+        return stream_dict
+
     def get_samples(self) -> set[int]:
         with ZarrIO(self.fname_zarr) as zio:
             return set(int(s) for s in zio.samples)
@@ -504,30 +548,24 @@ class WeatherGenReader(Reader):
         with ZarrIO(self.fname_zarr) as zio:
             return set(int(f) for f in zio.forecast_steps)
 
-    # TODO: get this from config
     def get_channels(self, stream: str) -> list[str]:
         """
-        Peek the channels of a target stream.
+        Get the list of channels for a given stream from the config.
 
         Parameters
         ----------
-        stream :
-            The name of the tar stream to peek.
-        fstep :
-            The forecast step to peek. Default is 0.
+        stream : str
+            The name of the stream to get channels for.
+
         Returns
         -------
-        channels :
-            A list of channel names in the tar stream.
+        list[str]
+            A list of channel names.
         """
-        with ZarrIO(self.fname_zarr) as zio:
-            dummy_out = zio.get_data(
-                list(self.get_samples())[0], stream, list(self.get_forecast_steps())[0]
-            )
-            channels = dummy_out.target.channels
-            _logger.debug(f"Peeked channels for stream {stream}: {channels}")
-
-        return channels
+        _logger.debug(f"Getting channels for stream {stream}...")
+        all_channels = self.get_inference_stream_attr(stream, "val_target_channels")
+        _logger.debug(f"Channels found in config: {all_channels}")
+        return all_channels
 
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """
