@@ -409,6 +409,35 @@ def get_path_output(config: Config, epoch: int) -> Path:
     return base_path / fname
 
 
+def get_shared_wg_path(local_path: str | Path) -> Path:
+    """
+    Resolves a local, relative path to an absolute path within the configured shared working
+    directory.
+
+    This utility function retrieves the base path defined for the shared WeatherGenerator (WG)
+    working directory from the private configuration and appends the provided local path segment.
+
+    Parameters
+    ----------
+    local_path : str or Path
+        The local or relative path segment (e.g., 'results', 'models', 'output') that needs
+        to be located within the shared working directory structure.
+
+    Returns
+    -------
+    Path
+        The absolute pathlib.Path object pointing to the specified location
+        within the shared working directory.
+
+    Notes
+    -----
+    The shared working directory base is retrieved from the 'path_shared_working_dir'
+    key found in the private configuration loaded by `_load_private_conf()`.
+    """
+    pcfg = _load_private_conf()
+    return Path(pcfg.get("path_shared_working_dir")) / local_path
+
+
 def validate_forecast_policy_and_steps(cf: OmegaConf):
     """
     Validates the forecast policy and steps within a configuration object.

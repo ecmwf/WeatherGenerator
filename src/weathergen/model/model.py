@@ -590,6 +590,12 @@ class Model(torch.nn.Module):
                 )
             ]
 
+            if self.training:
+                # Impute noise to the latent state
+                noise_std = self.cf.get("impute_latent_noise_std", 0.0)
+                if noise_std > 0.0:
+                    tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
+
             tokens = self.forecast(model_params, tokens)
 
         # prediction for final step

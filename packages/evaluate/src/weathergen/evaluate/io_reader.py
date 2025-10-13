@@ -16,7 +16,7 @@ import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
 
-from weathergen.common.config import load_config, load_model_config
+from weathergen.common.config import get_shared_wg_path, load_config, load_model_config
 from weathergen.common.io import ZarrIO
 from weathergen.evaluate.derived_channels import DeriveChannels
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
@@ -67,7 +67,9 @@ class DataAvailability:
 
 
 class Reader:
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
+    def __init__(
+        self, eval_cfg: dict, run_id: str, private_paths: dict[str, str] | None = None
+    ):
         """
         Generic data reader class.
 
@@ -77,8 +79,8 @@ class Reader:
             config with plotting and evaluation options for that run id
         run_id : str
             run id of the model
-        private_paths: lists
-            list of private paths for the supported HPC
+        private_paths: dict[srt, str]
+            dictionary of private paths for the supported HPC
         """
         self.eval_cfg = eval_cfg
         self.run_id = run_id
@@ -283,9 +285,9 @@ class WeatherGenReader(Reader):
         self.inference_cfg = self.get_inference_config()
 
         if not self.results_base_dir:
-            self.results_base_dir = Path(self.inference_cfg["run_path"])
+            self.results_base_dir = Path(get_shared_wg_path("results"))
             _logger.info(
-                f"Results directory obtained from model config: {self.results_base_dir}"
+                f"Results directory obtained from private config: {self.results_base_dir}"
             )
         else:
             _logger.info(f"Results directory parsed: {self.results_base_dir}")
@@ -500,8 +502,8 @@ class WeatherGenReader(Reader):
 
                     da_tars.append(da_tars_fs)
                     da_preds.append(da_preds_fs)
-                if return_counts:
-                    points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
+                    if return_counts:
+                        points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
 
             # Safer than a list
             da_tars = {
@@ -516,6 +518,27 @@ class WeatherGenReader(Reader):
             )
 
     ######## reader utils ########
+
+    def get_stream(self, stream: str):
+        """
+        returns the dictionary associated to a particular stream.
+        Returns an empty dictionary if the stream does not exist in the Zarr file.  
+
+        Parameters
+        ----------
+        stream: str
+            the stream name
+
+        Returns
+        -------
+        dict
+            the config dictionary associated to that stream
+        """
+        stream_dict = {}
+        with ZarrIO(self.fname_zarr) as zio:
+            if stream in zio.streams:
+                stream_dict = self.eval_cfg.streams.get(stream, {})
+        return stream_dict
 
     def get_samples(self) -> set[int]:
         with ZarrIO(self.fname_zarr) as zio:
