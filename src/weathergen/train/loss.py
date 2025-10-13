@@ -70,18 +70,48 @@ def mse_ens(target, ens, mu, stddev):
     return torch.stack([mse_loss(target, mem) for mem in ens], 0).mean()
 
 
-def kernel_crps(target, ens, mu, stddev, fair=True):
-    ens_size = ens.shape[0]
-    mae = torch.stack([(target - mem).abs().mean() for mem in ens], 0).mean()
+def kernel_crps(
+    target,
+    pred,
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+    fair=True,
+):
+    """
+    Compute kernel CRPS
+
+    Params:
+    target : shape ( num_data_points , num_channels )
+    pred : shape ( ens_dim , num_data_points , num_channels)
+    weights_channels : shape = (num_channels,)
+    weights_points : shape = (num_data_points)
+
+    """
+
+    preds = pred.permute([2, 1, 0]).unsqueeze(0).to(torch.float32)
+    targets = target.permute([1, 0]).unsqueeze(0).to(torch.float32)
+
+    ens_size = preds.shape[-1]
+    mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
 
     if ens_size == 1:
         return mae
 
-    coef = -1.0 / (2.0 * ens_size * (ens_size - 1)) if fair else -1.0 / (2.0 * ens_size**2)
-    ens_var = coef * torch.tensor([(p1 - p2).abs().sum() for p1 in ens for p2 in ens]).sum()
-    ens_var /= ens.shape[1]
+    ens_n = -1.0 / (ens_size * (ens_size - 1)) if fair else -1.0 / (ens_size**2)
 
-    return mae + ens_var
+    abs = torch.abs
+    ens_var = torch.zeros(size=preds.shape[:-1], device=preds.device)
+    # loop to reduce memory usage
+    for i in range(ens_size):
+        ens_var += torch.sum(ens_n * abs(preds[..., i].unsqueeze(-1) - preds[..., i + 1 :]), dim=-1)
+
+    # apply weighting
+    kcrps_locs_chs = mae + ens_var
+    if weights_points is not None:
+        kcrps_locs_chs = kcrps_locs_chs * weights_points
+    kcrps_chs = torch.mean(torch.mean(kcrps_locs_chs, 0), -1) * weights_channels
+
+    return torch.mean(kcrps_chs), kcrps_chs
 
 
 def mse_channel_location_weighted(
