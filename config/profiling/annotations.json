@@ -1,6 +1,7 @@
 [
     {
         "domain": "WeatherGen",
+        "color": "A1F702",
         "module": "weathergen.datasets.multi_stream_data_sampler",
         "functions": [
             "MultiStreamDataSampler.__iter__"
@@ -8,6 +9,35 @@
     },
     {
         "domain": "WeatherGen",
+        "color": "A1F702",
+        "module": "weathergen.datasets.tokenizer_forecast", 
+        "functions": [
+            "encode_times_source",
+            "encode_times_target",
+            "tokenize_window_space",
+            "tokenize_window_spacetime",
+            "TokenizerForecast.batchify_source",
+            "TokenizerForecast.batchify_target",
+            "TokenizerForecast.reset"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
+        "color": "A1F702",
+        "module": "weathergen.datasets.tokenizer_masking", 
+        "functions": [
+            "encode_times_source",
+            "encode_times_target",
+            "tokenize_window_space",
+            "tokenize_window_spacetime",
+            "TokenizerMasking.batchify_source",
+            "TokenizerMasking.batchify_target",
+            "TokenizerMasking.reset"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
+        "color": "A1F702",
         "module": "weathergen.datasets.batchifyer",
         "functions": [
             "encode_times_source",
@@ -20,15 +50,25 @@
     },
     {
         "domain": "WeatherGen",
+        "color": "FAE289",
         "module": "weathergen.datasets.stream_data",
         "functions": [
+            "StreamData.__init__",
             "StreamData.to_device",
+            "StreamData.add_empty_source",
+            "StreamData.add_empty_target",
+            "StreamData.add_source",
+            "StreamData.add_target",
+            "StreamData.target_empty",
+            "StreamData.source_empty",
+            "StreamData.empty",
+            "StreamData._merge_cells",
             "StreamData.merge_inputs"
-            
         ]
     },
     {
         "domain": "WeatherGen",
+        "color": "C6BAFF",
         "module": "weathergen.train.trainer",
         "functions": [
             "Trainer.inference",
@@ -41,6 +81,7 @@
     },
     {
         "domain": "WeatherGen",
+        "color": "A1F702",
         "module": "weathergen.datasets.utils",
         "functions": [
             "s2tor3",
@@ -52,6 +93,80 @@
     },
     {
         "domain": "WeatherGen",
+        "color": "69a201",
+        "module": "weathergen.datasets.tokenizer_utils",
+        "functions": [
+            "arc_alpha",
+            "encode_times_source",
+            "encode_times_target",
+            "hpy_cell_splits",
+            "hpy_splits",
+            "tokenize_window_space",
+            "tokenize_window_spacetime",
+            "_coords_local"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
+        "color": "0264F7",
+        "module": "weathergen.model.model",
+        "functions": [
+            "ModelParams.__init__",
+            "ModelParams.create",
+            "Model.__init__",
+            "Model.create",
+            "Model.freeze_weights_forecast",
+            "Model.print_num_parameters",
+            "Model.load",
+            "Model.forward_jac",
+            "Model.forward",
+            "Model.embed_cells",
+            "Model.source_tokens",
+            "Model.assimilate_local",
+            "Model.forecast",
+            "Model.predict"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
+        "color": "02dff7",
+        "module": "weathergen.model.engines",
+        "functions": [
+            "EmbeddingEngine.__init__",
+            "EmbeddingEngine.create",
+            "LocalAssimilationEngine.__init__",
+            "LocalAssimilationEngine.create",
+            "Local2GlobalAssimilationEngine.__init__",
+            "Local2GlobalAssimilationEngine.create",
+            "GlobalAssimilationEngine.__init__",
+            "GlobalAssimilationEngine.create",
+            "ForecastingEngine.__init__",
+            "ForecastingEngine.create",
+            "EnsPredictionHead.__init__",
+            "EnsPredictionHead.create",
+            "EnsPredictionHead.forward",
+            "TargetPredictionEngineClassic.__init__",
+            "TargetPredictionEngineClassic.forward",
+            "TargetPredictionEngine.__init__",
+            "TargetPredictionEngine.forward"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
+        "color": "02dff7",
+        "module": "weathergen.model.embeddings",
+        "functions": [
+            "StreamEmbedTransformer.__init__",
+            "StreamEmbedTransformer.forward_channels",
+            "StreamEmbedTransformer.forward_columns",
+            "StreamEmbedLinear.__init__",
+            "StreamEmbedLinear.forward"
+            
+        ]
+    },
+    {
+        "domain": "WeatherGen",
+        "color": "C6BAFF",
         "module": "weathergen.train.trainer_base",
         "functions": [
             "Trainer_Base.ddp_average"
@@ -60,6 +175,7 @@
     },
     {
         "domain": "healpy",
+        "color": "6CE6B8",
         "module": "astropy_healpix.healpy",
         "functions": [
             "ang2pix"
@@ -67,6 +183,7 @@
     },
     {
         "domain": "Anemoi",
+        "color": "A9EBA7",
         "module": "anemoi.datasets.data.store",
         "functions": [
             "Zarr.__getitem__"
@@ -74,6 +191,7 @@
     },
     {
         "domain": "Anemoi",
+        "color": "A9EBA7",
         "module": "anemoi.datasets.data.subset",
         "functions": [
             "Subset.__getitem__"
@@ -81,6 +199,7 @@
     },
     {
         "domain": "Zarr",
+        "color": "52ED4C",
         "module": "zarr.core",
         "functions": [
             "Array._get_selection",
@@ -114,46 +233,12 @@
             "Array.__array_prepare__",
             "Array.__array_struct__",
             "Array.__array_interface__",
-            "Array.__array_finalize__",
-            "Array.__array_ufunc__",
-            "Array.__array_function__",
-            "Array.__array_priority__",
-            "Array.__array_wrap__",
-            "Array.__array_prepare__",
-            "Array.__array_struct__",
-            "Array.__array_interface__",
-            "Array.__array_finalize__",
-            "Array.__array_ufunc__",
-            "Array.__array_function__",
-            "Array.__array_priority__",
-            "Array.__array_wrap__",
-            "Array.__array_prepare__",
-            "Array.__array_struct__",
-            "Array.__array_interface__",
-            "Array.__array_finalize__",
-            "Array.__array_ufunc__",
-            "Array.__array_function__",
-            "Array.__array_priority__",
-            "Array.__array_wrap__",
-            "Array.__array_prepare__",
-            "Array.__array_struct__",
-            "Array.__array_interface__",
-            "Array.__array_finalize__",
-            "Array.__array_ufunc__",
-            "Array.__array_function__",
-            "Array.__array_priority__",
-            "Array.__array_wrap__",
-            "Array.__array_prepare__",
-            "Array.__array_struct__",
-            "Array.__array_interface__",
-            "Array.__array_finalize__",
-            "Array.__array_ufunc__",
-            "Array.__array_function__",
-            "Array.__array_priority__"
+            "Array.__array_finalize__"
         ]
     },
     {
         "domain": "PyTorch",
+        "color": "E8B795",
         "module": "torch.amp",
         "functions": [
             "GradScaler.scale",
@@ -165,6 +250,7 @@
     },
     {
         "domain": "PyTorch",
+        "color": "E85A5A",
         "module": "torch.distributed",
         "functions": [
             "all_reduce"
@@ -172,6 +258,7 @@
     },
     {
         "domain": "PyTorch",
+        "color": "E85A5A",
         "module": "torch",
         "functions": [
             "Tensor.to",
@@ -185,13 +272,17 @@
     },
     {
         "domain": "PyTorch",
-        "color": "0xbbd6cf",
+        "color": "A6F7E4",
         "module": "torch.utils.data.dataloader",
-        "functions": ["_BaseDataLoaderIter.__next__"]
+        "functions": [
+            "_BaseDataLoaderIter.__next__",
+            "_SingleProcessDataLoaderIter.__next__",
+            "_MultiProcessingDataLoaderIter.__next__"
+        ]
     },
     {
         "domain": "PyTorch",
-        "color": "0xbbd6cf",
+        "color": "A6F7E4",
         "module": "torch.utils.data.dataset",
         "functions": [
             "Dataset.__getitem__",
@@ -201,12 +292,14 @@
 
     {
         "domain": "PyTorch",
+        "color": "E89C5A",
         "module": "torch.autograd",
         "functions": ["backward"]
     },
 
     {
         "domain": "PyTorch",
+        "color": "E85A5A",
         "module": "torch.nn.functional",
         "functions": [
             "conv1d",
@@ -262,7 +355,6 @@
             "prelu",
             "rrelu",
             "logsigmoid",
-            "glu",
             "hardshrink",
             "tanhshrink",
             "softsign",
@@ -296,7 +388,6 @@
             "cross_entropy",
             "binary_cross_entropy",
             "binary_cross_entropy_with_logits",
-
             "smooth_l1_loss",
             "huber_loss",
             "l1_loss",
@@ -335,6 +426,7 @@
 
     {
         "domain": "PyTorch",
+        "color": "E85A5A",
         "module": "torch.optim",
         "functions": [
             "Adafactor.step",
@@ -357,6 +449,7 @@
 
     {
         "domain":"PyTorch",
+        "color": "E85A5A",
         "module": "torch.nn.modules",
         "functions": [
             "Module.__call__",
@@ -523,6 +616,7 @@
 
     {
         "domain":"Numpy",
+        "color": "89FAF6",
         "module": "numpy",
         "functions": [
             "array",
@@ -555,7 +649,6 @@
             "isclose",
             "iscomplex",    
             "concatenate",
-            "split",
             "asarray",
             "asanyarray",
             "ascontiguousarray",
@@ -566,12 +659,7 @@
             "zeros_like",
             "ones",
             "ones_like",
-            "full",
-            "full_like",
-            "full",
-            "full_like",
             "eye",
-            "identity",
             "arange",
             "linspace",
             "logspace",
@@ -588,15 +676,11 @@
             "histogram",
             "histogram2d",
             "histogramdd",
-            "bincount",
             "digitize",
-            "cov",
-            "corrcoef",
             "correlate",
             "convolve",
             "vdot",
             "dot",
-            "inner",
             "outer",
             "tensordot",
             "einsum",
@@ -616,29 +700,7 @@
             "linalg.eig",
             "linalg.eigh",
             "linalg.eigvals",
-            "linalg.eigvalsh",
-            "linalg.norm",
-            "linalg.cond",
-            "linalg.det",
-            "linalg.matrix_rank",
-            "linalg.slogdet",
-            "linalg.solve",
-            "linalg.tensorsolve",
-            "linalg.lstsq",
-            "linalg.inv",
-            "linalg.pinv",
-            "linalg.tensorinv",
-            "linalg.qr",
-            "linalg.svd",
-            "linalg.eig",
-            "linalg.eigh",
-            "linalg.eigvals",
-            "linalg.eigvalsh",
-            "linalg.norm",
-            "linalg.cond",
-            "linalg.det",
-            "linalg.matrix_rank",
-            "linalg.slogdet"
+            "linalg.eigvalsh"
         ]
         },
         {
@@ -646,5 +708,4 @@
             "module": "pandas",
             "functions": ["to_datetime"]
         }
-    
-    ]
+]
