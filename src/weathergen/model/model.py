@@ -260,7 +260,7 @@ class Model(torch.nn.Module):
         cf = self.cf
 
         # separate embedding networks for differnt observation types
-        self.embed_engine = EmbeddingEngine(cf, self.sources_size) #.create()
+        self.embed_engine = EmbeddingEngine(cf, self.sources_size)
 
         ##############
         # local assimilation engine
@@ -620,7 +620,7 @@ class Model(torch.nn.Module):
         Returns:
             Tokens for local assimilation
         """
-        
+
         device = next(self.parameters()).device
         tokens_all = self.embed_engine(streams_data, model_params.pe_embed, self.dtype, device)
         
