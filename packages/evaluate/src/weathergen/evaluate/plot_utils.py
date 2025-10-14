@@ -115,6 +115,67 @@ def plot_metric_region(
                 )
 
 
+def score_card_metric_region(
+    metric: str,
+    region: str,
+    runs: dict,
+    scores_dict: dict,
+    sc_plotter: object,
+) -> None:
+    """
+    Create score cards for all streams and channels for a given metric and region.
+
+    Parameters
+    ----------
+    metric: str
+        String specifying the metric to plot
+    region: str
+        String specifying the region to plot
+    runs: dict
+        Dictionary containing the config for all runs
+    scores_dict : dict
+        The dictionary containing all computed metrics.
+    sc_plotter:
+        Plotter object to handle the plotting part
+    """
+    streams_set = collect_streams(runs)
+    channels_set = collect_channels(scores_dict, metric, region, runs)
+
+    for stream in streams_set:
+        selected_data, run_ids = [], []
+        channels_common = None
+        for _, data in scores_dict[metric][region].get(stream, {}).items():
+            channels_per_run = []
+            for ch in channels_set:
+                if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
+                    continue
+                else:
+                    channels_per_run.append(ch)
+
+            if channels_common is None:
+                channels_common = set(channels_per_run)
+            else:
+                channels_common = set(channels_common).intersection(
+                    set(channels_per_run)
+                )
+
+        if not channels_common:
+            continue
+
+        for run_id, data in scores_dict[metric][region].get(stream, {}).items():
+            selected_data.append(data.sel(channel=list(channels_common)))
+            run_ids.append(run_id)
+
+        if selected_data and len(selected_data) > 1.0:
+            _logger.info(f"Creating score cards for {metric} - {region} - {stream}.")
+            name = "_".join([metric, region, stream])
+            sc_plotter.plot(selected_data, run_ids, channels_common, name)
+        else:
+            _logger.info(
+                f"Only one run_id under stream: {stream}. Creating score card is skipped..."
+            )
+
+
 class DefaultMarkerSize:
     """
     Utility class for managing default configuration values, such as marker sizes

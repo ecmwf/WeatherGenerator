@@ -10,10 +10,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import omegaconf as oc
 import xarray as xr
+from matplotlib.lines import Line2D
 from PIL import Image
+from scipy.stats import wilcoxon
 
 from weathergen.common.config import _load_private_conf
-from weathergen.evaluate.plot_utils import DefaultMarkerSize
+from weathergen.evaluate.plot_utils import (
+    DefaultMarkerSize,
+)
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
@@ -690,3 +694,184 @@ class LinePlots:
         name = "_".join(filter(None, parts))
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
         plt.close()
+
+
+class ScoreCards:
+    """
+    Initialize the ScoreCards class.
+
+    Parameters
+    ----------
+    plotter_cfg:
+        Configuration dictionary containing basic information for plotting.
+        Expected keys are:
+            - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
+            - improvement: Size of the figure (width, height) in inches
+    output_basedir:
+        Base directory under which the score cards will be saved.
+    """
+
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
+        self.image_format = plotter_cfg.get("image_format")
+        self.improvement = plotter_cfg.get("improvement_scale", 0.2)
+        self.out_plot_dir = Path(output_basedir) / "score_cards"
+        if not os.path.exists(self.out_plot_dir):
+            _logger.info(f"Creating dir {self.out_plot_dir}")
+            os.makedirs(self.out_plot_dir, exist_ok=True)
+
+    def plot(
+        self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
+    ):
+        n_runs, n_vars = len(runs), len(channels)
+        fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_vars))
+
+        baseline = data[0]
+        skill_models = []
+
+        for i in range(1, n_runs):
+            skill_model = 0.0
+            for j, var in enumerate(channels):
+                diff, diff_mean, skill = self.compare_models(data, baseline, i, var)
+                skill_model += skill.values
+
+                # Get symbols based on difference and performance as well as coordinates
+                # for the position of the triangles.
+
+                x, y, alt, color, triangle, size = self.get_plot_symbols(
+                    i, j, skill, diff_mean
+                )
+
+                ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
+
+                # Perform Welch's t-test
+                stat, p = wilcoxon(diff, alternative=alt)
+
+                # Draw rectangle border for significance
+                if p < 0.05:
+                    lw = 2 if p < 0.01 else 1
+                    rect_color = color
+                    rect = plt.Rectangle(
+                        (x - 0.25, y - 0.25),
+                        0.5,
+                        0.5,
+                        fill=False,
+                        edgecolor=rect_color,
+                        linewidth=lw,
+                        zorder=2,
+                    )
+                    ax.add_patch(rect)
+
+            skill_models.append(skill_model / n_vars)
+
+        # Set axis labels
+        ylabels = [
+            f"{var}\n({baseline.coords['metric'].item().upper()}={baseline.sel({'channel': var}).mean(dim=['sample', 'forecast_step']).values:.3f})"
+            for var in channels
+        ]
+        xlabels = [
+            f"{model_name}\nSkill: {skill_models[i]:.3f}"
+            for i, model_name in enumerate(runs[1::])
+        ]
+        ax.set_xticks(np.arange(1, n_runs))
+        ax.set_xticklabels(xlabels, fontsize=10)
+        ax.set_yticks(np.arange(n_vars) + 0.5)
+        ax.set_yticklabels(ylabels, fontsize=10)
+        for label in ax.get_yticklabels():
+            label.set_horizontalalignment("center")
+            label.set_x(-0.17)
+        ax.set_ylabel("Variable", fontsize=14)
+        ax.set_title(
+            f"Model Scorecard vs. Baseline '{runs[0]}'",
+            fontsize=16,
+            pad=20,
+        )
+        for x in np.arange(0.5, n_runs - 1, 1):
+            ax.axvline(
+                x, color="gray", linestyle="--", linewidth=0.5, zorder=0, alpha=0.5
+            )
+        ax.set_xlim(0.5, n_runs - 0.5)
+        ax.set_ylim(0, n_vars)
+
+        legend = [
+            Line2D(
+                [0],
+                [0],
+                marker="^",
+                color="white",
+                label=f"{self.improvement * 100:.0f}% improvement",
+                markerfacecolor="blue",
+                markersize=np.sqrt(200),
+            )
+        ]
+        plt.legend(handles=legend, loc="upper left", bbox_to_anchor=(1.02, 1.0))
+
+        _logger.info(f"Saving scorecards to: {self.out_plot_dir}")
+
+        parts = ["score_card", tag] + runs
+        name = "_".join(filter(None, parts))
+        plt.savefig(
+            f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
+            bbox_inches="tight",
+            dpi=300,
+        )
+        plt.close(fig)
+
+    def compare_models(self, data, baseline, i, var, x_dim="forecast_step"):
+        baseline_var = baseline.sel({"channel": var})
+        data_var = data[i].sel({"channel": var})
+
+        non_zero_dims = [
+            dim
+            for dim in baseline_var.dims
+            if dim != x_dim and baseline_var[dim].shape[0] > 1
+        ]
+
+        if non_zero_dims:
+            _logger.info(
+                f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
+            )
+
+        baseline_score = baseline_var.mean(
+            dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
+        )
+        model_score = data_var.mean(
+            dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True
+        )
+        diff = baseline_score - model_score
+
+        skill = self.get_skill_score(model_score, baseline_score, 0.0)
+        return diff, diff.mean(dim=x_dim), skill.mean(dim=x_dim)
+
+    def get_skill_score(self, score_model, score_ref, score_perf):
+        skill_score = (score_model - score_ref) / (score_perf - score_ref)
+
+        return skill_score
+
+    def get_plot_symbols(self, i, j, skill, diff_mean):
+        if diff_mean > 0:
+            # A better than B
+            alt = "greater"
+            modus = "better"
+            color = "blue"
+        elif diff_mean < 0:
+            # A worse than B
+            alt = "less"
+            modus = "worse"
+            color = "red"
+        else:
+            # Equal performance (conservative fallback)
+            alt = "two-sided"
+            modus = "different"
+
+        triangle = "^" if modus == "better" else "v"
+
+        # Triangle coordinates
+        x = i
+        # First row is model 1 vs model 0
+        y = j + 0.5
+
+        size = 200 * (
+            1 - (1 / (1 + abs(skill) / self.improvement))
+        )  # Add base size to all
+
+        return x, y, alt, color, triangle, size

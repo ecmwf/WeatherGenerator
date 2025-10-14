@@ -41,11 +41,19 @@ def evaluate_from_args(argl: list[str]) -> None:
     parser.add_argument(
         "--config",
         type=str,
+        default=None,
         help="Path to the configuration yaml file for plotting. e.g. config/plottig_config.yaml",
     )
 
     args = parser.parse_args(argl)
-    evaluate_from_config(OmegaConf.load(args.config))
+    if args.config:
+        config = Path(args.config)
+    else:
+        _logger.info(
+            "No config file provided, using the default template config (please edit accordingly)"
+        )
+        config = Path(_REPO_ROOT / "config" / "evaluate" / "eval_config.yml")
+    evaluate_from_config(OmegaConf.load(config))
 
 
 def evaluate_from_config(cfg):
@@ -81,6 +89,9 @@ def evaluate_from_config(cfg):
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
 
             stream_dict = reader.get_stream(stream)
+            if not stream_dict:
+                _logger.info(f"Stream {stream} does not exist in source data or config file is empty. Skipping.")
+                continue
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
