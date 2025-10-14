@@ -239,13 +239,13 @@ def get_data_worker(args: tuple) -> xr.DataArray:
     -------
         xarray DataArray for the specified sample and forecast step.
     """
-    sample, fstep, run_id, stream, type, epoch, rank = args
+    sample, fstep, run_id, stream, dtype, epoch, rank = args
     fname_zarr = get_model_results(run_id, epoch, rank)
     with ZarrIO(fname_zarr) as zio:
         out = zio.get_data(sample, stream, fstep)
-        if type == "target":
+        if dtype == "target":
             data = out.target
-        elif type == "prediction":
+        elif dtype == "prediction":
             data = out.prediction
     return data
 
@@ -254,9 +254,10 @@ def get_data(
     run_id: str,
     samples: list,
     stream: str,
-    type: str,
+    dtype: str,
     fsteps: list,
     channels: list,
+    fstep_hours: int, 
     n_processes: list,
     epoch: int,
     rank: int,
@@ -283,8 +284,8 @@ def get_data(
         output_format : Output file format (currently only 'netcdf' supported).
         config : Loaded config for cf_parser function.
     """
-    if type not in ["target", "prediction"]:
-        raise ValueError(f"Invalid type: {type}. Must be 'target' or 'prediction'.")
+    if dtype not in ["target", "prediction"]:
+        raise ValueError(f"Invalid type: {dtype}. Must be 'target' or 'prediction'.")
 
     fname_zarr = get_model_results(run_id, epoch, rank)
     with ZarrIO(fname_zarr) as zio:
@@ -309,7 +310,7 @@ def get_data(
         for sample_idx in tqdm(samples):
             da_fs = []
             step_tasks = [
-                (sample_idx, fstep, run_id, stream, type, epoch, rank)
+                (sample_idx, fstep, run_id, stream, dtype, epoch, rank)
                 for fstep in fsteps
             ]
             for result in tqdm(
@@ -335,15 +336,15 @@ def get_data(
                     result = reshape_dataset(result)
                     da_fs.append(result)
 
-            _logger.info(f"Retrieved {len(da_fs)} forecast steps for type {type}.")
+            _logger.info(f"Retrieved {len(da_fs)} forecast steps for type {dtype}.")
             _logger.info(
                 f"Saving sample {sample_idx} data to {output_format} format in {output_dir}."
             )
-            FSTEP_HOURS = np.datetime64(6, "h")
+            
             save_sample_to_netcdf(
-                str(type)[:4],
+                str(dtype)[:4],
                 da_fs,
-                FSTEP_HOURS,
+                fstep_hours,
                 run_id,
                 output_dir,
                 output_format,
@@ -494,6 +495,13 @@ def parse_args(args: list) -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--fstep-hours", 
+        type = int, 
+        default= 6, 
+        help= "Time difference between forecast steps in hours (e.g., 6)"
+        ) 
+
+    parser.add_argument(
         "--epoch",
         type=int,
         default=0,
@@ -514,12 +522,21 @@ def parse_args(args: list) -> argparse.Namespace:
 
 
 def export() -> None:
+    """
+    Main function to export data from Zarr store to NetCDF files.
+    """
     # By default, arguments from the command line are read.
     export_from_args(sys.argv[1:])
 
 
 def export_from_args(args: list) -> None:
     # Get run_id zarr data as lists of xarray DataArrays
+    """
+    Export data from Zarr store to NetCDF files based on command line arguments.
+    Parameters
+    ----------
+        args : List of command line arguments.      
+    """
     args = parse_args(sys.argv[1:])
     run_id = args.run_id
     data_type = args.type
@@ -528,6 +545,7 @@ def export_from_args(args: list) -> None:
     samples = args.samples
     stream = args.stream
     fsteps = args.fsteps
+    fstep_hours = np.timedelta64(args.fstep_hours, "h")
     channels = args.channels
     n_processes = args.n_processes
     epoch = args.epoch
@@ -543,15 +561,16 @@ def export_from_args(args: list) -> None:
     # check config loaded correctly
     assert config["variables"]["q"] is not None
 
-    for type in data_type:
-        _logger.info(f"Starting processing {type} for run ID {run_id}.")
+    for dtype in data_type:
+        _logger.info(f"Starting processing {dtype} for run ID {run_id}.")
         get_data(
             run_id,
             samples,
             stream,
-            type,
+            dtype,
             fsteps,
             channels,
+            fstep_hours, 
             n_processes,
             epoch,
             rank,
@@ -559,7 +578,7 @@ def export_from_args(args: list) -> None:
             output_format,
             config,
         )
-        _logger.info(f"Finished processing {type} for run ID {run_id}.")
+        _logger.info(f"Finished processing {dtype} for run ID {run_id}.")
 
 
 if __name__ == "__main__":
