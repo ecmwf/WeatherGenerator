@@ -423,7 +423,18 @@ class Plotter:
         vmin = map_kwargs_save.pop("vmin", None)
         vmax = map_kwargs_save.pop("vmax", None)
         cmap = plt.get_cmap(map_kwargs_save.pop("colormap", "coolwarm"))
-
+        # data["lon"] = ((data["lon"] + 180) % 360) - 180
+        print(f"\n\nvmin = {vmin}", flush=True)
+        print(f"vmax = {vmax}", flush=True)
+        print(
+            f"min(lon) = {min(data['lon'].values)} max(lon) = {max(data['lon'].values)}",
+            flush=True,
+        )
+        print(
+            f"min(lat) = {min(data['lat'].values)} max(lat) = {max(data['lat'].values)}",
+            flush=True,
+        )
+        print(f"data = {data}\n\n", flush=True)
         if isinstance(map_kwargs_save.get("levels", False), oc.listconfig.ListConfig):
             norm = mpl.colors.BoundaryNorm(
                 map_kwargs_save.pop("levels", None), cmap.N, extend="both"
@@ -450,6 +461,8 @@ class Plotter:
         ax.coastlines()
 
         valid_time = str(data["valid_time"][0].values.astype("datetime64[m]"))
+
+        # print(f"\n\nlons = {lons}\n\n", flush=True)
 
         scatter_plt = ax.scatter(
             data["lon"],
