@@ -559,7 +559,7 @@ def export_from_args(args: list) -> None:
     config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2cf.yaml")
     config = OmegaConf.load(config_file)
     # check config loaded correctly
-    assert config["variables"]["q"] is not None
+    assert len(config["variables"].keys()) > 0 , "Config file not loaded correctly"
 
     for dtype in data_type:
         _logger.info(f"Starting processing {dtype} for run ID {run_id}.")
