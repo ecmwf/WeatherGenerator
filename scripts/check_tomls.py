@@ -43,10 +43,10 @@ def check_tomls(main_toml, *tomls):
         toml_dict = {}
         with open(toml, "rb") as toml_file:
             toml_dict = tomllib.load(toml_file)
-        all_tomls[str(toml)] = toml_dict
-    for name, toml_dict in all_tomls.items():
+        all_tomls[Path(toml)] = toml_dict
+    for toml_path, toml_dict in all_tomls.items():
         # shorten name to package path
-        name = name.split("/")[-2]
+        name = toml_path.parent.name
         # check build system is the same
         check_toml_key(main_toml_dict, toml_dict, ["build-system"], name)
         # check python version is the same
