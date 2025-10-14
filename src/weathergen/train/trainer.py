@@ -54,11 +54,10 @@ logger = logging.getLogger(__name__)
 
 
 class Trainer(TrainerBase):
-    def __init__(self, checkpoint_freq=250, print_freq=10):
+    def __init__(self, train_log_freq: Config):
         TrainerBase.__init__(self)
 
-        self.checkpoint_freq = checkpoint_freq
-        self.print_freq = print_freq
+        self.train_log_freq = train_log_freq
 
     def init(self, cf: Config, devices):
         self.cf = OmegaConf.merge(
@@ -533,7 +532,6 @@ class Trainer(TrainerBase):
         cf = self.cf
         self.model.train()
         # torch.autograd.set_detect_anomaly(True)
-        log_interval = self.cf.train_log.log_interval
 
         dataset_iter = iter(self.data_loader)
 
@@ -591,11 +589,11 @@ class Trainer(TrainerBase):
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
 
             self._log_terminal(bidx, epoch, TRAIN)
-            if bidx % log_interval == 0:
+            if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
 
-            # model checkpoint
-            if bidx % self.checkpoint_freq == 0 and bidx > 0:
+            # save model checkpoint (with designation _latest)
+            if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
 
             self.cf.istep += cf.batch_size_per_gpu
@@ -945,7 +943,8 @@ class Trainer(TrainerBase):
         self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
     def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
-        if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:
+        print_freq = self.train_log_freq.terminal
+        if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
             avg_loss, losses_all, _ = self._prepare_losses_for_logging()
 
@@ -975,7 +974,7 @@ class Trainer(TrainerBase):
                             self.cf.istep,
                             avg_loss.nanmean().item(),
                             self.lr_scheduler.get_lr(),
-                            (self.print_freq * self.cf.batch_size_per_gpu) / dt,
+                            (print_freq * self.cf.batch_size_per_gpu) / dt,
                         ),
                     )
                     logger.info("\t")
