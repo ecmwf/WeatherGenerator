@@ -100,13 +100,17 @@ def evaluate_results(run_id):
     logger.info("run evaluation")
     cfg = omegaconf.OmegaConf.create(
         {
-            "verbose": True,
-            "image_format": "png",
-            "dpi_val": 300,
-            "summary_plots": True,
-            "summary_dir": "./plots/",
-            "print_summary": True,
-            "evaluation": {"metrics": ["rmse", "l1", "mse"]},
+            "global_plotting_options": {
+                "image_format": "png",
+                "dpi_val": 300,
+            },
+            "evaluation": {
+                "metrics": ["rmse", "l1", "mse"],
+                "verbose": True,
+                "summary_plots": True,
+                "summary_dir": "./plots/",
+                "print_summary": True,
+            },
             "run_ids": {
                 run_id: {  # would be nice if this could be done with option
                     "streams": {

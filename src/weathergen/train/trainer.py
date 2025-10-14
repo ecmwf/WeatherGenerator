@@ -54,11 +54,10 @@ logger = logging.getLogger(__name__)
 
 
 class Trainer(TrainerBase):
-    def __init__(self, checkpoint_freq=250, print_freq=10):
+    def __init__(self, train_log_freq: Config):
         TrainerBase.__init__(self)
 
-        self.checkpoint_freq = checkpoint_freq
-        self.print_freq = print_freq
+        self.train_log_freq = train_log_freq
 
     def init(self, cf: Config, devices):
         self.cf = OmegaConf.merge(
@@ -158,6 +157,7 @@ class Trainer(TrainerBase):
         self.init(cf, devices)
         cf = self.cf
 
+        # TODO: do not define new members outside of the init!!
         self.device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
 
@@ -218,12 +218,14 @@ class Trainer(TrainerBase):
 
         if cf.with_ddp and cf.with_fsdp:
             fsdp_kwargs = {
-                "mp_policy": MixedPrecisionPolicy(
-                    param_dtype=self.mixed_precision_dtype,
-                    reduce_dtype=torch.float32,
-                )
-                if cf.with_mixed_precision
-                else None,
+                "mp_policy": (
+                    MixedPrecisionPolicy(
+                        param_dtype=self.mixed_precision_dtype,
+                        reduce_dtype=torch.float32,
+                    )
+                    if cf.with_mixed_precision
+                    else None
+                ),
             }
             modules_to_shard = (
                 MLP,
@@ -254,12 +256,14 @@ class Trainer(TrainerBase):
                     fully_shard(module, **fsdp_kwargs)
 
             full_precision_fsdp_kwargs = {
-                "mp_policy": MixedPrecisionPolicy(
-                    param_dtype=torch.float32,
-                    reduce_dtype=torch.float32,
-                )
-                if cf.with_mixed_precision
-                else None,
+                "mp_policy": (
+                    MixedPrecisionPolicy(
+                        param_dtype=torch.float32,
+                        reduce_dtype=torch.float32,
+                    )
+                    if cf.with_mixed_precision
+                    else None
+                ),
             }
             for module in self.model.pred_adapter_kv.modules():
                 if isinstance(module, modules_to_shard):
@@ -276,7 +280,6 @@ class Trainer(TrainerBase):
             for tensor in itertools.chain(self.model.parameters(), self.model.buffers()):
                 assert tensor.device == torch.device("meta")
 
-        # load model if specified
         if run_id_contd is None:
             self.model.to_empty(device="cuda")
             self.model.reset_parameters()
@@ -529,7 +532,6 @@ class Trainer(TrainerBase):
         cf = self.cf
         self.model.train()
         # torch.autograd.set_detect_anomaly(True)
-        log_interval = self.cf.train_log.log_interval
 
         dataset_iter = iter(self.data_loader)
 
@@ -587,11 +589,11 @@ class Trainer(TrainerBase):
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
 
             self._log_terminal(bidx, epoch, TRAIN)
-            if bidx % log_interval == 0:
+            if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
 
-            # model checkpoint
-            if bidx % self.checkpoint_freq == 0 and bidx > 0:
+            # save model checkpoint (with designation _latest)
+            if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
 
             self.cf.istep += cf.batch_size_per_gpu
@@ -676,6 +678,9 @@ class Trainer(TrainerBase):
         self.dataset_val.advance()
 
     def batch_to_device(self, batch):
+        # TODO: do not define new members outside of the init!!
+        self.device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{self.device_type}:{self.cf.local_rank}")
         # forecast_steps is dropped here from the batch
         return (
             [[d.to_device(self.device) for d in db] for db in batch[0]],
@@ -697,6 +702,14 @@ class Trainer(TrainerBase):
         params = torch.load(
             path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
         )
+
+        model_state_dict = self.model.state_dict()
+        params = {
+            k: v
+            for k, v in params.items()
+            if k in model_state_dict and v.shape == model_state_dict[k].shape
+        }
+
         is_model_sharded = self.cf.with_ddp and self.cf.with_fsdp
         if is_model_sharded:
             meta_sharded_sd = self.model.state_dict()
@@ -715,6 +728,25 @@ class Trainer(TrainerBase):
                 maybe_sharded_sd[k.replace("module.", "")] = params[k]
         # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
         mkeys, ukeys = self.model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
+
+        if mkeys:
+            # Get the unique parent modules for the missing parameters
+            new_modules_to_init = {key.rsplit(".", 1)[0] for key in mkeys}
+
+            # Find the highest-level "root" new modules to avoid redundant initializations
+            root_new_modules = set()
+            for path in sorted(list(new_modules_to_init)):
+                if not any(path.startswith(root + ".") for root in root_new_modules):
+                    root_new_modules.add(path)
+
+            # Get all modules for quick lookup and initialize the new ones
+            all_modules = dict(self.model.named_modules())
+            for path in root_new_modules:
+                if is_root():
+                    logger.info(f"Initializing new module not found in checkpoint: {path}")
+                module_to_init = all_modules[path]
+                module_to_init.to_empty(device="cuda")
+                module_to_init.reset_parameters()
 
         if not is_model_sharded:
             self.model = self.model.to(self.device)
@@ -911,7 +943,8 @@ class Trainer(TrainerBase):
         self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
     def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
-        if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:
+        print_freq = self.train_log_freq.terminal
+        if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
             avg_loss, losses_all, _ = self._prepare_losses_for_logging()
 
@@ -941,7 +974,7 @@ class Trainer(TrainerBase):
                             self.cf.istep,
                             avg_loss.nanmean().item(),
                             self.lr_scheduler.get_lr(),
-                            (self.print_freq * self.cf.batch_size_per_gpu) / dt,
+                            (print_freq * self.cf.batch_size_per_gpu) / dt,
                         ),
                     )
                     logger.info("\t")

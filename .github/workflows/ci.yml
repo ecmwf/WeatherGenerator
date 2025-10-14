@@ -31,7 +31,7 @@ jobs:
       - name: Type checker (pyrefly, experimental)
         # Do not attempt to install the default dependencies, this is much faster.
         # Run temporarily on a sub directory before the main restyling.
-        run: ./scripts/actions.sh type-check-experimental || echo "::warning::typing issues found"
+        run: ./scripts/actions.sh type-check || echo "::warning::typing issues found"
   pr:
     name: PR checks
     runs-on: ubuntu-latest

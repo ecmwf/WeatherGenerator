@@ -14,6 +14,7 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 import xarray as xr
+from scipy.spatial import cKDTree
 
 from weathergen.evaluate.score_utils import to_list
 
@@ -618,6 +619,70 @@ class Scores:
 
         return rmse
 
+    @staticmethod
+    def sort_by_coords(
+        da_to_sort: xr.DataArray, da_reference: xr.DataArray
+    ) -> xr.DataArray:
+        """
+        Sorts one xarray.DataArray's coordinate ordering to match a reference array using KDTree.
+
+        This method finds the nearest neighbor in `da_to_sort` for every coordinate in
+        `da_reference`, effectively reordering `da_to_sort` along its indexed dimension to align
+        with the sequence of coordinates in the reference.
+
+        Parameters
+        ----------
+        da_to_sort : xr.DataArray
+            The DataArray whose coordinate ordering needs to be matched.
+            Must contain 'lat' and 'lon' coordinates and an indexed dimension (e.g., 'ipoint').
+        da_reference : xr.DataArray
+            The DataArray providing the target coordinate ordering (the template). Must contain
+            'lat' and 'lon' coordinates.
+
+        Returns
+        -------
+        xr.DataArray
+            A new DataArray with the data from `da_to_sort` reordered to match the
+            coordinate sequence of `da_reference`.
+
+        Raises
+        ------
+        ValueError
+            If any reference coordinate does not have a matching coordinate in
+            `da_to_sort` within the allowed distance tolerance (1e-5).
+
+        Notes
+        -----
+        The matching uses `scipy.spatial.cKDTree.query` with a strict distance threshold
+        (`distance_upper_bound=1e-5`) to ensure precise one-to-one alignment.
+        """
+
+        # Extract coordinates
+        ref_lats = da_reference.lat.values
+        ref_lons = da_reference.lon.values
+        sort_lats = da_to_sort.lat.values
+        sort_lons = da_to_sort.lon.values
+
+        # Build KDTree on coordinates to sort
+        sort_coords = np.column_stack((sort_lats, sort_lons))
+        tree = cKDTree(sort_coords)
+
+        # Find nearest neighbors for reference coordinates
+        ref_coords = np.column_stack((ref_lats, ref_lons))
+        dist, indices = tree.query(ref_coords, distance_upper_bound=1e-5)
+
+        # Check for unmatched coordinates
+        unmatched_mask = ~np.isfinite(dist)
+        if np.any(unmatched_mask):
+            n_unmatched = np.sum(unmatched_mask)
+            _logger.info(
+                f"Found {n_unmatched} reference coordinates with no matching coordinates in array to sort. Returning NaN DataArray."
+            )
+            return xr.full_like(da_reference, np.nan)
+
+        # Reorder da_to_sort to match reference ordering
+        return da_to_sort.isel(ipoint=indices)
+
     def calc_change_rate(
         self,
         s0: xr.DataArray,
@@ -642,6 +707,9 @@ class Scores:
         if s1 is None:
             return xr.full_like(s0, np.nan)
         else:
+            # Sort the coordinates of subsequent time steps to match each other. Can be removed
+            # once unshuffling is solved elsewhere
+            s1 = self.sort_by_coords(da_to_sort=s1, da_reference=s0)
             crate = np.abs(s0 - s1.values)
             return crate
 

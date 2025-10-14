@@ -14,7 +14,6 @@ from pathlib import Path
 import numpy as np
 import omegaconf as oc
 import xarray as xr
-from scipy.spatial import cKDTree
 from tqdm import tqdm
 
 from weathergen.evaluate.io_reader import Reader
@@ -26,52 +25,16 @@ _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
 
-def sort_by_coords(da_to_sort, da_reference):
-    """Sort da_to_sort to match da_reference's coordinate ordering using KDTree."""
-
-    # Extract coordinates
-    ref_lats = da_reference.lat.values
-    ref_lons = da_reference.lon.values
-    sort_lats = da_to_sort.lat.values
-    sort_lons = da_to_sort.lon.values
-
-    # Build KDTree on coordinates to sort
-    sort_coords = np.column_stack((sort_lats, sort_lons))
-    tree = cKDTree(sort_coords)
-
-    # Find nearest neighbors for reference coordinates
-    ref_coords = np.column_stack((ref_lats, ref_lons))
-    dist, indices = tree.query(ref_coords, distance_upper_bound=1e-5)
-
-    # Check for unmatched coordinates
-    unmatched_mask = ~np.isfinite(dist)
-    if np.any(unmatched_mask):
-        n_unmatched = np.sum(unmatched_mask)
-        raise ValueError(
-            f"Found {n_unmatched} reference coordinates with no matching coordinates in array to sort"
-        )
-
-    # Reorder da_to_sort to match reference ordering
-    return da_to_sort.isel(ipoint=indices)
-
-
 def get_next_data(fstep, da_preds, da_tars, fsteps):
     """
     Get the next forecast step data for the given forecast step.
     """
-
     fstep_idx = fsteps.index(fstep)
     # Get the next forecast step
     next_fstep = fsteps[fstep_idx + 1] if fstep_idx + 1 < len(fsteps) else None
     if next_fstep is not None:
         preds_next = da_preds.get(next_fstep, None)
         tars_next = da_tars.get(next_fstep, None)
-        tars = da_tars.get(fstep, None)
-        preds = da_preds.get(fstep, None)
-
-        # Reindex to match the current forecast step's coordinates if necessary
-        preds_next = sort_by_coords(preds_next, preds)
-        tars_next = sort_by_coords(tars_next, tars)
     else:
         preds_next = None
         tars_next = None
@@ -124,8 +87,6 @@ def calc_scores_per_stream(
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
 
-    metric_list = []
-
     metric_stream = xr.DataArray(
         np.full(
             (len(samples), len(fsteps), len(channels), len(metrics)),
@@ -177,23 +138,19 @@ def calc_scores_per_stream(
             )
             continue
 
-        metric_list.append(combined_metrics)
-
         assert int(combined_metrics.forecast_step) == int(fstep), (
             "Different steps in data and metrics. Please check."
         )
-
+    
         metric_stream.loc[
             {
                 "forecast_step": int(combined_metrics.forecast_step),
                 "sample": combined_metrics.sample,
+                "channel": combined_metrics.channel,
             }
         ] = combined_metrics
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
-
-    metric_stream = xr.concat(metric_list, dim="forecast_step")
-    metric_stream = metric_stream.assign_coords({"forecast_step": fsteps})
 
     return metric_stream, points_per_sample
 
