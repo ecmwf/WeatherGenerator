@@ -67,9 +67,7 @@ class DataAvailability:
 
 
 class Reader:
-    def __init__(
-        self, eval_cfg: dict, run_id: str, private_paths: dict[str, str] | None = None
-    ):
+    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict[str, str] | None = None):
         """
         Generic data reader class.
 
@@ -282,9 +280,7 @@ class WeatherGenReader(Reader):
 
         if not self.results_base_dir:
             self.results_base_dir = Path(get_shared_wg_path("results"))
-            _logger.info(
-                f"Results directory obtained from private config: {self.results_base_dir}"
-            )
+            _logger.info(f"Results directory obtained from private config: {self.results_base_dir}")
         else:
             _logger.info(f"Results directory parsed: {self.results_base_dir}")
 
@@ -460,17 +456,13 @@ class WeatherGenReader(Reader):
                         da_tars_fs = da_tars_fs.assign_coords(
                             sample=(
                                 "ipoint",
-                                np.repeat(
-                                    da_tars_fs.sample.values, len(da_tars_fs.ipoint)
-                                ),
+                                np.repeat(da_tars_fs.sample.values, len(da_tars_fs.ipoint)),
                             )
                         )
                         da_preds_fs = da_preds_fs.assign_coords(
                             sample=(
                                 "ipoint",
-                                np.repeat(
-                                    da_preds_fs.sample.values, len(da_preds_fs.ipoint)
-                                ),
+                                np.repeat(da_preds_fs.sample.values, len(da_preds_fs.ipoint)),
                             )
                         )
 
@@ -504,7 +496,7 @@ class WeatherGenReader(Reader):
     def get_stream(self, stream: str):
         """
         returns the dictionary associated to a particular stream.
-        Returns an empty dictionary if the stream does not exist in the Zarr file.  
+        Returns an empty dictionary if the stream does not exist in the Zarr file.
 
         Parameters
         ----------

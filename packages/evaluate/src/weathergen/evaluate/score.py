@@ -612,9 +612,7 @@ class Scores:
         return rmse
 
     @staticmethod
-    def sort_by_coords(
-        da_to_sort: xr.DataArray, da_reference: xr.DataArray
-    ) -> xr.DataArray:
+    def sort_by_coords(da_to_sort: xr.DataArray, da_reference: xr.DataArray) -> xr.DataArray:
         """
         Sorts one xarray.DataArray's coordinate ordering to match a reference array using KDTree.
 

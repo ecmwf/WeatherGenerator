@@ -135,7 +135,7 @@ def calc_scores_per_stream(
         assert int(combined_metrics.forecast_step) == int(fstep), (
             "Different steps in data and metrics. Please check."
         )
-    
+
         metric_stream.loc[
             {
                 "forecast_step": int(combined_metrics.forecast_step),
@@ -404,9 +404,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
 
     for region in regions:
         for metric in metrics:
-            plot_metric_region(
-                metric, region, runs, scores_dict, plotter, print_summary
-            )
+            plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("score_cards", False):
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
 

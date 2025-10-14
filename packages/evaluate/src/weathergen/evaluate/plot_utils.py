@@ -155,9 +155,7 @@ def score_card_metric_region(
             if channels_common is None:
                 channels_common = set(channels_per_run)
             else:
-                channels_common = set(channels_common).intersection(
-                    set(channels_per_run)
-                )
+                channels_common = set(channels_common).intersection(set(channels_per_run))
 
         if not channels_common:
             continue

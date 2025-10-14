@@ -63,6 +63,8 @@ ignore = [
   "SIM118",
   "SIM102",
   "SIM401",
+  "E501", # to be removed 
+  "E721",
   # To ignore, not relevant for us
   "SIM108", # in case additional norm layer supports are added in future
   "N817", # we use heavy acronyms, e.g., allowing 'import LongModuleName as LMN' (LMN is accepted)
