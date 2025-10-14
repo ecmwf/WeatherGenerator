@@ -29,7 +29,7 @@ from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
 
-class EmbeddingEngine:
+class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
 
     def __init__(self, cf: Config, sources_size) -> None:
@@ -39,16 +39,11 @@ class EmbeddingEngine:
         :param cf: Configuration object containing parameters for the engine.
         :param sources_size: List of source sizes for each stream.
         """
+        super(EmbeddingEngine, self).__init__()
         self.cf = cf
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleList()
 
-    def create(self) -> torch.nn.ModuleList:
-        """
-        Creates and returns the module list (embeds).
-
-        :return: torch.nn.ModuleList containing the embedding layers.
-        """
         for i, si in enumerate(self.cf.streams):
             stream_name = si.get("name", i)
 
@@ -84,7 +79,50 @@ class EmbeddingEngine:
                 )
             else:
                 raise ValueError("Unsupported embedding network type")
-        return self.embeds
+        
+    def forward(self, streams_data, pe_embed, dtype, device):
+        source_tokens_lens = torch.stack(
+            [
+                torch.stack(
+                    [
+                        s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
+                        for s in stl_b
+                    ]
+                )
+                for stl_b in streams_data
+            ]
+        )
+        offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
+
+        tokens_all = torch.empty(
+            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=dtype, device=device
+        )
+    
+        for _, sb in enumerate(streams_data):
+            for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
+                if not s.source_empty():
+                    idxs = s.source_idxs_embed.to(device)
+                    idxs_pe = s.source_idxs_embed_pe.to(device)
+
+                    # create full scatter index
+                    # (there's no broadcasting which is likely highly inefficient)
+                    idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+                    x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
+                    # there's undocumented limitation in flash_attn that will make embed fail if
+                    # #tokens is too large; code below is a work around
+                    # x_embed = torch.cat(
+                    #     [
+                    #         embed(s_c, c_c).flatten(0, 1)
+                    #         for s_c, c_c in zip(
+                    #             torch.split(s.source_tokens_cells, 49152),
+                    #             torch.split(s.source_centroids, 49152),
+                    #         )
+                    #     ]
+                    # )
+
+                    # scatter write to reorder from per stream to per cell ordering
+                    tokens_all.scatter_(0, idxs, x_embed + pe_embed[idxs_pe])
+        return tokens_all
 
 
 class LocalAssimilationEngine:
@@ -385,6 +423,7 @@ class EnsPredictionHead(torch.nn.Module):
                 self.pred_heads[-1].append(fal)
 
     #########################################
+    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
     def forward(self, toks):
         preds = []
         for pred_head in self.pred_heads:

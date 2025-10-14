@@ -260,7 +260,7 @@ class Model(torch.nn.Module):
         cf = self.cf
 
         # separate embedding networks for differnt observation types
-        self.embeds = EmbeddingEngine(cf, self.sources_size).create()
+        self.embed_engine = EmbeddingEngine(cf, self.sources_size) #.create()
 
         ##############
         # local assimilation engine
@@ -466,7 +466,7 @@ class Model(torch.nn.Module):
         """Print number of parameters for entire model and each module used to build the model"""
 
         cf = self.cf
-        num_params_embed = [get_num_parameters(embed) for embed in self.embeds]
+        num_params_embed = [get_num_parameters(embed) for embed in self.embed_engine.embeds]
         num_params_total = get_num_parameters(self)
         num_params_ae_local = get_num_parameters(self.ae_local_blocks)
         num_params_ae_global = get_num_parameters(self.ae_global_blocks)
@@ -620,49 +620,10 @@ class Model(torch.nn.Module):
         Returns:
             Tokens for local assimilation
         """
-
-        source_tokens_lens = torch.stack(
-            [
-                torch.stack(
-                    [
-                        s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
-                        for s in stl_b
-                    ]
-                )
-                for stl_b in streams_data
-            ]
-        )
-        offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
+        
         device = next(self.parameters()).device
-        tokens_all = torch.empty(
-            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=self.dtype, device=device
-        )
-
-        for _, sb in enumerate(streams_data):
-            for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                if not s.source_empty():
-                    idxs = s.source_idxs_embed.to(device)
-                    idxs_pe = s.source_idxs_embed_pe.to(device)
-
-                    # create full scatter index
-                    # (there's no broadcasting which is likely highly inefficient)
-                    idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
-                    # there's undocumented limitation in flash_attn that will make embed fail if
-                    # #tokens is too large; code below is a work around
-                    # x_embed = torch.cat(
-                    #     [
-                    #         embed(s_c, c_c).flatten(0, 1)
-                    #         for s_c, c_c in zip(
-                    #             torch.split(s.source_tokens_cells, 49152),
-                    #             torch.split(s.source_centroids, 49152),
-                    #         )
-                    #     ]
-                    # )
-
-                    # scatter write to reorder from per stream to per cell ordering
-                    tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
-
+        tokens_all = self.embed_engine(streams_data, model_params.pe_embed, self.dtype, device)
+        
         return tokens_all
 
     #########################################
