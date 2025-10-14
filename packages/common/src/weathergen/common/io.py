@@ -139,7 +139,6 @@ class OutputDataset:
         coords = da.from_zarr(self.coords).compute()
         times = da.from_zarr(self.times).compute()
         geoinfo = da.from_zarr(self.geoinfo).compute()
-
         geoinfo = {name: ("ipoint", geoinfo[:, i]) for i, name in enumerate(self.geoinfo_channels)}
         # TODO: make sample, stream, forecast_step DataArray attribute, test how it
         # interacts with concatenating

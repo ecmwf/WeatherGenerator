@@ -23,7 +23,7 @@ dev = [
 
 [project.scripts]
 evaluation = "weathergen.evaluate.run_evaluation:evaluate"
-
+export = "weathergen.evaluate.export_inference:export"
 
 [tool.ruff.lint]
 # All disabled until the code is formatted.
