@@ -14,20 +14,29 @@ ICONCMIP6Amon :
     lon: 'longitude'
     lat: 'latitude'
     grid: 'i' # i = grid indexes
-  source_exclude: ["hur"]
-  target_exclude: ["hur"]
-  # source_exclude: [ #clivi # ua
-  #   "clwvi", "hfls", "hur", "pr", "prsn", "ps", "rlds", "rlus", "rlutcs", "rsdscs", "rsus", "rsut", 
-  #   "rtmt", "ta", "tauu", "ts", "uas", "vas", "zg", "clt", "evspsbl", "hfss", "hus", "prc", "prw", 
-  #   "psl", "rldscs", "rlut", "rsds", "rsdt", "rsuscs", "rsutcs", "sfcWind", "tas", "tauv", "va", "wap"
+  # source_exclude: [
+  #   "hur", # bcause it doesn't have data on all necessary levels
+  #   'clt',   'hfss', 'pr',   'rlds',  'rlut',  'rsus',  'tas',  'vas', # duplicate from day
+  #   'hfls', 'psl',  'rlus',  'rsds',  'sfcWind',  'uas'  # duplicate from day 
   # ]
-  # target_exclude: [ #clivi # ua
-  #   "clwvi", "hfls", "hur", "pr", "prsn", "ps", "rlds", "rlus", "rlutcs", "rsdscs", "rsus", "rsut", 
-  #   "rtmt", "ta", "tauu", "ts", "uas", "vas", "zg", "clt", "evspsbl", "hfss", "hus", "prc", "prw", 
-  #   "psl", "rldscs", "rlut", "rsds", "rsdt", "rsuscs", "rsutcs", "sfcWind", "tas", "tauv", "va", "wap"
+  # target_exclude: [
+  #   "hur", # bcause it doesn't have data on all necessary levels
+  #   'clt',   'hfss', 'pr',   'rlds',  'rlut',  'rsus',  'tas',  'vas', # duplicate from day
+  #   'hfls', 'psl',  'rlus',  'rsds',  'sfcWind',  'uas'   # duplicate from day
   # ]
-  pressure_levels: ["5000", "10000", "15000", "20000", "25000", "30000", "40000", "50000", "60000", 
-    "70000", "85000", "92500", "100000"
+  source_exclude: [ #clivi # ua
+    "clwvi", "hfls", "hur", "pr", "prsn", "ps", "rlds", "rlus", "rlutcs", "rsdscs", "rsus", "rsut", 
+    "rtmt", "ta", "tauu", "ts", "uas", "vas", "zg", "clt", "evspsbl", "hfss", "hus", "prc", "prw", 
+    "psl", "rldscs", "rlut", "rsds", "rsdt", "rsuscs", "rsutcs", "sfcWind", "tas", "tauv", "va", "wap"
+  ]
+  target_exclude: [ #clivi # ua
+    "clwvi", "hfls", "hur", "pr", "prsn", "ps", "rlds", "rlus", "rlutcs", "rsdscs", "rsus", "rsut", 
+    "rtmt", "ta", "tauu", "ts", "uas", "vas", "zg", "clt", "evspsbl", "hfss", "hus", "prc", "prw", 
+    "psl", "rldscs", "rlut", "rsds", "rsdt", "rsuscs", "rsutcs", "sfcWind", "tas", "tauv", "va", "wap"
+  ]
+  pressure_levels: [
+    "5000", "10000", "15000", "20000", "25000", "30000", 
+    "40000", "50000", "60000", "70000", "85000", "92500", "100000"
   ]
   variables: [
     "clivi", "clwvi", "hfls", "hur", "pr", "prsn", "ps", "rlds", "rlus", "rlutcs", "rsdscs", "rsus", "rsut", 
