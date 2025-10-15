@@ -39,10 +39,10 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
+from weathergen.model.ema import EMANeuralNet
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
-from weathergen.model.ema import EMA
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
@@ -154,6 +154,93 @@ class Trainer(TrainerBase):
         self.validate(epoch=0)
         logger.info(f"Finished inference run with id: {cf.run_id}")
 
+    def init_model_and_shard(self, cf, devices):
+        sources_size = self.dataset.get_sources_size()
+        targets_num_channels = self.dataset.get_targets_num_channels()
+        targets_coords_size = self.dataset.get_targets_coords_size()
+
+        with torch.device("meta"):
+            model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+
+        for name, module in model.named_modules():
+            name = module.name if hasattr(module, "name") else name
+            # avoid the whole model element which has name ''
+            if name == "":
+                continue
+            if re.fullmatch(self.freeze_modules, name) is not None:
+                freeze_weights(module)
+
+        if cf.with_ddp and not cf.with_fsdp:
+            model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                broadcast_buffers=True,
+                find_unused_parameters=True,
+                gradient_as_bucket_view=True,
+                bucket_cap_mb=512,
+            )
+
+        if cf.with_ddp and cf.with_fsdp:
+            fsdp_kwargs = {
+                "mp_policy": (
+                    MixedPrecisionPolicy(
+                        param_dtype=self.mixed_precision_dtype,
+                        reduce_dtype=torch.float32,
+                    )
+                    if cf.with_mixed_precision
+                    else None
+                ),
+            }
+            modules_to_shard = (
+                MLP,
+                MultiSelfAttentionHeadLocal,
+                MultiSelfAttentionHead,
+                MultiCrossAttentionHeadVarlen,
+                MultiCrossAttentionHeadVarlenSlicedQ,
+                MultiSelfAttentionHeadVarlen,
+            )
+
+            for module in model.ae_local_blocks.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+
+            for module in model.ae_adapter.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+
+            for module in model.ae_global_blocks.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+
+            for module in model.fe_blocks.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+
+            full_precision_fsdp_kwargs = {
+                "mp_policy": (
+                    MixedPrecisionPolicy(
+                        param_dtype=torch.float32,
+                        reduce_dtype=torch.float32,
+                    )
+                    if cf.with_mixed_precision
+                    else None
+                ),
+            }
+            for module in model.pred_adapter_kv.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **full_precision_fsdp_kwargs)
+
+            for module in model.target_token_engines.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **full_precision_fsdp_kwargs)
+
+        model_params = ModelParams(cf).create(cf)
+
+        if cf.with_ddp and cf.with_fsdp:
+            fully_shard(model)
+            for tensor in itertools.chain(model.parameters(), model.buffers()):
+                assert tensor.device == torch.device("meta")
+        return model, model_params
+
     def run(self, cf, devices, run_id_contd=None, epoch_contd=None):
         # general initalization
         self.init(cf, devices)
@@ -194,93 +281,7 @@ class Trainer(TrainerBase):
             self.dataset_val, **loader_params, sampler=None
         )
 
-        sources_size = self.dataset.get_sources_size()
-        targets_num_channels = self.dataset.get_targets_num_channels()
-        targets_coords_size = self.dataset.get_targets_coords_size()
-
-        with torch.device("meta"):
-            self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-
-        for name, module in self.model.named_modules():
-            name = module.name if hasattr(module, "name") else name
-            # avoid the whole model element which has name ''
-            if name == "":
-                continue
-            if re.fullmatch(self.freeze_modules, name) is not None:
-                freeze_weights(module)
-
-        if cf.with_ddp and not cf.with_fsdp:
-            self.model = torch.nn.parallel.DistributedDataParallel(
-                self.model,
-                broadcast_buffers=True,
-                find_unused_parameters=True,
-                gradient_as_bucket_view=True,
-                bucket_cap_mb=512,
-            )
-
-        if cf.with_ddp and cf.with_fsdp:
-            fsdp_kwargs = {
-                "mp_policy": (
-                    MixedPrecisionPolicy(
-                        param_dtype=self.mixed_precision_dtype,
-                        reduce_dtype=torch.float32,
-                    )
-                    if cf.with_mixed_precision
-                    else None
-                ),
-            }
-            modules_to_shard = (
-                MLP,
-                MultiSelfAttentionHeadLocal,
-                MultiSelfAttentionHead,
-                MultiCrossAttentionHeadVarlen,
-                MultiCrossAttentionHeadVarlenSlicedQ,
-                MultiSelfAttentionHeadVarlen,
-            )
-            # for module in self.model.embeds.modules():
-            #     if isinstance(module, modules_to_shard):
-            #         fully_shard(module, **fsdp_kwargs)
-
-            for module in self.model.ae_local_blocks.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
-
-            for module in self.model.ae_adapter.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
-
-            for module in self.model.ae_global_blocks.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
-
-            for module in self.model.fe_blocks.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
-
-            full_precision_fsdp_kwargs = {
-                "mp_policy": (
-                    MixedPrecisionPolicy(
-                        param_dtype=torch.float32,
-                        reduce_dtype=torch.float32,
-                    )
-                    if cf.with_mixed_precision
-                    else None
-                ),
-            }
-            for module in self.model.pred_adapter_kv.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **full_precision_fsdp_kwargs)
-
-            for module in self.model.target_token_engines.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **full_precision_fsdp_kwargs)
-
-        self.model_params = ModelParams(cf).create(cf)  # .to(device)
-
-        if cf.with_ddp and cf.with_fsdp:
-            fully_shard(self.model)
-            for tensor in itertools.chain(self.model.parameters(), self.model.buffers()):
-                assert tensor.device == torch.device("meta")
+        self.model, self.model_params = self.init_model_and_shard(cf, devices)
 
         if run_id_contd is None:
             self.model.to_empty(device="cuda")
@@ -299,7 +300,14 @@ class Trainer(TrainerBase):
 
         cf.ema = True
         if cf.ema:
-            self.ema = EMA(self.model, halflife_steps=1e-3)
+            meta_ema_net = self.init_model_and_shard(cf, devices)[0]
+            self.ema_net = EMANeuralNet(
+                self.model,
+                meta_ema_net,
+                halflife_steps=1e-3,
+                rampup_ratio=0.09,
+                is_model_sharded=(cf.with_ddp and cf.with_fsdp),
+            )
 
         # if with_fsdp then parameter count is unreliable
         if (is_root() and not cf.with_fsdp) or not cf.with_ddp:
@@ -588,7 +596,7 @@ class Trainer(TrainerBase):
             self.lr_scheduler.step()
 
             # EMA update
-            self.ema.update(
+            self.ema_net.update(
                 self.cf.istep * self.world_size_original * self.cf.batch_size_per_gpu,
                 self.world_size_original * self.cf.batch_size_per_gpu,
             )
@@ -610,7 +618,7 @@ class Trainer(TrainerBase):
                 self.save_model(-1)
 
             # Shouldn't this either be 1 or cf.batch_size_per_gpu * self.original
-            self.cf.istep += 1 # cf.batch_size_per_gpu
+            self.cf.istep += 1  # cf.batch_size_per_gpu
 
         self.dataset.advance()
 
@@ -636,7 +644,7 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds, _ = self.ema.forward_eval(
+                        preds, _ = self.ema_net.forward_eval(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
 
@@ -820,7 +828,9 @@ class Trainer(TrainerBase):
         # )
 
     def _get_full_model_state_dict(self):
-        maybe_sharded_sd = self.model.state_dict()
+        maybe_sharded_sd = (
+            self.model.state_dict() if self.ema_net is None else self.ema_net.state_dict()
+        )
         if self.cf.with_ddp and self.cf.with_fsdp:
             cpu_state_dict = {}
             for param_name, sharded_param in maybe_sharded_sd.items():
