@@ -23,14 +23,11 @@ from numpy.typing import NDArray
 
 # experimental value, should be inferred more intelligently
 CHUNK_N_SAMPLES = 16392
-DType: typing.TypeAlias = np.float32
+type DType = np.float32
 type NPDT64 = datetime64
 
 
 _logger = logging.getLogger(__name__)
-
-
-np.ndarray(3)
 
 
 @dataclasses.dataclass

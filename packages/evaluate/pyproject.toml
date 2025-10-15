@@ -3,7 +3,7 @@ name = "weathergen-evaluate"
 version = "0.1.0"
 description = "The WeatherGenerator Machine Learning Earth System Model"
 readme = "../../README.md"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "cartopy>=0.24.1",
     "xskillscore",
@@ -25,6 +25,12 @@ dev = [
 evaluation = "weathergen.evaluate.run_evaluation:evaluate"
 export = "weathergen.evaluate.export_inference:export"
 
+# The linting configuration
+[tool.ruff]
+
+# Wide rows
+line-length = 100
+
 [tool.ruff.lint]
 # All disabled until the code is formatted.
 select = [
@@ -40,13 +46,16 @@ select = [
     "SIM",
     # isort
     "I",
+    # Banned imports
+    "TID",
+    # Naming conventions
+    "N",
+    # print
+    "T201"
 ]
 
 # These rules are sensible and should be enabled at a later stage.
 ignore = [
-  "E501",
-  "E721",
-  "E722",
   # "B006",
   "B011",
   "UP008",
@@ -54,9 +63,22 @@ ignore = [
   "SIM118",
   "SIM102",
   "SIM401",
+  "E501", # to be removed 
+  "E721",
   # To ignore, not relevant for us
-  "E741",
+  "SIM108", # in case additional norm layer supports are added in future
+  "N817", # we use heavy acronyms, e.g., allowing 'import LongModuleName as LMN' (LMN is accepted)
+  "E731", # overly restrictive and less readable code
+  "N812", # prevents us following the convention for importing torch.nn.functional as F
 ]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"numpy.ndarray".msg = "Do not use 'ndarray' to describe a numpy array type, it is a function. Use numpy.typing.NDArray or numpy.typing.NDArray[np.float32] for example"
+
+[tool.ruff.format]
+# Use Unix `\n` line endings for all files
+line-ending = "lf"
+
 
 [tool.pyrefly]
 project-includes = ["src/"]
