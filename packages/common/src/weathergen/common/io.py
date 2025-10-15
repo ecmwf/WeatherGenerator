@@ -147,6 +147,7 @@ class OutputDataset:
 
     channels: list[str]
     geoinfo_channels: list[str]
+    lead_time: int
 
     @functools.cached_property
     def arrays(self) -> dict[str, zarr.Array | NDArray]:
@@ -185,6 +186,7 @@ class OutputDataset:
                 "sample": [self.item_key.sample],
                 "stream": [self.item_key.stream],
                 "forecast_step": [self.item_key.forecast_step],
+                "lead_time": ("forecast_step", [self.lead_time]),
                 "ipoint": self.datapoints,
                 "channel": self.channels,  # TODO: make sure channel names align with data
                 "valid_time": ("ipoint", times.astype("datetime64[ns]")),
@@ -284,6 +286,7 @@ class ZarrIO:
     def _write_metadata(self, dataset_group: zarr.Group, dataset: OutputDataset):
         dataset_group.attrs["channels"] = dataset.channels
         dataset_group.attrs["geoinfo_channels"] = dataset.geoinfo_channels
+        dataset_group.attrs["lead_time"] = dataset.lead_time
 
     def _write_arrays(self, dataset_group: zarr.Group, dataset: OutputDataset):
         for array_name, array in dataset.arrays.items():  # suffix is eg. data or coords
@@ -300,6 +303,14 @@ class ZarrIO:
             + "into group: {group}."
         )
         group.create_dataset(name, data=array, chunks=chunks)
+
+    @functools.cached_property
+    def example_key(self) -> ItemKey:
+        sample, example_sample = next(self.data_root.groups())
+        stream, example_stream = next(example_sample.groups())
+        fstep, example_item = next(example_stream.groups())
+
+        return ItemKey(sample, fstep, stream)
 
     @functools.cached_property
     def samples(self) -> list[int]:
@@ -319,7 +330,16 @@ class ZarrIO:
         # assume stream/samples/forecast_steps are orthogonal
         _, example_sample = next(self.data_root.groups())
         _, example_stream = next(example_sample.groups())
+
         return list(example_stream.group_keys())
+
+    @functools.cached_property
+    def lead_times(self) -> list[int]:
+        """Calculate available lead times from available forecast steps and len_hrs."""
+        example_prediction = self.load_zarr(self.example_key).prediction
+        len_hrs = example_prediction.lead_time // self.example_key.forecast_step
+
+        return [step * len_hrs for step in self.forecast_steps]
 
 
 @dataclasses.dataclass
@@ -364,6 +384,7 @@ class OutputBatchData:
 
     sample_start: int
     forecast_offset: int
+    len_hrs: int
 
     @functools.cached_property
     def samples(self):
@@ -414,8 +435,10 @@ class OutputBatchData:
             "Number of channel names does not align with prediction data."
         )
 
+        lead_time = self.len_hrs * key
+
         if key.with_source:
-            source_dataset = self._extract_sources(offset_key.sample, stream_idx, key)
+            source_dataset = self._extract_sources(offset_key.sample, stream_idx, key, lead_time)
         else:
             source_dataset = None
 
@@ -424,9 +447,15 @@ class OutputBatchData:
         return OutputItem(
             key=key,
             source=source_dataset,
-            target=OutputDataset("target", key, target_data, **dataclasses.asdict(data_coords)),
+            target=OutputDataset(
+                "target", key, target_data, lead_time=lead_time, **dataclasses.asdict(data_coords)
+            ),
             prediction=OutputDataset(
-                "prediction", key, preds_data, **dataclasses.asdict(data_coords)
+                "prediction",
+                key,
+                preds_data,
+                lead_time=lead_time,
+                **dataclasses.asdict(data_coords),
             ),
         )
 
@@ -486,7 +515,7 @@ class OutputBatchData:
 
         return DataCoordinates(times, coords, geoinfo, channels, geoinfo_channels)
 
-    def _extract_sources(self, sample, stream_idx, key):
+    def _extract_sources(self, sample, stream_idx, key, lead_time):
         channels = self.source_channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
 
@@ -505,6 +534,7 @@ class OutputBatchData:
             np.asarray(source.geoinfos),
             channels,
             geoinfo_channels,
+            lead_time
         )
 
         _logger.debug(f"source shape: {source_dataset.data.shape}")
