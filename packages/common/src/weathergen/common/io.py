@@ -147,7 +147,8 @@ class OutputDataset:
 
     channels: list[str]
     geoinfo_channels: list[str]
-    lead_time: int
+    # lead time in hours defined as forecast step * length of forecast step (len_hours)
+    lead_time_hrs: int
 
     @functools.cached_property
     def arrays(self) -> dict[str, zarr.Array | NDArray]:
@@ -186,7 +187,7 @@ class OutputDataset:
                 "sample": [self.item_key.sample],
                 "stream": [self.item_key.stream],
                 "forecast_step": [self.item_key.forecast_step],
-                "lead_time": ("forecast_step", [self.lead_time]),
+                "lead_time_hrs": ("forecast_step", [self.lead_time_hrs]),
                 "ipoint": self.datapoints,
                 "channel": self.channels,  # TODO: make sure channel names align with data
                 "valid_time": ("ipoint", times.astype("datetime64[ns]")),
@@ -286,7 +287,7 @@ class ZarrIO:
     def _write_metadata(self, dataset_group: zarr.Group, dataset: OutputDataset):
         dataset_group.attrs["channels"] = dataset.channels
         dataset_group.attrs["geoinfo_channels"] = dataset.geoinfo_channels
-        dataset_group.attrs["lead_time"] = dataset.lead_time
+        dataset_group.attrs["lead_time_hrs"] = dataset.lead_time_hrs
 
     def _write_arrays(self, dataset_group: zarr.Group, dataset: OutputDataset):
         for array_name, array in dataset.arrays.items():  # suffix is eg. data or coords
@@ -337,7 +338,7 @@ class ZarrIO:
     def lead_times(self) -> list[int]:
         """Calculate available lead times from available forecast steps and len_hrs."""
         example_prediction = self.load_zarr(self.example_key).prediction
-        len_hrs = example_prediction.lead_time // self.example_key.forecast_step
+        len_hrs = example_prediction.lead_time_hrs // self.example_key.forecast_step
 
         return [step * len_hrs for step in self.forecast_steps]
 
@@ -384,7 +385,7 @@ class OutputBatchData:
 
     sample_start: int
     forecast_offset: int
-    len_hrs: int
+    t_window_len_hours: int
 
     @functools.cached_property
     def samples(self):
@@ -435,7 +436,7 @@ class OutputBatchData:
             "Number of channel names does not align with prediction data."
         )
 
-        lead_time = self.len_hrs * key
+        lead_time = self.t_window_len_hours * key.forecast_step
 
         if key.with_source:
             source_dataset = self._extract_sources(offset_key.sample, stream_idx, key, lead_time)
@@ -448,13 +449,17 @@ class OutputBatchData:
             key=key,
             source=source_dataset,
             target=OutputDataset(
-                "target", key, target_data, lead_time=lead_time, **dataclasses.asdict(data_coords)
+                "target",
+                key,
+                target_data,
+                lead_time_hrs=lead_time,
+                **dataclasses.asdict(data_coords),
             ),
             prediction=OutputDataset(
                 "prediction",
                 key,
                 preds_data,
-                lead_time=lead_time,
+                lead_time_hrs=lead_time,
                 **dataclasses.asdict(data_coords),
             ),
         )
@@ -515,7 +520,7 @@ class OutputBatchData:
 
         return DataCoordinates(times, coords, geoinfo, channels, geoinfo_channels)
 
-    def _extract_sources(self, sample, stream_idx, key, lead_time):
+    def _extract_sources(self, sample, stream_idx, key, lead_time: int):
         channels = self.source_channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
 
