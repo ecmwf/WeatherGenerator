@@ -534,7 +534,7 @@ class OutputBatchData:
             np.asarray(source.geoinfos),
             channels,
             geoinfo_channels,
-            lead_time
+            lead_time,
         )
 
         _logger.debug(f"source shape: {source_dataset.data.shape}")

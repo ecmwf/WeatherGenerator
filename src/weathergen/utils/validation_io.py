@@ -61,7 +61,7 @@ def write_output(
         geoinfo_channels,
         sample_start,
         cf.forecast_offset,
-        cf.len_hrs
+        cf.len_hrs,
     )
 
     with io.ZarrIO(config.get_path_output(cf, epoch)) as writer:
