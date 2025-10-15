@@ -167,7 +167,7 @@ class LossCalculator:
 
             # accumulate loss
             loss_lfct = loss_lfct + loss
-            losses_chs += loss_chs.detach()
+            losses_chs = losses_chs + loss_chs.detach() if len(loss_chs) > 0 else losses_chs
             ctr_substeps += 1 if loss > 0.0 else 0
 
         # normalize over forecast steps in window

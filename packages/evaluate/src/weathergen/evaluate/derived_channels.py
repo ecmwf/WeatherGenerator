@@ -105,9 +105,7 @@ class DeriveChannels:
 
                 data_updated.append(conc)
 
-                self.channels = self.channels + (
-                    [tag] if tag not in self.channels else []
-                )
+                self.channels = self.channels + ([tag] if tag not in self.channels else [])
 
             else:
                 data_updated.append(data)

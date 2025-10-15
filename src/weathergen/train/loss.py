@@ -70,18 +70,60 @@ def mse_ens(target, ens, mu, stddev):
     return torch.stack([mse_loss(target, mem) for mem in ens], 0).mean()
 
 
-def kernel_crps(target, ens, mu, stddev, fair=True):
-    ens_size = ens.shape[0]
-    mae = torch.stack([(target - mem).abs().mean() for mem in ens], 0).mean()
+def kernel_crps(
+    targets,
+    preds,
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+    fair=True,
+):
+    """
+    Compute kernel CRPS
 
-    if ens_size == 1:
-        return mae
+    Params:
+    target : shape ( num_data_points , num_channels )
+    pred : shape ( ens_dim , num_data_points , num_channels)
+    weights_channels : shape = (num_channels,)
+    weights_points : shape = (num_data_points)
 
-    coef = -1.0 / (2.0 * ens_size * (ens_size - 1)) if fair else -1.0 / (2.0 * ens_size**2)
-    ens_var = coef * torch.tensor([(p1 - p2).abs().sum() for p1 in ens for p2 in ens]).sum()
-    ens_var /= ens.shape[1]
+    Returns:
+    loss: scalar - overall weighted CRPS
+    loss_chs: [C] - per-channel CRPS (location-weighted, not channel-weighted)
+    """
 
-    return mae + ens_var
+    ens_size = preds.shape[0]
+    assert ens_size > 1, "Ensemble size has to be greater than 1 for kernel CRPS."
+    assert len(preds.shape) == 3, "if data has batch dimension, remove unsqueeze() below"
+
+    # replace NaN by 0
+    mask_nan = ~torch.isnan(targets)
+    targets = torch.where(mask_nan, targets, 0)
+    preds = torch.where(mask_nan, preds, 0)
+
+    # permute to enable/simply broadcasting and contractions below
+    preds = preds.permute([2, 1, 0]).unsqueeze(0).to(torch.float32)
+    targets = targets.permute([1, 0]).unsqueeze(0).to(torch.float32)
+
+    mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
+
+    ens_n = -1.0 / (ens_size * (ens_size - 1)) if fair else -1.0 / (ens_size**2)
+    abs = torch.abs
+    ens_var = torch.zeros(size=preds.shape[:-1], device=preds.device)
+    # loop to reduce memory usage
+    for i in range(ens_size):
+        ens_var += torch.sum(ens_n * abs(preds[..., i].unsqueeze(-1) - preds[..., i + 1 :]), dim=-1)
+
+    kcrps_locs_chs = mae + ens_var
+
+    # apply point weighting
+    if weights_points is not None:
+        kcrps_locs_chs = kcrps_locs_chs * weights_points
+    # apply channel weighting
+    kcrps_chs = torch.mean(torch.mean(kcrps_locs_chs, 0), -1)
+    if weights_channels is not None:
+        kcrps_chs = kcrps_chs * weights_channels
+
+    return torch.mean(kcrps_chs), kcrps_chs
 
 
 def mse_channel_location_weighted(
