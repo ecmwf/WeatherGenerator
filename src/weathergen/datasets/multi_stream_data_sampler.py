@@ -26,7 +26,7 @@ from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.icon_dataset import IconDataset
 from weathergen.datasets.masking import Masker
-from weathergen.datasets.stream_data import StreamData
+from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
@@ -148,6 +148,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # MODIFIES config !!!
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
                 stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
+                stream_info["target_channel_weights"] = (
+                    ds.target_channel_weights
+                    if ds.target_channel_weights is not None
+                    else [1.0 for _ in ds.target_channels]
+                )
 
                 self.streams_datasets[-1] += [ds]
 
@@ -337,13 +342,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                         # rdata needs to be wrapped in a different class
                         # to avoid unwanted dependencies => see IOReaderData docstring
-                        rdata_wrapped = IOReaderData.create(rdata)
+                        rdata_wrapped: IOReaderData = IOReaderData.create(rdata)
 
                         sample_is_empty = rdata.is_empty()
                         if sample_is_empty:
-                            rdata = IOReaderData.spoof(
-                                rdata,
-                                len(stream_info.train_source_channels),
+                            rdata_wrapped = spoof(
+                                self.healpix_level_source,
                                 time_win1.start,
                                 ds.get_geoinfo_size(),
                                 ds.mean[ds.source_idx],
@@ -352,10 +356,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         # TODO: this should only be collected in validation mode
                         (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                             stream_info,
-                            torch.from_numpy(rdata.coords),
-                            torch.from_numpy(rdata.geoinfos),
-                            torch.from_numpy(rdata.data),
-                            rdata.datetimes,
+                            torch.from_numpy(rdata_wrapped.coords),
+                            torch.from_numpy(rdata_wrapped.geoinfos),
+                            torch.from_numpy(rdata_wrapped.data),
+                            rdata_wrapped.datetimes,
                             (time_win1.start, time_win1.end),
                             ds,
                         )
@@ -378,9 +382,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                             sample_is_empty = rdata.is_empty()
                             if sample_is_empty:
-                                rdata = IOReaderData.spoof(
-                                    rdata,
-                                    len(stream_info.train_target_channels),
+                                rdata = spoof(
+                                    self.healpix_level_target,
                                     time_win1.start,
                                     ds.get_geoinfo_size(),
                                     ds.mean[ds.target_idx],

@@ -139,7 +139,7 @@ def mse_channel_location_weighted(
     if weights_points is not None:
         diff2 = (diff2.transpose(1, 0) * weights_points).transpose(1, 0)
     loss_chs = diff2.mean(0)
-    loss = torch.mean(loss_chs * weights_channels if weights_channels else loss_chs)
+    loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
 
     return loss, loss_chs
 
@@ -147,3 +147,9 @@ def mse_channel_location_weighted(
 def cosine_latitude(stream_data, forecast_offset, fstep, min_value=1e-3, max_value=1.0):
     latitudes_radian = stream_data.target_coords_raw[forecast_offset + fstep][:, 0] * np.pi / 180
     return (max_value - min_value) * np.cos(latitudes_radian) + min_value
+
+
+def gamma_decay(forecast_steps, gamma):
+    fsteps = np.arange(forecast_steps)
+    weights = gamma**fsteps
+    return weights * (len(fsteps) / np.sum(weights))

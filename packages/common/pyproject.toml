@@ -16,7 +16,29 @@ dev = [
  "pytest~=8.3.5",
  "pytest-mock>=3.14.1",
  "ruff==0.9.7",
+ "pyrefly==0.33.0",
 ]
+
+
+[tool.pyrefly]
+project-includes = ["src/"]
+project-excludes = [
+]
+
+[tool.pyrefly.errors]
+bad-argument-type = false
+unsupported-operation = false
+missing-attribute = false
+no-matching-overload = false
+bad-context-manager = false
+
+# To do:
+bad-assignment = false
+bad-return = false
+index-error = false
+not-iterable = false
+not-callable = false
+
 
 
 

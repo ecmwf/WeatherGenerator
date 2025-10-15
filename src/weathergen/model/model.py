@@ -63,7 +63,6 @@ class ModelParams(torch.nn.Module):
         self.pe_embed = torch.nn.Parameter(
             torch.zeros(len_token_seq, cf.ae_local_dim_embed, dtype=self.dtype), requires_grad=False
         )
-        # self.pe_embed = torch.zeros(len_token_seq, cf.ae_local_dim_embed, dtype=self.dtype)
 
         pe = torch.zeros(
             self.num_healpix_cells,
@@ -72,7 +71,6 @@ class ModelParams(torch.nn.Module):
             dtype=self.dtype,
         )
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
-        # self.pe_global = pe
 
         ### HEALPIX NEIGHBOURS ###
         hlc = self.healpix_level
@@ -97,15 +95,11 @@ class ModelParams(torch.nn.Module):
             tokens_lens_value * torch.ones(bs * s[1] + 1, dtype=torch.int32), requires_grad=False
         )
         self.tokens_lens.data[0] = 0
-        # self.tokens_lens = tokens_lens_value * torch.ones(bs * s[1], dtype=torch.int32)
-        # self.tokens_lens[0] = 0
 
         self.q_cells_lens = torch.nn.Parameter(
             torch.ones(self.num_healpix_cells + 1, dtype=torch.int32), requires_grad=False
         )
         self.q_cells_lens.data[0] = 0
-        # self.q_cells_lens = torch.ones(self.num_healpix_cells + 1, dtype=torch.int32)
-        # self.q_cells_lens[0] = 0
 
     def create(self, cf: Config) -> "ModelParams":
         self.reset_parameters(cf)
@@ -468,21 +462,6 @@ class Model(torch.nn.Module):
         self.apply(_reset_params)
 
     #########################################
-    def freeze_weights_forecast(self) -> "Model":
-        """Freezes core model weights and makes forecasting engine weights trainable"""
-
-        # freeze everything
-        for p in self.parameters():
-            p.requires_grad = False
-        self.q_cells.requires_grad = False
-
-        # unfreeze forecast part
-        for p in self.fe_blocks.parameters():
-            p.requires_grad = True
-
-        return self
-
-    #########################################
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
 
@@ -610,6 +589,12 @@ class Model(torch.nn.Module):
                     target_coords_idxs,
                 )
             ]
+
+            if self.training:
+                # Impute noise to the latent state
+                noise_std = self.cf.get("impute_latent_noise_std", 0.0)
+                if noise_std > 0.0:
+                    tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
             tokens = self.forecast(model_params, tokens)
 
