@@ -67,7 +67,7 @@ def plot_metric_region(
     scores_dict: dict,
     plotter: object,
     print_summary: bool,
-):
+) -> None:
     """Plot data for all streams and channels for a given metric and region.
 
     Parameters
@@ -180,7 +180,7 @@ def bar_plot_metric_region(
     runs: dict,
     scores_dict: dict,
     br_plotter: object,
-):
+) -> None:
     """
     Create bar plots for all streams and run_ids for a given metric and region.
 

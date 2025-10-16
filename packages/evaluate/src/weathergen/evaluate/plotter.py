@@ -13,8 +13,8 @@ import xarray as xr
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
-
 from weathergen.common.config import _load_private_conf
+
 from weathergen.evaluate.plot_utils import (
     DefaultMarkerSize,
 )
@@ -721,6 +721,20 @@ class ScoreCards:
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def plot(self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str):
+        """
+        Plot score cards comparing performance between run_ids against a baseline over channels of interest.
+
+        Parameters
+        ----------
+        data:
+            List of (xarray) DataArrays with the scores (stream, region and metric specific)
+        runs:
+            List containing runs (in str format) to be compared (provided in the config)
+        channels:
+            List containing channels (in str format) of interest (provided in the config)
+        tag:
+            Tag to be added to the plot title and filename
+        """
         n_runs, n_vars = len(runs), len(channels)
         fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_vars))
 
@@ -893,6 +907,20 @@ class BarPlots:
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def plot(self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str):
+        """
+        Plot (ratio) bar plots comparing performance between different run_ids over channels of interest.
+
+        Parameters
+        ----------
+        data:
+            List of (xarray) DataArrays with the scores (stream, region and metric specific)
+        runs:
+            List containing runs (in str format) to be compared (provided in the config)
+        channels:
+            List containing channels (in str format) of interest (provided in the config)
+        tag:
+            Tag to be added to the plot title and filename
+        """
         for run_index in range(1, len(runs)):
             ratio_score = self.calc_ratio_per_run_id(data, channels, run_index)
 
