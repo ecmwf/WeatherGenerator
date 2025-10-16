@@ -39,7 +39,7 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
-from weathergen.model.ema import EMANeuralNet
+from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
@@ -297,14 +297,14 @@ class Trainer(TrainerBase):
         if cf.compile_model:
             self.model = torch.compile(self.model, dynamic=True)
 
-        cf.ema = True
-        if cf.ema:
-            meta_ema_net = self.init_model_and_shard(cf, devices)[0]
-            self.ema_net = EMANeuralNet(
+        self.validate_with_ema = cf.get("validate_with_ema", False)
+        if self.validate_with_ema:
+            meta_ema_model = self.init_model_and_shard(cf, devices)[0]
+            self.ema_model = EMAModel(
                 self.model,
-                meta_ema_net,
-                halflife_steps=1e-3,
-                rampup_ratio=0.09,
+                meta_ema_model,
+                halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
+                rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
 
@@ -594,10 +594,11 @@ class Trainer(TrainerBase):
             self.lr_scheduler.step()
 
             # EMA update
-            self.ema_net.update(
-                self.cf.istep * self.world_size_original * self.cf.batch_size_per_gpu,
-                self.world_size_original * self.cf.batch_size_per_gpu,
-            )
+            if self.validate_with_ema:
+                self.ema_model.update(
+                    self.cf.istep * self.world_size_original * self.cf.batch_size_per_gpu,
+                    self.world_size_original * self.cf.batch_size_per_gpu,
+                )
 
             self.loss_unweighted_hist += [loss_values.losses_all]
             self.loss_model_hist += [loss_values.loss.item()]
@@ -615,8 +616,7 @@ class Trainer(TrainerBase):
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
 
-            # Shouldn't this either be 1 or cf.batch_size_per_gpu * self.original
-            self.cf.istep += 1  # cf.batch_size_per_gpu
+            self.cf.istep += 1
 
         self.dataset.advance()
 
@@ -642,7 +642,7 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds, _ = self.ema_net.forward_eval(
+                        preds, _ = self.ema_model.forward_eval(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
 
@@ -827,7 +827,7 @@ class Trainer(TrainerBase):
 
     def _get_full_model_state_dict(self):
         maybe_sharded_sd = (
-            self.model.state_dict() if self.ema_net is None else self.ema_net.state_dict()
+            self.model.state_dict() if self.ema_model is None else self.ema_model.state_dict()
         )
         if self.cf.with_ddp and self.cf.with_fsdp:
             cpu_state_dict = {}
