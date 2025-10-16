@@ -299,6 +299,7 @@ class Trainer(TrainerBase):
             self.model = torch.compile(self.model, dynamic=True)
 
         self.validate_with_ema = cf.get("validate_with_ema", False)
+        self.ema_model = None
         if self.validate_with_ema:
             meta_ema_model = self.init_model_and_shard(cf, devices)[0]
             self.ema_model = EMAModel(
