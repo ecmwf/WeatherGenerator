@@ -100,6 +100,7 @@ def _get_model_config_file_name(run_id: str, epoch: int | None):
         epoch_str = f"_epoch{epoch:05d}"
     return f"model_{run_id}{epoch_str}.json"
 
+
 def get_model_results(run_id: str, epoch: int, rank: int) -> Path:
     """
     Get the path to the model results zarr store from a given run_id and epoch.
@@ -109,6 +110,7 @@ def get_model_results(run_id: str, epoch: int, rank: int) -> Path:
     if not zarr_path.exists() or not zarr_path.is_dir():
         raise FileNotFoundError(f"Zarr file {zarr_path} does not exist or is not a directory.")
     return zarr_path
+
 
 def _apply_fixes(config: Config) -> Config:
     """
@@ -129,11 +131,12 @@ def _check_logging(config: Config) -> Config:
     """
     config = config.copy()
     if config.get("train_log_freq") is None:  # TODO remove this for next version
-        config.train_log_freq = OmegaConf.construct(
+        config.train_log_freq = OmegaConf.create(
             {"checkpoint": 250, "terminal": 10, "metrics": config.train_log.log_interval}
         )
 
     return config
+
 
 def load_config(
     private_home: Path | None,
