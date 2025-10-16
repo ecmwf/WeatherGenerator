@@ -643,7 +643,6 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-
                         model_forward = (
                             self.model.forward
                             if self.ema_model is None
