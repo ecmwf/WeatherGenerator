@@ -308,7 +308,7 @@ class Model(torch.nn.Module):
 
         ##############
         # global assimilation engine
-        self.ae_global_blocks = GlobalAssimilationEngine(cf, self.num_healpix_cells).create()
+        self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
 
         ###############
         # forecasting engine
@@ -469,7 +469,7 @@ class Model(torch.nn.Module):
         num_params_embed = [get_num_parameters(embed) for embed in self.embed_engine.embeds]
         num_params_total = get_num_parameters(self)
         num_params_ae_local = get_num_parameters(self.ae_local_engine.ae_local_blocks)
-        num_params_ae_global = get_num_parameters(self.ae_global_blocks)
+        num_params_ae_global = get_num_parameters(self.ae_global_engine.ae_global_blocks)
 
         num_params_q_cells = np.prod(self.q_cells.shape) if self.q_cells.requires_grad else 0
         num_params_ae_adapater = get_num_parameters(self.ae_local_global_engine.ae_adapter)
@@ -740,8 +740,7 @@ class Model(torch.nn.Module):
         """
 
         # global assimilation engine and adapter
-        for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=False)
+        tokens = self.ae_global_engine(tokens, use_reentrant=False)
 
         return tokens
 

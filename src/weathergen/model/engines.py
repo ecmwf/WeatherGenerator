@@ -237,7 +237,7 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
         return tokens_global_c
 
 
-class GlobalAssimilationEngine:
+class GlobalAssimilationEngine(torch.nn.Module):
     name: "GlobalAssimilationEngine"
 
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
@@ -247,6 +247,7 @@ class GlobalAssimilationEngine:
         :param cf: Configuration object containing parameters for the engine.
         :param num_healpix_cells: Number of healpix cells used for local queries.
         """
+        super(GlobalAssimilationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
 
@@ -298,8 +299,11 @@ class GlobalAssimilationEngine:
                 )
             )
 
-    def create(self) -> torch.nn.ModuleList:
-        return self.ae_global_blocks
+    def forward(self, tokens, use_reentrant):
+        for block in self.ae_global_blocks:
+            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+            
+        return tokens
 
 
 class ForecastingEngine:
