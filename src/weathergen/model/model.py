@@ -264,7 +264,7 @@ class Model(torch.nn.Module):
 
         ##############
         # local assimilation engine
-        self.ae_local_blocks = LocalAssimilationEngine(cf) #.create()
+        self.ae_local_engine = LocalAssimilationEngine(cf) #.create()
 
         if cf.latent_noise_kl_weight > 0.0:
             self.interpolate_latents = LatentInterpolator(
@@ -468,7 +468,7 @@ class Model(torch.nn.Module):
         cf = self.cf
         num_params_embed = [get_num_parameters(embed) for embed in self.embed_engine.embeds]
         num_params_total = get_num_parameters(self)
-        num_params_ae_local = get_num_parameters(self.ae_local_blocks.ae_local_blocks)
+        num_params_ae_local = get_num_parameters(self.ae_local_engine.ae_local_blocks)
         num_params_ae_global = get_num_parameters(self.ae_global_blocks)
 
         num_params_q_cells = np.prod(self.q_cells.shape) if self.q_cells.requires_grad else 0
@@ -705,9 +705,7 @@ class Model(torch.nn.Module):
                 continue
             
             # local assimilation model
-            tokens_c = self.ae_local_blocks(tokens_c, cell_lens_c, use_reentrant=False)
-            # for block in self.ae_local_blocks:
-            #     tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=False)
+            tokens_c = self.ae_local_engine(tokens_c, cell_lens_c, use_reentrant=False)
 
             if self.cf.latent_noise_kl_weight > 0.0:
                 tokens_c, posteriors_c = self.interpolate_latents.interpolate_with_noise(
