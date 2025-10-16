@@ -137,7 +137,6 @@ class LocalAssimilationEngine:
         self.cf = cf
         self.ae_local_blocks = torch.nn.ModuleList()
 
-    def create(self) -> torch.nn.ModuleList:
         """
         Creates and returns the module list (ae_local_blocks).
 
@@ -166,6 +165,7 @@ class LocalAssimilationEngine:
                     norm_eps=self.cf.mlp_norm_eps,
                 )
             )
+    def create(self) -> torch.nn.ModuleList:
         return self.ae_local_blocks
 
 
