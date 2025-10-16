@@ -830,19 +830,7 @@ class ScoreCards:
         baseline_var = baseline.sel({"channel": var})
         data_var = data[i].sel({"channel": var})
 
-        non_zero_dims = [
-            dim for dim in baseline_var.dims if dim != x_dim and baseline_var[dim].shape[0] > 1
-        ]
-
-        if non_zero_dims:
-            _logger.info(
-                f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
-            )
-
-        baseline_score = baseline_var.mean(
-            dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
-        )
-        model_score = data_var.mean(dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True)
+        baseline_score, model_score = calculate_average_over_dim(x_dim, baseline_var, data_var)
         diff = baseline_score - model_score
 
         skill = self.get_skill_score(model_score, baseline_score, 0.0)
@@ -921,15 +909,23 @@ class BarPlots:
         tag:
             Tag to be added to the plot title and filename
         """
-        for run_index in range(1, len(runs)):
-            ratio_score = self.calc_ratio_per_run_id(data, channels, run_index)
 
-            fig, ax = (
-                plt.figure(figsize=(7, 1.2 * len(channels)), dpi=self.dpi_val),
-                plt.gca(),
+        # Calculate the dimensions for the figure, form the axes
+        fig, ax = plt.subplots(
+            1,
+            len(runs) - 1,
+            figsize=(5 * len(runs), 2 * len(channels)),
+            dpi=self.dpi_val,
+            squeeze=False,
+        )
+        ax = ax.flatten()
+
+        for run_index in range(1, len(runs)):
+            ratio_score, channels_per_comparison = self.calc_ratio_per_run_id(
+                data, channels, run_index
             )
 
-            ax.barh(
+            ax[run_index - 1].barh(
                 np.arange(len(ratio_score)),
                 ratio_score,
                 color=self.colors(ratio_score),
@@ -937,52 +933,61 @@ class BarPlots:
                 edgecolor="black",
                 linewidth=0.5,
             )
-            ax.set_yticks(np.arange(len(ratio_score)), labels=channels)
-            ax.invert_yaxis()
-            ax.set_xlabel(
+            ax[run_index - 1].set_yticks(
+                np.arange(len(ratio_score)), labels=channels_per_comparison
+            )
+            ax[run_index - 1].invert_yaxis()
+            ax[run_index - 1].set_xlabel(
                 f"Relative {data[0].coords['metric'].item().upper()}: Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
             )
 
-            _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
-            parts = ["bar_plot_compare", runs[0], runs[run_index], tag]
-            name = "_".join(filter(None, parts))
-            plt.savefig(
-                f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
-                bbox_inches="tight",
-                dpi=self.dpi_val,
-            )
-            plt.close(fig)
+        _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
+        parts = ["bar_plot_compare", tag] + runs
+        name = "_".join(filter(None, parts))
+        plt.savefig(
+            f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
+            bbox_inches="tight",
+            dpi=self.dpi_val,
+        )
+        plt.close(fig)
 
     def calc_ratio_per_run_id(self, data, channels, run_index, x_dim="channel"):
         ratio_score = []
-
+        channels_per_comparison = []
         for _, var in enumerate(channels):
+            if var not in data[0].channel.values or var not in data[run_index].channel.values:
+                continue
             baseline_var = data[0].sel({"channel": var})
             data_var = data[run_index].sel({"channel": var})
+            channels_per_comparison.append(var)
 
-            non_zero_dims = [
-                dim for dim in baseline_var.dims if dim != x_dim and baseline_var[dim].shape[0] > 1
-            ]
-
-            if non_zero_dims:
-                _logger.info(
-                    f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
-                )
-
-            baseline_score = baseline_var.mean(
-                dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
-            )
-            model_score = data_var.mean(
-                dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True
-            )
+            baseline_score, model_score = calculate_average_over_dim(x_dim, baseline_var, data_var)
 
             ratio_score.append(model_score / baseline_score)
 
         ratio_score = np.array(ratio_score) - 1
-        return ratio_score
+        return ratio_score, channels_per_comparison
 
     def colors(self, ratio_score: np.array):
         max_val = np.abs(ratio_score).max()
         cmap = plt.get_cmap("bwr")
         colors = [cmap(0.5 + v / (2 * max_val)) for v in ratio_score]
         return colors
+
+
+def calculate_average_over_dim(x_dim, baseline_var, data_var):
+    non_zero_dims = [
+        dim for dim in baseline_var.dims if dim != x_dim and baseline_var[dim].shape[0] > 1
+    ]
+
+    if non_zero_dims:
+        _logger.info(
+            f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
+        )
+
+    baseline_score = baseline_var.mean(
+        dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
+    )
+    model_score = data_var.mean(dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True)
+
+    return baseline_score, model_score
