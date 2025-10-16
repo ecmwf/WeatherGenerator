@@ -125,7 +125,7 @@ class EmbeddingEngine(torch.nn.Module):
         return tokens_all
 
 
-class LocalAssimilationEngine:
+class LocalAssimilationEngine(torch.nn.Module):
     name: "LocalAssimilationEngine"
 
     def __init__(self, cf: Config) -> None:
@@ -134,6 +134,7 @@ class LocalAssimilationEngine:
 
         :param cf: Configuration object containing parameters for the engine.
         """
+        super(LocalAssimilationEngine, self).__init__()
         self.cf = cf
         self.ae_local_blocks = torch.nn.ModuleList()
 
@@ -165,8 +166,11 @@ class LocalAssimilationEngine:
                     norm_eps=self.cf.mlp_norm_eps,
                 )
             )
-    def create(self) -> torch.nn.ModuleList:
-        return self.ae_local_blocks
+
+    def forward(self, tokens_c, cell_lens_c, use_reentrant):
+        for block in self.ae_local_blocks:
+                tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=use_reentrant)
+        return tokens_c
 
 
 class Local2GlobalAssimilationEngine:
