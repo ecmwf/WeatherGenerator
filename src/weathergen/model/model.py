@@ -321,7 +321,7 @@ class Model(torch.nn.Module):
                 "Empty forecast engine (fe_num_blocks = 0), but forecast_steps[i] > 0 for some i"
             )
 
-        self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells).create()
+        self.forecast_engine = ForecastingEngine(cf, self.num_healpix_cells)
 
         ###############
         # embed coordinates yielding one query token for each target token
@@ -474,7 +474,7 @@ class Model(torch.nn.Module):
         num_params_q_cells = np.prod(self.q_cells.shape) if self.q_cells.requires_grad else 0
         num_params_ae_adapater = get_num_parameters(self.ae_local_global_engine.ae_adapter)
 
-        num_params_fe = get_num_parameters(self.fe_blocks)
+        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
         num_params_pred_adapter = [get_num_parameters(kv) for kv in self.pred_adapter_kv]
         num_params_embed_tcs = [get_num_parameters(etc) for etc in self.embed_target_coords]
@@ -756,10 +756,7 @@ class Model(torch.nn.Module):
         Raises:
             ValueError: For unexpected arguments in checkpoint method
         """
-
-        for it, block in enumerate(self.fe_blocks):
-            aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
-            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+        tokens = self.forecast_engine(tokens, use_reentrant=False)
 
         return tokens
 

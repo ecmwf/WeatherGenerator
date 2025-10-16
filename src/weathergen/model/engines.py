@@ -302,11 +302,10 @@ class GlobalAssimilationEngine(torch.nn.Module):
     def forward(self, tokens, use_reentrant):
         for block in self.ae_global_blocks:
             tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
-            
         return tokens
 
 
-class ForecastingEngine:
+class ForecastingEngine(torch.nn.Module):
     name: "ForecastingEngine"
 
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
@@ -316,6 +315,7 @@ class ForecastingEngine:
         :param cf: Configuration object containing parameters for the engine.
         :param num_healpix_cells: Number of healpix cells used for local queries.
         """
+        super(ForecastingEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
@@ -376,8 +376,11 @@ class ForecastingEngine:
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-    def create(self) -> torch.nn.ModuleList:
-        return self.fe_blocks
+    def forward(self, tokens, use_reentrant):
+        for it, block in enumerate(self.fe_blocks):
+            aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
+            tokens = checkpoint(block, tokens, aux_info, use_reentrant=use_reentrant)
+        return tokens
 
 
 class EnsPredictionHead(torch.nn.Module):
