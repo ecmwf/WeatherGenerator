@@ -642,7 +642,12 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds, _ = self.ema_model.forward_eval(
+                        model_forward = (
+                            self.model.forward
+                            if self.ema_model is None
+                            else self.ema_model.forward_eval
+                        )
+                        preds, _ = model_forward(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
 
