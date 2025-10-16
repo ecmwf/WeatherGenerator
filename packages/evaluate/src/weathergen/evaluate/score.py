@@ -306,9 +306,7 @@ class Scores:
             raise ValueError("ens_dim must be a string.")
         return dim
 
-    def _validate_groupby_coord(
-        self, data: VerifiedData, group_by_coord: str | None
-    ) -> bool:
+    def _validate_groupby_coord(self, data: VerifiedData, group_by_coord: str | None) -> bool:
         """
         Check if the group_by_coord is present in both prediction and ground truth data and compatible.
         Raises ValueError if conditions are not met.
@@ -537,9 +535,7 @@ class Scores:
 
         return l2
 
-    def calc_mae(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
-    ):
+    def calc_mae(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
         """
         Calculate mean absolute error (MAE) of forecast data w.r.t. reference data.
 
@@ -566,9 +562,7 @@ class Scores:
 
         return mae
 
-    def calc_mse(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
-    ):
+    def calc_mse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
         """
         Calculate mean squared error (MSE) of forecast data w.r.t. reference data.
 
@@ -595,9 +589,7 @@ class Scores:
 
         return mse
 
-    def calc_rmse(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
-    ):
+    def calc_rmse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
         """
         Calculate root mean squared error (RMSE) of forecast data w.r.t. reference data
         Parameters
@@ -620,9 +612,7 @@ class Scores:
         return rmse
 
     @staticmethod
-    def sort_by_coords(
-        da_to_sort: xr.DataArray, da_reference: xr.DataArray
-    ) -> xr.DataArray:
+    def sort_by_coords(da_to_sort: xr.DataArray, da_reference: xr.DataArray) -> xr.DataArray:
         """
         Sorts one xarray.DataArray's coordinate ordering to match a reference array using KDTree.
 
@@ -848,9 +838,7 @@ class Scores:
 
         return acc
 
-    def calc_bias(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
-    ):
+    def calc_bias(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
         """
         Calculate mean bias of forecast data w.r.t. reference data
 
@@ -945,9 +933,7 @@ class Scores:
             ratio_spat_variability = ratio_spat_variability.groupby(group_by_coord)
 
         if non_spatial_avg_dims is not None:
-            ratio_spat_variability = ratio_spat_variability.mean(
-                dim=non_spatial_avg_dims
-            )
+            ratio_spat_variability = ratio_spat_variability.mean(dim=non_spatial_avg_dims)
 
         return ratio_spat_variability
 
@@ -993,15 +979,11 @@ class Scores:
         """
 
         def seeps(ground_truth, prediction, thr_light, thr_heavy, seeps_weights):
-            ob_ind = (ground_truth > thr_light).astype(int) + (
-                ground_truth >= thr_heavy
-            ).astype(int)
-            fc_ind = (prediction > thr_light).astype(int) + (
-                prediction >= thr_heavy
-            ).astype(int)
-            indices = (
-                fc_ind * 3 + ob_ind
-            )  # index of each data point in their local 3x3 matrices
+            ob_ind = (ground_truth > thr_light).astype(int) + (ground_truth >= thr_heavy).astype(
+                int
+            )
+            fc_ind = (prediction > thr_light).astype(int) + (prediction >= thr_heavy).astype(int)
+            indices = fc_ind * 3 + ob_ind  # index of each data point in their local 3x3 matrices
             seeps_val = seeps_weights[
                 indices, np.arange(len(indices))
             ]  # pick the right weight for each data point
@@ -1031,9 +1013,7 @@ class Scores:
         )
 
         if prediction.ndim == 1:
-            seeps_values_all = seeps(
-                ground_truth, prediction, t1.values, t3, seeps_weights
-            )
+            seeps_values_all = seeps(ground_truth, prediction, t1.values, t3, seeps_weights)
         else:
             prediction, ground_truth = (
                 prediction.transpose(..., "xy"),
@@ -1047,9 +1027,7 @@ class Scores:
                     ground_truth[it, ...],
                 )
                 # in case of missing data, skip computation
-                if np.all(np.isnan(prediction_now)) or np.all(
-                    np.isnan(ground_truth_now)
-                ):
+                if np.all(np.isnan(prediction_now)) or np.all(np.isnan(ground_truth_now)):
                     continue
 
                 seeps_values_all[it, ...] = seeps(
@@ -1086,9 +1064,7 @@ class Scores:
 
         return self._mean(np.sqrt(ens_std**2))
 
-    def calc_ssr(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
-    ):
+    def calc_ssr(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
         """
         Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data
 
@@ -1226,22 +1202,15 @@ class Scores:
                 # underlying arrays are numpy arrays -> use numpy's native random generator
                 rng = np.random.default_rng()
 
-                obs_stacked += (
-                    rng.random(size=obs_stacked.shape, dtype=np.float32) * noise_fac
-                )
-                fcst_stacked += (
-                    rng.random(size=fcst_stacked.shape, dtype=np.float32) * noise_fac
-                )
+                obs_stacked += rng.random(size=obs_stacked.shape, dtype=np.float32) * noise_fac
+                fcst_stacked += rng.random(size=fcst_stacked.shape, dtype=np.float32) * noise_fac
             else:
                 # underlying arrays are dask arrays -> use dask's random generator
                 obs_stacked += (
-                    da.random.random(size=obs_stacked.shape, chunks=obs_stacked.chunks)
-                    * noise_fac
+                    da.random.random(size=obs_stacked.shape, chunks=obs_stacked.chunks) * noise_fac
                 )
                 fcst_stacked += (
-                    da.random.random(
-                        size=fcst_stacked.shape, chunks=fcst_stacked.chunks
-                    )
+                    da.random.random(size=fcst_stacked.shape, chunks=fcst_stacked.chunks)
                     * noise_fac
                 )
 
@@ -1269,9 +1238,7 @@ class Scores:
         See https://xskillscore.readthedocs.io/en/stable/api
         Note: this version is found to be very slow. Use calc_rank_histogram alternatively.
         """
-        rank_hist = xskillscore.rank_histogram(
-            gt, p, member_dim=self.ens_dim, dim=self._agg_dims
-        )
+        rank_hist = xskillscore.rank_histogram(gt, p, member_dim=self.ens_dim, dim=self._agg_dims)
 
         return rank_hist
 
@@ -1323,9 +1290,7 @@ class Scores:
 
         if order == 1:
             dvar_dlambda = (
-                1.0
-                / (r_e * np.cos(lat) * dlambda)
-                * scalar_field.differentiate(lon_name)
+                1.0 / (r_e * np.cos(lat) * dlambda) * scalar_field.differentiate(lon_name)
             )
             dvar_dphi = 1.0 / (r_e * dphi) * scalar_field.differentiate(lat_name)
             dvar_dlambda = dvar_dlambda.transpose(
@@ -1336,8 +1301,6 @@ class Scores:
             if dom_avg:
                 var_diff_amplitude = var_diff_amplitude.mean(dim=[lat_name, lon_name])
         else:
-            raise ValueError(
-                f"Second-order differentation is not implemenetd in {method} yet."
-            )
+            raise ValueError(f"Second-order differentation is not implemenetd in {method} yet.")
 
         return var_diff_amplitude

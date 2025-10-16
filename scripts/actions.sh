@@ -51,6 +51,12 @@ case "$1" in
       uv run --extra cpu pytest src/
     )
     ;;
+  toml-check)
+    (
+      cd "$SCRIPT_DIR" || exit 1
+      uv run --no-project python scripts/check_tomls.py
+    )
+    ;;
   integration-test)
     (
       cd "$SCRIPT_DIR" || exit 1
@@ -112,7 +118,7 @@ case "$1" in
     )
     ;;
   *)
-    echo "Usage: $0 {sync|lint|lint-check|type-check|unit-test|integration-test|create-links|create-jupyter-kernel|jupytext-sync}"
+    echo "Usage: $0 {sync|lint|lint-check|type-check|unit-test|toml-check|integration-test|create-links|create-jupyter-kernel|jupytext-sync}"
     exit 1
     ;;
 esac

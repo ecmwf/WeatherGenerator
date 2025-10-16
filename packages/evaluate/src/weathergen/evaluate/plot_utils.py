@@ -103,9 +103,7 @@ def plot_metric_region(
                 run_ids.append(run_id)
 
             if selected_data:
-                _logger.info(
-                    f"Creating plot for {metric} - {region} - {stream} - {ch}."
-                )
+                _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
                 name = "_".join([metric, region] + sorted(set(run_ids)) + [stream, ch])
                 plotter.plot(
                     selected_data,
@@ -157,9 +155,7 @@ def score_card_metric_region(
             if channels_common is None:
                 channels_common = set(channels_per_run)
             else:
-                channels_common = set(channels_common).intersection(
-                    set(channels_per_run)
-                )
+                channels_common = set(channels_common).intersection(set(channels_per_run))
 
         if not channels_common:
             continue
@@ -207,9 +203,7 @@ class DefaultMarkerSize:
         float
             The default marker size for the stream.
         """
-        return cls._marker_size_stream.get(
-            stream_name.lower(), cls._default_marker_size
-        )
+        return cls._marker_size_stream.get(stream_name.lower(), cls._default_marker_size)
 
     @classmethod
     def list_streams(cls):
