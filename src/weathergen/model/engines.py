@@ -138,11 +138,6 @@ class LocalAssimilationEngine(torch.nn.Module):
         self.cf = cf
         self.ae_local_blocks = torch.nn.ModuleList()
 
-        """
-        Creates and returns the module list (ae_local_blocks).
-
-        :return: torch.nn.ModuleList containing the local assimilation blocks.
-        """
         for _ in range(self.cf.ae_local_num_blocks):
             self.ae_local_blocks.append(
                 MultiSelfAttentionHeadVarlen(
@@ -173,7 +168,7 @@ class LocalAssimilationEngine(torch.nn.Module):
         return tokens_c
 
 
-class Local2GlobalAssimilationEngine:
+class Local2GlobalAssimilationEngine(torch.nn.Module):
     name: "Local2GlobalAssimilationEngine"
 
     def __init__(self, cf: Config) -> None:
@@ -182,15 +177,10 @@ class Local2GlobalAssimilationEngine:
 
         :param cf: Configuration object containing parameters for the engine.
         """
+        super(Local2GlobalAssimilationEngine, self).__init__()
         self.cf = cf
         self.ae_adapter = torch.nn.ModuleList()
 
-    def create(self) -> torch.nn.ModuleList:
-        """
-        Creates and returns the module list (ae_adapter).
-
-        :return: torch.nn.ModuleList containing the local-to-global assimilation adapter blocks.
-        """
         self.ae_adapter.append(
             MultiCrossAttentionHeadVarlenSlicedQ(
                 self.cf.ae_global_dim_embed,
@@ -233,7 +223,18 @@ class Local2GlobalAssimilationEngine:
                 attention_dtype=get_dtype(self.cf.attention_dtype),
             )
         )
-        return self.ae_adapter
+
+    def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant):
+        for block in self.ae_adapter:
+                tokens_global_c = checkpoint(
+                    block,
+                    tokens_global_c,
+                    tokens_c,
+                    q_cells_lens_c,
+                    cell_lens_c,
+                    use_reentrant=use_reentrant,
+                )
+        return tokens_global_c
 
 
 class GlobalAssimilationEngine:
@@ -251,12 +252,6 @@ class GlobalAssimilationEngine:
 
         self.ae_global_blocks = torch.nn.ModuleList()
 
-    def create(self) -> torch.nn.ModuleList:
-        """
-        Creates and returns the module list (ae_global_blocks).
-
-        :return: torch.nn.ModuleList containing the global assimilation blocks.
-        """
         global_rate = int(1 / self.cf.ae_global_att_dense_rate)
         for i in range(self.cf.ae_global_num_blocks):
             ## Alternate between local and global attention
@@ -302,6 +297,8 @@ class GlobalAssimilationEngine:
                     norm_eps=self.cf.mlp_norm_eps,
                 )
             )
+
+    def create(self) -> torch.nn.ModuleList:
         return self.ae_global_blocks
 
 
@@ -319,12 +316,6 @@ class ForecastingEngine:
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
-    def create(self) -> torch.nn.ModuleList:
-        """
-        Creates and returns the module list (fe_blocks).
-
-        :return: torch.nn.ModuleList containing the forecasting blocks.
-        """
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if self.cf.forecast_policy is not None:
             for i in range(self.cf.fe_num_blocks):
@@ -381,6 +372,7 @@ class ForecastingEngine:
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
+    def create(self) -> torch.nn.ModuleList:
         return self.fe_blocks
 
 

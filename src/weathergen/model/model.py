@@ -264,7 +264,7 @@ class Model(torch.nn.Module):
 
         ##############
         # local assimilation engine
-        self.ae_local_engine = LocalAssimilationEngine(cf) #.create()
+        self.ae_local_engine = LocalAssimilationEngine(cf)
 
         if cf.latent_noise_kl_weight > 0.0:
             self.interpolate_latents = LatentInterpolator(
@@ -276,7 +276,7 @@ class Model(torch.nn.Module):
 
         ##############
         # local -> global assimilation engine adapter
-        self.ae_adapter = Local2GlobalAssimilationEngine(cf).create()
+        self.ae_adapter = Local2GlobalAssimilationEngine(cf) #.create()
 
         ##############
         # learnable queries
@@ -472,7 +472,7 @@ class Model(torch.nn.Module):
         num_params_ae_global = get_num_parameters(self.ae_global_blocks)
 
         num_params_q_cells = np.prod(self.q_cells.shape) if self.q_cells.requires_grad else 0
-        num_params_ae_adapater = get_num_parameters(self.ae_adapter)
+        num_params_ae_adapater = get_num_parameters(self.ae_adapter.ae_adapter)
 
         num_params_fe = get_num_parameters(self.fe_blocks)
 
@@ -715,15 +715,17 @@ class Model(torch.nn.Module):
             else:
                 tokens_c, posteriors = tokens_c, 0.0
 
-            for block in self.ae_adapter:
-                tokens_global_c = checkpoint(
-                    block,
-                    tokens_global_c,
-                    tokens_c,
-                    q_cells_lens_c,
-                    cell_lens_c,
-                    use_reentrant=False,
-                )
+            tokens_global_c = self.ae_adapter(tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant=False)
+
+            # for block in self.ae_adapter:
+            #     tokens_global_c = checkpoint(
+            #         block,
+            #         tokens_global_c,
+            #         tokens_c,
+            #         q_cells_lens_c,
+            #         cell_lens_c,
+            #         use_reentrant=False,
+            #     )
 
             tokens_global_all += [tokens_global_c]
 
