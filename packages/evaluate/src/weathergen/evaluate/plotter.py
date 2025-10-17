@@ -711,35 +711,54 @@ class ScoreCards:
         Base directory under which the score cards will be saved.
     """
 
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path) -> None:
         self.image_format = plotter_cfg.get("image_format")
+        self.dpi_val = plotter_cfg.get("dpi_val")
         self.improvement = plotter_cfg.get("improvement_scale", 0.2)
         self.out_plot_dir = Path(output_basedir) / "score_cards"
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
-    def plot(self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str):
+    def plot(
+        self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
+    ) -> None:
+        """
+        Plot score cards comparing performance between run_ids against a baseline over channels of interest.
+
+        Parameters
+        ----------
+        data:
+            List of (xarray) DataArrays with the scores (stream, region and metric specific)
+        runs:
+            List containing runs (in str format) to be compared (provided in the config)
+        channels:
+            List containing channels (in str format) of interest (provided in the config)
+        tag:
+            Tag to be added to the plot title and filename
+        """
         n_runs, n_vars = len(runs), len(channels)
         fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_vars))
 
         baseline = data[0]
         skill_models = []
 
-        for i in range(1, n_runs):
+        for run_index in range(1, n_runs):
             skill_model = 0.0
-            for j, var in enumerate(channels):
-                diff, diff_mean, skill = self.compare_models(data, baseline, i, var)
+            for var_index, var in enumerate(channels):
+                diff, diff_mean, skill = self.compare_models(data, baseline, run_index, var)
                 skill_model += skill.values
 
                 # Get symbols based on difference and performance as well as coordinates
                 # for the position of the triangles.
 
-                x, y, alt, color, triangle, size = self.get_plot_symbols(i, j, skill, diff_mean)
+                x, y, alt, color, triangle, size = self.get_plot_symbols(
+                    run_index, var_index, skill, diff_mean
+                )
 
                 ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
 
-                # Perform Welch's t-test
+                # Perform Wilcoxon test
                 stat, p = wilcoxon(diff, alternative=alt)
 
                 # Draw rectangle border for significance
@@ -805,38 +824,123 @@ class ScoreCards:
         plt.savefig(
             f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
             bbox_inches="tight",
-            dpi=300,
+            dpi=self.dpi_val,
         )
         plt.close(fig)
 
-    def compare_models(self, data, baseline, i, var, x_dim="forecast_step"):
+    def compare_models(
+        self,
+        data: list[xr.DataArray],
+        baseline: xr.DataArray,
+        run_index: int,
+        var: str,
+        x_dim="forecast_step",
+    ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray]:
+        """
+        Compare a model with a baseline model and calculate skill scores.
+
+        Parameters
+        ----------
+        data: list[xr.DataArray]
+            List of all scores in xarray format for each model.
+
+        baseline: xarray DataArray
+            The baseline scores in xarrays format.
+
+        run_index: int
+            The order index over the run_ids.
+
+        var: str
+            The specified channel over which we compare.
+
+        xdim: str
+            The dimension for which an average will not be calculated.
+
+        Returns
+        ----------
+        diff: xr.DataArray
+            Difference in scores between baseline and model.
+
+        diff.mean(dim="forecast_step"): xr.DataArray
+            Average difference in scores over all forecast steps between baseline and model .
+
+        skill.mean(dim="forecast_step"): xr.DataArray
+            Average skill scores over all forecast steps between baseline and model .
+
+        """
         baseline_var = baseline.sel({"channel": var})
-        data_var = data[i].sel({"channel": var})
+        data_var = data[run_index].sel({"channel": var})
 
-        non_zero_dims = [
-            dim for dim in baseline_var.dims if dim != x_dim and baseline_var[dim].shape[0] > 1
-        ]
-
-        if non_zero_dims:
-            _logger.info(
-                f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
-            )
-
-        baseline_score = baseline_var.mean(
-            dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
-        )
-        model_score = data_var.mean(dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True)
+        baseline_score, model_score = calculate_average_over_dim(x_dim, baseline_var, data_var)
         diff = baseline_score - model_score
 
         skill = self.get_skill_score(model_score, baseline_score, 0.0)
         return diff, diff.mean(dim=x_dim), skill.mean(dim=x_dim)
 
-    def get_skill_score(self, score_model, score_ref, score_perf):
-        skill_score = (score_model - score_ref) / (score_perf - score_ref)
+    def get_skill_score(
+        self, score_model: xr.DataArray, score_ref: xr.DataArray, score_perf: float
+    ) -> xr.DataArray:
+        """
+        Calculation function for calculating skill score between a model and the baseline.
 
+        Parameters
+        ----------
+        score_model: xr.DataArray
+            The scores of the model that we aim to compare with the baseline.
+
+        score_ref: xr.DataArray
+            The scores of the baseline model.
+
+        score_perf: float
+            The perfect score based on the metric. For example for RMSE is 0.
+
+        Returns
+        ----------
+        skill_score: xr.DataArray
+            Skill scores of a model compared with baseline.
+
+        """
+
+        skill_score = (score_model - score_ref) / (score_perf - score_ref)
         return skill_score
 
-    def get_plot_symbols(self, i, j, skill, diff_mean):
+    def get_plot_symbols(
+        self, run_index: int, var_index: int, skill: xr.DataArray, diff_mean: xr.DataArray
+    ) -> tuple[int, float, str, str, str, xr.DataArray]:
+        """
+        Get the triangle symbols per comparison model with the correct size and color
+        based on score improvement or deterioration.
+
+        Parameters
+        ----------
+        run_index: int
+            The order index over the run_ids.
+        var_index: float
+            The order index over the channels.
+        skill: xarray.DataArray
+            The skill of the model
+        diff_mean: xr.DataArray
+            The average difference between the baseline and the model. Determines improvement or
+            deterioration over baseline.
+
+        Returns
+        ----------
+        x: int
+            x coordinate of the triangle that indicates improvement or deterioration over baseline.
+
+        y: float
+            y coordinate of the triangle that indicates improvement or deterioration over baseline.
+
+        alt: str
+            str that indicates the alternative hypothesis test for Wilcoxon test of significance.
+
+        color: str
+            The color "red" or "blue" that indicates improvement or deterioration over baseline.
+        triangle: str
+            The triangle symbol "^" or "v" that indicates improvement or deterioration over baseline.
+        size: xr.DataArray
+            Size of the triangles in the final plot
+        """
         if diff_mean > 0:
             # A better than B
             alt = "greater"
@@ -855,10 +959,193 @@ class ScoreCards:
         triangle = "^" if modus == "better" else "v"
 
         # Triangle coordinates
-        x = i
+        x = run_index
         # First row is model 1 vs model 0
-        y = j + 0.5
+        y = var_index + 0.5
 
         size = 200 * (1 - (1 / (1 + abs(skill) / self.improvement)))  # Add base size to all
 
         return x, y, alt, color, triangle, size
+
+
+class BarPlots:
+    """
+    Initialize the BarPlots class.
+
+    Parameters
+    ----------
+    plotter_cfg:
+        Configuration dictionary containing basic information for plotting.
+        Expected keys are:
+            - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
+            - improvement: Size of the figure (width, height) in inches
+    output_basedir:
+        Base directory under which the score cards will be saved.
+    """
+
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path) -> None:
+        self.image_format = plotter_cfg.get("image_format")
+        self.dpi_val = plotter_cfg.get("dpi_val")
+        self.cmap = plotter_cfg.get("cmap", "bwr")
+        self.out_plot_dir = Path(output_basedir) / "bar_plots"
+        _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
+        if not os.path.exists(self.out_plot_dir):
+            _logger.info(f"Creating dir {self.out_plot_dir}")
+            os.makedirs(self.out_plot_dir, exist_ok=True)
+
+    def plot(
+        self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
+    ) -> None:
+        """
+        Plot (ratio) bar plots comparing performance between different run_ids over channels of interest.
+
+        Parameters
+        ----------
+        data:
+            List of (xarray) DataArrays with the scores (stream, region and metric specific)
+        runs:
+            List containing runs (in str format) to be compared (provided in the config)
+        channels:
+            List containing channels (in str format) of interest (provided in the config)
+        tag:
+            Tag to be added to the plot title and filename
+        """
+
+        fig, ax = plt.subplots(
+            1,
+            len(runs) - 1,
+            figsize=(5 * len(runs), 2 * len(channels)),
+            dpi=self.dpi_val,
+            squeeze=False,
+        )
+        ax = ax.flatten()
+
+        for run_index in range(1, len(runs)):
+            ratio_score, channels_per_comparison = self.calc_ratio_per_run_id(
+                data, channels, run_index
+            )
+
+            ax[run_index - 1].barh(
+                np.arange(len(ratio_score)),
+                ratio_score,
+                color=self.colors(ratio_score),
+                align="center",
+                edgecolor="black",
+                linewidth=0.5,
+            )
+            ax[run_index - 1].set_yticks(
+                np.arange(len(ratio_score)), labels=channels_per_comparison
+            )
+            ax[run_index - 1].invert_yaxis()
+            ax[run_index - 1].set_xlabel(
+                f"Relative {data[0].coords['metric'].item().upper()}: Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
+            )
+
+        _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
+        parts = ["bar_plot_compare", tag] + runs
+        name = "_".join(filter(None, parts))
+        plt.savefig(
+            f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
+            bbox_inches="tight",
+            dpi=self.dpi_val,
+        )
+        plt.close(fig)
+
+    def calc_ratio_per_run_id(
+        self, data: list[xr.DataArray], channels: list[str], run_index: int, x_dim="channel"
+    ) -> tuple[np.array, str]:
+        """
+        This function calculates the ratio per comparison model for each channel.
+
+        Parameters
+        ----------
+        data: list[xr.DataArray]
+            List of all scores for each model in xarrays format.
+        channels: list[str]
+            All the available channels.
+        run_index: int
+            The order index over the run_ids.
+        xdim: str
+            The dimension for which an average will not be calculated.
+
+        Returns
+        ----------
+        ratio_score: np.array
+            The (ratio) skill over each channel for a specific model
+        channels_per_comparison: str
+            The common channels over which the baseline and the other model will be compared.
+
+        """
+        ratio_score = []
+        channels_per_comparison = []
+        for _, var in enumerate(channels):
+            if var not in data[0].channel.values or var not in data[run_index].channel.values:
+                continue
+            baseline_var = data[0].sel({"channel": var})
+            data_var = data[run_index].sel({"channel": var})
+            channels_per_comparison.append(var)
+
+            baseline_score, model_score = calculate_average_over_dim(x_dim, baseline_var, data_var)
+
+            ratio_score.append(model_score / baseline_score)
+
+        ratio_score = np.array(ratio_score) - 1
+        return ratio_score, channels_per_comparison
+
+    def colors(self, ratio_score: np.array) -> list[tuple]:
+        """
+        This function calculates colormaps based on the skill scores. From negative value blue color variations
+        should be given otherwise red color variations should be given.
+
+        Parameters
+        ----------
+        ratio_score: np.array
+            The (ratio) skill for a specific model
+        Returns
+        ----------
+        colors: list[tuple]
+            The color magnitude (blue to red) of the bars in the plots
+        """
+        max_val = np.abs(ratio_score).max()
+        cmap = plt.get_cmap("bwr")
+        colors = [cmap(0.5 + v / (2 * max_val)) for v in ratio_score]
+        return colors
+
+
+def calculate_average_over_dim(
+    x_dim: str, baseline_var: xr.DataArray, data_var: xr.DataArray
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """
+    Calculate average over xarray dimensions that are larger than 1. Those might be the forecast-steps or the samples.
+
+    Parameters
+    ----------
+    xdim: str
+        The dimension for which an average will not be calculated.
+    baseline_var: xr.DataArray
+        xarray DataArray with the scores of the baseline model for a specific channel/variable
+    data_var: xr.DataArray
+        xarray DataArray with the scores of the comparison model for a specific channel/variable
+
+    Returns
+    -------
+    baseline_score: xarray DataArray
+        The baseline average scores over the dimensions not specified by xdim
+    model_score: xarray DataArray
+        The model average scores over the dimensions not specified by xdim
+    """
+    non_zero_dims = [
+        dim for dim in baseline_var.dims if dim != x_dim and baseline_var[dim].shape[0] > 1
+    ]
+
+    if non_zero_dims:
+        _logger.info(
+            f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
+        )
+
+    baseline_score = baseline_var.mean(
+        dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
+    )
+    model_score = data_var.mean(dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True)
+
+    return baseline_score, model_score
