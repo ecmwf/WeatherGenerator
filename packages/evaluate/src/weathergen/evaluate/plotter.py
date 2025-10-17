@@ -265,7 +265,7 @@ class Plotter:
         )
         plt.legend(frameon=False)
 
-        valid_time = str(
+        valid_time = (
             target_data["valid_time"][0]
             .values.astype("datetime64[m]")
             .astype(datetime.datetime)
@@ -443,7 +443,7 @@ class Plotter:
         ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
         ax.coastlines()
 
-        valid_time = str(
+        valid_time = (
             data["valid_time"][0]
             .values.astype("datetime64[m]")
             .astype(datetime.datetime)
