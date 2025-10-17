@@ -155,8 +155,23 @@ desc: ""
 data_loader_rng_seed: ???
 run_id: ???
 
+<<<<<<< HEAD
 # The period to log in the training loop (in number of batch steps)
 train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
+=======
+# Parameters for logging/printing in the training loop
+train_log:
+  # The period to log metrics (in number of batch steps)
+  log_interval: 20
+  
+# Forecast MLP type: "dense" (default) or "moe"
+fe_mlp_type: "dense"    # set to "moe" to enable MoE
+
+# MoE-only params (ignored when fe_mlp_type != "moe")
+fe_moe_num_experts: 8
+fe_moe_top_k: 2
+fe_moe_hidden_factor: 0.5   # = HF_dense / 4
+>>>>>>> 36fea3a (Adding MoEMLP layer to the layers file, integrate the MoE layer in Forecasting engine, and set up the config file to control the use of this layer)
