@@ -107,6 +107,13 @@ class LossCalculator:
 
         return stream_info_loss_weight, weights_channels
 
+    def _get_fstep_weights(self, forecast_steps):
+        timestep_weight_config = self.cf.get("timestep_weight")
+        if timestep_weight_config is None:
+            return [1.0 for _ in range(forecast_steps)]
+        weights_timestep_fct = getattr(losses, timestep_weight_config[0])
+        return weights_timestep_fct(forecast_steps, timestep_weight_config[1])
+
     def _get_location_weights(self, stream_info, stream_data, forecast_offset, fstep):
         location_weight_type = stream_info.get("location_weight", None)
         if location_weight_type is None:
@@ -239,6 +246,8 @@ class LossCalculator:
 
             stream_data = streams_data[i_batch][i_stream_info]
 
+            fstep_loss_weights = self._get_fstep_weights(len(targets))
+
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
             stream_is_spoof = streams_data[i_batch][i_stream_info].is_spoof
@@ -246,7 +255,9 @@ class LossCalculator:
                 mask = torch.tensor(0.0, device=self.device, requires_grad=False)
             else:
                 mask = torch.tensor(1.0, device=self.device, requires_grad=False)
-            for fstep, target in enumerate(targets):
+            for fstep, (target, fstep_weight) in enumerate(
+                zip(targets, fstep_loss_weights, strict=False)
+            ):
                 # skip if either target or prediction has no data points
                 pred = preds[fstep][i_stream_info]
 
@@ -294,7 +305,9 @@ class LossCalculator:
 
                     # Add the weighted and normalized loss from this loss function to the total
                     # batch loss
-                    loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct * stream_loss_weight)
+                    loss_fstep = loss_fstep + (
+                        loss_fct_weight * loss_lfct * stream_loss_weight * fstep_weight
+                    )
                     # NOTE: with nll loss, the loss can be negative, so we need to comment the if out
                     ctr_loss_fcts += 1 if loss_lfct != 0.0 else 0  # if loss_lfct > 0.0 else 0
 
