@@ -17,9 +17,7 @@ from tqdm import tqdm
 _logger = logging.getLogger(__name__)
 
 
-def match_climatology_time(
-    target_datetime: pd.Timestamp, clim_data: xr.Dataset
-) -> int | None:
+def match_climatology_time(target_datetime: pd.Timestamp, clim_data: xr.Dataset) -> int | None:
     """
     Find matching climatology time index for target datetime.
 
@@ -59,9 +57,7 @@ def match_climatology_time(
     else:
         # Use first match if multiple exist
         if len(matching_indices) > 1:
-            _logger.debug(
-                f"Found {len(matching_indices)} matching times, using first one"
-            )
+            _logger.debug(f"Found {len(matching_indices)} matching times, using first one")
         return matching_indices[0]
 
 
@@ -109,9 +105,7 @@ def find_climatology_indices(
 
     # Approximate matching with 1e-10 tolerance
     tolerance = 1e-5
-    for i, (target_lat, target_lon) in enumerate(
-        zip(target_lats, target_lons, strict=True)
-    ):
+    for i, (target_lat, target_lon) in enumerate(zip(target_lats, target_lons, strict=True)):
         # Find approximate matches using tolerance-based comparison
         lat_match = np.abs(clim_lats - target_lat) <= tolerance
         lon_match = np.abs(clim_lons - target_lon) <= tolerance
@@ -154,9 +148,7 @@ def align_clim_data(
         for fstep, target_data in target_output.items():
             samples = np.unique(target_data.sample.values)
             # Prepare climatology data for each sample
-            matching_time_idx = match_climatology_time(
-                target_data.valid_time.values[0], clim_data
-            )
+            matching_time_idx = match_climatology_time(target_data.valid_time.values[0], clim_data)
             prepared_clim_data = (
                 clim_data.data.isel(
                     time=matching_time_idx,
@@ -206,9 +198,7 @@ def align_clim_data(
                 clim_values = prepared_clim_data.isel(grid_points=clim_indices).values
                 try:
                     if len(samples) > 1:
-                        aligned_clim_data[fstep].loc[{"ipoint": sample_mask}] = (
-                            clim_values
-                        )
+                        aligned_clim_data[fstep].loc[{"ipoint": sample_mask}] = clim_values
                     else:
                         aligned_clim_data[fstep] = clim_values
                 except (ValueError, IndexError) as e:
