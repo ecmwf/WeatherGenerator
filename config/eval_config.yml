@@ -1,0 +1,14 @@
+evaluation:
+  metrics  : ["rmse", "l1", "mse"]
+
+run_ids :
+ dw3acg5s: #uwbvdtge:
+     streams:
+       ERA5:
+         channels: ["2t"] #, "10u", "z_500"]
+         evaluation:
+           forecast_step: "all"
+           sample: "all"
+     label: "MTM ERA5"
+     epoch: 0
+     rank: 0

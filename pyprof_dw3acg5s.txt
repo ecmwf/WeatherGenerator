@@ -1,0 +1,238 @@
+
+  _     ._   __/__   _ _  _  _ _/_   Recorded: 13:17:57  Samples:  67784
+ /_//_/// /_\ / //_// / //_'/ //     Duration: 91.204    CPU time: 73.363
+/   _/                      v5.1.1
+
+Program: /p/project1/weatherai/tarnawa2/weathergenerator/WeatherGenerator/packages/evaluate/src/weathergen/evaluate/run_evaluation.py --config config/eval_config.yml
+
+91.200 <module>  run_evaluation.py:1
+├─ 81.862 evaluate  run_evaluation.py:34
+│  └─ 81.862 evaluate_from_args  run_evaluation.py:39
+│     └─ 81.854 evaluate_from_config  run_evaluation.py:53
+│        ├─ 80.293 calc_scores_per_stream  utils.py:46
+│        │  ├─ 37.825 get_score  score.py:100
+│        │  │  └─ 37.825 Scores.get_score  score.py:195
+│        │  │     ├─ 13.842 Scores.calc_l1  score.py:458
+│        │  │     │  ├─ 7.410 Scores._sum  score.py:353
+│        │  │     │  │  └─ 7.410 DataArrayGroupBy.sum  xarray/core/_aggregations.py:7370
+│        │  │     │  │     └─ 7.410 DataArrayGroupBy.reduce  xarray/core/groupby.py:1644
+│        │  │     │  │        └─ 7.085 DataArrayGroupBy.map  xarray/core/groupby.py:1557
+│        │  │     │  │           └─ 7.085 DataArrayGroupBy._combine  xarray/core/groupby.py:1624
+│        │  │     │  │              └─ 6.827 DataArrayGroupBy._concat_shortcut  xarray/core/groupby.py:1529
+│        │  │     │  │                 └─ 6.820 Variable.concat  xarray/core/variable.py:1690
+│        │  │     │  │                    └─ 6.771 <genexpr>  xarray/core/groupby.py:1606
+│        │  │     │  │                       ├─ 3.768 DataArrayGroupBy._iter_grouped_shortcut  xarray/core/groupby.py:1519
+│        │  │     │  │                       │  └─ 3.768 Variable.__getitem__  xarray/core/variable.py:775
+│        │  │     │  │                       │     ├─ 2.414 apply_indexer  xarray/core/indexing.py:1031
+│        │  │     │  │                       │     │  └─ 2.414 IndexCallable.__getitem__  xarray/core/indexing.py:371
+│        │  │     │  │                       │     │     └─ 2.413 DaskIndexingAdapter._oindex_get  xarray/core/indexing.py:1685
+│        │  │     │  │                       │     │        └─ 2.412 Array.__getitem__  dask/array/core.py:1988
+│        │  │     │  │                       │     │           └─ 2.096 inner  contextlib.py:78
+│        │  │     │  │                       │     │              └─ 2.092 slice_array  dask/array/slicing.py:100
+│        │  │     │  │                       │     │                 └─ 2.092 slice_with_newaxes  dask/array/slicing.py:178
+│        │  │     │  │                       │     │                    └─ 2.089 slice_wrap_lists  dask/array/slicing.py:228
+│        │  │     │  │                       │     │                       └─ 1.940 take  dask/array/slicing.py:582
+│        │  │     │  │                       │     │                          └─ 1.482 _shuffle  dask/array/_shuffle.py:181
+│        │  │     │  │                       │     └─ 1.341 Variable._broadcast_indexes  xarray/core/variable.py:590
+│        │  │     │  │                       └─ 3.001 reduce_array  xarray/core/groupby.py:1696
+│        │  │     │  │                          └─ 3.000 Variable.reduce  xarray/core/variable.py:1633
+│        │  │     │  │                             └─ 2.989 Variable.reduce  xarray/namedarray/core.py:867
+│        │  │     │  │                                └─ 2.969 f  xarray/core/duck_array_ops.py:493
+│        │  │     │  │                                   └─ 2.963 nansum  xarray/computation/nanops.py:97
+│        │  │     │  │                                      └─ 2.619 sum_where  xarray/core/duck_array_ops.py:390
+│        │  │     │  │                                         └─ 2.110 Array.__array_function__  dask/array/core.py:1734
+│        │  │     │  │                                            └─ 1.265 zeros_like  dask/array/creation.py:177
+│        │  │     │  │                                               └─ 1.252 wrapper  dask/backends.py:136
+│        │  │     │  │                                                  └─ 1.251 wrap_func_shape_as_first_arg  dask/array/wrap.py:48
+│        │  │     │  │                                                     └─ 1.195 _parse_wrap_args  dask/array/wrap.py:18
+│        │  │     │  │                                                        └─ 1.181 tokenize  dask/tokenize.py:47
+│        │  │     │  │                                                           └─ 1.179 _tokenize  dask/tokenize.py:33
+│        │  │     │  │                                                              └─ 1.165 _normalize_seq_func  dask/tokenize.py:142
+│        │  │     │  │                                                                 └─ 1.160 _inner_normalize_token  dask/tokenize.py:143
+│        │  │     │  │                                                                    └─ 1.155 Dispatch.__call__  dask/utils.py:773
+│        │  │     │  │                                                                       └─ 1.128 normalize_partial  dask/tokenize.py:174
+│        │  │     │  │                                                                          └─ 1.125 _normalize_seq_func  dask/tokenize.py:142
+│        │  │     │  │                                                                             └─ 1.121 _inner_normalize_token  dask/tokenize.py:143
+│        │  │     │  │                                                                                └─ 1.119 Dispatch.__call__  dask/utils.py:773
+│        │  │     │  │                                                                                   └─ 1.094 normalize_object  dask/tokenize.py:194
+│        │  │     │  │                                                                                      └─ 1.090 _normalize_pickle  dask/tokenize.py:233
+│        │  │     │  │                                                                                         └─ 1.060 dumps  cloudpickle/cloudpickle.py:1522
+│        │  │     │  │                                                                                            └─ 1.055 Pickler.dump  cloudpickle/cloudpickle.py:1301
+│        │  │     │  │                                                                                               └─ 1.026 Pickler.reducer_override  cloudpickle/cloudpickle.py:1348
+│        │  │     │  │                                                                                                  └─ 1.020 Pickler._function_reduce  cloudpickle/cloudpickle.py:1254
+│        │  │     │  │                                                                                                     └─ 0.995 Pickler._dynamic_function_reduce  cloudpickle/cloudpickle.py:1248
+│        │  │     │  │                                                                                                        └─ 0.992 _function_getstate  cloudpickle/cloudpickle.py:707
+│        │  │     │  │                                                                                                           └─ 0.985 _find_imported_submodules  cloudpickle/cloudpickle.py:338
+│        │  │     │  └─ 6.207 inner  xarray/util/deprecation_helpers.py:95
+│        │  │     │     └─ 6.207 DataArray.groupby  xarray/core/dataarray.py:6800
+│        │  │     │        └─ 6.206 _parse_group_and_groupers  xarray/core/groupby.py:381
+│        │  │     │           └─ 6.206 <genexpr>  xarray/core/groupby.py:434
+│        │  │     │              └─ 6.206 ResolvedGrouper.__init__  <string>:2
+│        │  │     │                 └─ 6.206 ResolvedGrouper.__post_init__  xarray/core/groupby.py:317
+│        │  │     │                    └─ 6.205 UniqueGrouper.factorize  xarray/groupers.py:205
+│        │  │     │                       └─ 6.125 UniqueGrouper._factorize_unique  xarray/groupers.py:248
+│        │  │     │                          └─ 6.026 EncodedGroups.__init__  xarray/groupers.py:88
+│        │  │     │                             └─ 6.025 _codes_to_group_indices  xarray/core/groupby.py:86
+│        │  │     │                                ├─ 3.994 [self]  xarray/core/groupby.py
+│        │  │     │                                └─ 2.031 list.append  <built-in>
+│        │  │     ├─ 11.961 Scores.calc_rmse  score.py:597
+│        │  │     │  └─ 11.818 Scores.calc_mse  score.py:568
+│        │  │     │     ├─ 6.302 inner  xarray/util/deprecation_helpers.py:95
+│        │  │     │     │  └─ 6.302 DataArray.groupby  xarray/core/dataarray.py:6800
+│        │  │     │     │     └─ 6.301 _parse_group_and_groupers  xarray/core/groupby.py:381
+│        │  │     │     │        └─ 6.300 <genexpr>  xarray/core/groupby.py:434
+│        │  │     │     │           └─ 6.300 ResolvedGrouper.__init__  <string>:2
+│        │  │     │     │              └─ 6.300 ResolvedGrouper.__post_init__  xarray/core/groupby.py:317
+│        │  │     │     │                 └─ 6.298 UniqueGrouper.factorize  xarray/groupers.py:205
+│        │  │     │     │                    └─ 6.223 UniqueGrouper._factorize_unique  xarray/groupers.py:248
+│        │  │     │     │                       └─ 6.126 EncodedGroups.__init__  xarray/groupers.py:88
+│        │  │     │     │                          └─ 6.126 _codes_to_group_indices  xarray/core/groupby.py:86
+│        │  │     │     │                             ├─ 3.963 [self]  xarray/core/groupby.py
+│        │  │     │     │                             └─ 2.164 list.append  <built-in>
+│        │  │     │     └─ 5.288 Scores._mean  score.py:369
+│        │  │     │        └─ 5.288 DataArrayGroupBy.mean  xarray/core/_aggregations.py:7139
+│        │  │     │           └─ 5.288 DataArrayGroupBy.reduce  xarray/core/groupby.py:1644
+│        │  │     │              └─ 4.960 DataArrayGroupBy.map  xarray/core/groupby.py:1557
+│        │  │     │                 └─ 4.960 DataArrayGroupBy._combine  xarray/core/groupby.py:1624
+│        │  │     │                    └─ 4.782 DataArrayGroupBy._concat_shortcut  xarray/core/groupby.py:1529
+│        │  │     │                       └─ 4.781 Variable.concat  xarray/core/variable.py:1690
+│        │  │     │                          └─ 4.733 <genexpr>  xarray/core/groupby.py:1606
+│        │  │     │                             └─ 3.919 DataArrayGroupBy._iter_grouped_shortcut  xarray/core/groupby.py:1519
+│        │  │     │                                └─ 3.919 Variable.__getitem__  xarray/core/variable.py:775
+│        │  │     │                                   ├─ 2.577 apply_indexer  xarray/core/indexing.py:1031
+│        │  │     │                                   │  └─ 2.576 IndexCallable.__getitem__  xarray/core/indexing.py:371
+│        │  │     │                                   │     └─ 2.576 DaskIndexingAdapter._oindex_get  xarray/core/indexing.py:1685
+│        │  │     │                                   │        └─ 2.576 Array.__getitem__  dask/array/core.py:1988
+│        │  │     │                                   │           └─ 2.085 inner  contextlib.py:78
+│        │  │     │                                   │              └─ 2.085 slice_array  dask/array/slicing.py:100
+│        │  │     │                                   │                 └─ 2.083 slice_with_newaxes  dask/array/slicing.py:178
+│        │  │     │                                   │                    └─ 2.082 slice_wrap_lists  dask/array/slicing.py:228
+│        │  │     │                                   │                       └─ 1.940 take  dask/array/slicing.py:582
+│        │  │     │                                   │                          └─ 1.476 _shuffle  dask/array/_shuffle.py:181
+│        │  │     │                                   └─ 1.337 Variable._broadcast_indexes  xarray/core/variable.py:590
+│        │  │     └─ 11.760 Scores.calc_mse  score.py:568
+│        │  │        ├─ 6.248 inner  xarray/util/deprecation_helpers.py:95
+│        │  │        │  └─ 6.248 DataArray.groupby  xarray/core/dataarray.py:6800
+│        │  │        │     └─ 6.247 _parse_group_and_groupers  xarray/core/groupby.py:381
+│        │  │        │        └─ 6.247 <genexpr>  xarray/core/groupby.py:434
+│        │  │        │           └─ 6.247 ResolvedGrouper.__init__  <string>:2
+│        │  │        │              └─ 6.247 ResolvedGrouper.__post_init__  xarray/core/groupby.py:317
+│        │  │        │                 └─ 6.243 UniqueGrouper.factorize  xarray/groupers.py:205
+│        │  │        │                    └─ 6.165 UniqueGrouper._factorize_unique  xarray/groupers.py:248
+│        │  │        │                       └─ 6.067 EncodedGroups.__init__  xarray/groupers.py:88
+│        │  │        │                          └─ 6.065 _codes_to_group_indices  xarray/core/groupby.py:86
+│        │  │        │                             ├─ 3.969 [self]  xarray/core/groupby.py
+│        │  │        │                             └─ 2.096 list.append  <built-in>
+│        │  │        └─ 5.291 Scores._mean  score.py:369
+│        │  │           └─ 5.291 DataArrayGroupBy.mean  xarray/core/_aggregations.py:7139
+│        │  │              └─ 5.291 DataArrayGroupBy.reduce  xarray/core/groupby.py:1644
+│        │  │                 └─ 4.960 DataArrayGroupBy.map  xarray/core/groupby.py:1557
+│        │  │                    └─ 4.960 DataArrayGroupBy._combine  xarray/core/groupby.py:1624
+│        │  │                       └─ 4.793 DataArrayGroupBy._concat_shortcut  xarray/core/groupby.py:1529
+│        │  │                          └─ 4.791 Variable.concat  xarray/core/variable.py:1690
+│        │  │                             └─ 4.740 <genexpr>  xarray/core/groupby.py:1606
+│        │  │                                ├─ 3.707 DataArrayGroupBy._iter_grouped_shortcut  xarray/core/groupby.py:1519
+│        │  │                                │  └─ 3.705 Variable.__getitem__  xarray/core/variable.py:775
+│        │  │                                │     ├─ 2.380 apply_indexer  xarray/core/indexing.py:1031
+│        │  │                                │     │  └─ 2.380 IndexCallable.__getitem__  xarray/core/indexing.py:371
+│        │  │                                │     │     └─ 2.380 DaskIndexingAdapter._oindex_get  xarray/core/indexing.py:1685
+│        │  │                                │     │        └─ 2.377 Array.__getitem__  dask/array/core.py:1988
+│        │  │                                │     │           └─ 2.114 inner  contextlib.py:78
+│        │  │                                │     │              └─ 2.111 slice_array  dask/array/slicing.py:100
+│        │  │                                │     │                 └─ 2.107 slice_with_newaxes  dask/array/slicing.py:178
+│        │  │                                │     │                    └─ 2.107 slice_wrap_lists  dask/array/slicing.py:228
+│        │  │                                │     │                       └─ 1.939 take  dask/array/slicing.py:582
+│        │  │                                │     │                          └─ 1.488 _shuffle  dask/array/_shuffle.py:181
+│        │  │                                │     └─ 1.321 Variable._broadcast_indexes  xarray/core/variable.py:590
+│        │  │                                └─ 1.031 reduce_array  xarray/core/groupby.py:1696
+│        │  │                                   └─ 1.029 Variable.reduce  xarray/core/variable.py:1633
+│        │  │                                      └─ 1.019 Variable.reduce  xarray/namedarray/core.py:867
+│        │  │                                         └─ 0.988 mean  xarray/core/duck_array_ops.py:751
+│        │  │                                            └─ 0.987 f  xarray/core/duck_array_ops.py:493
+│        │  │                                               └─ 0.978 nanmean  xarray/computation/nanops.py:122
+│        │  │                                                  └─ 0.977 f  xarray/core/nputils.py:179
+│        │  │                                                     └─ 0.973 Array.__array_function__  dask/array/core.py:1734
+│        │  │                                                        └─ 0.955 nanmean  dask/array/reductions.py:404
+│        │  │                                                           └─ 0.942 reduction  dask/array/_reductions_generic.py:25
+│        │  ├─ 25.920 WeatherGenReader.get_data  io_reader.py:350
+│        │  │  ├─ 16.827 OutputDataset.as_xarray  weathergen/common/io.py:129
+│        │  │  │  ├─ 11.844 Array.compute  dask/base.py:349
+│        │  │  │  │  └─ 11.837 compute  dask/base.py:597
+│        │  │  │  │     ├─ 8.858 get  dask/threaded.py:38
+│        │  │  │  │     │  └─ 8.807 get_async  dask/local.py:384
+│        │  │  │  │     │     ├─ 6.500 queue_get  dask/local.py:140
+│        │  │  │  │     │     │  └─ 6.496 Queue.get  queue.py:154
+│        │  │  │  │     │     │        [2 frames hidden]  threading, <built-in>
+│        │  │  │  │     │     └─ 1.420 _HLGExprSequence.__dask_graph__  dask/_expr.py:1150
+│        │  │  │  │     │        └─ 1.393 cached_property.__get__  functools.py:979
+│        │  │  │  │     │           └─ 1.390 _HLGExprSequence._optimized_dsk  dask/_expr.py:1134
+│        │  │  │  │     │              └─ 1.019 optimize  dask/array/optimization.py:37
+│        │  │  │  │     └─ 1.011 FinalizeCompute.optimize  dask/_expr.py:434
+│        │  │  │  │        └─ 1.010 optimize_until  dask/_expr.py:925
+│        │  │  │  ├─ 2.710 from_zarr  dask/array/core.py:3733
+│        │  │  │  │  ├─ 1.416 tokenize  dask/tokenize.py:47
+│        │  │  │  │  │  └─ 1.398 _tokenize  dask/tokenize.py:33
+│        │  │  │  │  │     └─ 1.374 _normalize_seq_func  dask/tokenize.py:142
+│        │  │  │  │  │        └─ 1.363 _inner_normalize_token  dask/tokenize.py:143
+│        │  │  │  │  │           └─ 1.350 Dispatch.__call__  dask/utils.py:773
+│        │  │  │  │  │              └─ 1.281 normalize_object  dask/tokenize.py:194
+│        │  │  │  │  │                 └─ 1.274 _normalize_pickle  dask/tokenize.py:233
+│        │  │  │  │  │                    └─ 0.919 Array.__setstate__  zarr/core.py:2572
+│        │  │  │  │  └─ 1.279 from_array  dask/array/core.py:3476
+│        │  │  │  └─ 1.687 DataArray.__init__  xarray/core/dataarray.py:414
+│        │  │  ├─ 6.237 ZarrIO.get_data  weathergen/common/io.py:210
+│        │  │  │  └─ 6.235 ZarrIO.load_zarr  weathergen/common/io.py:216
+│        │  │  │     ├─ 3.845 Group._array_iter  zarr/hierarchy.py:685
+│        │  │  │     │  └─ 2.611 contains_array  zarr/storage.py:116
+│        │  │  │     │     └─ 2.565 DirectoryStore.__contains__  zarr/storage.py:1175
+│        │  │  │     │        └─ 2.547 isfile  <frozen genericpath>:27
+│        │  │  │     │           └─ 2.537 stat  <built-in>
+│        │  │  │     └─ 1.154 Group.groups  zarr/hierarchy.py:591
+│        │  │  └─ 1.758 concat  xarray/structure/concat.py:66
+│        │  │     └─ 1.756 _dataarray_concat  xarray/structure/concat.py:725
+│        │  │        └─ 1.713 _dataset_concat  xarray/structure/concat.py:486
+│        │  └─ 15.890 DataArray.compute  xarray/core/dataarray.py:1163
+│        │     └─ 15.888 DataArray.load  xarray/core/dataarray.py:1137
+│        │        └─ 15.888 Dataset.load  xarray/core/dataset.py:515
+│        │           └─ 15.855 DaskManager.compute  xarray/namedarray/daskmanager.py:80
+│        │              └─ 15.842 compute  dask/base.py:597
+│        │                 └─ 15.809 get  dask/threaded.py:38
+│        │                    └─ 15.807 get_async  dask/local.py:384
+│        │                       ├─ 12.921 queue_get  dask/local.py:140
+│        │                       │  └─ 12.918 Queue.get  queue.py:154
+│        │                       │        [2 frames hidden]  threading, <built-in>
+│        │                       └─ 1.506 _HLGExprSequence.__dask_graph__  dask/_expr.py:1150
+│        │                          └─ 1.495 cached_property.__get__  functools.py:979
+│        │                             └─ 1.495 _HLGExprSequence._optimized_dsk  dask/_expr.py:1134
+│        │                                └─ 1.476 optimize  dask/array/optimization.py:37
+│        └─ 1.278 plot_summary  utils.py:396
+│           └─ 1.277 plot_metric_region  plot_utils.py:63
+│              └─ 1.271 LinePlots.plot  plotter.py:633
+│                 └─ 1.204 savefig  matplotlib/pyplot.py:1246
+│                    └─ 1.046 Figure.savefig  matplotlib/figure.py:3334
+│                       └─ 1.046 FigureCanvasAgg.print_figure  matplotlib/backend_bases.py:2049
+│                          └─ 1.046 <lambda>  matplotlib/backend_bases.py:2040
+│                             └─ 1.046 FigureCanvasAgg.print_png  matplotlib/backends/backend_agg.py:434
+│                                └─ 1.046 FigureCanvasAgg._print_pil  matplotlib/backends/backend_agg.py:424
+├─ 3.099 <module>  weathergen/common/config.py:1
+│  └─ 3.097 <module>  weathergen/train/utils.py:1
+│     └─ 3.096 <module>  torch/__init__.py:1
+│        └─ 0.938 <module>  torch/_meta_registrations.py:1
+├─ 3.051 <module>  io_reader.py:1
+│  ├─ 1.649 <module>  weathergen/common/io.py:1
+│  │  └─ 1.303 <module>  dask/array/__init__.py:1
+│  │     └─ 0.920 <module>  dask/array/backends.py:1
+│  └─ 1.397 <module>  xarray/__init__.py:1
+│     └─ 1.313 <module>  xarray/coders.py:1
+│        └─ 1.312 <module>  xarray/coding/times.py:1
+│           └─ 1.162 <module>  pandas/__init__.py:1
+└─ 2.985 <module>  utils.py:1
+   ├─ 1.620 <module>  plotter.py:1
+   └─ 1.363 <module>  score.py:1
+      └─ 1.361 <module>  xskillscore/__init__.py:1
+         └─ 1.311 <module>  xskillscore/core/accessor.py:1
+            └─ 1.303 <module>  xskillscore/core/deterministic.py:1
+               └─ 1.299 <module>  xskillscore/core/np_deterministic.py:1
+                  └─ 1.298 <module>  scipy/stats/__init__.py:1
+                     └─ 1.075 <module>  scipy/stats/_stats_py.py:1
+

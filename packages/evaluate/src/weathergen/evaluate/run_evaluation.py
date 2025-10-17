@@ -14,6 +14,11 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from dask_jobqueue import SLURMCluster
+from dask.distributed import Client
+
+
+
 from omegaconf import OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
@@ -31,12 +36,12 @@ _logger = logging.getLogger(__name__)
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
 
-def evaluate() -> None:
+def evaluate(client=None) -> None:
     # By default, arguments from the command line are read.
-    evaluate_from_args(sys.argv[1:])
+    evaluate_from_args(sys.argv[1:], client = client)
 
 
-def evaluate_from_args(argl: list[str]) -> None:
+def evaluate_from_args(argl: list[str], client=None) -> None:
     parser = argparse.ArgumentParser(
         description="Fast evaluation of WeatherGenerator runs."
     )
@@ -47,10 +52,10 @@ def evaluate_from_args(argl: list[str]) -> None:
     )
 
     args = parser.parse_args(argl)
-    evaluate_from_config(OmegaConf.load(args.config))
+    evaluate_from_config(OmegaConf.load(args.config), client = client)
 
 
-def evaluate_from_config(cfg):
+def evaluate_from_config(cfg, client = None):
     # configure logging
     logging.basicConfig(level=logging.INFO)
 
@@ -101,6 +106,7 @@ def evaluate_from_config(cfg):
                                 stream,
                                 region,
                                 metric,
+                                client=client
                             )
 
                             available_data = reader.check_availability(
@@ -123,7 +129,7 @@ def evaluate_from_config(cfg):
 
                     if metrics_to_compute:
                         all_metrics, points_per_sample = calc_scores_per_stream(
-                            reader, stream, region, metrics_to_compute
+                            reader, stream, region, metrics_to_compute, client = client
                         )
 
                         metric_list_to_json(
@@ -146,4 +152,8 @@ def evaluate_from_config(cfg):
 
 
 if __name__ == "__main__":
-    evaluate()
+    cluster = SLURMCluster(
+    queue='devel', account='weatherai', processes=24, cores=48, memory='96GB', interface='ib0', walltime='00:20:00')
+    client = Client(cluster)
+    cluster.scale(72)
+    evaluate(client = client)

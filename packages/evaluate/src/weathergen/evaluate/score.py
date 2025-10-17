@@ -35,7 +35,7 @@ except Exception:
 
 
 def _get_skill_score(
-    score_fcst: xr.DataArray, score_ref: xr.DataArray, score_perf: float
+    score_fcst: xr.DataArray, score_ref: xr.DataArray, score_perf: float, client=None
 ) -> xr.DataArray:
     """
     Calculate the skill score of a forecast data array w.r.t. a reference and a perfect score.
@@ -104,6 +104,7 @@ def get_score(
     group_by_coord: str | None = None,
     ens_dim: str = "ens",
     compute: bool = False,
+    client=None,
     **kwargs,
 ) -> xr.DataArray:
     """
@@ -135,10 +136,11 @@ def get_score(
     sc = Scores(agg_dims=agg_dims, ens_dim=ens_dim)
 
     score_data = sc.get_score(data, score_name, group_by_coord, **kwargs)
+    '''
     if compute:
         # If compute is True, compute the score immediately
         return score_data.compute()
-
+    '''
     return score_data
 
 
@@ -198,6 +200,7 @@ class Scores:
         score_name: str,
         group_by_coord: str | None = None,
         compute: bool = False,
+        client=None,
         **kwargs,
     ):
         """
@@ -291,7 +294,7 @@ class Scores:
             # Return lazy evaluation result
             return result
 
-    def _validate_agg_dims(self, dims: str | list[str]) -> list[str] | str:
+    def _validate_agg_dims(self, dims: str | list[str], client=None) -> list[str] | str:
         if dims == "all":
             return dims
         if isinstance(dims, str):
@@ -300,13 +303,13 @@ class Scores:
             return dims
         raise ValueError("agg_dims must be 'all', a string, or list of strings.")
 
-    def _validate_ens_dim(self, dim: str) -> str:
+    def _validate_ens_dim(self, dim: str, client=None) -> str:
         if not isinstance(dim, str):
             raise ValueError("ens_dim must be a string.")
         return dim
 
     def _validate_groupby_coord(
-        self, data: VerifiedData, group_by_coord: str | None
+        self, data: VerifiedData, group_by_coord: str | None, client=None
     ) -> bool:
         """
         Check if the group_by_coord is present in both prediction and ground truth data and compatible.
@@ -350,7 +353,7 @@ class Scores:
             )
             return False
 
-    def _sum(self, data: xr.DataArray) -> xr.DataArray:
+    def _sum(self, data: xr.DataArray, client=None) -> xr.DataArray:
         """
         Sum data over aggregation dimensions.
 
@@ -366,7 +369,7 @@ class Scores:
         """
         return data.sum(dim=self._agg_dims)
 
-    def _mean(self, data: xr.DataArray) -> xr.DataArray:
+    def _mean(self, data: xr.DataArray, client=None) -> xr.DataArray:
         """
         Average data over aggregation dimensions.
 
@@ -388,6 +391,7 @@ class Scores:
         gt: xr.DataArray,
         thresh: float,
         group_by_coord: str | None = None,
+        client=None
     ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]:
         """
         Get counts of 2x2 contingency tables
@@ -411,6 +415,7 @@ class Scores:
         gt: xr.DataArray,
         group_by_coord: str | None = None,
         thresh: float = 0.1,
+        client=None
     ):
         a, b, c, d = self.get_2x2_event_counts(p, gt, thresh, group_by_coord)
         n = a + b + c + d
@@ -429,6 +434,7 @@ class Scores:
         gt: xr.DataArray,
         group_by_coord: str | None = None,
         thresh: float = 0.1,
+        client=None
     ):
         a, b, c, _ = self.get_2x2_event_counts(p, gt, thresh, group_by_coord)
 
@@ -445,6 +451,7 @@ class Scores:
         gt: xr.DataArray,
         group_by_coord: str | None = None,
         thresh: float = 0.1,
+        client=None
     ):
         a, b, c, d = self.get_2x2_event_counts(p, gt, thresh, group_by_coord)
 
@@ -461,6 +468,7 @@ class Scores:
         gt: xr.DataArray,
         group_by_coord: str | None = None,
         scale_dims: list | None = None,
+        client=None
     ):
         """
         Calculate the L1 error norm of forecast data w.r.t. reference data.
@@ -493,6 +501,7 @@ class Scores:
         group_by_coord: str | None = None,
         scale_dims: list | None = None,
         squared_l2: bool = False,
+        client=None
     ):
         """
         Calculate the L2 error norm of forecast data w.r.t. reference data.
@@ -537,7 +546,7 @@ class Scores:
         return l2
 
     def calc_mae(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
+        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None, client=None
     ):
         """
         Calculate mean absolute error (MAE) of forecast data w.r.t. reference data.
@@ -566,7 +575,7 @@ class Scores:
         return mae
 
     def calc_mse(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
+        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None, client=None
     ):
         """
         Calculate mean squared error (MSE) of forecast data w.r.t. reference data.
@@ -595,7 +604,7 @@ class Scores:
         return mse
 
     def calc_rmse(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
+        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None, client=None
     ):
         """
         Calculate root mean squared error (RMSE) of forecast data w.r.t. reference data
@@ -622,6 +631,7 @@ class Scores:
         self,
         s0: xr.DataArray,
         s1: xr.DataArray,
+        client=None
     ):
         """
         Calculate the "change rate" of a data array as the mean absolute difference between two consecutive time steps.
@@ -652,6 +662,7 @@ class Scores:
         p_next: xr.DataArray,
         gt_next: xr.DataArray,
         group_by_coord: str | None = None,
+        client=None
     ):
         """
         Calculate forecast rate of change over time
@@ -691,6 +702,7 @@ class Scores:
         gt_next: xr.DataArray,
         p_next: xr.DataArray,
         group_by_coord: str | None = None,
+        client=None
     ):
         """
         Calculate target rate of change over time
@@ -730,6 +742,7 @@ class Scores:
         clim_mean: xr.DataArray,
         group_by_coord: str | None = None,
         spatial_dims: list = None,
+        client=None
     ):
         """
         Calculate anomaly correlation coefficient (ACC).
@@ -781,7 +794,8 @@ class Scores:
         return acc
 
     def calc_bias(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
+        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None,
+        client=None
     ):
         """
         Calculate mean bias of forecast data w.r.t. reference data
@@ -811,6 +825,7 @@ class Scores:
         gt: xr.DataArray,
         group_by_coord: str | None = None,
         pixel_max: float = 1.0,
+        client=None
     ):
         """
         Calculate PSNR of forecast data w.r.t. reference data
@@ -844,6 +859,7 @@ class Scores:
         group_by_coord: str | None = None,
         order: int = 1,
         non_spatial_avg_dims: list[str] = None,
+        client=None
     ):
         """
         Calculates the ratio between the spatial variability of differental operator with order 1 (higher values unsupported yest)
@@ -892,6 +908,7 @@ class Scores:
         t3: xr.DataArray,
         spatial_dims: list,
         group_by_coord: str | None = None,
+        client=None
     ):
         """
         Calculates stable equitable error in probabiliyt space (SEEPS), see Rodwell et al., 2011
@@ -1019,7 +1036,7 @@ class Scores:
         return self._mean(np.sqrt(ens_std**2))
 
     def calc_ssr(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
+        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None, client=None
     ):
         """
         Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data
@@ -1046,6 +1063,7 @@ class Scores:
         gt: xr.DataArray,
         group_by_coord: str | None = None,
         method: str = "ensemble",
+        client=None,
         **kwargs,
     ):
         """
@@ -1110,6 +1128,7 @@ class Scores:
         norm: bool = True,
         add_noise: bool = True,
         noise_fac=1.0e-03,
+        client=None
     ):
         """
         Calculate the rank histogram of the forecast data w.r.t. reference data.
@@ -1213,6 +1232,7 @@ class Scores:
         order: int = 1,
         r_e: float = 6371.0e3,
         dom_avg: bool = True,
+        client=None
     ):
         """
         Calculates the amplitude of the gradient (order=1) or the Laplacian (order=2)

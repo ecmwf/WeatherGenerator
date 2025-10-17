@@ -10,7 +10,8 @@
 import json
 import logging
 from pathlib import Path
-
+import time
+import dask
 import numpy as np
 import omegaconf as oc
 import xarray as xr
@@ -25,7 +26,7 @@ _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
 
-def get_next_data(fstep, da_preds, da_tars, fsteps):
+def get_next_data(fstep, da_preds, da_tars, fsteps, client=None):
     """
     Get the next forecast step data for the given forecast step.
     """
@@ -44,7 +45,7 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
 
 
 def calc_scores_per_stream(
-    reader: Reader, stream: str, region: str, metrics: list[str]
+    reader: Reader, stream: str, region: str, metrics: list[str], client=None
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -70,7 +71,7 @@ def calc_scores_per_stream(
     )
 
     available_data = reader.check_availability(stream, mode="evaluation")
-
+    start = time.time()
     output_data = reader.get_data(
         stream,
         region=region,
@@ -107,7 +108,11 @@ def calc_scores_per_stream(
             "metric": metrics,
         },
     )
-
+    metric_stream.chunk
+    end = time.time()
+    print(end - start)
+    start = time.time()
+    print("hello")
     for (fstep, tars), (_, preds) in zip(
         da_tars.items(), da_preds.items(), strict=False
     ):
@@ -121,6 +126,7 @@ def calc_scores_per_stream(
             _logger.debug(
                 f"Build computation graphs for metrics for stream {stream}..."
             )
+            
 
             combined_metrics = [
                 get_score(
@@ -128,10 +134,12 @@ def calc_scores_per_stream(
                     metric,
                     agg_dims="ipoint",
                     group_by_coord="sample",
+                    compute=True,
+                    client=client
                 )
                 for metric in metrics
             ]
-
+            
             combined_metrics = xr.concat(combined_metrics, dim="metric")
             combined_metrics["metric"] = metrics
 
@@ -154,11 +162,13 @@ def calc_scores_per_stream(
 
     metric_stream = xr.concat(metric_list, dim="forecast_step")
     metric_stream = metric_stream.assign_coords({"forecast_step": fsteps})
+    end = time.time()
+    print(end - start)
 
     return metric_stream, points_per_sample
 
 
-def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[str]:
+def plot_data(reader: Reader, stream: str, global_plotting_opts: dict, client=None) -> list[str]:
     """
     Plot the data for a given run and stream.
 
@@ -299,6 +309,7 @@ def metric_list_to_json(
     npoints_sample_list: list[xr.DataArray],
     streams: list[str],
     region: str,
+    client=None
 ):
     """
     Write the evaluation results collected in a list of xarray DataArrays for the metrics
@@ -359,7 +370,7 @@ def metric_list_to_json(
     )
 
 
-def retrieve_metric_from_json(reader: Reader, stream: str, region: str, metric: str):
+def retrieve_metric_from_json(reader: Reader, stream: str, region: str, metric: str, client=None):
     """
     Retrieve the score for a given run, stream, metric, epoch, and rank from a JSON file.
 
@@ -393,7 +404,7 @@ def retrieve_metric_from_json(reader: Reader, stream: str, region: str, metric: 
         raise FileNotFoundError(f"File {score_path} not found in the archive.")
 
 
-def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
+def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path, client=None):
     """
     Plot summary of the evaluation results.
     This function is a placeholder for future implementation.
@@ -439,6 +450,7 @@ def common_ranges(
     data_preds: list[dict],
     plot_chs: list[str],
     maps_config: oc.dictconfig.DictConfig,
+    client=None
 ) -> oc.dictconfig.DictConfig:
     """
     Calculate common ranges per stream and variables.
@@ -483,7 +495,7 @@ def common_ranges(
     return maps_config
 
 
-def calc_val(x: xr.DataArray, bound: str) -> list[float]:
+def calc_val(x: xr.DataArray, bound: str, client=None) -> list[float]:
     """
     Calculate the maximum or minimum value per variable for all forecasteps.
     Parameters
@@ -509,6 +521,7 @@ def calc_bounds(
     data_preds,
     var,
     bound,
+    client=None
 ):
     """
     Calculate the minimum and maximum values per variable for all forecasteps for both targets and predictions
@@ -536,7 +549,7 @@ def calc_bounds(
     return list_bound
 
 
-def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataArray:
+def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1, client=None) -> xr.DataArray:
     """
     Convert a scalar coordinate to a dimension in an xarray DataArray.
     If the coordinate is already a dimension, it is returned unchanged.
