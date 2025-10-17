@@ -14,6 +14,8 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+from dataclasses import dataclass
+from numpy.typing import NDArray
 
 import numpy as np
 import torch
@@ -39,9 +41,10 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
+from weathergen.datasets.stream_data import StreamData, healpix_coords
 from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
-from weathergen.model.model import Model, ModelParams
+from weathergen.model.model import Model, ModelParams, ForwardOutput
 from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
@@ -50,8 +53,9 @@ from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
-
+from weathergen.train.structures import TrainerPredictions
 logger = logging.getLogger(__name__)
+
 
 
 class Trainer(TrainerBase):
@@ -243,6 +247,8 @@ class Trainer(TrainerBase):
 
     def run(self, cf, devices, run_id_contd=None, epoch_contd=None):
         # general initalization
+        assert cf is not None
+        assert self.cf is not None
         self.init(cf, devices)
         cf = self.cf
 
@@ -429,10 +435,11 @@ class Trainer(TrainerBase):
     def _prepare_logging(
         self,
         preds: list[list[Tensor]],
+        tokens: list[Tensor],
         forecast_offset: int,
         forecast_steps: int,
-        streams_data: list[list[Any]],
-    ):
+        streams_data: list[list[StreamData]],
+    ) -> TrainerPredictions:
         """Collects and denormalizes prediction and target data for logging.
 
         This function processes target and prediction tensors, extracts relevant
@@ -472,6 +479,9 @@ class Trainer(TrainerBase):
                 inner list contains the original lengths (shape[0]) of the target
                 tensors before any filtering.
         """
+        assert self.cf is not None
+        sd = streams_data[0][0]
+        sd.source_centroids
 
         #'''
         # TODO: Remove this function and port functionality to write_validation(), which then
@@ -535,15 +545,25 @@ class Trainer(TrainerBase):
                 preds_all[fstep][i_strm] += [dn_data(i_strm, pred.to(f32)).detach().cpu()]
                 targets_all[fstep][i_strm] += [dn_data(i_strm, target.to(f32)).detach().cpu()]
 
-        return (
-            preds_all,
-            targets_all,
-            targets_coords_raw,
-            targets_times_raw,
-            targets_lens,
+        x = targets_all[0][0][0] 
+        x.shape
+
+        tokens_cpu = [t.detach().cpu() for t in tokens]
+        tokens_coords_raw = healpix_coords(self.cf.healpix_level)
+
+        return TrainerPredictions(
+            preds_all=preds_all,
+            targets_all=targets_all,
+            targets_coords_raw=targets_coords_raw,
+            targets_times_raw=targets_times_raw,
+            targets_lens=targets_lens,
+            tokens_all=tokens_cpu,
+            tokens_coords_raw=[tokens_coords_raw],
+            tokens_times_raw=[], # TODO
         )
 
     def train(self, epoch):
+        assert self.cf is not None
         cf = self.cf
         self.model.train()
         # torch.autograd.set_detect_anomaly(True)
@@ -623,6 +643,7 @@ class Trainer(TrainerBase):
         self.dataset.advance()
 
     def validate(self, epoch):
+        assert self.cf is not None
         cf = self.cf
         self.model.eval()
 
@@ -649,9 +670,10 @@ class Trainer(TrainerBase):
                             if self.ema_model is None
                             else self.ema_model.forward_eval
                         )
-                        preds, _ = model_forward(
+                        forward_out: ForwardOutput = model_forward(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
+                        preds = forward_out.predictions
 
                     # compute loss and log output
                     if bidx < cf.log_validation:
@@ -661,14 +683,9 @@ class Trainer(TrainerBase):
                         )
 
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
-                        (
-                            preds_all,
-                            targets_all,
-                            targets_coords_all,
-                            targets_times_all,
-                            targets_lens,
-                        ) = self._prepare_logging(
+                        denorm_predictions = self._prepare_logging(
                             preds=preds,
+                            tokens=forward_out.tokens,
                             forecast_offset=cf.forecast_offset,
                             forecast_steps=cf.forecast_steps,
                             streams_data=batch[0],
@@ -679,11 +696,12 @@ class Trainer(TrainerBase):
                             epoch,
                             bidx,
                             sources,
-                            preds_all,
-                            targets_all,
-                            targets_coords_all,
-                            targets_times_all,
-                            targets_lens,
+                            denorm_predictions.preds_all,
+                            denorm_predictions.targets_all,
+                            denorm_predictions.targets_coords_raw,
+                            denorm_predictions.targets_times_raw,
+                            denorm_predictions.targets_lens,
+                            denorm_predictions,
                         )
 
                     else:
@@ -721,6 +739,7 @@ class Trainer(TrainerBase):
             run_id : model_id of the trained model
             epoch : The epoch to load. Default (-1) is the latest epoch
         """
+        assert self.cf is not None
 
         path_run = Path(self.cf.model_path) / run_id
         epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"

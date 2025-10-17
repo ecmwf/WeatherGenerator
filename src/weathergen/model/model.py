@@ -13,14 +13,15 @@ import logging
 import math
 import warnings
 from pathlib import Path
+from dataclasses import dataclass
 
 import astropy_healpix as hp
-import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
 from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
+from torch import Tensor
 
 from weathergen.common.config import Config
 from weathergen.model.engines import (
@@ -195,6 +196,15 @@ class ModelParams(torch.nn.Module):
 
         return
 
+
+@dataclass
+class ForwardOutput:
+    """
+    Output of the model forward pass.
+    """
+    tokens: list[Tensor]
+    posteriors: Tensor
+    predictions: list[list[Tensor]]
 
 ####################################################################################################
 class Model(torch.nn.Module):
@@ -545,10 +555,10 @@ class Model(torch.nn.Module):
 
         preds_all = self.forward(sources, sources_lens)
 
-        return tuple(preds_all[0])
+        return tuple(preds_all.targets)
 
     #########################################
-    def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
+    def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int) -> ForwardOutput:
         """Performs the forward pass of the model to generate forecasts
 
         Tokens are processed through the model components, which were defined in the create method.
@@ -572,12 +582,13 @@ class Model(torch.nn.Module):
         tokens = self.embed_cells(model_params, streams_data)
 
         # local assimilation engine and adapter
-        tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
+        local_tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
 
-        tokens = self.assimilate_global(model_params, tokens)
+        tokens = self.assimilate_global(model_params, local_tokens)
 
         # roll-out in latent space
         preds_all = []
+        tokens_all = [tokens]
         for fstep in range(forecast_offset, forecast_offset + forecast_steps):
             # prediction
             preds_all += [
@@ -590,13 +601,15 @@ class Model(torch.nn.Module):
                 )
             ]
 
-            if self.training:
-                # Impute noise to the latent state
-                noise_std = self.cf.get("impute_latent_noise_std", 0.0)
-                if noise_std > 0.0:
-                    tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
+            noise_std = self.cf.get("impute_latent_noise_std", 0.0)
+            if self.training and noise_std > 0.0:
+                noisy_tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
+            else:
+                noisy_tokens = tokens
 
-            tokens = self.forecast(model_params, tokens)
+
+            tokens = self.forecast(model_params, noisy_tokens)
+            tokens_all.append(tokens)   
 
         # prediction for final step
         preds_all += [
@@ -609,7 +622,8 @@ class Model(torch.nn.Module):
             )
         ]
 
-        return preds_all, posteriors
+
+        return ForwardOutput(tokens=tokens_all, posteriors=posteriors, predictions=preds_all)
 
     #########################################
     def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:

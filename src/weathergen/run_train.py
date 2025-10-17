@@ -195,9 +195,10 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
 
 if __name__ == "__main__":
-    # Entry point for slurm script.
-    # Check whether --from_run_id passed as argument.
-    if next((True for arg in sys.argv if "--from_run_id" in arg), False):
-        train_continue()
-    else:
-        train()
+    inference()
+    # # Entry point for slurm script.
+    # # Check whether --from_run_id passed as argument.
+    # if next((True for arg in sys.argv if "--from_run_id" in arg), False):
+    #     train_continue()
+    # else:
+    #     train()

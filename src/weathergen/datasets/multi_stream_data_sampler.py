@@ -12,6 +12,7 @@ import pathlib
 
 import numpy as np
 import torch
+from torch import Tensor
 
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
@@ -284,7 +285,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         return self.streams_datasets[obs_id][0].denormalize_source_channels(data)
 
     ###################################################
-    def denormalize_target_channels(self, obs_id, data):
+    def denormalize_target_channels(self, obs_id, data) -> Tensor:
         # TODO: with multiple ds per stream we need to distinguish these here
         return self.streams_datasets[obs_id][0].denormalize_target_channels(data)
 

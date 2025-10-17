@@ -10,6 +10,7 @@
 import astropy_healpix as hp
 import numpy as np
 import torch
+from numpy.typing import NDArray
 
 from weathergen.common.io import IOReaderData
 
@@ -373,13 +374,7 @@ def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> IOReaderD
     other should be such an instance.
     """
 
-    dx = 0.5
-    dy = 0.5
-    num_healpix_cells = 12 * 4**healpix_level
-    lons, lats = hp.healpix_to_lonlat(
-        np.arange(0, num_healpix_cells), 2**healpix_level, dx=dx, dy=dy, order="nested"
-    )
-    coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
+    coords = healpix_coords(healpix_level)
     geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
 
     data = np.expand_dims(mean_of_data.astype(np.float32), axis=0).repeat(coords.shape[0], axis=0)
@@ -404,3 +399,13 @@ def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> IOReaderD
     )
 
     return IOReaderData(coords, geoinfos, data, datetimes)
+
+def healpix_coords(healpix_level: int) -> NDArray[np.float32]:
+    dx = 0.5
+    dy = 0.5
+    num_healpix_cells = 12 * 4**healpix_level
+    lons, lats = hp.healpix_to_lonlat(
+        np.arange(0, num_healpix_cells), 2**healpix_level, dx=dx, dy=dy, order="nested"
+    )
+    coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
+    return coords
