@@ -925,6 +925,9 @@ class Model(torch.nn.Module):
                 [streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))]
             )
 
+            # apply an l2 norm
+            tokens_stream = tokens_stream / tokens_stream.norm(dim=-1, keepdim=True)
+
             tc_tokens = tte(
                 latent=tokens_stream,
                 output=tc_tokens,
