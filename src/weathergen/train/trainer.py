@@ -239,19 +239,19 @@ class Trainer(TrainerBase):
             #     if isinstance(module, modules_to_shard):
             #         fully_shard(module, **fsdp_kwargs)
 
-            for module in self.model.ae_local_blocks.modules():
+            for module in self.model.ae_local_engine.ae_local_blocks.modules():
                 if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)
 
-            for module in self.model.ae_adapter.modules():
+            for module in self.model.ae_local_global_engine.ae_adapter.modules():
                 if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)
 
-            for module in self.model.ae_global_blocks.modules():
+            for module in self.model.ae_global_engine.ae_global_blocks.modules():
                 if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)
 
-            for module in self.model.fe_blocks.modules():
+            for module in self.model.forecast_engine.fe_blocks.modules():
                 if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)
 
