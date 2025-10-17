@@ -104,6 +104,7 @@ class Trainer(TrainerBase):
         cf = self.cf
         self.device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
+        self.ema_model = None
 
         # !! modifies config: adds config.streams[i].<stage>_source_channels
         # and config.streams[i].<stage>_target_channels !!
@@ -298,6 +299,7 @@ class Trainer(TrainerBase):
             self.model = torch.compile(self.model, dynamic=True)
 
         self.validate_with_ema = cf.get("validate_with_ema", False)
+        self.ema_model = None
         if self.validate_with_ema:
             meta_ema_model = self.init_model_and_shard(cf, devices)[0]
             self.ema_model = EMAModel(
@@ -642,7 +644,12 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds, _ = self.ema_model.forward_eval(
+                        model_forward = (
+                            self.model.forward
+                            if self.ema_model is None
+                            else self.ema_model.forward_eval
+                        )
+                        preds, _ = model_forward(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
 
