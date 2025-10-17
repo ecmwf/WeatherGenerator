@@ -13,7 +13,9 @@ import itertools
 import logging
 import pathlib
 import typing
+from copy import deepcopy
 
+import astropy_healpix as hp
 import dask.array as da
 import numpy as np
 import xarray as xr
@@ -23,14 +25,11 @@ from numpy.typing import NDArray
 
 # experimental value, should be inferred more intelligently
 CHUNK_N_SAMPLES = 16392
-DType: typing.TypeAlias = np.float32
+type DType = np.float32
 type NPDT64 = datetime64
 
 
 _logger = logging.getLogger(__name__)
-
-
-np.ndarray(3)
 
 
 @dataclasses.dataclass
@@ -49,7 +48,7 @@ class IOReaderData:
     datetimes: NDArray[NPDT64]
 
     @classmethod
-    def create(cls, other: typing.Any) -> typing.Self:
+    def create(cls, other: typing.Any) -> "IOReaderData":
         """
         create an instance from data_reader_base.ReaderData instance.
 
@@ -67,6 +66,45 @@ class IOReaderData:
         assert datetimes.shape[0] == n_datapoints, "number of datapoints do not match data"
 
         return cls(**dataclasses.asdict(other))
+
+    @classmethod
+    def spoof(
+        cls, other: typing.Any, nchannels, datetime, geoinfo_size, mean_of_data
+    ) -> typing.Self:
+        """
+        Spoof an instance from data_reader_base.ReaderData instance.
+        other should be such an instance.
+        """
+
+        hl = 5
+        dx = 0.5
+        dy = 0.5
+        other_copy = deepcopy(other)
+        num_healpix_cells = 12 * 4**hl
+        lons, lats = hp.healpix_to_lonlat(
+            np.arange(0, num_healpix_cells), 2**hl, dx=dx, dy=dy, order="nested"
+        )
+        other_copy.coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
+        other_copy.geoinfos = np.zeros((other_copy.coords.shape[0], geoinfo_size), dtype=np.float32)
+
+        other_copy.data = np.expand_dims(mean_of_data.astype(np.float32), axis=0).repeat(
+            other_copy.coords.shape[0], axis=0
+        )
+        other_copy.datetimes = np.array(datetime).repeat(other_copy.coords.shape[0])
+
+        n_datapoints = len(other_copy.data)
+
+        assert other_copy.coords.shape == (n_datapoints, 2), (
+            "number of datapoints do not match data"
+        )
+        assert other_copy.geoinfos.shape[0] == n_datapoints, (
+            "number of datapoints do not match data"
+        )
+        assert other_copy.datetimes.shape[0] == n_datapoints, (
+            "number of datapoints do not match data"
+        )
+
+        return cls(**dataclasses.asdict(other_copy))
 
 
 @dataclasses.dataclass
@@ -139,7 +177,6 @@ class OutputDataset:
         coords = da.from_zarr(self.coords).compute()
         times = da.from_zarr(self.times).compute()
         geoinfo = da.from_zarr(self.geoinfo).compute()
-
         geoinfo = {name: ("ipoint", geoinfo[:, i]) for i, name in enumerate(self.geoinfo_channels)}
         # TODO: make sample, stream, forecast_step DataArray attribute, test how it
         # interacts with concatenating

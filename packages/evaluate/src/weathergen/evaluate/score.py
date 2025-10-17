@@ -14,6 +14,7 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 import xarray as xr
+from scipy.spatial import cKDTree
 
 from weathergen.evaluate.score_utils import to_list
 
@@ -71,12 +72,15 @@ class VerifiedData:
 
     prediction: xr.DataArray
     ground_truth: xr.DataArray
+    prediction_next: xr.DataArray
+    ground_truth_next: xr.DataArray
 
     def __post_init__(self):
         # Perform checks on initialization
         self._validate_dimensions()
         self._validate_broadcastability()
 
+    # TODO: add checks for prediction_next, ground_truth_next
     def _validate_dimensions(self):
         # Ensure all dimensions in truth are in forecast (or equal)
         missing_dims = set(self.ground_truth.dims) - set(self.prediction.dims)
@@ -85,6 +89,7 @@ class VerifiedData:
                 f"Truth data has extra dimensions not found in forecast: {missing_dims}"
             )
 
+    # TODO: add checks for prediction_next, ground_truth_next
     def _validate_broadcastability(self):
         try:
             # Attempt broadcast
@@ -175,6 +180,8 @@ class Scores:
             "rmse": self.calc_rmse,
             "bias": self.calc_bias,
             "acc": self.calc_acc,
+            "froct": self.calc_froct,
+            "troct": self.calc_troct,
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
@@ -257,7 +264,15 @@ class Scores:
 
         arg_names: list[str] = inspect.getfullargspec(f).args[1:]
 
-        args = {"p": data.prediction, "gt": data.ground_truth}
+        if score_name in ["froct", "troct"]:
+            args = {
+                "p": data.prediction,
+                "gt": data.ground_truth,
+                "p_next": data.prediction_next,
+                "gt_next": data.ground_truth_next,
+            }
+        else:
+            args = {"p": data.prediction, "gt": data.ground_truth}
 
         # Add group_by_coord if provided
         if group_by_coord is not None:
@@ -291,9 +306,7 @@ class Scores:
             raise ValueError("ens_dim must be a string.")
         return dim
 
-    def _validate_groupby_coord(
-        self, data: VerifiedData, group_by_coord: str | None
-    ) -> bool:
+    def _validate_groupby_coord(self, data: VerifiedData, group_by_coord: str | None) -> bool:
         """
         Check if the group_by_coord is present in both prediction and ground truth data and compatible.
         Raises ValueError if conditions are not met.
@@ -522,9 +535,7 @@ class Scores:
 
         return l2
 
-    def calc_mae(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
-    ):
+    def calc_mae(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
         """
         Calculate mean absolute error (MAE) of forecast data w.r.t. reference data.
 
@@ -551,9 +562,7 @@ class Scores:
 
         return mae
 
-    def calc_mse(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
-    ):
+    def calc_mse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
         """
         Calculate mean squared error (MSE) of forecast data w.r.t. reference data.
 
@@ -580,9 +589,7 @@ class Scores:
 
         return mse
 
-    def calc_rmse(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
-    ):
+    def calc_rmse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
         """
         Calculate root mean squared error (RMSE) of forecast data w.r.t. reference data
         Parameters
@@ -603,6 +610,176 @@ class Scores:
         rmse = np.sqrt(self.calc_mse(p, gt, group_by_coord))
 
         return rmse
+
+    @staticmethod
+    def sort_by_coords(da_to_sort: xr.DataArray, da_reference: xr.DataArray) -> xr.DataArray:
+        """
+        Sorts one xarray.DataArray's coordinate ordering to match a reference array using KDTree.
+
+        This method finds the nearest neighbor in `da_to_sort` for every coordinate in
+        `da_reference`, effectively reordering `da_to_sort` along its indexed dimension to align
+        with the sequence of coordinates in the reference.
+
+        Parameters
+        ----------
+        da_to_sort : xr.DataArray
+            The DataArray whose coordinate ordering needs to be matched.
+            Must contain 'lat' and 'lon' coordinates and an indexed dimension (e.g., 'ipoint').
+        da_reference : xr.DataArray
+            The DataArray providing the target coordinate ordering (the template). Must contain
+            'lat' and 'lon' coordinates.
+
+        Returns
+        -------
+        xr.DataArray
+            A new DataArray with the data from `da_to_sort` reordered to match the
+            coordinate sequence of `da_reference`.
+
+        Raises
+        ------
+        ValueError
+            If any reference coordinate does not have a matching coordinate in
+            `da_to_sort` within the allowed distance tolerance (1e-5).
+
+        Notes
+        -----
+        The matching uses `scipy.spatial.cKDTree.query` with a strict distance threshold
+        (`distance_upper_bound=1e-5`) to ensure precise one-to-one alignment.
+        """
+
+        # Extract coordinates
+        ref_lats = da_reference.lat.values
+        ref_lons = da_reference.lon.values
+        sort_lats = da_to_sort.lat.values
+        sort_lons = da_to_sort.lon.values
+
+        # Build KDTree on coordinates to sort
+        sort_coords = np.column_stack((sort_lats, sort_lons))
+        tree = cKDTree(sort_coords)
+
+        # Find nearest neighbors for reference coordinates
+        ref_coords = np.column_stack((ref_lats, ref_lons))
+        dist, indices = tree.query(ref_coords, distance_upper_bound=1e-5)
+
+        # Check for unmatched coordinates
+        unmatched_mask = ~np.isfinite(dist)
+        if np.any(unmatched_mask):
+            n_unmatched = np.sum(unmatched_mask)
+            _logger.info(
+                f"Found {n_unmatched} reference coordinates with no matching coordinates in array to sort. Returning NaN DataArray."
+            )
+            return xr.full_like(da_reference, np.nan)
+
+        # Reorder da_to_sort to match reference ordering
+        return da_to_sort.isel(ipoint=indices)
+
+    def calc_change_rate(
+        self,
+        s0: xr.DataArray,
+        s1: xr.DataArray,
+    ):
+        """
+        Calculate the "change rate" of a data array as the mean absolute difference between two consecutive time steps.
+
+        Parameters
+        ----------
+        s0: xr.DataArray
+            Data array at time step t0
+        s1: xr.DataArray
+            Data array at time step t1
+
+        Returns
+        -------
+        xr.DataArray
+            Change rate of the data array
+        """
+
+        if s1 is None:
+            return xr.full_like(s0, np.nan)
+        else:
+            # Sort the coordinates of subsequent time steps to match each other. Can be removed
+            # once unshuffling is solved elsewhere
+            s1 = self.sort_by_coords(da_to_sort=s1, da_reference=s0)
+            crate = np.abs(s0 - s1.values)
+            return crate
+
+    def calc_froct(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        p_next: xr.DataArray,
+        gt_next: xr.DataArray,
+        group_by_coord: str | None = None,
+    ):
+        """
+        Calculate forecast rate of change over time
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array (not used in calculation, but kept for consistency)
+        p_next: xr.DataArray
+            Next forecast step data array
+        gt_next: xr.DataArray
+            Next ground truth step data array (not used in calculation, but kept for consistency)
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the FROCT score.
+        """
+        if self._agg_dims is None:
+            raise ValueError(
+                "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
+            )
+
+        froct = self.calc_change_rate(p, p_next)
+
+        if group_by_coord:
+            froct = froct.groupby(group_by_coord)
+
+        froct = self._mean(froct)
+
+        return froct
+
+    def calc_troct(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        gt_next: xr.DataArray,
+        p_next: xr.DataArray,
+        group_by_coord: str | None = None,
+    ):
+        """
+        Calculate target rate of change over time
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array (not used in calculation, but kept for consistency)
+        gt: xr.DataArray
+            Ground truth data array
+        p_next: xr.DataArray
+            Next forecast step data array (not used in calculation, but kept for consistency)
+        gt_next: xr.DataArray
+            Next ground truth step data array
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the FROCT score.
+        """
+        if self._agg_dims is None:
+            raise ValueError(
+                "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
+            )
+
+        troct = self.calc_change_rate(gt, gt_next)
+
+        if group_by_coord:
+            troct = troct.groupby(group_by_coord)
+
+        troct = self._mean(troct)
+
+        return troct
 
     def calc_acc(
         self,
@@ -661,9 +838,7 @@ class Scores:
 
         return acc
 
-    def calc_bias(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
-    ):
+    def calc_bias(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
         """
         Calculate mean bias of forecast data w.r.t. reference data
 
@@ -758,9 +933,7 @@ class Scores:
             ratio_spat_variability = ratio_spat_variability.groupby(group_by_coord)
 
         if non_spatial_avg_dims is not None:
-            ratio_spat_variability = ratio_spat_variability.mean(
-                dim=non_spatial_avg_dims
-            )
+            ratio_spat_variability = ratio_spat_variability.mean(dim=non_spatial_avg_dims)
 
         return ratio_spat_variability
 
@@ -806,15 +979,11 @@ class Scores:
         """
 
         def seeps(ground_truth, prediction, thr_light, thr_heavy, seeps_weights):
-            ob_ind = (ground_truth > thr_light).astype(int) + (
-                ground_truth >= thr_heavy
-            ).astype(int)
-            fc_ind = (prediction > thr_light).astype(int) + (
-                prediction >= thr_heavy
-            ).astype(int)
-            indices = (
-                fc_ind * 3 + ob_ind
-            )  # index of each data point in their local 3x3 matrices
+            ob_ind = (ground_truth > thr_light).astype(int) + (ground_truth >= thr_heavy).astype(
+                int
+            )
+            fc_ind = (prediction > thr_light).astype(int) + (prediction >= thr_heavy).astype(int)
+            indices = fc_ind * 3 + ob_ind  # index of each data point in their local 3x3 matrices
             seeps_val = seeps_weights[
                 indices, np.arange(len(indices))
             ]  # pick the right weight for each data point
@@ -844,9 +1013,7 @@ class Scores:
         )
 
         if prediction.ndim == 1:
-            seeps_values_all = seeps(
-                ground_truth, prediction, t1.values, t3, seeps_weights
-            )
+            seeps_values_all = seeps(ground_truth, prediction, t1.values, t3, seeps_weights)
         else:
             prediction, ground_truth = (
                 prediction.transpose(..., "xy"),
@@ -860,9 +1027,7 @@ class Scores:
                     ground_truth[it, ...],
                 )
                 # in case of missing data, skip computation
-                if np.all(np.isnan(prediction_now)) or np.all(
-                    np.isnan(ground_truth_now)
-                ):
+                if np.all(np.isnan(prediction_now)) or np.all(np.isnan(ground_truth_now)):
                     continue
 
                 seeps_values_all[it, ...] = seeps(
@@ -899,9 +1064,7 @@ class Scores:
 
         return self._mean(np.sqrt(ens_std**2))
 
-    def calc_ssr(
-        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
-    ):
+    def calc_ssr(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
         """
         Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data
 
@@ -1039,22 +1202,15 @@ class Scores:
                 # underlying arrays are numpy arrays -> use numpy's native random generator
                 rng = np.random.default_rng()
 
-                obs_stacked += (
-                    rng.random(size=obs_stacked.shape, dtype=np.float32) * noise_fac
-                )
-                fcst_stacked += (
-                    rng.random(size=fcst_stacked.shape, dtype=np.float32) * noise_fac
-                )
+                obs_stacked += rng.random(size=obs_stacked.shape, dtype=np.float32) * noise_fac
+                fcst_stacked += rng.random(size=fcst_stacked.shape, dtype=np.float32) * noise_fac
             else:
                 # underlying arrays are dask arrays -> use dask's random generator
                 obs_stacked += (
-                    da.random.random(size=obs_stacked.shape, chunks=obs_stacked.chunks)
-                    * noise_fac
+                    da.random.random(size=obs_stacked.shape, chunks=obs_stacked.chunks) * noise_fac
                 )
                 fcst_stacked += (
-                    da.random.random(
-                        size=fcst_stacked.shape, chunks=fcst_stacked.chunks
-                    )
+                    da.random.random(size=fcst_stacked.shape, chunks=fcst_stacked.chunks)
                     * noise_fac
                 )
 
@@ -1082,9 +1238,7 @@ class Scores:
         See https://xskillscore.readthedocs.io/en/stable/api
         Note: this version is found to be very slow. Use calc_rank_histogram alternatively.
         """
-        rank_hist = xskillscore.rank_histogram(
-            gt, p, member_dim=self.ens_dim, dim=self._agg_dims
-        )
+        rank_hist = xskillscore.rank_histogram(gt, p, member_dim=self.ens_dim, dim=self._agg_dims)
 
         return rank_hist
 
@@ -1136,9 +1290,7 @@ class Scores:
 
         if order == 1:
             dvar_dlambda = (
-                1.0
-                / (r_e * np.cos(lat) * dlambda)
-                * scalar_field.differentiate(lon_name)
+                1.0 / (r_e * np.cos(lat) * dlambda) * scalar_field.differentiate(lon_name)
             )
             dvar_dphi = 1.0 / (r_e * dphi) * scalar_field.differentiate(lat_name)
             dvar_dlambda = dvar_dlambda.transpose(
@@ -1149,8 +1301,6 @@ class Scores:
             if dom_avg:
                 var_diff_amplitude = var_diff_amplitude.mean(dim=[lat_name, lon_name])
         else:
-            raise ValueError(
-                f"Second-order differentation is not implemenetd in {method} yet."
-            )
+            raise ValueError(f"Second-order differentation is not implemenetd in {method} yet.")
 
         return var_diff_amplitude
