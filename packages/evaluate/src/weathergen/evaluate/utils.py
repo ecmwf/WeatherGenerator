@@ -18,8 +18,12 @@ from tqdm import tqdm
 
 from weathergen.evaluate.clim_utils import get_climatology
 from weathergen.evaluate.io_reader import Reader
-from weathergen.evaluate.plot_utils import plot_metric_region
-from weathergen.evaluate.plotter import LinePlots, Plotter
+from weathergen.evaluate.plot_utils import (
+    bar_plot_metric_region,
+    plot_metric_region,
+    score_card_metric_region,
+)
+from weathergen.evaluate.plotter import BarPlots, LinePlots, Plotter, ScoreCards
 from weathergen.evaluate.score import VerifiedData, get_score
 
 _logger = logging.getLogger(__name__)
@@ -30,7 +34,6 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
     """
     Get the next forecast step data for the given forecast step.
     """
-
     fstep_idx = fsteps.index(fstep)
     # Get the next forecast step
     next_fstep = fsteps[fstep_idx + 1] if fstep_idx + 1 < len(fsteps) else None
@@ -66,18 +69,20 @@ def calc_scores_per_stream(
     Tuple of xarray DataArray containing the scores and the number of points per sample.
     """
 
-    _logger.info(
-        f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}..."
-    )
+    _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
 
     available_data = reader.check_availability(stream, mode="evaluation")
+
+    fsteps = available_data.fsteps
+    samples = available_data.samples
+    channels = available_data.channels
 
     output_data = reader.get_data(
         stream,
         region=region,
-        fsteps=available_data.fsteps,
-        samples=available_data.samples,
-        channels=available_data.channels,
+        fsteps=fsteps,
+        samples=samples,
+        channels=channels,
         return_counts=True,
     )
 
@@ -86,16 +91,6 @@ def calc_scores_per_stream(
     points_per_sample = output_data.points_per_sample
 
     aligned_clim_data = get_climatology(reader, da_tars, stream)
-
-    fsteps = [int(k) for k in da_tars.keys()]
-
-    first_da = list(da_preds.values())[0]
-
-    # TODO: improve the way we handle samples.
-    samples = list(np.atleast_1d(np.unique(first_da.sample.values)))
-    channels = list(np.atleast_1d(first_da.channel.values))
-
-    metric_list = []
 
     metric_stream = xr.DataArray(
         np.full(
@@ -110,9 +105,7 @@ def calc_scores_per_stream(
         },
     )
 
-    for (fstep, tars), (_, preds) in zip(
-        da_tars.items(), da_preds.items(), strict=False
-    ):
+    for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         _logger.debug(f"Verifying data for stream {stream}...")
 
         preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
@@ -121,9 +114,7 @@ def calc_scores_per_stream(
             climatology = aligned_clim_data[fstep] if aligned_clim_data else None
             score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
             # Build up computation graphs for all metrics
-            _logger.debug(
-                f"Build computation graphs for metrics for stream {stream}..."
-            )
+            _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
 
             combined_metrics = [
                 get_score(
@@ -149,14 +140,19 @@ def calc_scores_per_stream(
             )
             continue
 
-        metric_list.append(combined_metrics)
+        assert int(combined_metrics.forecast_step) == int(fstep), (
+            "Different steps in data and metrics. Please check."
+        )
 
-        metric_stream.loc[{"forecast_step": int(fstep)}] = combined_metrics
+        metric_stream.loc[
+            {
+                "forecast_step": int(combined_metrics.forecast_step),
+                "sample": combined_metrics.sample,
+                "channel": combined_metrics.channel,
+            }
+        ] = combined_metrics
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
-
-    metric_stream = xr.concat(metric_list, dim="forecast_step")
-    metric_stream = metric_stream.assign_coords({"forecast_step": fsteps})
 
     return metric_stream, points_per_sample
 
@@ -201,9 +197,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
         "image_format": global_plotting_opts.get("image_format", "png"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
-        "plot_subtimesteps": reader.get_inference_stream_attr(
-            stream, "tokenize_spacetime", False
-        ),
+        "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
     }
 
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
@@ -247,15 +241,11 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
 
     plot_names = []
 
-    for (fstep, tars), (_, preds) in zip(
-        da_tars.items(), da_preds.items(), strict=False
-    ):
+    for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         plot_chs = list(np.atleast_1d(tars.channel.values))
         plot_samples = list(np.unique(tars.sample.values))
 
-        for sample in tqdm(
-            plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"
-        ):
+        for sample in tqdm(plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"):
             plots = []
 
             data_selection = {
@@ -275,9 +265,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
                 plots.extend([map_tar, map_pred])
 
             if plot_histograms:
-                h = plotter.create_histograms_per_sample(
-                    tars, preds, plot_chs, data_selection
-                )
+                h = plotter.create_histograms_per_sample(tars, preds, plot_chs, data_selection)
                 plots.append(h)
 
             plotter = plotter.clean_data_selection()
@@ -286,12 +274,8 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
 
     if plot_animations:
         plot_fsteps = da_tars.keys()
-        h = plotter.animation(
-            plot_samples, plot_fsteps, plot_chs, data_selection, "preds"
-        )
-        h = plotter.animation(
-            plot_samples, plot_fsteps, plot_chs, data_selection, "targets"
-        )
+        h = plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "preds")
+        h = plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
 
     return plot_names
 
@@ -342,9 +326,7 @@ def metric_list_to_json(
             metric_now = metrics_stream.sel(metric=metric)
 
             # Save as individual DataArray, not Dataset
-            metric_now.attrs["npoints_per_sample"] = (
-                npoints_sample_stream.values.tolist()
-            )
+            metric_now.attrs["npoints_per_sample"] = npoints_sample_stream.values.tolist()
             metric_dict = metric_now.to_dict()
 
             # Match the expected filename pattern
@@ -426,12 +408,15 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     }
 
     plotter = LinePlots(plot_cfg, summary_dir)
-
+    sc_plotter = ScoreCards(plot_cfg, summary_dir)
+    br_plotter = BarPlots(plot_cfg, summary_dir)
     for region in regions:
         for metric in metrics:
-            plot_metric_region(
-                metric, region, runs, scores_dict, plotter, print_summary
-            )
+            plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+            if eval_opt.get("score_cards", False):
+                score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
+            if eval_opt.get("bar_plots", False):
+                bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
 
 
 ############# Utility functions ############
@@ -479,9 +464,7 @@ def common_ranges(
 
             list_min = calc_bounds(data_tars, data_preds, var, "min")
 
-            maps_config.update(
-                {var: {"vmax": float(max(list_max)), "vmin": float(min(list_min))}}
-            )
+            maps_config.update({var: {"vmax": float(max(list_max)), "vmin": float(min(list_min))}})
 
     return maps_config
 
