@@ -1,3 +1,4 @@
+import datetime
 import glob
 import logging
 import os
@@ -264,7 +265,12 @@ class Plotter:
         )
         plt.legend(frameon=False)
 
-        valid_time = str(target_data["valid_time"][0].values.astype("datetime64[m]"))
+        valid_time = str(
+            target_data["valid_time"][0]
+            .values.astype("datetime64[m]")
+            .astype(datetime.datetime)
+            .strftime("%Y-%m-%dT%H%M")
+        )
 
         # TODO: make this nicer
         parts = [
@@ -272,7 +278,7 @@ class Plotter:
             self.run_id,
             tag,
             str(self.sample),
-            valid_time.replace(":", ""),
+            valid_time,
             self.stream,
             varname,
             str(self.fstep).zfill(3),
@@ -437,7 +443,12 @@ class Plotter:
         ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
         ax.coastlines()
 
-        valid_time = str(data["valid_time"][0].values.astype("datetime64[m]"))
+        valid_time = str(
+            data["valid_time"][0]
+            .values.astype("datetime64[m]")
+            .astype(datetime.datetime)
+            .strftime("%Y-%m-%dT%H%M")
+        )
 
         scatter_plt = ax.scatter(
             data["lon"],
@@ -463,7 +474,7 @@ class Plotter:
             self.run_id,
             tag,
             str(self.sample),
-            valid_time.replace(":", ""),
+            valid_time,
             self.stream,
             varname,
             str(self.fstep).zfill(3),
