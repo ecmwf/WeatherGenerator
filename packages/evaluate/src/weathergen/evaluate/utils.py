@@ -257,25 +257,25 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
                 )
                 for ens in available_data.ensemble:  
                     
-                    preds_ens = preds.sel(ens=ens) if ens in preds.dims and ens != "mean" else preds
-                    preds_name = "preds" if ens not in preds.dims else f"preds_ens_{ens}" 
-
+                    preds_ens = preds.sel(ens=ens) if "ens" in preds.dims and ens != "mean" else preds
+                    preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
+                    preds_name = "_".join(filter(None, ["preds", preds_tag]))  # avoid trailing underscore
+                    
                     plotter.create_maps_per_sample(
                         preds_ens, plot_chs, data_selection, preds_name, maps_config
                     )
 
-                if plot_histograms:
-                    preds_name = "" if ens not in preds.dims else f"ens_{ens}"
-                    plotter.create_histograms_per_sample(
-                        tars, preds_ens, plot_chs, data_selection, preds_name
-                    )
+                    if plot_histograms:
+                        plotter.create_histograms_per_sample(
+                            tars, preds_ens, plot_chs, data_selection, preds_tag
+                        )
 
             plotter = plotter.clean_data_selection()
 
     if plot_animations:
         plot_fsteps = da_tars.keys()
         for ens in available_data.ensemble:  
-            preds_name = "preds" if ens not in preds.dims else f"preds_ens_{ens}" 
+            preds_name = "preds" if "ens" not in preds.dims else f"preds_ens_{ens}" 
             plotter.animation(
                 plot_samples, plot_fsteps, plot_chs, data_selection, preds_name
             )

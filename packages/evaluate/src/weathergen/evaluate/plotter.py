@@ -452,7 +452,7 @@ class Plotter:
             .astype(datetime.datetime)
             .strftime("%Y-%m-%dT%H%M")
         )
-
+        
         scatter_plt = ax.scatter(
             data["lon"],
             data["lat"],
