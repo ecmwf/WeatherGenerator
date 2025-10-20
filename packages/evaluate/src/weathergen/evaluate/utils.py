@@ -71,17 +71,19 @@ def calc_scores_per_stream(
     _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
 
     available_data = reader.check_availability(stream, mode="evaluation")
-
+   
     fsteps = available_data.fsteps
     samples = available_data.samples
     channels = available_data.channels
+    ensemble = available_data.ensemble
 
     output_data = reader.get_data(
         stream,
-        region=region,
-        fsteps=fsteps,
-        samples=samples,
-        channels=channels,
+        region   = region,
+        fsteps   = fsteps,
+        samples  = samples,
+        channels = channels,
+        ensemble = ensemble, 
         return_counts=True,
     )
 
@@ -91,7 +93,7 @@ def calc_scores_per_stream(
 
     metric_stream = xr.DataArray(
         np.full(
-            (len(samples), len(fsteps), len(channels), len(metrics)),
+            (len(samples), len(fsteps), len(channels), len(metrics), len(ensemble)),
             np.nan,
         ),
         coords={
@@ -99,6 +101,7 @@ def calc_scores_per_stream(
             "forecast_step": fsteps,
             "channel": channels,
             "metric": metrics,
+            "ens": ensemble,
         },
     )
 
@@ -121,7 +124,7 @@ def calc_scores_per_stream(
                 )
                 for metric in metrics
             ]
-
+            
             combined_metrics = xr.concat(combined_metrics, dim="metric")
             combined_metrics["metric"] = metrics
 
@@ -129,6 +132,7 @@ def calc_scores_per_stream(
             combined_metrics = combined_metrics.compute()
             combined_metrics = scalar_coord_to_dim(combined_metrics, "channel")
             combined_metrics = scalar_coord_to_dim(combined_metrics, "sample")
+            combined_metrics = scalar_coord_to_dim(combined_metrics, "ens")
         else:
             # depending on the datset, there might be no data (e.g. no CERRA in southern hemisphere region)
             _logger.warning(
@@ -140,20 +144,23 @@ def calc_scores_per_stream(
             "Different steps in data and metrics. Please check."
         )
 
-        metric_stream.loc[
-            {
+        criteria = {
                 "forecast_step": int(combined_metrics.forecast_step),
                 "sample": combined_metrics.sample,
                 "channel": combined_metrics.channel,
             }
-        ] = combined_metrics
+
+        if "ens" in combined_metrics.dims:
+            criteria["ens"] =  combined_metrics.ens
+
+        metric_stream.loc[criteria] = combined_metrics
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
     return metric_stream, points_per_sample
 
 
-def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[str]:
+def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
     """
     Plot the data for a given run and stream.
 
@@ -165,10 +172,6 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
         Stream name to plot data for.
     global_plotting_opts: dict
         Dictionary containing all plotting options that apply globally to all run_ids
-
-    Returns
-    -------
-    List of plot names generated during the plotting process.
     """
     run_id = reader.run_id
 
@@ -219,6 +222,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
         samples=available_data.samples,
         fsteps=available_data.fsteps,
         channels=available_data.channels,
+        ensemble=available_data.ensemble,
     )
 
     da_tars = model_output.target
@@ -254,26 +258,34 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
                 map_tar = plotter.create_maps_per_sample(
                     tars, plot_chs, data_selection, "targets", maps_config
                 )
+                for ens in available_data.ensemble:  
+                    if ens == "mean":
+                        preds_ens = preds.mean(dim="ens")
+                    else:
+                        preds_ens = preds.sel(ens=ens)
+                    
+                    map_pred = plotter.create_maps_per_sample(
+                        preds_ens, plot_chs, data_selection, f"preds_ens_{ens}", maps_config
+                    )
 
-                map_pred = plotter.create_maps_per_sample(
-                    preds, plot_chs, data_selection, "preds", maps_config
-                )
-                plots.extend([map_tar, map_pred])
-
-            if plot_histograms:
-                h = plotter.create_histograms_per_sample(tars, preds, plot_chs, data_selection)
-                plots.append(h)
+                if plot_histograms:
+                    h = plotter.create_histograms_per_sample(
+                        tars, preds_ens, plot_chs, data_selection, "ens_{ens}"
+                    )
 
             plotter = plotter.clean_data_selection()
 
-            plot_names.append(plots)
-
     if plot_animations:
         plot_fsteps = da_tars.keys()
-        h = plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "preds")
-        h = plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
+        for ens in available_data.ensemble:  
+            h = plotter.animation(
+                plot_samples, plot_fsteps, plot_chs, data_selection, f"preds_ens_{ens}"
+            )
+        h = plotter.animation(
+            plot_samples, plot_fsteps, plot_chs, data_selection, "targets"
+        )
 
-    return plot_names
+    return
 
 
 def metric_list_to_json(
@@ -401,6 +413,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         "fig_size": plt_opt.get("fig_size", (8, 10)),
         "log_scale": eval_opt.get("log_scale", False),
         "add_grid": eval_opt.get("add_grid", False),
+        "plot_ensemble": eval_opt.get("plot_ensemble", False),
     }
 
     plotter = LinePlots(plot_cfg, summary_dir)
@@ -447,7 +460,8 @@ def common_ranges(
         if var in maps_config:
             if not isinstance(maps_config[var].get("vmax"), (int | float)):
                 list_max = calc_bounds(data_tars, data_preds, var, "max")
-
+                list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
+                
                 maps_config[var].update({"vmax": float(max(list_max))})
 
             if not isinstance(maps_config[var].get("vmin"), (int | float)):
@@ -457,8 +471,10 @@ def common_ranges(
 
         else:
             list_max = calc_bounds(data_tars, data_preds, var, "max")
-
+            list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
+            
             list_min = calc_bounds(data_tars, data_preds, var, "min")
+            list_min = np.concatenate([arr.flatten() for arr in list_min]).tolist()
 
             maps_config.update({var: {"vmax": float(max(list_max)), "vmin": float(min(list_min))}})
 
