@@ -287,11 +287,10 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
                         preds_ens, plot_chs, data_selection, preds_name, maps_config
                     )
 
-                if plot_histograms:
-                    preds_name = "" if ens not in preds.dims else f"ens_{ens}"
-                    plotter.create_histograms_per_sample(
-                        tars, preds_ens, plot_chs, data_selection, preds_name
-                    )
+                    if plot_histograms:
+                        plotter.create_histograms_per_sample(
+                            tars, preds_ens, plot_chs, data_selection, preds_tag
+                        )
 
             plotter = plotter.clean_data_selection()
 
