@@ -72,7 +72,7 @@ def calc_scores_per_stream(
     _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
 
     available_data = reader.check_availability(stream, mode="evaluation")
-   
+
     fsteps = available_data.fsteps
     samples = available_data.samples
     channels = available_data.channels
@@ -80,11 +80,11 @@ def calc_scores_per_stream(
 
     output_data = reader.get_data(
         stream,
-        region   = region,
-        fsteps   = fsteps,
-        samples  = samples,
-        channels = channels,
-        ensemble = ensemble, 
+        region=region,
+        fsteps=fsteps,
+        samples=samples,
+        channels=channels,
+        ensemble=ensemble,
         return_counts=True,
     )
 
@@ -478,6 +478,10 @@ def common_ranges(
             if not isinstance(maps_config[var].get("vmax"), (int | float)):
                 list_max = calc_bounds(data_tars, data_preds, var, "max")
                 list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
+<<<<<<< HEAD
+=======
+
+>>>>>>> 0e876d2 (lint)
                 maps_config[var].update({"vmax": float(max(list_max))})
 
             if not isinstance(maps_config[var].get("vmin"), (int | float)):
@@ -488,6 +492,10 @@ def common_ranges(
         else:
             list_max = calc_bounds(data_tars, data_preds, var, "max")
             list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
+<<<<<<< HEAD
+=======
+
+>>>>>>> 0e876d2 (lint)
             list_min = calc_bounds(data_tars, data_preds, var, "min")
             list_min = np.concatenate([arr.flatten() for arr in list_min]).tolist()
 

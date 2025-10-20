@@ -194,7 +194,7 @@ class Reader:
             "channel": set(self.get_channels(stream)),
             "ensemble": set(self.get_ensemble(stream)),
         }
-       
+
         check_score = True
         corrected = False
         for name in ["channel", "fstep", "sample", "ensemble"]:
@@ -423,7 +423,7 @@ class WeatherGenReader(Reader):
             samples = samples or sorted([int(sample) for sample in self.get_samples()])
             channels = channels or stream_cfg.get("channels", all_channels)
             channels = to_list(channels)
-            
+
             ensemble = ensemble or self.get_ensemble(stream)
             ensemble = to_list(ensemble)
 
@@ -437,7 +437,7 @@ class WeatherGenReader(Reader):
             )
 
             da_tars, da_preds = [], []
-         
+
             if return_counts:
                 points_per_sample = xr.DataArray(
                     np.full((len(fsteps), len(samples)), np.nan),
@@ -458,21 +458,21 @@ class WeatherGenReader(Reader):
                 for sample in tqdm(samples, desc=f"Processing {self.run_id} - {stream} - {fstep}"):
                     out = zio.get_data(sample, stream, fstep)
                     target, pred = out.target.as_xarray(), out.prediction.as_xarray()
-                   
+
                     if region != "global":
                         _logger.debug(
                             f"Applying bounding box mask for region '{region}' to targets and predictions..."
                         )
                         target = bbox.apply_mask(target)
                         pred = bbox.apply_mask(pred)
-                
+
                     npoints = len(target.ipoint)
                     if npoints == 0:
                         _logger.info(
                             f"Skipping {stream} sample {sample} forecast step: {fstep}. Dataset is empty."
                         )
                         continue
-                   
+
                     if ensemble == ["mean"]:
                         _logger.debug("Averaging over ensemble members.")
                         pred = pred.mean("ens", keepdims=True)
@@ -630,12 +630,12 @@ class WeatherGenReader(Reader):
         all_channels = self.get_inference_stream_attr(stream, "val_target_channels")
         _logger.debug(f"Channels found in config: {all_channels}")
         return all_channels
-    
+
     def get_ensemble(self, stream: str | None = None) -> list[str]:
         """Get the list of ensemble member names for a given stream from the config."""
         _logger.debug(f"Getting ensembles for stream {stream}...")
 
-       #TODO: improve this to get ensemble from io class
+        # TODO: improve this to get ensemble from io class
         with ZarrIO(self.fname_zarr) as zio:
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
         return list(dummy.prediction.as_xarray().coords["ens"].values)
