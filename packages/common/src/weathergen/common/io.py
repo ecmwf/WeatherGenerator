@@ -13,11 +13,10 @@ import itertools
 import logging
 import pathlib
 import typing
-from copy import deepcopy
 
-import astropy_healpix as hp
 import dask.array as da
 import numpy as np
+import torch
 import xarray as xr
 import zarr
 from numpy import datetime64
@@ -47,6 +46,22 @@ class IOReaderData:
     data: NDArray[DType]
     datetimes: NDArray[NPDT64]
 
+    def is_empty(self):
+        """
+        Test if data object is empty
+        """
+        return len(self.data) == 0
+
+    def to_torch(self):
+        """
+        Convert data, coords, and geoinfos to torch tensor
+        """
+        self.coords = torch.tensor(self.coords)
+        self.geoinfos = torch.tensor(self.geoinfos)
+        self.data = torch.tensor(self.data)
+
+        return self
+
     @classmethod
     def create(cls, other: typing.Any) -> "IOReaderData":
         """
@@ -68,43 +83,33 @@ class IOReaderData:
         return cls(**dataclasses.asdict(other))
 
     @classmethod
-    def spoof(
-        cls, other: typing.Any, nchannels, datetime, geoinfo_size, mean_of_data
-    ) -> typing.Self:
+    def combine(cls, others: typing.Any) -> "IOReaderData":
         """
-        Spoof an instance from data_reader_base.ReaderData instance.
+        create an instance from data_reader_base.ReaderData instances.
+
         other should be such an instance.
         """
 
-        hl = 5
-        dx = 0.5
-        dy = 0.5
-        other_copy = deepcopy(other)
-        num_healpix_cells = 12 * 4**hl
-        lons, lats = hp.healpix_to_lonlat(
-            np.arange(0, num_healpix_cells), 2**hl, dx=dx, dy=dy, order="nested"
-        )
-        other_copy.coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
-        other_copy.geoinfos = np.zeros((other_copy.coords.shape[0], geoinfo_size), dtype=np.float32)
+        assert len(others) > 0
 
-        other_copy.data = np.expand_dims(mean_of_data.astype(np.float32), axis=0).repeat(
-            other_copy.coords.shape[0], axis=0
-        )
-        other_copy.datetimes = np.array(datetime).repeat(other_copy.coords.shape[0])
+        other = others[0]
+        coords = np.zeros((0, other.coords.shape[1]), dtype=other.coords.dtype)
+        geoinfos = np.zeros((0, other.geoinfos.shape[1]), dtype=other.geoinfos.dtype)
+        data = np.zeros((0, other.data.shape[1]), dtype=other.data.dtype)
+        datetimes = np.array([], dtype=other.datetimes.dtype)
 
-        n_datapoints = len(other_copy.data)
+        for other in others:
+            n_datapoints = len(other.data)
+            assert other.coords.shape == (n_datapoints, 2), "number of datapoints do not match"
+            assert other.geoinfos.shape[0] == n_datapoints, "number of datapoints do not match"
+            assert other.datetimes.shape[0] == n_datapoints, "number of datapoints do not match"
 
-        assert other_copy.coords.shape == (n_datapoints, 2), (
-            "number of datapoints do not match data"
-        )
-        assert other_copy.geoinfos.shape[0] == n_datapoints, (
-            "number of datapoints do not match data"
-        )
-        assert other_copy.datetimes.shape[0] == n_datapoints, (
-            "number of datapoints do not match data"
-        )
+            coords = np.concatenate([coords, other.coords])
+            geoinfos = np.concatenate([geoinfos, other.geoinfos])
+            data = np.concatenate([data, other.data])
+            datetimes = np.concatenate([datetimes, other.datetimes])
 
-        return cls(**dataclasses.asdict(other_copy))
+        return cls(**dataclasses.asdict(other))
 
 
 @dataclasses.dataclass

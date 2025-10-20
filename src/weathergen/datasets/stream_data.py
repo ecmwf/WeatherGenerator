@@ -13,15 +13,22 @@ import torch
 
 from weathergen.common.io import IOReaderData
 
+# class ModelInputData :
+#     """
+#     Representation of model input data, collecting all streams
+#     """
 
+#     def __init__() :
+
+#     def add_stream( stream_data : StreamInputData) :
+
+
+# class StreamInputData:
 class StreamData:
     """
-    StreamData object that encapsulates all data the model ingests for one batch item
+    Encapsulates all data the model ingests for one batch item
     for one stream.
     """
-
-    # TODO: comment
-    is_spoof: bool = False
 
     def __init__(self, idx: int, forecast_steps: int, nhc_source: int, nhc_target: int) -> None:
         """
@@ -46,6 +53,10 @@ class StreamData:
         self.forecast_steps = forecast_steps
         self.nhc_source = nhc_source
         self.nhc_target = nhc_target
+
+        # TODO: comment
+        self.source_is_spoof: bool = False
+        self.target_is_spoof: bool = False
 
         # TODO add shape of tensors
 
@@ -110,7 +121,6 @@ class StreamData:
         None
         """
 
-        source = spoof(source)
         self.source_raw += [source]
         self.source_tokens_lens += [torch.ones([self.nhc_source], dtype=torch.int32)]
         self.source_tokens_cells += [torch.tensor([])]
@@ -318,6 +328,8 @@ class StreamData:
             self.source_centroids[idx] = self.mask_value
 
         else:
+            self.source_is_spoof = True
+
             self.source_raw = IOReaderData(np.array([]), np.array([]), np.array([]), np.array([]))
             self.source_tokens_lens = torch.zeros([self.nhc_source])
             self.source_tokens_cells = torch.tensor([])
@@ -365,8 +377,13 @@ class StreamData:
                 self.target_tokens_lens[fstep] = torch.tensor([0])
                 self.target_coords_lens[fstep] = torch.tensor([])
 
+    def is_spoof(self) -> bool:
+        """
+        Test if source or target is spoof data (to conservatively exclude data/predictions)
+        """
+        return self.source_is_spoof or self.target_is_spoof
 
-# TODO: other, nchannels unnneeded
+
 def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> IOReaderData:
     """
     Spoof an instance from data_reader_base.ReaderData instance.
