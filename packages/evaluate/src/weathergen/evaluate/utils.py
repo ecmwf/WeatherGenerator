@@ -239,14 +239,11 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         da_tars, da_preds, available_data.channels, global_plotting_opts[stream]
     )
 
-    plot_names = []
-
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         plot_chs = list(np.atleast_1d(tars.channel.values))
         plot_samples = list(np.unique(tars.sample.values))
 
         for sample in tqdm(plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"):
-            plots = []
 
             data_selection = {
                 "sample": sample,
@@ -255,22 +252,22 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
             }
 
             if plot_maps:
-                map_tar = plotter.create_maps_per_sample(
+                plotter.create_maps_per_sample(
                     tars, plot_chs, data_selection, "targets", maps_config
                 )
                 for ens in available_data.ensemble:  
-                    if ens == "mean":
-                        preds_ens = preds.mean(dim="ens")
-                    else:
-                        preds_ens = preds.sel(ens=ens)
                     
-                    map_pred = plotter.create_maps_per_sample(
-                        preds_ens, plot_chs, data_selection, f"preds_ens_{ens}", maps_config
+                    preds_ens = preds.sel(ens=ens) if ens in preds.dims and ens != "mean" else preds
+                    preds_name = "preds" if ens not in preds.dims else f"preds_ens_{ens}" 
+
+                    plotter.create_maps_per_sample(
+                        preds_ens, plot_chs, data_selection, preds_name, maps_config
                     )
 
                 if plot_histograms:
-                    h = plotter.create_histograms_per_sample(
-                        tars, preds_ens, plot_chs, data_selection, "ens_{ens}"
+                    preds_name = "" if ens not in preds.dims else f"ens_{ens}"
+                    plotter.create_histograms_per_sample(
+                        tars, preds_ens, plot_chs, data_selection, preds_name
                     )
 
             plotter = plotter.clean_data_selection()
@@ -278,10 +275,11 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
     if plot_animations:
         plot_fsteps = da_tars.keys()
         for ens in available_data.ensemble:  
-            h = plotter.animation(
-                plot_samples, plot_fsteps, plot_chs, data_selection, f"preds_ens_{ens}"
+            preds_name = "preds" if ens not in preds.dims else f"preds_ens_{ens}" 
+            plotter.animation(
+                plot_samples, plot_fsteps, plot_chs, data_selection, preds_name
             )
-        h = plotter.animation(
+        plotter.animation(
             plot_samples, plot_fsteps, plot_chs, data_selection, "targets"
         )
 

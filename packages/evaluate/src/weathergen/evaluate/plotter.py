@@ -888,7 +888,7 @@ class ScoreCards:
 
         # Set axis labels
         ylabels = [
-            f"{var}\n({baseline.coords['metric'].item().upper()}={baseline.sel({'channel': var}).mean(dim=['sample', 'forecast_step']).values:.3f})"
+            f"{var}\n({baseline.coords['metric'].item().upper()}={baseline.sel(channel = var).mean().values.squeeze():.3f})"
             for var in channels
         ]
         xlabels = [
