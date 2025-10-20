@@ -31,9 +31,7 @@ _logger.setLevel(logging.INFO)
 
 if not _logger.handlers:
     handler = logging.StreamHandler()
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     handler.setFormatter(formatter)
     _logger.addHandler(handler)
 
@@ -98,9 +96,9 @@ def reshape_dataset(input_data_array: xr.DataArray) -> xr.Dataset:
         ipoint=input_data_array.coords["ipoint"],
         pressure_level=pl,
     )
-    reshaped_dataset = reshaped_dataset.set_index(
-        ipoint=("valid_time", "lat", "lon")
-    ).unstack("ipoint")
+    reshaped_dataset = reshaped_dataset.set_index(ipoint=("valid_time", "lat", "lon")).unstack(
+        "ipoint"
+    )
     return reshaped_dataset
 
 
@@ -120,9 +118,8 @@ def add_conventions(stream: str, run_id: str, ds: xr.Dataset) -> xr.Dataset:
     ds.attrs["title"] = f"WeatherGenerator Output for {run_id} using stream {stream}"
     ds.attrs["institution"] = "WeatherGenerator Project"
     ds.attrs["source"] = "WeatherGenerator v0.0"
-    ds.attrs["history"] = (
-        "Created using the zarr_nc.py script on "
-        + np.datetime_as_string(np.datetime64("now"), unit="s")
+    ds.attrs["history"] = "Created using the zarr_nc.py script on " + np.datetime_as_string(
+        np.datetime64("now"), unit="s"
     )
     ds.attrs["Conventions"] = "CF-1.12"
     return ds
@@ -172,9 +169,7 @@ def cf_parser(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
         if mapping[var_name]["level_type"] == "sfc":
             dims.remove("pressure")
         coordinates = {}
-        for coord, new_name in config["coordinates"][
-            mapping[var_name]["level_type"]
-        ].items():
+        for coord, new_name in config["coordinates"][mapping[var_name]["level_type"]].items():
             coordinates |= {
                 new_name: (
                     ds.coords[coord].dims,
@@ -257,7 +252,7 @@ def get_data(
     dtype: str,
     fsteps: list,
     channels: list,
-    fstep_hours: int, 
+    fstep_hours: int,
     n_processes: list,
     epoch: int,
     rank: int,
@@ -295,11 +290,7 @@ def get_data(
         all_channels = dummy_out.target.channels
         channels = all_channels if channels is None else channels
 
-    fsteps = (
-        zio_forecast_steps
-        if fsteps is None
-        else sorted([int(fstep) for fstep in fsteps])
-    )
+    fsteps = zio_forecast_steps if fsteps is None else sorted([int(fstep) for fstep in fsteps])
 
     samples = (
         zio_samples
@@ -310,8 +301,7 @@ def get_data(
         for sample_idx in tqdm(samples):
             da_fs = []
             step_tasks = [
-                (sample_idx, fstep, run_id, stream, dtype, epoch, rank)
-                for fstep in fsteps
+                (sample_idx, fstep, run_id, stream, dtype, epoch, rank) for fstep in fsteps
             ]
             for result in tqdm(
                 pool.imap_unordered(get_data_worker, step_tasks, chunksize=1),
@@ -323,9 +313,7 @@ def get_data(
                     result = result.as_xarray().squeeze()
                     if set(channels) != set(all_channels):
                         available_channels = result.channel.values
-                        existing_channels = [
-                            ch for ch in channels if ch in available_channels
-                        ]
+                        existing_channels = [ch for ch in channels if ch in available_channels]
                         if len(existing_channels) < len(channels):
                             _logger.info(
                                 f"The following channels were not found: "
@@ -340,7 +328,7 @@ def get_data(
             _logger.info(
                 f"Saving sample {sample_idx} data to {output_format} format in {output_dir}."
             )
-            
+
             save_sample_to_netcdf(
                 str(dtype)[:4],
                 da_fs,
@@ -383,9 +371,7 @@ def save_sample_to_netcdf(
         Loaded config for cf_parser function.
     """
     # find forecast_ref_time
-    frt = array_list[0].valid_time.values[0] - fstep_hours * int(
-        array_list[0].forecast_step.values
-    )
+    frt = array_list[0].valid_time.values[0] - fstep_hours * int(array_list[0].forecast_step.values)
     out_fname = output_filename(type_str, run_id, output_dir, output_format, frt)
     # check if file already exists
     if out_fname.exists():
@@ -406,9 +392,7 @@ def save_sample_to_netcdf(
         sample_all_steps = cf_parser(config, sample_all_steps)
         # add forecast_period attributes
         n_hours = fstep_hours.astype("int64")
-        sample_all_steps["forecast_period"] = (
-            sample_all_steps["forecast_period"] * n_hours
-        )
+        sample_all_steps["forecast_period"] = sample_all_steps["forecast_period"] * n_hours
         sample_all_steps["forecast_period"].attrs = {
             "standard_name": "forecast_period",
             "long_name": "time since forecast_reference_time",
@@ -495,11 +479,11 @@ def parse_args(args: list) -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--fstep-hours", 
-        type = int, 
-        default= 6, 
-        help= "Time difference between forecast steps in hours (e.g., 6)"
-        ) 
+        "--fstep-hours",
+        type=int,
+        default=6,
+        help="Time difference between forecast steps in hours (e.g., 6)",
+    )
 
     parser.add_argument(
         "--epoch",
@@ -535,7 +519,7 @@ def export_from_args(args: list) -> None:
     Export data from Zarr store to NetCDF files based on command line arguments.
     Parameters
     ----------
-        args : List of command line arguments.      
+        args : List of command line arguments.
     """
     args = parse_args(sys.argv[1:])
     run_id = args.run_id
@@ -559,7 +543,7 @@ def export_from_args(args: list) -> None:
     config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2cf.yaml")
     config = OmegaConf.load(config_file)
     # check config loaded correctly
-    assert len(config["variables"].keys()) > 0 , "Config file not loaded correctly"
+    assert len(config["variables"].keys()) > 0, "Config file not loaded correctly"
 
     for dtype in data_type:
         _logger.info(f"Starting processing {dtype} for run ID {run_id}.")
@@ -570,7 +554,7 @@ def export_from_args(args: list) -> None:
             dtype,
             fsteps,
             channels,
-            fstep_hours, 
+            fstep_hours,
             n_processes,
             epoch,
             rank,
