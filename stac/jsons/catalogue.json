@@ -90,6 +90,24 @@
          "rel": "child",
          "title": "ABI-GOES16",
          "type": "application/json"
+      },
+      {
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/ifs-fesom_atmos.json",
+         "rel": "child",
+         "title": "AWI IFS-FESOM Coupled Climate Model (Atmos)",
+         "type": "application/json"
+      },
+      {
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/ifs-fesom_ocean_elem.json",
+         "rel": "child",
+         "title": "AWI IFS-FESOM Coupled Climate Model (Ocean element)",
+         "type": "application/json"
+      },
+      {
+         "href": "https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/develop/stac/jsons/ifs-fesom_ocean_node.json",
+         "rel": "child",
+         "title": "AWI IFS-FESOM Coupled Climate Model (Ocean node)",
+         "type": "application/json"
       }
    ],
    "stac_extensions": [
