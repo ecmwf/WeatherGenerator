@@ -71,7 +71,7 @@ def calc_scores_per_stream(
     _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
 
     available_data = reader.check_availability(stream, mode="evaluation")
-   
+
     fsteps = available_data.fsteps
     samples = available_data.samples
     channels = available_data.channels
@@ -79,11 +79,11 @@ def calc_scores_per_stream(
 
     output_data = reader.get_data(
         stream,
-        region   = region,
-        fsteps   = fsteps,
-        samples  = samples,
-        channels = channels,
-        ensemble = ensemble, 
+        region=region,
+        fsteps=fsteps,
+        samples=samples,
+        channels=channels,
+        ensemble=ensemble,
         return_counts=True,
     )
 
@@ -124,7 +124,7 @@ def calc_scores_per_stream(
                 )
                 for metric in metrics
             ]
-            
+
             combined_metrics = xr.concat(combined_metrics, dim="metric")
             combined_metrics["metric"] = metrics
 
@@ -145,13 +145,13 @@ def calc_scores_per_stream(
         )
 
         criteria = {
-                "forecast_step": int(combined_metrics.forecast_step),
-                "sample": combined_metrics.sample,
-                "channel": combined_metrics.channel,
-            }
+            "forecast_step": int(combined_metrics.forecast_step),
+            "sample": combined_metrics.sample,
+            "channel": combined_metrics.channel,
+        }
 
         if "ens" in combined_metrics.dims:
-            criteria["ens"] =  combined_metrics.ens
+            criteria["ens"] = combined_metrics.ens
 
         metric_stream.loc[criteria] = combined_metrics
 
@@ -244,7 +244,6 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         plot_samples = list(np.unique(tars.sample.values))
 
         for sample in tqdm(plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"):
-
             data_selection = {
                 "sample": sample,
                 "stream": stream,
@@ -255,12 +254,15 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
                 plotter.create_maps_per_sample(
                     tars, plot_chs, data_selection, "targets", maps_config
                 )
-                for ens in available_data.ensemble:  
-                    
-                    preds_ens = preds.sel(ens=ens) if "ens" in preds.dims and ens != "mean" else preds
+                for ens in available_data.ensemble:
+                    preds_ens = (
+                        preds.sel(ens=ens) if "ens" in preds.dims and ens != "mean" else preds
+                    )
                     preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
-                    preds_name = "_".join(filter(None, ["preds", preds_tag]))  # avoid trailing underscore
-                    
+                    preds_name = "_".join(
+                        filter(None, ["preds", preds_tag])
+                    )  # avoid trailing underscore
+
                     plotter.create_maps_per_sample(
                         preds_ens, plot_chs, data_selection, preds_name, maps_config
                     )
@@ -274,14 +276,10 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
 
     if plot_animations:
         plot_fsteps = da_tars.keys()
-        for ens in available_data.ensemble:  
-            preds_name = "preds" if "ens" not in preds.dims else f"preds_ens_{ens}" 
-            plotter.animation(
-                plot_samples, plot_fsteps, plot_chs, data_selection, preds_name
-            )
-        plotter.animation(
-            plot_samples, plot_fsteps, plot_chs, data_selection, "targets"
-        )
+        for ens in available_data.ensemble:
+            preds_name = "preds" if "ens" not in preds.dims else f"preds_ens_{ens}"
+            plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, preds_name)
+        plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
 
     return
 
@@ -459,7 +457,7 @@ def common_ranges(
             if not isinstance(maps_config[var].get("vmax"), (int | float)):
                 list_max = calc_bounds(data_tars, data_preds, var, "max")
                 list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
-                
+
                 maps_config[var].update({"vmax": float(max(list_max))})
 
             if not isinstance(maps_config[var].get("vmin"), (int | float)):
@@ -470,7 +468,7 @@ def common_ranges(
         else:
             list_max = calc_bounds(data_tars, data_preds, var, "max")
             list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
-            
+
             list_min = calc_bounds(data_tars, data_preds, var, "min")
             list_min = np.concatenate([arr.flatten() for arr in list_min]).tolist()
 

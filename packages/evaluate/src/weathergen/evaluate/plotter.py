@@ -77,8 +77,8 @@ class Plotter:
 
         self.sample = None
         self.stream = None
-        self.fstep  = None
-        
+        self.fstep = None
+
         self.select = {}
 
     def update_data_selection(self, select: dict):
@@ -118,7 +118,7 @@ class Plotter:
         """
         self.sample = None
         self.stream = None
-        self.fstep  = None
+        self.fstep = None
 
         self.select = {}
         return self
@@ -138,7 +138,7 @@ class Plotter:
         -------
             xarray DataArray with selected data.
         """
-     
+
         for key, value in selection.items():
             if key in da.coords and key not in da.dims:
                 # Coordinate like 'sample' aligned to another dim
@@ -452,7 +452,7 @@ class Plotter:
             .astype(datetime.datetime)
             .strftime("%Y-%m-%dT%H%M")
         )
-        
+
         scatter_plt = ax.scatter(
             data["lon"],
             data["lat"],
@@ -480,7 +480,7 @@ class Plotter:
             valid_time,
             self.stream,
             varname,
-            "fstep", 
+            "fstep",
             str(self.fstep).zfill(3),
         ]
 
@@ -539,10 +539,10 @@ class Plotter:
 
                     name = "_".join(filter(None, parts))
                     fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
-                    
+
                     names = glob.glob(fname)
                     image_paths += names
-              
+
                 images = [Image.open(path) for path in image_paths]
                 images[0].save(
                     f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{var}.gif",
@@ -638,40 +638,40 @@ class LinePlots:
                     _logger.info(f"  x: {xi:.3f}, y: {yi:.3f}")
                 _logger.info("--------------------------")
         return
-    
+
     def _plot_ensemble(self, data: xr.DataArray, x_dim: str, label: str) -> None:
         """
-        Plot ensemble spread for a data array.  
-       
+        Plot ensemble spread for a data array.
+
         Parameters
         ----------
         data: xr.xArray
             DataArray to be plotted
         x_dim: str
             Dimension to be used for the x-axis.
-        label: str  
+        label: str
             Label for the dataset
         Returns
         -------
             None
         """
-        averaged = data.mean(
-                dim=[dim for dim in data.dims if dim != x_dim], skipna=True
-            ).sortby(x_dim)
-        
+        averaged = data.mean(dim=[dim for dim in data.dims if dim != x_dim], skipna=True).sortby(
+            x_dim
+        )
+
         lines = plt.plot(
-                averaged[x_dim],
-                averaged.values,
-                label=label,
-                marker="o",
-                linestyle="-",
-                )
+            averaged[x_dim],
+            averaged.values,
+            label=label,
+            marker="o",
+            linestyle="-",
+        )
         line = lines[0]
         color = line.get_color()
 
         ens = data.mean(
-                dim=[dim for dim in data.dims if dim not in [x_dim, "ens"] ], skipna=True
-            ).sortby(x_dim)
+            dim=[dim for dim in data.dims if dim not in [x_dim, "ens"]], skipna=True
+        ).sortby(x_dim)
 
         if self.plot_ensemble == "std":
             std_dev = ens.std(dim="ens", skipna=True).sortby(x_dim)
@@ -680,8 +680,9 @@ class LinePlots:
                 (averaged - std_dev).values,
                 (averaged + std_dev).values,
                 label=f"{label} - std dev",
-                color = color,
-                alpha=0.2)
+                color=color,
+                alpha=0.2,
+            )
 
         elif self.plot_ensemble == "minmax":
             ens_min = ens.min(dim="ens", skipna=True).sortby(x_dim)
@@ -692,8 +693,9 @@ class LinePlots:
                 ens_min.values,
                 ens_max.values,
                 label=f"{label} - min max",
-                color = color, 
-                alpha=0.2)  
+                color=color,
+                alpha=0.2,
+            )
 
         elif self.plot_ensemble == "members":
             for j in range(ens.ens.size):
@@ -705,8 +707,8 @@ class LinePlots:
                 )
         else:
             _logger.warning(
-                f"LinePlot:: Unknown option for plot_ensemble: {plot_ensemble}. Skipping ensemble plotting."
-                    )
+                f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. Skipping ensemble plotting."
+            )
 
     def plot(
         self,
@@ -735,7 +737,7 @@ class LinePlots:
             Name of the dimension to be used for the y-axis.
         print_summary:
             If True, print a summary of the values from the graph.
-       
+
         Returns
         -------
             None
@@ -750,14 +752,10 @@ class LinePlots:
         fig = plt.figure(figsize=(12, 6), dpi=self.dpi_val)
 
         for i, data in enumerate(data_list):
-            non_zero_dims = [
-                dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1
-            ]
+            non_zero_dims = [dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1]
 
             if self.plot_ensemble and "ens" in non_zero_dims:
-                _logger.info(
-                    f"LinePlot:: Plotting ensemble with option {self.plot_ensemble}."
-                )
+                _logger.info(f"LinePlot:: Plotting ensemble with option {self.plot_ensemble}.")
                 self._plot_ensemble(data, x_dim, label_list[i])
             else:
                 if non_zero_dims:
@@ -776,7 +774,6 @@ class LinePlots:
                     marker="o",
                     linestyle="-",
                 )
-                
 
         xlabel = "".join(c if c.isalnum() else " " for c in x_dim)
         plt.xlabel(xlabel)
@@ -888,7 +885,7 @@ class ScoreCards:
 
         # Set axis labels
         ylabels = [
-            f"{var}\n({baseline.coords['metric'].item().upper()}={baseline.sel(channel = var).mean().values.squeeze():.3f})"
+            f"{var}\n({baseline.coords['metric'].item().upper()}={baseline.sel(channel=var).mean().values.squeeze():.3f})"
             for var in channels
         ]
         xlabels = [
