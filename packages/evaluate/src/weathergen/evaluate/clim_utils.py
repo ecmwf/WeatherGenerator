@@ -12,6 +12,7 @@ import logging
 import numpy as np
 import pandas as pd
 import xarray as xr
+from scipy.spatial import cKDTree
 from tqdm import tqdm
 
 _logger = logging.getLogger(__name__)
@@ -61,61 +62,29 @@ def match_climatology_time(target_datetime: pd.Timestamp, clim_data: xr.Dataset)
         return matching_indices[0]
 
 
-def find_climatology_indices(
-    target_lats: np.ndarray,
-    target_lons: np.ndarray,
-    clim_lats: np.ndarray,
-    clim_lons: np.ndarray,
-) -> np.ndarray:
+def build_climatology_indexer(clim_lats: np.typing.NDArray, clim_lons: np.typing.NDArray):
     """
-    Function to find climatology indices matching target coordinates with tolerance.
-
-    This function performs 2D coordinate matching between target coordinates and
-    climatology coordinates using approximate matching with 1e-10 tolerance.
-
-    Parameters
-    ----------
-    target_lats : np.ndarray
-        Target latitude coordinates (1D array)
-    target_lons : np.ndarray
-        Target longitude coordinates (1D array)
-    clim_lats : np.ndarray
-        Climatology latitude coordinates (1D array)
-    clim_lons : np.ndarray
-        Climatology longitude coordinates (1D array)
-
-    Returns
-    -------
-    np.ndarray
-        Array of climatology indices for each target coordinate.
-        Shape: (len(target_lats),). Contains -1 for coordinates with no match.
+    Build a fast KDTree indexer for climatology coordinates.
+    Returns a function that maps (target_lats, target_lons) -> climatology indices.
     """
+    # Normalize climatology longitudes once
+    clim_lons = np.where(clim_lons >= 180, clim_lons - 360, clim_lons)
 
-    # Convert to numpy arrays if needed
-    target_lats = np.asarray(target_lats)
-    target_lons = np.asarray(target_lons)
-    clim_lats = np.asarray(clim_lats)
-    clim_lons = np.asarray(clim_lons)
+    # Build KDTree on climatology coordinates
+    clim_coords = np.column_stack((clim_lats, clim_lons))
+    tree = cKDTree(clim_coords)
 
-    # Hardcode conversion of clim_lons from 0-360 to -180-180
-    clim_lons[clim_lons >= 180] = clim_lons[clim_lons >= 180] - 360
+    def indexer(
+        target_lats: np.typing.NDArray, target_lons: np.typing.NDArray, tol: float = 1e-5
+    ) -> np.typing.NDArray:
+        target_coords = np.column_stack((target_lats, target_lons))
+        dist, idx = tree.query(target_coords, distance_upper_bound=tol)
 
-    # Create result array initialized with -1 (no match)
-    result_indices = np.full(len(target_lats), -1, dtype=np.int32)
+        # Mark unmatched points as -1
+        idx[~np.isfinite(dist)] = -1
+        return idx.astype(np.int32)
 
-    # Approximate matching with 1e-10 tolerance
-    tolerance = 1e-5
-    for i, (target_lat, target_lon) in enumerate(zip(target_lats, target_lons, strict=True)):
-        # Find approximate matches using tolerance-based comparison
-        lat_match = np.abs(clim_lats - target_lat) <= tolerance
-        lon_match = np.abs(clim_lons - target_lon) <= tolerance
-        coord_match = lat_match & lon_match
-
-        match_indices = np.where(coord_match)[0]
-        if len(match_indices) > 0:
-            result_indices[i] = match_indices[0]  # Use first match
-
-    return result_indices
+    return indexer
 
 
 def align_clim_data(
@@ -144,29 +113,30 @@ def align_clim_data(
 
     if clim_data is None:
         return aligned_clim_data
+
     else:
+        # Build KDTree indexer once
+        clim_lats = clim_data.latitude.values
+        clim_lons = clim_data.longitude.values
+        clim_indexer = build_climatology_indexer(clim_lats, clim_lons)
         for fstep, target_data in target_output.items():
             samples = np.unique(target_data.sample.values)
-            # Prepare climatology data for each sample
-            matching_time_idx = match_climatology_time(target_data.valid_time.values[0], clim_data)
-            prepared_clim_data = (
-                clim_data.data.isel(
-                    time=matching_time_idx,
-                )
-                .sel(
-                    channels=target_data.channel.values,
-                )
-                .transpose("grid_points", "channels")
-            )
-
             for sample in tqdm(samples):
-                if len(samples) > 1:
-                    sample_mask = target_data.sample.values == sample
-                    target_lats = target_data.loc[{"ipoint": sample_mask}].lat.values
-                    target_lons = target_data.loc[{"ipoint": sample_mask}].lon.values
-                else:
-                    target_lats = target_data.lat.values
-                    target_lons = target_data.lon.values
+                sample_mask = target_data.sample.values == sample
+                timestamp = target_data.valid_time.values[sample_mask][0]
+                # Prepare climatology data for each sample
+                matching_time_idx = match_climatology_time(timestamp, clim_data)
+                prepared_clim_data = (
+                    clim_data.data.isel(
+                        time=matching_time_idx,
+                    )
+                    .sel(
+                        channels=target_data.channel.values,
+                    )
+                    .transpose("grid_points", "channels")
+                )
+                target_lats = target_data.loc[{"ipoint": sample_mask}].lat.values
+                target_lons = target_data.loc[{"ipoint": sample_mask}].lon.values
                 # check if target coords match cached target coords
                 # if they do, use cached clim_indices
                 if (
@@ -178,9 +148,8 @@ def align_clim_data(
                 else:
                     clim_lats = prepared_clim_data.latitude.values
                     clim_lons = prepared_clim_data.longitude.values
-                    clim_indices = find_climatology_indices(
-                        target_lats, target_lons, clim_lats, clim_lons
-                    )
+
+                    clim_indices = clim_indexer(target_lats, target_lons)
                     # Check for unmatched coordinates
                     unmatched_mask = clim_indices == -1
                     if np.any(unmatched_mask):
