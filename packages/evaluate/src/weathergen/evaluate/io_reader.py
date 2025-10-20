@@ -16,7 +16,7 @@ import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
 
-from weathergen.common.config import load_config, load_model_config
+from weathergen.common.config import get_shared_wg_path, load_config, load_model_config
 from weathergen.common.io import ZarrIO
 from weathergen.evaluate.derived_channels import DeriveChannels
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
@@ -67,7 +67,7 @@ class DataAvailability:
 
 
 class Reader:
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
+    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict[str, str] | None = None):
         """
         Generic data reader class.
 
@@ -77,8 +77,8 @@ class Reader:
             config with plotting and evaluation options for that run id
         run_id : str
             run id of the model
-        private_paths: lists
-            list of private paths for the supported HPC
+        private_paths: dict[srt, str]
+            dictionary of private paths for the supported HPC
         """
         self.eval_cfg = eval_cfg
         self.run_id = run_id
@@ -252,9 +252,7 @@ class Reader:
         )
 
         stream_cfg = self.get_stream(stream)
-        assert stream_cfg.get(mode, False), (
-            "Mode does not exist in stream config. Please add it."
-        )
+        assert stream_cfg.get(mode, False), "Mode does not exist in stream config. Please add it."
 
         samples = stream_cfg[mode].get("sample", None)
         fsteps = stream_cfg[mode].get("forecast_step", None)
@@ -262,9 +260,7 @@ class Reader:
 
         return DataAvailability(
             score_availability=True,
-            channels=None
-            if (channels == "all" or channels is None)
-            else list(channels),
+            channels=None if (channels == "all" or channels is None) else list(channels),
             fsteps=None if (fsteps == "all" or fsteps is None) else list(fsteps),
             samples=None if (samples == "all" or samples is None) else list(samples),
         )
@@ -283,10 +279,8 @@ class WeatherGenReader(Reader):
         self.inference_cfg = self.get_inference_config()
 
         if not self.results_base_dir:
-            self.results_base_dir = Path(self.inference_cfg["run_path"])
-            _logger.info(
-                f"Results directory obtained from model config: {self.results_base_dir}"
-            )
+            self.results_base_dir = Path(get_shared_wg_path("results"))
+            _logger.info(f"Results directory obtained from private config: {self.results_base_dir}")
         else:
             _logger.info(f"Results directory parsed: {self.results_base_dir}")
 
@@ -304,9 +298,7 @@ class WeatherGenReader(Reader):
         )
         # for backward compatibility allow metric_dir to be specified in the run config
         self.metrics_dir = Path(
-            self.eval_cfg.get(
-                "metrics_dir", self.metrics_base_dir / self.run_id / "evaluation"
-            )
+            self.eval_cfg.get("metrics_dir", self.metrics_base_dir / self.run_id / "evaluation")
         )
 
         self.fname_zarr = self.results_dir.joinpath(
@@ -314,9 +306,7 @@ class WeatherGenReader(Reader):
         )
 
         if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
-            _logger.error(
-                f"Zarr file {self.fname_zarr} does not exist or is not a directory."
-            )
+            _logger.error(f"Zarr file {self.fname_zarr} does not exist or is not a directory.")
             raise FileNotFoundError(
                 f"Zarr file {self.fname_zarr} does not exist or is not a directory."
             )
@@ -399,9 +389,7 @@ class WeatherGenReader(Reader):
             # TODO: Avoid conversion of fsteps and sample to integers (as obtained from the ZarrIO)
             fsteps = sorted([int(fstep) for fstep in fsteps])
             samples = sorted(
-                [int(sample) for sample in self.get_samples()]
-                if samples is None
-                else samples
+                [int(sample) for sample in self.get_samples()] if samples is None else samples
             )
             channels = channels or stream_cfg.get("channels", all_channels)
             channels = to_list(channels)
@@ -427,15 +415,11 @@ class WeatherGenReader(Reader):
             fsteps_final = []
 
             for fstep in fsteps:
-                _logger.info(
-                    f"RUN {self.run_id} - {stream}: Processing fstep {fstep}..."
-                )
+                _logger.info(f"RUN {self.run_id} - {stream}: Processing fstep {fstep}...")
                 da_tars_fs, da_preds_fs = [], []
                 pps = []
 
-                for sample in tqdm(
-                    samples, desc=f"Processing {self.run_id} - {stream} - {fstep}"
-                ):
+                for sample in tqdm(samples, desc=f"Processing {self.run_id} - {stream} - {fstep}"):
                     out = zio.get_data(sample, stream, fstep)
                     target, pred = out.target.as_xarray(), out.prediction.as_xarray()
 
@@ -467,6 +451,20 @@ class WeatherGenReader(Reader):
                 if da_tars_fs:
                     da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
                     da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
+                    if len(samples) == 1:
+                        # Ensure sample coordinate is repeated along ipoint even if only one sample
+                        da_tars_fs = da_tars_fs.assign_coords(
+                            sample=(
+                                "ipoint",
+                                np.repeat(da_tars_fs.sample.values, len(da_tars_fs.ipoint)),
+                            )
+                        )
+                        da_preds_fs = da_preds_fs.assign_coords(
+                            sample=(
+                                "ipoint",
+                                np.repeat(da_preds_fs.sample.values, len(da_preds_fs.ipoint)),
+                            )
+                        )
 
                     if set(channels) != set(all_channels):
                         _logger.debug(
@@ -482,22 +480,39 @@ class WeatherGenReader(Reader):
 
                     da_tars.append(da_tars_fs)
                     da_preds.append(da_preds_fs)
-                if return_counts:
-                    points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
+                    if return_counts:
+                        points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
 
             # Safer than a list
-            da_tars = {
-                fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=True)
-            }
-            da_preds = {
-                fstep: da for fstep, da in zip(fsteps_final, da_preds, strict=True)
-            }
+            da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=True)}
+            da_preds = {fstep: da for fstep, da in zip(fsteps_final, da_preds, strict=True)}
 
             return ReaderOutput(
                 target=da_tars, prediction=da_preds, points_per_sample=points_per_sample
             )
 
     ######## reader utils ########
+
+    def get_stream(self, stream: str):
+        """
+        returns the dictionary associated to a particular stream.
+        Returns an empty dictionary if the stream does not exist in the Zarr file.
+
+        Parameters
+        ----------
+        stream: str
+            the stream name
+
+        Returns
+        -------
+        dict
+            the config dictionary associated to that stream
+        """
+        stream_dict = {}
+        with ZarrIO(self.fname_zarr) as zio:
+            if stream in zio.streams:
+                stream_dict = self.eval_cfg.streams.get(stream, {})
+        return stream_dict
 
     def get_samples(self) -> set[int]:
         with ZarrIO(self.fname_zarr) as zio:

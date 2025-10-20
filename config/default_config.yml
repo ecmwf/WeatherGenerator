@@ -28,7 +28,9 @@ ae_global_num_blocks: 8
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
-ae_global_att_dense_rate: 0.2
+# TODO: switching to < 1 triggers triton-related issues.
+# See https://github.com/ecmwf/WeatherGenerator/issues/1050
+ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 
@@ -49,6 +51,7 @@ fe_num_blocks: 0
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
+impute_latent_noise_std: 0.0  # 1e-4
 
 healpix_level: 5
 
@@ -82,6 +85,11 @@ batch_size_validation_per_gpu: 1
 # e.g. ".*ERA5" will match any module whose name ends in ERA5\
 # encoders and decoders that exist per stream have the stream name attached at the end
 freeze_modules: ""
+
+# whether to track the exponential moving average of weights for validation
+validate_with_ema: True
+ema_ramp_up_ratio: 0.09
+ema_halflife_in_thousands: 1e-3
 
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
@@ -147,7 +155,8 @@ desc: ""
 data_loader_rng_seed: ???
 run_id: ???
 
-# Parameters for logging/printing in the training loop
-train_log:
-  # The period to log metrics (in number of batch steps)
-  log_interval: 20
+# The period to log in the training loop (in number of batch steps)
+train_log_freq:
+  terminal: 10
+  metrics: 20
+  checkpoint: 250
