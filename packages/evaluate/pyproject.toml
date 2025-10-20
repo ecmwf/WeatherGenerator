@@ -9,7 +9,7 @@ dependencies = [
     "xskillscore",
     "xhistogram",
     "panel",
-    "omegaconf~=2.3.0",
+    "omegaconf",
     "weathergen-common",
     "plotly>=6.2.0",
 ]
