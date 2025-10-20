@@ -212,7 +212,7 @@ class Reader:
             if not requested[name] <= reader_data[name]:
                 missing = requested[name] - reader_data[name]
 
-                if name == "ensemble" and "mean" in missing:
+                if name == "ensemble" and "mean" in missing: 
                     missing.remove("mean")  
                 if missing:
                     _logger.info(
