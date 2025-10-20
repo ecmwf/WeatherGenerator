@@ -68,9 +68,9 @@ class Masker:
         if self.current_strategy == "healpix":
             hl_data = self.healpix_level_data
             hl_mask = self.masking_strategy_config.get("hl_mask")
-            assert hl_data is not None and hl_mask is not None, (
-                "If HEALPix masking, hl_mask must be given in masking_strategy_config."
-            )
+            assert (
+                hl_data is not None and hl_mask is not None
+            ), "If HEALPix masking, hl_mask must be given in masking_strategy_config."
             assert hl_mask < hl_data, "hl_mask must be less than hl_data for HEALPix masking."
 
         if self.current_strategy == "channel":
@@ -85,15 +85,15 @@ class Masker:
                 # check explicit includes
                 source_include = stream.get("source_include", [])
                 target_include = stream.get("target_include", [])
-                assert set(source_include) == set(target_include), (
-                    "Source and target channels not identical. Required for masking_mode=channel"
-                )
+                assert set(source_include) == set(
+                    target_include
+                ), "Source and target channels not identical. Required for masking_mode=channel"
                 # check excludes
                 source_exclude = stream.get("source_exclude", [])
                 target_exclude = stream.get("target_exclude", [])
-                assert set(source_exclude) == set(target_exclude), (
-                    "Source and target channels not identical. Required for masking_mode=channel"
-                )
+                assert set(source_exclude) == set(
+                    target_exclude
+                ), "Source and target channels not identical. Required for masking_mode=channel"
 
     def reset_rng(self, rng) -> None:
         """
@@ -302,7 +302,7 @@ class Masker:
                 elif len(pp) == 0:
                     selected_tensors = cc
                 else:  # If length of target and mask doesn't match, create new mask
-                    ratio = np.sum(cc) / len(pp)  # Ratio of masked tokens in source
+                    ratio = np.sum(pp) / len(pp)  # Ratio of masked tokens in source
                     indx = max(1, int(ratio * len(cc)))  # Get the same for target
                     selected_tensors = cc[:indx]
 
@@ -367,9 +367,9 @@ class Masker:
         hl_data = self.healpix_level_data
         hl_mask = self.masking_strategy_config.get("hl_mask")
 
-        assert len(token_lens) == self.healpix_num_cells, (
-            f"Expected {self.healpix_num_cells} cells at level {hl_data}, got {len(token_lens)}."
-        )
+        assert (
+            len(token_lens) == self.healpix_num_cells
+        ), f"Expected {self.healpix_num_cells} cells at level {hl_data}, got {len(token_lens)}."
 
         # Calculate the number of parent cells at the mask level (hl_mask)
         num_parent_cells = 12 * (4**hl_mask)

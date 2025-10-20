@@ -97,10 +97,10 @@ class DataReaderFesom(DataReaderTimestep):
         # print(f"checking stream info {list(stream_info.keys())}")
 
     def _get_mesh_size(self, group: zarr.Group) -> int:
-        if "nod2" in group.data.attrs:
-            return group.data.attrs["nod2"]
-        else:
+        if "n_points" in group.data.attrs:
             return group.data.attrs["n_points"]
+        else:
+            return group.data.attrs["nod2"]
 
     def _reorder_groups(self, colnames: list[str], groups: list[zarr.Group]) -> list[da.Array]:
         reordered_data_arrays: list[da.Array] = []
