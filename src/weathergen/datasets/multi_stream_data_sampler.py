@@ -374,8 +374,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         )
                         stream_data.source_is_spoof = True
 
-                    # TODO: handling of conversion from numpy to torch here and below
-                    # TODO: this should only be collected in validation mode
+                    # preprocess data for model input
                     (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                         stream_info,
                         rdata.to_torch(),
@@ -383,6 +382,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         stream_ds[0].normalize_coords,
                     )
 
+                    # TODO: rdata only be collected in validation mode
                     stream_data.add_source(rdata, ss_lens, ss_cells, ss_centroids)
 
                     # target
@@ -396,7 +396,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                         # collect all targets for current stream
                         rdata: IOReaderData = collect_all(stream_ds, step_forecast_dt, "target")
-                        # combine target
 
                         if rdata.is_empty():
                             # work around for https://github.com/pytorch/pytorch/issues/158719
@@ -409,6 +408,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             )
                             stream_data.target_is_spoof = True
 
+                        # preprocess data for model input
                         (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
                             stream_info,
                             self.sampling_rate_target,
