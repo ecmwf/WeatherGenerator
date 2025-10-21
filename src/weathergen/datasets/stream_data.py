@@ -38,6 +38,8 @@ class StreamData:
         None
         """
 
+        self.mask_value = 0.0
+
         self.forecast_steps = forecast_steps
         self.nhc_source = nhc_source
         self.nhc_target = nhc_target
@@ -168,6 +170,9 @@ class StreamData:
         self.source_tokens_lens = ss_lens
         self.source_tokens_cells = torch.cat(ss_cells)
         self.source_centroids = torch.cat(ss_centroids)
+
+        idx = torch.isnan(self.source_tokens_cells)
+        self.source_tokens_cells[idx] = self.mask_value
 
     def add_target(
         self,

@@ -59,7 +59,7 @@ def collect_sources(stream_ds: list, idx: int, type: str) -> IOReaderData:
             assert False, "invalid type"
 
         # get source (of potentially multi-step length)
-        rdata = get_reader_data(idx)
+        rdata = get_reader_data(idx).remove_nan_coords()
         rdata.data = normalize_channels(rdata.data)
         rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
         rdatas += [rdata]
