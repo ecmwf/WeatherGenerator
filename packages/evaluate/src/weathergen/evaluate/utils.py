@@ -17,12 +17,8 @@ import xarray as xr
 from tqdm import tqdm
 
 from weathergen.evaluate.io_reader import Reader
-from weathergen.evaluate.plot_utils import (
-    bar_plot_metric_region,
-    plot_metric_region,
-    score_card_metric_region,
-)
-from weathergen.evaluate.plotter import BarPlots, LinePlots, Plotter, ScoreCards
+from weathergen.evaluate.plot_utils import plot_metric_region
+from weathergen.evaluate.plotter import LinePlots, Plotter
 from weathergen.evaluate.score import VerifiedData, get_score
 
 _logger = logging.getLogger(__name__)
@@ -33,6 +29,7 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
     """
     Get the next forecast step data for the given forecast step.
     """
+
     fstep_idx = fsteps.index(fstep)
     # Get the next forecast step
     next_fstep = fsteps[fstep_idx + 1] if fstep_idx + 1 < len(fsteps) else None
@@ -68,26 +65,47 @@ def calc_scores_per_stream(
     Tuple of xarray DataArray containing the scores and the number of points per sample.
     """
 
-    _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
+    _logger.info(
+        f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}..."
+    )
 
     available_data = reader.check_availability(stream, mode="evaluation")
-
-    fsteps = available_data.fsteps
-    samples = available_data.samples
-    channels = available_data.channels
 
     output_data = reader.get_data(
         stream,
         region=region,
-        fsteps=fsteps,
-        samples=samples,
-        channels=channels,
+        fsteps=available_data.fsteps,
+        samples=available_data.samples,
+        channels=available_data.channels,
         return_counts=True,
     )
 
     da_preds = output_data.prediction
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
+
+    # Print ensemble spread before selection
+    print_ensemble_spread(da_preds, stream)
+
+    # Select first ensemble member if ens dimension exists
+    for fstep in da_preds.keys():
+        if "ens" in da_preds[fstep].dims:
+            #da_preds[fstep] = da_preds[fstep].isel(ens=0, drop=True)
+            #_logger.info(f"Selected first ensemble member for forecast step {fstep}")
+            # or compute the mean: .mean(dim='ens'):
+            da_preds[fstep] = da_preds[fstep].mean(dim='ens')
+            _logger.info(f"Averaged ensemble members for forecast step {fstep}")
+
+    # get coordinate information from retrieved data
+    fsteps = [int(k) for k in da_tars.keys()]
+
+    first_da = list(da_preds.values())[0]
+
+    # TODO: improve the way we handle samples.
+    samples = list(np.atleast_1d(np.unique(first_da.sample.values)))
+    channels = list(np.atleast_1d(first_da.channel.values))
+
+    metric_list = []
 
     metric_stream = xr.DataArray(
         np.full(
@@ -102,7 +120,9 @@ def calc_scores_per_stream(
         },
     )
 
-    for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
+    for (fstep, tars), (_, preds) in zip(
+        da_tars.items(), da_preds.items(), strict=False
+    ):
         _logger.debug(f"Verifying data for stream {stream}...")
 
         preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
@@ -110,7 +130,9 @@ def calc_scores_per_stream(
         if preds.ipoint.size > 0:
             score_data = VerifiedData(preds, tars, preds_next, tars_next)
             # Build up computation graphs for all metrics
-            _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
+            _logger.debug(
+                f"Build computation graphs for metrics for stream {stream}..."
+            )
 
             combined_metrics = [
                 get_score(
@@ -136,19 +158,14 @@ def calc_scores_per_stream(
             )
             continue
 
-        assert int(combined_metrics.forecast_step) == int(fstep), (
-            "Different steps in data and metrics. Please check."
-        )
+        metric_list.append(combined_metrics)
 
-        metric_stream.loc[
-            {
-                "forecast_step": int(combined_metrics.forecast_step),
-                "sample": combined_metrics.sample,
-                "channel": combined_metrics.channel,
-            }
-        ] = combined_metrics
+        metric_stream.loc[{"forecast_step": int(fstep)}] = combined_metrics
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
+
+    metric_stream = xr.concat(metric_list, dim="forecast_step")
+    metric_stream = metric_stream.assign_coords({"forecast_step": fsteps})
 
     return metric_stream, points_per_sample
 
@@ -193,7 +210,9 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
         "image_format": global_plotting_opts.get("image_format", "png"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
-        "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
+        "plot_subtimesteps": reader.get_inference_stream_attr(
+            stream, "tokenize_spacetime", False
+        ),
     }
 
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
@@ -224,6 +243,19 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
     da_tars = model_output.target
     da_preds = model_output.prediction
 
+    # ensemble spread before selection
+    print_ensemble_spread(da_preds, stream)
+
+    # Here we select the first ensemble member if the dimension exists
+    for fstep in da_preds.keys():
+        if "ens" in da_preds[fstep].dims:
+            #da_preds[fstep] = da_preds[fstep].isel(ens=0, drop=True)
+            #_logger.info(f"Selected first ensemble member for forecast step {fstep}")
+            # or compute the mean: .mean(dim='ens'):
+            da_preds[fstep] = da_preds[fstep].mean(dim='ens')
+            _logger.info(f"Averaged ensemble members for forecast step {fstep}")
+ 
+
     if not da_tars:
         _logger.info(f"Skipping Plot Data for {stream}. Targets are empty.")
         return
@@ -237,11 +269,15 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
 
     plot_names = []
 
-    for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
+    for (fstep, tars), (_, preds) in zip(
+        da_tars.items(), da_preds.items(), strict=False
+    ):
         plot_chs = list(np.atleast_1d(tars.channel.values))
         plot_samples = list(np.unique(tars.sample.values))
 
-        for sample in tqdm(plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"):
+        for sample in tqdm(
+            plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"
+        ):
             plots = []
 
             data_selection = {
@@ -261,7 +297,9 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
                 plots.extend([map_tar, map_pred])
 
             if plot_histograms:
-                h = plotter.create_histograms_per_sample(tars, preds, plot_chs, data_selection)
+                h = plotter.create_histograms_per_sample(
+                    tars, preds, plot_chs, data_selection
+                )
                 plots.append(h)
 
             plotter = plotter.clean_data_selection()
@@ -270,8 +308,33 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
 
     if plot_animations:
         plot_fsteps = da_tars.keys()
-        h = plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "preds")
-        h = plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
+        h = plotter.animation(
+            plot_samples, plot_fsteps, plot_chs, data_selection, "preds"
+        )
+        h = plotter.animation(
+            plot_samples, plot_fsteps, plot_chs, data_selection, "targets"
+        )
+
+    plot_spread_skill = plot_settings.get("plot_spread_skill", False)
+    if plot_spread_skill:
+        _logger.info(f"Creating ensemble spread-skill diagnostic maps for {stream}...")
+        
+        # Need to reload data WITHOUT selecting first ensemble member
+        model_output_ens = reader.get_data(
+            stream,
+            samples=available_data.samples,
+            fsteps=available_data.fsteps,
+            channels=available_data.channels,
+        )
+        
+        # Check if ensemble dimension exists
+        first_pred = list(model_output_ens.prediction.values())[0]
+        if "ens" in first_pred.dims:
+            spread_skill_plots = plot_spread_skill_maps(reader, stream, global_plotting_opts)
+            plot_names.extend(spread_skill_plots)
+        else:
+            _logger.warning(f"Cannot plot spread-skill maps: no ensemble dimension found in {stream}")
+
 
     return plot_names
 
@@ -322,7 +385,9 @@ def metric_list_to_json(
             metric_now = metrics_stream.sel(metric=metric)
 
             # Save as individual DataArray, not Dataset
-            metric_now.attrs["npoints_per_sample"] = npoints_sample_stream.values.tolist()
+            metric_now.attrs["npoints_per_sample"] = (
+                npoints_sample_stream.values.tolist()
+            )
             metric_dict = metric_now.to_dict()
 
             # Match the expected filename pattern
@@ -404,15 +469,12 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     }
 
     plotter = LinePlots(plot_cfg, summary_dir)
-    sc_plotter = ScoreCards(plot_cfg, summary_dir)
-    br_plotter = BarPlots(plot_cfg, summary_dir)
+
     for region in regions:
         for metric in metrics:
-            plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
-            if eval_opt.get("score_cards", False):
-                score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
-            if eval_opt.get("bar_plots", False):
-                bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
+            plot_metric_region(
+                metric, region, runs, scores_dict, plotter, print_summary
+            )
 
 
 ############# Utility functions ############
@@ -460,7 +522,9 @@ def common_ranges(
 
             list_min = calc_bounds(data_tars, data_preds, var, "min")
 
-            maps_config.update({var: {"vmax": float(max(list_max)), "vmin": float(min(list_min))}})
+            maps_config.update(
+                {var: {"vmax": float(max(list_max[0])), "vmin": float(min(list_min[0]))}}
+            )
 
     return maps_config
 
@@ -543,3 +607,226 @@ def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataA
         da = da.drop_vars(name)
         da = da.expand_dims({name: [val]}, axis=axis)
     return da
+
+
+def print_ensemble_spread(da_preds: dict[str, xr.DataArray], stream: str):
+    """
+    Simple utility to print mean ensemble spread per channel.
+    
+    Spread is computed as sqrt(mean variance) with Bessel's correction (ddof=1).
+    
+    Parameters
+    ----------
+    da_preds : dict
+        Dictionary of predictions with forecast steps as keys
+    stream : str
+        Stream name for logging
+    """
+    print(f"\n{'='*60}")
+    print(f"ENSEMBLE SPREAD STATISTICS - {stream}")
+    print(f"{'='*60}")
+    
+    for fstep, preds in da_preds.items():
+        if "ens" in preds.dims:
+            # Compute variance across ensemble members with Bessel's correction
+            # ddof=1 means divide by (N-1) instead of N
+            variance = preds.var(dim="ens", ddof=1)  # [ipoint, channel]
+            
+            # Mean variance per channel (averaging over all points)
+            mean_variance_per_channel = variance.mean(dim="ipoint")  # [channel]
+            
+            # Spread is sqrt of mean variance
+            mean_spread_per_channel = np.sqrt(mean_variance_per_channel)
+            
+            print(f"\nForecast step: {fstep}")
+            print(f"  Number of ensemble members: {preds.sizes['ens']}")
+            print(f"  Number of points (all samples): {preds.sizes['ipoint']}")
+            print(f"  Using Bessel's correction: variance = sum((x - mean)²) / (N - 1)")
+            
+            # Print per-channel spreads
+            channels = preds.channel.values
+            for ch_idx, channel in enumerate(channels):
+                ch_spread = mean_spread_per_channel.isel(channel=ch_idx).values.item()
+                print(f"  {channel:>15s}: mean spread = {ch_spread:.6f}")
+            
+            # Overall mean spread (sqrt of mean variance across all channels and points)
+            overall_spread = np.sqrt(variance.mean()).values.item()
+            print(f"  {'OVERALL':>15s}: mean spread = {overall_spread:.6f}")
+        else:
+            print(f"\nForecast step: {fstep} - No ensemble dimension found")
+    
+    print(f"{'='*60}\n")
+
+
+def plot_spread_skill_maps(
+    reader: Reader,
+    stream: str,
+    global_plotting_opts: dict,
+) -> list[str]:
+    """
+    Plot spread, skill (RMSE), and spread-skill ratio maps for ensemble predictions.
+    
+    Creates three types of maps:
+    1. Ensemble spread (sqrt of variance across members, with Bessel's correction)
+    2. Ensemble skill (RMSE of ensemble mean)
+    3. Spread-skill ratio (calibration diagnostic)
+    
+    Spread is computed as sqrt(variance) with ddof=1 (Bessel's correction).
+    
+    Parameters
+    ----------
+    reader : Reader
+        Reader object containing all info about the run
+    stream : str
+        Stream name to plot data for
+    global_plotting_opts : dict
+        Dictionary containing all plotting options
+        
+    Returns
+    -------
+    list[str]
+        List of plot filenames generated
+    """
+    _logger.info(f"Creating spread-skill maps for {stream}...")
+    
+    plotter_cfg = {
+        "image_format": global_plotting_opts.get("image_format", "png"),
+        "dpi_val": global_plotting_opts.get("dpi_val", 300),
+        "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
+        "plot_subtimesteps": reader.get_inference_stream_attr(
+            stream, "tokenize_spacetime", False
+        ),
+    }
+    
+    plotter = Plotter(plotter_cfg, reader.runplot_dir)
+    
+    available_data = reader.check_availability(stream, mode="plotting")
+    
+    model_output = reader.get_data(
+        stream,
+        samples=available_data.samples,
+        fsteps=available_data.fsteps,
+        channels=available_data.channels,
+    )
+    
+    da_tars = model_output.target
+    da_preds = model_output.prediction
+    
+    plot_names = []
+    
+    for (fstep, tars), (_, preds) in zip(
+        da_tars.items(), da_preds.items(), strict=False
+    ):
+        if "ens" not in preds.dims:
+            _logger.warning(f"No ensemble dimension found for {stream} fstep {fstep}")
+            continue
+        
+        plot_chs = list(np.atleast_1d(tars.channel.values))
+        
+        # Compute ensemble statistics
+        # 1. Spread: sqrt(variance) across ensemble members with Bessel's correction
+        variance = preds.var(dim="ens", ddof=1)  # [ipoint, channel], divide by (N-1)
+        spread = np.sqrt(variance)  # [ipoint, channel]
+        
+        # 2. Skill: RMSE of ensemble mean
+        ens_mean = preds.mean(dim="ens")  # [ipoint, channel]
+        skill = np.sqrt(((ens_mean - tars) ** 2))  # [ipoint, channel]
+        
+        # 3. Spread-skill ratio (clip to avoid extreme values from near-zero skill)
+        spread_skill_ratio = spread / skill  # [ipoint, channel]
+        spread_skill_ratio = spread_skill_ratio.clip(max=1.5)
+        
+        # Set the data selection so plotter knows the stream
+        plot_samples = list(np.unique(tars.sample.values)) if "sample" in tars.dims else []
+        data_selection = {
+            "stream": stream,
+            "forecast_step": fstep,
+        }
+        if plot_samples:
+            data_selection["sample"] = plot_samples[0]
+        
+        plotter.update_data_selection(data_selection)
+        
+        # Initialize global plotting config if needed
+        if not isinstance(global_plotting_opts.get(stream), oc.DictConfig):
+            global_plotting_opts[stream] = oc.DictConfig({})
+        
+        # Create maps for each channel
+        for channel in plot_chs:
+            # Calculate common vmin/vmax for spread and skill to ensure consistent scales
+            spread_ch = spread.sel(channel=channel)  # [ipoint]
+            skill_ch = skill.sel(channel=channel)  # [ipoint]
+            
+            # Compute common range (use max of both for vmax, 0 for vmin)
+            vmin_common = 0.0
+            vmax_common = max(
+                float(spread_ch.max().values),
+                float(skill_ch.max().values)
+            )
+            
+            # Add some padding to vmax (5%)
+            vmax_common *= 1.05
+            
+            _logger.info(f"Common colorbar range for {channel}: [{vmin_common:.4f}, {vmax_common:.4f}]")
+            
+            # ← REMOVED: Don't modify global_plotting_opts to avoid conflicts
+            # Just pass settings directly via map_kwargs
+            
+            # 1. Plot SPREAD map
+            map_output_dir = plotter.get_map_output_dir("ensemble_spread")
+            if not map_output_dir.exists():
+                map_output_dir.mkdir(parents=True, exist_ok=True)
+            
+            spread_plot = plotter.scatter_plot(
+                spread_ch,
+                map_output_dir,
+                channel,
+                tag=f"spread_fstep{fstep}",
+                map_kwargs={
+                    "vmin": vmin_common,
+                    "vmax": vmax_common,
+                },
+            )
+            plot_names.append(spread_plot)
+            _logger.info(f"Created spread map for {stream} - {channel} - fstep {fstep}")
+            
+            # 2. Plot SKILL (RMSE) map with same range
+            map_output_dir = plotter.get_map_output_dir("ensemble_skill")
+            if not map_output_dir.exists():
+                map_output_dir.mkdir(parents=True, exist_ok=True)
+            
+            skill_plot = plotter.scatter_plot(
+                skill_ch,
+                map_output_dir,
+                channel,
+                tag=f"skill_fstep{fstep}",
+                map_kwargs={
+                    "vmin": vmin_common,
+                    "vmax": vmax_common,
+                },
+            )
+            plot_names.append(skill_plot)
+            _logger.info(f"Created skill map for {stream} - {channel} - fstep {fstep}")
+            
+            # 3. Plot SPREAD-SKILL RATIO map
+            map_output_dir = plotter.get_map_output_dir("spread_skill_ratio")
+            if not map_output_dir.exists():
+                map_output_dir.mkdir(parents=True, exist_ok=True)
+            
+            ratio_plot = plotter.scatter_plot(
+                spread_skill_ratio.sel(channel=channel),
+                map_output_dir,
+                channel,
+                tag=f"spread_skill_ratio_fstep{fstep}",
+                map_kwargs={
+                    "vmin": 0.0,
+                    "vmax": 1.2,
+                },
+            )
+            plot_names.append(ratio_plot)
+            _logger.info(f"Created spread-skill ratio map for {stream} - {channel} - fstep {fstep}")
+        
+        # Clean up data selection after each forecast step
+        plotter.clean_data_selection()
+    
+    return plot_names

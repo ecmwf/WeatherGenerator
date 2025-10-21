@@ -43,6 +43,7 @@ run_ids :
           plot_maps: true
           plot_histograms: true
           plot_animations: true
+          plot_spread_skill: true
       CERRA:
         channels: ["z_500", "t_850", "u_850"] #, "blah"]
         evaluation:
