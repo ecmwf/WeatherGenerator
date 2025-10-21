@@ -526,7 +526,7 @@ class WeatherGenReader(Reader):
             else:
                 _logger.warning(
                     f"No climatology path specified for stream {stream}. Setting climatology to NaN. "
-                    "Add 'climatology_path' to evaluation config to keep metrics like ACC."
+                    "Add 'climatology_path' to evaluation config to use metrics like ACC."
                 )
 
         return clim_data_path

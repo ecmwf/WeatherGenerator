@@ -788,6 +788,26 @@ class Scores:
 
         return troct
 
+    def _calc_acc_group(self, fcst_group: xr.DataArray, obs_group: xr.DataArray, spatial_dims: list[str]) -> xr.DataArray:
+        """ Calculate ACC for a single group
+        Parameters
+        ----------  
+        fcst_group: xr.DataArray
+            Forecast data for the group 
+        obs_group: xr.DataArray
+            Observation data for the group
+        spatial_dims: List[str]
+            Names of spatial dimensions over which ACC is calculated.
+        Returns
+        -------
+        xr.DataArray
+            ACC for the group
+        """
+
+        return (fcst_group * obs_group).sum(spatial_dims) / np.sqrt(
+            (fcst_group**2).sum(spatial_dims) * (obs_group**2).sum(spatial_dims)
+        )
+    
     def calc_acc(
         self,
         p: xr.DataArray,
@@ -828,17 +848,12 @@ class Scores:
                     f"Spatial dimension '{dim}' not found in prediction data dimensions: {p.dims}"
                 )
         if c is None:
-            c = xr.full_like(p, np.nan).values
+            return xr.full_like(p.sum(spatial_dims), np.nan)
 
         # Calculate anomalies
         fcst_ano, obs_ano = p - c, gt - c
 
         if group_by_coord:
-            # Define a function to calculate ACC for each group
-            def calc_acc_group(fcst_group, obs_group):
-                return (fcst_group * obs_group).sum(spatial_dims) / np.sqrt(
-                    (fcst_group**2).sum(spatial_dims) * (obs_group**2).sum(spatial_dims)
-                )
 
             # Apply groupby and calculate ACC within each group using apply
             fcst_grouped = fcst_ano.groupby(group_by_coord)
@@ -847,7 +862,7 @@ class Scores:
             # Use apply to calculate ACC for each group - this preserves the coordinate structure
             acc = xr.concat(
                 [
-                    calc_acc_group(fcst_group, obs_grouped[group_label])
+                    self._calc_acc_group(fcst_group, obs_grouped[group_label], spatial_dims)
                     for group_label, fcst_group in fcst_grouped
                 ],
                 dim=group_by_coord,
