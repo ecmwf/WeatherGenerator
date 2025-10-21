@@ -51,17 +51,18 @@ class StreamData:
 
         # initialize empty members
         self.sample_idx = idx
-        self.target_coords = [[] for _ in range(forecast_steps + 1)]
+        self.target_coords = [torch.tensor([]) for _ in range(forecast_steps + 1)]
         self.target_coords_raw = [[] for _ in range(forecast_steps + 1)]
         self.target_times_raw = [[] for _ in range(forecast_steps + 1)]
         # this is not directly used but to precompute index in compute_idxs_predict()
         self.target_coords_lens = [
-            [0 for _ in range(self.nhc_target)] for _ in range(forecast_steps + 1)
+            torch.tensor([0 for _ in range(self.nhc_target)]) for _ in range(forecast_steps + 1)
         ]
-        self.target_tokens = [[] for _ in range(forecast_steps + 1)]
+        self.target_tokens = [torch.tensor([]) for _ in range(forecast_steps + 1)]
         self.target_tokens_lens = [
-            [0 for _ in range(self.nhc_target)] for _ in range(forecast_steps + 1)
+            torch.tensor([0 for _ in range(self.nhc_target)]) for _ in range(forecast_steps + 1)
         ]
+
         # source tokens per cell
         self.source_tokens_cells = []
         # length of source tokens per cell (without padding)
