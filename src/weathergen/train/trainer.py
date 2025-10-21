@@ -596,7 +596,7 @@ class Trainer(TrainerBase):
                 if bidx % self.train_log_freq.terminal == 0:
                     self.last_grad_norm = self._get_tensor_item(total_norm)
                 if bidx % self.train_log_freq.metrics == 0:
-                    self._log_instant_grad_norms(TRAIN, total_norm)
+                    self._log_instant_grad_norms(TRAIN)
 
             # optimizer step
             self.grad_scaler.step(self.optimizer)
@@ -984,10 +984,10 @@ class Trainer(TrainerBase):
 
     def _get_tensor_item(self, tensor):
         """
-        When using FSDP2, we need full_tensor().item() instead of .item(), see here:
-        https://gist.github.com/Kai-46/a9835ef3f36e76d06afee6c11f388144
+        When using FSDP2, tensor is a DTensor and we need full_tensor().item() instead of .item(),
+        see here: https://gist.github.com/Kai-46/a9835ef3f36e76d06afee6c11f388144
         """
-        return tensor.full_tensor().item() if self.cf.world_size > 1 else tensor.item()
+        return tensor.full_tensor().item() if isinstance(tensor, DTensor) else tensor.item()
 
     def _log_instant_grad_norms(self, stage: Stage):
         """
