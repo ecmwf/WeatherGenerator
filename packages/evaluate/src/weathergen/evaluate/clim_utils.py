@@ -202,8 +202,8 @@ def get_climatology(reader, da_tars, stream: str) -> xr.Dataset | None:
     """
     # Get climatology data path from configuration
     clim_data_path = reader.get_climatology_filename(stream)
-  
-    aligned_clim_data = None   
+
+    aligned_clim_data = None
 
     if clim_data_path:
         clim_data = xr.open_dataset(clim_data_path)

@@ -507,28 +507,28 @@ class WeatherGenReader(Reader):
         """
 
         stream_dict = self.get_stream(stream)
-       
+
         clim_data_path = stream_dict.get("climatology_path", None)
         if not clim_data_path:
             clim_base_dir = self.inference_cfg.get("data_path_aux", None)
 
             clim_fn = next(
-            (
-                item.get("climatology_filename")
-                for item in self.inference_cfg["streams"]
-                if item.get("name") == stream
-            ),
-            None,
-             )
+                (
+                    item.get("climatology_filename")
+                    for item in self.inference_cfg["streams"]
+                    if item.get("name") == stream
+                ),
+                None,
+            )
 
             if clim_base_dir and clim_fn:
                 clim_data_path = Path(clim_base_dir).join(clim_fn)
             else:
                 _logger.warning(
-                f"No climatology path specified for stream {stream}. Setting climatology to NaN. "
-                "Add 'climatology_path' to evaluation config to keep metrics like ACC."
-            )
-        
+                    f"No climatology path specified for stream {stream}. Setting climatology to NaN. "
+                    "Add 'climatology_path' to evaluation config to keep metrics like ACC."
+                )
+
         return clim_data_path
 
     def get_stream(self, stream: str):
