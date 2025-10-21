@@ -53,6 +53,7 @@ def match_climatology_time(target_datetime: pd.Timestamp, clim_data: xr.Dataset)
     if len(matching_indices) == 0:
         _logger.warning(
             f"No matching climatology time found for {target_datetime} (DOY: {target_doy}, Hour: {target_hour})"
+            f"Please check that climatology data and stream input data filenames match."
         )
         return None
     else:
@@ -200,39 +201,13 @@ def get_climatology(reader, da_tars, stream: str) -> xr.Dataset | None:
         Climatology dataset if available, otherwise None
     """
     # Get climatology data path from configuration
-    stream_dict = reader.eval_cfg["streams"][stream]
-    inference_cfg = reader.get_inference_config()
-    # This searches for the climatology filename in the stream configuration
-    clim_fn = next(
-        (
-            item.get("climatology_filename")
-            for item in inference_cfg["streams"]
-            if item.get("name") == stream
-        ),
-        None,
-    )
+    clim_data_path = reader.get_climatology_filename(stream)
+  
+    aligned_clim_data = None   
 
-    if stream_dict.get("needs_climatology", False):
-        # Check if climatology path is specified in the eval configuration
-        if "climatology_path" in stream_dict:
-            clim_data_path = stream_dict["climatology_path"]
-            clim_data = xr.open_dataset(clim_data_path)
-            _logger.info("Aligning climatological data with target structure...")
-            aligned_clim_data = align_clim_data(da_tars, clim_data)
-        # Otherwise check if a general aux data path and clim fn is specified in the inference configuration
-        elif "data_path_aux" in inference_cfg and clim_fn is not None:
-            clim_data_path = inference_cfg["data_path_aux"]
-            clim_data_path = clim_data_path + clim_fn
-            clim_data = xr.open_dataset(clim_data_path)
-            _logger.info("Aligning climatological data with target structure...")
-            aligned_clim_data = align_clim_data(da_tars, clim_data)
-        else:
-            _logger.warning(
-                f"No climatology path specified for stream {stream}. Setting climatology to NaN. "
-                "Add 'climatology_path' to evaluation config to keep metrics like ACC."
-            )
-            aligned_clim_data = None
-    else:
-        aligned_clim_data = None
+    if clim_data_path:
+        clim_data = xr.open_dataset(clim_data_path)
+        _logger.info("Aligning climatological data with target structure...")
+        aligned_clim_data = align_clim_data(da_tars, clim_data)
 
     return aligned_clim_data
