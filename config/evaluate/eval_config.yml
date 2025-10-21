@@ -22,7 +22,6 @@ evaluation:
   summary_dir: "./plots/"
   plot_ensemble: "members" #supported: false, "std", "minmax", "members"
   print_summary: false #print out score values on screen. it can be verbose
-  plot_ensemble: 
   log_scale: false
   add_grid: false
   score_cards: false
@@ -43,7 +42,7 @@ run_ids :
         plotting:
           sample: [1, 3]
           forecast_step: [1,3, 2]
-          ensemble: "all" #supported: "all", "mean", [0,1,2]
+          ensemble: [0,2,5] #supported: "all", "mean", [0,1,2]
           plot_maps: true
           plot_histograms: true
           plot_animations: true
