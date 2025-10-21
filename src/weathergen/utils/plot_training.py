@@ -227,7 +227,7 @@ def plot_lr(
 
     plt.legend(legend_str)
     plt.grid(True, which="both", ls="-")
-    plt.yscale("log")
+    #plt.yscale("log")
     plt.title("learning rate")
     plt.ylabel("lr")
     plt.xlabel(x_axis)
@@ -302,7 +302,7 @@ def plot_utilization(
 
     plt.legend(legend_str)
     plt.grid(True, which="both", ls="-")
-    # plt.yscale( 'log')
+    #plt.yscale( 'log')
     plt.title("utilization")
     plt.ylabel("percentage utilization")
     plt.xlabel(x_axis)
@@ -368,8 +368,13 @@ def plot_loss_per_stream(
         _fig = plt.figure(figsize=(10, 7), dpi=300)
 
         legend_strs = []
-        min_val = np.finfo(np.float32).max
-        max_val = 0.0
+        
+        #min_val = np.finfo(np.float32).max
+        #max_val = 0.0
+
+        min_val = np.inf  # Will be updated to actual minimum
+        max_val = -np.inf  # Will be updated to actual maximum
+
         for mode in modes:
             legend_strs += [[]]
             for err in errs:
@@ -415,8 +420,10 @@ def plot_loss_per_stream(
 
                         # skip all-nan slices
                         if (~np.isnan(y_data)).sum() > 0:
-                            min_val = np.min([min_val, np.nanmin(y_data)])
-                            max_val = np.max([max_val, np.nanmax(y_data)])
+                            # ← FIX: Properly track min/max including negative values
+                            min_val = min(min_val, np.nanmin(y_data))
+                            max_val = max(max_val, np.nanmax(y_data))
+
 
         # TODO: ensure that legend is plotted with full opacity
         legend_str = legend_strs[0]
@@ -426,7 +433,12 @@ def plot_loss_per_stream(
             continue
 
         # no valid data found
-        if (min_val >= max_val) or np.isnan(min_val) or np.isnan(max_val):
+        #if (min_val >= max_val) or np.isnan(min_val) or np.isnan(max_val):
+        #    continue
+
+        if not (np.isfinite(min_val) and np.isfinite(max_val) and min_val < max_val):
+            plt.close()
+            _logger.warning(f"No valid data range for stream: {stream_name}")
             continue
 
         legend = plt.legend(legend_str, loc="upper right" if not x_scale_log else "lower left")
@@ -701,7 +713,7 @@ def plot_train(args=None):
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
-        errs=["loss_mse", "gmm_nll", "ens_gaussian_nll"],
+        errs=["loss_mse", "gmm_nll", "ens_gaussian_nll", "kernel_crps"],
     )
     plot_loss_per_stream(
         ["val"],
@@ -712,7 +724,7 @@ def plot_train(args=None):
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
-        errs=["loss_mse", "gmm_nll", "ens_gaussian_nll"],
+        errs=["loss_mse", "gmm_nll", "ens_gaussian_nll", "kernel_crps"],
     )
     plot_loss_per_stream(
         ["train"],
@@ -723,7 +735,7 @@ def plot_train(args=None):
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
-        errs=["loss_mse", "gmm_nll", "ens_gaussian_nll"],
+        errs=["loss_mse", "gmm_nll", "ens_gaussian_nll", "kernel_crps"],
     )
 
     # plot all cols for all run_ids
@@ -735,7 +747,7 @@ def plot_train(args=None):
             run_data,
             get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
             plot_dir=out_dir,
-            errs=["loss_mse", "gmm_nll", "ens_gaussian_nll"],
+            errs=["loss_mse", "gmm_nll", "ens_gaussian_nll", "kernel_crps"],
         )
     plot_loss_per_run(
         ["val"],
@@ -744,7 +756,7 @@ def plot_train(args=None):
         run_data,
         get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
         plot_dir=out_dir,
-        errs=["loss_mse", "gmm_nll", "ens_gaussian_nll"],
+        errs=["loss_mse", "gmm_nll", "ens_gaussian_nll", "kernel_crps"],
     )
 
 

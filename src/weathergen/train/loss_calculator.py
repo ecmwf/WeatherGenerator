@@ -251,6 +251,7 @@ class LossCalculator:
                 # reshape prediction tensor to match target's dimensions: extract data/coords and
                 # remove token dimension if it exists.
                 # expected final shape of pred is [ensemble_size, num_samples, num_channels].
+
                 pred = pred.reshape([pred.shape[0], *target.shape])
                 assert pred.shape[1] > 0
 
