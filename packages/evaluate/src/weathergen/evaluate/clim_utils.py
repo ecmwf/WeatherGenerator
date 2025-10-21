@@ -134,7 +134,7 @@ def align_clim_data(
                     .sel(
                         channels=target_data.channel.values,
                     )
-                    .transpose("grid_points", "channels")
+                    .transpose("grid_points", "channels")  # dimensions specific to anemoi
                 )
                 target_lats = target_data.loc[{"ipoint": sample_mask}].lat.values
                 target_lons = target_data.loc[{"ipoint": sample_mask}].lon.values
@@ -165,6 +165,7 @@ def align_clim_data(
                     cached_target_lats = target_lats
                     cached_target_lons = target_lons
 
+                # TODO: generalize to potential variation of grid_point dimension name
                 clim_values = prepared_clim_data.isel(grid_points=clim_indices).values
                 try:
                     if len(samples) > 1:
