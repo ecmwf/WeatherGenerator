@@ -799,6 +799,7 @@ class Model(torch.nn.Module):
         Args:
             model_params : Query and embedding parameters (never used)
             tokens : Input tokens to be processed by the model.
+            fstep: Current forecast step index (can be used as aux info).
         Returns:
             Processed tokens
         Raises:
