@@ -493,6 +493,44 @@ class WeatherGenReader(Reader):
 
     ######## reader utils ########
 
+    def get_climatology_filename(self, stream: str) -> str | None:
+        """
+        Get the climatology filename for a given stream from the inference configuration.
+        Parameters
+        ----------
+        stream : str
+            Name of the data stream.
+        Returns
+        -------
+        str or None
+            Climatology filename if specified, otherwise None.
+        """
+
+        stream_dict = self.get_stream(stream)
+
+        clim_data_path = stream_dict.get("climatology_path", None)
+        if not clim_data_path:
+            clim_base_dir = self.inference_cfg.get("data_path_aux", None)
+
+            clim_fn = next(
+                (
+                    item.get("climatology_filename")
+                    for item in self.inference_cfg["streams"]
+                    if item.get("name") == stream
+                ),
+                None,
+            )
+
+            if clim_base_dir and clim_fn:
+                clim_data_path = Path(clim_base_dir).join(clim_fn)
+            else:
+                _logger.warning(
+                    f"No climatology path specified for stream {stream}. Setting climatology to NaN. "
+                    "Add 'climatology_path' to evaluation config to use metrics like ACC."
+                )
+
+        return clim_data_path
+
     def get_stream(self, stream: str):
         """
         returns the dictionary associated to a particular stream.

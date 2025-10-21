@@ -16,6 +16,7 @@ import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
 
+from weathergen.evaluate.clim_utils import get_climatology
 from weathergen.evaluate.io_reader import Reader
 from weathergen.evaluate.plot_utils import (
     bar_plot_metric_region,
@@ -89,6 +90,8 @@ def calc_scores_per_stream(
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
 
+    aligned_clim_data = get_climatology(reader, da_tars, stream)
+
     metric_stream = xr.DataArray(
         np.full(
             (len(samples), len(fsteps), len(channels), len(metrics)),
@@ -108,7 +111,8 @@ def calc_scores_per_stream(
         preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
 
         if preds.ipoint.size > 0:
-            score_data = VerifiedData(preds, tars, preds_next, tars_next)
+            climatology = aligned_clim_data[fstep] if aligned_clim_data else None
+            score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
             # Build up computation graphs for all metrics
             _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
 
