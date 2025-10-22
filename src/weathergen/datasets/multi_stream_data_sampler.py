@@ -41,14 +41,25 @@ type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 logger = logging.getLogger(__name__)
 
 
-def collect_sources(stream_ds: list, idx: int, type: str) -> IOReaderData:
+def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
+    """
+    Convert data, coords, and geoinfos to torch tensor
+    """
+    rdata.coords = torch.tensor(rdata.coords)
+    rdata.geoinfos = torch.tensor(rdata.geoinfos)
+    rdata.data = torch.tensor(rdata.data)
+
+    return rdata
+
+
+def collect_datasources(stream_datasets: list, idx: int, type: str) -> IOReaderData:
     """
     Utility function to collect all sources / targets from streams list
     """
 
     rdatas = []
 
-    for ds in stream_ds:
+    for ds in stream_datasets:
         if type == "source":
             get_reader_data = ds.get_source
             normalize_channels = ds.normalize_source_channels
@@ -56,7 +67,7 @@ def collect_sources(stream_ds: list, idx: int, type: str) -> IOReaderData:
             get_reader_data = ds.get_target
             normalize_channels = ds.normalize_target_channels
         else:
-            assert False, "invalid type"
+            assert False, "invalid value for argument `type`"
 
         # get source (of potentially multi-step length)
         rdata = get_reader_data(idx).remove_nan_coords()
@@ -355,10 +366,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         idx, forecast_dt + self.forecast_offset, self.num_healpix_cells
                     )
 
-                    # source
-
                     # collect all targets for current stream
-                    rdata: IOReaderData = collect_sources(stream_ds, idx, "source")
+                    rdata: IOReaderData = collect_datasources(stream_ds, idx, "source")
 
                     if rdata.is_empty():
                         # work around for https://github.com/pytorch/pytorch/issues/158719
@@ -374,14 +383,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # preprocess data for model input
                     (ss_cells, ss_lens, ss_centroids, idxs_inv) = self.tokenizer.batchify_source(
                         stream_info,
-                        rdata.to_torch(),
+                        readerdata_to_torch(rdata),
                         (time_win_source.start, time_win_source.end),
                         stream_ds[0].normalize_coords,
                     )
 
                     # rdata does not need to be retained in training mode, only used for output
-                    # if self._stage == TRAIN:
-                    #     rdata = None
+                    if self._stage == TRAIN:
+                        rdata = None
                     stream_data.add_source(rdata, ss_lens, ss_cells, ss_centroids, idxs_inv)
 
                     # target
@@ -394,7 +403,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         time_win_target = self.time_window_handler.window(step_forecast_dt)
 
                         # collect all targets for current stream
-                        rdata: IOReaderData = collect_sources(stream_ds, step_forecast_dt, "target")
+                        rdata: IOReaderData = collect_datasources(
+                            stream_ds, step_forecast_dt, "target"
+                        )
 
                         if rdata.is_empty():
                             # work around for https://github.com/pytorch/pytorch/issues/158719
@@ -411,11 +422,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         (tt_cells, tc, tt_c, tt_t, idxs_inv) = self.tokenizer.batchify_target(
                             stream_info,
                             self.sampling_rate_target,
-                            rdata.to_torch(),
+                            readerdata_to_torch(rdata),
                             (time_win_target.start, time_win_target.end),
                         )
 
-                        stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t, idxs_inv)
+                        stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t)
 
                     # merge inputs for sources and targets for current stream
                     streams_data += [stream_data]
