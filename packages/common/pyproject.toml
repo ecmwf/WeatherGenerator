@@ -35,13 +35,6 @@ missing-attribute = false
 no-matching-overload = false
 bad-context-manager = false
 
-# To do:
-bad-assignment = false
-bad-return = false
-index-error = false
-not-iterable = false
-not-callable = false
-
 
 
 
