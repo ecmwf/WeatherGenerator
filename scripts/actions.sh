@@ -36,6 +36,8 @@ case "$1" in
     ;;
   type-check)
     (
+      cd "$SCRIPT_DIR" || exit 1
+      uv sync --extra cpu 
       cd "$SCRIPT_DIR/packages/common" || exit 1
       uv run --all-packages pyrefly check
       cd "$SCRIPT_DIR/packages/evaluate" || exit 1

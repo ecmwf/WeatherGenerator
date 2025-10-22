@@ -15,6 +15,8 @@ import subprocess
 from pathlib import Path
 
 import yaml
+import yaml.scanner
+import yaml.constructor
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
 
