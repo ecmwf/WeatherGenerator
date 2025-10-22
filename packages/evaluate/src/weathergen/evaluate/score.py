@@ -850,7 +850,7 @@ class Scores:
 
         return fact
 
-    def calc_fact(
+    def calc_oact(
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
