@@ -11,18 +11,16 @@ import io
 import json
 import logging
 import os
-import subprocess
-from pathlib import Path
 import random
 import string
+import subprocess
+from pathlib import Path
 
 import yaml
-import yaml.scanner
 import yaml.constructor
+import yaml.scanner
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
-
-
 
 _REPO_ROOT = Path(
     __file__
@@ -33,6 +31,7 @@ _logger = logging.getLogger(__name__)
 
 
 Config = DictConfig
+
 
 def get_run_id():
     s1 = string.ascii_lowercase

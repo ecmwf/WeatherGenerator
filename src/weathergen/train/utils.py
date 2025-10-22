@@ -8,11 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import json
-import random
-import string
 
 import torch
-
 
 from weathergen.common import config
 
