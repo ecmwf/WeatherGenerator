@@ -289,7 +289,10 @@ class Scores:
 
         if group_by_coord is not None and self._validate_groupby_coord(data, group_by_coord):
             # Apply groupby to all DataArrays in args
-            grouped_args = {k: (v.groupby(group_by_coord) if isinstance(v, xr.DataArray) else v) for k, v in args.items()}
+            grouped_args = {
+                k: (v.groupby(group_by_coord) if isinstance(v, xr.DataArray) else v)
+                for k, v in args.items()
+            }
 
             # Apply function f to each group and concatenate results
             group_names = list(next(iter(grouped_args.values())).groups.keys())
@@ -407,11 +410,11 @@ class Scores:
     ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]:
         """
         Get counts of 2x2 contingency tables
-       
+
         Parameters
         ----------
         p: xr.DataArray
-            Forecast data array 
+            Forecast data array
         gt: xr.DataArray
             Ground truth data array
         thresh: float
@@ -419,9 +422,9 @@ class Scores:
         Returns
         -------
         tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]
-            Counts of hits (a), false alarms (b), misses (c), and correct negatives (d) 
+            Counts of hits (a), false alarms (b), misses (c), and correct negatives (d)
         """
-    
+
         a = self._sum((p >= thresh) & (gt >= thresh))
         b = self._sum((p >= thresh) & (gt >= thresh))
         c = self._sum((p < thresh) & (gt >= thresh))
@@ -442,7 +445,7 @@ class Scores:
         Parameters
         ----------
         p: xr.DataArray
-            Forecast data array     
+            Forecast data array
         gt: xr.DataArray
             Ground truth data array
         thresh: float
@@ -534,7 +537,7 @@ class Scores:
         """
         Calculate the L1 error norm of forecast data w.r.t. reference data.
         Note that the L1 error norm is calculated as the sum of absolute differences.
-        
+
         Parameters
         ----------
         p: xr.DataArray
@@ -543,9 +546,9 @@ class Scores:
             Ground truth data array
         scale_dims: list | None
             List of dimensions over which the L1 score will be scaled.
-            If provided, the L1 score will be divided by the product of the sizes of these dimensions.  
+            If provided, the L1 score will be divided by the product of the sizes of these dimensions.
         Returns
-        ------- 
+        -------
         xr.DataArray
             L1 error norm
         """
@@ -590,7 +593,7 @@ class Scores:
             Default is False, i.e. the L2 score is returned as the square root of the sum of squared differences.
         Returns
         -------
-        xr.DataArray    
+        xr.DataArray
             L2 error norm
         """
         l2 = np.square(p - gt)
@@ -641,7 +644,7 @@ class Scores:
         gt: xr.DataArray
             Ground truth data array
         Returns
-        ------- 
+        -------
         xr.DataArray
             Mean squared error (MSE)
         """
@@ -650,7 +653,7 @@ class Scores:
                 "Cannot calculate mean squared error without aggregation dimensions (agg_dims=None)."
             )
 
-        return self._mean( np.square(p - gt) )
+        return self._mean(np.square(p - gt))
 
     def calc_rmse(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """
@@ -838,7 +841,7 @@ class Scores:
         troct = self._mean(troct)
 
         return troct
-    
+
     def calc_acc(
         self,
         p: xr.DataArray,
@@ -888,7 +891,7 @@ class Scores:
         acc = (fcst_ano * obs_ano).sum(spatial_dims) / np.sqrt(
             (fcst_ano**2).sum(spatial_dims) * (obs_ano**2).sum(spatial_dims)
         )
-           
+
         return acc
 
     def calc_bias(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
@@ -1013,7 +1016,7 @@ class Scores:
             Threshold for strong precipitation events
         spatial_dims: List[str]
             List of spatial dimensions of the data, e.g. ["lat", "lon"]
-    
+
         Returns
         -------
         xr.DataArray
@@ -1102,7 +1105,7 @@ class Scores:
 
         Returns
         -------
-        xr.DataArray    
+        xr.DataArray
             Spread of the forecast ensemble
         """
         ens_std = p.std(dim=self._ens_dim)
@@ -1124,9 +1127,7 @@ class Scores:
         xr.DataArray
             Spread-Skill Ratio (SSR)
         """
-        ssr = self.calc_spread(p) / self.calc_rmse(
-            p, gt
-        )  # spread/rmse
+        ssr = self.calc_spread(p) / self.calc_rmse(p, gt)  # spread/rmse
 
         return ssr
 
@@ -1248,11 +1249,12 @@ class Scores:
                     da.random.random(size=fcst_stacked.shape, chunks=fcst_stacked.chunks)
                     * noise_fac
                 )
-        #preserve the other coordinates
+        # preserve the other coordinates
         preserved_coords = {
-            c: obs_stacked[c].values for c in obs_stacked.coords 
+            c: obs_stacked[c].values
+            for c in obs_stacked.coords
             if all(dim not in {self._ens_dim, "npoints"} for dim in obs_stacked[c].dims)
-            }
+        }
 
         # calculate ranks for all data points
         rank = (obs_stacked >= fcst_stacked).sum(dim=self._ens_dim)
@@ -1264,14 +1266,13 @@ class Scores:
             bins=np.arange(len(fcst_stacked[self._ens_dim]) + 2),
             block_size=None if rank.chunks is None else "auto",
         )
-        
+
         # Reattach preserved coordinates by broadcasting
         for coord_name, coord_values in preserved_coords.items():
             # Only keep unique values along npoints if necessary
             if coord_name in rank_counts.coords:
                 continue
             rank_counts = rank_counts.assign_coords({coord_name: coord_values})
-       
 
         # provide normalized rank counts if desired
         if norm:
@@ -1280,7 +1281,6 @@ class Scores:
 
         return rank_counts
 
-    
     def calc_rank_histogram_xskillscore(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """
         Wrapper around rank_histogram-method by xskillscore-package.
@@ -1312,14 +1312,14 @@ class Scores:
         Calculates the amplitude of the gradient (order=1) or the Laplacian (order=2)
         of a scalar field given on a regular, geographical grid
         (i.e. dlambda = const. and dphi=const.)
-        
+
         Parameters
         ----------
-        scalar_field: 
+        scalar_field:
             Scalar field as data array with latitude and longitude as coordinates
-        order: 
+        order:
             Order of spatial differential operator
-        r_e: 
+        r_e:
             Radius of the sphere
         dom_avg:
             Flag whether to return the domain-averaged amplitude or the amplitude at each grid point

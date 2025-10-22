@@ -119,21 +119,24 @@ def calc_scores_per_stream(
             # Build up computation graphs for all metrics
             _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
 
-            #Add it only if it is not None
+            # Add it only if it is not None
             valid_scores = [
                 score
                 for metric in metrics
-                if (score := get_score(
-                    score_data,
-                    metric,
-                    agg_dims="ipoint",
-                    group_by_coord="sample",
-                )) is not None
+                if (
+                    score := get_score(
+                        score_data,
+                        metric,
+                        agg_dims="ipoint",
+                        group_by_coord="sample",
+                    )
+                )
+                is not None
             ]
 
             # Keep only metrics corresponding to valid_scores
             valid_metric_names = [
-                metric for metric, score in zip(metrics, valid_scores) if score is not None
+                metric for metric, score in zip(metrics, valid_scores, strict=False) if score is not None
             ]
 
             # Concatenate along a new "metric" dimension and assign metric names
