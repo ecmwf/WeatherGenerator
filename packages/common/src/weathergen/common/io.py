@@ -15,7 +15,6 @@ import pathlib
 import typing
 from copy import deepcopy
 
-import astropy_healpix as hp
 import dask.array as da
 import numpy as np
 import xarray as xr
@@ -75,6 +74,9 @@ class IOReaderData:
         Spoof an instance from data_reader_base.ReaderData instance.
         other should be such an instance.
         """
+        # TODO: do we need it in common package?
+        import astropy_healpix as hp
+
 
         hl = 5
         dx = 0.5
