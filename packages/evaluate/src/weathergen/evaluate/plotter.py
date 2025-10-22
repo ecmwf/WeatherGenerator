@@ -78,6 +78,7 @@ class Plotter:
         self.sample = None
         self.stream = None
         self.fstep = None
+
         self.select = {}
 
     def update_data_selection(self, select: dict):
@@ -118,6 +119,7 @@ class Plotter:
         self.sample = None
         self.stream = None
         self.fstep = None
+
         self.select = {}
         return self
 
@@ -136,6 +138,7 @@ class Plotter:
         -------
             xarray DataArray with selected data.
         """
+
         for key, value in selection.items():
             if key in da.coords and key not in da.dims:
                 # Coordinate like 'sample' aligned to another dim
@@ -477,6 +480,7 @@ class Plotter:
             valid_time,
             self.stream,
             varname,
+            "fstep",
             str(self.fstep).zfill(3),
         ]
 
@@ -529,6 +533,7 @@ class Plotter:
                         "*",
                         self.stream,
                         var,
+                        "fstep",
                         str(fstep).zfill(3),
                     ]
 
@@ -566,6 +571,12 @@ class LinePlots:
                 - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
                 - dpi_val: DPI value for the saved images
                 - fig_size: Size of the figure (width, height) in inches
+                -  plot_ensemble:
+                    If True, plot ensemble spread if 'ens' dimension is present. Options are:
+                        - False: do not plot ensemble spread
+                        - "std": plot mean +/- standard deviation
+                        - "minmax": plot min-max range
+                        - "members": plot individual ensemble members
         output_basedir:
             Base directory under which the plots will be saved.
             Expected scheme `<results_base_dir>/<run_id>`.
@@ -576,6 +587,7 @@ class LinePlots:
         self.fig_size = plotter_cfg.get("fig_size")
         self.log_scale = plotter_cfg.get("log_scale")
         self.add_grid = plotter_cfg.get("add_grid")
+        self.plot_ensemble = plotter_cfg.get("plot_ensemble", False)
 
         self.out_plot_dir = Path(output_basedir) / "line_plots"
         if not os.path.exists(self.out_plot_dir):
@@ -627,6 +639,77 @@ class LinePlots:
                 _logger.info("--------------------------")
         return
 
+    def _plot_ensemble(self, data: xr.DataArray, x_dim: str, label: str) -> None:
+        """
+        Plot ensemble spread for a data array.
+
+        Parameters
+        ----------
+        data: xr.xArray
+            DataArray to be plotted
+        x_dim: str
+            Dimension to be used for the x-axis.
+        label: str
+            Label for the dataset
+        Returns
+        -------
+            None
+        """
+        averaged = data.mean(dim=[dim for dim in data.dims if dim != x_dim], skipna=True).sortby(
+            x_dim
+        )
+
+        lines = plt.plot(
+            averaged[x_dim],
+            averaged.values,
+            label=label,
+            marker="o",
+            linestyle="-",
+        )
+        line = lines[0]
+        color = line.get_color()
+
+        ens = data.mean(
+            dim=[dim for dim in data.dims if dim not in [x_dim, "ens"]], skipna=True
+        ).sortby(x_dim)
+
+        if self.plot_ensemble == "std":
+            std_dev = ens.std(dim="ens", skipna=True).sortby(x_dim)
+            plt.fill_between(
+                averaged[x_dim],
+                (averaged - std_dev).values,
+                (averaged + std_dev).values,
+                label=f"{label} - std dev",
+                color=color,
+                alpha=0.2,
+            )
+
+        elif self.plot_ensemble == "minmax":
+            ens_min = ens.min(dim="ens", skipna=True).sortby(x_dim)
+            ens_max = ens.max(dim="ens", skipna=True).sortby(x_dim)
+
+            plt.fill_between(
+                averaged[x_dim],
+                ens_min.values,
+                ens_max.values,
+                label=f"{label} - min max",
+                color=color,
+                alpha=0.2,
+            )
+
+        elif self.plot_ensemble == "members":
+            for j in range(ens.ens.size):
+                plt.plot(
+                    ens[x_dim],
+                    ens.isel(ens=j).values,
+                    color=color,
+                    alpha=0.2,
+                )
+        else:
+            _logger.warning(
+                f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. Skipping ensemble plotting."
+            )
+
     def plot(
         self,
         data: xr.DataArray | list,
@@ -635,6 +718,7 @@ class LinePlots:
         x_dim: str = "forecast_step",
         y_dim: str = "value",
         print_summary: bool = False,
+        plot_ensemble: str | bool = False,
     ) -> None:
         """
         Plot a line graph comparing multiple datasets.
@@ -653,6 +737,10 @@ class LinePlots:
             Name of the dimension to be used for the y-axis.
         print_summary:
             If True, print a summary of the values from the graph.
+
+        Returns
+        -------
+            None
         """
 
         data_list, label_list = self._check_lengths(data, labels)
@@ -665,21 +753,27 @@ class LinePlots:
 
         for i, data in enumerate(data_list):
             non_zero_dims = [dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1]
-            if non_zero_dims:
-                _logger.info(
-                    f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
-                )
-            averaged = data.mean(
-                dim=[dim for dim in data.dims if dim != x_dim], skipna=True
-            ).sortby(x_dim)
 
-            plt.plot(
-                averaged[x_dim],
-                averaged.values,
-                label=label_list[i],
-                marker="o",
-                linestyle="-",
-            )
+            if self.plot_ensemble and "ens" in non_zero_dims:
+                _logger.info(f"LinePlot:: Plotting ensemble with option {self.plot_ensemble}.")
+                self._plot_ensemble(data, x_dim, label_list[i])
+            else:
+                if non_zero_dims:
+                    _logger.info(
+                        f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
+                    )
+
+                averaged = data.mean(
+                    dim=[dim for dim in data.dims if dim != x_dim], skipna=True
+                ).sortby(x_dim)
+
+                plt.plot(
+                    averaged[x_dim],
+                    averaged.values,
+                    label=label_list[i],
+                    marker="o",
+                    linestyle="-",
+                )
 
         xlabel = "".join(c if c.isalnum() else " " for c in x_dim)
         plt.xlabel(xlabel)
@@ -791,7 +885,7 @@ class ScoreCards:
 
         # Set axis labels
         ylabels = [
-            f"{var}\n({baseline.coords['metric'].item().upper()}={baseline.sel({'channel': var}).mean(dim=['sample', 'forecast_step']).values:.3f})"
+            f"{var}\n({baseline.coords['metric'].item().upper()}={baseline.sel(channel=var).mean().values.squeeze():.3f})"
             for var in channels
         ]
         xlabels = [
