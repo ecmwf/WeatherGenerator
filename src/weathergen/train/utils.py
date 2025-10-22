@@ -13,11 +13,10 @@ import string
 
 import torch
 
+from weathergen.common.config import get_run_id as get_run_id_common
 
-def get_run_id():
-    s1 = string.ascii_lowercase
-    s2 = string.ascii_lowercase + string.digits
-    return "".join(random.sample(s1, 1)) + "".join(random.sample(s2, 7))
+# TODO: remove the reference
+get_run_id = get_run_id_common
 
 
 def str_to_tensor(modelid):

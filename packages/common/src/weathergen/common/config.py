@@ -7,19 +7,24 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import importlib
 import io
 import json
 import logging
 import os
 import subprocess
 from pathlib import Path
+import string 
+import random
 
 import yaml
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
 
-from weathergen.train.utils import get_run_id
+def get_run_id():
+    s1 = string.ascii_lowercase
+    s2 = string.ascii_lowercase + string.digits
+    return "".join(random.sample(s1, 1)) + "".join(random.sample(s2, 7))
+
 
 _REPO_ROOT = Path(
     __file__
