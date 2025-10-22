@@ -183,6 +183,8 @@ class Scores:
             "acc": self.calc_acc,
             "froct": self.calc_froct,
             "troct": self.calc_troct,
+            "fact": self.calc_fact,
+            "oact": self.calc_oact,
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
