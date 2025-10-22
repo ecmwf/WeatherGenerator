@@ -105,20 +105,20 @@ class Trainer(TrainerBase):
         self.device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
 
-        #print("What is the cf in inference", cf)
-        #print("What is cf.loss_fcts_val", cf.loss_fcts_val)
+        # print("What is the cf in inference", cf)
+        # print("What is cf.loss_fcts_val", cf.loss_fcts_val)
 
-
-        # overwrite filenames in cf 
+        # overwrite filenames in cf
         for i, st in enumerate(cf.streams):
             if st.type == "anemoi":
-                st.filenames = ['/iopsstor/scratch/cscs/shickman/testing_data/aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr']
-        #        st.loss_fcts_val = [["mse", 1.0]]
+                st.filenames = [
+                    "/iopsstor/scratch/cscs/shickman/testing_data/aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr"
+                ]
+                #        st.loss_fcts_val = [["mse", 1.0]]
                 cf.streams[i] = st
-        
+
         cf.loss_fcts_val = [["mse", 1.0]]
         print("What is cf.loss_fcts_val", cf.loss_fcts_val)
-
 
         # !! modifies config: adds config.streams[i].<stage>_source_channels
         # and config.streams[i].<stage>_target_channels !!
@@ -583,6 +583,12 @@ class Trainer(TrainerBase):
             if cf.latent_noise_kl_weight > 0.0:
                 kl = torch.cat([posterior.kl() for posterior in posteriors])
                 loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
+                loss_values.loss += (
+                    0.005
+                    * torch.triu(
+                        1 - posteriors.mode() * posteriors.mode().tranpose(-1, -2), diagonal=1
+                    ).mean()
+                )
 
             loss_scalar = loss_values.loss
             # backward pass
