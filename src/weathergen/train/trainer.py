@@ -239,6 +239,11 @@ class Trainer(TrainerBase):
             fully_shard(model)
             for tensor in itertools.chain(model.parameters(), model.buffers()):
                 assert tensor.device == torch.device("meta")
+
+        for embed in model.embeds:
+            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
+            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
+
         return model, model_params
 
     def run(self, cf, devices, run_id_contd=None, epoch_contd=None):
