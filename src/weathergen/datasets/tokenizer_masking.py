@@ -77,6 +77,8 @@ class TokenizerMasking(Tokenizer):
             rdata.data,
             rdata.datetimes,
         )
+        idxs_inv_lens = [[len(i) for i in idx] for idx in idxs_inv]
+        idxs_inv = torch.cat([torch.cat(a) for a in idxs_inv])
 
         tokenized_data = [
             torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in tokenized_data
@@ -84,7 +86,7 @@ class TokenizerMasking(Tokenizer):
 
         # Use the masker to get source tokens and the selection mask for the target
         source_tokens_cells, idxs_inv = self.masker.mask_source(
-            tokenized_data, rdata.coords, rdata.geoinfos, rdata.data, idxs_inv
+            tokenized_data, rdata.coords, rdata.geoinfos, rdata.data, idxs_inv, idxs_inv_lens
         )
 
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
@@ -131,6 +133,7 @@ class TokenizerMasking(Tokenizer):
         )
 
         # tokenize
+        # idxs_inv = None
         target_tokens_cells, idxs_inv = tokenize_window(
             0,
             rdata.coords,
@@ -138,9 +141,11 @@ class TokenizerMasking(Tokenizer):
             rdata.data,
             rdata.datetimes,
         )
+        idxs_inv_lens = [[len(i) for i in idx] for idx in idxs_inv]
+        idxs_inv = torch.cat([torch.cat(a) for a in idxs_inv])
 
         target_tokens, idxs_inv = self.masker.mask_target(
-            target_tokens_cells, rdata.coords, rdata.geoinfos, rdata.data, idxs_inv
+            target_tokens_cells, rdata.coords, rdata.geoinfos, rdata.data, idxs_inv, idxs_inv_lens
         )
 
         target_tokens_lens = [len(t) for t in target_tokens]

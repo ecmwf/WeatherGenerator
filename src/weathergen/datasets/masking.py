@@ -144,8 +144,9 @@ class Masker:
         coords: torch.Tensor,
         geoinfos: torch.Tensor,
         source: torch.Tensor,
-        idxs_inv: list[torch.Tensor],
-    ) -> (list[torch.Tensor], list[torch.Tensor]):
+        idxs_inv: torch.Tensor,
+        idxs_inv_lens: list[list[int]],
+    ) -> (list[torch.Tensor], torch.Tensor):
         """
         Receives tokenized data, generates a mask, and returns the source data (unmasked)
         and the permutation selection mask (perm_sel) to be used for the target.
@@ -156,15 +157,22 @@ class Masker:
 
         Returns:
             list[torch.Tensor]: The unmasked tokens (model input).
-            list[torch.Tensor]: indices for inverting datapoint ordering.
         """
 
         token_lens = [len(t) for t in tokenized_data]
         num_tokens = sum(token_lens)
 
+        # TODO: wrap in function
+        lens_per_cell = [np.array(i).sum() for i in idxs_inv_lens]
+        idxs_inv_cell = torch.split(idxs_inv, lens_per_cell)
+        idxs_inv_out = [
+            list(torch.split(idxs, ll))
+            for idxs, ll in zip(idxs_inv_cell, idxs_inv_lens, strict=False)
+        ]
+
         # If there are no tokens, return empty lists.
         if num_tokens == 0:
-            return tokenized_data, idxs_inv
+            return tokenized_data
 
         # Clean strategy selection
         self.current_strategy = self._select_strategy()
@@ -183,8 +191,7 @@ class Masker:
             token_lens = [len(t) for t in tokenized_data]
             self.perm_sel = [np.ones(tl, dtype=bool) for tl in token_lens]
             source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
-            idxs_inv = [data[~p] for data, p in zip(idxs_inv, self.perm_sel, strict=True)]
-            return source_data, idxs_inv
+            return (source_data,)
 
         # Implementation of different masking strategies.
         # Generate a flat boolean mask for random, block, or healpix masking at cell level.
@@ -231,10 +238,8 @@ class Masker:
             # Only select unmasked timesteps
             self.perm_sel = mask
             source_data = []
-            idxs_inv_out = []
-            for data, idxs, p in zip(tokenized_data, idxs_inv, self.perm_sel, strict=True):
+            for data, p in zip(tokenized_data, self.perm_sel, strict=True):
                 source_data.append(data[~p] if len(data) > 0 else data)
-                idxs_inv_out.append(idxs[~p] if len(idxs) > 0 else idxs)
 
         else:
             # Split the flat mask to match the structure of the tokenized data (list of lists)
@@ -244,12 +249,16 @@ class Masker:
 
             # Apply the mask to get the source data (where mask is False)
             source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
+            # TODO: when np.where(p) is empty then we should insert empty tensor so that cat below
+            #       works
             idxs_inv_out = [
-                [idxs[d] for d in np.where(~p)[0]]
-                for idxs, p in zip(idxs_inv, self.perm_sel, strict=True)
+                [idxs[i] for i in np.where(p)[0]]
+                for idxs, p in zip(idxs_inv_out, self.perm_sel, strict=True)
             ]
 
-        return source_data, idxs_inv_out
+        idxs_inv = torch.cat([torch.cat(a) for a in idxs_inv_out if len(a) > 0])
+
+        return source_data, idxs_inv
 
     def mask_target(
         self,
@@ -257,8 +266,9 @@ class Masker:
         coords: torch.Tensor,
         geoinfos: torch.Tensor,
         source: torch.Tensor,
-        idxs_inv: list[torch.Tensor],
-    ) -> (list[torch.Tensor], list[torch.Tensor]):
+        idxs_inv: torch.Tensor,
+        idxs_inv_lens: list[list[int]],
+    ) -> (list[torch.Tensor], torch.Tensor):
         """
         Applies the permutation selection mask to
         the tokenized data to create the target data.
@@ -275,6 +285,14 @@ class Masker:
             list[torch.Tensor]: The target data with masked tokens, one tensor per cell.
         """
 
+        # TODO: wrap in function
+        lens_per_cell = [np.array(i).sum() for i in idxs_inv_lens]
+        idxs_inv_cell = torch.split(idxs_inv, lens_per_cell)
+        idxs_inv_out = [
+            list(torch.split(idxs, ll))
+            for idxs, ll in zip(idxs_inv_cell, idxs_inv_lens, strict=False)
+        ]
+
         # check that self.perm_sel is set, and not None with an assert statement
         assert self.perm_sel is not None, "Masker.perm_sel must be set before calling mask_target."
 
@@ -284,24 +302,15 @@ class Masker:
         feature_dim = self.dim_time_enc + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
 
         processed_target_tokens = []
-        idxs_inv_out = []
+        processed_idxs_inv = []
 
         # process all tokens used for embedding
-        for cc, idxs_inv_cell, pp in zip(
-            target_tokenized_data, idxs_inv, self.perm_sel, strict=True
-        ):
-            if len(pp) == 0:
-                processed_target_tokens.append(torch.empty(0, feature_dim, dtype=coords.dtype))
-                idxs_inv_out.append(idxs_inv_cell)
-                continue
-
+        for cc, idxs, pp in zip(target_tokenized_data, idxs_inv_out, self.perm_sel, strict=True):
             if self.current_strategy == "channel":
                 # If masking strategy is channel, handle target tokens differently.
                 # We don't have Booleans per cell, instead per channel per cell,
                 # we set the unmasked channels to NaN so not in loss.
                 selected_tensors = []
-                idxs_inv_out_cur = []
-
                 for c, p in zip(cc, pp, strict=True):
                     # slightly complicated as the first dimension of c varies with data in the cell.
                     # do not mask the first 8 channels,
@@ -310,26 +319,28 @@ class Masker:
                         :, ~p[0, (self.dim_time_enc + coords.shape[-1] + geoinfos.shape[-1]) :]
                     ] = torch.nan
                     selected_tensors.append(c)
-                    assert False, "Implement idxs_inv_cell"
 
             elif self.current_strategy == "causal":
                 # select only the target times where mask is True
                 selected_tensors = [c for i, c in enumerate(cc) if pp[i]]
-                idxs_inv_out_cur = [idxs_inv_cell[i] for i in np.where(pp)[0]]
 
             else:
                 # For other masking strategies, we simply select the tensors where the mask is True.
                 selected_tensors = [c for c, p in zip(cc, pp, strict=True) if p]
-                idxs_inv_out_cur = [idxs_inv_cell[i] for i in np.where(pp)[0]]
+                selected_idxs_inv = [idxs[i] for i in np.where(pp)[0]]
 
             # Append the selected tensors to the processed_target_tokens list.
             if selected_tensors:
                 processed_target_tokens.append(torch.cat(selected_tensors))
-                idxs_inv_out.append(idxs_inv_out_cur)
+                processed_idxs_inv.append(selected_idxs_inv)
             else:
-                processed_target_tokens.append(torch.empty(0, feature_dim, dtype=coords.dtype))
+                processed_target_tokens.append(
+                    torch.empty(0, feature_dim, dtype=coords.dtype, device=coords.device)
+                )
 
-        return processed_target_tokens, idxs_inv_out
+        idxs_inv = torch.cat([torch.cat(a) for a in processed_idxs_inv if len(a) > 0])
+
+        return processed_target_tokens, idxs_inv
 
     def _get_sampling_rate(self):
         """
