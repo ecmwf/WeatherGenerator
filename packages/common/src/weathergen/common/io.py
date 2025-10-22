@@ -109,7 +109,7 @@ class IOReaderData:
             data = np.concatenate([data, other.data])
             datetimes = np.concatenate([datetimes, other.datetimes])
 
-        return cls(**dataclasses.asdict(other))
+        return cls(coords, geoinfos, data, datetimes)
 
 
 @dataclasses.dataclass
