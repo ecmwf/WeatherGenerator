@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Protocol
 from omegaconf import OmegaConf
 from weathergen.common.config import _REPO_ROOT
-from lru import lru_cache
+from functools import lru_cache
 
 
 class PlatformEnv(Protocol):
@@ -28,6 +28,16 @@ class PlatformEnv(Protocol):
 
     def get_hpc_certificate(self) -> str | None:
         ...
+
+
+# def get_private_conf() -> OmegaConf:
+#     """
+#     Loads the private configuration from the private repository.
+#     Excludes secrets. 
+
+#     In doudbt, use this function.
+#     """
+
 
 @lru_cache(maxsize=1)
 def get_platform_env() -> PlatformEnv:
