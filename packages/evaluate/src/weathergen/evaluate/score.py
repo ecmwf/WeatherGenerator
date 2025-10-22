@@ -788,12 +788,14 @@ class Scores:
 
         return troct
 
-    def _calc_acc_group(self, fcst: xr.DataArray, obs: xr.DataArray, spatial_dims: list[str]) -> xr.DataArray:
-        """ Calculate ACC for a single group
+    def _calc_acc_group(
+        self, fcst: xr.DataArray, obs: xr.DataArray, spatial_dims: list[str]
+    ) -> xr.DataArray:
+        """Calculate ACC for a single group
         Parameters
-        ----------  
+        ----------
         fcst: xr.DataArray
-            Forecast data for the group 
+            Forecast data for the group
         obs: xr.DataArray
             Observation data for the group
         spatial_dims: List[str]
@@ -807,7 +809,7 @@ class Scores:
         return (fcst * obs).sum(spatial_dims) / np.sqrt(
             (fcst**2).sum(spatial_dims) * (obs**2).sum(spatial_dims)
         )
-    
+
     def calc_acc(
         self,
         p: xr.DataArray,
@@ -854,7 +856,6 @@ class Scores:
         fcst_ano, obs_ano = p - c, gt - c
 
         if group_by_coord:
-
             # Apply groupby and calculate ACC within each group using apply
             fcst_grouped = fcst_ano.groupby(group_by_coord)
             obs_grouped = obs_ano.groupby(group_by_coord)
@@ -870,8 +871,8 @@ class Scores:
 
         else:
             # Calculate ACC over spatial dimensions (no grouping)
-            acc = self._calc_acc_group(fcst_ano, obs_ano, spatial_dims) 
-           
+            acc = self._calc_acc_group(fcst_ano, obs_ano, spatial_dims)
+
         return acc
 
     def calc_bias(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
