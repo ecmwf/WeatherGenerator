@@ -562,45 +562,21 @@ wheels = [
 
 [[package]]
 name = "eccodes"
-version = "2.43.0"
+version = "2.42.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'darwin' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "cffi", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'darwin' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
-    { name = "eccodeslib", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'darwin' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "findlibs", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'darwin' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "numpy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'darwin' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a0/4c/5ccdcab09ef2e9c0b916beb24cbb26257c7395c92ce9dabc29264276a769/eccodes-2.43.0.tar.gz", hash = "sha256:b99c41aaa64b20291452297a3d513e0b08cc96bcedfe364d8f58348159c48faa", size = 2269307, upload-time = "2025-07-25T10:03:39.12Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/bb/e45f61ec5d5d8034099eb3597f3d5def36f6fe3b9de902314e527d94baad/eccodes-2.42.0.tar.gz", hash = "sha256:0abb2bc6c6f4e83749c4e9c313d5428c62b15dc6c5b47d2807943e3a5ffd5291", size = 2268756, upload-time = "2025-06-25T13:49:51.742Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/05/abd7dd019e3f0170803172cfba68735b7156cd5360ac0f406579ab36cfba/eccodes-2.43.0-cp312-cp312-win_amd64.whl", hash = "sha256:fd14ece703579be6b83a9816fb07f00f0b6a8971ccb5a1d3be94cc369567a43a", size = 6972421, upload-time = "2025-07-25T10:03:06.352Z" },
-    { url = "https://files.pythonhosted.org/packages/e7/36/ff4eb5b2e35a6179266e97260373f3eddf8f0458c244007a5c37d3e28904/eccodes-2.43.0-py3-none-any.whl", hash = "sha256:fbb85816d9646f603a5b0c4c2768b6b5ead6d2aa2bf118cecbca852377ada3b1", size = 44377, upload-time = "2025-07-25T10:03:37.341Z" },
-]
-
-[[package]]
-name = "eccodeslib"
-version = "2.44.0.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "eckitlib", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'darwin' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
-    { name = "fckitlib", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'darwin' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/5b/1b/b9d4a82f2a4a06db4fbd0d53992c336305256f101d4a3d6e32f12eccecd2/eccodeslib-2.44.0.4-1-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:ec9125de4c24861a349ea61d4386ed0d6a389d67117107b3797bc2515f7ee602", size = 20853438, upload-time = "2025-10-13T10:53:55.796Z" },
-    { url = "https://files.pythonhosted.org/packages/11/c1/7b96a0eaab3311bd892eda8d9e53e5efa16f13456b1c15e11e2308c8ac8f/eccodeslib-2.44.0.4-cp312-cp312-macosx_13_0_arm64.whl", hash = "sha256:afc1860d346239df5915e4db7d780073aeff3e2fc9dbd1226baa3196fac9444b", size = 8922038, upload-time = "2025-10-13T10:33:01.434Z" },
-    { url = "https://files.pythonhosted.org/packages/d0/4e/429f59b5eeb9d8545e24b6d80db3910641e9d3bbb816f0684d7d3bcfe470/eccodeslib-2.44.0.4-cp312-cp312-macosx_13_0_x86_64.whl", hash = "sha256:725209f55df1eba05086e6faa9cf4256191bc413549b6dcccdeb793a1d506e02", size = 8725616, upload-time = "2025-10-13T10:39:09.051Z" },
-    { url = "https://files.pythonhosted.org/packages/23/ce/c14addf360a014db9bed593854814c007b19a0ac82207dc62e429f4331aa/eccodeslib-2.44.0.4-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:cc706637341019eae7bcc4d68d382c0c2c6a5834829174dd791ab5e5b963c7d7", size = 20853438, upload-time = "2025-10-13T10:34:46.011Z" },
-]
-
-[[package]]
-name = "eckitlib"
-version = "1.32.2.4"
-source = { registry = "https://pypi.org/simple" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/54/ec3587a08afb923a7ce95eaa06823391c020cf0f9400c3bc02aa47223145/eckitlib-1.32.2.4-1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:439724f7176d4ad4c1e7ca8ad0e925e4df9cd51078bc70d7f1996f01e00156e2", size = 44583601, upload-time = "2025-10-13T10:54:09.016Z" },
-    { url = "https://files.pythonhosted.org/packages/94/22/44ba92cabe361e3de1e6fec0f901a93a34b10f2fa75c41021653ee215070/eckitlib-1.32.2.4-cp312-cp312-macosx_13_0_arm64.whl", hash = "sha256:9760700d71cf9bc1e72bdc2768ce791e80014aa7c0bf14c39111a4f991c743d7", size = 2925744, upload-time = "2025-10-13T10:33:07.51Z" },
-    { url = "https://files.pythonhosted.org/packages/e2/20/0147c1865a2beab651d8b3f4dce89072bfd8faf4b701f02db5d7d4b220c0/eckitlib-1.32.2.4-cp312-cp312-macosx_13_0_x86_64.whl", hash = "sha256:321b837c7d256ff29dddef63e7e24aa4fc5f8a113dc8b7f0132fd2f5b7711519", size = 3028931, upload-time = "2025-10-13T10:39:14.851Z" },
-    { url = "https://files.pythonhosted.org/packages/9d/5b/fe26416dc7a2a8498bb8e1a7be8596f0741e0dbe3a8fdbd434ed11c32d39/eckitlib-1.32.2.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:20ac471546ca156598a162a069f5da5fd3a76626b7775a6759506a72d1340aad", size = 44583599, upload-time = "2025-10-13T10:34:58.965Z" },
+    { url = "https://files.pythonhosted.org/packages/4c/39/d722564463530a30cf8633f8e390eb91d436ba85a96195273480044e1c38/eccodes-2.42.0-cp312-cp312-macosx_13_0_arm64.whl", hash = "sha256:d2beb205bf44abe875c5d7df067fd98ffaa42d38ee53ec40795ed2b3a356697e", size = 7370124, upload-time = "2025-06-25T10:06:08.663Z" },
+    { url = "https://files.pythonhosted.org/packages/32/79/a9b85327421de8969168308ffc49151ec0c4ead99cc11d0bdc407d799caa/eccodes-2.42.0-cp312-cp312-macosx_13_0_x86_64.whl", hash = "sha256:742834bab3cb2ed0b9cdf4213890cc2b46d9cf9f34852d5efc1a1ddc46d64faa", size = 7469509, upload-time = "2025-06-25T10:08:25.671Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/60/ac11c442d83246df8cadd09b7754535ad5be0e65a5fa5f88d453a62340fc/eccodes-2.42.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:767e0317580fa639cf1cfac2fefb2252b354d33a67744971fe24a0dad5f7757a", size = 8165282, upload-time = "2025-06-25T10:16:21.106Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/a6/e80b83967dbd85adc7238541af3863e8306b44a58f41dc2af13e4180694e/eccodes-2.42.0-cp312-cp312-win_amd64.whl", hash = "sha256:32231b381f62deddd1bdfbd89ec87b653a0c0de35c30b3a9f71005d8a838b4b7", size = 6968490, upload-time = "2025-06-25T13:12:43.554Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/c6/3e2b53ce1b0531c21126283d0739c1685b4a5586ec60c80e87859bb23e8f/eccodes-2.42.0-py3-none-any.whl", hash = "sha256:cff7533d447c76fd96ae742d70329bb9b29f2de05f8fd3603c844eb6c4240b00", size = 44162, upload-time = "2025-06-25T13:49:50.51Z" },
 ]
 
 [[package]]
@@ -661,19 +637,6 @@ wheels = [
 ]
 
 [[package]]
-name = "fckitlib"
-version = "0.14.0.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "eckitlib", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'darwin' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform == 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8d/10/c9b3447d43be5b1f74e50391cefe10250e598864baabd6e0e088e98a2162/fckitlib-0.14.0.4-cp312-cp312-macosx_13_0_arm64.whl", hash = "sha256:6ae3f6645260724b053747ca34a0e69541243baa631acf0418beabbef780f7e2", size = 411475, upload-time = "2025-10-13T10:33:09.898Z" },
-    { url = "https://files.pythonhosted.org/packages/a6/2e/ba67587df54e40592986f36b3a693e30050002f7b8611e30dad27dc7714c/fckitlib-0.14.0.4-cp312-cp312-macosx_13_0_x86_64.whl", hash = "sha256:50e7eed791e50e558fdc7bf6dca7a05015b288b445bd6cb52f9213fc1b8c6480", size = 417159, upload-time = "2025-10-13T10:39:17.89Z" },
-    { url = "https://files.pythonhosted.org/packages/75/17/2a8070a408be0ad266eba79015214dd86a7a21380fe5d740adb5bfe8c196/fckitlib-0.14.0.4-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:aec7889a73e6dfa51c755bc8906bcbf3e67fadb732dc171b2338717604db7c2d", size = 13392981, upload-time = "2025-10-13T10:54:16.146Z" },
-]
-
-[[package]]
 name = "filelock"
 version = "3.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -715,6 +678,19 @@ requires-dist = [
 [[package]]
 name = "flash-attn"
 version = "2.7.4.post1"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "platform_machine == 'arm64' and sys_platform == 'darwin'",
+]
+dependencies = [
+    { name = "einops", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "torch", version = "2.6.0", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/11/34/9bf60e736ed7bbe15055ac2dab48ec67d9dbd088d2b4ae318fd77190ab4e/flash_attn-2.7.4.post1.tar.gz", hash = "sha256:f03485c9a49a4d68d0733acdcad80ab0e72afa025a777fdc2966ceccf9d51765", size = 5986610, upload-time = "2025-01-30T06:39:51.93Z" }
+
+[[package]]
+name = "flash-attn"
+version = "2.7.4.post1"
 source = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
 resolution-markers = [
     "platform_machine == 'x86_64' and sys_platform == 'linux'",
@@ -732,19 +708,6 @@ requires-dist = [
     { name = "einops" },
     { name = "torch" },
 ]
-
-[[package]]
-name = "flash-attn"
-version = "2.8.3"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "platform_machine == 'arm64' and sys_platform == 'darwin'",
-]
-dependencies = [
-    { name = "einops", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
-    { name = "torch", version = "2.6.0", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/3b/b2/8d76c41ad7974ee264754709c22963447f7f8134613fd9ce80984ed0dab7/flash_attn-2.8.3.tar.gz", hash = "sha256:1e71dd64a9e0280e0447b8a0c2541bad4bf6ac65bdeaa2f90e51a9e57de0370d", size = 8447812, upload-time = "2025-08-15T08:28:12.911Z" }
 
 [[package]]
 name = "flexcache"
@@ -2623,8 +2586,8 @@ cpu = [
 ]
 gpu = [
     { name = "flash-attn", version = "2.7.3", source = { url = "https://object-store.os-api.cci1.ecmwf.int/weathergenerator-dev/wheels/flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl" }, marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'extra-10-weathergen-gpu') or (platform_machine != 'aarch64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
+    { name = "flash-attn", version = "2.7.4.post1", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'extra-10-weathergen-gpu') or (platform_machine != 'arm64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform != 'darwin' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "flash-attn", version = "2.7.4.post1", source = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'extra-10-weathergen-gpu') or (platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
-    { name = "flash-attn", version = "2.8.3", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'extra-10-weathergen-gpu') or (platform_machine != 'arm64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform != 'darwin' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "torch", version = "2.6.0", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'extra-10-weathergen-gpu') or (platform_machine != 'arm64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform != 'darwin' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "torch", version = "2.6.0+cu126", source = { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-linux_aarch64.whl" }, marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'extra-10-weathergen-gpu') or (platform_machine != 'aarch64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "torch", version = "2.6.0+cu126", source = { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'extra-10-weathergen-gpu') or (platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
@@ -2647,7 +2610,7 @@ requires-dist = [
     { name = "anemoi-datasets", specifier = "~=0.5.16" },
     { name = "astropy-healpix", specifier = "~=1.1.2" },
     { name = "dask", specifier = "~=2025.5.1" },
-    { name = "eccodes", specifier = "<=2.43" },
+    { name = "eccodes", specifier = "<=2.42" },
     { name = "flash-attn", marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'gpu'", url = "https://object-store.os-api.cci1.ecmwf.int/weathergenerator-dev/wheels/flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl" },
     { name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'gpu'", url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" },
     { name = "flash-attn", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'gpu') or (sys_platform != 'linux' and extra == 'gpu')" },

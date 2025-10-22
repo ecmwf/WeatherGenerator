@@ -36,14 +36,28 @@ case "$1" in
     ;;
   type-check)
     (
+      # The dependencies are rebuilt for each package to ensure that they do not rely on implicit imports.
       cd "$SCRIPT_DIR" || exit 1
-      uv sync --extra cpu 
-      cd "$SCRIPT_DIR/packages/common" || exit 1
-      uv run --all-packages pyrefly check
-      cd "$SCRIPT_DIR/packages/evaluate" || exit 1
-      uv run --all-packages pyrefly check
-      cd "$SCRIPT_DIR" || exit 1
-      uv run --all-packages pyrefly check
+      # weathergen-common
+      uv sync --project packages/common --no-install-workspace
+      uv run --project packages/common --frozen pyrefly check packages/common
+      # Fail for errors on weathergen-common:
+      if [ $? -ne 0 ]; then
+        echo "Type checking failed for weathergen-common."
+        exit 1
+      fi
+
+      # weathergen-evaluate
+      uv sync --project packages/evaluate --no-install-workspace --package weatheren-common
+      uv pip list
+      uv run --project packages/evaluate --frozen pyrefly check packages/evaluate
+
+      # weathergen (root)
+      # Install the whole workspace. It also needs the extra cpu option for the right version of pytorch.
+      uv sync --all-packages --extra cpu --no-install-workspace
+      uv pip list
+      uv run --all-packages pyrefly check src
+      echo "Type checking completed."
     )
     ;;
   unit-test)
