@@ -16,9 +16,9 @@ import numpy as np
 import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
-
 from weathergen.common.config import get_shared_wg_path, load_config, load_model_config
 from weathergen.common.io import ZarrIO
+
 from weathergen.evaluate.derived_channels import DeriveChannels
 from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
 
@@ -288,8 +288,6 @@ class Reader:
                 "String format for sample in config must be 'digit-digit'"
             )
             samples = list(range(int(samples.split("-")[0]), int(samples.split("-")[1]) + 1))
-
-        breakpoint()
 
         return DataAvailability(
             score_availability=True,
