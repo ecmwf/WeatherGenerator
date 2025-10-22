@@ -41,7 +41,7 @@ type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 logger = logging.getLogger(__name__)
 
 
-def collect_sources(stream_ds: list, idx: int, type: str) -> IOReaderData:
+def collect_datasources(stream_ds: list, idx: int, type: str) -> IOReaderData:
     """
     Utility function to collect all sources / targets from streams list
     """
@@ -356,7 +356,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     )
 
                     # collect all targets for current stream
-                    rdata: IOReaderData = collect_sources(stream_ds, idx, "source")
+                    rdata: IOReaderData = collect_datasources(stream_ds, idx, "source")
 
                     if rdata.is_empty():
                         # work around for https://github.com/pytorch/pytorch/issues/158719
@@ -390,7 +390,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         time_win_target = self.time_window_handler.window(step_forecast_dt)
 
                         # collect all targets for current stream
-                        rdata: IOReaderData = collect_sources(stream_ds, step_forecast_dt, "target")
+                        rdata: IOReaderData = collect_datasources(
+                            stream_ds, step_forecast_dt, "target"
+                        )
 
                         if rdata.is_empty():
                             # work around for https://github.com/pytorch/pytorch/issues/158719
