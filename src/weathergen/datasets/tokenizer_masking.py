@@ -70,7 +70,7 @@ class TokenizerMasking(Tokenizer):
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
         # tokenize all data first
-        tokenized_data = tokenize_window(
+        tokenized_data, idxs_inv = tokenize_window(
             0,
             rdata.coords,
             rdata.geoinfos,
@@ -83,8 +83,8 @@ class TokenizerMasking(Tokenizer):
         ]
 
         # Use the masker to get source tokens and the selection mask for the target
-        source_tokens_cells = self.masker.mask_source(
-            tokenized_data, rdata.coords, rdata.geoinfos, rdata.data
+        source_tokens_cells, idxs_inv = self.masker.mask_source(
+            tokenized_data, rdata.coords, rdata.geoinfos, rdata.data, idxs_inv
         )
 
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
@@ -93,7 +93,7 @@ class TokenizerMasking(Tokenizer):
         else:
             source_centroids = torch.tensor([])
 
-        return (source_tokens_cells, source_tokens_lens, source_centroids)
+        return (source_tokens_cells, source_tokens_lens, source_centroids, idxs_inv)
 
     def batchify_target(
         self,
@@ -131,7 +131,7 @@ class TokenizerMasking(Tokenizer):
         )
 
         # tokenize
-        target_tokens_cells = tokenize_window(
+        target_tokens_cells, idxs_inv = tokenize_window(
             0,
             rdata.coords,
             rdata.geoinfos,
@@ -139,8 +139,8 @@ class TokenizerMasking(Tokenizer):
             rdata.datetimes,
         )
 
-        target_tokens = self.masker.mask_target(
-            target_tokens_cells, rdata.coords, rdata.geoinfos, rdata.data
+        target_tokens, idxs_inv = self.masker.mask_target(
+            target_tokens_cells, rdata.coords, rdata.geoinfos, rdata.data, idxs_inv
         )
 
         target_tokens_lens = [len(t) for t in target_tokens]
@@ -214,7 +214,7 @@ class TokenizerMasking(Tokenizer):
             target_coords.requires_grad = False
             target_coords = list(target_coords.split(tt_lens))
 
-        return (target_tokens, target_coords, target_coords_raw, target_times_raw)
+        return (target_tokens, target_coords, target_coords_raw, target_times_raw, idxs_inv)
 
     def sample_tensors_uniform_vectorized(
         self, tensor_list: list, lengths: list, max_total_points: int

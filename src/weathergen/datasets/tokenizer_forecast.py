@@ -62,7 +62,7 @@ class TokenizerForecast(Tokenizer):
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
         # TODO: properly set stream_id; don't forget to normalize
-        source_tokens_cells = tokenize_window(
+        source_tokens_cells, idxs_inv = tokenize_window(
             0,
             rdata.coords,
             rdata.geoinfos,
@@ -78,7 +78,7 @@ class TokenizerForecast(Tokenizer):
         if source_tokens_lens.sum() > 0:
             source_centroids = self.compute_source_centroids(source_tokens_cells)
 
-        return (source_tokens_cells, source_tokens_lens, source_centroids)
+        return (source_tokens_cells, source_tokens_lens, source_centroids, idxs_inv)
 
     def batchify_target(
         self,

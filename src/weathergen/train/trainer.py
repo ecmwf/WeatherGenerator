@@ -512,7 +512,7 @@ class Trainer(TrainerBase):
         targets_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
         targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
 
-        # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
+        # TODO: iterate over batches, and change loop order to batch, stream, fstep
         for fstep in range(len(targets_rt)):
             for i_strm, target in enumerate(targets_rt[fstep]):
                 pred = preds[fstep][i_strm]
@@ -523,10 +523,6 @@ class Trainer(TrainerBase):
                 # extract data/coords and remove token dimension if it exists
                 pred = pred.reshape([pred.shape[0], *target.shape])
                 assert pred.shape[1] > 0
-
-                mask_nan = ~torch.isnan(target)
-                if pred[:, mask_nan].shape[1] == 0:
-                    continue
 
                 targets_lens[fstep][i_strm] += [target.shape[0]]
                 dn_data = self.dataset_val.denormalize_target_channels

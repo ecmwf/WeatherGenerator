@@ -57,6 +57,8 @@ class StreamData:
         self.target_tokens_lens = [
             torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(forecast_steps + 1)
         ]
+        # index to recover original ordering of data
+        self.target_idxs_inv = None
 
         # source tokens per cell
         self.source_tokens_cells = []
@@ -69,6 +71,8 @@ class StreamData:
         # processing after embedding
         self.source_idxs_embed = torch.tensor([])
         self.source_idxs_embed_pe = torch.tensor([])
+        # index to recover original ordering of data
+        self.source_idxs_inv = None
 
     def to_device(self, device: str) -> None:
         """
@@ -140,7 +144,12 @@ class StreamData:
         ]
 
     def add_source(
-        self, ss_raw: IOReaderData, ss_lens: torch.tensor, ss_cells: list, ss_centroids: list
+        self,
+        ss_raw: IOReaderData,
+        ss_lens: torch.tensor,
+        ss_cells: list,
+        ss_centroids: list,
+        idxs_inv: torch.tensor,
     ) -> None:
         """
         Add data for source for one input.
@@ -153,6 +162,7 @@ class StreamData:
             [ torch.tensor( tokens per cell, token size, number of channels) ]
         ss_centroids : list(number of healpix cells )
             [ torch.tensor( for source , 5) ]
+        idxs_inv : index to recover original ordering of datapoints
 
         Returns
         -------
@@ -163,6 +173,7 @@ class StreamData:
         self.source_tokens_lens = ss_lens
         self.source_tokens_cells = torch.cat(ss_cells)
         self.source_centroids = torch.cat(ss_centroids)
+        self.source_idxs_inv = idxs_inv
 
         idx = torch.isnan(self.source_tokens_cells)
         self.source_tokens_cells[idx] = self.mask_value
@@ -174,6 +185,7 @@ class StreamData:
         target_coords: torch.tensor,
         target_coords_raw: torch.tensor,
         times_raw: torch.tensor,
+        idxs_inv: torch.tensor,
     ) -> None:
         """
         Add data for target for one input.
@@ -193,6 +205,7 @@ class StreamData:
         target_times : list( number of healpix cells)
             [ torch.tensor( points per cell) ]
               absolute target times
+        idxs_inv : index to recover original ordering of datapoints
 
         Returns
         -------
@@ -202,7 +215,7 @@ class StreamData:
         self.target_tokens[fstep] = torch.cat(targets)
         self.target_coords[fstep] = torch.cat(target_coords)
         self.target_times_raw[fstep] = np.concatenate(times_raw)
-        self.target_coords_raw[fstep] = target_coords_raw
+        self.target_coords_raw[fstep] = torch.cat(target_coords_raw)
 
         tc = target_coords
         self.target_coords_lens[fstep] = torch.tensor(
@@ -213,6 +226,7 @@ class StreamData:
             [len(f) for f in targets] if len(targets) > 1 else self.target_tokens_lens[fstep],
             dtype=torch.int,
         )
+        self.target_idxs_inv = idxs_inv
 
     def target_empty(self) -> bool:
         """

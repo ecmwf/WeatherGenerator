@@ -34,7 +34,7 @@ from weathergen.datasets.utils import (
     compute_source_cell_lens,
 )
 from weathergen.utils.distributed import is_root
-from weathergen.utils.train_logger import Stage
+from weathergen.utils.train_logger import TRAIN, Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 
@@ -426,7 +426,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             (time_win_target.start, time_win_target.end),
                         )
 
-                        stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t)
+                        stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t, idxs_inv)
 
                     # merge inputs for sources and targets for current stream
                     streams_data += [stream_data]

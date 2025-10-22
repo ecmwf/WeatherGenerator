@@ -110,6 +110,7 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
 
     # extract information to split according to cells by first sorting and then finding split idxs
     hpy_idxs_ord = np.argsort(hpy_idxs, **numpy_argsort_args)
+    hpy_idxs_ord_inv = np.argsort(hpy_idxs_ord, **numpy_argsort_args)
     splits = np.flatnonzero(np.diff(hpy_idxs[hpy_idxs_ord]))
 
     # extract per cell data
@@ -119,7 +120,14 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
     for b, x in zip(np.unique(np.unique(hpy_idxs[hpy_idxs_ord])), hpy_idxs_ord_temp, strict=True):
         hpy_idxs_ord_split[b] = x
 
-    return (hpy_idxs_ord_split, thetas, phis, posr3)
+    hpy_idxs_ord_inv_temp = np.split(hpy_idxs_ord_inv, splits + 1)
+    hpy_idxs_ord_inv_split = [np.array([], dtype=np.int64) for _ in range(12 * 4**hl)]
+    for b, x in zip(
+        np.unique(np.unique(hpy_idxs[hpy_idxs_ord_inv])), hpy_idxs_ord_inv_temp, strict=True
+    ):
+        hpy_idxs_ord_inv_split[b] = x
+
+    return (hpy_idxs_ord_split, hpy_idxs_ord_inv_split, thetas, phis, posr3)
 
 
 def hpy_splits(
@@ -137,7 +145,7 @@ def hpy_splits(
     """
 
     # list of data points per healpix cell
-    (hpy_idxs_ord_split, thetas, phis, posr3) = hpy_cell_splits(coords, hl)
+    (hpy_idxs_ord_split, hpy_idxs_ord_inv_split, thetas, phis, posr3) = hpy_cell_splits(coords, hl)
 
     # if token_size is exceeed split based on latitude
     # TODO: split by hierarchically traversing healpix scheme
@@ -161,11 +169,16 @@ def hpy_splits(
         for idxs, ts, r in zip(hpy_idxs_ord_split, thetas_sorted, rem, strict=True)
     ]
 
+    idxs_ord_inv = [
+        list(torch.split(torch.from_numpy(idxs), token_size))
+        for idxs, ts, r in zip(hpy_idxs_ord_inv_split, thetas_sorted, rem, strict=True)
+    ]
+
     # extract length and flatten nested list
     idxs_ord_lens = [[len(a) for a in aa] for aa in idxs_ord]
     idxs_ord = [torch.cat([idxs for idxs in iidxs]) for iidxs in idxs_ord]
 
-    return idxs_ord, idxs_ord_lens, posr3
+    return idxs_ord, idxs_ord_lens, posr3, idxs_ord_inv
 
 
 def tokenize_window_space(
@@ -190,7 +203,7 @@ def tokenize_window_space(
         return
 
     # idx_ord_lens is length is number of tokens per healpix cell
-    idxs_ord, idxs_ord_lens, posr3 = hpy_splits(coords, hl, token_size, pad_tokens)
+    idxs_ord, idxs_ord_lens, posr3, idxs_ord_inv = hpy_splits(coords, hl, token_size, pad_tokens)
 
     # pad with zero at the beggining for token size padding
     times_enc = enc_time(times, time_win)
@@ -231,7 +244,7 @@ def tokenize_window_space(
         for i, (idxs, idxs_lens) in enumerate(zip(idxs_ord, idxs_ord_lens, strict=True))
     ]
 
-    return tokens_cells
+    return tokens_cells, idxs_ord_inv
 
 
 def tokenize_window_spacetime(
@@ -249,17 +262,19 @@ def tokenize_window_spacetime(
     pad_tokens=True,
     local_coords=True,
 ):
-    """Tokenize respecting an intrinsic time step in the data, i.e. each time step is tokenized
+    """
+    Tokenize respecting an intrinsic time step in the data, i.e. each time step is tokenized
     separately
     """
 
     num_healpix_cells = 12 * 4**hl
     tokens_cells = [[] for _ in range(num_healpix_cells)]
+    idxs_inv = [[] for _ in range(num_healpix_cells)]
 
     t_unique = np.unique(times)
     for _, t in enumerate(t_unique):
         mask = t == times
-        tokens_cells_cur = tokenize_window_space(
+        tokens_cells_cur, idxs_inv_cur = tokenize_window_space(
             stream_id,
             coords[mask],
             geoinfos[mask],
@@ -275,9 +290,11 @@ def tokenize_window_spacetime(
             local_coords,
         )
 
+        # merge tokens originating from different time steps
         tokens_cells = [t + tc for t, tc in zip(tokens_cells, tokens_cells_cur, strict=True)]
+        idxs_inv = [t + tc for t, tc in zip(idxs_inv, idxs_inv_cur, strict=True)]
 
-    return tokens_cells
+    return tokens_cells, idxs_inv
 
 
 def _coords_local(
