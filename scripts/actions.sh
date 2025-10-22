@@ -38,8 +38,10 @@ case "$1" in
     (
       # The dependencies are rebuilt for each package to ensure that they do not rely on implicit imports.
       cd "$SCRIPT_DIR" || exit 1
+
       # weathergen-common
       uv sync --project packages/common --no-install-workspace
+      uv pip list
       uv run --project packages/common --frozen pyrefly check packages/common
       # Fail for errors on weathergen-common:
       if [ $? -ne 0 ]; then
@@ -48,7 +50,7 @@ case "$1" in
       fi
 
       # weathergen-evaluate
-      uv sync --project packages/evaluate --no-install-workspace --package weatheren-common
+      uv sync --project packages/evaluate --no-install-workspace --package weathergen-evaluate 
       uv pip list
       uv run --project packages/evaluate --frozen pyrefly check packages/evaluate
 
