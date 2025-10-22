@@ -210,10 +210,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             else cf.data_loader_rng_seed * 13
         )
 
-        self.healpix_level_source: int = cf.healpix_level
-        self.healpix_level_target: int = cf.healpix_level
-        self.num_healpix_cells_source: int = 12 * 4**self.healpix_level_source
-        self.num_healpix_cells_target: int = 12 * 4**self.healpix_level_target
+        self.healpix_level: int = cf.healpix_level
+        self.num_healpix_cells: int = 12 * 4**self.healpix_level
 
         if cf.training_mode == "forecast":
             self.tokenizer = TokenizerForecast(cf.healpix_level)
@@ -328,9 +326,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # create new shuffeling
         self.reset()
 
-        nhc_target = self.num_healpix_cells_target
-        nhc_source = self.num_healpix_cells_source
-
         # bidx is used to count the #batches that have been emitted
         # idx_raw is used to index into the dataset; the decoupling is needed
         # since there are empty batches
@@ -357,7 +352,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # for all streams
                 for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
                     stream_data = StreamData(
-                        idx, forecast_dt + self.forecast_offset, nhc_source, nhc_target
+                        idx, forecast_dt + self.forecast_offset, self.num_healpix_cells
                     )
 
                     # collect all targets for current stream

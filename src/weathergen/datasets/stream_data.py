@@ -20,7 +20,7 @@ class StreamData:
     for one stream.
     """
 
-    def __init__(self, idx: int, forecast_steps: int, nhc_source: int, nhc_target: int) -> None:
+    def __init__(self, idx: int, forecast_steps: int, healpix_cells: int) -> None:
         """
         StreamData object
 
@@ -28,10 +28,8 @@ class StreamData:
         ----------
         forecast_steps : int
             Number of forecast steps
-        nhc_source : int
+        healpix_cells : int
             Number of healpix cells for source
-        nhc_target : int
-            Number of healpix cells for target
 
         Returns
         -------
@@ -41,15 +39,10 @@ class StreamData:
         self.mask_value = 0.0
 
         self.forecast_steps = forecast_steps
-        self.nhc_source = nhc_source
-        self.nhc_target = nhc_target
+        self.healpix_cells = healpix_cells
 
         self.source_is_spoof = False
         self.target_is_spoof = False
-
-        # TODO add shape of tensors
-
-        # TODO, TODO, TODO: remove / dfix init!!!
 
         # initialize empty members
         self.sample_idx = idx
@@ -58,11 +51,11 @@ class StreamData:
         self.target_times_raw = [[] for _ in range(forecast_steps + 1)]
         # this is not directly used but to precompute index in compute_idxs_predict()
         self.target_coords_lens = [
-            torch.tensor([0 for _ in range(self.nhc_target)]) for _ in range(forecast_steps + 1)
+            torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(forecast_steps + 1)
         ]
         self.target_tokens = [torch.tensor([]) for _ in range(forecast_steps + 1)]
         self.target_tokens_lens = [
-            torch.tensor([0 for _ in range(self.nhc_target)]) for _ in range(forecast_steps + 1)
+            torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(forecast_steps + 1)
         ]
 
         # source tokens per cell
@@ -119,7 +112,7 @@ class StreamData:
 
         source = spoof(source)
         self.source_raw += [source]
-        self.source_tokens_lens += [torch.ones([self.nhc_source], dtype=torch.int32)]
+        self.source_tokens_lens += [torch.ones([self.healpix_cells], dtype=torch.int32)]
         self.source_tokens_cells += [torch.tensor([])]
         self.source_centroids += [torch.tensor([])]
 
@@ -138,12 +131,12 @@ class StreamData:
         """
 
         self.target_tokens[fstep] += [torch.tensor([], dtype=torch.int32)]
-        self.target_tokens_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
-        self.target_coords[fstep] += [torch.zeros((0, 105)) for _ in range(self.nhc_target)]
-        self.target_coords_lens[fstep] += [torch.zeros([self.nhc_target], dtype=torch.int32)]
-        self.target_coords_raw[fstep] += [torch.tensor([]) for _ in range(self.nhc_target)]
+        self.target_tokens_lens[fstep] += [torch.zeros([self.healpix_cells], dtype=torch.int32)]
+        self.target_coords[fstep] += [torch.zeros((0, 105)) for _ in range(self.healpix_cells)]
+        self.target_coords_lens[fstep] += [torch.zeros([self.healpix_cells], dtype=torch.int32)]
+        self.target_coords_raw[fstep] += [torch.tensor([]) for _ in range(self.healpix_cells)]
         self.target_times_raw[fstep] += [
-            np.array([], dtype="datetime64[ns]") for _ in range(self.nhc_target)
+            np.array([], dtype="datetime64[ns]") for _ in range(self.healpix_cells)
         ]
 
     def add_source(
