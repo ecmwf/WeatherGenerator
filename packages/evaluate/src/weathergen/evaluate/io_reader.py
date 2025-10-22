@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -277,10 +278,18 @@ class Reader:
         if ensemble == "mean":
             ensemble = ["mean"]
 
-        if isinstance(fsteps, str) and "-" in fsteps:
+        if isinstance(fsteps, str):
+            assert re.match(r"^\d+-\d+$", fsteps), (
+                "String format for forecast_step in config must be 'digit-digit'"
+            )
             fsteps = list(range(int(fsteps.split("-")[0]), int(fsteps.split("-")[1]) + 1))
-        if isinstance(samples, str) and "-" in samples:
+        if isinstance(samples, str):
+            assert re.match(r"^\d+-\d+$", samples), (
+                "String format for sample in config must be 'digit-digit'"
+            )
             samples = list(range(int(samples.split("-")[0]), int(samples.split("-")[1]) + 1))
+
+        breakpoint()
 
         return DataAvailability(
             score_availability=True,
