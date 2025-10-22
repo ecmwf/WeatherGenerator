@@ -93,55 +93,129 @@ def encode_times_target(times, time_win) -> torch.tensor:
     return time_tensor + 0.5
 
 
-def hpy_cell_splits(coords: torch.tensor, hl: int):
+def get_random_rot():
+    """Generate a simple random rotation matrix for quick testing."""
+    # Generate random Euler angles
+    alpha = torch.rand(1).item() * 2 * np.pi  # rotation around z
+    beta = torch.rand(1).item() * np.pi       # rotation around y
+    gamma = torch.rand(1).item() * 2 * np.pi  # rotation around x
+    
+    #print(f"[DEBUG] Random Euler angles: α={alpha:.4f}, β={beta:.4f}, γ={gamma:.4f}")
+    
+    # Rotation matrices
+    Rz = torch.tensor([
+        [np.cos(alpha), -np.sin(alpha), 0],
+        [np.sin(alpha),  np.cos(alpha), 0],
+        [0,              0,              1]
+    ], dtype=torch.float32)
+    
+    Ry = torch.tensor([
+        [ np.cos(beta), 0, np.sin(beta)],
+        [ 0,            1, 0           ],
+        [-np.sin(beta), 0, np.cos(beta)]
+    ], dtype=torch.float32)
+    
+    Rx = torch.tensor([
+        [1, 0,             0            ],
+        [0, np.cos(gamma), -np.sin(gamma)],
+        [0, np.sin(gamma),  np.cos(gamma)]
+    ], dtype=torch.float32)
+    
+    # Combined rotation: Rz @ Ry @ Rx
+    R = Rz @ Ry @ Rx
+    
+    # Verify it's a valid rotation (determinant = 1, orthogonal)
+    det = torch.det(R).item()
+    #print(f"[DEBUG] Rotation matrix determinant: {det:.6f} (should be ~1.0)")
+    #print(f"[DEBUG] Rotation matrix:\n{R}")
+    
+    return R
+
+
+def hpy_cell_splits(coords: torch.tensor, hl: int, R_fixed: torch.Tensor | None = None):
     """Compute healpix cell id for each coordinate on given level hl
+
+    Args:
+        coords: [N, 2] tensor of (lat, lon) in degrees
+        hl: HEALPix level
+        R_fixed: Optional fixed rotation matrix to use. If None, generates random rotation.
 
     Returns
       hpy_idxs_ord_split : list of per cell indices into thetas,phis,posr3
       thetas : thetas in rad
       phis : phis in rad
       posr3 : (thetas,phis) as position in R3
+      R : rotation matrix used (either R_fixed or newly generated)
     """
+    #print(f"\n[DEBUG] ========== hpy_cell_splits ==========")
+    #print(f"[DEBUG] Input: {len(coords)} coords, healpix level={hl}")
+    #print(f"[DEBUG] Using fixed rotation: {R_fixed is not None}")
+    
+    # Convert lat/lon to spherical
     thetas = ((90.0 - coords[:, 0]) / 180.0) * np.pi
     phis = ((coords[:, 1] + 180.0) / 360.0) * 2.0 * np.pi
-    # healpix cells for all points
-    hpy_idxs = ang2pix(2**hl, thetas, phis, nest=True)
-    posr3 = s2tor3(thetas, phis)
+    
+    # Convert to 3D Cartesian
+    posr3 = s2tor3(thetas, phis)  # [N, 3]
+    
+    # Use provided rotation or generate new one
+    if R_fixed is not None:
+        R_random = R_fixed
+        #print(f"[DEBUG] Using provided rotation matrix")
+    else:
+        R_random = get_random_rot()  # [3, 3]
+        #print(f"[DEBUG] Generated new rotation matrix")
+    
+    posr3_rotated = posr3 @ R_random.T  # [N, 3] @ [3, 3]^T = [N, 3]
+    
+    print(f"[DEBUG] Rotated 3D norms (should be ~1.0): {torch.norm(posr3_rotated[:3], dim=1)}")
+    
+    # Convert rotated 3D back to spherical
+    thetas_rot = torch.acos(torch.clamp(posr3_rotated[:, 2], -1.0, 1.0))
+    phis_rot = torch.atan2(posr3_rotated[:, 1], posr3_rotated[:, 0])
+    phis_rot = torch.where(phis_rot < 0, phis_rot + 2.0 * np.pi, phis_rot)
+    
+    # Assign healpix cells using ROTATED coordinates
+    hpy_idxs = ang2pix(2**hl, thetas_rot, phis_rot, nest=True)   
+    
+    #print(f"[DEBUG] Number of unique cells: {len(np.unique(hpy_idxs))} / {12 * 4**hl} total")
 
-    # extract information to split according to cells by first sorting and then finding split idxs
+    # extract information to split according to cells
     hpy_idxs_ord = np.argsort(hpy_idxs, **numpy_argsort_args)
     splits = np.flatnonzero(np.diff(hpy_idxs[hpy_idxs_ord]))
 
-    # extract per cell data
     hpy_idxs_ord_temp = np.split(hpy_idxs_ord, splits + 1)
     hpy_idxs_ord_split = [np.array([], dtype=np.int64) for _ in range(12 * 4**hl)]
-    # TODO: split smarter (with a augmented splits list?) so that this loop is not needed
-    for b, x in zip(np.unique(np.unique(hpy_idxs[hpy_idxs_ord])), hpy_idxs_ord_temp, strict=True):
+    
+    for b, x in zip(np.unique(hpy_idxs[hpy_idxs_ord]), hpy_idxs_ord_temp, strict=True):
         hpy_idxs_ord_split[b] = x
+    
+    #print(f"[DEBUG] ========================================\n")
 
-    return (hpy_idxs_ord_split, thetas, phis, posr3)
+    return (hpy_idxs_ord_split, thetas, phis, posr3, R_random)
 
 
 def hpy_splits(
-    coords: torch.Tensor, hl: int, token_size: int, pad_tokens: bool
-) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
-    """Compute healpix cell for each data point and splitting information per cell;
-       when the token_size is exceeded then splitting based on lat is used;
-       tokens can be padded
+    coords: torch.Tensor, hl: int, token_size: int, pad_tokens: bool, R_fixed: torch.Tensor | None = None
+) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor, torch.Tensor]:
+    """Compute healpix cell for each data point and splitting information per cell
 
-    Return :
-        idxs_ord : flat list of indices (to data points) per healpix cell
+    Args:
+        R_fixed: Optional fixed rotation matrix. If None, generates random rotation.
+
+    Returns:
+        idxs_ord : flat list of indices per healpix cell
         idxs_ord_lens : lens of lists per cell
-        (so that data[idxs_ord].split( idxs_ord_lens) provides per cell data)
         posr3 : R^3 positions of coords
+        R : rotation matrix used
     """
 
     # list of data points per healpix cell
-    (hpy_idxs_ord_split, thetas, phis, posr3) = hpy_cell_splits(coords, hl)
+    (hpy_idxs_ord_split, thetas, phis, posr3, R) = hpy_cell_splits(coords, hl, R_fixed=R_fixed)
 
-    # if token_size is exceeed split based on latitude
-    # TODO: split by hierarchically traversing healpix scheme
+    # if token_size is exceeded split based on latitude
     thetas_sorted = [torch.argsort(thetas[idxs], stable=True) for idxs in hpy_idxs_ord_split]
+    
     # remainder for padding to token size
     if pad_tokens:
         rem = [
@@ -152,7 +226,6 @@ def hpy_splits(
         rem = np.zeros(len(hpy_idxs_ord_split), dtype=np.int32)
 
     # helper variables to split according to cells
-    # pad to token size *and* offset by +1 to account for the index 0 that is added for the padding
     idxs_ord = [
         torch.split(
             torch.cat((torch.from_numpy(np.take(idxs, ts) + 1), torch.zeros(r, dtype=torch.int32))),
@@ -165,7 +238,7 @@ def hpy_splits(
     idxs_ord_lens = [[len(a) for a in aa] for aa in idxs_ord]
     idxs_ord = [torch.cat([idxs for idxs in iidxs]) for iidxs in idxs_ord]
 
-    return idxs_ord, idxs_ord_lens, posr3
+    return idxs_ord, idxs_ord_lens, posr3, R
 
 
 def tokenize_window_space(
@@ -182,32 +255,36 @@ def tokenize_window_space(
     enc_time,
     pad_tokens=True,
     local_coords=True,
+    R_fixed: torch.Tensor | None = None,  # ← NEW PARAMETER
 ):
-    """Process one window into tokens"""
+    """Process one window into tokens
+    
+    Args:
+        R_fixed: Optional fixed rotation matrix. If None, generates random rotation.
+                Returns the rotation used for consistency with target tokenization.
+    """
 
-    # len(source)==1 would require special case handling that is not worth the effort
+    # len(source)==1 would require special case handling
     if len(source) < 2:
-        return
+        return None, None  # ← Return None for both tokens and rotation
 
-    # idx_ord_lens is length is number of tokens per healpix cell
-    idxs_ord, idxs_ord_lens, posr3 = hpy_splits(coords, hl, token_size, pad_tokens)
+    # idx_ord_lens length is number of tokens per healpix cell
+    idxs_ord, idxs_ord_lens, posr3, R = hpy_splits(coords, hl, token_size, pad_tokens, R_fixed=R_fixed)
 
-    # pad with zero at the beggining for token size padding
+    # pad with zero at the beginning for token size padding
     times_enc = enc_time(times, time_win)
     times_enc_padded = torch.cat([torch.zeros_like(times_enc[0]).unsqueeze(0), times_enc])
     geoinfos_padded = torch.cat([torch.zeros_like(geoinfos[0]).unsqueeze(0), geoinfos])
     source_padded = torch.cat([torch.zeros_like(source[0]).unsqueeze(0), source])
 
     # convert to local coordinates
-    # TODO: avoid that padded lists are rotated, which means potentially a lot of zeros
     if local_coords:
         coords_local = _coords_local(posr3, hpy_verts_rots, idxs_ord, n_coords)
     else:
         coords_local = torch.cat([torch.zeros_like(coords[0]).unsqueeze(0), coords])
         coords_local = [coords_local[idxs] for idxs in idxs_ord]
 
-    # reorder based on cells (except for coords_local) and then cat along
-    # (time,coords,geoinfos,source) dimension and then split based on cells
+    # reorder based on cells and cat along (time,coords,geoinfos,source) dimension
     tokens_cells = [
         (
             list(
@@ -231,7 +308,7 @@ def tokenize_window_space(
         for i, (idxs, idxs_lens) in enumerate(zip(idxs_ord, idxs_ord_lens, strict=True))
     ]
 
-    return tokens_cells
+    return tokens_cells, R  # ← Return rotation matrix
 
 
 def tokenize_window_spacetime(
@@ -248,18 +325,33 @@ def tokenize_window_spacetime(
     enc_time,
     pad_tokens=True,
     local_coords=True,
+    R_fixed: torch.Tensor | None = None,  # ← ADD THIS PARAMETER
 ):
     """Tokenize respecting an intrinsic time step in the data, i.e. each time step is tokenized
     separately
+    
+    Args:
+        R_fixed: Optional fixed rotation matrix. If provided, use same rotation for all timesteps.
+                If None, generate new rotation for first timestep and reuse for subsequent ones.
+    
+    Returns:
+        tokens_cells: List of token lists per cell
+        R: Rotation matrix used (for consistency with source/target)
     """
 
     num_healpix_cells = 12 * 4**hl
     tokens_cells = [[] for _ in range(num_healpix_cells)]
+    
+    # Track rotation across timesteps
+    R_used = R_fixed  # Start with provided rotation (or None)
 
     t_unique = np.unique(times)
-    for _, t in enumerate(t_unique):
+    for i, t in enumerate(t_unique):
         mask = t == times
-        tokens_cells_cur = tokenize_window_space(
+        
+        # First timestep: generate or use provided rotation
+        # Subsequent timesteps: reuse the rotation from first timestep
+        result = tokenize_window_space(
             stream_id,
             coords[mask],
             geoinfos[mask],
@@ -273,12 +365,22 @@ def tokenize_window_spacetime(
             enc_time,
             pad_tokens,
             local_coords,
+            R_fixed=R_used,  # ← Pass rotation (None for first iter if not provided)
         )
+        
+        # Unpack the result
+        if result[0] is None:  # Handle empty case
+            continue
+            
+        tokens_cells_cur, R_cur = result
+        
+        # Store rotation from first timestep
+        if i == 0:
+            R_used = R_cur
 
         tokens_cells = [t + tc for t, tc in zip(tokens_cells, tokens_cells_cur, strict=True)]
 
-    return tokens_cells
-
+    return tokens_cells, R_used  # ← Return rotation matrix
 
 def _coords_local(
     posr3: Tensor, hpy_verts_rots: Tensor, idxs_ord: list[Tensor], n_coords: CoordNormalizer

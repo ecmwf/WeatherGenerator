@@ -31,11 +31,10 @@ class TokenizerMasking(Tokenizer):
     def __init__(self, healpix_level: int, masker: Masker):
         super().__init__(healpix_level)
         self.masker = masker
+        self.current_rotation = None  # ← ADD: Store rotation for consistency
 
     def reset_rng(self, rng) -> None:
-        """
-        Reset rng after epoch to ensure proper randomization
-        """
+        """Reset rng after epoch to ensure proper randomization"""
         self.masker.reset_rng(rng)
         self.rng = rng
 
@@ -44,7 +43,7 @@ class TokenizerMasking(Tokenizer):
         stream_info: dict,
         rdata: IOReaderData,
         time_win: tuple,
-        normalize_coords,  # dataset
+        normalize_coords,
     ):
         token_size = stream_info["token_size"]
         is_diagnostic = stream_info.get("diagnostic", False)
@@ -62,27 +61,27 @@ class TokenizerMasking(Tokenizer):
 
         self.token_size = token_size
 
-        # return empty if there is no data or we are in diagnostic mode
         if is_diagnostic or rdata.data.shape[1] == 0 or len(rdata.data) < 2:
+            self.current_rotation = None  # ← ADD: Reset rotation
             source_tokens_cells = torch.tensor([])
             source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
             source_centroids = torch.tensor([])
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
-        # tokenize all data first
-        tokenized_data = tokenize_window(
+        # ← CHANGE: Unpack tuple (tokens, rotation)
+        tokenized_data, self.current_rotation = tokenize_window(
             0,
             rdata.coords,
             rdata.geoinfos,
             rdata.data,
             rdata.datetimes,
+            R_fixed=None,  # ← ADD: Generate new rotation
         )
 
         tokenized_data = [
             torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in tokenized_data
         ]
 
-        # Use the masker to get source tokens and the selection mask for the target
         source_tokens_cells = self.masker.mask_source(
             tokenized_data, rdata.coords, rdata.geoinfos, rdata.data
         )
@@ -109,15 +108,12 @@ class TokenizerMasking(Tokenizer):
         target_tokens, target_coords = torch.tensor([]), torch.tensor([])
         target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
 
-        # target is empty
         if len(self.masker.perm_sel) == 0:
             return (target_tokens, target_coords, torch.tensor([]), torch.tensor([]))
 
-        # identity function
         def id(arg):
             return arg
 
-        # set tokenization function, no normalization of coords
         tokenize_window = partial(
             tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
             time_win=time_win,
@@ -128,10 +124,11 @@ class TokenizerMasking(Tokenizer):
             enc_time=encode_times_target,
             pad_tokens=False,
             local_coords=False,
+            R_fixed=self.current_rotation,  # ← ADD: Reuse rotation from source
         )
 
-        # tokenize
-        target_tokens_cells = tokenize_window(
+        # ← CHANGE: Unpack tuple (tokens, rotation)
+        target_tokens_cells, _ = tokenize_window(
             0,
             rdata.coords,
             rdata.geoinfos,
@@ -139,6 +136,7 @@ class TokenizerMasking(Tokenizer):
             rdata.datetimes,
         )
 
+        # Rest unchanged...
         target_tokens = self.masker.mask_target(
             target_tokens_cells, rdata.coords, rdata.geoinfos, rdata.data
         )
@@ -146,8 +144,6 @@ class TokenizerMasking(Tokenizer):
         target_tokens_lens = [len(t) for t in target_tokens]
         total_target = sum(target_tokens_lens)
 
-        # sampling the number of targets according to per-stream sampling_rate_target
-        # otherwise take global sampling_rate_target from config
         sampling_rate_target = stream_info.get("sampling_rate_target", sampling_rate_target)
 
         samples = (torch.empty(total_target).uniform_() < sampling_rate_target).split(
@@ -173,12 +169,7 @@ class TokenizerMasking(Tokenizer):
         target_tokens_lens = [len(t) for t in target_tokens]
         tt_lens = target_tokens_lens
 
-        # TODO: can we avoid setting the offsets here manually?
-        # TODO: ideally we would not have recover it; but using tokenize_window seems necessary for
-        #       consistency -> split tokenize_window in two parts with the cat only happening in the
-        #       second
         offset = 6
-        # offset of 1 : stream_id
         target_times = torch.split(tt_lin[..., 1:offset], tt_lens)
         target_coords = torch.split(tt_lin[..., offset : offset + rdata.coords.shape[-1]], tt_lens)
         offset += rdata.coords.shape[-1]
@@ -192,15 +183,13 @@ class TokenizerMasking(Tokenizer):
         target_coords_raw = torch.split(
             tt_lin[:, offset : offset + rdata.coords.shape[-1]], tt_lens
         )
-        # recover absolute time from relatives in encoded ones
-        # TODO: avoid recover; see TODO above
+        
         deltas_sec = (
             arc_alpha(tt_lin[..., 1] - 0.5, tt_lin[..., 2] - 0.5) / (2.0 * np.pi) * (12 * 3600)
         )
         deltas_sec = deltas_sec.numpy().astype("timedelta64[s]")
         target_times_raw = np.split(time_win[0] + deltas_sec, np.cumsum(tt_lens)[:-1])
 
-        # compute encoding of target coordinates used in prediction network
         if torch.tensor(tt_lens).sum() > 0:
             target_coords = get_target_coords_local_ffast(
                 self.hl_target,
