@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import importlib
 import io
 import json
 import logging
@@ -279,6 +280,7 @@ def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
             raise ValueError(msg)
 
     return overwrite_config
+
 
 
 def _load_private_conf(private_home: Path | None = None) -> DictConfig:

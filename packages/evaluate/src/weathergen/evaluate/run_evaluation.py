@@ -3,6 +3,7 @@
 # dependencies = [
 #   "weathergen-evaluate",
 #   "weathergen-common",
+#   "weathergen-metrics",
 # ]
 # [tool.uv.sources]
 # weathergen-evaluate = { path = "../../../../../packages/evaluate" }
@@ -14,6 +15,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import mlflow
 from omegaconf import OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
@@ -25,10 +27,14 @@ from weathergen.evaluate.utils import (
     plot_summary,
     retrieve_metric_from_json,
 )
+from weathergen.metrics.mlflow_utils import setup_mlflow, get_or_create_experiment_mlflow, MlFlowUpload, log_metrics
+from weathergen.common.platform_env import get_platform_env
 
 _logger = logging.getLogger(__name__)
 
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
+
+_platform_env = get_platform_env()
 
 
 def evaluate() -> None:
@@ -155,4 +161,25 @@ def evaluate_from_config(cfg):
 
 
 if __name__ == "__main__":
-    evaluate()
+    logging.basicConfig(level=logging.INFO)
+    hpc_conf = _platform_env.get_hpc_config()
+    assert hpc_conf is not None
+    private_home = Path(hpc_conf)
+    private_cf = OmegaConf.load(private_home)
+    mlflow_client = setup_mlflow(private_cf)
+    _logger.info(f"MLFlow client set up: {mlflow_client}")
+    run_id = "test_run"
+    parent_run = get_or_create_experiment_mlflow(mlflow_client, run_id)
+    _logger.info(f"MLFlow parent run: {parent_run}")
+    phase = "eval"
+    with mlflow.start_run(run_id = parent_run.info.run_id):
+        with mlflow.start_run(
+            run_name=f"{phase}_{run_id}",
+            parent_run_id=parent_run.info.run_id,
+            nested=True,
+    ) as run:
+            mlflow.set_tags(MlFlowUpload.run_tags(run_id, phase))
+            log_metrics([{"metric1": 0.5}], mlflow_client, run.info.run_id)
+
+
+    # evaluate()
