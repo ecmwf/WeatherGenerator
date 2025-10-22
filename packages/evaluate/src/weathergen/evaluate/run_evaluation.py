@@ -27,7 +27,7 @@ from weathergen.evaluate.utils import (
     plot_summary,
     retrieve_metric_from_json,
 )
-from weathergen.metrics.mlflow_utils import setup_mlflow, get_or_create_experiment_mlflow, MlFlowUpload, log_metrics
+from weathergen.metrics.mlflow_utils import setup_mlflow, get_or_create_mlflow_parent_run, MlFlowUpload, log_metrics
 from weathergen.common.platform_env import get_platform_env
 
 _logger = logging.getLogger(__name__)
@@ -169,7 +169,7 @@ if __name__ == "__main__":
     mlflow_client = setup_mlflow(private_cf)
     _logger.info(f"MLFlow client set up: {mlflow_client}")
     run_id = "test_run"
-    parent_run = get_or_create_experiment_mlflow(mlflow_client, run_id)
+    parent_run = get_or_create_mlflow_parent_run(mlflow_client, run_id)
     _logger.info(f"MLFlow parent run: {parent_run}")
     phase = "eval"
     with mlflow.start_run(run_id = parent_run.info.run_id):
