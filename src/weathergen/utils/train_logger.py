@@ -142,10 +142,8 @@ class TrainLogger:
         log_vals = []
         log_vals += [perf_gpu]
         log_vals += [perf_mem]
-        if perf_gpu > 0.0:
-            metrics[_performance_gpu] = perf_gpu
-        if perf_mem > 0.0:
-            metrics[_performance_memory] = perf_mem
+        metrics[_performance_gpu] = perf_gpu
+        metrics[_performance_memory] = perf_mem
         self.log_metrics("train", metrics)
         with open(self.path_run / (self.cf.run_id + "_perf_log.txt"), "ab") as f:
             np.savetxt(f, log_vals)

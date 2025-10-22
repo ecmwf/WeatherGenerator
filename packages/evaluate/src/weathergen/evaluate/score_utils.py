@@ -83,9 +83,7 @@ class RegionBoundingBox:
 
     def contains(self, lat: float, lon: float) -> bool:
         """Check if a lat/lon point is within the bounding box."""
-        return (self.lat_min <= lat <= self.lat_max) and (
-            self.lon_min <= lon <= self.lon_max
-        )
+        return (self.lat_min <= lat <= self.lat_max) and (self.lon_min <= lon <= self.lon_max)
 
     def apply_mask(
         self,
