@@ -362,7 +362,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         # work around for https://github.com/pytorch/pytorch/issues/158719
                         # create non-empty mean data instead of empty tensor
                         rdata = spoof(
-                            self.healpix_level_source,
+                            self.healpix_level,
                             time_win_source.start,
                             stream_ds[0].get_geoinfo_size(),
                             stream_ds[0].mean[stream_ds[0].source_idx],
@@ -396,7 +396,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             # work around for https://github.com/pytorch/pytorch/issues/158719
                             # create non-empty mean data instead of empty tensor
                             rdata = spoof(
-                                self.healpix_level_target,
+                                self.healpix_level,
                                 time_win_target.start,
                                 stream_ds[0].get_geoinfo_size(),
                                 stream_ds[0].mean[stream_ds[0].target_idx],
