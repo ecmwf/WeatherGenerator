@@ -41,14 +41,25 @@ type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 logger = logging.getLogger(__name__)
 
 
-def collect_datasources(stream_ds: list, idx: int, type: str) -> IOReaderData:
+def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
+    """
+    Convert data, coords, and geoinfos to torch tensor
+    """
+    rdata.coords = torch.tensor(rdata.coords)
+    rdata.geoinfos = torch.tensor(rdata.geoinfos)
+    rdata.data = torch.tensor(rdata.data)
+
+    return rdata
+
+
+def collect_datasources(stream_datasets: list, idx: int, type: str) -> IOReaderData:
     """
     Utility function to collect all sources / targets from streams list
     """
 
     rdatas = []
 
-    for ds in stream_ds:
+    for ds in stream_datasets:
         if type == "source":
             get_reader_data = ds.get_source
             normalize_channels = ds.normalize_source_channels
@@ -56,7 +67,7 @@ def collect_datasources(stream_ds: list, idx: int, type: str) -> IOReaderData:
             get_reader_data = ds.get_target
             normalize_channels = ds.normalize_target_channels
         else:
-            assert False, "invalid type"
+            assert False, "invalid value for argument `type`"
 
         # get source (of potentially multi-step length)
         rdata = get_reader_data(idx).remove_nan_coords()
@@ -372,7 +383,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # preprocess data for model input
                     (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                         stream_info,
-                        rdata.to_torch(),
+                        readerdata_to_torch(rdata),
                         (time_win_source.start, time_win_source.end),
                         stream_ds[0].normalize_coords,
                     )
@@ -409,7 +420,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
                             stream_info,
                             self.sampling_rate_target,
-                            rdata.to_torch(),
+                            readerdata_to_torch(rdata),
                             (time_win_target.start, time_win_target.end),
                         )
 

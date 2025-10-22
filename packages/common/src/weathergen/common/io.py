@@ -16,7 +16,6 @@ import typing
 
 import dask.array as da
 import numpy as np
-import torch
 import xarray as xr
 import zarr
 from numpy import datetime64
@@ -52,20 +51,10 @@ class IOReaderData:
         """
         return len(self.data) == 0
 
-    def to_torch(self):
-        """
-        Convert data, coords, and geoinfos to torch tensor
-        """
-        self.coords = torch.tensor(self.coords)
-        self.geoinfos = torch.tensor(self.geoinfos)
-        self.data = torch.tensor(self.data)
-
-        return self
-
     @classmethod
     def create(cls, other: typing.Any) -> "IOReaderData":
         """
-        create an instance from data_reader_base.ReaderData instance.
+        Create an instance from data_reader_base.ReaderData instance.
 
         other should be such an instance.
         """
@@ -83,14 +72,14 @@ class IOReaderData:
         return cls(**dataclasses.asdict(other))
 
     @classmethod
-    def combine(cls, others: typing.Any) -> "IOReaderData":
+    def combine(cls, others: list["IOReaderData"]) -> "IOReaderData":
         """
-        create an instance from data_reader_base.ReaderData instances.
+        Create an instance from data_reader_base.ReaderData instance by combining mulitple ones.
 
-        other should be such an instance.
+        others is list of ReaderData instances.
         """
 
-        assert len(others) > 0
+        assert len(others) > 0, len(others)
 
         other = others[0]
         coords = np.zeros((0, other.coords.shape[1]), dtype=other.coords.dtype)

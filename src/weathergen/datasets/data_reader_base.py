@@ -230,7 +230,7 @@ class ReaderData:
         """
         return len(self.data)
 
-    def remove_nan_coords(self):
+    def remove_nan_coords(self) -> "ReaderData":
         """
         Remove all data points where coords are NaN
 
@@ -241,13 +241,14 @@ class ReaderData:
         idx_valid = ~np.isnan(self.coords)
         # filter should be if any (of the two) coords is NaN
         idx_valid = np.logical_and(idx_valid[:, 0], idx_valid[:, 1])
-        # apply
-        self.coords = self.coords[idx_valid]
-        self.geoinfos = self.geoinfos[idx_valid]
-        self.data = self.data[idx_valid]
-        self.datetimes = self.datetimes[idx_valid]
 
-        return self
+        # apply
+        return ReaderData(
+            self.coords[idx_valid],
+            self.geoinfos[idx_valid],
+            self.data[idx_valid],
+            self.datetimes[idx_valid],
+        )
 
 
 def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
