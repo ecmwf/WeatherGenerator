@@ -272,7 +272,7 @@ class Scores:
                 "p_next": data.prediction_next,
                 "gt_next": data.ground_truth_next,
             }
-        elif score_name == "acc":
+        elif score_name in ["acc", "fact", "oact"]:
             args = {
                 "p": data.prediction,
                 "gt": data.ground_truth,
@@ -788,6 +788,134 @@ class Scores:
 
         return troct
 
+    def calc_fact(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        c: xr.DataArray,
+        group_by_coord: str | None = None,
+        spatial_dims: list = None,
+    ):
+        """
+        Calculate forecast activity metric as standard deviation of forecast anomaly.
+
+        NOTE:
+        The climatlogical mean data clim_mean must fit to the forecast and ground truth data.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        c: xr.DataArray
+            Climatological mean data array, which is used to calculate anomalies
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the ACC score.
+        spatial_dims: List[str]
+            Names of spatial dimensions over which ACC is calculated.
+            Note: No averaging is possible over these dimensions.
+        """
+
+        # Check if spatial_dims are in the data
+        spatial_dims = ["ipoint"] if spatial_dims is None else to_list(spatial_dims)
+
+        for dim in spatial_dims:
+            if dim not in p.dims:
+                raise ValueError(
+                    f"Spatial dimension '{dim}' not found in prediction data dimensions: {p.dims}"
+                )
+        if c is None:
+            return xr.full_like(p.sum(spatial_dims), np.nan)
+
+        # Calculate anomalies
+        fcst_ano = p - c
+
+        if group_by_coord:
+
+            # Apply groupby and calculate FACT within each group using apply
+            fcst_grouped = fcst_ano.groupby(group_by_coord)
+
+            # Use apply to calculate FACT for each group - this preserves the coordinate structure
+            fact = xr.concat(
+                [
+                    fcst_group.std(dim=spatial_dims)
+                    for group_label, fcst_group in fcst_grouped
+                ],
+                dim=group_by_coord,
+            ).assign_coords({group_by_coord: list(fcst_grouped.groups.keys())})
+
+        else:
+            # Calculate forecast activity over spatial dimensions (no grouping)
+            fact = fcst_ano.std(dim=spatial_dims)
+
+        return fact
+
+    def calc_fact(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        c: xr.DataArray,
+        group_by_coord: str | None = None,
+        spatial_dims: list = None,
+    ):
+        """
+        Calculate observation activity metric as standard deviation of observation anomaly.
+
+        NOTE:
+        The climatlogical mean data clim_mean must fit to the forecast and ground truth data.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        c: xr.DataArray
+            Climatological mean data array, which is used to calculate anomalies
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the ACC score.
+        spatial_dims: List[str]
+            Names of spatial dimensions over which ACC is calculated.
+            Note: No averaging is possible over these dimensions.
+        """
+
+        # Check if spatial_dims are in the data
+        spatial_dims = ["ipoint"] if spatial_dims is None else to_list(spatial_dims)
+
+        for dim in spatial_dims:
+            if dim not in p.dims:
+                raise ValueError(
+                    f"Spatial dimension '{dim}' not found in prediction data dimensions: {p.dims}"
+                )
+        if c is None:
+            return xr.full_like(p.sum(spatial_dims), np.nan)
+
+        # Calculate anomalies
+        obs_ano = gt - c
+
+        if group_by_coord:
+
+            # Apply groupby and calculate OACT within each group using apply
+            obs_grouped = obs_ano.groupby(group_by_coord)
+
+            # Use apply to calculate OACT for each group - this preserves the coordinate structure
+            oact = xr.concat(
+                [
+                    obs_group.std(dim=spatial_dims)
+                    for group_label, obs_group in obs_grouped
+                ],
+                dim=group_by_coord,
+            ).assign_coords({group_by_coord: list(obs_grouped.groups.keys())})
+
+        else:
+            # Calculate observation activity over spatial dimensions (no grouping)
+            oact = obs_ano.std(dim=spatial_dims)
+
+        return oact
+
     def _calc_acc_group(self, fcst: xr.DataArray, obs: xr.DataArray, spatial_dims: list[str]) -> xr.DataArray:
         """ Calculate ACC for a single group
         Parameters
@@ -807,7 +935,7 @@ class Scores:
         return (fcst * obs).sum(spatial_dims) / np.sqrt(
             (fcst**2).sum(spatial_dims) * (obs**2).sum(spatial_dims)
         )
-    
+
     def calc_acc(
         self,
         p: xr.DataArray,
