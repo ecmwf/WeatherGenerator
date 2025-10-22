@@ -115,18 +115,26 @@ def calc_scores_per_stream(
             # Build up computation graphs for all metrics
             _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
 
-            combined_metrics = [
-                get_score(
+            #Add it only if it is not None
+            valid_scores = [
+                score
+                for metric in metrics
+                if (score := get_score(
                     score_data,
                     metric,
                     agg_dims="ipoint",
                     group_by_coord="sample",
-                )
-                for metric in metrics
+                )) is not None
             ]
 
-            combined_metrics = xr.concat(combined_metrics, dim="metric")
-            combined_metrics["metric"] = metrics
+            # Keep only metrics corresponding to valid_scores
+            valid_metric_names = [
+                metric for metric, score in zip(metrics, valid_scores) if score is not None
+            ]
+
+            # Concatenate along a new "metric" dimension and assign metric names
+            combined_metrics = xr.concat(valid_scores, dim="metric")
+            combined_metrics = combined_metrics.assign_coords(metric=valid_metric_names)
 
             _logger.debug(f"Running computation of metrics for stream {stream}...")
             combined_metrics = combined_metrics.compute()
@@ -148,11 +156,12 @@ def calc_scores_per_stream(
             "forecast_step": int(combined_metrics.forecast_step),
             "sample": combined_metrics.sample,
             "channel": combined_metrics.channel,
+            "metric": combined_metrics.metric,
         }
 
         if "ens" in combined_metrics.dims:
             criteria["ens"] = combined_metrics.ens
-
+        
         metric_stream.loc[criteria] = combined_metrics
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
