@@ -277,6 +277,11 @@ class Reader:
         if ensemble == "mean":
             ensemble = ["mean"]
 
+        if isinstance(fsteps, str) and "-" in fsteps:
+            fsteps = list(range(int(fsteps.split("-")[0]), int(fsteps.split("-")[1]) + 1))
+        if isinstance(samples, str) and "-" in samples:
+            samples = list(range(int(samples.split("-")[0]), int(samples.split("-")[1]) + 1))
+
         return DataAvailability(
             score_availability=True,
             channels=None if (channels == "all" or channels is None) else list(channels),
