@@ -13,12 +13,16 @@ import logging
 import os
 import subprocess
 from pathlib import Path
+import random
+import string
 
 import yaml
+import yaml.scanner
+import yaml.constructor
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
 
-from weathergen.train.utils import get_run_id
+
 
 _REPO_ROOT = Path(
     __file__
@@ -29,6 +33,11 @@ _logger = logging.getLogger(__name__)
 
 
 Config = DictConfig
+
+def get_run_id():
+    s1 = string.ascii_lowercase
+    s2 = string.ascii_lowercase + string.digits
+    return "".join(random.sample(s1, 1)) + "".join(random.sample(s2, 7))
 
 
 def format_cf(config: Config) -> str:
