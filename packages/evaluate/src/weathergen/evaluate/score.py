@@ -544,7 +544,6 @@ class Scores:
         """
         Calculate the L1 error norm of forecast data w.r.t. reference data.
         Note that the L1 error norm is calculated as the sum of absolute differences.
-
         Parameters
         ----------
         p: xr.DataArray
@@ -1186,7 +1185,6 @@ class Scores:
             Threshold for strong precipitation events
         spatial_dims: List[str]
             List of spatial dimensions of the data, e.g. ["lat", "lon"]
-
         Returns
         -------
         xr.DataArray
@@ -1436,6 +1434,14 @@ class Scores:
             bins=np.arange(len(fcst_stacked[self._ens_dim]) + 2),
             block_size=None if rank.chunks is None else "auto",
         )
+        
+        # Reattach preserved coordinates by broadcasting
+        for coord_name, coord_values in preserved_coords.items():
+            # Only keep unique values along npoints if necessary
+            if coord_name in rank_counts.coords:
+                continue
+            rank_counts = rank_counts.assign_coords({coord_name: coord_values})
+       
 
         # Reattach preserved coordinates by broadcasting
         for coord_name, coord_values in preserved_coords.items():
