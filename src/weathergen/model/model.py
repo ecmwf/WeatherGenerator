@@ -524,22 +524,9 @@ class Model(torch.nn.Module):
         params = torch.load(
             path_run / filename, map_location=torch.device("cpu"), weights_only=True
         )
-
-        params_cleanup = {
-            "embeds": "embed_engine.embeds", # EmbeddingEngine
-            "ae_local_blocks": "ae_local_engine.ae_local_blocks", # LocalAssimilationEngine
-            "ae_adapter": "ae_local_global_engine.ae_adapter", # Local2GlobalAssimilationEngine
-            "ae_global_blocks": "ae_global_engine.ae_global_blocks", # GlobalAssimilationEngine
-            "fe_blocks":"forecast_engine.fe_blocks" # ForecastingEngine
-        }
-
         params_renamed = {}
-        for k, v in params.items():
-            new_k = k.replace("module.", "")
-            first_w = new_k.split(".", 1)[0]
-            if first_w in params_cleanup:
-                new_k = new_k.replace(first_w, params_cleanup[first_w], 1)
-            params_renamed[new_k] = v
+        for k in params.keys():
+            params_renamed[k.replace("module.", "")] = params[k]
 
         mkeys, ukeys = self.load_state_dict(params_renamed, strict=False)
         # mkeys, ukeys = self.load_state_dict( params, strict=False)
