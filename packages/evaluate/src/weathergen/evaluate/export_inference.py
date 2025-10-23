@@ -25,7 +25,6 @@ from tqdm import tqdm
 
 from weathergen.common.config import _REPO_ROOT, get_model_results
 from weathergen.common.io import ZarrIO
-from typing import Optional, Dict
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -39,46 +38,47 @@ if not _logger.handlers:
 """
 Enhanced functions to handle Gaussian grids when converting from Zarr to NetCDF.
 """
+
+
 def detect_grid_type(input_data_array: xr.DataArray) -> str:
     """Detect whether data is on a regular lat/lon grid or Gaussian grid."""
-    if 'lat' not in input_data_array.coords or 'lon' not in input_data_array.coords:
-        return 'unknown'
-    
-    lats = input_data_array.coords['lat'].values
-    lons = input_data_array.coords['lon'].values
-    
+    if "lat" not in input_data_array.coords or "lon" not in input_data_array.coords:
+        return "unknown"
+
+    lats = input_data_array.coords["lat"].values
+    lons = input_data_array.coords["lon"].values
+
     unique_lats = np.unique(lats)
     unique_lons = np.unique(lons)
-    
+
     # Check if all (lat, lon) combinations exist (regular grid)
     if len(lats) == len(unique_lats) * len(unique_lons):
-        lat_lon_pairs = set(zip(lats, lons))
+        lat_lon_pairs = set(zip(lats, lons, strict=False))
         expected_pairs = {(lat, lon) for lat in unique_lats for lon in unique_lons}
         if lat_lon_pairs == expected_pairs:
-            return 'regular'
-    
-    # Otherwise it's Gaussian (irregular spacing or reduced grid)
-    return 'gaussian'
+            return "regular"
 
+    # Otherwise it's Gaussian (irregular spacing or reduced grid)
+    return "gaussian"
 
 
 def reshape_dataset_adaptive(input_data_array: xr.DataArray) -> xr.Dataset:
     """
     Reshape dataset while preserving grid structure (regular or Gaussian).
-    
+
     Parameters
     ----------
     input_data_array : xr.DataArray
         Input data with dimensions (ipoint, channel)
-        
+
     Returns
     -------
     xr.Dataset
         Reshaped dataset appropriate for the grid type
     """
     grid_type = detect_grid_type(input_data_array)
-    
-    if grid_type == 'regular':
+
+    if grid_type == "regular":
         # Use original reshape logic for regular grids
         return reshape_dataset_regular(input_data_array)
     else:
@@ -92,7 +92,7 @@ def reshape_dataset_regular(input_data_array: xr.DataArray) -> xr.Dataset:
     """
     var_dict, pl = find_pl(input_data_array.channel.values)
     data_vars = {}
-    
+
     for new_var, old_vars in var_dict.items():
         if len(old_vars) > 1:
             data_vars[new_var] = xr.DataArray(
@@ -104,18 +104,18 @@ def reshape_dataset_regular(input_data_array: xr.DataArray) -> xr.Dataset:
                 input_data_array.sel(channel=old_vars[0]).values,
                 dims=["ipoint"],
             )
-    
+
     reshaped_dataset = xr.Dataset(data_vars)
     reshaped_dataset = reshaped_dataset.assign_coords(
         ipoint=input_data_array.coords["ipoint"],
         pressure_level=pl,
     )
-    
+
     # This is safe for regular grids
-    reshaped_dataset = reshaped_dataset.set_index(
-        ipoint=("valid_time", "lat", "lon")
-    ).unstack("ipoint")
-    
+    reshaped_dataset = reshaped_dataset.set_index(ipoint=("valid_time", "lat", "lon")).unstack(
+        "ipoint"
+    )
+
     return reshaped_dataset
 
 
@@ -123,53 +123,53 @@ def reshape_dataset_gaussian(input_data_array: xr.DataArray) -> xr.Dataset:
     """
     Reshape for Gaussian/unstructured grids - keeps spatial dimension as 'ncells'.
     Follows CF conventions for unstructured grids.
-    
+
     Parameters
     ----------
     input_data_array : xr.DataArray
         Input data with dimensions (ipoint, channel) - single timestep
-        
+
     Returns
     -------
     xr.Dataset
         Dataset with dimensions (ncells,) or (pressure_level, ncells) for single timestep
     """
     var_dict, pl = find_pl(input_data_array.channel.values)
-    
+
     # Since we're processing one forecast step at a time, we have a single timestep
     # Extract spatial coordinates
-    lats = input_data_array.coords['lat'].values
-    lons = input_data_array.coords['lon'].values
+    lats = input_data_array.coords["lat"].values
+    lons = input_data_array.coords["lon"].values
     n_spatial = len(lats)
-    
+
     # Get the valid_time for this forecast step
-    if 'valid_time' in input_data_array.coords:
-        valid_time = input_data_array.coords['valid_time'].values
-    elif 'time' in input_data_array.coords:
-        valid_time = input_data_array.coords['time'].values
+    if "valid_time" in input_data_array.coords:
+        valid_time = input_data_array.coords["valid_time"].values
+    elif "time" in input_data_array.coords:
+        valid_time = input_data_array.coords["time"].values
     else:
         valid_time = None
-    
+
     # Get forecast_step if available
-    if 'forecast_step' in input_data_array.coords:
-        forecast_step = input_data_array.coords['forecast_step'].values
+    if "forecast_step" in input_data_array.coords:
+        forecast_step = input_data_array.coords["forecast_step"].values
     else:
         forecast_step = None
-        
+
     # Get stream if available
-    if 'stream' in input_data_array.coords:
-        stream = input_data_array.coords['stream'].values
+    if "stream" in input_data_array.coords:
+        stream = input_data_array.coords["stream"].values
     else:
         stream = None
-    
-    # Reshape data: keep as (n_spatial,) or (n_levels, n_spatial) 
+
+    # Reshape data: keep as (n_spatial,) or (n_levels, n_spatial)
     data_vars = {}
-    
+
     for new_var, old_vars in var_dict.items():
         if len(old_vars) > 1:
             # Variable with pressure levels: (ipoint, n_levels) -> (n_levels, ipoint)
             data = input_data_array.sel(channel=old_vars).values.T
-            
+
             data_vars[new_var] = xr.DataArray(
                 data,
                 dims=["pressure_level", "ncells"],
@@ -177,34 +177,33 @@ def reshape_dataset_gaussian(input_data_array: xr.DataArray) -> xr.Dataset:
         else:
             # Surface variable: (ipoint,)
             data = input_data_array.sel(channel=old_vars[0]).values
-            
+
             data_vars[new_var] = xr.DataArray(
                 data,
                 dims=["ncells"],
             )
-    
+
     # Create dataset with proper coordinates
     reshaped_dataset = xr.Dataset(data_vars)
-    
+
     # Add coordinates
     coords_dict = {
-        'ncells': np.arange(n_spatial),
-        'lat': (["ncells"], lats),
-        'lon': (["ncells"], lons),
+        "ncells": np.arange(n_spatial),
+        "lat": (["ncells"], lats),
+        "lon": (["ncells"], lons),
     }
 
     # Add optional coordinates
     for coord_name, coord_value in [
-        ('pressure_level', pl),
-        ('valid_time', valid_time),
-        ('forecast_step', forecast_step),
-        ('stream', stream)
+        ("pressure_level", pl),
+        ("valid_time", valid_time),
+        ("forecast_step", forecast_step),
+        ("stream", stream),
     ]:
         if coord_value is not None:
-            coords_dict[coord_name] = coord_value    
+            coords_dict[coord_name] = coord_value
     reshaped_dataset = reshaped_dataset.assign_coords(**coords_dict)
 
-    
     # Add attributes to lat/lon to mark them as auxiliary coordinates
     reshaped_dataset["lat"].attrs = {
         "standard_name": "latitude",
@@ -216,17 +215,17 @@ def reshape_dataset_gaussian(input_data_array: xr.DataArray) -> xr.Dataset:
         "long_name": "longitude",
         "units": "degrees_east",
     }
-    
+
     # Add grid mapping information
     reshaped_dataset.attrs["grid_type"] = "gaussian"
-    
+
     return reshaped_dataset
 
 
-def add_gaussian_grid_metadata(ds: xr.Dataset, grid_info: Optional[Dict] = None) -> xr.Dataset:
+def add_gaussian_grid_metadata(ds: xr.Dataset, grid_info: dict | None = None) -> xr.Dataset:
     """
     Add Gaussian grid metadata following CF conventions.
-    
+
     Parameters
     ----------
     ds : xr.Dataset
@@ -235,38 +234,38 @@ def add_gaussian_grid_metadata(ds: xr.Dataset, grid_info: Optional[Dict] = None)
         Dictionary with grid information:
         - 'N': Gaussian grid number (e.g., N320)
         - 'reduced': Whether it's a reduced Gaussian grid
-        
+
     Returns
     -------
     xr.Dataset
         Dataset with added grid metadata
     """
     ds = ds.copy()
-    
+
     # Add coordinates attribute to data variables
     for var in ds.data_vars:
         if "ncells" in ds[var].dims:
             ds[var].attrs["coordinates"] = "lat lon"
-    
+
     # If grid info provided, add it
     if grid_info:
         ds.attrs["gaussian_grid_number"] = grid_info.get("N", "unknown")
         ds.attrs["gaussian_grid_type"] = "reduced" if grid_info.get("reduced", False) else "regular"
-    
+
     return ds
 
 
 def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
     """
     Modified CF parser that handles both regular and Gaussian grids.
-    
+
     Parameters
     ----------
     config : OmegaConf
         Configuration for CF parsing
     ds : xr.Dataset
         Input dataset
-        
+
     Returns
     -------
     xr.Dataset
@@ -274,10 +273,10 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
     """
     # Detect if this is a Gaussian grid
     is_gaussian = "ncells" in ds.dims
-    
+
     variables = {}
     mapping = config["variables"]
-    
+
     # Handle dimensions based on grid type
     if is_gaussian:
         # For Gaussian grids, keep ncells and don't try to create lat/lon dimensions
@@ -324,7 +323,7 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
                 "long_name": "longitude",
                 "units": "degrees_east",
             }
-            
+
     else:
         # Original logic for regular grids
         ds_attributes = {}
@@ -335,20 +334,20 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
                     dim_attributes["units"] = dim_dict["std_unit"]
                 ds_attributes[dim_dict["wg"]] = dim_attributes
                 continue
-                
+
             if dim_name in ds.dims:
                 ds = ds.rename_dims({dim_name: dim_dict["wg"]})
-                
+
             dim_attributes = dict(standard_name=dim_dict.get("std", None))
             if "std_unit" in dim_dict and dim_dict["std_unit"] is not None:
                 dim_attributes["units"] = dim_dict["std_unit"]
             ds_attributes[dim_dict["wg"]] = dim_attributes
-            
+
         for var_name in ds.data_vars:
             dims = ["pressure", "valid_time", "latitude", "longitude"]
             if mapping[var_name]["level_type"] == "sfc":
                 dims.remove("pressure")
-                
+
             coordinates = {}
             for coord, new_name in config["coordinates"][mapping[var_name]["level_type"]].items():
                 coordinates |= {
@@ -358,13 +357,13 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
                         ds_attributes[new_name],
                     )
                 }
-                
+
             variable = ds[var_name]
             attributes = dict(
                 standard_name=mapping[var_name]["std"],
                 units=mapping[var_name]["std_unit"],
             )
-            
+
             variables[mapping[var_name]["var"]] = xr.DataArray(
                 data=variable.values,
                 dims=dims,
@@ -372,11 +371,12 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
                 attrs=attributes,
                 name=mapping[var_name]["var"],
             )
-    
+
     dataset = xr.merge(variables.values())
     dataset.attrs = ds.attrs
-    
+
     return dataset
+
 
 def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
     """
@@ -407,6 +407,7 @@ def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
     pl = list(set(pl))
     return var_dict, pl
 
+
 def add_conventions(stream: str, run_id: str, ds: xr.Dataset) -> xr.Dataset:
     """
     Add CF conventions to the dataset attributes.
@@ -428,6 +429,7 @@ def add_conventions(stream: str, run_id: str, ds: xr.Dataset) -> xr.Dataset:
     )
     ds.attrs["Conventions"] = "CF-1.12"
     return ds
+
 
 def output_filename(
     prefix: str,
@@ -624,9 +626,7 @@ def save_sample_to_netcdf(
         sample_all_steps = sample_all_steps.assign_coords(forecast_ref_time=frt)
         stream = str(sample_all_steps.coords["stream"].values)
 
-
         if "sample" in sample_all_steps.coords:
-            print(f"Dropping sample {sample_all_steps.coords['sample'].values} coordinate for NetCDF output.")
             sample_all_steps = sample_all_steps.drop_vars("sample")
 
         sample_all_steps = cf_parser_gaussian_aware(config, sample_all_steps)
