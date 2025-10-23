@@ -243,11 +243,13 @@ class LossCalculator:
 
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
-            stream_is_spoof = streams_data[i_batch][i_stream_info].is_spoof
+
+            stream_is_spoof = streams_data[i_batch][i_stream_info].is_spoof()
             if stream_is_spoof:
-                mask = torch.tensor(0.0, device=self.device, requires_grad=False)
+                spoof_weight = torch.tensor(0.0, device=self.device, requires_grad=False)
             else:
-                mask = torch.tensor(1.0, device=self.device, requires_grad=False)
+                spoof_weight = torch.tensor(1.0, device=self.device, requires_grad=False)
+
             for fstep, (target, fstep_weight) in enumerate(
                 zip(targets, fstep_loss_weights, strict=False)
             ):
@@ -287,7 +289,7 @@ class LossCalculator:
                         weights_channels,
                         weights_locations,
                     )
-                    losses_all[stream_info.name][:, i_lfct] += mask * loss_lfct_chs
+                    losses_all[stream_info.name][:, i_lfct] += spoof_weight * loss_lfct_chs
 
                     # Add the weighted and normalized loss from this loss function to the total
                     # batch loss
@@ -299,7 +301,7 @@ class LossCalculator:
                 loss_fsteps = loss_fsteps + (loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0)
                 ctr_fsteps += 1 if ctr_loss_fcts > 0 else 0
 
-            loss = loss + ((mask * loss_fsteps) / (ctr_fsteps if ctr_fsteps > 0 else 1.0))
+            loss = loss + ((spoof_weight * loss_fsteps) / (ctr_fsteps if ctr_fsteps > 0 else 1.0))
             ctr_streams += 1 if ctr_fsteps > 0 and not stream_is_spoof else 0
 
             # normalize by forecast step
@@ -309,14 +311,6 @@ class LossCalculator:
             # replace channels without information by nan to exclude from further computations
             losses_all[stream_info.name][losses_all[stream_info.name] == 0.0] = torch.nan
             stddev_all[stream_info.name][stddev_all[stream_info.name] == 0.0] = torch.nan
-
-        if loss == 0.0:
-            # streams_data[i] are samples in batch
-            # streams_data[i][0] is stream 0 (sample_idx is identical for all streams per sample)
-            _logger.warning(
-                f"Loss is 0.0 for sample(s): {[sd[0].sample_idx.item() for sd in streams_data]}."
-                + "This will likely lead to errors in the optimization step."
-            )
 
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)
