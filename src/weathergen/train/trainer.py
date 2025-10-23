@@ -994,10 +994,10 @@ class Trainer(TrainerBase):
         Log instantaneous grad norms, we do not average because of the cost and because we want to
         measure the actual values.
         """
-        grad_norms = {"total_grad_norm": self.last_grad_norm}
+        grad_norms = {"grad_norm.total": self.last_grad_norm}
         for name, param in self.model.named_parameters():
             if param.grad is not None:
-                grad_norms["grad_norm_" + name] = self._get_tensor_item(param.grad.norm())
+                grad_norms["grad_norm." + name] = self._get_tensor_item(param.grad.norm())
 
         if is_root():
             self.train_logger.log_metrics(stage, grad_norms)
