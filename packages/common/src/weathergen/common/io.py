@@ -158,7 +158,7 @@ class OutputDataset:
     def datapoints(self) -> NDArray[np.int_]:
         return np.arange(self.data.shape[0])
 
-    def as_xarray(self, chunk_nsamples=CHUNK_N_SAMPLES) -> xr.Dataset:
+    def as_xarray(self, chunk_nsamples=CHUNK_N_SAMPLES) -> xr.DataArray:
         """Convert raw dask arrays into chunked dask-aware xarray dataset."""
         chunks = (chunk_nsamples, *self.data.shape[1:])
 
@@ -221,7 +221,7 @@ class ZarrIO:
 
     def __init__(self, store_path: pathlib.Path):
         self._store_path = store_path
-        self.data_root = None
+        self.data_root: zarr.Group | None = None
 
     def __enter__(self) -> typing.Self:
         self._store = zarr.storage.DirectoryStore(self._store_path)
