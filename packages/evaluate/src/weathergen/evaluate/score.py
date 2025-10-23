@@ -184,7 +184,7 @@ class Scores:
             "froct": self.calc_froct,
             "troct": self.calc_troct,
             "fact": self.calc_fact,
-            "oact": self.calc_oact,
+            "tact": self.calc_tact,
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
@@ -274,7 +274,7 @@ class Scores:
                 "p_next": data.prediction_next,
                 "gt_next": data.ground_truth_next,
             }
-        elif score_name in ["acc", "fact", "oact"]:
+        elif score_name in ["acc", "fact", "tact"]:
             args = {
                 "p": data.prediction,
                 "gt": data.ground_truth,
@@ -850,7 +850,7 @@ class Scores:
 
         return fact
 
-    def calc_oact(
+    def calc_tact(
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
@@ -892,23 +892,26 @@ class Scores:
             return xr.full_like(p.sum(spatial_dims), np.nan)
 
         # Calculate anomalies
-        obs_ano = gt - c
+        target_ano = gt - c
 
         if group_by_coord:
-            # Apply groupby and calculate OACT within each group using apply
-            obs_grouped = obs_ano.groupby(group_by_coord)
+            # Apply groupby and calculate TACT within each group using apply
+            target_grouped = target_ano.groupby(group_by_coord)
 
-            # Use apply to calculate OACT for each group - this preserves the coordinate structure
-            oact = xr.concat(
-                [obs_group.std(dim=spatial_dims) for group_label, obs_group in obs_grouped],
+            # Use apply to calculate TACT for each group - this preserves the coordinate structure
+            tact = xr.concat(
+                [
+                    target_group.std(dim=spatial_dims)
+                    for group_label, target_group in target_grouped
+                ],
                 dim=group_by_coord,
-            ).assign_coords({group_by_coord: list(obs_grouped.groups.keys())})
+            ).assign_coords({group_by_coord: list(target_grouped.groups.keys())})
 
         else:
             # Calculate observation activity over spatial dimensions (no grouping)
-            oact = obs_ano.std(dim=spatial_dims)
+            tact = target_ano.std(dim=spatial_dims)
 
-        return oact
+        return tact
 
     def _calc_acc_group(
         self, fcst: xr.DataArray, obs: xr.DataArray, spatial_dims: list[str]
