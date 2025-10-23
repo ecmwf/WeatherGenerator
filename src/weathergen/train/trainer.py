@@ -527,6 +527,15 @@ class Trainer(TrainerBase):
                 targets_lens[fstep][i_strm] += [target.shape[0]]
                 dn_data = self.dataset_val.denormalize_target_channels
 
+                # revert reordering of points for cells and potentially randomization
+                # this is only implemented for forecasting
+                idxs_inv = streams_data[fstep][i_strm].target_idxs_inv
+                if idxs_inv is not None:
+                    targets_coords_raw[fstep][i_strm] = targets_coords_raw[fstep][i_strm][idxs_inv]
+                    targets_times_raw[fstep][i_strm] = targets_times_raw[fstep][i_strm][idxs_inv]
+                    pred = pred[:, idxs_inv]
+                    target = target[idxs_inv]
+
                 f32 = torch.float32
                 preds_all[fstep][i_strm] += [dn_data(i_strm, pred.to(f32)).detach().cpu()]
                 targets_all[fstep][i_strm] += [dn_data(i_strm, target.to(f32)).detach().cpu()]

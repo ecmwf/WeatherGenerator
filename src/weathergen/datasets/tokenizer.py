@@ -24,11 +24,13 @@ class Tokenizer:
     Base class for tokenizers.
     """
 
-    def __init__(self, healpix_level: int):
+    def __init__(self, cf: dict):
+        self.permute_target_points = cf.get(cf.permute_target_points, True)
+
         ref = torch.tensor([1.0, 0.0, 0.0])
 
-        self.hl_source = healpix_level
-        self.hl_target = healpix_level
+        self.hl_source = cf.healpix_level
+        self.hl_target = cf.healpix_level
 
         self.num_healpix_cells_source = 12 * 4**self.hl_source
         self.num_healpix_cells_target = 12 * 4**self.hl_target

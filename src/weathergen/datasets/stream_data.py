@@ -71,8 +71,6 @@ class StreamData:
         # processing after embedding
         self.source_idxs_embed = torch.tensor([])
         self.source_idxs_embed_pe = torch.tensor([])
-        # index to recover original ordering of data
-        self.source_idxs_inv = None
 
     def to_device(self, device: str) -> None:
         """
@@ -144,12 +142,7 @@ class StreamData:
         ]
 
     def add_source(
-        self,
-        ss_raw: IOReaderData,
-        ss_lens: torch.tensor,
-        ss_cells: list,
-        ss_centroids: list,
-        idxs_inv: torch.tensor,
+        self, ss_raw: IOReaderData, ss_lens: torch.tensor, ss_cells: list, ss_centroids: list
     ) -> None:
         """
         Add data for source for one input.
@@ -173,7 +166,6 @@ class StreamData:
         self.source_tokens_lens = ss_lens
         self.source_tokens_cells = torch.cat(ss_cells)
         self.source_centroids = torch.cat(ss_centroids)
-        self.source_idxs_inv = idxs_inv
 
         idx = torch.isnan(self.source_tokens_cells)
         self.source_tokens_cells[idx] = self.mask_value

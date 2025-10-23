@@ -70,23 +70,21 @@ class TokenizerMasking(Tokenizer):
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
         # tokenize all data first
-        tokenized_data, idxs_inv = tokenize_window(
+        tokenized_data = tokenize_window(
             0,
             rdata.coords,
             rdata.geoinfos,
             rdata.data,
             rdata.datetimes,
         )
-        idxs_inv_lens = [[len(i) for i in idx] for idx in idxs_inv]
-        idxs_inv = torch.cat([torch.cat(a) for a in idxs_inv])
 
         tokenized_data = [
             torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in tokenized_data
         ]
 
         # Use the masker to get source tokens and the selection mask for the target
-        source_tokens_cells, idxs_inv = self.masker.mask_source(
-            tokenized_data, rdata.coords, rdata.geoinfos, rdata.data, idxs_inv, idxs_inv_lens
+        source_tokens_cells = self.masker.mask_source(
+            tokenized_data, rdata.coords, rdata.geoinfos, rdata.data
         )
 
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
@@ -95,7 +93,7 @@ class TokenizerMasking(Tokenizer):
         else:
             source_centroids = torch.tensor([])
 
-        return (source_tokens_cells, source_tokens_lens, source_centroids, idxs_inv)
+        return (source_tokens_cells, source_tokens_lens, source_centroids)
 
     def batchify_target(
         self,
@@ -133,19 +131,16 @@ class TokenizerMasking(Tokenizer):
         )
 
         # tokenize
-        # idxs_inv = None
-        target_tokens_cells, idxs_inv = tokenize_window(
+        target_tokens_cells = tokenize_window(
             0,
             rdata.coords,
             rdata.geoinfos,
             rdata.data,
             rdata.datetimes,
         )
-        idxs_inv_lens = [[len(i) for i in idx] for idx in idxs_inv]
-        idxs_inv = torch.cat([torch.cat(a) for a in idxs_inv])
 
-        target_tokens, idxs_inv = self.masker.mask_target(
-            target_tokens_cells, rdata.coords, rdata.geoinfos, rdata.data, idxs_inv, idxs_inv_lens
+        target_tokens = self.masker.mask_target(
+            target_tokens_cells, rdata.coords, rdata.geoinfos, rdata.data
         )
 
         target_tokens_lens = [len(t) for t in target_tokens]
@@ -218,6 +213,8 @@ class TokenizerMasking(Tokenizer):
             )
             target_coords.requires_grad = False
             target_coords = list(target_coords.split(tt_lens))
+
+        idxs_inv = None
 
         return (target_tokens, target_coords, target_coords_raw, target_times_raw, idxs_inv)
 

@@ -62,7 +62,7 @@ class TokenizerForecast(Tokenizer):
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
         # TODO: properly set stream_id; don't forget to normalize
-        source_tokens_cells, idxs_inv = tokenize_window(
+        source_tokens_cells = tokenize_window(
             0,
             rdata.coords,
             rdata.geoinfos,
@@ -78,7 +78,7 @@ class TokenizerForecast(Tokenizer):
         if source_tokens_lens.sum() > 0:
             source_centroids = self.compute_source_centroids(source_tokens_cells)
 
-        return (source_tokens_cells, source_tokens_lens, source_centroids, idxs_inv)
+        return (source_tokens_cells, source_tokens_lens, source_centroids)
 
     def batchify_target(
         self,
@@ -87,10 +87,7 @@ class TokenizerForecast(Tokenizer):
         rdata: IOReaderData,
         time_win: tuple,
     ):
-        target_tokens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
-        target_coords = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
-        target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
-
+        # limit the number of target points
         sampling_rate_target = stream_info.get("sampling_rate_target", sampling_rate_target)
         if sampling_rate_target < 1.0:
             mask = self.rng.uniform(0.0, 1.0, rdata.data.shape[0]) < sampling_rate_target
@@ -101,20 +98,24 @@ class TokenizerForecast(Tokenizer):
 
         # TODO: currently treated as empty to avoid special case handling
         if len(rdata.data) < 2:
+            target_tokens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
+            target_coords = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
             return (target_tokens, target_coords, torch.tensor([]), torch.tensor([]))
 
-        # compute indices for each cell
+        # compute indices for each cell (no tokenization is used/needed here since the decoding
+        # uses the cell structure but no tokens)
         hpy_idxs_ord_split, _, _, _ = hpy_cell_splits(rdata.coords, self.hl_target)
 
-        # TODO: expose parameter
-        with_perm_target = True
-        if with_perm_target:
-            hpy_idxs_ord_split = [
-                idx[self.rng.permutation(len(idx))[: int(len(idx))]] for idx in hpy_idxs_ord_split
-            ]
+        # permute the indices for each cell to improve generalization
+        if self.permute_target_points:
+            perms = [self.rng.permutation(len(idx))[: int(len(idx))] for idx in hpy_idxs_ord_split]
+            hpy_idxs_ord_split = [idx[p] for idx, p in zip(hpy_idxs_ord_split, perms, strict=False)]
 
-        # helper variables to split according to cells
+        # reordering is done in contiguous memory for efficiency
         idxs_ord = np.concatenate(hpy_idxs_ord_split)
+        # inverse map for reordering to output data points in same order as input
+        idxs_ord_inv = np.argsort(idxs_ord)
+        # helper variables to split according to cells
         ll = np.cumsum(np.array([len(a) for a in hpy_idxs_ord_split]))[:-1]
 
         # compute encoding of time
@@ -146,4 +147,4 @@ class TokenizerForecast(Tokenizer):
             target_coords.requires_grad = False
             target_coords = list(target_coords.split(target_tokens_lens.tolist()))
 
-        return (target_tokens, target_coords, target_coords_raw, target_times_raw)
+        return (target_tokens, target_coords, target_coords_raw, target_times_raw, idxs_ord_inv)

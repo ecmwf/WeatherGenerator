@@ -45,11 +45,12 @@ def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
     """
     Convert data, coords, and geoinfos to torch tensor
     """
-    rdata.coords = torch.tensor(rdata.coords)
-    rdata.geoinfos = torch.tensor(rdata.geoinfos)
-    rdata.data = torch.tensor(rdata.data)
-
-    return rdata
+    return IOReaderData(
+        coords=torch.tensor(rdata.coords),
+        geoinfos=torch.tensor(rdata.geoinfos),
+        data=torch.tensor(rdata.data),
+        datetimes=rdata.datetimes,
+    )
 
 
 def collect_datasources(stream_datasets: list, idx: int, type: str) -> IOReaderData:
@@ -225,10 +226,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.num_healpix_cells: int = 12 * 4**self.healpix_level
 
         if cf.training_mode == "forecast":
-            self.tokenizer = TokenizerForecast(cf.healpix_level)
+            self.tokenizer = TokenizerForecast(cf)
         elif cf.training_mode == "masking":
             masker = Masker(cf)
-            self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
+            self.tokenizer = TokenizerMasking(cf, masker)
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
             msg = "masked token modeling does not support self.input_window_steps > 1; "
             msg += "increase window length"
@@ -381,7 +382,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         stream_data.source_is_spoof = True
 
                     # preprocess data for model input
-                    (ss_cells, ss_lens, ss_centroids, idxs_inv) = self.tokenizer.batchify_source(
+                    (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                         stream_info,
                         readerdata_to_torch(rdata),
                         (time_win_source.start, time_win_source.end),
@@ -391,7 +392,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # rdata does not need to be retained in training mode, only used for output
                     if self._stage == TRAIN:
                         rdata = None
-                    stream_data.add_source(rdata, ss_lens, ss_cells, ss_centroids, idxs_inv)
+                    stream_data.add_source(rdata, ss_lens, ss_cells, ss_centroids)
 
                     # target
 
