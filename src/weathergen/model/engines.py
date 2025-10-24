@@ -71,6 +71,7 @@ class EmbeddingEngine:
                         norm_type=self.cf.norm_type,
                         embed_size_centroids=self.cf.embed_size_centroids,
                         unembed_mode=self.cf.embed_unembed_mode,
+                        embed_gradient_checkpoint_mode=self.cf.embed_gradient_checkpoint_mode,
                         stream_name=stream_name,
                     )
                 )
