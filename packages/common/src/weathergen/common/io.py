@@ -145,7 +145,7 @@ class OutputDataset:
     geoinfo_channels: list[str]
 
     @functools.cached_property
-    def arrays(self) -> dict[str, zarr.Array| NDArray]:
+    def arrays(self) -> dict[str, zarr.Array | NDArray]:
         """Iterate over the arrays and their names."""
         return {
             "data": self.data,
@@ -396,12 +396,10 @@ class OutputBatchData:
             target_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
             preds_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
         else:
-            target_data = (
-                self.targets[offset_key.forecast_step][stream_idx][0][datapoints]
-            )
-            preds_data = (
-                self.predictions[offset_key.forecast_step][stream_idx][0].transpose(1,2,0)[datapoints]
-            )
+            target_data = self.targets[offset_key.forecast_step][stream_idx][0][datapoints]
+            preds_data = self.predictions[offset_key.forecast_step][stream_idx][0].transpose(
+                1, 2, 0
+            )[datapoints]
 
         data_coords = self._extract_coordinates(stream_idx, offset_key, datapoints)
 
@@ -500,7 +498,7 @@ class OutputBatchData:
             np.asarray(source.data),
             np.asarray(source.datetimes),
             np.asarray(source.coords),
-            np.asarray(source.geoinfos) ,
+            np.asarray(source.geoinfos),
             channels,
             geoinfo_channels,
         )
