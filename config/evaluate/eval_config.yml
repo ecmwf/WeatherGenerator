@@ -16,7 +16,7 @@
 #      vmax: 40
 
 evaluation:
-  metrics  : ["rmse", "mae"] #options: "l1", "l2", "froct", "bias", "rmse", "mae" etc..
+  metrics  : ["rmse", "mae", "mse"] #options: "l1", "l2", "froct", "bias", "rmse", "mae" etc..
   regions: ["global", "nhem"] #options: "global", "nhem", "shem", "tropics"
   summary_plots : true
   plot_ensemble: false, #"members" #options: false, "std", "minmax", "members"

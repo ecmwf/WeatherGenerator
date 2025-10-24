@@ -6,7 +6,7 @@ readme = "../../README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "xarray>=2025.6.1",
-    "dask>=2024.9.1",
+ "dask[distributed]~=2025.5.1",
     "zarr==2.18.4, <3",
     "numcodecs<0.16.0",
    "astropy_healpix~=1.1.2",

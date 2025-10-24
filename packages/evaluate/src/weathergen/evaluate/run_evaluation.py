@@ -1,12 +1,3 @@
-#!/usr/bin/env -S uv run
-# /// script
-# dependencies = [
-#   "weathergen-evaluate",
-#   "weathergen-common",
-# ]
-# [tool.uv.sources]
-# weathergen-evaluate = { path = "../../../../../packages/evaluate" }
-# ///
 
 import argparse
 import logging

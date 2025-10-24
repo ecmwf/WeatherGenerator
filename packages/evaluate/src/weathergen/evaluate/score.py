@@ -16,6 +16,7 @@ import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
 
+
 from weathergen.evaluate.score_utils import to_list
 
 # from common.io import MockIO
@@ -239,8 +240,8 @@ class Scores:
         if score_name in self.det_metrics_dict.keys():
             f = self.det_metrics_dict[score_name]
         elif score_name in self.prob_metrics_dict.keys():
-            assert self.ens_dim in data.prediction.dims, (
-                f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} not found in prediction data"
+            assert self._ens_dim in data.prediction.dims, (
+                f"Probablistic score {score_name} chosen, but ensemble dimension {self._ens_dim} not found in prediction data"
             )
             f = self.prob_metrics_dict[score_name]
         else:
@@ -570,7 +571,7 @@ class Scores:
 
         return mae
 
-    def calc_mse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
+    def calc_mse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None) -> xr.DataArray:
         """
         Calculate mean squared error (MSE) of forecast data w.r.t. reference data.
 
@@ -587,14 +588,20 @@ class Scores:
             raise ValueError(
                 "Cannot calculate mean squared error without aggregation dimensions (agg_dims=None)."
             )
+        mse: xr.DataArray = (p - gt)**2
+        # import pdb; pdb.set_trace()
+        # mse.data
 
-        mse = np.square(p - gt)
+        # print(mse.expr)
+        # mse.visualize(filename="1.png")
+        # mse.visualize(tasks=True)
+        # import pdb; pdb.set_trace()
 
         if group_by_coord:
             mse = mse.groupby(group_by_coord)
 
         mse = self._mean(mse)
-
+        # print(mse.compute())
         return mse
 
     def calc_rmse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
@@ -619,7 +626,7 @@ class Scores:
 
         return rmse
 
-    def calc_vrmse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
+    def calc_vrmse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None) -> xr.DataArray:
         """
         Calculate variance-normalized root mean squared error (VRMSE) of forecast data w.r.t. reference data
         Parameters

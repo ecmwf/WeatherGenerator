@@ -15,6 +15,9 @@ import numpy as np
 import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
+# Modify a dataclass
+from dataclasses import replace
+from dask.distributed import Client
 
 from weathergen.evaluate.clim_utils import get_climatology
 from weathergen.evaluate.io_reader import Reader, WeatherGenReader
@@ -72,6 +75,8 @@ def calc_scores_per_stream(
     _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
 
     available_data = reader.check_availability(stream, mode="evaluation")
+    client = Client(threads_per_worker=4, n_workers=1)
+    _logger.info(f"Dask client created: {client}")
 
     fsteps = available_data.fsteps
     samples = available_data.samples
@@ -117,7 +122,21 @@ def calc_scores_per_stream(
             climatology = aligned_clim_data[fstep] if aligned_clim_data else None
             score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
             # Build up computation graphs for all metrics
-            _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
+            _logger.info(f"Build computation graphs for metrics for stream {stream}...")
+
+            print("TESTING METRICS COMPUTATION...")
+
+            print("Before persist:")
+            print(score_data.prediction.data.dask)
+            # Persist in memory with indexes
+            # TODO: sample would be needed too??
+            xindexes = ["ipoint"]
+            def _persist(da: xr.DataArray) -> xr.DataArray:
+                return da.drop_indexes("ipoint").set_xindex(xindexes).persist()
+            score_data = replace(score_data, prediction=_persist(score_data.prediction))
+            score_data = replace(score_data, ground_truth=_persist(score_data.ground_truth))
+            print("After persist:   ")
+            print(score_data.prediction.data.dask)
 
             combined_metrics = [
                 get_score(
@@ -129,10 +148,15 @@ def calc_scores_per_stream(
                 for metric in metrics
             ]
 
-            combined_metrics = xr.concat(combined_metrics, dim="metric")
-            combined_metrics["metric"] = metrics
+            futures = client.compute(combined_metrics)
+            _logger.info(f"Submitted metric computations to Dask cluster, waiting for results...: {futures}")
+            all_combined_metrics = client.gather(futures)
+
+            print(combined_metrics)
 
             _logger.debug(f"Running computation of metrics for stream {stream}...")
+            combined_metrics = xr.concat(all_combined_metrics, dim="metric")
+            combined_metrics["metric"] = metrics
             combined_metrics = combined_metrics.compute()
             combined_metrics = scalar_coord_to_dim(combined_metrics, "channel")
             combined_metrics = scalar_coord_to_dim(combined_metrics, "sample")

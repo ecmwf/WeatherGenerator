@@ -12,6 +12,7 @@ dependencies = [
     "omegaconf",
     "weathergen-common",
     "plotly>=6.2.0",
+   "dask[distributed]~=2025.5.1",
 ]
 
 [dependency-groups]
