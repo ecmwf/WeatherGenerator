@@ -30,6 +30,11 @@ type NPDT64 = datetime64
 _logger = logging.getLogger(__name__)
 
 
+def is_ndarray(obj: typing.Any) -> bool:
+    """Check if object is an ndarray (wraps the linter warning)."""
+    return isinstance(obj, (np.ndarray))  # noqa: TID251
+
+
 @dataclasses.dataclass
 class IOReaderData:
     """
@@ -286,7 +291,7 @@ class ZarrIO:
             self._create_dataset(dataset_group, array_name, array)
 
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
-        assert isinstance(array, np.ndarray), f"Expected ndarray but got: {type(array)}"
+        assert is_ndarray(array), f"Expected ndarray but got: {type(array)}"
         if array.size == 0:  # sometimes for geoinfo
             chunks = None
         else:
@@ -415,8 +420,8 @@ class OutputBatchData:
         else:
             source_dataset = None
 
-        assert isinstance(target_data, np.ndarray), f"Expected ndarray but got: {type(target_data)}"
-        assert isinstance(preds_data, np.ndarray), f"Expected ndarray but got: {type(preds_data)}"
+        assert is_ndarray(target_data), f"Expected ndarray but got: {type(target_data)}"
+        assert is_ndarray(preds_data), f"Expected ndarray but got: {type(preds_data)}"
         return OutputItem(
             key=key,
             source=source_dataset,
