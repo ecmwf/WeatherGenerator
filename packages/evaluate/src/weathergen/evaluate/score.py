@@ -183,8 +183,8 @@ class Scores:
             "acc": self.calc_acc,
             "froct": self.calc_froct,
             "troct": self.calc_troct,
-            "fact": self.calc_fact,
-            "tact": self.calc_tact,
+            "fact": self.calc_act,
+            "tact": self.calc_act,
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
@@ -278,6 +278,16 @@ class Scores:
             args = {
                 "p": data.prediction,
                 "gt": data.ground_truth,
+                "c": data.climatology,
+            }
+        elif score_name == "fact":
+            args = {
+                "p": data.prediction,
+                "c": data.climatology,
+            }
+        elif score_name == "tact":
+            args = {
+                "p": data.ground_truth,
                 "c": data.climatology,
             }
         else:
@@ -790,16 +800,15 @@ class Scores:
 
         return troct
 
-    def calc_fact(
+    def calc_act(
         self,
         p: xr.DataArray,
-        gt: xr.DataArray,
         c: xr.DataArray,
         group_by_coord: str | None = None,
         spatial_dims: list = None,
     ):
         """
-        Calculate forecast activity metric as standard deviation of forecast anomaly.
+        Calculate activity metric as standard deviation of forecast or target anomaly.
 
         NOTE:
         The climatlogical mean data clim_mean must fit to the forecast and ground truth data.
@@ -807,16 +816,14 @@ class Scores:
         Parameters
         ----------
         p: xr.DataArray
-            Forecast data array
-        gt: xr.DataArray
-            Ground truth data array
+            Forecast or target data array
         c: xr.DataArray
             Climatological mean data array, which is used to calculate anomalies
         group_by_coord: str
             Name of the coordinate to group by.
-            If provided, the coordinate becomes a new dimension of the ACC score.
+            If provided, the coordinate becomes a new dimension of the activity score.
         spatial_dims: List[str]
-            Names of spatial dimensions over which ACC is calculated.
+            Names of spatial dimensions over which activity is calculated.
             Note: No averaging is possible over these dimensions.
         """
 
@@ -832,86 +839,23 @@ class Scores:
             return xr.full_like(p.sum(spatial_dims), np.nan)
 
         # Calculate anomalies
-        fcst_ano = p - c
+        ano = p - c
 
         if group_by_coord:
-            # Apply groupby and calculate FACT within each group using apply
-            fcst_grouped = fcst_ano.groupby(group_by_coord)
+            # Apply groupby and calculate activity within each group using apply
+            ano_grouped = ano.groupby(group_by_coord)
 
-            # Use apply to calculate FACT for each group - this preserves the coordinate structure
-            fact = xr.concat(
-                [fcst_group.std(dim=spatial_dims) for group_label, fcst_group in fcst_grouped],
+            # Use apply to calculate activity for each group - this preserves the coordinate structure
+            act = xr.concat(
+                [ano_group.std(dim=spatial_dims) for group_label, ano_group in ano_grouped],
                 dim=group_by_coord,
-            ).assign_coords({group_by_coord: list(fcst_grouped.groups.keys())})
+            ).assign_coords({group_by_coord: list(ano_grouped.groups.keys())})
 
         else:
             # Calculate forecast activity over spatial dimensions (no grouping)
-            fact = fcst_ano.std(dim=spatial_dims)
+            act = ano.std(dim=spatial_dims)
 
-        return fact
-
-    def calc_tact(
-        self,
-        p: xr.DataArray,
-        gt: xr.DataArray,
-        c: xr.DataArray,
-        group_by_coord: str | None = None,
-        spatial_dims: list = None,
-    ):
-        """
-        Calculate observation activity metric as standard deviation of observation anomaly.
-
-        NOTE:
-        The climatlogical mean data clim_mean must fit to the forecast and ground truth data.
-
-        Parameters
-        ----------
-        p: xr.DataArray
-            Forecast data array
-        gt: xr.DataArray
-            Ground truth data array
-        c: xr.DataArray
-            Climatological mean data array, which is used to calculate anomalies
-        group_by_coord: str
-            Name of the coordinate to group by.
-            If provided, the coordinate becomes a new dimension of the ACC score.
-        spatial_dims: List[str]
-            Names of spatial dimensions over which ACC is calculated.
-            Note: No averaging is possible over these dimensions.
-        """
-
-        # Check if spatial_dims are in the data
-        spatial_dims = ["ipoint"] if spatial_dims is None else to_list(spatial_dims)
-
-        for dim in spatial_dims:
-            if dim not in p.dims:
-                raise ValueError(
-                    f"Spatial dimension '{dim}' not found in prediction data dimensions: {p.dims}"
-                )
-        if c is None:
-            return xr.full_like(p.sum(spatial_dims), np.nan)
-
-        # Calculate anomalies
-        target_ano = gt - c
-
-        if group_by_coord:
-            # Apply groupby and calculate TACT within each group using apply
-            target_grouped = target_ano.groupby(group_by_coord)
-
-            # Use apply to calculate TACT for each group - this preserves the coordinate structure
-            tact = xr.concat(
-                [
-                    target_group.std(dim=spatial_dims)
-                    for group_label, target_group in target_grouped
-                ],
-                dim=group_by_coord,
-            ).assign_coords({group_by_coord: list(target_grouped.groups.keys())})
-
-        else:
-            # Calculate observation activity over spatial dimensions (no grouping)
-            tact = target_ano.std(dim=spatial_dims)
-
-        return tact
+        return act
 
     def _calc_acc_group(
         self, fcst: xr.DataArray, obs: xr.DataArray, spatial_dims: list[str]
@@ -936,7 +880,6 @@ class Scores:
         return (fcst * obs).sum(spatial_dims) / np.sqrt(
             (fcst**2).sum(spatial_dims) * (obs**2).sum(spatial_dims)
         )
-
 
     def calc_acc(
         self,
