@@ -183,8 +183,8 @@ class Scores:
             "acc": self.calc_acc,
             "froct": self.calc_froct,
             "troct": self.calc_troct,
-            "fact": self.calc_act,
-            "tact": self.calc_act,
+            "fact": self.calc_fact,
+            "tact": self.calc_tact,
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
@@ -287,7 +287,7 @@ class Scores:
             }
         elif score_name == "tact":
             args = {
-                "p": data.ground_truth,
+                "gt": data.ground_truth,
                 "c": data.climatology,
             }
         else:
@@ -749,7 +749,7 @@ class Scores:
         """
         if self._agg_dims is None:
             raise ValueError(
-                "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
+                "Cannot calculate rate of change without aggregation dimensions (agg_dims=None)."
             )
 
         froct = self.calc_change_rate(p, p_next)
@@ -788,7 +788,7 @@ class Scores:
         """
         if self._agg_dims is None:
             raise ValueError(
-                "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
+                "Cannot calculate rate of change without aggregation dimensions (agg_dims=None)."
             )
 
         troct = self.calc_change_rate(gt, gt_next)
@@ -800,9 +800,9 @@ class Scores:
 
         return troct
 
-    def calc_act(
+    def _calc_act(
         self,
-        p: xr.DataArray,
+        x: xr.DataArray,
         c: xr.DataArray,
         group_by_coord: str | None = None,
         spatial_dims: list = None,
@@ -815,7 +815,7 @@ class Scores:
 
         Parameters
         ----------
-        p: xr.DataArray
+        x: xr.DataArray
             Forecast or target data array
         c: xr.DataArray
             Climatological mean data array, which is used to calculate anomalies
@@ -831,15 +831,15 @@ class Scores:
         spatial_dims = ["ipoint"] if spatial_dims is None else to_list(spatial_dims)
 
         for dim in spatial_dims:
-            if dim not in p.dims:
+            if dim not in x.dims:
                 raise ValueError(
-                    f"Spatial dimension '{dim}' not found in prediction data dimensions: {p.dims}"
+                    f"Spatial dimension '{dim}' not found in prediction data dimensions: {x.dims}"
                 )
         if c is None:
-            return xr.full_like(p.sum(spatial_dims), np.nan)
+            return xr.full_like(x.sum(spatial_dims), np.nan)
 
         # Calculate anomalies
-        ano = p - c
+        ano = x - c
 
         if group_by_coord:
             # Apply groupby and calculate activity within each group using apply
@@ -856,6 +856,64 @@ class Scores:
             act = ano.std(dim=spatial_dims)
 
         return act
+    
+    def calc_fact(
+        self,
+        p: xr.DataArray,
+        c: xr.DataArray,
+        group_by_coord: str | None = None,
+        spatial_dims: list = None,
+    ):
+        """
+        Calculate target activity metric as standard deviation of target anomaly.
+
+        NOTE:
+        The climatlogical mean data clim_mean must fit to the target data.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        c: xr.DataArray
+            Climatological mean data array, which is used to calculate anomalies
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the activity score.
+        spatial_dims: List[str]
+            Names of spatial dimensions over which activity is calculated.
+            Note: No averaging is possible over these dimensions.
+        """
+
+        return self._calc_act(p, c, group_by_coord, spatial_dims)
+    
+    def calc_tact(
+        self,
+        gt: xr.DataArray,
+        c: xr.DataArray,
+        group_by_coord: str | None = None,
+        spatial_dims: list = None,
+    ):
+        """
+        Calculate target activity metric as standard deviation of target anomaly.
+
+        NOTE:
+        The climatlogical mean data clim_mean must fit to the target data.
+
+        Parameters
+        ----------
+        gt: xr.DataArray
+            Target data array
+        c: xr.DataArray
+            Climatological mean data array, which is used to calculate anomalies
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the activity score.
+        spatial_dims: List[str]
+            Names of spatial dimensions over which activity is calculated.
+            Note: No averaging is possible over these dimensions.
+        """
+
+        return self._calc_act(gt, c, group_by_coord, spatial_dims)
 
     def _calc_acc_group(
         self, fcst: xr.DataArray, obs: xr.DataArray, spatial_dims: list[str]
