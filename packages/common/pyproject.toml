@@ -9,6 +9,9 @@ dependencies = [
     "dask>=2024.9.1",
     "zarr==2.18.4, <3",
     "numcodecs<0.16.0",
+   "astropy_healpix~=1.1.2",
+   "omegaconf~=2.3.0",
+   "pyyaml",
 ]
 
 [dependency-groups]
@@ -16,7 +19,7 @@ dev = [
  "pytest~=8.3.5",
  "pytest-mock>=3.14.1",
  "ruff==0.9.7",
- "pyrefly==0.33.0",
+ "pyrefly==0.36.0",
 ]
 
 
@@ -31,13 +34,6 @@ unsupported-operation = false
 missing-attribute = false
 no-matching-overload = false
 bad-context-manager = false
-
-# To do:
-bad-assignment = false
-bad-return = false
-index-error = false
-not-iterable = false
-not-callable = false
 
 
 

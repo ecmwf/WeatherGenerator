@@ -45,10 +45,16 @@ class IOReaderData:
     data: NDArray[DType]
     datetimes: NDArray[NPDT64]
 
+    def is_empty(self):
+        """
+        Test if data object is empty
+        """
+        return len(self.data) == 0
+
     @classmethod
     def create(cls, other: typing.Any) -> "IOReaderData":
         """
-        create an instance from data_reader_base.ReaderData instance.
+        Create an instance from data_reader_base.ReaderData instance.
 
         other should be such an instance.
         """
@@ -64,6 +70,35 @@ class IOReaderData:
         assert datetimes.shape[0] == n_datapoints, "number of datapoints do not match data"
 
         return cls(**dataclasses.asdict(other))
+
+    @classmethod
+    def combine(cls, others: list["IOReaderData"]) -> "IOReaderData":
+        """
+        Create an instance from data_reader_base.ReaderData instance by combining mulitple ones.
+
+        others is list of ReaderData instances.
+        """
+
+        assert len(others) > 0, len(others)
+
+        other = others[0]
+        coords = np.zeros((0, other.coords.shape[1]), dtype=other.coords.dtype)
+        geoinfos = np.zeros((0, other.geoinfos.shape[1]), dtype=other.geoinfos.dtype)
+        data = np.zeros((0, other.data.shape[1]), dtype=other.data.dtype)
+        datetimes = np.array([], dtype=other.datetimes.dtype)
+
+        for other in others:
+            n_datapoints = len(other.data)
+            assert other.coords.shape == (n_datapoints, 2), "number of datapoints do not match"
+            assert other.geoinfos.shape[0] == n_datapoints, "number of datapoints do not match"
+            assert other.datetimes.shape[0] == n_datapoints, "number of datapoints do not match"
+
+            coords = np.concatenate([coords, other.coords])
+            geoinfos = np.concatenate([geoinfos, other.geoinfos])
+            data = np.concatenate([data, other.data])
+            datetimes = np.concatenate([datetimes, other.datetimes])
+
+        return cls(coords, geoinfos, data, datetimes)
 
 
 @dataclasses.dataclass
@@ -123,7 +158,7 @@ class OutputDataset:
     def datapoints(self) -> NDArray[np.int_]:
         return np.arange(self.data.shape[0])
 
-    def as_xarray(self, chunk_nsamples=CHUNK_N_SAMPLES) -> xr.Dataset:
+    def as_xarray(self, chunk_nsamples=CHUNK_N_SAMPLES) -> xr.DataArray:
         """Convert raw dask arrays into chunked dask-aware xarray dataset."""
         chunks = (chunk_nsamples, *self.data.shape[1:])
 
@@ -186,7 +221,7 @@ class ZarrIO:
 
     def __init__(self, store_path: pathlib.Path):
         self._store_path = store_path
-        self.data_root = None
+        self.data_root: zarr.Group | None = None
 
     def __enter__(self) -> typing.Self:
         self._store = zarr.storage.DirectoryStore(self._store_path)
