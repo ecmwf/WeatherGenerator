@@ -740,6 +740,9 @@ class Trainer(TrainerBase):
             path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
         )
 
+        # # Ensure backward compatibility with old model checkpoints
+        # params = self.model.rename_old_state_dict(params)
+
         model_state_dict = self.model.state_dict()
         params = {
             k: v

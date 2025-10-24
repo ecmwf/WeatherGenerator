@@ -563,6 +563,10 @@ class Model(torch.nn.Module):
         params = torch.load(
             path_run / filename, map_location=torch.device("cpu"), weights_only=True
         )
+
+        # # Ensure backward compatibility with old model checkpoints
+        # params = self.rename_old_state_dict(params)
+
         params_renamed = {}
         for k in params.keys():
             params_renamed[k.replace("module.", "")] = params[k]
