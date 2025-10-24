@@ -212,6 +212,10 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
     if not isinstance(plot_maps, bool):
         raise TypeError("plot_maps must be a boolean.")
 
+    plot_target = plot_settings.get("plot_target", True)
+    if not isinstance(plot_target, bool):
+        raise TypeError("plot_target must be a boolean.")
+
     # Check if histograms should be plotted
     plot_histograms = plot_settings.get("plot_histograms", False)
     if not isinstance(plot_histograms, bool):
@@ -255,9 +259,10 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
             }
 
             if plot_maps:
-                plotter.create_maps_per_sample(
-                    tars, plot_chs, data_selection, "targets", maps_config
-                )
+                if plot_target:
+                    plotter.create_maps_per_sample(
+                        tars, plot_chs, data_selection, "targets", maps_config
+                    )
                 for ens in available_data.ensemble:
                     preds_ens = (
                         preds.sel(ens=ens) if "ens" in preds.dims and ens != "mean" else preds
@@ -283,7 +288,8 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         for ens in available_data.ensemble:
             preds_name = "preds" if "ens" not in preds.dims else f"preds_ens_{ens}"
             plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, preds_name)
-        plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
+        if plot_target:
+            plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
 
     return
 

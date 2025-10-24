@@ -114,12 +114,12 @@ def align_clim_data(
 
     if clim_data is None:
         return aligned_clim_data
-    
+
     # Build KDTree indexer once
     clim_lats = clim_data.latitude.values
     clim_lons = clim_data.longitude.values
     clim_indexer = build_climatology_indexer(clim_lats, clim_lons)
-   
+
     for fstep, target_data in target_output.items():
         samples = np.unique(target_data.sample.values)
         for sample in tqdm(samples, f"Aligning climatology for forecast step {fstep}"):
