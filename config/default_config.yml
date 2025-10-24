@@ -24,7 +24,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 8
+ae_global_num_blocks: 2
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -42,12 +42,12 @@ pred_mlp_adaln: True
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-forecast_offset : 0
+forecast_offset : 1
 forecast_delta_hrs: 0
-forecast_steps: 0
-forecast_policy: null
+forecast_steps: 1
+forecast_policy: "fixed"
 forecast_att_dense_rate: 1.0
-fe_num_blocks: 0
+fe_num_blocks: 2
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -93,7 +93,7 @@ ema_halflife_in_thousands: 1e-3
 
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "masking"
+training_mode: "forecast"
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
@@ -168,8 +168,28 @@ train_log:
   
 # Forecast MLP type: "dense" (default) or "moe"
 fe_mlp_type: "dense"    # set to "moe" to enable MoE
+ae_global_mlp_type: "dense"    # set to "moe" to enable MoE
+ffn_mlp_type: "dense"  # set to "moe" to enable MoE in the feed-forward network of the decoder blocks
+decoder_mlp_type: "dense"  # set to "moe" to enable MoE in the decoder prediction MLP
+moe_lambda: 0.02  # coefficient for the MoE load balancing loss
 
 # MoE-only params (ignored when fe_mlp_type != "moe")
-fe_moe_num_experts: 8
-fe_moe_top_k: 2
+fe_moe_num_experts: 2
+fe_moe_top_k: 1
 fe_moe_hidden_factor: 0.5   # = HF_dense / 4
+
+# MoE-only params (ignored when ae_global_mlp_type != "moe")
+ae_global_moe_num_experts: 4
+ae_global_moe_top_k: 2
+ae_global_moe_hidden_factor: 0.5   # = HF_dense / 4
+
+# MoE-only params (ignored when ffn_mlp_type != "moe")
+ffn_moe_num_experts: 2
+ffn_moe_top_k: 1
+ffn_moe_hidden_factor: 0.5   # = HF_dense / 4
+
+# MoE-only params (ignored when decoder_mlp_type != "moe")
+decoder_moe_num_experts: 2
+decoder_moe_top_k: 1
+decoder_moe_hidden_factor: 0.5   # = HF_dense / 4
+tr_mlp_hidden_factor: 2

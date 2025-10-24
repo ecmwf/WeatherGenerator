@@ -40,7 +40,7 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadVarlen,
 )
 from weathergen.model.ema import EMAModel
-from weathergen.model.layers import MLP
+from weathergen.model.layers import MLP, MoEMLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
@@ -154,6 +154,14 @@ class Trainer(TrainerBase):
         self.validate(epoch=0)
         logger.info(f"Finished inference run with id: {cf.run_id}")
 
+    def _ensure_moe_modules_cached(self):
+        # Works with plain, DDP-wrapped, FSDP, or compiled models
+        from weathergen.model.layers import MoEMLP
+        m = self.model
+        if hasattr(m, "module"):   # DDP
+            m = m.module
+        self.moe_modules = [x for x in m.modules() if isinstance(x, MoEMLP)]
+
     def init_model_and_shard(self, cf, devices):
         sources_size = self.dataset.get_sources_size()
         targets_num_channels = self.dataset.get_targets_num_channels()
@@ -197,6 +205,7 @@ class Trainer(TrainerBase):
                 MultiCrossAttentionHeadVarlen,
                 MultiCrossAttentionHeadVarlenSlicedQ,
                 MultiSelfAttentionHeadVarlen,
+                MoEMLP,
             )
 
             for module in model.ae_local_blocks.modules():
@@ -239,6 +248,7 @@ class Trainer(TrainerBase):
             fully_shard(model)
             for tensor in itertools.chain(model.parameters(), model.buffers()):
                 assert tensor.device == torch.device("meta")
+
         return model, model_params
 
     def run(self, cf, devices, run_id_contd=None, epoch_contd=None):
@@ -282,7 +292,7 @@ class Trainer(TrainerBase):
         )
 
         self.model, self.model_params = self.init_model_and_shard(cf, devices)
-
+        self._ensure_moe_modules_cached()
         if run_id_contd is None:
             self.model.to_empty(device="cuda")
             self.model.reset_parameters()
@@ -560,7 +570,12 @@ class Trainer(TrainerBase):
         for bidx, batch in enumerate(dataset_iter):
             forecast_steps = batch[-1]
             batch = self.batch_to_device(batch)
-
+            interval = max(1, int(getattr(self.cf, "moe_loss_interval", 1)))
+            collect = (self.cf.istep % interval) == 0
+            for m in self.moe_modules:
+                # only set if MoEMLP implements the flag
+                if hasattr(m, "enable_gate_loss"):
+                    m.enable_gate_loss = collect
             # evaluate model
             with torch.autocast(
                 device_type=f"cuda:{cf.local_rank}",
@@ -577,50 +592,126 @@ class Trainer(TrainerBase):
             if cf.latent_noise_kl_weight > 0.0:
                 kl = torch.cat([posterior.kl() for posterior in posteriors])
                 loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
+            
+            # MoE gate loss
+            moe_lambda_base = float(getattr(self.cf, "moe_lambda", 0.02))
+            if moe_lambda_base and collect:
+                # optional warmup
+                warm = int(getattr(self.cf, "moe_lambda_warmup_steps", 0))
+                warm_mult = 1.0 if warm <= 0 else min(1.0, self.cf.istep / float(warm))
 
-            # backward pass
-            self.optimizer.zero_grad()
-            self.grad_scaler.scale(loss_values.loss).backward()
-            # loss_values.loss.backward()
+                gate_loss = None
+                for m in self.moe_modules:
+                    la = getattr(m, "last_aux", None)
+                    if isinstance(la, dict) and ("gate_loss" in la):
+                        gate_loss = la["gate_loss"] if gate_loss is None else (gate_loss + la["gate_loss"])
 
-            # gradient clipping
-            self.grad_scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=cf.grad_clip)
+                if gate_loss is not None:
+                    # scale λ by interval so average gradient matches per-step application
+                    effective_lambda = moe_lambda_base * interval * warm_mult
+                    loss_values.loss = loss_values.loss + effective_lambda * gate_loss
+            
+            # moe_lambda = getattr(self.cf, "moe_lambda", 0.0)
+            # gate_loss = None
+            # if moe_lambda != 0.0:
+            #     gate_loss = torch.zeros((), device=self.device)
+            #     route_hists = []
 
-            # optimizer step
-            self.grad_scaler.step(self.optimizer)
-            self.grad_scaler.update()
-            # self.optimizer.step()
+            #     for m in self.model.modules():
+            #         if isinstance(m, MoEMLP) and hasattr(m, "last_aux"):
+            #             la = m.last_aux
+            #             if isinstance(la, dict):
+            #                 if "gate_loss" in la:
+            #                     gate_loss = gate_loss + la["gate_loss"]
+            #                 if "route_hist" in la:
+            #                     # route_hist: [E]
+            #                     route_hists.append(la["route_hist"].detach())
 
-            # update learning rate
-            self.lr_scheduler.step()
+            #     loss_values.loss = loss_values.loss + moe_lambda * gate_loss
 
-            # EMA update
-            if self.validate_with_ema:
-                self.ema_model.update(
-                    self.cf.istep * self.world_size_original * self.cf.batch_size_per_gpu,
-                    self.world_size_original * self.cf.batch_size_per_gpu,
-                )
+            #     # Lightweight logging every metrics interval
+            #     if (self.cf.istep % self.train_log_freq.metrics) == 0:
+            #         # summarize routing (entropy and max-util)
+            #         # summarize routing (entropy and max-util) without stacking, since E can differ per block
+            #         if route_hists:
+            #             entropies = []
+            #             max_utils = []
+            #             sizes = []
+            #             for rh in route_hists:
+            #                 p = rh.float()                     # [E], sums ~1
+            #                 ent = (-(p * p.clamp_min(1e-6).log())).sum()   # scalar
+            #                 entropies.append(ent.item())
+            #                 max_utils.append(p.max().item())
+            #                 sizes.append(p.numel())
 
-            self.loss_unweighted_hist += [loss_values.losses_all]
-            self.loss_model_hist += [loss_values.loss.item()]
-            self.stdev_unweighted_hist += [loss_values.stddev_all]
+            #             # averages across blocks
+            #             entropy_mean = torch.tensor(entropies, device=self.device).mean().item()
+            #             max_util_mean = torch.tensor(max_utils, device=self.device).mean().item()
 
-            perf_gpu, perf_mem = self.get_perf()
-            self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
-            self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
+            #             # optional: quick distribution of expert counts across MoE modules
+            #             # (kept tiny for logging)
+            #             unique_E = sorted(set(sizes))
+            #             logger.info(
+            #                 "[MoE] step=%d | gate_loss=%.4e (λ=%.3g) | blocks=%d | route: entropy=%.3f, max_util=%.3f | E=%s",
+            #                 self.cf.istep,
+            #                 gate_loss.item(),
+            #                 moe_lambda,
+            #                 len(route_hists),
+            #                 entropy_mean,
+            #                 max_util_mean,
+            #                 unique_E,
+            #             )
+            #         else:
+            #             logger.info(
+            #                 "[MoE] step=%d | gate_loss=%.4e (λ=%.3g) | blocks=0 (no route_hist yet)",
+            #                 self.cf.istep,
+            #                 gate_loss.item(),
+            #                 moe_lambda,
+            #             )
+             
+                # backward pass
+                self.optimizer.zero_grad()
+                self.grad_scaler.scale(loss_values.loss).backward()
+                # loss_values.loss.backward()
 
-            self._log_terminal(bidx, epoch, TRAIN)
-            if bidx % self.train_log_freq.metrics == 0:
-                self._log(TRAIN)
+                # gradient clipping
+                self.grad_scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=cf.grad_clip)
 
-            # save model checkpoint (with designation _latest)
-            if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
-                self.save_model(-1)
+                # optimizer step
+                self.grad_scaler.step(self.optimizer)
+                self.grad_scaler.update()
+                # self.optimizer.step()
 
-            self.cf.istep += 1
+                # update learning rate
+                self.lr_scheduler.step()
 
-        self.dataset.advance()
+                # EMA update
+                if self.validate_with_ema:
+                    self.ema_model.update(
+                        self.cf.istep * self.world_size_original * self.cf.batch_size_per_gpu,
+                        self.world_size_original * self.cf.batch_size_per_gpu,
+                    )
+
+                self.loss_unweighted_hist += [loss_values.losses_all]
+                self.loss_model_hist += [loss_values.loss.item()]
+                self.stdev_unweighted_hist += [loss_values.stddev_all]
+
+                perf_gpu, perf_mem = self.get_perf()
+                self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
+                self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
+
+                self._log_terminal(bidx, epoch, TRAIN)
+                if bidx % self.train_log_freq.metrics == 0:
+                    self._log(TRAIN)
+
+                # save model checkpoint (with designation _latest)
+                if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
+                    self.save_model(-1)
+
+                self.cf.istep += 1
+
+            self.dataset.advance()
 
     def validate(self, epoch):
         cf = self.cf

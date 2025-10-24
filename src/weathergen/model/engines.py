@@ -24,10 +24,12 @@ from weathergen.model.embeddings import (
     StreamEmbedLinear,
     StreamEmbedTransformer,
 )
-from weathergen.model.layers import MLP
+from weathergen.model.layers import MLP, MoEMLP
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
+import logging
+logger = logging.getLogger(__name__)
 
 class EmbeddingEngine:
     name: "EmbeddingEngine"
@@ -249,17 +251,50 @@ class GlobalAssimilationEngine:
                     )
                 )
             # MLP block
-            self.ae_global_blocks.append(
-                MLP(
-                    self.cf.ae_global_dim_embed,
-                    self.cf.ae_global_dim_embed,
-                    with_residual=True,
-                    dropout_rate=self.cf.ae_global_dropout_rate,
-                    hidden_factor=self.cf.ae_global_mlp_hidden_factor,
-                    norm_type=self.cf.norm_type,
-                    norm_eps=self.cf.mlp_norm_eps,
-                )
+            # Add MoE option
+            use_moe = getattr(self.cf, "ae_global_mlp_type", "dense") == "moe"
+            mlp_common_kwargs = dict(
+                dim_in=self.cf.ae_global_dim_embed,
+                dim_out=self.cf.ae_global_dim_embed,
+                with_residual=True,
+                dropout_rate=self.cf.ae_global_dropout_rate,
+                norm_type=self.cf.norm_type,
+                norm_eps=self.cf.mlp_norm_eps,
             )
+            if use_moe:
+                self.ae_global_blocks.append(
+                    MoEMLP(
+                        **mlp_common_kwargs,
+                        num_experts=getattr(self.cf, "ae_global_moe_num_experts", 2),
+                        top_k=getattr(self.cf, "ae_global_moe_top_k", 1),
+                        router_noisy_std=getattr(self.cf, "ae_global_moe_router_noisy_std", 0.0),
+                        hidden_factor=getattr(self.cf, "ae_global_moe_hidden_factor", 2),
+                    )
+                )
+            else:
+                self.ae_global_blocks.append(
+                    MLP(
+                        self.cf.ae_global_dim_embed,
+                        self.cf.ae_global_dim_embed,
+                        with_residual=True,
+                        dropout_rate=self.cf.ae_global_dropout_rate,
+                        hidden_factor=self.cf.ae_global_mlp_hidden_factor,
+                        norm_type=self.cf.norm_type,
+                        norm_eps=self.cf.mlp_norm_eps,
+                    )
+                )
+        # Count MoE blocks
+        num_moe = sum(1 for m in self.ae_global_blocks if isinstance(m, MoEMLP))
+        logger.info(
+            "[MoE] GlobalAssimilationEngine: %d MoEMLP blocks "
+            "(ae_global_mlp_type=%s, experts=%s, top_k=%s, hidden_factor=%s)",
+            num_moe,
+            getattr(self.cf, "ae_global_mlp_type", "dense"),
+            getattr(self.cf, "ae_global_moe_num_experts", None),
+            getattr(self.cf, "ae_global_moe_top_k", None),
+            getattr(self.cf, "ae_global_moe_hidden_factor", None),
+        )
+
         return self.ae_global_blocks
 
 
@@ -343,8 +378,8 @@ class ForecastingEngine:
                     self.fe_blocks.append(
                         MoEMLP(
                             **mlp_common_kwargs,
-                            num_experts=getattr(self.cf, "fe_moe_num_experts", 8),
-                            top_k=getattr(self.cf, "fe_moe_top_k", 4),
+                            num_experts=getattr(self.cf, "fe_moe_num_experts", 2),
+                            top_k=getattr(self.cf, "fe_moe_top_k", 2),
                             router_noisy_std=getattr(self.cf, "fe_moe_router_noisy_std", 0.0),
                             hidden_factor=getattr(self.cf, "fe_moe_hidden_factor", 2),
                         )
@@ -362,15 +397,24 @@ class ForecastingEngine:
                         )
                     )
                 # ------------------------------------------------------------------
-        def init_weights_final(m):
-            if isinstance(m, torch.nn.Linear):
-                torch.nn.init.normal_(m.weight, mean=0, std=0.001)
-                if m.bias is not None:
-                    torch.nn.init.normal_(m.bias, mean=0, std=0.001)
+        # def init_weights_final(m):
+        #     if isinstance(m, torch.nn.Linear) and not getattr(m, "is_moe_router", False):
+        #         torch.nn.init.normal_(m.weight, mean=0, std=0.001)
+        #         if m.bias is not None:
+        #             torch.nn.init.normal_(m.bias, mean=0, std=0.001)
 
-        for block in self.fe_blocks:
-            block.apply(init_weights_final)
-
+        # for block in self.fe_blocks:
+        #     block.apply(init_weights_final)
+        num_moe = sum(1 for m in self.fe_blocks if isinstance(m, MoEMLP))
+        logger.info(
+            "[MoE] ForecastingEngine: %d MoEMLP blocks "
+            "(fe_mlp_type=%s, experts=%s, top_k=%s, hidden_factor=%s)",
+            num_moe,
+            getattr(self.cf, "fe_mlp_type", "dense"),
+            getattr(self.cf, "fe_moe_num_experts", None),
+            getattr(self.cf, "fe_moe_top_k", None),
+            getattr(self.cf, "fe_moe_hidden_factor", None),
+        )
         return self.fe_blocks
 
 
@@ -619,6 +663,14 @@ class TargetPredictionEngine(nn.Module):
                         with_adanorm=False,
                         with_mlp=False,
                         attention_kwargs=attention_kwargs,
+                        ffn_mlp_type=getattr(self.cf, "decoder_ffn_mlp_type", "dense"),
+                        ffn_hidden_factor=getattr(self.cf, "decoder_ffn_hidden_factor", 4),
+                        moe_kwargs=dict(
+                            num_experts=getattr(self.cf, "decoder_moe_num_experts", 2),
+                            top_k=getattr(self.cf, "decoder_moe_top_k", 2),
+                            router_noisy_std=getattr(self.cf, "decoder_moe_router_noisy_std", 0.0),
+                            use_checkpoint=getattr(self.cf, "decoder_moe_use_checkpoint", False),
+                        )
                     )
                 )
             elif self.cf.decoder_type == "AdaLayerNormConditioning":
@@ -674,6 +726,14 @@ class TargetPredictionEngine(nn.Module):
                         tr_mlp_hidden_factor=tr_mlp_hidden_factor,
                         tro_type=tro_type,
                         mlp_norm_eps=self.cf.mlp_norm_eps,
+                        ffn_mlp_type=getattr(self.cf, "decoder_ffn_mlp_type", "dense"),
+                        ffn_hidden_factor=getattr(self.cf, "decoder_ffn_hidden_factor", 4),
+                        moe_kwargs=dict(
+                            num_experts=getattr(self.cf, "decoder_moe_num_experts", 2),
+                            top_k=getattr(self.cf, "decoder_moe_top_k", 2),
+                            router_noisy_std=getattr(self.cf, "decoder_moe_router_noisy_std", 0.0),
+                            use_checkpoint=getattr(self.cf, "decoder_moe_use_checkpoint", False),
+                        )
                     )
                 )
             else:

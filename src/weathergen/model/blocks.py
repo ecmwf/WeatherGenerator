@@ -14,10 +14,12 @@ from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiSelfAttentionHeadVarlen,
 )
-from weathergen.model.layers import MLP
+from weathergen.model.layers import MLP, MoEMLP
 from weathergen.model.norms import AdaLayerNormLayer
 from weathergen.utils.utils import get_dtype
 
+import logging
+logger = logging.getLogger(__name__)
 
 class SelfAttentionBlock(nn.Module):
     """
@@ -43,14 +45,32 @@ class SelfAttentionBlock(nn.Module):
             self.mhsa_block = lambda x, _, **kwargs: self.mhsa(self.ln_sa(x), **kwargs) + x
 
         approx_gelu = lambda: nn.GELU(approximate="tanh")
-        self.mlp = MLP(
-            dim_in=dim,
-            dim_out=dim,
-            hidden_factor=4,
-            dropout_rate=0.1,
-            nonlin=approx_gelu,
-            with_residual=False,
-        )
+        use_moe_ffn = (kwargs.get("ffn_mlp_type", "dense") == "moe")
+        ffn_hidden_factor = kwargs.get("ffn_hidden_factor", 4)
+        moe_kwargs = kwargs.get("moe_kwargs", {})  # e.g. num_experts, top_k, router_noisy_std
+        
+        if use_moe_ffn:
+            self.mlp = MoEMLP(
+                dim_in=dim,
+                dim_out=dim,
+                hidden_factor=ffn_hidden_factor,
+                dropout_rate=0.1,
+                nonlin=nn.GELU,              # internal block constructs nonlin()
+                with_residual=False,
+                norm_type=kwargs["attention_kwargs"]["norm_type"],
+                dim_aux=(dim_aux if self.with_adanorm else None),
+                norm_eps=kwargs["attention_kwargs"]["norm_eps"],
+                **moe_kwargs,                # <- e.g. num_experts=8, top_k=2, router_noisy_std=0.01
+            )
+        else:
+            self.mlp = MLP(
+                dim_in=dim,
+                dim_out=dim,
+                hidden_factor=4,
+                dropout_rate=0.1,
+                nonlin=approx_gelu,
+                with_residual=False,
+            )
         if self.with_adanorm:
             self.mlp_fn = lambda x, **kwargs: self.mlp(x)
             self.mlp_block = AdaLayerNormLayer(dim, dim_aux, self.mlp_fn, dropout_rate)
@@ -104,7 +124,7 @@ class CrossAttentionBlock(nn.Module):
 
         self.with_adanorm = with_adanorm
         self.with_self_attn = with_self_attn
-        self.with_mlp = with_self_attn
+        self.with_mlp = with_mlp
 
         if with_self_attn:
             self.mhsa = MultiSelfAttentionHeadVarlen(
@@ -136,18 +156,37 @@ class CrossAttentionBlock(nn.Module):
 
         if self.with_mlp:
             approx_gelu = lambda: nn.GELU(approximate="tanh")
-            self.mlp = MLP(
-                dim_in=dim_q,
-                dim_out=dim_q,
-                hidden_factor=4,
-                nonlin=approx_gelu,
-                with_residual=False,
-            )
+            
+            use_moe_ffn = (kwargs.get("ffn_mlp_type", "dense") == "moe")
+            ffn_hidden_factor = kwargs.get("ffn_hidden_factor", 4)
+            moe_kwargs = kwargs.get("moe_kwargs", {})
+            
+            if use_moe_ffn:
+                self.mlp = MoEMLP(
+                    dim_in=dim_q,
+                    dim_out=dim_q,
+                    hidden_factor=ffn_hidden_factor,
+                    dropout_rate=0.1,
+                    nonlin=nn.GELU,          # internal block constructs nonlin()
+                    with_residual=False,
+                    norm_type=kwargs["attention_kwargs"]["norm_type"],
+                    dim_aux=(dim_aux if self.with_adanorm else None),
+                    norm_eps=kwargs["attention_kwargs"]["norm_eps"],
+                    **moe_kwargs,            # <- e.g. num_experts=8, top_k=2, router_noisy_std=0.01
+                )
+            else:
+                self.mlp = MLP(
+                    dim_in=dim_q,
+                    dim_out=dim_q,
+                    hidden_factor=4,
+                    nonlin=approx_gelu,
+                    with_residual=False,
+                )
             if self.with_adanorm:
                 self.mlp_fn = lambda x, **kwargs: self.mlp(x)
                 self.mlp_block = AdaLayerNormLayer(dim_q, dim_aux, self.mlp_fn, dropout_rate)
             else:
-                self.ln_mlp = nn.LayerNorm(dim_q, eps=kwargs["attention_kwargs"]["norm_eps"])
+                self.ln_mlp = nn.LayerNorm(eps=kwargs["attention_kwargs"]["norm_eps"])
                 self.mlp_block = lambda x, _, **kwargs: self.mlp(self.ln_mlp(x)) + x
         else:
             self.mlp_block = lambda x, _, **kwargs: x
@@ -191,6 +230,7 @@ class OriginalPredictionBlock(nn.Module):
         tr_mlp_hidden_factor,
         tro_type,
         mlp_norm_eps=1e-6,
+        **kwargs,
     ):
         super().__init__()
 
@@ -237,18 +277,45 @@ class OriginalPredictionBlock(nn.Module):
             )
 
         # MLP Block
-        self.block.append(
-            MLP(
-                dim_in,
-                dim_out,
-                with_residual=True,
-                hidden_factor=self.tr_mlp_hidden_factor,
-                dropout_rate=0.1,  # Assuming dropout_rate is 0.1
-                norm_type=self.cf.norm_type,
-                dim_aux=(dim_aux if self.cf.pred_mlp_adaln else None),
-                norm_eps=self.cf.mlp_norm_eps,
-            )
+        # Add MoE option
+        use_moe = getattr(self.cf, "decoder_mlp_type", "dense") == "moe"
+        logger.info(
+            "[MoE] Decoder head: type=%s%s",
+            "moe" if use_moe else "dense",
+            ("" if not use_moe else
+            f" (experts={getattr(self.cf,'moe_num_experts',None)}, top_k={getattr(self.cf,'moe_top_k',None)})"),
         )
+
+        if use_moe:
+            self.block.append(
+                MoEMLP(
+                    dim_in,
+                    dim_out,
+                    hidden_factor=self.tr_mlp_hidden_factor,
+                    dropout_rate=0.1,
+                    with_residual=True,                        # mirror dense
+                    norm_type=self.cf.norm_type,
+                    dim_aux=(dim_aux if self.cf.pred_mlp_adaln else None),
+                    norm_eps=self.cf.mlp_norm_eps,
+                    num_experts=getattr(self.cf, "moe_num_experts", 8),
+                    top_k=getattr(self.cf, "moe_top_k", 2),
+                    router_noisy_std=getattr(self.cf, "moe_router_noisy_std", 0.0),
+                    use_checkpoint=getattr(self.cf, "moe_use_checkpoint", False),
+                )
+            )
+        else:
+            self.block.append(
+                MLP(
+                    dim_in,
+                    dim_out,
+                    with_residual=True,
+                    hidden_factor=self.tr_mlp_hidden_factor,
+                    dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                    norm_type=self.cf.norm_type,
+                    dim_aux=(dim_aux if self.cf.pred_mlp_adaln else None),
+                    norm_eps=self.cf.mlp_norm_eps,
+                )
+            )
 
     def forward(self, latent, output, coords, latent_lens, output_lens):
         for layer in self.block:
