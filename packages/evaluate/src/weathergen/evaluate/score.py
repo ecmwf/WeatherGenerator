@@ -274,7 +274,7 @@ class Scores:
                 "p_next": data.prediction_next,
                 "gt_next": data.ground_truth_next,
             }
-        elif score_name in ["acc", "fact", "tact"]:
+        elif score_name in ["acc"]:
             args = {
                 "p": data.prediction,
                 "gt": data.ground_truth,
