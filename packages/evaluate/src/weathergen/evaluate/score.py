@@ -268,31 +268,25 @@ class Scores:
 
         arg_names: list[str] = inspect.getfullargspec(f).args[1:]
 
-        if score_name in ["froct", "troct"]:
-            args = {
-                "p": data.prediction,
-                "gt": data.ground_truth,
-                "p_next": data.prediction_next,
-                "gt_next": data.ground_truth_next,
-            }
-        elif score_name in ["acc"]:
-            args = {
-                "p": data.prediction,
-                "gt": data.ground_truth,
-                "c": data.climatology,
-            }
-        elif score_name == "fact":
-            args = {
-                "p": data.prediction,
-                "c": data.climatology,
-            }
-        elif score_name == "tact":
-            args = {
-                "gt": data.ground_truth,
-                "c": data.climatology,
-            }
-        else:
-            args = {"p": data.prediction, "gt": data.ground_truth}
+        score_args_map = {
+            "froct": ["p", "gt", "p_next", "gt_next"],
+            "troct": ["p", "gt", "p_next", "gt_next"],
+            "acc":   ["p", "gt", "c"],
+            "fact":  ["p", "c"],
+            "tact":  ["gt", "c"],
+        }
+
+        available = {
+            "p": data.prediction,
+            "gt": data.ground_truth,
+            "p_next": data.prediction_next,
+            "gt_next": data.ground_truth_next,
+            "c": data.climatology,
+        }
+
+        #assign p and gt by default if metrics do not have specific args
+        keys = score_args_map.get(score_name, ["p", "gt"])
+        args = {k: available[k] for k in keys}
 
         # Add group_by_coord if provided
         if group_by_coord is not None:
@@ -888,10 +882,10 @@ class Scores:
         spatial_dims: list = None,
     ):
         """
-        Calculate target activity metric as standard deviation of target anomaly.
+        Calculate forecast activity metric as standard deviation of forecast anomaly.
 
         NOTE:
-        The climatlogical mean data clim_mean must fit to the target data.
+        The climatlogical mean data clim_mean must fit to the forecast data.
 
         Parameters
         ----------
