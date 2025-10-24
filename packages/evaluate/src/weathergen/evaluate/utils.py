@@ -17,7 +17,7 @@ import xarray as xr
 from tqdm import tqdm
 
 from weathergen.evaluate.clim_utils import get_climatology
-from weathergen.evaluate.io_reader import Reader
+from weathergen.evaluate.io_reader import Reader, WeatherGenReader
 from weathergen.evaluate.plot_utils import (
     bar_plot_metric_region,
     plot_metric_region,
@@ -48,7 +48,7 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
 
 
 def calc_scores_per_stream(
-    reader: Reader, stream: str, region: str, metrics: list[str]
+    reader: WeatherGenReader, stream: str, region: str, metrics: list[str]
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.

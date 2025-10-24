@@ -124,7 +124,7 @@ class ItemKey:
         """Decide if output item should contain source dataset."""
         # TODO: is this valid for the adjusted (offsetted) forecast steps?
         # => if config.forecast_offset > 0 source will be never written
-        return self.forecast_step == 0
+        return False #self.forecast_step == 0
 
 
 @dataclasses.dataclass
@@ -148,6 +148,8 @@ class OutputDataset:
 
     channels: list[str]
     geoinfo_channels: list[str]
+
+    array_names = ["data", "times", "coords", "geoinfo"]
 
     @functools.cached_property
     def arrays(self) -> dict[str, zarr.Array | NDArray]:
@@ -198,6 +200,9 @@ class OutputDataset:
 
 
 class OutputItem:
+
+    item_keys = ["target", "prediction", "source"]
+
     def __init__(
         self,
         key: ItemKey,
@@ -253,13 +258,33 @@ class ZarrIO:
     def load_zarr(self, key: ItemKey) -> OutputItem:
         """Get datasets for a output item."""
         group = self._get_group(key)
-        datasets = {
-            name: OutputDataset(name, key, **dict(dataset.arrays()), **dataset.attrs)
-            for name, dataset in group.groups()
-        }
-        datasets["key"] = key
 
-        return OutputItem(**datasets)
+        datasets: dict[str, OutputDataset|None] = {}
+        for name in OutputItem.item_keys:
+            dataset_group: zarr.Group | None = group.get(name)
+            # import pdb; pdb.set_trace()
+            if dataset_group is not None:
+                all_arrays = dict(dataset_group.arrays())
+                # No arrays? skip.
+                if len(all_arrays) == 0:
+                    datasets[name] = None
+                    continue
+                arrays = {
+                    array_name: all_arrays[array_name]
+                    for array_name in OutputDataset.array_names
+                }
+                dataset = OutputDataset(
+                    name,
+                    key,
+                    **arrays,
+                    channels=list(dataset_group.attrs["channels"]),
+                    geoinfo_channels=list(dataset_group.attrs["geoinfo_channels"]),
+                )
+                datasets[name] = dataset
+            else:
+                datasets[name] = None
+
+        return OutputItem(key=key, **datasets)
 
     def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
