@@ -12,6 +12,7 @@ from functools import partial
 import numpy as np
 import torch
 
+from weathergen.common.io import IOReaderData
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
@@ -41,12 +42,9 @@ class TokenizerMasking(Tokenizer):
     def batchify_source(
         self,
         stream_info: dict,
-        coords: np.array,
-        geoinfos: np.array,
-        source: np.array,
-        times: np.array,
+        rdata: IOReaderData,
         time_win: tuple,
-        normalizer,  # dataset
+        normalize_coords,  # dataset
     ):
         token_size = stream_info["token_size"]
         is_diagnostic = stream_info.get("diagnostic", False)
@@ -58,16 +56,14 @@ class TokenizerMasking(Tokenizer):
             token_size=token_size,
             hl=self.hl_source,
             hpy_verts_rots=self.hpy_verts_rots_source[-1],
-            n_coords=normalizer.normalize_coords,
-            n_geoinfos=normalizer.normalize_geoinfos,
-            n_data=normalizer.normalize_source_channels,
+            n_coords=normalize_coords,
             enc_time=encode_times_source,
         )
 
         self.token_size = token_size
 
         # return empty if there is no data or we are in diagnostic mode
-        if is_diagnostic or source.shape[1] == 0 or len(source) < 2:
+        if is_diagnostic or rdata.data.shape[1] == 0 or len(rdata.data) < 2:
             source_tokens_cells = torch.tensor([])
             source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
             source_centroids = torch.tensor([])
@@ -76,10 +72,10 @@ class TokenizerMasking(Tokenizer):
         # tokenize all data first
         tokenized_data = tokenize_window(
             0,
-            coords,
-            geoinfos,
-            source,
-            times,
+            rdata.coords,
+            rdata.geoinfos,
+            rdata.data,
+            rdata.datetimes,
         )
 
         tokenized_data = [
@@ -87,7 +83,9 @@ class TokenizerMasking(Tokenizer):
         ]
 
         # Use the masker to get source tokens and the selection mask for the target
-        source_tokens_cells = self.masker.mask_source(tokenized_data, coords, geoinfos, source)
+        source_tokens_cells = self.masker.mask_source(
+            tokenized_data, rdata.coords, rdata.geoinfos, rdata.data
+        )
 
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
         if source_tokens_lens.sum() > 0:
@@ -101,12 +99,8 @@ class TokenizerMasking(Tokenizer):
         self,
         stream_info: dict,
         sampling_rate_target: float,
-        coords: torch.tensor,
-        geoinfos: torch.tensor,
-        source: torch.tensor,
-        times: np.array,
+        rdata: IOReaderData,
         time_win: tuple,
-        normalizer,  # dataset
     ):
         token_size = stream_info["token_size"]
         tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
@@ -131,8 +125,6 @@ class TokenizerMasking(Tokenizer):
             hl=self.hl_source,
             hpy_verts_rots=self.hpy_verts_rots_source[-1],
             n_coords=id,
-            n_geoinfos=normalizer.normalize_geoinfos,
-            n_data=normalizer.normalize_target_channels,
             enc_time=encode_times_target,
             pad_tokens=False,
             local_coords=False,
@@ -141,13 +133,15 @@ class TokenizerMasking(Tokenizer):
         # tokenize
         target_tokens_cells = tokenize_window(
             0,
-            coords,
-            geoinfos,
-            source,
-            times,
+            rdata.coords,
+            rdata.geoinfos,
+            rdata.data,
+            rdata.datetimes,
         )
 
-        target_tokens = self.masker.mask_target(target_tokens_cells, coords, geoinfos, source)
+        target_tokens = self.masker.mask_target(
+            target_tokens_cells, rdata.coords, rdata.geoinfos, rdata.data
+        )
 
         target_tokens_lens = [len(t) for t in target_tokens]
         total_target = sum(target_tokens_lens)
@@ -186,14 +180,18 @@ class TokenizerMasking(Tokenizer):
         offset = 6
         # offset of 1 : stream_id
         target_times = torch.split(tt_lin[..., 1:offset], tt_lens)
-        target_coords = torch.split(tt_lin[..., offset : offset + coords.shape[-1]], tt_lens)
-        offset += coords.shape[-1]
-        target_geoinfos = torch.split(tt_lin[..., offset : offset + geoinfos.shape[-1]], tt_lens)
-        offset += geoinfos.shape[-1]
+        target_coords = torch.split(tt_lin[..., offset : offset + rdata.coords.shape[-1]], tt_lens)
+        offset += rdata.coords.shape[-1]
+        target_geoinfos = torch.split(
+            tt_lin[..., offset : offset + rdata.geoinfos.shape[-1]], tt_lens
+        )
+        offset += rdata.geoinfos.shape[-1]
         target_tokens = torch.split(tt_lin[..., offset:], tt_lens)
 
         offset = 6
-        target_coords_raw = torch.split(tt_lin[:, offset : offset + coords.shape[-1]], tt_lens)
+        target_coords_raw = torch.split(
+            tt_lin[:, offset : offset + rdata.coords.shape[-1]], tt_lens
+        )
         # recover absolute time from relatives in encoded ones
         # TODO: avoid recover; see TODO above
         deltas_sec = (

@@ -919,7 +919,9 @@ class Scores:
         """Calculate ACC for a single group
         Parameters
         ----------
+        ----------
         fcst: xr.DataArray
+            Forecast data for the group
             Forecast data for the group
         obs: xr.DataArray
             Observation data for the group
@@ -934,6 +936,7 @@ class Scores:
         return (fcst * obs).sum(spatial_dims) / np.sqrt(
             (fcst**2).sum(spatial_dims) * (obs**2).sum(spatial_dims)
         )
+
 
     def calc_acc(
         self,
@@ -996,6 +999,8 @@ class Scores:
 
         else:
             # Calculate ACC over spatial dimensions (no grouping)
+            acc = self._calc_acc_group(fcst_ano, obs_ano, spatial_dims)
+
             acc = self._calc_acc_group(fcst_ano, obs_ano, spatial_dims)
 
         return acc
