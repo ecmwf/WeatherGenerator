@@ -34,6 +34,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         norm_type="LayerNorm",
         embed_size_centroids=64,
         unembed_mode="full",
+        embed_gradient_checkpoint_mode=True,
         stream_name="stream_embed",
     ):
         """Constructor
@@ -59,6 +60,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         self.num_heads = num_heads
         self.embed_size_centroids = embed_size_centroids
         self.unembed_mode = unembed_mode
+        self.embed_gradient_checkpoint_mode = embed_gradient_checkpoint_mode
 
         norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
 
@@ -148,23 +150,43 @@ class StreamEmbedTransformer(torch.nn.Module):
     def forward_channels(self, x_in, centroids):
         peh = positional_encoding_harmonic
 
-        # embed provided input data
-        x = peh(checkpoint(self.embed, x_in.transpose(-2, -1), use_reentrant=False))
+        if self.embed_gradient_checkpoint_mode:
+            # embed provided input data
+            x = peh(checkpoint(self.embed, x_in.transpose(-2, -1), use_reentrant=False))
 
-        for layer in self.layers:
-            x = checkpoint(layer, x, use_reentrant=False)
+            for layer in self.layers:
+                x = checkpoint(layer, x, use_reentrant=False)
 
-        # read out
-        if self.unembed_mode == "full":
-            out = checkpoint(self.unembed, self.ln_final(x.flatten(-2, -1)), use_reentrant=False)
-        elif self.unembed_mode == "block":
-            out = [
-                checkpoint(ue, ln(x[:, i]), use_reentrant=False)
-                for i, (ue, ln) in enumerate(zip(self.unembed, self.ln_final, strict=True))
-            ]
-            out = torch.stack(out, dim=1).flatten(-2, -1)
+            # read out
+            if self.unembed_mode == "full":
+                out = checkpoint(self.unembed, self.ln_final(x.flatten(-2, -1)), use_reentrant=False)
+            elif self.unembed_mode == "block":
+                out = [
+                    checkpoint(ue, ln(x[:, i]), use_reentrant=False)
+                    for i, (ue, ln) in enumerate(zip(self.unembed, self.ln_final, strict=True))
+                ]
+                out = torch.stack(out, dim=1).flatten(-2, -1)
+            else:
+                assert False
+
         else:
-            assert False
+            # embed provided input data
+            x = peh(self.embed(x_in.transpose(-2, -1)))
+
+            for layer in self.layers:
+                x = layer(x)
+
+            # read out
+            if self.unembed_mode == "full":
+                out = self.unembed(self.ln_final(x.flatten(-2, -1)))
+            elif self.unembed_mode == "block":
+                out = [
+                    ue(ln(x[:, i]))
+                    for i, (ue, ln) in enumerate(zip(self.unembed, self.ln_final, strict=True))
+                ]
+                out = torch.stack(out, dim=1).flatten(-2, -1)
+            else:
+                assert False
 
         # append centroids
         if self.embed_size_centroids > 0:
