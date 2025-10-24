@@ -241,7 +241,7 @@ class Scores:
         if score_name in self.det_metrics_dict.keys():
             f = self.det_metrics_dict[score_name]
         elif score_name in self.prob_metrics_dict.keys():
-            assert self.ens_dim in data.prediction.dims, (
+            assert self._ens_dim in data.prediction.dims, (
                 f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} not found in prediction data"
             )
             f = self.prob_metrics_dict[score_name]
@@ -253,12 +253,11 @@ class Scores:
                     + ', '.join(self.prob_metrics_dict.keys())
                 }"
             )
-
+       
         if self._agg_dims_in == "all":
             # Aggregate over all dimensions of the prediction data
             self._agg_dims = list(data.prediction.dims)
         else:
-            # Check if _agg_dims is in prediction data
             for dim in self._agg_dims_in:
                 if dim not in data.prediction.dims:
                     raise ValueError(
@@ -313,6 +312,7 @@ class Scores:
             return [dims]
         if isinstance(dims, list) and all(isinstance(d, str) for d in dims):
             return dims
+    
         raise ValueError("agg_dims must be 'all', a string, or list of strings.")
 
     def _validate_ens_dim(self, dim: str) -> str:

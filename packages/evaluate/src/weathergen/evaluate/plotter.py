@@ -41,7 +41,7 @@ class Plotter:
     Contains all basic plotting functions.
     """
 
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, stream : str | None = None):
         """
         Initialize the Plotter class.
 
@@ -57,6 +57,8 @@ class Plotter:
         output_basedir:
             Base directory under which the plots will be saved.
             Expected scheme `<results_base_dir>/<run_id>`.
+        stream:
+            Stream identifier for which the plots will be created. It can also be set later via update_data_selection.
         """
 
         _logger.info(f"Taking cartopy paths from {work_dir}")
@@ -76,7 +78,7 @@ class Plotter:
             os.makedirs(self.out_plot_basedir, exist_ok=True)
 
         self.sample = None
-        self.stream = None
+        self.stream = stream
         self.fstep = None
 
         self.select = {}
@@ -375,6 +377,7 @@ class Plotter:
                     var,
                     tag=tag,
                     map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
+                    title= f"{self.stream}, {varname} : fstep = {self.fstep:03} ({valid_time})"
                 )
                 plot_names.append(name)
 
@@ -389,6 +392,7 @@ class Plotter:
         varname: str,
         tag: str = "",
         map_kwargs: dict | None = None,
+        title: str | None = None
     ):
         """
         Plot a 2D map for a data array using scatter plot.
@@ -405,6 +409,8 @@ class Plotter:
             Any tag you want to add to the plot
         map_kwargs: dict | None
             Additional keyword arguments for the map.
+        title: str | None
+            Title for the plot.
 
         Returns
         -------
@@ -467,23 +473,26 @@ class Plotter:
         )
 
         plt.colorbar(scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}")
-        plt.title(f"{self.stream}, {varname} : fstep = {self.fstep:03} ({valid_time})")
+        plt.title(title)
         ax.set_global()
         ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
 
         # TODO: make this nicer
-        parts = [
-            "map",
-            self.run_id,
-            tag,
-            str(self.sample),
-            valid_time,
-            self.stream,
-            varname,
-            "fstep",
-            str(self.fstep).zfill(3),
-        ]
+        parts = ["map", self.run_id, tag]
 
+        if self.sample:
+            parts.append(str(self.sample))
+
+        parts.append(valid_time)
+
+        if self.stream:
+            parts.append(self.stream)
+
+        parts.append(varname)
+
+        if self.fstep is not None:
+            parts.extend(["fstep", f"{self.fstep:03d}"])
+        
         name = "_".join(filter(None, parts))
         fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
 

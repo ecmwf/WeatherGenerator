@@ -48,8 +48,7 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
 
 
 def calc_scores_per_stream(
-    reader: Reader, stream: str, region: str, metrics: list[str]
-) -> tuple[xr.DataArray, xr.DataArray]:
+    reader: Reader, stream: str, region: str, metrics: list[str], agg_dims: str = "ipoint", group_by_coord = "sample") -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
 
@@ -63,6 +62,8 @@ def calc_scores_per_stream(
         Region name to calculate scores for.
     metrics :
         List of metric names to calculate.
+    agg_dims :
+        Dimensions to aggregate over when calculating scores.
 
     Returns
     -------
@@ -94,19 +95,19 @@ def calc_scores_per_stream(
 
     aligned_clim_data = get_climatology(reader, da_tars, stream)
 
-    metric_stream = xr.DataArray(
-        np.full(
-            (len(samples), len(fsteps), len(channels), len(metrics), len(ensemble)),
-            np.nan,
-        ),
-        coords={
-            "sample": samples,
-            "forecast_step": fsteps,
-            "channel": channels,
-            "metric": metrics,
-            "ens": ensemble,
-        },
-    )
+    # metric_stream = xr.DataArray(
+    #     np.full(
+    #         (len(samples), len(fsteps), len(channels), len(metrics), len(ensemble)),
+    #         np.nan,
+    #     ),
+    #     coords={
+    #         "sample": samples,
+    #         "forecast_step": fsteps,
+    #         "channel": channels,
+    #         "metric": metrics,
+    #         "ens": ensemble,
+    #     },
+    # )
 
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         _logger.debug(f"Verifying data for stream {stream}...")
@@ -118,25 +119,38 @@ def calc_scores_per_stream(
             score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
             # Build up computation graphs for all metrics
             _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
-
+    
             combined_metrics = [
                 get_score(
                     score_data,
                     metric,
-                    agg_dims="ipoint",
-                    group_by_coord="sample",
+                    agg_dims=agg_dims,
+                    group_by_coord=group_by_coord,
                 )
                 for metric in metrics
             ]
 
             combined_metrics = xr.concat(combined_metrics, dim="metric")
-            combined_metrics["metric"] = metrics
+            
+            if reader.regular_spacing(stream):
+
+                combined_metrics = combined_metrics.assign_coords(
+                        lat=preds.lat.isel(sample=0),
+                        lon=preds.lon.isel(sample=0),
+                        metric = metrics, 
+                        valid_time=preds.valid_time.isel(sample=0)
+                )
+            else:
+                combined_metrics = combined_metrics.assign_coords(
+                        metric = metrics, 
+                )
 
             _logger.debug(f"Running computation of metrics for stream {stream}...")
             combined_metrics = combined_metrics.compute()
-            combined_metrics = scalar_coord_to_dim(combined_metrics, "channel")
-            combined_metrics = scalar_coord_to_dim(combined_metrics, "sample")
-            combined_metrics = scalar_coord_to_dim(combined_metrics, "ens")
+            
+            for coord in combined_metrics.coords:
+                combined_metrics = scalar_coord_to_dim(combined_metrics, coord)
+            
         else:
             # depending on the datset, there might be no data (e.g. no CERRA in southern hemisphere region)
             _logger.warning(
@@ -148,21 +162,64 @@ def calc_scores_per_stream(
             "Different steps in data and metrics. Please check."
         )
 
-        criteria = {
-            "forecast_step": int(combined_metrics.forecast_step),
-            "sample": combined_metrics.sample,
-            "channel": combined_metrics.channel,
-        }
+        # criteria = {
+        #     "forecast_step": int(combined_metrics.forecast_step),
+        #     "sample": combined_metrics.sample,
+        #     "channel": combined_metrics.channel,
+        # }
 
-        if "ens" in combined_metrics.dims:
-            criteria["ens"] = combined_metrics.ens
+        # if "ens" in combined_metrics.dims:
+        #     criteria["ens"] = combined_metrics.ens
 
-        metric_stream.loc[criteria] = combined_metrics
+        # metric_stream.loc[criteria] = combined_metrics
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
-    return metric_stream, points_per_sample
+    return combined_metrics, points_per_sample
 
+def plot_score_maps_per_stream(reader: Reader, stream: str, all_metrics: list[xr.DataArray], global_plotting_opts: dict) -> None:
+    """
+    Plot the scores map for a given run and stream.
+
+    Parameters
+    ----------
+    reader: Reader
+        Reader object containing all infos about the run
+    stream: str
+        Stream name to plot scores map for.
+    all_metrics: list[xr.DataArray]
+        List of all metrics DataArrays to plot.
+    global_plotting_opts: dict
+        Dictionary containing all plotting options that apply globally to all run_ids
+    """
+    run_id = reader.run_id
+
+    # get stream dict from evaluation config (assumed to be part of cfg at this point)
+    stream_cfg = reader.get_stream(stream)
+
+    # handle plotting settings
+    plot_settings = stream_cfg.get("plotting", {})
+
+    plotter_cfg = {
+        "image_format": global_plotting_opts.get("image_format", "png"),
+        "dpi_val": global_plotting_opts.get("dpi_val", 300),
+        "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
+    }
+
+    plotter = Plotter(plotter_cfg, reader.runplot_dir, stream)
+    map_output_dir = reader.runplot_dir / "score_maps" / stream 
+    map_output_dir.mkdir(parents=True, exist_ok=True)
+    tag = f"{run_id}_scores_map"
+    for metric in all_metrics.coords["metric"].values:
+        for channel in all_metrics.coords["channel"].values:
+            plotter.scatter_plot(
+                        all_metrics.sel(metric=metric, channel=channel).squeeze(),
+                        map_output_dir,
+                        channel,
+                        tag=tag,
+                    )
+
+    return
 
 def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
     """

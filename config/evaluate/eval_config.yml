@@ -21,6 +21,7 @@ evaluation:
   summary_plots : true
   summary_dir: "./plots/"
   plot_ensemble: "members" #supported: false, "std", "minmax", "members"
+  plot_score_maps: true
   print_summary: false #print out score values on screen. it can be verbose
   log_scale: false
   add_grid: false

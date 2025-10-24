@@ -127,6 +127,10 @@ class Reader:
     def get_ensemble(self, stream: str | None = None) -> list[str]:
         """Placeholder implementation ensemble member names getter. Override in subclass."""
         return list()
+    
+    def regular_spacing(self, stream: str) -> bool:
+        """Placeholder implementation to check if lat/lon are regularly spaced. Override in subclass."""
+        return True 
 
     def check_availability(
         self,
@@ -369,6 +373,37 @@ class WeatherGenReader(Reader):
 
         return config
 
+    def _check_latlon_regular_spacing(self, data_arrays: list[xr.DataArray]) -> bool:
+        """
+        Check if the latitude and longitude coordinates in the provided DataArrays are regularly spaced.
+
+        Parameters
+        ----------
+        data_arrays : list[xr.DataArray]
+            List of xarray DataArrays to check.
+
+        Returns
+        -------
+        bool
+            True if both latitude and longitude are regularly spaced in all DataArrays, False otherwise.
+        """
+        for da in data_arrays:
+            if "lat" in da.coords and "lon" in da.coords:
+                lat_diff = np.diff(da["lat"].values)
+                lon_diff = np.diff(da["lon"].values)
+
+                if not (np.allclose(lat_diff, lat_diff[0]) and np.allclose(lon_diff, lon_diff[0])):
+                    _logger.info(
+                        "Latitude and/or longitude coordinates are not regularly spaced."
+                    )
+                    return False
+            else:
+                _logger.warning("DataArray does not contain 'lat' and 'lon' coordinates.")
+                return False
+
+        _logger.info("Latitude and longitude coordinates are regularly spaced.")
+        return True
+
     def get_data(
         self,
         stream: str,
@@ -447,6 +482,7 @@ class WeatherGenReader(Reader):
                 points_per_sample = None
 
             fsteps_final = []
+            regularly_spaced = None
 
             for fstep in fsteps:
                 _logger.info(f"RUN {self.run_id} - {stream}: Processing fstep {fstep}...")
@@ -490,22 +526,32 @@ class WeatherGenReader(Reader):
                 )
 
                 if da_tars_fs:
-                    da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
-                    da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
-                    if len(samples) == 1:
-                        # Ensure sample coordinate is repeated along ipoint even if only one sample
-                        da_tars_fs = da_tars_fs.assign_coords(
-                            sample=(
-                                "ipoint",
-                                np.repeat(da_tars_fs.sample.values, len(da_tars_fs.ipoint)),
+                    
+                    #faster processing
+                    if self.regular_spacing(stream):
+                        da_tars_fs = [a.expand_dims(sample=[int(a.sample.values)]) for a in da_tars_fs]
+                        da_tars_fs = xr.concat(da_tars_fs, dim="sample")
+
+                        da_preds_fs = [a.expand_dims(sample=[int(a.sample.values)]) for a in da_preds_fs]
+                        da_preds_fs = xr.concat(da_preds_fs, dim="sample")
+                        
+                    else:
+                        da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
+                        da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
+                        if len(samples) == 1:
+                            # Ensure sample coordinate is repeated along ipoint even if only one sample
+                            da_tars_fs = da_tars_fs.assign_coords(
+                                sample=(
+                                    "ipoint",
+                                    np.repeat(da_tars_fs.sample.values, len(da_tars_fs.ipoint)),
+                                )
                             )
-                        )
-                        da_preds_fs = da_preds_fs.assign_coords(
-                            sample=(
-                                "ipoint",
-                                np.repeat(da_preds_fs.sample.values, len(da_preds_fs.ipoint)),
+                            da_preds_fs = da_preds_fs.assign_coords(
+                                sample=(
+                                    "ipoint",
+                                    np.repeat(da_preds_fs.sample.values, len(da_preds_fs.ipoint)),
+                                )
                             )
-                        )
 
                     if set(channels) != set(all_channels):
                         _logger.debug(
@@ -630,6 +676,25 @@ class WeatherGenReader(Reader):
         with ZarrIO(self.fname_zarr) as zio:
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
         return list(dummy.prediction.as_xarray().coords["ens"].values)
+
+    #TODO: improve this
+    def regular_spacing(self, stream: str) -> bool:
+        """Check if the latitude and longitude coordinates are regularly spaced for a given stream."""
+        _logger.debug(f"Checking regular spacing for stream {stream}...")
+
+        with ZarrIO(self.fname_zarr) as zio:
+            dummy = zio.get_data(0, stream, zio.forecast_steps[0])
+            dummy1 = zio.get_data(0, stream, zio.forecast_steps[1])
+       
+        da  = dummy.prediction.as_xarray()
+        da1 = dummy1.prediction.as_xarray() 
+       
+        if not (np.allclose(sorted(da["lat"].values), sorted(da1["lat"].values)) and np.allclose(sorted(da["lon"].values), sorted(da1["lon"].values) )):
+            _logger.debug("Latitude and/or longitude coordinates are not regularly spaced.")
+            return False
+
+        _logger.debug("Latitude and longitude coordinates are regularly spaced.")
+        return True
 
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """

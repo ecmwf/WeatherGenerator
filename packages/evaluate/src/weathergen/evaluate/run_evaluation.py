@@ -24,6 +24,7 @@ from weathergen.evaluate.utils import (
     plot_data,
     plot_summary,
     retrieve_metric_from_json,
+    plot_score_maps_per_stream
 )
 
 _logger = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ def evaluate_from_config(cfg):
 
     metrics = cfg.evaluation.metrics
     regions = cfg.evaluation.get("regions", ["global"])
+    plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
 
     global_plotting_opts = cfg.get("global_plotting_options", {})
 
@@ -131,9 +133,16 @@ def evaluate_from_config(cfg):
                             metrics_to_compute.append(metric)
 
                     if metrics_to_compute:
+                        agg_dim = "sample" if plot_score_maps else "ipoint"
+                        group_by_coords = None if reader.regular_spacing(stream) else "sample"
+                        _logger.info(f"Aggregating scores over dimension 'agg_dim': {agg_dim} and group_by_coords: {group_by_coords}")
                         all_metrics, points_per_sample = calc_scores_per_stream(
-                            reader, stream, region, metrics_to_compute
+                            reader, stream, region, metrics_to_compute, agg_dims=agg_dim, group_by_coord = group_by_coords
                         )
+                    
+                        if plot_score_maps:
+                            plot_score_maps_per_stream(reader, stream, all_metrics, global_plotting_opts)
+                            all_metrics = all_metrics.mean(dim="ipoint")
 
                         metric_list_to_json(
                             reader,
