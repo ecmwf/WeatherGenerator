@@ -53,7 +53,7 @@ def _get_skill_score(
 
     Returns
     ----------
-    skiil_score : xr.DataArray
+    skill_score : xr.DataArray
         Skill score data array
     """
 
