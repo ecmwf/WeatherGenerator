@@ -313,12 +313,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.tokenizer.reset_rng(self.rng)
 
     ###################################################
-    def denormalize_source_channels(self, stream_id, data):
+    def denormalize_source_channels(self, stream_id, data) -> torch.Tensor:
         # TODO: with multiple ds per stream we need to distinguish these here
         return self.streams_datasets[stream_id][0].denormalize_source_channels(data)
 
     ###################################################
-    def denormalize_target_channels(self, stream_id, data):
+    def denormalize_target_channels(self, stream_id, data) -> torch.Tensor:
         # TODO: with multiple ds per stream we need to distinguish these here
         return self.streams_datasets[stream_id][0].denormalize_target_channels(data)
 
