@@ -19,6 +19,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import tqdm
+from numpy.typing import NDArray
 from omegaconf import OmegaConf
 from torch import Tensor
 
@@ -241,6 +242,16 @@ class Trainer(TrainerBase):
             fully_shard(model)
             for tensor in itertools.chain(model.parameters(), model.buffers()):
                 assert tensor.device == torch.device("meta")
+
+        # For reasons we do not yet fully understand, when using train continue in some
+        # instances, FSDP2 does not register the forward_channels and forward_columns
+        # functions in the embedding engine as forward functions. Thus, yielding a crash
+        # because the input tensors are not converted to DTensors. This seems to primarily
+        # occur during validation.
+        for embed in model.embeds:
+            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
+            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
+
         return model, model_params
 
     def run(self, cf, devices, run_id_contd=None, epoch_contd=None):
@@ -510,9 +521,13 @@ class Trainer(TrainerBase):
 
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         fsteps = len(targets_rt)
-        preds_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
-        targets_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
-        targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+        preds_all: list[list[list[NDArray]]] = [
+            [[] for _ in self.cf.streams] for _ in range(fsteps)
+        ]
+        targets_all: list[list[list[NDArray]]] = [
+            [[] for _ in self.cf.streams] for _ in range(fsteps)
+        ]
+        targets_lens: list[list[list[int]]] = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
 
         # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
         for fstep in range(len(targets_rt)):
@@ -534,8 +549,12 @@ class Trainer(TrainerBase):
                 dn_data = self.dataset_val.denormalize_target_channels
 
                 f32 = torch.float32
-                preds_all[fstep][i_strm] += [dn_data(i_strm, pred.to(f32)).detach().cpu()]
-                targets_all[fstep][i_strm] += [dn_data(i_strm, target.to(f32)).detach().cpu()]
+                preds_all[fstep][i_strm] += [
+                    np.asarray(dn_data(i_strm, pred.to(f32)).detach().cpu())
+                ]
+                targets_all[fstep][i_strm] += [
+                    np.asarray(dn_data(i_strm, target.to(f32)).detach().cpu())
+                ]
 
         return (
             preds_all,

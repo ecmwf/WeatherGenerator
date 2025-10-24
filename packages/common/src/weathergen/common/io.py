@@ -30,6 +30,11 @@ type NPDT64 = datetime64
 _logger = logging.getLogger(__name__)
 
 
+def is_ndarray(obj: typing.Any) -> bool:
+    """Check if object is an ndarray (wraps the linter warning)."""
+    return isinstance(obj, (np.ndarray))  # noqa: TID251
+
+
 @dataclasses.dataclass
 class IOReaderData:
     """
@@ -58,10 +63,10 @@ class IOReaderData:
 
         other should be such an instance.
         """
-        coords = other.coords
-        geoinfos = other.geoinfos
-        data = other.data
-        datetimes = other.datetimes
+        coords = np.asarray(other.coords)
+        geoinfos = np.asarray(other.geoinfos)
+        data = np.asarray(other.data)
+        datetimes = np.asarray(other.datetimes)
 
         n_datapoints = len(data)
 
@@ -130,22 +135,22 @@ class OutputDataset:
     item_key: ItemKey
 
     # (datapoints, channels, ens)
-    data: zarr.Array  # wrong type => array like
+    data: zarr.Array | NDArray  # wrong type => array like
 
     # (datapoints,)
-    times: zarr.Array
+    times: zarr.Array | NDArray
 
     # (datapoints, 2)
-    coords: zarr.Array
+    coords: zarr.Array | NDArray
 
     # (datapoints, geoinfos) geoinfos are stream dependent => 0 for most gridded data
-    geoinfo: zarr.Array
+    geoinfo: zarr.Array | NDArray
 
     channels: list[str]
     geoinfo_channels: list[str]
 
     @functools.cached_property
-    def arrays(self) -> dict[str, zarr.Array]:
+    def arrays(self) -> dict[str, zarr.Array | NDArray]:
         """Iterate over the arrays and their names."""
         return {
             "data": self.data,
@@ -236,7 +241,8 @@ class ZarrIO:
         """Write one output item to the zarr store."""
         group = self._get_group(item.key, create=True)
         for dataset in item.datasets:
-            self._write_dataset(group, dataset)
+            if dataset is not None:
+                self._write_dataset(group, dataset)
 
     def get_data(self, sample: int, stream: str, forecast_step: int) -> OutputItem:
         """Get datasets for the output item matching the arguments."""
@@ -285,6 +291,7 @@ class ZarrIO:
             self._create_dataset(dataset_group, array_name, array)
 
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
+        assert is_ndarray(array), f"Expected ndarray but got: {type(array)}"
         if array.size == 0:  # sometimes for geoinfo
             chunks = None
         else:
@@ -394,20 +401,10 @@ class OutputBatchData:
             target_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
             preds_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
         else:
-            target_data = (
-                self.targets[offset_key.forecast_step][stream_idx][0][datapoints]
-                .cpu()
-                .detach()
-                .numpy()
-            )
-            preds_data = (
-                self.predictions[offset_key.forecast_step][stream_idx][0]
-                .transpose(1, 0)
-                .transpose(1, 2)[datapoints]
-                .cpu()
-                .detach()
-                .numpy()
-            )
+            target_data = self.targets[offset_key.forecast_step][stream_idx][0][datapoints]
+            preds_data = self.predictions[offset_key.forecast_step][stream_idx][0].transpose(
+                1, 2, 0
+            )[datapoints]
 
         data_coords = self._extract_coordinates(stream_idx, offset_key, datapoints)
 
@@ -423,6 +420,8 @@ class OutputBatchData:
         else:
             source_dataset = None
 
+        assert is_ndarray(target_data), f"Expected ndarray but got: {type(target_data)}"
+        assert is_ndarray(preds_data), f"Expected ndarray but got: {type(preds_data)}"
         return OutputItem(
             key=key,
             source=source_dataset,
@@ -501,10 +500,10 @@ class OutputBatchData:
         source_dataset = OutputDataset(
             "source",
             key,
-            source.data,
-            source.datetimes,
-            source.coords,
-            source.geoinfos,
+            np.asarray(source.data),
+            np.asarray(source.datetimes),
+            np.asarray(source.coords),
+            np.asarray(source.geoinfos),
             channels,
             geoinfo_channels,
         )
