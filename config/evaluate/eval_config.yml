@@ -27,14 +27,14 @@ evaluation:
   score_cards: false
 
 run_ids :
-  ar40mckx:
-    label: "pretrained model ar40mckx"
+  test_small1_60289:
+    label: "pretrained model test_small1_60289"
     results_base_dir : "./results/"
     epoch: 0
     rank: 0
     streams:
       ERA5:
-        channels: ["2t", "10u"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
+        channels: ["t_850"]
         evaluation:
           forecast_step: "all"
           sample: "all"
@@ -43,37 +43,6 @@ run_ids :
           sample: [1, 3]
           forecast_step: [1,3, 2]
           ensemble: [0,2,5] #supported: "all", "mean", [0,1,2]
-          plot_maps: true
-          plot_histograms: true
-          plot_animations: true
-      CERRA:
-        channels: ["z_500", "t_850", "u_850"] #, "blah"]
-        evaluation:
-          forecast_step: "all"
-          sample: "all"
-        plotting:
-          sample: [2, 3, 0]
-          forecast_step: [1,3, 4, 5]
-          plot_maps: true
-          plot_histograms: true
-          plot_animations: true
-      
-  c8g5katp:
-    label: "2 steps window"
-    results_base_dir : "./results/"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
-        evaluation:
-          forecast_step: "all"
-          sample: "all"
-          ensemble: "mean" 
-        plotting:
-          sample: [1, 3]
-          forecast_step: [1,3, 2]
-          ensemble: "mean" 
           plot_maps: true
           plot_histograms: true
           plot_animations: true

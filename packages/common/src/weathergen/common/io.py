@@ -396,20 +396,11 @@ class OutputBatchData:
             target_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
             preds_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
         else:
-            # TODO: there should be no torch tensors here anymore
             target_data = (
                 self.targets[offset_key.forecast_step][stream_idx][0][datapoints]
-                .cpu()
-                .detach()
-                .numpy()
             )
             preds_data = (
-                self.predictions[offset_key.forecast_step][stream_idx][0]
-                .transpose(1, 0)
-                .transpose(1, 2)[datapoints]
-                .cpu()
-                .detach()
-                .numpy()
+                self.predictions[offset_key.forecast_step][stream_idx][0].transpose(1,2,0)[datapoints]
             )
 
         data_coords = self._extract_coordinates(stream_idx, offset_key, datapoints)

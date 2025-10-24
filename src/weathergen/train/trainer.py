@@ -21,6 +21,7 @@ import torch.nn as nn
 import tqdm
 from omegaconf import OmegaConf
 from torch import Tensor
+from numpy.typing import NDArray
 
 # FSDP2
 from torch.distributed.fsdp import (
@@ -518,9 +519,9 @@ class Trainer(TrainerBase):
 
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         fsteps = len(targets_rt)
-        preds_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
-        targets_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
-        targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+        preds_all: list[list[list[NDArray]]] = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+        targets_all: list[list[list[NDArray]]] = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+        targets_lens: list[list[list[int]]] = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
 
         # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
         for fstep in range(len(targets_rt)):
@@ -542,8 +543,8 @@ class Trainer(TrainerBase):
                 dn_data = self.dataset_val.denormalize_target_channels
 
                 f32 = torch.float32
-                preds_all[fstep][i_strm] += [dn_data(i_strm, pred.to(f32)).detach().cpu()]
-                targets_all[fstep][i_strm] += [dn_data(i_strm, target.to(f32)).detach().cpu()]
+                preds_all[fstep][i_strm] += [np.asarray(dn_data(i_strm, pred.to(f32)).detach().cpu())]
+                targets_all[fstep][i_strm] += [np.asarray(dn_data(i_strm, target.to(f32)).detach().cpu())]
 
         return (
             preds_all,
