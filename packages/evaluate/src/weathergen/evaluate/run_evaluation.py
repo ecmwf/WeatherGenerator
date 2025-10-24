@@ -16,10 +16,13 @@ from collections import defaultdict
 from pathlib import Path
 
 import mlflow
+import numpy as np
 from omegaconf import OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
+from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io_reader import WeatherGenReader
+from weathergen.evaluate.plot_utils import collect_channels, collect_streams
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
@@ -27,8 +30,12 @@ from weathergen.evaluate.utils import (
     plot_summary,
     retrieve_metric_from_json,
 )
-from weathergen.metrics.mlflow_utils import setup_mlflow, get_or_create_mlflow_parent_run, MlFlowUpload, log_metrics
-from weathergen.common.platform_env import get_platform_env
+from weathergen.metrics.mlflow_utils import (
+    MlFlowUpload,
+    get_or_create_mlflow_parent_run,
+    log_scores,
+    setup_mlflow,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -50,6 +57,12 @@ def evaluate_from_args(argl: list[str]) -> None:
         default=None,
         help="Path to the configuration yaml file for plotting. e.g. config/plottig_config.yaml",
     )
+    parser.add_argument(
+        "--push-metrics",
+        required=False,
+        action="store_true",
+        help="(optional) Upload scores to MLFlow.",
+    )
 
     args = parser.parse_args(argl)
     if args.config:
@@ -59,10 +72,20 @@ def evaluate_from_args(argl: list[str]) -> None:
             "No config file provided, using the default template config (please edit accordingly)"
         )
         config = Path(_REPO_ROOT / "config" / "evaluate" / "eval_config.yml")
-    evaluate_from_config(OmegaConf.load(config))
+    mlflow_client = None
+    if args.push_metrics:
+        # logging.basicConfig(level=logging.INFO)
+        hpc_conf = _platform_env.get_hpc_config()
+        assert hpc_conf is not None
+        private_home = Path(hpc_conf)
+        private_cf = OmegaConf.load(private_home)
+        mlflow_client = setup_mlflow(private_cf)
+        _logger.info(f"MLFlow client set up: {mlflow_client}")
+
+    evaluate_from_config(OmegaConf.load(config), mlflow_client)
 
 
-def evaluate_from_config(cfg):
+def evaluate_from_config(cfg, mlflow_client):
     # configure logging
     logging.basicConfig(level=logging.INFO)
 
@@ -154,6 +177,56 @@ def evaluate_from_config(cfg):
                             {"metric": metric}
                         )
 
+        if mlflow_client:
+            parent_run = get_or_create_mlflow_parent_run(mlflow_client, run_id)
+            _logger.info(f"MLFlow parent run: {parent_run}")
+            phase = "eval"
+
+            for region in regions:
+                for metric in metrics:
+                    streams_set = collect_streams(runs)
+                    channels_set = collect_channels(scores_dict, metric, region, runs)
+
+                    for stream in streams_set:
+                        for ch in channels_set:
+                            data = scores_dict[metric][region][stream][run_id]
+                            # skip if channel is missing or contains NaN
+                            if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
+                                continue
+                            _logger.info(
+                                f"Uploading data for {metric} - {region} - {stream} - {ch}."
+                            )
+
+                            x_dim = "forecast_step"
+                            non_zero_dims = [
+                                dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1
+                            ]
+                            if "ens" in non_zero_dims:
+                                _logger.info("Uploading ensembles not yet imnplemented")
+                            else:
+                                if non_zero_dims:
+                                    _logger.info(
+                                        f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
+                                    )
+                                averaged = data.mean(
+                                    dim=[dim for dim in data.dims if dim != x_dim], skipna=True
+                                ).sortby(x_dim)
+                                label = f"score.{region}.{metric}.{stream}.{ch}"
+                                with mlflow.start_run(run_id=parent_run.info.run_id):
+                                    with mlflow.start_run(
+                                        run_name=f"{phase}_{run_id}",
+                                        parent_run_id=parent_run.info.run_id,
+                                        nested=True,
+                                    ) as run:
+                                        mlflow.set_tags(MlFlowUpload.run_tags(run_id, phase))
+                                        log_scores(
+                                            averaged[x_dim].values[:4],
+                                            averaged.values[:4],
+                                            label,
+                                            mlflow_client,
+                                            run.info.run_id,
+                                        )
+
     # plot summary
     if scores_dict and cfg.evaluation.get("summary_plots", True):
         _logger.info("Started creating summary plots..")
@@ -161,25 +234,4 @@ def evaluate_from_config(cfg):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    hpc_conf = _platform_env.get_hpc_config()
-    assert hpc_conf is not None
-    private_home = Path(hpc_conf)
-    private_cf = OmegaConf.load(private_home)
-    mlflow_client = setup_mlflow(private_cf)
-    _logger.info(f"MLFlow client set up: {mlflow_client}")
-    run_id = "test_run"
-    parent_run = get_or_create_mlflow_parent_run(mlflow_client, run_id)
-    _logger.info(f"MLFlow parent run: {parent_run}")
-    phase = "eval"
-    with mlflow.start_run(run_id = parent_run.info.run_id):
-        with mlflow.start_run(
-            run_name=f"{phase}_{run_id}",
-            parent_run_id=parent_run.info.run_id,
-            nested=True,
-    ) as run:
-            mlflow.set_tags(MlFlowUpload.run_tags(run_id, phase))
-            log_metrics([{"metric1": 0.5}], mlflow_client, run.info.run_id)
-
-
-    # evaluate()
+    evaluate()

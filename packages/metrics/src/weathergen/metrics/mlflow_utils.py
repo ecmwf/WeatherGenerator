@@ -3,14 +3,12 @@ import os
 
 import mlflow
 import mlflow.client
+from mlflow.client import MlflowClient
 from mlflow.entities.metric import Metric
 from mlflow.entities.run import Run
-from mlflow.client import MlflowClient
-from mlflow.entities.param import Param
 
-from weathergen.common.platform_env import get_platform_env
 from weathergen.common.config import Config
-
+from weathergen.common.platform_env import get_platform_env
 
 _logger = logging.getLogger(__name__)
 
@@ -68,9 +66,29 @@ def log_metrics(
             if not k.startswith("weathergen.")
         ]
 
+    mlflow_metrics = [met for dct in metrics for met in _convert_to_mlflow_metric(dct)]
+    mlflow_client.log_batch(
+        run_id=mlflow_run_id,
+        metrics=mlflow_metrics,
+    )
+
+
+def log_scores(
+    metrics: list,
+    fsteps: list,
+    label: str,
+    mlflow_client: MlflowClient,
+    mlflow_run_id: str,
+):
+    """
+    Logs the evaluation scores to MLFlow.
+    """
+    ts = 0
     mlflow_metrics = [
-        met for dct in metrics for met in _convert_to_mlflow_metric(dct)
+        Metric(key=label, value=y, timestamp=ts, step=int(x))
+        for x, y in zip(fsteps, metrics, strict=False)
     ]
+
     mlflow_client.log_batch(
         run_id=mlflow_run_id,
         metrics=mlflow_metrics,
@@ -87,21 +105,25 @@ def setup_mlflow(private_config: Config) -> MlflowClient:
     )
     return mlflow_client
 
+
 def get_or_create_mlflow_parent_run(mlflow_client: MlflowClient, run_id: str) -> Run:
     exp_name = MlFlowUpload.experiment_name
-    _logger.info(
-        f"Setting experiment name to {exp_name}: host: {os.environ['DATABRICKS_HOST']}"
-    )
+    _logger.info(f"Setting experiment name to {exp_name}: host: {os.environ['DATABRICKS_HOST']}")
     exp = mlflow.set_experiment(exp_name)
     _logger.info(f"Experiment {exp_name} created with ID {exp.experiment_id}: {exp}")
-    l = mlflow_client.search_runs(experiment_ids=[exp.experiment_id], filter_string=f"tags.run_id='{run_id}' AND tags.stage='unknown'")
+    l = mlflow_client.search_runs(
+        experiment_ids=[exp.experiment_id],
+        filter_string=f"tags.run_id='{run_id}' AND tags.stage='unknown'",
+    )
     if len(l) == 0:
         _logger.info(f"No existing parent run found for run_id {run_id}, creating new run")
         return mlflow_client.create_run(
             experiment_id=exp.experiment_id,
             tags=MlFlowUpload.run_tags(run_id, "unknown"),
             run_name=run_id,
-            )
+        )
     if len(l) > 1:
-        _logger.warning(f"Multiple existing parent runs found for run_id {run_id}, using the first one: {l[0].info.run_id}")
+        _logger.warning(
+            f"Multiple existing parent runs found for run_id {run_id}, using the first one: {l[0].info.run_id}"
+        )
     return l[0]
