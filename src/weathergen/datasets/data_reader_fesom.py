@@ -330,7 +330,7 @@ class DataReaderFesom(DataReaderTimestep):
                 f"target appears to be in a [0, 360] format."
                 f"It will be automatically converted to the required [-180, 180] format."
             )
-            self._trg_lat_conv = True
+            self._trg_lon_conv = True
 
         self.geoinfo_channels = []
         self.geoinfo_idx = []
