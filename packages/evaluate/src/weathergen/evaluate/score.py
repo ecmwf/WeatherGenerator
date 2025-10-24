@@ -179,6 +179,7 @@ class Scores:
             "l2": self.calc_l2,
             "mse": self.calc_mse,
             "rmse": self.calc_rmse,
+            "vrmse": self.calc_vrmse,
             "bias": self.calc_bias,
             "acc": self.calc_acc,
             "froct": self.calc_froct,
@@ -678,6 +679,28 @@ class Scores:
         rmse = np.sqrt(self.calc_mse(p, gt))
 
         return rmse
+
+    def calc_vrmse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
+        """
+        Calculate variance-normalized root mean squared error (VRMSE) of forecast data w.r.t. reference data
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the VRMSE score.
+        """
+        if self._agg_dims is None:
+            raise ValueError(
+                "Cannot calculate variance-normalized root mean squared error without aggregation dimensions (agg_dims=None)."
+            )
+
+        vrmse = np.sqrt(self.calc_mse(p, gt, group_by_coord) / (gt.var(dim=self._agg_dims)+1e-6))
+
+        return vrmse
 
     @staticmethod
     def sort_by_coords(da_to_sort: xr.DataArray, da_reference: xr.DataArray) -> xr.DataArray:
