@@ -22,6 +22,7 @@ ae_adapter_embed: 128
 ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
+ae_adapter_grdient_checkpoint_mode: False
 
 ae_global_dim_embed: 2048
 ae_global_num_blocks: 8
