@@ -787,9 +787,13 @@ class Model(torch.nn.Module):
         """
 
         # global assimilation engine and adapter
-        for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=False)
-
+        if self.cf.assimilate_global_gradient_checkpoint_mode:
+            for block in self.ae_global_blocks:
+                tokens = checkpoint(block, tokens, use_reentrant=False)
+        else:
+             for block in self.ae_global_blocks:
+                tokens = block(tokens)
+                   
         return tokens
 
     #########################################
