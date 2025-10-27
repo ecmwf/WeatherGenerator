@@ -136,11 +136,11 @@ def get_score(
     sc = Scores(agg_dims=agg_dims, ens_dim=ens_dim)
 
     score_data = sc.get_score(data, score_name, group_by_coord, **kwargs)
-    '''
+    
     if compute:
         # If compute is True, compute the score immediately
         return score_data.compute()
-    '''
+    
     return score_data
 
 
