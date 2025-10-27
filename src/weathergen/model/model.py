@@ -754,15 +754,24 @@ class Model(torch.nn.Module):
             else:
                 tokens_c, posteriors = tokens_c, 0.0
 
-            for block in self.ae_adapter:
-                tokens_global_c = checkpoint(
-                    block,
-                    tokens_global_c,
-                    tokens_c,
-                    q_cells_lens_c,
-                    cell_lens_c,
-                    use_reentrant=False,
-                )
+            if self.cf.ae_adapter_grdient_checkpoint_mode:
+                for block in self.ae_adapter:
+                    tokens_global_c = checkpoint(
+                        block,
+                        tokens_global_c,
+                        tokens_c,
+                        q_cells_lens_c,
+                        cell_lens_c,
+                        use_reentrant=False,
+                    )
+            else:
+                for block in self.ae_adapter:
+                    tokens_global_c = block(
+                        tokens_global_c,
+                        tokens_c,
+                        q_cells_lens_c,
+                        cell_lens_c,
+                    )
 
             tokens_global_all += [tokens_global_c]
 
