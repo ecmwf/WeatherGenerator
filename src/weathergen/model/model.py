@@ -253,7 +253,6 @@ class Model(torch.nn.Module):
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
-        self.ae_local_blocks_grdient_checkpoint_mode = self.cf.ae_local_blocks_grdient_checkpoint_mode
 
     #########################################
     def create(self) -> "Model":
@@ -744,7 +743,7 @@ class Model(torch.nn.Module):
                 tokens_global_all += [tokens_global_c]
                 continue
 
-            if self.ae_local_blocks_grdient_checkpoint_mode: 
+            if self.cf.ae_local_blocks_grdient_checkpoint_mode: 
                 for block in self.ae_local_blocks:
                     tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=False)
             else:
