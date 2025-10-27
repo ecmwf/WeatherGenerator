@@ -98,7 +98,7 @@ def reshape_dataset_adaptive(input_data_array: xr.DataArray) -> xr.Dataset:
     reshaped_dataset = reshaped_dataset.assign_coords(
         ipoint=input_data_array.coords["ipoint"],
         pressure_level=pl,
-    )  
+    )
 
     if grid_type == "regular":
         # Use original reshape logic for regular grids
@@ -108,8 +108,10 @@ def reshape_dataset_adaptive(input_data_array: xr.DataArray) -> xr.Dataset:
         )
     else:
         # Use new logic for Gaussian/unstructured grids
-        reshaped_dataset = reshaped_dataset.set_index(ipoint2=("ipoint", "valid_time")).unstack("ipoint2")
-        #rename ipoint to ncells
+        reshaped_dataset = reshaped_dataset.set_index(ipoint2=("ipoint", "valid_time")).unstack(
+            "ipoint2"
+        )
+        # rename ipoint to ncells
         reshaped_dataset = reshaped_dataset.rename_dims({"ipoint": "ncells"})
         reshaped_dataset = reshaped_dataset.rename_vars({"ipoint": "ncells"})
 
@@ -144,6 +146,7 @@ def add_gaussian_grid_metadata(ds: xr.Dataset, grid_info: dict | None = None) ->
         ds.attrs["gaussian_grid_type"] = "reduced" if grid_info.get("reduced", False) else "regular"
 
     return ds
+
 
 def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
     """
@@ -218,7 +221,7 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
             # adding auxiliary coordinates
             # these do not save to netcdf?
             # https://foundations.projectpythia.org/core/data-formats/netcdf-cf/#auxiliary-coordinates
-            attributes['coordinates'] = 'lat lon'
+            attributes["coordinates"] = "lat lon"
         variables[mapping[var_name]["var"]] = xr.DataArray(
             data=variable.values,
             dims=dims,
@@ -228,7 +231,6 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
         )
     dataset = xr.merge(variables.values())
     dataset.attrs = ds.attrs
-    print(dataset['q'].attrs['coordinates'])
     return dataset
 
 
@@ -278,8 +280,9 @@ def add_conventions(stream: str, run_id: str, ds: xr.Dataset) -> xr.Dataset:
     ds.attrs["title"] = f"WeatherGenerator Output for {run_id} using stream {stream}"
     ds.attrs["institution"] = "WeatherGenerator Project"
     ds.attrs["source"] = "WeatherGenerator v0.0"
-    ds.attrs["history"] = "Created using the export_inference.py script on " + np.datetime_as_string(
-        np.datetime64("now"), unit="s"
+    ds.attrs["history"] = (
+        "Created using the export_inference.py script on "
+        + np.datetime_as_string(np.datetime64("now"), unit="s")
     )
     ds.attrs["Conventions"] = "CF-1.12"
     return ds
@@ -463,24 +466,11 @@ def save_sample_to_netcdf(
     """
     # find forecast_ref_time
     frt = array_list[0].valid_time.values[0] - fstep_hours * int(array_list[0].forecast_step.values)
-    print(frt)
     out_fname = output_filename(type_str, run_id, output_dir, output_format, frt)
     # check if file already exists
     if out_fname.exists():
         _logger.info(f"File {out_fname} already exists. Skipping.")
     else:
-        # remove multiple valid_times, uncomment later
-        # def _clean_da(da: xr.DataArray) -> xr.DataArray:
-        #     if "valid_time" in da.coords and da.valid_time.size > 1:
-        #         unique_valid_time = np.unique(da.valid_time.values)
-        #         da = da.drop_vars("valid_time")
-        #         da = da.assign_coords(valid_time=unique_valid_time)
-        #         # make valid_time a dimension for each variable
-        #         #da = da.ass("ncells", "pressure_level", "valid_time")
-        #         da = da.assign_coords()
-        #     return da
-        # array_list = [_clean_da(da) for da in array_list]
-        # print(array_list[0])
         sample_all_steps = xr.concat(
             array_list,
             dim="valid_time",
@@ -510,7 +500,6 @@ def save_sample_to_netcdf(
             "units": "hours",
         }
         sample_all_steps = add_conventions(stream, run_id, sample_all_steps)
-        print(sample_all_steps.info())
         sample_all_steps.to_netcdf(out_fname, mode="w", compute=False)
 
 
