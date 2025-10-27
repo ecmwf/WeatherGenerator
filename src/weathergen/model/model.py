@@ -773,7 +773,6 @@ class Model(torch.nn.Module):
                         cell_lens_c,
                     )
 
-
             tokens_global_all += [tokens_global_c]
 
         tokens_global = torch.cat(tokens_global_all)
