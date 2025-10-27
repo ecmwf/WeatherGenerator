@@ -78,18 +78,7 @@ def reshape_dataset_adaptive(input_data_array: xr.DataArray) -> xr.Dataset:
     """
     grid_type = detect_grid_type(input_data_array)
 
-    if grid_type == "regular":
-        # Use original reshape logic for regular grids
-        return reshape_dataset_regular(input_data_array)
-    else:
-        # Use new logic for Gaussian/unstructured grids
-        return reshape_dataset_gaussian(input_data_array)
-
-
-def reshape_dataset_regular(input_data_array: xr.DataArray) -> xr.Dataset:
-    """
-    Original reshape logic for regular lat/lon grids.
-    """
+    # Original logic
     var_dict, pl = find_pl(input_data_array.channel.values)
     data_vars = {}
 
@@ -109,115 +98,20 @@ def reshape_dataset_regular(input_data_array: xr.DataArray) -> xr.Dataset:
     reshaped_dataset = reshaped_dataset.assign_coords(
         ipoint=input_data_array.coords["ipoint"],
         pressure_level=pl,
-    )
+    )  
 
-    # This is safe for regular grids
-    reshaped_dataset = reshaped_dataset.set_index(ipoint=("valid_time", "lat", "lon")).unstack(
-        "ipoint"
-    )
-
-    return reshaped_dataset
-
-
-def reshape_dataset_gaussian(input_data_array: xr.DataArray) -> xr.Dataset:
-    """
-    Reshape for Gaussian/unstructured grids - keeps spatial dimension as 'ncells'.
-    Follows CF conventions for unstructured grids.
-
-    Parameters
-    ----------
-    input_data_array : xr.DataArray
-        Input data with dimensions (ipoint, channel) - single timestep
-
-    Returns
-    -------
-    xr.Dataset
-        Dataset with dimensions (ncells,) or (pressure_level, ncells) for single timestep
-    """
-    var_dict, pl = find_pl(input_data_array.channel.values)
-
-    # Since we're processing one forecast step at a time, we have a single timestep
-    # Extract spatial coordinates
-    lats = input_data_array.coords["lat"].values
-    lons = input_data_array.coords["lon"].values
-    n_spatial = len(lats)
-
-    # Get the valid_time for this forecast step
-    if "valid_time" in input_data_array.coords:
-        valid_time = input_data_array.coords["valid_time"].values
-    elif "time" in input_data_array.coords:
-        valid_time = input_data_array.coords["time"].values
+    if grid_type == "regular":
+        # Use original reshape logic for regular grids
+        # This is safe for regular grids
+        reshaped_dataset = reshaped_dataset.set_index(ipoint=("valid_time", "lat", "lon")).unstack(
+            "ipoint"
+        )
     else:
-        valid_time = None
-
-    # Get forecast_step if available
-    if "forecast_step" in input_data_array.coords:
-        forecast_step = input_data_array.coords["forecast_step"].values
-    else:
-        forecast_step = None
-
-    # Get stream if available
-    if "stream" in input_data_array.coords:
-        stream = input_data_array.coords["stream"].values
-    else:
-        stream = None
-
-    # Reshape data: keep as (n_spatial,) or (n_levels, n_spatial)
-    data_vars = {}
-
-    for new_var, old_vars in var_dict.items():
-        if len(old_vars) > 1:
-            # Variable with pressure levels: (ipoint, n_levels) -> (n_levels, ipoint)
-            data = input_data_array.sel(channel=old_vars).values.T
-
-            data_vars[new_var] = xr.DataArray(
-                data,
-                dims=["pressure_level", "ncells"],
-            )
-        else:
-            # Surface variable: (ipoint,)
-            data = input_data_array.sel(channel=old_vars[0]).values
-
-            data_vars[new_var] = xr.DataArray(
-                data,
-                dims=["ncells"],
-            )
-
-    # Create dataset with proper coordinates
-    reshaped_dataset = xr.Dataset(data_vars)
-
-    # Add coordinates
-    coords_dict = {
-        "ncells": np.arange(n_spatial),
-        "lat": (["ncells"], lats),
-        "lon": (["ncells"], lons),
-    }
-
-    # Add optional coordinates
-    for coord_name, coord_value in [
-        ("pressure_level", pl),
-        ("valid_time", valid_time),
-        ("forecast_step", forecast_step),
-        ("stream", stream),
-    ]:
-        if coord_value is not None:
-            coords_dict[coord_name] = coord_value
-    reshaped_dataset = reshaped_dataset.assign_coords(**coords_dict)
-
-    # Add attributes to lat/lon to mark them as auxiliary coordinates
-    reshaped_dataset["lat"].attrs = {
-        "standard_name": "latitude",
-        "long_name": "latitude",
-        "units": "degrees_north",
-    }
-    reshaped_dataset["lon"].attrs = {
-        "standard_name": "longitude",
-        "long_name": "longitude",
-        "units": "degrees_east",
-    }
-
-    # Add grid mapping information
-    reshaped_dataset.attrs["grid_type"] = "gaussian"
+        # Use new logic for Gaussian/unstructured grids
+        reshaped_dataset = reshaped_dataset.set_index(ipoint2=("ipoint", "valid_time")).unstack("ipoint2")
+        #rename ipoint to ncells
+        reshaped_dataset = reshaped_dataset.rename_dims({"ipoint": "ncells"})
+        reshaped_dataset = reshaped_dataset.rename_vars({"ipoint": "ncells"})
 
     return reshaped_dataset
 
@@ -241,11 +135,8 @@ def add_gaussian_grid_metadata(ds: xr.Dataset, grid_info: dict | None = None) ->
         Dataset with added grid metadata
     """
     ds = ds.copy()
-
-    # Add coordinates attribute to data variables
-    for var in ds.data_vars:
-        if "ncells" in ds[var].dims:
-            ds[var].attrs["coordinates"] = "lat lon"
+    # Add grid mapping information
+    ds.attrs["grid_type"] = "gaussian"
 
     # If grid info provided, add it
     if grid_info:
@@ -254,10 +145,9 @@ def add_gaussian_grid_metadata(ds: xr.Dataset, grid_info: dict | None = None) ->
 
     return ds
 
-
 def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
     """
-    Modified CF parser that handles both regular and Gaussian grids.
+    CF parser that handles both regular and Gaussian grids.
 
     Parameters
     ----------
@@ -273,108 +163,66 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
     """
     # Detect if this is a Gaussian grid
     is_gaussian = "ncells" in ds.dims
-
+    # order important here
+    if is_gaussian:
+        dims_list = ["pressure", "ncells", "valid_time"]
+    else:
+        dims_list = [
+            "pressure",
+            "valid_time",
+            "latitude",
+            "longitude",
+        ]
+    # Start a new xarray dataset from scratch, it's easier than deleting / renaming (I tried!).
     variables = {}
     mapping = config["variables"]
 
-    # Handle dimensions based on grid type
-    if is_gaussian:
-        # For Gaussian grids, keep ncells and don't try to create lat/lon dimensions
-        for var_name in ds.data_vars:
-            if var_name in ["lat", "lon"]:
-                continue
-
-            variable = ds[var_name]
-
-            if var_name not in mapping:
-                # Variable not in mapping - skip or keep as-is
-                variables[var_name] = variable
-                continue
-
-            dims = list(variable.dims)
-
-            attributes = dict(
-                standard_name=mapping[var_name].get("std", var_name),
-                units=mapping[var_name].get("std_unit", "unknown"),
-                coordinates="lat lon",  # Mark auxiliary coordinates
+    ds_attributes = {}
+    for dim_name, dim_dict in config["dimensions"].items():
+        # clear dimensions if key and dim_dict['wg'] are the same
+        if dim_name == dim_dict["wg"]:
+            dim_attributes = dict(
+                standard_name=dim_dict.get("std", None),
             )
-
-            # Get mapped variable name or use original
-            mapped_name = mapping[var_name].get("var", var_name)
-
-            variables[mapped_name] = xr.DataArray(
-                data=variable.values,
-                dims=dims,
-                coords={coord: ds.coords[coord] for coord in variable.coords if coord in ds.coords},
-                attrs=attributes,
-                name=mapped_name,
-            )
-
-        # Preserve lat/lon as coordinate variables with proper attributes
-        if "lat" in ds.coords:
-            ds.coords["lat"].attrs = {
-                "standard_name": "latitude",
-                "long_name": "latitude",
-                "units": "degrees_north",
-            }
-        if "lon" in ds.coords:
-            ds.coords["lon"].attrs = {
-                "standard_name": "longitude",
-                "long_name": "longitude",
-                "units": "degrees_east",
-            }
-
-    else:
-        # Original logic for regular grids
-        ds_attributes = {}
-        for dim_name, dim_dict in config["dimensions"].items():
-            if dim_name == dim_dict["wg"]:
-                dim_attributes = dict(standard_name=dim_dict.get("std", None))
-                if dim_dict.get("std_unit", None) is not None:
-                    dim_attributes["units"] = dim_dict["std_unit"]
-                ds_attributes[dim_dict["wg"]] = dim_attributes
-                continue
-
-            if dim_name in ds.dims:
-                ds = ds.rename_dims({dim_name: dim_dict["wg"]})
-
-            dim_attributes = dict(standard_name=dim_dict.get("std", None))
-            if "std_unit" in dim_dict and dim_dict["std_unit"] is not None:
+            if dim_dict.get("std_unit", None) is not None:
                 dim_attributes["units"] = dim_dict["std_unit"]
             ds_attributes[dim_dict["wg"]] = dim_attributes
-
-        for var_name in ds.data_vars:
-            dims = ["pressure", "valid_time", "latitude", "longitude"]
-            if mapping[var_name]["level_type"] == "sfc":
-                dims.remove("pressure")
-
-            coordinates = {}
-            for coord, new_name in config["coordinates"][mapping[var_name]["level_type"]].items():
-                coordinates |= {
-                    new_name: (
-                        ds.coords[coord].dims,
-                        ds.coords[coord].values,
-                        ds_attributes[new_name],
-                    )
-                }
-
-            variable = ds[var_name]
-            attributes = dict(
-                standard_name=mapping[var_name]["std"],
-                units=mapping[var_name]["std_unit"],
-            )
-
-            variables[mapping[var_name]["var"]] = xr.DataArray(
-                data=variable.values,
-                dims=dims,
-                coords={**coordinates, "valid_time": ds["valid_time"].values},
-                attrs=attributes,
-                name=mapping[var_name]["var"],
-            )
-
+            continue
+        if dim_name in ds.dims:
+            ds = ds.rename_dims({dim_name: dim_dict["wg"]})
+        dim_attributes = dict(
+            standard_name=dim_dict.get("std", None),
+        )
+        if "std_unit" in dim_dict and dim_dict["std_unit"] is not None:
+            dim_attributes["units"] = dim_dict["std_unit"]
+        ds_attributes[dim_dict["wg"]] = dim_attributes
+    for var_name in ds:
+        dims = dims_list.copy()
+        if mapping[var_name]["level_type"] == "sfc":
+            dims.remove("pressure")
+        coordinates = {}
+        for coord, new_name in config["coordinates"][mapping[var_name]["level_type"]].items():
+            coordinates |= {
+                new_name: (
+                    ds.coords[coord].dims,
+                    ds.coords[coord].values,
+                    ds_attributes[new_name],
+                )
+            }
+        variable = ds[var_name]
+        attributes = dict(
+            standard_name=mapping[var_name]["std"],
+            units=mapping[var_name]["std_unit"],
+        )
+        variables[mapping[var_name]["var"]] = xr.DataArray(
+            data=variable.values,
+            dims=dims,
+            coords={**coordinates, "valid_time": ds["valid_time"].values},
+            attrs=attributes,
+            name=mapping[var_name]["var"],
+        )
     dataset = xr.merge(variables.values())
     dataset.attrs = ds.attrs
-
     return dataset
 
 
@@ -424,7 +272,7 @@ def add_conventions(stream: str, run_id: str, ds: xr.Dataset) -> xr.Dataset:
     ds.attrs["title"] = f"WeatherGenerator Output for {run_id} using stream {stream}"
     ds.attrs["institution"] = "WeatherGenerator Project"
     ds.attrs["source"] = "WeatherGenerator v0.0"
-    ds.attrs["history"] = "Created using the zarr_nc.py script on " + np.datetime_as_string(
+    ds.attrs["history"] = "Created using the export_inference.py script on " + np.datetime_as_string(
         np.datetime64("now"), unit="s"
     )
     ds.attrs["Conventions"] = "CF-1.12"
@@ -609,11 +457,24 @@ def save_sample_to_netcdf(
     """
     # find forecast_ref_time
     frt = array_list[0].valid_time.values[0] - fstep_hours * int(array_list[0].forecast_step.values)
+    print(frt)
     out_fname = output_filename(type_str, run_id, output_dir, output_format, frt)
     # check if file already exists
     if out_fname.exists():
         _logger.info(f"File {out_fname} already exists. Skipping.")
     else:
+        # remove multiple valid_times, uncomment later
+        # def _clean_da(da: xr.DataArray) -> xr.DataArray:
+        #     if "valid_time" in da.coords and da.valid_time.size > 1:
+        #         unique_valid_time = np.unique(da.valid_time.values)
+        #         da = da.drop_vars("valid_time")
+        #         da = da.assign_coords(valid_time=unique_valid_time)
+        #         # make valid_time a dimension for each variable
+        #         #da = da.ass("ncells", "pressure_level", "valid_time")
+        #         da = da.assign_coords()
+        #     return da
+        # array_list = [_clean_da(da) for da in array_list]
+        # print(array_list[0])
         sample_all_steps = xr.concat(
             array_list,
             dim="valid_time",
@@ -636,7 +497,7 @@ def save_sample_to_netcdf(
             _logger.info("Detected and preserved Gaussian grid structure")
         # add forecast_period attributes
         n_hours = fstep_hours.astype("int64")
-        sample_all_steps["forecast_period"] = sample_all_steps["forecast_step"] * n_hours
+        sample_all_steps["forecast_period"] = sample_all_steps["forecast_period"] * n_hours
         sample_all_steps["forecast_period"].attrs = {
             "standard_name": "forecast_period",
             "long_name": "time since forecast_reference_time",
@@ -661,6 +522,7 @@ def parse_args(args: list) -> argparse.Namespace:
         "--run-id",
         type=str,
         help=" Zarr folder which contains target and inference results",
+        required=True,
     )
 
     parser.add_argument(
@@ -669,12 +531,14 @@ def parse_args(args: list) -> argparse.Namespace:
         choices=["prediction", "target"],
         nargs="+",
         help="List of type of data to convert (e.g. prediction target)",
+        required=True,
     )
 
     parser.add_argument(
         "--output-dir",
         type=str,
         help="Output directory to save the NetCDF files",
+        required=True,
     )
 
     parser.add_argument(
@@ -682,6 +546,7 @@ def parse_args(args: list) -> argparse.Namespace:
         type=str,
         choices=["netcdf", "grib"],
         help="Output file format (currently only netcdf supported)",
+        required=True,
     )
 
     parser.add_argument(
@@ -689,6 +554,7 @@ def parse_args(args: list) -> argparse.Namespace:
         type=str,
         choices=["ERA5"],
         help="Stream name to retrieve data for",
+        required=True,
     )
 
     parser.add_argument(
