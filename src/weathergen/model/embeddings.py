@@ -159,7 +159,11 @@ class StreamEmbedTransformer(torch.nn.Module):
 
             # read out
             if self.unembed_mode == "full":
-                out = checkpoint(self.unembed, self.ln_final(x.flatten(-2, -1)), use_reentrant=False)
+                out = checkpoint(
+                    self.unembed,
+                    self.ln_final(x.flatten(-2, -1)),
+                    use_reentrant=False,
+                )
             elif self.unembed_mode == "block":
                 out = [
                     checkpoint(ue, ln(x[:, i]), use_reentrant=False)
