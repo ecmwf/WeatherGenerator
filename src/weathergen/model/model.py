@@ -791,9 +791,9 @@ class Model(torch.nn.Module):
             for block in self.ae_global_blocks:
                 tokens = checkpoint(block, tokens, use_reentrant=False)
         else:
-             for block in self.ae_global_blocks:
+            for block in self.ae_global_blocks:
                 tokens = block(tokens)
-                   
+
         return tokens
 
     #########################################
