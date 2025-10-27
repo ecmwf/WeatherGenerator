@@ -19,6 +19,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import tqdm
+from numpy.typing import NDArray
 from omegaconf import OmegaConf
 from torch import Tensor
 
@@ -88,6 +89,8 @@ class Trainer(TrainerBase):
         # Get world_size of previous, to be continued run before
         # world_size gets overwritten by current setting during init_ddp()
         self.world_size_original = cf.get("world_size", None)
+
+        self.log_grad_norms = cf.get("log_grad_norms", False)
 
         # create output directory
         if is_root():
@@ -239,6 +242,16 @@ class Trainer(TrainerBase):
             fully_shard(model)
             for tensor in itertools.chain(model.parameters(), model.buffers()):
                 assert tensor.device == torch.device("meta")
+
+        # For reasons we do not yet fully understand, when using train continue in some
+        # instances, FSDP2 does not register the forward_channels and forward_columns
+        # functions in the embedding engine as forward functions. Thus, yielding a crash
+        # because the input tensors are not converted to DTensors. This seems to primarily
+        # occur during validation.
+        for embed in model.embeds:
+            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
+            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
+
         return model, model_params
 
     def run(self, cf, devices, run_id_contd=None, epoch_contd=None):
@@ -508,9 +521,13 @@ class Trainer(TrainerBase):
 
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         fsteps = len(targets_rt)
-        preds_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
-        targets_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
-        targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+        preds_all: list[list[list[NDArray]]] = [
+            [[] for _ in self.cf.streams] for _ in range(fsteps)
+        ]
+        targets_all: list[list[list[NDArray]]] = [
+            [[] for _ in self.cf.streams] for _ in range(fsteps)
+        ]
+        targets_lens: list[list[list[int]]] = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
 
         # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
         for fstep in range(len(targets_rt)):
@@ -532,8 +549,12 @@ class Trainer(TrainerBase):
                 dn_data = self.dataset_val.denormalize_target_channels
 
                 f32 = torch.float32
-                preds_all[fstep][i_strm] += [dn_data(i_strm, pred.to(f32)).detach().cpu()]
-                targets_all[fstep][i_strm] += [dn_data(i_strm, target.to(f32)).detach().cpu()]
+                preds_all[fstep][i_strm] += [
+                    np.asarray(dn_data(i_strm, pred.to(f32)).detach().cpu())
+                ]
+                targets_all[fstep][i_strm] += [
+                    np.asarray(dn_data(i_strm, target.to(f32)).detach().cpu())
+                ]
 
         return (
             preds_all,
@@ -585,7 +606,16 @@ class Trainer(TrainerBase):
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=cf.grad_clip)
+            total_norm = torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=cf.grad_clip
+            )
+
+            # log gradient norms
+            if self.log_grad_norms:
+                if bidx % self.train_log_freq.terminal == 0:
+                    self.last_grad_norm = self._get_tensor_item(total_norm)
+                if bidx % self.train_log_freq.metrics == 0:
+                    self._log_instant_grad_norms(TRAIN)
 
             # optimizer step
             self.grad_scaler.step(self.optimizer)
@@ -971,6 +1001,26 @@ class Trainer(TrainerBase):
 
         self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
+    def _get_tensor_item(self, tensor):
+        """
+        When using FSDP2, tensor is a DTensor and we need full_tensor().item() instead of .item(),
+        see here: https://gist.github.com/Kai-46/a9835ef3f36e76d06afee6c11f388144
+        """
+        return tensor.full_tensor().item() if isinstance(tensor, DTensor) else tensor.item()
+
+    def _log_instant_grad_norms(self, stage: Stage):
+        """
+        Log instantaneous grad norms, we do not average because of the cost and because we want to
+        measure the actual values.
+        """
+        grad_norms = {"grad_norm.total": self.last_grad_norm}
+        for name, param in self.model.named_parameters():
+            if param.grad is not None:
+                grad_norms["grad_norm." + name] = self._get_tensor_item(param.grad.norm())
+
+        if is_root():
+            self.train_logger.log_metrics(stage, grad_norms)
+
     def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
         print_freq = self.train_log_freq.terminal
         if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
@@ -992,20 +1042,16 @@ class Trainer(TrainerBase):
                 elif stage == TRAIN:
                     # samples per sec
                     dt = time.time() - self.t_start
-                    pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
-                    pstr += "(lr={:.2E}, s/sec={:.3f})"
                     len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
-                    logger.info(
-                        pstr.format(
-                            epoch,
-                            bidx,
-                            len_dataset,
-                            self.cf.istep,
-                            avg_loss.nanmean().item(),
-                            self.lr_scheduler.get_lr(),
-                            (print_freq * self.cf.batch_size_per_gpu) / dt,
-                        ),
+                    pstr = (
+                        f"{epoch:03d} : {bidx:05d}/{len_dataset:05d} : "
+                        + f"{self.cf.istep:06d} : loss = {avg_loss.nanmean().item():.4E} "
+                        + f"(lr={self.lr_scheduler.get_lr():.2E}, "
                     )
+                    if self.log_grad_norms:
+                        pstr += f"gradient norm={self.last_grad_norm:.3f}, "
+                    pstr += f"s/sec={(print_freq * self.cf.batch_size_per_gpu) / dt:.3f})"
+                    logger.info(pstr)
                     logger.info("\t")
                     for _, st in enumerate(self.cf.streams):
                         logger.info(
