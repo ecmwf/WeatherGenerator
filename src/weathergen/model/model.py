@@ -872,18 +872,30 @@ class Model(torch.nn.Module):
             ## embed token coords, concatenating along batch dimension
             # (which is taking care of through the varlen attention)
             # arguably we should to the mixed precision policy when creating the model in FSDP
-            tc_tokens = torch.cat(
-                [
-                    checkpoint(
-                        tc_embed,
-                        streams_data[i_b][ii].target_coords[fstep],
-                        use_reentrant=False,
-                    )
-                    if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
-                    else streams_data[i_b][ii].target_coords[fstep]
-                    for i_b in range(len(streams_data))
-                ]
-            )
+            if self.cf.pred_gradient_checkpoint_mode:
+                tc_tokens = torch.cat(
+                    [
+                        checkpoint(
+                            tc_embed,
+                            streams_data[i_b][ii].target_coords[fstep],
+                            use_reentrant=False,
+                        )
+                        if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
+                        else streams_data[i_b][ii].target_coords[fstep]
+                        for i_b in range(len(streams_data))
+                    ]
+                )
+            else:
+                tc_tokens = torch.cat(
+                    [
+                        tc_embed(
+                            streams_data[i_b][ii].target_coords[fstep],
+                        )
+                        if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
+                        else streams_data[i_b][ii].target_coords[fstep]
+                        for i_b in range(len(streams_data))
+                    ]
+                )
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
@@ -923,6 +935,9 @@ class Model(torch.nn.Module):
             )
 
             # final prediction head to map back to physical space
-            preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
+            if self.cf.pred_gradient_checkpoint_mode:
+                preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
+            else:
+                preds_tokens += [self.pred_heads[ii](tc_tokens)]
 
         return preds_tokens
