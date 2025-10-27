@@ -134,6 +134,7 @@ grad_clip: 1.0
 weight_decay: 0.1
 norm_type: "LayerNorm"
 nn_module: "te"
+log_grad_norms: False
 
 start_date: 197901010000
 end_date: 202012310000

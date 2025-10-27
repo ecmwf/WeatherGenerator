@@ -202,7 +202,7 @@ class StreamData:
         self.target_tokens[fstep] = torch.cat(targets)
         self.target_coords[fstep] = torch.cat(target_coords)
         self.target_times_raw[fstep] = np.concatenate(times_raw)
-        self.target_coords_raw[fstep] = target_coords_raw
+        self.target_coords_raw[fstep] = torch.cat(target_coords_raw)
 
         tc = target_coords
         self.target_coords_lens[fstep] = torch.tensor(
