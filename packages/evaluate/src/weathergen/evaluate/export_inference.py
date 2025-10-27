@@ -214,6 +214,11 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
             standard_name=mapping[var_name]["std"],
             units=mapping[var_name]["std_unit"],
         )
+        if is_gaussian:
+            # adding auxiliary coordinates
+            # these do not save to netcdf?
+            # https://foundations.projectpythia.org/core/data-formats/netcdf-cf/#auxiliary-coordinates
+            attributes['coordinates'] = 'lat lon'
         variables[mapping[var_name]["var"]] = xr.DataArray(
             data=variable.values,
             dims=dims,
@@ -223,6 +228,7 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
         )
     dataset = xr.merge(variables.values())
     dataset.attrs = ds.attrs
+    print(dataset['q'].attrs['coordinates'])
     return dataset
 
 
@@ -504,6 +510,7 @@ def save_sample_to_netcdf(
             "units": "hours",
         }
         sample_all_steps = add_conventions(stream, run_id, sample_all_steps)
+        print(sample_all_steps.info())
         sample_all_steps.to_netcdf(out_fname, mode="w", compute=False)
 
 
