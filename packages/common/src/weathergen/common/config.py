@@ -97,7 +97,7 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
 
     config = OmegaConf.create(json.loads(json_str))
 
-    return _check_logging(config)
+    return _apply_fixes(config)
 
 
 def _get_model_config_file_name(run_id: str, epoch: int | None):
