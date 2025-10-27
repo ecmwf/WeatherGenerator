@@ -871,8 +871,6 @@ class Scores:
 
         return troct
 
-<<<<<<< HEAD
-=======
     def _calc_act(
         self,
         x: xr.DataArray,
@@ -1012,7 +1010,6 @@ class Scores:
             (fcst**2).sum(spatial_dims) * (obs**2).sum(spatial_dims)
         )
 
->>>>>>> 966083a (Add forecast and observation activity (#1126))
     def calc_acc(
         self,
         p: xr.DataArray,

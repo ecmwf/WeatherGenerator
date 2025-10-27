@@ -138,7 +138,6 @@ class Plotter:
         -------
             xarray DataArray with selected data.
         """
-
         for key, value in selection.items():
             if key in da.coords and key not in da.dims:
                 # Coordinate like 'sample' aligned to another dim
@@ -539,10 +538,10 @@ class Plotter:
 
                     name = "_".join(filter(None, parts))
                     fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
-
+                    
                     names = glob.glob(fname)
                     image_paths += names
-
+              
                 images = [Image.open(path) for path in image_paths]
                 images[0].save(
                     f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{var}.gif",
@@ -638,6 +637,75 @@ class LinePlots:
                     _logger.info(f"  x: {xi:.3f}, y: {yi:.3f}")
                 _logger.info("--------------------------")
         return
+    
+    def _plot_ensemble(self, data: xr.DataArray, x_dim: str, label: str) -> None:
+        """
+        Plot ensemble spread for a data array.  
+       
+        Parameters
+        ----------
+        data: xr.xArray
+            DataArray to be plotted
+        x_dim: str
+            Dimension to be used for the x-axis.
+        label: str  
+            Label for the dataset
+        Returns
+        -------
+            None
+        """
+        averaged = data.mean(
+                dim=[dim for dim in data.dims if dim != x_dim], skipna=True
+            ).sortby(x_dim)
+        
+        lines = plt.plot(
+                averaged[x_dim],
+                averaged.values,
+                label=label,
+                marker="o",
+                linestyle="-",
+                )
+        line = lines[0]
+        color = line.get_color()
+
+        ens = data.mean(
+                dim=[dim for dim in data.dims if dim not in [x_dim, "ens"] ], skipna=True
+            ).sortby(x_dim)
+
+        if self.plot_ensemble == "std":
+            std_dev = ens.std(dim="ens", skipna=True).sortby(x_dim)
+            plt.fill_between(
+                averaged[x_dim],
+                (averaged - std_dev).values,
+                (averaged + std_dev).values,
+                label=f"{label} - std dev",
+                color = color,
+                alpha=0.2)
+
+        elif self.plot_ensemble == "minmax":
+            ens_min = ens.min(dim="ens", skipna=True).sortby(x_dim)
+            ens_max = ens.max(dim="ens", skipna=True).sortby(x_dim)
+
+            plt.fill_between(
+                averaged[x_dim],
+                ens_min.values,
+                ens_max.values,
+                label=f"{label} - min max",
+                color = color, 
+                alpha=0.2)  
+
+        elif self.plot_ensemble == "members":
+            for j in range(ens.ens.size):
+                plt.plot(
+                    ens[x_dim],
+                    ens.isel(ens=j).values,
+                    color=color,
+                    alpha=0.2,
+                )
+        else:
+            _logger.warning(
+                f"LinePlot:: Unknown option for plot_ensemble: {plot_ensemble}. Skipping ensemble plotting."
+                    )
 
     def _plot_ensemble(self, data: xr.DataArray, x_dim: str, label: str) -> None:
         """
@@ -737,7 +805,6 @@ class LinePlots:
             Name of the dimension to be used for the y-axis.
         print_summary:
             If True, print a summary of the values from the graph.
-
         Returns
         -------
             None

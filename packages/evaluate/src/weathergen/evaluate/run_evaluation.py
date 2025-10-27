@@ -113,7 +113,7 @@ def evaluate_from_config(cfg):
                                 region,
                                 metric,
                             )
-
+    
                             available_data = reader.check_availability(
                                 stream, metric_data, mode="evaluation"
                             )
