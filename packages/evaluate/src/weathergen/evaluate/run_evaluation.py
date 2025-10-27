@@ -16,13 +16,12 @@ from collections import defaultdict
 from pathlib import Path
 
 import mlflow
-import numpy as np
 from omegaconf import OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
 from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io_reader import WeatherGenReader
-from weathergen.evaluate.plot_utils import collect_channels, collect_streams
+from weathergen.evaluate.plot_utils import collect_channels
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
@@ -177,55 +176,38 @@ def evaluate_from_config(cfg, mlflow_client):
                             {"metric": metric}
                         )
 
-        if mlflow_client:
+    if mlflow_client:
+        # Reorder scores_dict to push to MLFlow per run_id:
+        # Create a new defaultdict with the target structure: [run_id][metric][region][stream]
+        reordered_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+
+        # Iterate through the original dictionary to get all keys and the final value
+        for metric, regions_dict in scores_dict.items():
+            for region, streams_dict in regions_dict.items():
+                for stream, runs_dict in streams_dict.items():
+                    for run_id, final_dict in runs_dict.items():
+                        # Assign the final_dict to the new structure using the reordered keys
+                        reordered_dict[run_id][metric][region][stream] = final_dict
+
+        channels_set = collect_channels(scores_dict, metric, region, runs)
+
+        for run_id, metrics_dict in reordered_dict.items():
             parent_run = get_or_create_mlflow_parent_run(mlflow_client, run_id)
             _logger.info(f"MLFlow parent run: {parent_run}")
             phase = "eval"
-
-            for region in regions:
-                for metric in metrics:
-                    streams_set = collect_streams(runs)
-                    channels_set = collect_channels(scores_dict, metric, region, runs)
-
-                    for stream in streams_set:
-                        for ch in channels_set:
-                            data = scores_dict[metric][region][stream][run_id]
-                            # skip if channel is missing or contains NaN
-                            if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
-                                continue
-                            _logger.info(
-                                f"Uploading data for {metric} - {region} - {stream} - {ch}."
-                            )
-
-                            x_dim = "forecast_step"
-                            non_zero_dims = [
-                                dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1
-                            ]
-                            if "ens" in non_zero_dims:
-                                _logger.info("Uploading ensembles not yet imnplemented")
-                            else:
-                                if non_zero_dims:
-                                    _logger.info(
-                                        f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
-                                    )
-                                averaged = data.mean(
-                                    dim=[dim for dim in data.dims if dim != x_dim], skipna=True
-                                ).sortby(x_dim)
-                                label = f"score.{region}.{metric}.{stream}.{ch}"
-                                with mlflow.start_run(run_id=parent_run.info.run_id):
-                                    with mlflow.start_run(
-                                        run_name=f"{phase}_{run_id}",
-                                        parent_run_id=parent_run.info.run_id,
-                                        nested=True,
-                                    ) as run:
-                                        mlflow.set_tags(MlFlowUpload.run_tags(run_id, phase))
-                                        log_scores(
-                                            averaged[x_dim].values[:4],
-                                            averaged.values[:4],
-                                            label,
-                                            mlflow_client,
-                                            run.info.run_id,
-                                        )
+            with mlflow.start_run(run_id=parent_run.info.run_id):
+                with mlflow.start_run(
+                    run_name=f"{phase}_{run_id}",
+                    parent_run_id=parent_run.info.run_id,
+                    nested=True,
+                ) as run:
+                    mlflow.set_tags(MlFlowUpload.run_tags(run_id, phase))
+                    log_scores(
+                        metrics_dict,
+                        mlflow_client,
+                        run.info.run_id,
+                        channels_set,
+                    )
 
     # plot summary
     if scores_dict and cfg.evaluation.get("summary_plots", True):

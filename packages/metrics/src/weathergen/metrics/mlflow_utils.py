@@ -3,6 +3,7 @@ import os
 
 import mlflow
 import mlflow.client
+import numpy as np
 from mlflow.client import MlflowClient
 from mlflow.entities.metric import Metric
 from mlflow.entities.run import Run
@@ -73,22 +74,75 @@ def log_metrics(
     )
 
 
+# def log_scores(
+#     metrics: list,
+#     fsteps: list,
+#     label: str,
+#     mlflow_client: MlflowClient,
+#     mlflow_run_id: str,
+# ):
+#     """
+#     Logs the evaluation scores to MLFlow.
+#     """
+#     ts = 0
+#     mlflow_metrics = [
+#         Metric(key=label, value=y, timestamp=ts, step=int(x))
+#         for x, y in zip(fsteps, metrics, strict=False)
+#     ]
+
+#     mlflow_client.log_batch(
+#         run_id=mlflow_run_id,
+#         metrics=mlflow_metrics,
+#     )
+
+
 def log_scores(
-    metrics: list,
-    fsteps: list,
-    label: str,
+    metrics_dict: dict,
     mlflow_client: MlflowClient,
     mlflow_run_id: str,
+    channels_set: list,
+    x_dim="forecast_step",
 ):
     """
     Logs the evaluation scores to MLFlow.
     """
-    ts = 0
-    mlflow_metrics = [
-        Metric(key=label, value=y, timestamp=ts, step=int(x))
-        for x, y in zip(fsteps, metrics, strict=False)
-    ]
 
+    ts = 0
+
+    mlflow_metrics = []
+    for metric, regions_dict in metrics_dict.items():
+        print(metric)
+        for region, streams_dict in regions_dict.items():
+            print(region)
+            for stream, data in streams_dict.items():
+                print(stream)
+                for ch in channels_set:
+                    # skip if channel is missing or contains NaN
+                    if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
+                        continue
+                    _logger.info(f"Collecting data for {metric} - {region} - {stream} - {ch}.")
+
+                    non_zero_dims = [
+                        dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1
+                    ]
+                    if "ens" in non_zero_dims:
+                        _logger.info("Uploading ensembles not yet imnplemented")
+                    else:
+                        if non_zero_dims:
+                            _logger.info(
+                                f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}"
+                                + ". Averaging..."
+                            )
+                        averaged = data.mean(
+                            dim=[dim for dim in data.dims if dim != x_dim], skipna=True
+                        ).sortby(x_dim)
+                        label = f"score.{region}.{metric}.{stream}.{ch}"
+
+                        mlflow_metrics.append(
+                            Metric(key=label, value=y, timestamp=ts, step=int(x))
+                            for x, y in zip(averaged[x_dim].values, averaged.values, strict=False)
+                        )
+    breakpoint()
     mlflow_client.log_batch(
         run_id=mlflow_run_id,
         metrics=mlflow_metrics,
