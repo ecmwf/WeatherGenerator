@@ -869,7 +869,6 @@ class Model(torch.nn.Module):
                     ]
                 )
             else:
-
                 tc_tokens = torch.cat(
                     [
                         tc_embed(
