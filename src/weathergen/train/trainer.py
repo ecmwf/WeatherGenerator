@@ -529,7 +529,7 @@ class Trainer(TrainerBase):
         ]
         targets_lens: list[list[list[int]]] = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
 
-        # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
+        # TODO: iterate over batches, and change loop order to batch, stream, fstep
         for fstep in range(len(targets_rt)):
             for i_strm, target in enumerate(targets_rt[fstep]):
                 pred = preds[fstep][i_strm]
@@ -541,12 +541,17 @@ class Trainer(TrainerBase):
                 pred = pred.reshape([pred.shape[0], *target.shape])
                 assert pred.shape[1] > 0
 
-                mask_nan = ~torch.isnan(target)
-                if pred[:, mask_nan].shape[1] == 0:
-                    continue
-
                 targets_lens[fstep][i_strm] += [target.shape[0]]
                 dn_data = self.dataset_val.denormalize_target_channels
+
+                # revert reordering of points for cells and potentially randomization
+                # this is only implemented for forecasting
+                idxs_inv = streams_data[fstep][i_strm].target_idxs_inv
+                if idxs_inv is not None:
+                    targets_coords_raw[fstep][i_strm] = targets_coords_raw[fstep][i_strm][idxs_inv]
+                    targets_times_raw[fstep][i_strm] = targets_times_raw[fstep][i_strm][idxs_inv]
+                    pred = pred[:, idxs_inv]
+                    target = target[idxs_inv]
 
                 f32 = torch.float32
                 preds_all[fstep][i_strm] += [

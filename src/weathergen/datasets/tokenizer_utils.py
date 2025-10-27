@@ -102,9 +102,10 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
       phis : phis in rad
       posr3 : (thetas,phis) as position in R3
     """
+
     thetas = ((90.0 - coords[:, 0]) / 180.0) * np.pi
     phis = ((coords[:, 1] + 180.0) / 360.0) * 2.0 * np.pi
-    # healpix cells for all points
+    # healpix cell index for all points
     hpy_idxs = ang2pix(2**hl, thetas, phis, nest=True)
     posr3 = s2tor3(thetas, phis)
 
@@ -115,7 +116,7 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
     # extract per cell data
     hpy_idxs_ord_temp = np.split(hpy_idxs_ord, splits + 1)
     hpy_idxs_ord_split = [np.array([], dtype=np.int64) for _ in range(12 * 4**hl)]
-    # TODO: split smarter (with a augmented splits list?) so that this loop is not needed
+    # split according to cells
     for b, x in zip(np.unique(np.unique(hpy_idxs[hpy_idxs_ord])), hpy_idxs_ord_temp, strict=True):
         hpy_idxs_ord_split[b] = x
 
@@ -249,7 +250,8 @@ def tokenize_window_spacetime(
     pad_tokens=True,
     local_coords=True,
 ):
-    """Tokenize respecting an intrinsic time step in the data, i.e. each time step is tokenized
+    """
+    Tokenize respecting an intrinsic time step in the data, i.e. each time step is tokenized
     separately
     """
 
@@ -275,6 +277,7 @@ def tokenize_window_spacetime(
             local_coords,
         )
 
+        # merge tokens originating from different time steps
         tokens_cells = [t + tc for t, tc in zip(tokens_cells, tokens_cells_cur, strict=True)]
 
     return tokens_cells

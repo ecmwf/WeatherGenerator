@@ -57,6 +57,8 @@ class StreamData:
         self.target_tokens_lens = [
             torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(forecast_steps + 1)
         ]
+        # index to recover original ordering of data
+        self.target_idxs_inv = None
 
         # source tokens per cell
         self.source_tokens_cells = []
@@ -153,6 +155,7 @@ class StreamData:
             [ torch.tensor( tokens per cell, token size, number of channels) ]
         ss_centroids : list(number of healpix cells )
             [ torch.tensor( for source , 5) ]
+        idxs_inv : index to recover original ordering of datapoints
 
         Returns
         -------
@@ -174,6 +177,7 @@ class StreamData:
         target_coords: torch.tensor,
         target_coords_raw: torch.tensor,
         times_raw: torch.tensor,
+        idxs_inv: torch.tensor,
     ) -> None:
         """
         Add data for target for one input.
@@ -193,6 +197,7 @@ class StreamData:
         target_times : list( number of healpix cells)
             [ torch.tensor( points per cell) ]
               absolute target times
+        idxs_inv : index to recover original ordering of datapoints
 
         Returns
         -------
@@ -213,6 +218,7 @@ class StreamData:
             [len(f) for f in targets] if len(targets) > 1 else self.target_tokens_lens[fstep],
             dtype=torch.int,
         )
+        self.target_idxs_inv = idxs_inv
 
     def target_empty(self) -> bool:
         """
