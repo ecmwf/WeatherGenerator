@@ -304,7 +304,7 @@ class Masker:
                 else:  # If length of target and mask doesn't match, create new mask
                     ratio = np.sum(pp) / len(pp)  # Ratio of masked tokens in source
                     indx = max(1, int(ratio * len(cc)))  # Get the same for target
-                    selected_tensors = cc[:indx]
+                    selected_tensors = cc[-indx:]
 
             elif self.current_strategy == "healpix":
                 selected_tensors = (
