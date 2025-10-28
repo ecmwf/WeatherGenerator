@@ -175,22 +175,7 @@ class Local2GlobalAssimilationEngine:
                 norm_eps=self.cf.mlp_norm_eps,
             )
         )
-        self.ae_adapter.append(
-            MultiCrossAttentionHeadVarlenSlicedQ(
-                self.cf.ae_global_dim_embed,
-                self.cf.ae_local_dim_embed,
-                num_slices_q=self.cf.ae_local_num_queries,
-                dim_head_proj=self.cf.ae_adapter_embed,
-                num_heads=self.cf.ae_adapter_num_heads,
-                with_residual=self.cf.ae_adapter_with_residual,
-                with_qk_lnorm=self.cf.ae_adapter_with_qk_lnorm,
-                dropout_rate=self.cf.ae_adapter_dropout_rate,
-                with_flash=self.cf.with_flash_attention,
-                norm_type=self.cf.norm_type,
-                norm_eps=self.cf.norm_eps,
-                attention_dtype=get_dtype(self.cf.attention_dtype),
-            )
-        )
+
         return self.ae_adapter
 
 
@@ -329,6 +314,9 @@ class ForecastingEngine:
                         norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
+            self.fe_blocks.append(
+                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+            )
 
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
