@@ -743,8 +743,12 @@ class Model(torch.nn.Module):
                 tokens_global_all += [tokens_global_c]
                 continue
 
-            for block in self.ae_local_blocks:
-                tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=False)
+            if self.cf.ae_local_blocks_grdient_checkpoint_mode:
+                for block in self.ae_local_blocks:
+                    tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=False)
+            else:
+                for block in self.ae_local_blocks:
+                    tokens_c = block(tokens_c, cell_lens_c)
 
             if self.cf.latent_noise_kl_weight > 0.0:
                 tokens_c, posteriors_c = self.interpolate_latents.interpolate_with_noise(
@@ -754,15 +758,24 @@ class Model(torch.nn.Module):
             else:
                 tokens_c, posteriors = tokens_c, 0.0
 
-            for block in self.ae_adapter:
-                tokens_global_c = checkpoint(
-                    block,
-                    tokens_global_c,
-                    tokens_c,
-                    q_cells_lens_c,
-                    cell_lens_c,
-                    use_reentrant=False,
-                )
+            if self.cf.ae_adapter_grdient_checkpoint_mode:
+                for block in self.ae_adapter:
+                    tokens_global_c = checkpoint(
+                        block,
+                        tokens_global_c,
+                        tokens_c,
+                        q_cells_lens_c,
+                        cell_lens_c,
+                        use_reentrant=False,
+                    )
+            else:
+                for block in self.ae_adapter:
+                    tokens_global_c = block(
+                        tokens_global_c,
+                        tokens_c,
+                        q_cells_lens_c,
+                        cell_lens_c,
+                    )
 
             tokens_global_all += [tokens_global_c]
 
@@ -787,8 +800,12 @@ class Model(torch.nn.Module):
         """
 
         # global assimilation engine and adapter
-        for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=False)
+        if self.cf.assimilate_global_gradient_checkpoint_mode:
+            for block in self.ae_global_blocks:
+                tokens = checkpoint(block, tokens, use_reentrant=False)
+        else:
+            for block in self.ae_global_blocks:
+                tokens = block(tokens)
 
         return tokens
 
@@ -855,18 +872,30 @@ class Model(torch.nn.Module):
             ## embed token coords, concatenating along batch dimension
             # (which is taking care of through the varlen attention)
             # arguably we should to the mixed precision policy when creating the model in FSDP
-            tc_tokens = torch.cat(
-                [
-                    checkpoint(
-                        tc_embed,
-                        streams_data[i_b][ii].target_coords[fstep],
-                        use_reentrant=False,
-                    )
-                    if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
-                    else streams_data[i_b][ii].target_coords[fstep]
-                    for i_b in range(len(streams_data))
-                ]
-            )
+            if self.cf.pred_gradient_checkpoint_mode:
+                tc_tokens = torch.cat(
+                    [
+                        checkpoint(
+                            tc_embed,
+                            streams_data[i_b][ii].target_coords[fstep],
+                            use_reentrant=False,
+                        )
+                        if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
+                        else streams_data[i_b][ii].target_coords[fstep]
+                        for i_b in range(len(streams_data))
+                    ]
+                )
+            else:
+                tc_tokens = torch.cat(
+                    [
+                        tc_embed(
+                            streams_data[i_b][ii].target_coords[fstep],
+                        )
+                        if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
+                        else streams_data[i_b][ii].target_coords[fstep]
+                        for i_b in range(len(streams_data))
+                    ]
+                )
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
@@ -906,6 +935,9 @@ class Model(torch.nn.Module):
             )
 
             # final prediction head to map back to physical space
-            preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
+            if self.cf.pred_gradient_checkpoint_mode:
+                preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
+            else:
+                preds_tokens += [self.pred_heads[ii](tc_tokens)]
 
         return preds_tokens

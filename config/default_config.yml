@@ -6,6 +6,7 @@ embed_centroids_local_coords: False
 embed_size_centroids: 0
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
+embed_gradient_checkpoint_mode: False
 
 target_cell_local_prediction: True
 
@@ -17,11 +18,13 @@ ae_local_with_qk_lnorm: True
 
 ae_local_num_queries: 1
 ae_local_queries_per_cell: False
+ae_local_blocks_grdient_checkpoint_mode: False
 ae_adapter_num_heads: 16
 ae_adapter_embed: 128
 ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
+ae_adapter_grdient_checkpoint_mode: False
 
 ae_global_dim_embed: 2048
 ae_global_num_blocks: 8
@@ -33,12 +36,14 @@ ae_global_with_qk_lnorm: True
 ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
+assimilate_global_gradient_checkpoint_mode: False 
 
 decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
 pred_adapter_kv: False
 pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
+pred_gradient_checkpoint_mode: False
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
