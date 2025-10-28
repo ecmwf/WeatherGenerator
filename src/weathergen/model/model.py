@@ -322,6 +322,7 @@ class Model(torch.nn.Module):
             )
 
         self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells).create()
+        self.layernorm = torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
 
         ###############
         # embed coordinates yielding one query token for each target token
@@ -809,6 +810,7 @@ class Model(torch.nn.Module):
         for block in self.fe_blocks:
             aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
             tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+            tokens = self.layernorm(tokens)
 
         return tokens
 
