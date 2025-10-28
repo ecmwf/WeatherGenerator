@@ -52,7 +52,7 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
 
 
 def calc_scores_per_stream(
-    reader: WeatherGenReader, stream: str, region: str, metrics: list[str]
+    reader: WeatherGenReader, stream: str, region: str, metrics: list[str], client: Client
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -76,8 +76,6 @@ def calc_scores_per_stream(
     _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
 
     available_data = reader.check_availability(stream, mode="evaluation")
-    client = Client(threads_per_worker=4, n_workers=1)
-    _logger.info(f"Dask client created: {client}")
 
     fsteps = available_data.fsteps
     samples = available_data.samples

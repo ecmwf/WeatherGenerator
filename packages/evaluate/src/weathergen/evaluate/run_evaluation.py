@@ -4,6 +4,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from dask.distributed import Client
 from omegaconf import OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
@@ -74,6 +75,18 @@ def evaluate_from_config(cfg):
     # to get a structure like: scores_dict[metric][region][stream][run_id] = plot
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
 
+    client: Client | None = None
+    if cfg.evaluation.get("dask", None) is not None:
+        num_workers = cfg.evaluation.get("dask.num_workers", None)
+        threads_per_worker = cfg.evaluation.get("dask.threads_per_worker", None)
+        client = Client(
+            processes=True, n_workers=num_workers, threads_per_worker=threads_per_worker
+        )
+        _logger.info(f"Dask client info: {client}")
+    else:
+        client = Client(processes=True, n_workers=1, threads_per_worker=1)
+        _logger.info("No dask configuration found in config file, running with a single worker.")
+
     for run_id, run in runs.items():
         _logger.info(f"RUN {run_id}: Getting data...")
 
@@ -126,7 +139,7 @@ def evaluate_from_config(cfg):
 
                     if metrics_to_compute:
                         all_metrics, points_per_sample = calc_scores_per_stream(
-                            reader, stream, region, metrics_to_compute
+                            reader, stream, region, metrics_to_compute, client=client
                         )
 
                         metric_list_to_json(
