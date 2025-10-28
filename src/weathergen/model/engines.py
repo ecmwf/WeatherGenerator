@@ -318,6 +318,7 @@ class ForecastingEngine:
                         )
                     )
 
+                # Add MLP block
                 self.fe_blocks.append(
                     MLP(
                         self.cf.ae_global_dim_embed,
@@ -330,6 +331,7 @@ class ForecastingEngine:
                     )
                 )
 
+                # Add a LayerNorm block as the last block of the FE
                 if i + 1 == self.cf.fe_num_blocks:
                     self.fe_blocks.append(
                         LayerNormBlock(
