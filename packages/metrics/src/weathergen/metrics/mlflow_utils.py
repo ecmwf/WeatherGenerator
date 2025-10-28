@@ -111,19 +111,16 @@ def log_scores(
 
     mlflow_metrics = []
     for metric, regions_dict in metrics_dict.items():
-        print(metric)
         for region, streams_dict in regions_dict.items():
-            print(region)
             for stream, data in streams_dict.items():
-                print(stream)
                 for ch in channels_set:
                     # skip if channel is missing or contains NaN
                     if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
                         continue
                     _logger.info(f"Collecting data for {metric} - {region} - {stream} - {ch}.")
-
+                    data_ch = data.sel(channel=ch)
                     non_zero_dims = [
-                        dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1
+                        dim for dim in data_ch.dims if dim != x_dim and data_ch[dim].shape[0] > 1
                     ]
                     if "ens" in non_zero_dims:
                         _logger.info("Uploading ensembles not yet imnplemented")
@@ -133,19 +130,23 @@ def log_scores(
                                 f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}"
                                 + ". Averaging..."
                             )
-                        averaged = data.mean(
-                            dim=[dim for dim in data.dims if dim != x_dim], skipna=True
+                        averaged = data_ch.mean(
+                            dim=[dim for dim in data_ch.dims if dim != x_dim], skipna=True
                         ).sortby(x_dim)
                         label = f"score.{region}.{metric}.{stream}.{ch}"
 
                         mlflow_metrics.append(
-                            Metric(key=label, value=y, timestamp=ts, step=int(x))
-                            for x, y in zip(averaged[x_dim].values, averaged.values, strict=False)
+                            [
+                                Metric(key=label, value=y, timestamp=ts, step=int(x))
+                                for x, y in zip(
+                                    averaged[x_dim].values, averaged.values, strict=False
+                                )
+                            ]
                         )
-    breakpoint()
+
     mlflow_client.log_batch(
         run_id=mlflow_run_id,
-        metrics=mlflow_metrics,
+        metrics=[met for dict in mlflow_metrics for met in dict],
     )
 
 
