@@ -1,6 +1,6 @@
 name: Task / Issue
 description: A task or issue that should take less than a week to complete.
-title: "[ISSUE] "
+title: ""
 
 body:
   - type: textarea
