@@ -15,6 +15,7 @@ import numpy as np
 import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
+
 # Modify a dataclass
 from dataclasses import replace
 from dask.distributed import Client
@@ -83,6 +84,9 @@ def calc_scores_per_stream(
     channels = available_data.channels
     ensemble = available_data.ensemble
 
+    _logger.info(
+        f"Retrieving data for stream {stream} region={region} fsteps={fsteps} samples={samples} channels={channels} ensemble={ensemble}..."
+    )
     output_data = reader.get_data(
         stream,
         region=region,
@@ -92,6 +96,7 @@ def calc_scores_per_stream(
         ensemble=ensemble,
         return_counts=True,
     )
+    _logger.info(f"Data for stream {stream} retrieved successfully.: {output_data}")
 
     da_preds = output_data.prediction
     da_tars = output_data.target
@@ -116,7 +121,9 @@ def calc_scores_per_stream(
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         _logger.debug(f"Verifying data for stream {stream}...")
 
+        _logger.info(f"Processing forecast step {fstep} for stream {stream}...")
         preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
+        _logger.info(f"Next forecast step data retrieved: {preds_next}, {tars_next}")
 
         if preds.ipoint.size > 0:
             climatology = aligned_clim_data[fstep] if aligned_clim_data else None
@@ -131,8 +138,10 @@ def calc_scores_per_stream(
             # Persist in memory with indexes
             # TODO: sample would be needed too??
             xindexes = ["ipoint"]
+
             def _persist(da: xr.DataArray) -> xr.DataArray:
                 return da.drop_indexes("ipoint").set_xindex(xindexes).persist()
+
             score_data = replace(score_data, prediction=_persist(score_data.prediction))
             score_data = replace(score_data, ground_truth=_persist(score_data.ground_truth))
             print("After persist:   ")
@@ -149,7 +158,9 @@ def calc_scores_per_stream(
             ]
 
             futures = client.compute(combined_metrics)
-            _logger.info(f"Submitted metric computations to Dask cluster, waiting for results...: {futures}")
+            _logger.info(
+                f"Submitted metric computations to Dask cluster, waiting for results...: {futures}"
+            )
             all_combined_metrics = client.gather(futures)
 
             print(combined_metrics)
