@@ -124,7 +124,8 @@ def calc_scores_per_stream(
                 # Persist in memory with indexes
                 # TODO: sample would be needed too??
                 xindexes = ["ipoint"]
-                return da.drop_indexes("ipoint").set_xindex(xindexes).persist()
+                return da
+                # return da.drop_indexes("ipoint").set_xindex(xindexes).persist()
 
             score_data = replace(score_data, prediction=_persist(score_data.prediction))
             score_data = replace(score_data, ground_truth=_persist(score_data.ground_truth))

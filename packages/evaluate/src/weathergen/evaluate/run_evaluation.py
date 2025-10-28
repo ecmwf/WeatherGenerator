@@ -47,8 +47,8 @@ def evaluate_from_args(argl: list[str]) -> None:
 
 
 def evaluate_from_config(cfg):
-    # configure logging
-    logging.basicConfig(level=logging.INFO)
+    # configure logging. Put the date in unix timestamp format for easy sorting
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     # load configuration
 
