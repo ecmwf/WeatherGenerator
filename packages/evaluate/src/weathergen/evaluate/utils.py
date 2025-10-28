@@ -136,7 +136,9 @@ def calc_scores_per_stream(
 
             # Keep only metrics corresponding to valid_scores
             valid_metric_names = [
-                metric for metric, score in zip(metrics, valid_scores, strict=False) if score is not None
+                metric
+                for metric, score in zip(metrics, valid_scores, strict=False)
+                if score is not None
             ]
 
             # Concatenate along a new "metric" dimension and assign metric names

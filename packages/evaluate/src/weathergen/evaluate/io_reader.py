@@ -640,15 +640,6 @@ class WeatherGenReader(Reader):
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
         return list(dummy.prediction.as_xarray().coords["ens"].values)
 
-    def get_ensemble(self, stream: str | None = None) -> list[str]:
-        """Get the list of ensemble member names for a given stream from the config."""
-        _logger.debug(f"Getting ensembles for stream {stream}...")
-
-        # TODO: improve this to get ensemble from io class
-        with ZarrIO(self.fname_zarr) as zio:
-            dummy = zio.get_data(0, stream, zio.forecast_steps[0])
-        return list(dummy.prediction.as_xarray().coords["ens"].values)
-
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """
         Get the value of a key for a specific stream from the a model config.
