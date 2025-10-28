@@ -2,10 +2,12 @@ evaluation:
   metrics  : ["rmse", "l1", "mse", "tact", "fact", "acc", "troct", "froct"]
 run_ids :
   ciga1p9c:
+    epoch: 0
+    rank: 0
      streams:
        ERA5:
          climatology_path: "/ec/weathergen/assets/climatology/aifs-ea-an-oper-0001-mars-o96-1980-2020-6h-v6_climatology.zarr"
          channels: ["2t", "msl", "10u", "z_500"]
          evaluation:
            forecast_step: "all" #[2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36]
-           sample: [1,2,3,4, 5, 6,7,8, 9, 10]  ("all" would be 244 but it was too slow)
+           sample: [1,2,3,4, 5, 6,7,8, 9, 10]  # ("all" would be 244 but it was too slow)
