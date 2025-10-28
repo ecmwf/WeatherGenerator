@@ -107,6 +107,8 @@ def calc_scores_per_stream(
 
     all_futures = []
 
+    persist_data = True
+
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         _logger.debug(f"Verifying data for stream {stream}...")
 
@@ -123,8 +125,9 @@ def calc_scores_per_stream(
             def _persist(da: xr.DataArray) -> xr.DataArray:
                 # Persist in memory with indexes
                 # TODO: sample would be needed too??
+                if not persist_data:
+                    return da
                 xindexes = ["ipoint"]
-                # return da
                 return da.drop_indexes("ipoint").set_xindex(xindexes).persist()
 
             score_data = replace(score_data, prediction=_persist(score_data.prediction))
@@ -143,7 +146,12 @@ def calc_scores_per_stream(
             ]
 
             futures = client.compute(combined_metrics)
-            task = FstepBlock(fstep=fstep, futures=futures)
+            task = FstepBlock(
+                persisted_preds=score_data.prediction,
+                persisted_gt=score_data.ground_truth,
+                fstep=fstep,
+                futures=futures,
+            )
             all_futures.append(task)
             _logger.info(
                 f"Submitted metric computations to Dask cluster, waiting for results...: {task}"
@@ -205,6 +213,8 @@ def calc_scores_per_stream(
 
 @dataclass
 class FstepBlock:
+    persisted_preds: xr.DataArray | None
+    persisted_gt: xr.DataArray | None
     fstep: str
     futures: list[xr.DataArray]
 
@@ -213,6 +223,14 @@ def _process_fstep_block(
     fstep_block: FstepBlock, mstream: xr.DataArray, client: Client, stream: str, metrics: list[str]
 ) -> None:
     all_combined_metrics = client.gather(fstep_block.futures)
+
+    # Release persisted data to free up memory on the dask cluster
+    if fstep_block.persisted_preds is not None:
+        fstep_block.persisted_preds.release()
+        del fstep_block.persisted_preds
+    if fstep_block.persisted_gt is not None:
+        fstep_block.persisted_gt.release()
+        del fstep_block.persisted_gt
 
     _logger.debug(f"Running computation of metrics for stream {stream}...")
     combined_metrics = xr.concat(all_combined_metrics, dim="metric")
