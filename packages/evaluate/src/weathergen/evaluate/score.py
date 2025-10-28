@@ -16,7 +16,6 @@ import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
 
-
 from weathergen.evaluate.score_utils import to_list
 
 # from common.io import MockIO

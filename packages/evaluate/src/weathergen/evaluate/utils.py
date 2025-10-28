@@ -9,16 +9,16 @@
 
 import json
 import logging
+
+# Modify a dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
 import omegaconf as oc
 import xarray as xr
-from tqdm import tqdm
-
-# Modify a dataclass
-from dataclasses import replace
 from dask.distributed import Client
+from tqdm import tqdm
 
 from weathergen.evaluate.clim_utils import get_climatology
 from weathergen.evaluate.io_reader import Reader, WeatherGenReader
@@ -120,21 +120,16 @@ def calc_scores_per_stream(
             # Build up computation graphs for all metrics
             _logger.info(f"Build computation graphs for metrics for stream {stream}...")
 
-            print("TESTING METRICS COMPUTATION...")
-
-            print("Before persist:")
-            print(score_data.prediction.data.dask)
-            # Persist in memory with indexes
-            # TODO: sample would be needed too??
-            xindexes = ["ipoint"]
-
             def _persist(da: xr.DataArray) -> xr.DataArray:
+                # Persist in memory with indexes
+                # TODO: sample would be needed too??
+                xindexes = ["ipoint"]
                 return da.drop_indexes("ipoint").set_xindex(xindexes).persist()
 
             score_data = replace(score_data, prediction=_persist(score_data.prediction))
             score_data = replace(score_data, ground_truth=_persist(score_data.ground_truth))
-            print("After persist:   ")
-            print(score_data.prediction.data.dask)
+            _logger.debug("After persist:")
+            _logger.debug(score_data.prediction.data.dask)
 
             combined_metrics = [
                 get_score(
@@ -152,11 +147,9 @@ def calc_scores_per_stream(
             _logger.info(
                 f"Submitted metric computations to Dask cluster, waiting for results...: {task}"
             )
-            # all_combined_metrics = client.gather(futures)
 
-            print(combined_metrics)
+            _logger.debug(f"Running computation of metrics for stream {stream}...")
             # all_combined_metrics = client.gather(futures)
-
 
             # _logger.debug(f"Running computation of metrics for stream {stream}...")
             # combined_metrics = xr.concat(all_combined_metrics, dim="metric")
@@ -187,6 +180,7 @@ def calc_scores_per_stream(
 
         # metric_stream.loc[criteria] = combined_metrics
 
+    _logger.info(f"Created {len(all_futures)} futures for stream {stream}. ")
     metric_stream = xr.DataArray(
         np.full(
             (len(samples), len(fsteps), len(channels), len(metrics), len(ensemble)),
@@ -201,26 +195,23 @@ def calc_scores_per_stream(
         },
     )
 
-
     for fstep_block in all_futures:
         _process_fstep_block(fstep_block, metric_stream, client, stream, metrics)
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
     return metric_stream, points_per_sample
 
-from dataclasses import dataclass
 
 @dataclass
 class FstepBlock:
     fstep: str
     futures: list[xr.DataArray]
 
-def _process_fstep_block(fstep_block: FstepBlock,
-                         mstream: xr.DataArray,
-                           client: Client, stream: str,
-                             metrics: list[str]) -> None:
-    all_combined_metrics = client.gather(fstep_block.futures)
 
+def _process_fstep_block(
+    fstep_block: FstepBlock, mstream: xr.DataArray, client: Client, stream: str, metrics: list[str]
+) -> None:
+    all_combined_metrics = client.gather(fstep_block.futures)
 
     _logger.debug(f"Running computation of metrics for stream {stream}...")
     combined_metrics = xr.concat(all_combined_metrics, dim="metric")
@@ -233,7 +224,6 @@ def _process_fstep_block(fstep_block: FstepBlock,
     assert int(combined_metrics.forecast_step) == int(fstep_block.fstep), (
         "Different steps in data and metrics. Please check."
     )
-
 
     criteria = {
         "forecast_step": int(combined_metrics.forecast_step),
