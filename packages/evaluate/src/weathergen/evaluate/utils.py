@@ -226,10 +226,10 @@ def _process_fstep_block(
 
     # Release persisted data to free up memory on the dask cluster
     if fstep_block.persisted_preds is not None:
-        fstep_block.persisted_preds.release()
+        client.cancel(fstep_block.persisted_preds)
         del fstep_block.persisted_preds
     if fstep_block.persisted_gt is not None:
-        fstep_block.persisted_gt.release()
+        client.cancel(fstep_block.persisted_gt)
         del fstep_block.persisted_gt
 
     _logger.debug(f"Running computation of metrics for stream {stream}...")
