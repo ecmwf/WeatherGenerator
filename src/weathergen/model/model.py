@@ -511,7 +511,7 @@ class Model(torch.nn.Module):
 
     #########################################
     def rename_old_state_dict(self, params: dict) -> dict:
-        """Checks if model from checkpoint is from the old model version and if so renames 
+        """Checks if model from checkpoint is from the old model version and if so renames
         the parameters accordingly to the new model version.
 
         Args:
@@ -520,11 +520,11 @@ class Model(torch.nn.Module):
             new_params : Dictionary with (renamed) model parameters
         """
         params_cleanup = {
-            "embeds": "embed_engine.embeds", # EmbeddingEngine
-            "ae_local_blocks": "ae_local_engine.ae_local_blocks", # LocalAssimilationEngine
-            "ae_adapter": "ae_local_global_engine.ae_adapter", # Local2GlobalAssimilationEngine
-            "ae_global_blocks": "ae_global_engine.ae_global_blocks", # GlobalAssimilationEngine
-            "fe_blocks":"forecast_engine.fe_blocks" # ForecastingEngine
+            "embeds": "embed_engine.embeds",  # EmbeddingEngine
+            "ae_local_blocks": "ae_local_engine.ae_local_blocks",  # LocalAssimilationEngine
+            "ae_adapter": "ae_local_global_engine.ae_adapter",  # Local2GlobalAssimilationEngine
+            "ae_global_blocks": "ae_global_engine.ae_global_blocks",  # GlobalAssimilationEngine
+            "fe_blocks": "forecast_engine.fe_blocks",  # ForecastingEngine
         }
 
         new_params = {}
@@ -536,18 +536,18 @@ class Model(torch.nn.Module):
             # Strip "module." (prefix for DataParallel or DistributedDataParallel)
             if new_k.startswith("module."):
                 prefix = "module."
-                new_k = new_k[len(prefix):]
-                
+                new_k = new_k[len(prefix) :]
+
             first_w, rest = new_k.split(".", 1) if "." in new_k else (new_k, "")
             # Only check first word (root level modules) to avoid false matches.
             if first_w in params_cleanup:
-                new_k = params_cleanup[first_w] + "." + rest  
+                new_k = params_cleanup[first_w] + "." + rest
 
             new_k = prefix + new_k
             new_params[new_k] = v
 
         return new_params
-    
+
     #########################################
     def load(self, run_id: str, epoch: str = -1) -> None:
         """Loads model state from checkpoint and checks for missing and unused keys.
@@ -667,7 +667,7 @@ class Model(torch.nn.Module):
 
         device = next(self.parameters()).device
         tokens_all = self.embed_engine(streams_data, model_params.pe_embed, self.dtype, device)
-        
+
         return tokens_all
 
     #########################################
@@ -747,7 +747,7 @@ class Model(torch.nn.Module):
             if l0 == l1 or tokens_c.shape[0] == 0:
                 tokens_global_all += [tokens_global_c]
                 continue
-            
+
             # local assimilation model
             tokens_c = self.ae_local_engine(tokens_c, cell_lens_c, use_reentrant=False)
 
@@ -759,7 +759,9 @@ class Model(torch.nn.Module):
             else:
                 tokens_c, posteriors = tokens_c, 0.0
 
-            tokens_global_c = self.ae_local_global_engine(tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant=False)
+            tokens_global_c = self.ae_local_global_engine(
+                tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant=False
+            )
 
             tokens_global_all += [tokens_global_c]
 

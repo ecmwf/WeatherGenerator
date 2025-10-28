@@ -115,7 +115,6 @@ class StreamEmbedTransformer(torch.nn.Module):
             else:
                 raise ValueError(f"Unknown unembed mode: {unembed_mode}")
 
-
         elif mode == "columns":
             assert embed_size_centroids == 0
             self.embed = torch.nn.Linear(self.dim_in, self.dim_embed)
@@ -200,6 +199,7 @@ class StreamEmbedTransformer(torch.nn.Module):
             return self.forward_columns(x_in, centroids)
         else:
             raise ValueError(f"Unknown mode {self.mode}")
+
 
 class StreamEmbedLinear(torch.nn.Module):
     def __init__(self, dim_in, dim_out, stream_name="stream_embed"):

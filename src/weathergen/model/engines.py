@@ -79,7 +79,7 @@ class EmbeddingEngine(torch.nn.Module):
                 )
             else:
                 raise ValueError("Unsupported embedding network type")
-        
+
     def forward(self, streams_data, pe_embed, dtype, device):
         source_tokens_lens = torch.stack(
             [
@@ -97,7 +97,7 @@ class EmbeddingEngine(torch.nn.Module):
         tokens_all = torch.empty(
             (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=dtype, device=device
         )
-    
+
         for _, sb in enumerate(streams_data):
             for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
                 if not s.source_empty():
@@ -164,7 +164,7 @@ class LocalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, cell_lens_c, use_reentrant):
         for block in self.ae_local_blocks:
-                tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=use_reentrant)
+            tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=use_reentrant)
         return tokens_c
 
 
@@ -226,14 +226,14 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant):
         for block in self.ae_adapter:
-                tokens_global_c = checkpoint(
-                    block,
-                    tokens_global_c,
-                    tokens_c,
-                    q_cells_lens_c,
-                    cell_lens_c,
-                    use_reentrant=use_reentrant,
-                )
+            tokens_global_c = checkpoint(
+                block,
+                tokens_global_c,
+                tokens_c,
+                q_cells_lens_c,
+                cell_lens_c,
+                use_reentrant=use_reentrant,
+            )
         return tokens_global_c
 
 
