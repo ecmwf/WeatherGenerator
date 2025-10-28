@@ -246,7 +246,7 @@ class Scores:
             f = self.prob_metrics_dict[score_name]
         else:
             raise ValueError(
-                f"Unknown score chosen. Supported scores: {
+                f"Unknown score chosen: {score_name}. Supported scores: {
                     ', '.join(self.det_metrics_dict.keys())
                     + ', '
                     + ', '.join(self.prob_metrics_dict.keys())
