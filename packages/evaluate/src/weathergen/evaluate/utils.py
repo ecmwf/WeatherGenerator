@@ -52,7 +52,12 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
 
 
 def calc_scores_per_stream(
-    reader: WeatherGenReader, stream: str, region: str, metrics: list[str], client: Client
+    reader: WeatherGenReader,
+    stream: str,
+    region: str,
+    metrics: list[str],
+    client: Client,
+    persist_data=False,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -67,6 +72,9 @@ def calc_scores_per_stream(
         Region name to calculate scores for.
     metrics :
         List of metric names to calculate.
+    persist_data :
+        Whether to persist data in memory for faster computation.
+        Use it if there is enough memory and if there are many metrics to compute.
 
     Returns
     -------
@@ -104,8 +112,6 @@ def calc_scores_per_stream(
     aligned_clim_data = get_climatology(reader, da_tars, stream)
 
     all_futures = []
-
-    persist_data = True
 
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         _logger.debug(f"Verifying data for stream {stream}...")
