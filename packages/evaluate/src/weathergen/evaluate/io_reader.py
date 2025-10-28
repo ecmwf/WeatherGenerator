@@ -70,6 +70,9 @@ class DataAvailability:
 
 
 class Reader:
+
+    data: pd.DataFrame | None # Data attributes (if specified)
+
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict[str, str] | None = None):
         """
         Generic data reader class.
@@ -87,6 +90,7 @@ class Reader:
         self.run_id = run_id
         self.private_paths = private_paths
         self.streams = eval_cfg.streams.keys()
+        self.data = None
 
         # If results_base_dir and model_base_dir are not provided, default paths are used
         self.model_base_dir = self.eval_cfg.get("model_base_dir", None)
@@ -297,6 +301,34 @@ class Reader:
             ensemble=None if (ensemble == "all" or ensemble is None) else list(ensemble),
         )
 
+##### Helper function for CSVReader ####
+def _rename_channels(data) -> pd.DataFrame:
+        """
+        The scores downloaded from Quaver have a different convention. Need renaming. 
+        Rename channel names to include underscore between letters and digits.
+        E.g., 'z500' -> 'z_500', 't850' -> 't_850', '2t' -> '2t', '10ff' -> '10ff'
+
+        Parameters
+        ----------
+        name : str
+            Original channel name.
+
+        Returns
+        -------
+        pd.DataFrame
+            Dataset with renamed channel names.
+        """
+        for name in list(data.index):
+            # If it starts with digits (surface vars like 2t, 10ff) → leave unchanged
+            if re.match(r"^\d", name):
+                continue
+
+            # Otherwise, insert underscore between letters and digits
+            data = data.rename(
+                index={name: re.sub(r"([a-zA-Z])(\d+)", r"\1_\2", name)}
+            )
+
+        return data
 
 class CsvReader(Reader):
     """
@@ -321,9 +353,9 @@ class CsvReader(Reader):
         self.csv_path = eval_cfg.get("csv_path")
         assert self.csv_path is not None, "CSV path must be provided in the config."
 
-        self.data = pd.read_csv(self.csv_path, index_col=0)
+        pd_data = pd.read_csv(self.csv_path, index_col=0)
 
-        self.data = self.rename_channels()
+        self.data = _rename_channels(pd_data)
         self.metrics_base_dir = Path(self.csv_path).parent
         # for backward compatibility allow metric_dir to be specified in the run config
         self.metrics_dir = Path(
@@ -342,44 +374,23 @@ class CsvReader(Reader):
         self.metric = eval_cfg.get("metric")
         self.region = eval_cfg.get("region")
 
-    def rename_channels(self) -> str:
-        """
-        Rename channel names to include underscore between letters and digits.
-        E.g., 'z500' -> 'z_500', 't850' -> 't_850', '2t' -> '2t', '10ff' -> '10ff'
-
-        Parameters
-        ----------
-        name : str
-            Original channel name.
-
-        Returns
-        -------
-        str
-            Renamed channel name.
-        """
-        for name in list(self.data.index):
-            # If it starts with digits (surface vars like 2t, 10ff) → leave unchanged
-            if re.match(r"^\d", name):
-                continue
-
-            # Otherwise, insert underscore between letters and digits
-            self.data = self.data.rename(
-                index={name: re.sub(r"([a-zA-Z])(\d+)", r"\1_\2", name)}
-            )
-
-        return self.data
-
     def get_samples(self) -> set[int]:
+        """ get set of samples for the retrieved scores (initialisation times) """
         return set(self.samples)  # Placeholder implementation
 
     def get_forecast_steps(self) -> set[int]:
+        """ get set of forecast steps """
         return set(self.forecast_steps)  # Placeholder implementation
 
     # TODO: get this from config
     def get_channels(self, stream: str | None = None) -> list[str]:
+        """ get set of channels """
         assert stream == self.stream, "streams do not match in CSVReader."
         return list(self.channels)  # Placeholder implementation
 
+    def get_values(self) -> xr.DataArray:
+        """ get score values in the right format """
+        return self.data.values[np.newaxis, :, :, np.newaxis].T
 
 class WeatherGenReader(Reader):
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):

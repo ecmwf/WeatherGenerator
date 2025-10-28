@@ -378,26 +378,27 @@ def retrieve_metric_from_file(reader: Reader, stream: str, region: str, metric: 
     xr.DataArray
         The metric DataArray.
     """
-    if hasattr(reader, "data") and reader.data is not None:
+    if reader.data is not None:
         available_data = reader.check_availability(stream, mode="evaluation")
 
-        # empty DataArray with NaNs
-        data = np.full(
-            (
-                len(available_data.samples),
-                len(available_data.fsteps),
-                len(available_data.channels),
-                1,
-            ),
-            np.nan,
-        )
         # fill it only for matching metric
         if (
             metric == reader.metric
             and region == reader.region
             and stream == reader.stream
         ):
-            data = reader.data.values[np.newaxis, :, :, np.newaxis].T
+            data = reader.get_values()
+        else:
+
+            data = np.full(
+                (
+                    len(available_data.samples),
+                    len(available_data.fsteps),
+                    len(available_data.channels),
+                    1,
+                ),
+                np.nan,
+            )
 
         da = xr.DataArray(
             data.astype(np.float32),
