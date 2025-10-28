@@ -23,10 +23,8 @@ _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
 
 def evaluate() -> None:
-    from dask.distributed import performance_report
-    with performance_report(filename="dask-report.html"):
-        # By default, arguments from the command line are read.
-        evaluate_from_args(sys.argv[1:])
+    # By default, arguments from the command line are read.
+    evaluate_from_args(sys.argv[1:])
 
 
 def evaluate_from_args(argl: list[str]) -> None:
@@ -142,9 +140,11 @@ def evaluate_from_config(cfg):
                             metrics_to_compute.append(metric)
 
                     if metrics_to_compute:
-                        all_metrics, points_per_sample = calc_scores_per_stream(
-                            reader, stream, region, metrics_to_compute, client=client
-                        )
+                            from dask.distributed import performance_report
+                            with performance_report(filename="dask-report.html"):
+                                all_metrics, points_per_sample = calc_scores_per_stream(
+                                    reader, stream, region, metrics_to_compute, client=client
+                                )
 
                         metric_list_to_json(
                             reader,
