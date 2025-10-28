@@ -147,8 +147,8 @@ def calc_scores_per_stream(
 
             futures = client.compute(combined_metrics)
             task = FstepBlock(
-                persisted_preds=score_data.prediction,
-                persisted_gt=score_data.ground_truth,
+                persisted_preds=score_data.prediction if persist_data else None,
+                persisted_gt=score_data.ground_truth if persist_data else None,
                 fstep=fstep,
                 futures=futures,
             )
