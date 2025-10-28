@@ -133,17 +133,11 @@ def evaluate_from_config(cfg):
                             metrics_to_compute.append(metric)
 
                     if metrics_to_compute:
-                        agg_dim = "sample" if plot_score_maps else "ipoint"
-                        group_by_coords = None if reader.regular_spacing(stream) else "sample"
                         _logger.info(f"Aggregating scores over dimension 'agg_dim': {agg_dim} and group_by_coords: {group_by_coords}")
                         all_metrics, points_per_sample = calc_scores_per_stream(
-                            reader, stream, region, metrics_to_compute, agg_dims=agg_dim, group_by_coord = group_by_coords
+                            reader, stream, region, metrics_to_compute
                         )
                     
-                        if plot_score_maps:
-                            plot_score_maps_per_stream(reader, stream, all_metrics, global_plotting_opts)
-                            all_metrics = all_metrics.mean(dim="ipoint")
-
                         metric_list_to_json(
                             reader,
                             [all_metrics],

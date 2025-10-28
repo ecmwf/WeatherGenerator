@@ -124,8 +124,8 @@ def calc_scores_per_stream(
                 get_score(
                     score_data,
                     metric,
-                    agg_dims=agg_dims,
-                    group_by_coord=group_by_coord,
+                    agg_dims="ipoint",
+                    group_by_coord="sample",
                 )
                 for metric in metrics
             ]
@@ -133,7 +133,7 @@ def calc_scores_per_stream(
             combined_metrics = xr.concat(combined_metrics, dim="metric")
             
             if reader.regular_spacing(stream):
-
+                
                 combined_metrics = combined_metrics.assign_coords(
                         lat=preds.lat.isel(sample=0),
                         lon=preds.lon.isel(sample=0),
@@ -148,6 +148,16 @@ def calc_scores_per_stream(
             _logger.debug(f"Running computation of metrics for stream {stream}...")
             combined_metrics = combined_metrics.compute()
             
+            if plot_score_maps:
+                _logger.debug(f"Plotting scores on a map {stream}...")
+                for metric in metrics
+                    plot_metrics = [get_score(
+                                score_data,
+                                metric,
+                                agg_dims="sample",
+                            ) for metric in metrics]
+                    plot_score_maps_per_stream(reader, stream, plot_metrics.compute(), global_plotting_opts, "tag = forecast step")
+
             for coord in combined_metrics.coords:
                 combined_metrics = scalar_coord_to_dim(combined_metrics, coord)
             
