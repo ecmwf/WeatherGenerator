@@ -141,18 +141,19 @@ def evaluate_from_config(cfg):
 
                     if metrics_to_compute:
                         from dask.distributed import performance_report
+
                         with performance_report(filename="dask-report.html"):
                             all_metrics, points_per_sample = calc_scores_per_stream(
-                                    reader, stream, region, metrics_to_compute, client=client
-                                )
+                                reader, stream, region, metrics_to_compute, client=client
+                            )
 
-                        metric_list_to_json(
-                            reader,
-                            [all_metrics],
-                            [points_per_sample],
-                            [stream],
-                            region,
-                        )
+                            metric_list_to_json(
+                                reader,
+                                [all_metrics],
+                                [points_per_sample],
+                                [stream],
+                                region,
+                            )
 
                     for metric in metrics_to_compute:
                         scores_dict[metric][region][stream][run_id] = all_metrics.sel(
