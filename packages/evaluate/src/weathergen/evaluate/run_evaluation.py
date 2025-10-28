@@ -77,9 +77,10 @@ def evaluate_from_config(cfg):
 
     _logger.info("Setting up Dask client for evaluation...")
     client: Client | None = None
-    if cfg.get("dask", None) is not None:
-        num_workers = cfg.get("dask.num_workers", None)
-        threads_per_worker = cfg.get("dask.threads_per_worker", None)
+    dask_cfg = cfg.get("dask", None)
+    if dask_cfg is not None:
+        num_workers = dask_cfg.get("num_workers", None)
+        threads_per_worker = dask_cfg.get("threads_per_worker", None)
         client = Client(
             processes=True, n_workers=num_workers, threads_per_worker=threads_per_worker
         )
