@@ -140,9 +140,9 @@ def evaluate_from_config(cfg):
                             metrics_to_compute.append(metric)
 
                     if metrics_to_compute:
-                            from dask.distributed import performance_report
-                            with performance_report(filename="dask-report.html"):
-                                all_metrics, points_per_sample = calc_scores_per_stream(
+                        from dask.distributed import performance_report
+                        with performance_report(filename="dask-report.html"):
+                            all_metrics, points_per_sample = calc_scores_per_stream(
                                     reader, stream, region, metrics_to_compute, client=client
                                 )
 
