@@ -478,10 +478,6 @@ def common_ranges(
             if not isinstance(maps_config[var].get("vmax"), (int | float)):
                 list_max = calc_bounds(data_tars, data_preds, var, "max")
                 list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
-<<<<<<< HEAD
-=======
-
->>>>>>> 0e876d2 (lint)
                 maps_config[var].update({"vmax": float(max(list_max))})
 
             if not isinstance(maps_config[var].get("vmin"), (int | float)):
@@ -492,10 +488,6 @@ def common_ranges(
         else:
             list_max = calc_bounds(data_tars, data_preds, var, "max")
             list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
-<<<<<<< HEAD
-=======
-
->>>>>>> 0e876d2 (lint)
             list_min = calc_bounds(data_tars, data_preds, var, "min")
             list_min = np.concatenate([arr.flatten() for arr in list_min]).tolist()
 
