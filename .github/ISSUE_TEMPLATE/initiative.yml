@@ -1,6 +1,6 @@
 name: Initiative
 description: A piece of work that will likely take more than a week to complete.
-title: "[ISSUE] "
+title: ""
 labels: ["initiative"]
 
 body:
