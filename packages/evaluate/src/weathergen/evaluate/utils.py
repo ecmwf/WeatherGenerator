@@ -147,15 +147,10 @@ def calc_scores_per_stream(
             ]
 
             futures = client.compute(combined_metrics)
-            obj = {}
-            obj.futures = futures
-            obj.fstep = fstep
-            all_futures.append(obj)
+            task = FstepBlock(fstep=fstep, futures=futures)
+            all_futures.append(task)
             _logger.info(
-                f"Submitted metric computations to Dask cluster, waiting for results...: {futures}"
-            )
-            _logger.info(
-                f"Submitted metric computations to Dask cluster, waiting for results...: {futures}"
+                f"Submitted metric computations to Dask cluster, waiting for results...: {task}"
             )
             # all_combined_metrics = client.gather(futures)
 
@@ -208,15 +203,21 @@ def calc_scores_per_stream(
 
 
     for fstep_block in all_futures:
-        process_fstep_block(fstep_block, metric_stream, client, stream, metrics)
+        _process_fstep_block(fstep_block, metric_stream, client, stream, metrics)
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
     return metric_stream, points_per_sample
 
+from dataclasses import dataclass
 
-def process_fstep_block(fstep_block,
+@dataclass
+class FstepBlock:
+    fstep: str
+    futures: list[xr.DataArray]
+
+def _process_fstep_block(fstep_block: FstepBlock,
                          mstream: xr.DataArray,
-                           client:Client, stream:str,
+                           client: Client, stream: str,
                              metrics: list[str]) -> None:
     all_combined_metrics = client.gather(fstep_block.futures)
 
