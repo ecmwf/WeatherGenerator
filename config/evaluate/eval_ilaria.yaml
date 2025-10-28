@@ -5,9 +5,9 @@ image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
 dpi_val : 300
 summary_plots : false
 print_summary: false #print out score values on screen. it can be verbose
-dask:
-  num_workers: 4  #number of dask workers to use for evaluation. if not specified, runs with a single worker.
-  threads_per_worker: 10
+# dask:
+#   num_workers: 4  #number of dask workers to use for evaluation. if not specified, runs with a single worker.
+#   threads_per_worker: 10
 evaluation:
   metrics  : ["rmse", "l1", "mse", "acc", "troct", "froct"]
   summary_plots: false
