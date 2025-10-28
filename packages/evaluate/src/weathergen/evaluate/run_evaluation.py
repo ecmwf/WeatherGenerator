@@ -164,4 +164,6 @@ def evaluate_from_config(cfg):
 
 
 if __name__ == "__main__":
-    evaluate()
+    from dask.distributed import performance_report
+    with performance_report(filename="dask-report.html"):
+        evaluate()

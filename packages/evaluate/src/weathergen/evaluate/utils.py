@@ -19,6 +19,7 @@ import omegaconf as oc
 import xarray as xr
 from dask.distributed import Client
 from tqdm import tqdm
+from dask.distributed import performance_report
 
 from weathergen.evaluate.clim_utils import get_climatology
 from weathergen.evaluate.io_reader import Reader, WeatherGenReader
@@ -118,7 +119,7 @@ def calc_scores_per_stream(
 
         _logger.info(f"Processing forecast step {fstep} for stream {stream}...")
         preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
-        _logger.info(f"Next forecast step data retrieved: {preds_next}, {tars_next}")
+        _logger.info(f"Next forecast step data retrieved")
 
         if preds.ipoint.size > 0:
             climatology = aligned_clim_data[fstep] if aligned_clim_data else None
