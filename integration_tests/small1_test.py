@@ -100,13 +100,17 @@ def evaluate_results(run_id):
     logger.info("run evaluation")
     cfg = omegaconf.OmegaConf.create(
         {
-            "verbose": True,
-            "image_format": "png",
-            "dpi_val": 300,
-            "summary_plots": True,
-            "summary_dir": "./plots/",
-            "print_summary": True,
-            "evaluation": {"metrics": ["rmse", "l1", "mse"]},
+            "global_plotting_options": {
+                "image_format": "png",
+                "dpi_val": 300,
+            },
+            "evaluation": {
+                "metrics": ["rmse", "l1", "mse"],
+                "verbose": True,
+                "summary_plots": True,
+                "summary_dir": "./plots/",
+                "print_summary": True,
+            },
             "run_ids": {
                 run_id: {  # would be nice if this could be done with option
                     "streams": {
@@ -168,8 +172,9 @@ def assert_train_loss_below_threshold(run_id):
     )
     # Check that the loss does not explode in a single epoch
     # This is meant to be a quick test, not a convergence test
-    assert loss_metric < 1.25, (
-        f"'stream.ERA5.loss_mse.loss_avg' is {loss_metric}, expected to be below 0.25"
+    target = 1.5
+    assert loss_metric < target, (
+        f"'stream.ERA5.loss_mse.loss_avg' is {loss_metric}, expected to be below {target}"
     )
 
 

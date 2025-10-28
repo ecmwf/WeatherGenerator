@@ -1,0 +1,56 @@
+name: Initiative
+description: A piece of work that will likely take more than a week to complete.
+title: ""
+labels: ["initiative"]
+
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the task. Describe the task. It can be a feature, a set of experiments, documentation, etc.
+      description: Be specific and provide context.
+      placeholder: "Describe the task here..."
+
+  - type: markdown
+    attributes:
+      value: |
+        Tips for writing good initiatives:
+        https://gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private/-/wikis/Design-docs/Writing-a-design-doc
+
+  - type: input
+    id: hedgedoc_url
+    attributes:
+      label: Hedgedoc URL, if you are keeping notes, plots, logs in hedgedoc.
+      description: Hedgedoc URL, if you are keeping notes, plots, logs in hedgedoc.
+      placeholder: "https://gitlab.jsc.fz-juelich.de/hedgedoc/..."
+    validations:
+      required: false
+
+
+  - type: input
+    id: design_url
+    attributes:
+      label: URL to the design document
+      description: Paste a link to logs, screenshots, or related resources
+      placeholder: "link to doc on sharepoint"
+    validations:
+      required: false
+
+
+  - type: checkboxes
+    id: area
+    attributes:
+      label: Area
+      description: The general area this task relates to.
+      options:
+        - label: datasets, data readers, data preparation and transfer
+        - label: model
+        - label: science
+        - label: infrastructure and engineering
+        - label: evaluation, export and visualization
+        - label: documentation
+    validations:
+      required: true
+
+
+
