@@ -57,7 +57,7 @@ def calc_scores_per_stream(
     region: str,
     metrics: list[str],
     client: Client,
-    persist_data=False,
+    persist_data: bool = False,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -102,7 +102,7 @@ def calc_scores_per_stream(
         ensemble=ensemble,
         return_counts=True,
     )
-    _logger.info(f"Data for stream {stream} retrieved successfully.: {output_data}")
+    _logger.info(f"Data for stream {stream} retrieved successfully.")
 
     da_preds = output_data.prediction
     da_tars = output_data.target

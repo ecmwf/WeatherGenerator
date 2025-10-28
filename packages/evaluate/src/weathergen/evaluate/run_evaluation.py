@@ -75,10 +75,11 @@ def evaluate_from_config(cfg):
     # to get a structure like: scores_dict[metric][region][stream][run_id] = plot
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
 
+    _logger.info("Setting up Dask client for evaluation...")
     client: Client | None = None
-    if cfg.evaluation.get("dask", None) is not None:
-        num_workers = cfg.evaluation.get("dask.num_workers", None)
-        threads_per_worker = cfg.evaluation.get("dask.threads_per_worker", None)
+    if cfg.get("dask", None) is not None:
+        num_workers = cfg.get("dask.num_workers", None)
+        threads_per_worker = cfg.get("dask.threads_per_worker", None)
         client = Client(
             processes=True, n_workers=num_workers, threads_per_worker=threads_per_worker
         )
