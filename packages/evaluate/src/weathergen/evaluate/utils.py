@@ -124,7 +124,6 @@ def calc_scores_per_stream(
 
             def _persist(da: xr.DataArray) -> xr.DataArray:
                 # Persist in memory with indexes
-                # TODO: sample would be needed too??
                 if not persist_data:
                     return da
                 xindexes = ["ipoint"]
@@ -147,8 +146,6 @@ def calc_scores_per_stream(
 
             futures = client.compute(combined_metrics)
             task = FstepBlock(
-                persisted_preds=score_data.prediction if persist_data else None,
-                persisted_gt=score_data.ground_truth if persist_data else None,
                 fstep=fstep,
                 futures=futures,
             )
@@ -157,37 +154,12 @@ def calc_scores_per_stream(
                 f"Submitted metric computations to Dask cluster, waiting for results...: {task}"
             )
 
-            _logger.debug(f"Running computation of metrics for stream {stream}...")
-            # all_combined_metrics = client.gather(futures)
-
-            # _logger.debug(f"Running computation of metrics for stream {stream}...")
-            # combined_metrics = xr.concat(all_combined_metrics, dim="metric")
-            # combined_metrics["metric"] = metrics
-            # combined_metrics = combined_metrics.compute()
-            # combined_metrics = scalar_coord_to_dim(combined_metrics, "channel")
-            # combined_metrics = scalar_coord_to_dim(combined_metrics, "sample")
-            # combined_metrics = scalar_coord_to_dim(combined_metrics, "ens")
         else:
             # depending on the datset, there might be no data (e.g. no CERRA in southern hemisphere region)
             _logger.warning(
                 f"No data available for stream {stream} at forecast step {fstep} in region {region}. Skipping metrics calculation."
             )
             continue
-
-        # assert int(combined_metrics.forecast_step) == int(fstep), (
-        #     "Different steps in data and metrics. Please check."
-        # )
-
-        # criteria = {
-        #     "forecast_step": int(combined_metrics.forecast_step),
-        #     "sample": combined_metrics.sample,
-        #     "channel": combined_metrics.channel,
-        # }
-
-        # if "ens" in combined_metrics.dims:
-        #     criteria["ens"] = combined_metrics.ens
-
-        # metric_stream.loc[criteria] = combined_metrics
 
     _logger.info(f"Created {len(all_futures)} futures for stream {stream}. ")
     metric_stream = xr.DataArray(
@@ -213,8 +185,6 @@ def calc_scores_per_stream(
 
 @dataclass
 class FstepBlock:
-    persisted_preds: xr.DataArray | None
-    persisted_gt: xr.DataArray | None
     fstep: str
     futures: list[xr.DataArray]
 
@@ -223,14 +193,6 @@ def _process_fstep_block(
     fstep_block: FstepBlock, mstream: xr.DataArray, client: Client, stream: str, metrics: list[str]
 ) -> None:
     all_combined_metrics = client.gather(fstep_block.futures)
-
-    # Release persisted data to free up memory on the dask cluster
-    if fstep_block.persisted_preds is not None:
-        client.cancel(fstep_block.persisted_preds)
-        del fstep_block.persisted_preds
-    if fstep_block.persisted_gt is not None:
-        client.cancel(fstep_block.persisted_gt)
-        del fstep_block.persisted_gt
 
     _logger.debug(f"Running computation of metrics for stream {stream}...")
     combined_metrics = xr.concat(all_combined_metrics, dim="metric")
