@@ -8,6 +8,7 @@ print_summary: false #print out score values on screen. it can be verbose
 
 evaluation:
   metrics  : ["rmse", "l1", "mse", "acc", "troct", "froct"]
+  summary_plots: false
 
 #MTM models
 run_ids :
