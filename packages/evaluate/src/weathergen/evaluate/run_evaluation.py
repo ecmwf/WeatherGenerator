@@ -6,7 +6,7 @@
 # ]
 # [tool.uv.sources]
 # weathergen-evaluate = { path = "../../../../../packages/evaluate" }
-# ///
+# /// script
 
 import argparse
 import logging
@@ -14,6 +14,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from dask.distributed import Client
 from omegaconf import OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
@@ -57,8 +58,10 @@ def evaluate_from_args(argl: list[str]) -> None:
 
 
 def evaluate_from_config(cfg):
-    # configure logging
-    logging.basicConfig(level=logging.INFO)
+    # configure logging. Put the date in unix timestamp format for easy sorting
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
 
     # load configuration
 
@@ -79,6 +82,20 @@ def evaluate_from_config(cfg):
 
     # to get a structure like: scores_dict[metric][region][stream][run_id] = plot
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+
+    _logger.info("Setting up Dask client for evaluation...")
+    client: Client | None = None
+    dask_cfg = cfg.get("dask", None)
+    if dask_cfg is not None:
+        num_workers = dask_cfg.get("num_workers", None)
+        threads_per_worker = dask_cfg.get("threads_per_worker", None)
+        client = Client(
+            processes=True, n_workers=num_workers, threads_per_worker=threads_per_worker
+        )
+        _logger.info(f"Dask client info: {client}")
+    else:
+        client = Client(processes=True, n_workers=1, threads_per_worker=1)
+        _logger.info("No dask configuration found in config file, running with a single worker.")
 
     for run_id, run in runs.items():
         _logger.info(f"RUN {run_id}: Getting data...")
@@ -131,17 +148,20 @@ def evaluate_from_config(cfg):
                             metrics_to_compute.append(metric)
 
                     if metrics_to_compute:
-                        all_metrics, points_per_sample = calc_scores_per_stream(
-                            reader, stream, region, metrics_to_compute
-                        )
+                        from dask.distributed import performance_report
 
-                        metric_list_to_json(
-                            reader,
-                            [all_metrics],
-                            [points_per_sample],
-                            [stream],
-                            region,
-                        )
+                        with performance_report(filename="dask-report.html"):
+                            all_metrics, points_per_sample = calc_scores_per_stream(
+                                reader, stream, region, metrics_to_compute, client=client
+                            )
+
+                            metric_list_to_json(
+                                reader,
+                                [all_metrics],
+                                [points_per_sample],
+                                [stream],
+                                region,
+                            )
 
                     for metric in metrics_to_compute:
                         scores_dict[metric][region][stream][run_id] = all_metrics.sel(

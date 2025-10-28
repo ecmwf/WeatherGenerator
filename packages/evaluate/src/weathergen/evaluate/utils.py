@@ -9,15 +9,19 @@
 
 import json
 import logging
+
+# Modify a dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
 import omegaconf as oc
 import xarray as xr
+from dask.distributed import Client
 from tqdm import tqdm
 
 from weathergen.evaluate.clim_utils import get_climatology
-from weathergen.evaluate.io_reader import Reader
+from weathergen.evaluate.io_reader import Reader, WeatherGenReader
 from weathergen.evaluate.plot_utils import (
     bar_plot_metric_region,
     plot_metric_region,
@@ -48,7 +52,12 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
 
 
 def calc_scores_per_stream(
-    reader: Reader, stream: str, region: str, metrics: list[str]
+    reader: WeatherGenReader,
+    stream: str,
+    region: str,
+    metrics: list[str],
+    client: Client,
+    persist_data: bool = False,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -63,6 +72,9 @@ def calc_scores_per_stream(
         Region name to calculate scores for.
     metrics :
         List of metric names to calculate.
+    persist_data :
+        Whether to persist data in memory for faster computation.
+        Use it if there is enough memory and if there are many metrics to compute.
 
     Returns
     -------
@@ -78,6 +90,9 @@ def calc_scores_per_stream(
     channels = available_data.channels
     ensemble = available_data.ensemble
 
+    _logger.info(
+        f"Retrieving data for stream {stream} region={region} fsteps={fsteps} samples={samples} channels={channels} ensemble={ensemble}..."
+    )
     output_data = reader.get_data(
         stream,
         region=region,
@@ -87,13 +102,70 @@ def calc_scores_per_stream(
         ensemble=ensemble,
         return_counts=True,
     )
+    _logger.info(f"Data for stream {stream} retrieved successfully.")
 
     da_preds = output_data.prediction
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
+    assert points_per_sample is not None
 
     aligned_clim_data = get_climatology(reader, da_tars, stream)
 
+    all_futures = []
+
+    for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
+        _logger.debug(f"Verifying data for stream {stream}...")
+
+        _logger.info(f"Processing forecast step {fstep} for stream {stream}...")
+        preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
+        _logger.info("Next forecast step data retrieved")
+
+        if preds.ipoint.size > 0:
+            climatology = aligned_clim_data[fstep] if aligned_clim_data else None
+            score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
+            # Build up computation graphs for all metrics
+            _logger.info(f"Build computation graphs for metrics for stream {stream}...")
+
+            def _persist(da: xr.DataArray) -> xr.DataArray:
+                # Persist in memory with indexes
+                if not persist_data:
+                    return da
+                xindexes = ["ipoint"]
+                return da.drop_indexes("ipoint").set_xindex(xindexes).persist()
+
+            score_data = replace(score_data, prediction=_persist(score_data.prediction))
+            score_data = replace(score_data, ground_truth=_persist(score_data.ground_truth))
+            _logger.debug("After persist:")
+            _logger.debug(score_data.prediction.data.dask)
+
+            combined_metrics = [
+                get_score(
+                    score_data,
+                    metric,
+                    agg_dims="ipoint",
+                    group_by_coord="sample",
+                )
+                for metric in metrics
+            ]
+
+            futures = client.compute(combined_metrics)
+            task = FstepBlock(
+                fstep=fstep,
+                futures=futures,
+            )
+            all_futures.append(task)
+            _logger.info(
+                f"Submitted metric computations to Dask cluster, waiting for results...: {task}"
+            )
+
+        else:
+            # depending on the datset, there might be no data (e.g. no CERRA in southern hemisphere region)
+            _logger.warning(
+                f"No data available for stream {stream} at forecast step {fstep} in region {region}. Skipping metrics calculation."
+            )
+            continue
+
+    _logger.info(f"Created {len(all_futures)} futures for stream {stream}. ")
     metric_stream = xr.DataArray(
         np.full(
             (len(samples), len(fsteps), len(channels), len(metrics), len(ensemble)),
@@ -108,60 +180,46 @@ def calc_scores_per_stream(
         },
     )
 
-    for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
-        _logger.debug(f"Verifying data for stream {stream}...")
-
-        preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
-
-        if preds.ipoint.size > 0:
-            climatology = aligned_clim_data[fstep] if aligned_clim_data else None
-            score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
-            # Build up computation graphs for all metrics
-            _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
-
-            combined_metrics = [
-                get_score(
-                    score_data,
-                    metric,
-                    agg_dims="ipoint",
-                    group_by_coord="sample",
-                )
-                for metric in metrics
-            ]
-
-            combined_metrics = xr.concat(combined_metrics, dim="metric")
-            combined_metrics["metric"] = metrics
-
-            _logger.debug(f"Running computation of metrics for stream {stream}...")
-            combined_metrics = combined_metrics.compute()
-            combined_metrics = scalar_coord_to_dim(combined_metrics, "channel")
-            combined_metrics = scalar_coord_to_dim(combined_metrics, "sample")
-            combined_metrics = scalar_coord_to_dim(combined_metrics, "ens")
-        else:
-            # depending on the datset, there might be no data (e.g. no CERRA in southern hemisphere region)
-            _logger.warning(
-                f"No data available for stream {stream} at forecast step {fstep} in region {region}. Skipping metrics calculation."
-            )
-            continue
-
-        assert int(combined_metrics.forecast_step) == int(fstep), (
-            "Different steps in data and metrics. Please check."
-        )
-
-        criteria = {
-            "forecast_step": int(combined_metrics.forecast_step),
-            "sample": combined_metrics.sample,
-            "channel": combined_metrics.channel,
-        }
-
-        if "ens" in combined_metrics.dims:
-            criteria["ens"] = combined_metrics.ens
-
-        metric_stream.loc[criteria] = combined_metrics
-
+    for fstep_block in all_futures:
+        _process_fstep_block(fstep_block, metric_stream, client, stream, metrics)
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
     return metric_stream, points_per_sample
+
+
+@dataclass
+class FstepBlock:
+    fstep: str
+    futures: list[xr.DataArray]
+
+
+def _process_fstep_block(
+    fstep_block: FstepBlock, mstream: xr.DataArray, client: Client, stream: str, metrics: list[str]
+) -> None:
+    all_combined_metrics = client.gather(fstep_block.futures)
+
+    _logger.debug(f"Running computation of metrics for stream {stream}...")
+    combined_metrics = xr.concat(all_combined_metrics, dim="metric")
+    combined_metrics["metric"] = metrics
+    combined_metrics = combined_metrics.compute()
+    combined_metrics = scalar_coord_to_dim(combined_metrics, "channel")
+    combined_metrics = scalar_coord_to_dim(combined_metrics, "sample")
+    combined_metrics = scalar_coord_to_dim(combined_metrics, "ens")
+
+    assert int(combined_metrics.forecast_step) == int(fstep_block.fstep), (
+        "Different steps in data and metrics. Please check."
+    )
+
+    criteria = {
+        "forecast_step": int(combined_metrics.forecast_step),
+        "sample": combined_metrics.sample,
+        "channel": combined_metrics.channel,
+    }
+
+    if "ens" in combined_metrics.dims:
+        criteria["ens"] = combined_metrics.ens
+
+    mstream.loc[criteria] = combined_metrics
 
 
 def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:

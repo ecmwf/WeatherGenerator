@@ -241,13 +241,13 @@ class Scores:
         if score_name in self.det_metrics_dict.keys():
             f = self.det_metrics_dict[score_name]
         elif score_name in self.prob_metrics_dict.keys():
-            assert self.ens_dim in data.prediction.dims, (
-                f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} not found in prediction data"
+            assert self._ens_dim in data.prediction.dims, (
+                f"Probablistic score {score_name} chosen, but ensemble dimension {self._ens_dim} not found in prediction data"
             )
             f = self.prob_metrics_dict[score_name]
         else:
             raise ValueError(
-                f"Unknown score chosen. Supported scores: {
+                f"Unknown score chosen: {score_name}. Supported scores: {
                     ', '.join(self.det_metrics_dict.keys())
                     + ', '
                     + ', '.join(self.prob_metrics_dict.keys())
@@ -271,9 +271,9 @@ class Scores:
         score_args_map = {
             "froct": ["p", "gt", "p_next", "gt_next"],
             "troct": ["p", "gt", "p_next", "gt_next"],
-            "acc":   ["p", "gt", "c"],
-            "fact":  ["p", "c"],
-            "tact":  ["gt", "c"],
+            "acc": ["p", "gt", "c"],
+            "fact": ["p", "c"],
+            "tact": ["gt", "c"],
         }
 
         available = {
@@ -284,7 +284,7 @@ class Scores:
             "c": data.climatology,
         }
 
-        #assign p and gt by default if metrics do not have specific args
+        # assign p and gt by default if metrics do not have specific args
         keys = score_args_map.get(score_name, ["p", "gt"])
         args = {k: available[k] for k in keys}
 
@@ -576,7 +576,9 @@ class Scores:
 
         return mae
 
-    def calc_mse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
+    def calc_mse(
+        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
+    ) -> xr.DataArray:
         """
         Calculate mean squared error (MSE) of forecast data w.r.t. reference data.
 
@@ -593,14 +595,13 @@ class Scores:
             raise ValueError(
                 "Cannot calculate mean squared error without aggregation dimensions (agg_dims=None)."
             )
-
-        mse = np.square(p - gt)
+        mse: xr.DataArray = (p - gt) ** 2
 
         if group_by_coord:
             mse = mse.groupby(group_by_coord)
 
         mse = self._mean(mse)
-
+        # print(mse.compute())
         return mse
 
     def calc_rmse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
@@ -625,7 +626,9 @@ class Scores:
 
         return rmse
 
-    def calc_vrmse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
+    def calc_vrmse(
+        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
+    ) -> xr.DataArray:
         """
         Calculate variance-normalized root mean squared error (VRMSE) of forecast data w.r.t. reference data
         Parameters
@@ -643,7 +646,7 @@ class Scores:
                 "Cannot calculate variance-normalized root mean squared error without aggregation dimensions (agg_dims=None)."
             )
 
-        vrmse = np.sqrt(self.calc_mse(p, gt, group_by_coord) / (gt.var(dim=self._agg_dims)+1e-6))
+        vrmse = np.sqrt(self.calc_mse(p, gt, group_by_coord) / (gt.var(dim=self._agg_dims) + 1e-6))
 
         return vrmse
 
@@ -873,7 +876,7 @@ class Scores:
             act = ano.std(dim=spatial_dims)
 
         return act
-    
+
     def calc_fact(
         self,
         p: xr.DataArray,
@@ -902,7 +905,7 @@ class Scores:
         """
 
         return self._calc_act(p, c, group_by_coord, spatial_dims)
-    
+
     def calc_tact(
         self,
         gt: xr.DataArray,
