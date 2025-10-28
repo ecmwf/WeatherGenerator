@@ -24,7 +24,7 @@ from weathergen.model.embeddings import (
     StreamEmbedLinear,
     StreamEmbedTransformer,
 )
-from weathergen.model.layers import FEMLP, MLP
+from weathergen.model.layers import MLP, LayerNormBlock
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
@@ -318,28 +318,24 @@ class ForecastingEngine:
                         )
                     )
 
+                self.fe_blocks.append(
+                    MLP(
+                        self.cf.ae_global_dim_embed,
+                        self.cf.ae_global_dim_embed,
+                        with_residual=True,
+                        dropout_rate=self.cf.fe_dropout_rate,
+                        norm_type=self.cf.norm_type,
+                        dim_aux=1,
+                        norm_eps=self.cf.mlp_norm_eps,
+                    )
+                )
+
                 if i + 1 == self.cf.fe_num_blocks:
                     self.fe_blocks.append(
-                        FEMLP(
+                        LayerNormBlock(
                             self.cf.ae_global_dim_embed,
-                            self.cf.ae_global_dim_embed,
-                            with_residual=True,
-                            dropout_rate=self.cf.fe_dropout_rate,
-                            norm_type=self.cf.norm_type,
-                            dim_aux=1,
                             norm_eps=self.cf.mlp_norm_eps,
-                        )
-                    )
-                else:
-                    self.fe_blocks.append(
-                        MLP(
-                            self.cf.ae_global_dim_embed,
-                            self.cf.ae_global_dim_embed,
-                            with_residual=True,
-                            dropout_rate=self.cf.fe_dropout_rate,
-                            norm_type=self.cf.norm_type,
-                            dim_aux=1,
-                            norm_eps=self.cf.mlp_norm_eps,
+                            elementwise_affine=False,
                         )
                     )
 
