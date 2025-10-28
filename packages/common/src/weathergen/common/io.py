@@ -124,7 +124,7 @@ class ItemKey:
         """Decide if output item should contain source dataset."""
         # TODO: is this valid for the adjusted (offsetted) forecast steps?
         # => if config.forecast_offset > 0 source will be never written
-        return False #self.forecast_step == 0
+        return False  # self.forecast_step == 0
 
 
 @dataclasses.dataclass
@@ -200,7 +200,6 @@ class OutputDataset:
 
 
 class OutputItem:
-
     item_keys = ["target", "prediction", "source"]
 
     def __init__(
@@ -259,7 +258,7 @@ class ZarrIO:
         """Get datasets for a output item."""
         group = self._get_group(key)
 
-        datasets: dict[str, OutputDataset|None] = {}
+        datasets: dict[str, OutputDataset | None] = {}
         for name in OutputItem.item_keys:
             dataset_group: zarr.Group | None = group.get(name)
             # import pdb; pdb.set_trace()
@@ -270,8 +269,7 @@ class ZarrIO:
                     datasets[name] = None
                     continue
                 arrays = {
-                    array_name: all_arrays[array_name]
-                    for array_name in OutputDataset.array_names
+                    array_name: all_arrays[array_name] for array_name in OutputDataset.array_names
                 }
                 dataset = OutputDataset(
                     name,

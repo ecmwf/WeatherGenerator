@@ -571,7 +571,9 @@ class Scores:
 
         return mae
 
-    def calc_mse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None) -> xr.DataArray:
+    def calc_mse(
+        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
+    ) -> xr.DataArray:
         """
         Calculate mean squared error (MSE) of forecast data w.r.t. reference data.
 
@@ -588,7 +590,7 @@ class Scores:
             raise ValueError(
                 "Cannot calculate mean squared error without aggregation dimensions (agg_dims=None)."
             )
-        mse: xr.DataArray = (p - gt)**2
+        mse: xr.DataArray = (p - gt) ** 2
         # import pdb; pdb.set_trace()
         # mse.data
 
@@ -626,7 +628,9 @@ class Scores:
 
         return rmse
 
-    def calc_vrmse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None) -> xr.DataArray:
+    def calc_vrmse(
+        self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None
+    ) -> xr.DataArray:
         """
         Calculate variance-normalized root mean squared error (VRMSE) of forecast data w.r.t. reference data
         Parameters
@@ -644,7 +648,7 @@ class Scores:
                 "Cannot calculate variance-normalized root mean squared error without aggregation dimensions (agg_dims=None)."
             )
 
-        vrmse = np.sqrt(self.calc_mse(p, gt, group_by_coord) / (gt.var(dim=self._agg_dims)+1e-6))
+        vrmse = np.sqrt(self.calc_mse(p, gt, group_by_coord) / (gt.var(dim=self._agg_dims) + 1e-6))
 
         return vrmse
 
