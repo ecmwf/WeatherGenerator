@@ -874,7 +874,6 @@ class Scores:
         self,
         x: xr.DataArray,
         c: xr.DataArray,
-        group_by_coord: str | None = None,
         spatial_dims: list = None,
     ):
         """
@@ -889,9 +888,6 @@ class Scores:
             Forecast or target data array
         c: xr.DataArray
             Climatological mean data array, which is used to calculate anomalies
-        group_by_coord: str
-            Name of the coordinate to group by.
-            If provided, the coordinate becomes a new dimension of the activity score.
         spatial_dims: List[str]
             Names of spatial dimensions over which activity is calculated.
             Note: No averaging is possible over these dimensions.
@@ -910,20 +906,7 @@ class Scores:
 
         # Calculate anomalies
         ano = x - c
-
-        if group_by_coord:
-            # Apply groupby and calculate activity within each group using apply
-            ano_grouped = ano.groupby(group_by_coord)
-
-            # Use apply to calculate activity for each group - this preserves the coordinate structure
-            act = xr.concat(
-                [ano_group.std(dim=spatial_dims) for group_label, ano_group in ano_grouped],
-                dim=group_by_coord,
-            ).assign_coords({group_by_coord: list(ano_grouped.groups.keys())})
-
-        else:
-            # Calculate forecast activity over spatial dimensions (no grouping)
-            act = ano.std(dim=spatial_dims)
+        act = ano.std(dim=spatial_dims)
 
         return act
     
@@ -931,7 +914,6 @@ class Scores:
         self,
         p: xr.DataArray,
         c: xr.DataArray,
-        group_by_coord: str | None = None,
         spatial_dims: list = None,
     ):
         """
@@ -946,21 +928,17 @@ class Scores:
             Forecast data array
         c: xr.DataArray
             Climatological mean data array, which is used to calculate anomalies
-        group_by_coord: str
-            Name of the coordinate to group by.
-            If provided, the coordinate becomes a new dimension of the activity score.
         spatial_dims: List[str]
             Names of spatial dimensions over which activity is calculated.
             Note: No averaging is possible over these dimensions.
         """
 
-        return self._calc_act(p, c, group_by_coord, spatial_dims)
+        return self._calc_act(p, c, spatial_dims)
     
     def calc_tact(
         self,
         gt: xr.DataArray,
         c: xr.DataArray,
-        group_by_coord: str | None = None,
         spatial_dims: list = None,
     ):
         """
@@ -975,39 +953,12 @@ class Scores:
             Target data array
         c: xr.DataArray
             Climatological mean data array, which is used to calculate anomalies
-        group_by_coord: str
-            Name of the coordinate to group by.
-            If provided, the coordinate becomes a new dimension of the activity score.
         spatial_dims: List[str]
             Names of spatial dimensions over which activity is calculated.
             Note: No averaging is possible over these dimensions.
         """
 
-        return self._calc_act(gt, c, group_by_coord, spatial_dims)
-
-    def _calc_acc_group(
-        self, fcst: xr.DataArray, obs: xr.DataArray, spatial_dims: list[str]
-    ) -> xr.DataArray:
-        """Calculate ACC for a single group
-        Parameters
-        ----------
-        ----------
-        fcst: xr.DataArray
-            Forecast data for the group
-            Forecast data for the group
-        obs: xr.DataArray
-            Observation data for the group
-        spatial_dims: List[str]
-            Names of spatial dimensions over which ACC is calculated.
-        Returns
-        -------
-        xr.DataArray
-            ACC for the group
-        """
-
-        return (fcst * obs).sum(spatial_dims) / np.sqrt(
-            (fcst**2).sum(spatial_dims) * (obs**2).sum(spatial_dims)
-        )
+        return self._calc_act(gt, c, spatial_dims)
 
     def calc_acc(
         self,
@@ -1058,8 +1009,6 @@ class Scores:
         acc = (fcst_ano * obs_ano).sum(spatial_dims) / np.sqrt(
             (fcst_ano**2).sum(spatial_dims) * (obs_ano**2).sum(spatial_dims)
         )
-
-            acc = self._calc_acc_group(fcst_ano, obs_ano, spatial_dims)
 
         return acc
 
