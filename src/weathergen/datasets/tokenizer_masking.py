@@ -64,9 +64,9 @@ class TokenizerMasking(Tokenizer):
 
         # return empty if there is no data or we are in diagnostic mode
         if is_diagnostic or rdata.data.shape[1] == 0 or len(rdata.data) < 2:
-            source_tokens_cells = torch.tensor([])
+            source_tokens_cells = [torch.tensor([])]
             source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
-            source_centroids = torch.tensor([])
+            source_centroids = [torch.tensor([])]
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
         # tokenize all data first
