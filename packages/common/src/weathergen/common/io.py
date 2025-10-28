@@ -261,7 +261,6 @@ class ZarrIO:
         datasets: dict[str, OutputDataset | None] = {}
         for name in OutputItem.item_keys:
             dataset_group: zarr.Group | None = group.get(name)
-            # import pdb; pdb.set_trace()
             if dataset_group is not None:
                 all_arrays = dict(dataset_group.arrays())
                 # No arrays? skip.
