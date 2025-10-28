@@ -23,8 +23,10 @@ _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
 
 def evaluate() -> None:
-    # By default, arguments from the command line are read.
-    evaluate_from_args(sys.argv[1:])
+    from dask.distributed import performance_report
+    with performance_report(filename="dask-report.html"):
+        # By default, arguments from the command line are read.
+        evaluate_from_args(sys.argv[1:])
 
 
 def evaluate_from_args(argl: list[str]) -> None:
@@ -164,6 +166,4 @@ def evaluate_from_config(cfg):
 
 
 if __name__ == "__main__":
-    from dask.distributed import performance_report
-    with performance_report(filename="dask-report.html"):
-        evaluate()
+    evaluate()
