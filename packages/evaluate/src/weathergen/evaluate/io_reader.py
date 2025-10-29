@@ -513,14 +513,14 @@ class WeatherGenReader(Reader):
                     # Irregular (scatter) case. concatenate over ipoint
                     da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
                     da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
-                
+
                 if len(samples) == 1:
                     _logger.debug("Repeating sample coordinate for single-sample case.")
                     for da in (da_tars_fs, da_preds_fs):
                         da.assign_coords(
                             sample=("ipoint", np.repeat(da.sample.values, da.sizes["ipoint"]))
                         )
-
+            
                 if set(channels) != set(all_channels):
                     _logger.debug(
                         f"Restricting targets and predictions to channels {channels} for stream {stream}..."

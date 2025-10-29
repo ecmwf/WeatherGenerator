@@ -223,10 +223,10 @@ def _plot_score_maps_per_stream(
         [get_score(score_data, m, agg_dims="sample") for m in metrics],
         dim="metric",
     )
-    breakpoint()
+
     plot_metrics = plot_metrics.assign_coords(
-        lat=preds.lat.isel(sample=0).reset_coords(drop=True),
-        lon=preds.lon.isel(sample=0).reset_coords(drop=True),
+        lat=preds.lat.reset_coords(drop=True),
+        lon=preds.lon.reset_coords(drop=True),
         metric=metrics,
     ).compute() 
   
@@ -235,7 +235,6 @@ def _plot_score_maps_per_stream(
 
     has_ens = "ens" in plot_metrics.coords
     ens_values = plot_metrics.coords["ens"].values if has_ens else [None]
-
     
     for metric in plot_metrics.coords["metric"].values:
         for ens_val in tqdm(ens_values, f"Plotting metric - {metric}"):
