@@ -242,7 +242,7 @@ class Scores:
             f = self.det_metrics_dict[score_name]
         elif score_name in self.prob_metrics_dict.keys():
             assert self._ens_dim in data.prediction.dims, (
-                f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} not found in prediction data"
+                f"Probablistic score {score_name} chosen, but ensemble dimension {self._ens_dim} not found in prediction data"
             )
             f = self.prob_metrics_dict[score_name]
         else:
@@ -1242,7 +1242,7 @@ class Scores:
         """
         Calculate the spread of the forecast ensemble
         """
-        ens_std = p.std(dim=self.ens_dim)
+        ens_std = p.std(dim=self._ens_dim)
 
         if group_by_coord:
             ens_std = ens_std.groupby(group_by_coord)
@@ -1309,15 +1309,15 @@ class Scores:
         if method == "ensemble":
             func_kwargs = {
                 "forecasts": p,
-                "member_dim": self.ens_dim,
+                "member_dim": self._ens_dim,
                 "dim": self._agg_dims,
                 **kwargs,
             }
             crps_func = xskillscore.crps_ensemble
         elif method == "gaussian":
             func_kwargs = {
-                "mu": p.mean(dim=self.ens_dim),
-                "sig": p.std(dim=self.ens_dim),
+                "mu": p.mean(dim=self._ens_dim),
+                "sig": p.std(dim=self._ens_dim),
                 "dim": self._agg_dims,
                 **kwargs,
             }
@@ -1400,13 +1400,13 @@ class Scores:
                 )
 
         # calculate ranks for all data points
-        rank = (obs_stacked >= fcst_stacked).sum(dim=self.ens_dim)
+        rank = (obs_stacked >= fcst_stacked).sum(dim=self._ens_dim)
         # and count occurence of rank values
         rank.name = "rank"  # name for xr.DataArray is required for histogram-method
         rank_counts = histogram(
             rank,
             dim=["npoints"],
-            bins=np.arange(len(fcst_stacked[self.ens_dim]) + 2),
+            bins=np.arange(len(fcst_stacked[self._ens_dim]) + 2),
             block_size=None if rank.chunks is None else "auto",
         )
 
@@ -1423,7 +1423,7 @@ class Scores:
         See https://xskillscore.readthedocs.io/en/stable/api
         Note: this version is found to be very slow. Use calc_rank_histogram alternatively.
         """
-        rank_hist = xskillscore.rank_histogram(gt, p, member_dim=self.ens_dim, dim=self._agg_dims)
+        rank_hist = xskillscore.rank_histogram(gt, p, member_dim=self._ens_dim, dim=self._agg_dims)
 
         return rank_hist
 

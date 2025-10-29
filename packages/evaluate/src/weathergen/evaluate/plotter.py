@@ -377,7 +377,7 @@ class Plotter:
                     var,
                     tag=tag,
                     map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
-                    title= f"{self.stream}, {varname} : fstep = {self.fstep:03} ({valid_time})"
+                    title= f"{self.stream}, {var} : fstep = {self.fstep:03} ({valid_time})"
                 )
                 plot_names.append(name)
 
@@ -446,18 +446,13 @@ class Plotter:
                 a_max=marker_size * 10.0,
                 a_min=marker_size,
             )
-
+      
         # Create figure and axis objects
         fig = plt.figure(dpi=self.dpi_val)
         ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
         ax.coastlines()
 
-        valid_time = (
-            data["valid_time"][0]
-            .values.astype("datetime64[m]")
-            .astype(datetime.datetime)
-            .strftime("%Y-%m-%dT%H%M")
-        )
+        assert data["lon"].shape == data["lat"].shape == data.shape, f"Scatter plot:: Data shape do not match. Shapes: lon {data["lon"].shape}, lat {data["lat"].shape}, data {data.shape}."
 
         scatter_plt = ax.scatter(
             data["lon"],
@@ -483,7 +478,15 @@ class Plotter:
         if self.sample:
             parts.append(str(self.sample))
 
-        parts.append(valid_time)
+        if "valid_time" in data.coords:
+            valid_time = (
+                data["valid_time"][0]
+                .values.astype("datetime64[m]")
+                .astype(datetime.datetime)
+                .strftime("%Y-%m-%dT%H%M")
+            )
+
+            parts.append(valid_time)
 
         if self.stream:
             parts.append(self.stream)

@@ -24,7 +24,6 @@ from weathergen.evaluate.utils import (
     plot_data,
     plot_summary,
     retrieve_metric_from_json,
-    plot_score_maps_per_stream
 )
 
 _logger = logging.getLogger(__name__)
@@ -108,34 +107,35 @@ def evaluate_from_config(cfg):
                     metrics_to_compute = []
 
                     for metric in metrics:
-                        try:
-                            metric_data = retrieve_metric_from_json(
-                                reader,
-                                stream,
-                                region,
-                                metric,
-                            )
+                        
+                        metric_data = retrieve_metric_from_json(
+                            reader,
+                            stream,
+                            region,
+                            metric,
+                        )
 
-                            available_data = reader.check_availability(
-                                stream, metric_data, mode="evaluation"
-                            )
-
-                            if not available_data.score_availability:
-                                metrics_to_compute.append(metric)
-                            else:
-                                # simply select the chosen eval channels, samples, fsteps here...
-                                scores_dict[metric][region][stream][run_id] = metric_data.sel(
-                                    sample=available_data.samples,
-                                    channel=available_data.channels,
-                                    forecast_step=available_data.fsteps,
-                                )
-                        except (FileNotFoundError, KeyError):
+                        if metric_data is None or plot_score_maps:
                             metrics_to_compute.append(metric)
+                            continue
+                    
+                        available_data = reader.check_availability(
+                            stream, metric_data, mode="evaluation"
+                        )
+
+                        if not available_data.score_availability:
+                            metrics_to_compute.append(metric)
+                        else:
+                            # simply select the chosen eval channels, samples, fsteps here...
+                            scores_dict[metric][region][stream][run_id] = metric_data.sel(
+                                sample=available_data.samples,
+                                channel=available_data.channels,
+                                forecast_step=available_data.fsteps,
+                            )
 
                     if metrics_to_compute:
-                        _logger.info(f"Aggregating scores over dimension 'agg_dim': {agg_dim} and group_by_coords: {group_by_coords}")
                         all_metrics, points_per_sample = calc_scores_per_stream(
-                            reader, stream, region, metrics_to_compute
+                            reader, stream, region, metrics_to_compute, plot_score_maps
                         )
                     
                         metric_list_to_json(
