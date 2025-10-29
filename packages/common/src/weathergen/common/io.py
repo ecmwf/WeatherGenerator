@@ -445,6 +445,10 @@ class OutputBatchData:
         stream_idx = self.streams[key.stream]
         datapoints = self._get_datapoints_per_sample(offset_key, stream_idx)
 
+        # TODO extract real source interval start/end times
+        dummy_date = np.datetime64("2020-01-01")
+        source_interval = TimeRange(dummy_date, dummy_date + np.timedelta64(5, "D"))
+
         _logger.debug(
             f"forecast_step: {key.forecast_step} = {offset_key.forecast_step} (rel_step) + "
             + f"{self.forecast_offset} (forecast_offset)"
@@ -470,7 +474,9 @@ class OutputBatchData:
         )
 
         if key.with_source:
-            source_dataset = self._extract_sources(offset_key.sample, stream_idx, key)
+            source_dataset = self._extract_sources(
+                offset_key.sample, stream_idx, key, source_interval
+            )
         else:
             source_dataset = None
 
@@ -482,12 +488,14 @@ class OutputBatchData:
             target=OutputDataset(
                 "target",
                 key,
+                source_interval,
                 target_data,
                 **dataclasses.asdict(data_coords),
             ),
             prediction=OutputDataset(
                 "prediction",
                 key,
+                source_interval,
                 preds_data,
                 **dataclasses.asdict(data_coords),
             ),
@@ -549,11 +557,13 @@ class OutputBatchData:
 
         return DataCoordinates(times, coords, geoinfo, channels, geoinfo_channels)
 
-    def _extract_sources(self, sample, stream_idx, key):
+    def _extract_sources(
+        self, sample: int, stream_idx: int, key: ItemKey, source_interval: TimeRange
+    ) -> OutputDataset:
         channels = self.source_channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
 
-        source = self.sources[sample][stream_idx]
+        source: IOReaderData = self.sources[sample][stream_idx]
 
         assert source.data.shape[1] == len(channels), (
             "Number of source channel names does not align with source data"
@@ -562,6 +572,7 @@ class OutputBatchData:
         source_dataset = OutputDataset(
             "source",
             key,
+            source_interval,
             np.asarray(source.data),
             np.asarray(source.datetimes),
             np.asarray(source.coords),
