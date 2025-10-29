@@ -528,7 +528,7 @@ def save_sample_to_netcdf(
             _logger.info("Detected and preserved Gaussian grid structure")
         # add forecast_period attributes
         n_hours = fstep_hours.astype("int64")
-        sample_all_steps["forecast_period"] = sample_all_steps["forecast_period"] * n_hours
+        sample_all_steps["forecast_period"] = sample_all_steps["forecast_step"] * n_hours
         sample_all_steps["forecast_period"].attrs = {
             "standard_name": "forecast_period",
             "long_name": "time since forecast_reference_time",
