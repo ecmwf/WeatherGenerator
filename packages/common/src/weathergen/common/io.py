@@ -214,7 +214,7 @@ class OutputDataset:
         additional_dims = (0, 1, 2) if len(data.shape) == 3 else (0, 1, 2, 5)
         expanded_data = da.expand_dims(data, axis=additional_dims)
         coords = da.from_zarr(self.coords).compute()
-        times = da.from_zarr(self.times).compute()
+        times = da.from_zarr(self.times).compute().astype("datetime64[ns]")
         geoinfo = da.from_zarr(self.geoinfo).compute()
         geoinfo = {name: ("ipoint", geoinfo[:, i]) for i, name in enumerate(self.geoinfo_channels)}
         # TODO: make sample, stream, forecast_step DataArray attribute, test how it
@@ -224,11 +224,14 @@ class OutputDataset:
             dims=["sample", "stream", "forecast_step", "ipoint", "channel", "ens"],
             coords={
                 "sample": [self.item_key.sample],
+                "source_interval_start": ("sample", [self.source_interval.start]),
+                "source_interval_end": ("sample", self.source_interval.end),
                 "stream": [self.item_key.stream],
                 "forecast_step": [self.item_key.forecast_step],
                 "ipoint": self.datapoints,
                 "channel": self.channels,  # TODO: make sure channel names align with data
-                "valid_time": ("ipoint", times.astype("datetime64[ns]")),
+                "valid_time": ("ipoint", times),
+                "lead_time": ("ipoint", self.source_interval.get_lead_time(times)),
                 "lat": ("ipoint", coords[..., 0]),
                 "lon": ("ipoint", coords[..., 1]),
                 **geoinfo,
