@@ -87,7 +87,7 @@ class Reader:
         self.private_paths = private_paths
 
         self.streams = eval_cfg.streams.keys()
-        #TODO: propagate it to the other functions using global plotting opts
+        # TODO: propagate it to the other functions using global plotting opts
         self.global_plotting_options = eval_cfg.get("global_plotting_options", {})
 
         # If results_base_dir and model_base_dir are not provided, default paths are used
@@ -129,10 +129,10 @@ class Reader:
     def get_ensemble(self, stream: str | None = None) -> list[str]:
         """Placeholder implementation ensemble member names getter. Override in subclass."""
         return list()
-    
+
     def is_regular(self, stream: str) -> bool:
         """Placeholder implementation to check if lat/lon are regularly spaced. Override in subclass."""
-        return True 
+        return True
 
     def check_availability(
         self,
@@ -453,7 +453,6 @@ class WeatherGenReader(Reader):
                 points_per_sample = None
 
             fsteps_final = []
-            regularly_spaced = None
 
             for fstep in fsteps:
                 _logger.info(f"RUN {self.run_id} - {stream}: Processing fstep {fstep}...")
@@ -489,7 +488,9 @@ class WeatherGenReader(Reader):
                     pps.append(npoints)
 
                 if not da_tars_fs:
-                    _logger.info(f"[{self.run_id} - {stream}] No valid data found for fstep {fstep}.")
+                    _logger.info(
+                        f"[{self.run_id} - {stream}] No valid data found for fstep {fstep}."
+                    )
                     continue
 
                 fsteps_final.append(fstep)
@@ -498,16 +499,16 @@ class WeatherGenReader(Reader):
                     f"Concatenating targets and predictions for stream {stream}, forecast_step {fstep}..."
                 )
 
-                #faster processing
+                # faster processing
                 if self.is_regular(stream):
                     # Efficient concatenation for regular grid
                     da_tars_fs = xr.concat(
                         [a.expand_dims(sample=[int(a.sample.values)]) for a in da_tars_fs],
-                        dim="sample"
+                        dim="sample",
                     )
                     da_preds_fs = xr.concat(
                         [a.expand_dims(sample=[int(a.sample.values)]) for a in da_preds_fs],
-                        dim="sample"
+                        dim="sample",
                     )
                 else:
                     # Irregular (scatter) case. concatenate over ipoint
@@ -520,7 +521,7 @@ class WeatherGenReader(Reader):
                         da.assign_coords(
                             sample=("ipoint", np.repeat(da.sample.values, da.sizes["ipoint"]))
                         )
-            
+
                 if set(channels) != set(all_channels):
                     _logger.debug(
                         f"Restricting targets and predictions to channels {channels} for stream {stream}..."
@@ -645,7 +646,7 @@ class WeatherGenReader(Reader):
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
         return list(dummy.prediction.as_xarray().coords["ens"].values)
 
-    #TODO: improve this
+    # TODO: improve this
     def is_regular(self, stream: str) -> bool:
         """Check if the latitude and longitude coordinates are regularly spaced for a given stream."""
         _logger.debug(f"Checking regular spacing for stream {stream}...")
@@ -653,11 +654,14 @@ class WeatherGenReader(Reader):
         with ZarrIO(self.fname_zarr) as zio:
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
             dummy1 = zio.get_data(0, stream, zio.forecast_steps[1])
-       
-        da  = dummy.prediction.as_xarray()
-        da1 = dummy1.prediction.as_xarray() 
-       
-        if not (np.allclose(sorted(da["lat"].values), sorted(da1["lat"].values)) and np.allclose(sorted(da["lon"].values), sorted(da1["lon"].values) )):
+
+        da = dummy.prediction.as_xarray()
+        da1 = dummy1.prediction.as_xarray()
+
+        if not (
+            np.allclose(sorted(da["lat"].values), sorted(da1["lat"].values))
+            and np.allclose(sorted(da["lon"].values), sorted(da1["lon"].values))
+        ):
             _logger.debug("Latitude and/or longitude coordinates are not regularly spaced.")
             return False
 

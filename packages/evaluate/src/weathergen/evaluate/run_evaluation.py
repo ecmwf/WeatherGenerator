@@ -107,7 +107,6 @@ def evaluate_from_config(cfg):
                     metrics_to_compute = []
 
                     for metric in metrics:
-                        
                         metric_data = retrieve_metric_from_json(
                             reader,
                             stream,
@@ -118,7 +117,7 @@ def evaluate_from_config(cfg):
                         if metric_data is None or plot_score_maps:
                             metrics_to_compute.append(metric)
                             continue
-                    
+
                         available_data = reader.check_availability(
                             stream, metric_data, mode="evaluation"
                         )
@@ -137,7 +136,7 @@ def evaluate_from_config(cfg):
                         all_metrics, points_per_sample = calc_scores_per_stream(
                             reader, stream, region, metrics_to_compute, plot_score_maps
                         )
-                    
+
                         metric_list_to_json(
                             reader,
                             [all_metrics],

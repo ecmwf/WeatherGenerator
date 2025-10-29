@@ -41,7 +41,7 @@ class Plotter:
     Contains all basic plotting functions.
     """
 
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, stream : str | None = None):
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, stream: str | None = None):
         """
         Initialize the Plotter class.
 
@@ -377,7 +377,7 @@ class Plotter:
                     var,
                     tag=tag,
                     map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
-                    title= f"{self.stream}, {var} : fstep = {self.fstep:03} ({valid_time})"
+                    title=f"{self.stream}, {var} : fstep = {self.fstep:03} ({valid_time})",
                 )
                 plot_names.append(name)
 
@@ -392,7 +392,7 @@ class Plotter:
         varname: str,
         tag: str = "",
         map_kwargs: dict | None = None,
-        title: str | None = None
+        title: str | None = None,
     ):
         """
         Plot a 2D map for a data array using scatter plot.
@@ -446,13 +446,15 @@ class Plotter:
                 a_max=marker_size * 10.0,
                 a_min=marker_size,
             )
-      
+
         # Create figure and axis objects
         fig = plt.figure(dpi=self.dpi_val)
         ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
         ax.coastlines()
 
-        assert data["lon"].shape == data["lat"].shape == data.shape, f"Scatter plot:: Data shape do not match. Shapes: lon {data["lon"].shape}, lat {data["lat"].shape}, data {data.shape}."
+        assert data["lon"].shape == data["lat"].shape == data.shape, (
+            f"Scatter plot:: Data shape do not match. Shapes: lon {data['lon'].shape}, lat {data['lat'].shape}, data {data.shape}."
+        )
 
         scatter_plt = ax.scatter(
             data["lon"],
@@ -495,7 +497,7 @@ class Plotter:
 
         if self.fstep is not None:
             parts.extend(["fstep", f"{self.fstep:03d}"])
-        
+
         name = "_".join(filter(None, parts))
         fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
 

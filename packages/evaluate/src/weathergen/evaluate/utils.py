@@ -48,7 +48,8 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
 
 
 def calc_scores_per_stream(
-    reader: Reader, stream: str, region: str, metrics: list[str], plot_score_maps: bool = False) -> tuple[xr.DataArray, xr.DataArray]:
+    reader: Reader, stream: str, region: str, metrics: list[str], plot_score_maps: bool = False
+) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
 
@@ -62,9 +63,9 @@ def calc_scores_per_stream(
         Region name to calculate scores for.
     metrics :
         List of metric names to calculate.
-    plot_score_maps : 
-        When it is True and the stream is on a regular grid the scores are recomputed as a function of the "ipoint" and plotted on a 2D scatter map. 
-        NOTE: the scores are averaged over the "sample" dimension and for most of the metrics this does not give the same results as averaging over the "ipoint" dimension. 
+    plot_score_maps :
+        When it is True and the stream is on a regular grid the scores are recomputed as a function of the "ipoint" and plotted on a 2D scatter map.
+        NOTE: the scores are averaged over the "sample" dimension and for most of the metrics this does not give the same results as averaging over the "ipoint" dimension.
     Returns
     -------
     Tuple of xarray DataArray containing the scores and the number of points per sample.
@@ -73,8 +74,10 @@ def calc_scores_per_stream(
     _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
     if plot_score_maps:
         _logger.info(f"RUN {reader.run_id} - {stream}: Plotting scores is enabled.")
-        _logger.info(f"RUN {reader.run_id} - {stream}: Saving plotted scores to {reader.runplot_dir}/score_maps")
-   
+        _logger.info(
+            f"RUN {reader.run_id} - {stream}: Saving plotted scores to {reader.runplot_dir}/score_maps"
+        )
+
     available_data = reader.check_availability(stream, mode="evaluation")
 
     fsteps = available_data.fsteps
@@ -114,7 +117,6 @@ def calc_scores_per_stream(
     )
 
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
-
         if preds.ipoint.size == 0:
             _logger.warning(
                 f"No data for stream {stream} at fstep {fstep} in region {region}. Skipping."
@@ -144,10 +146,10 @@ def calc_scores_per_stream(
 
         _logger.debug(f"Running computation of metrics for stream {stream}...")
         combined_metrics = combined_metrics.compute()
-        
+
         for coord in ["channel", "sample", "ens"]:
             combined_metrics = scalar_coord_to_dim(combined_metrics, coord)
-        
+
         assert int(combined_metrics.forecast_step) == int(fstep), (
             "Different steps in data and metrics. Please check."
         )
@@ -173,10 +175,11 @@ def calc_scores_per_stream(
 
     return combined_metrics, points_per_sample
 
+
 def _plot_score_maps_per_stream(
     reader: Reader,
     stream: str,
-    region: str, 
+    region: str,
     score_data: VerifiedData,
     metrics: list[str],
     fstep: int,
@@ -191,19 +194,19 @@ def _plot_score_maps_per_stream(
      region :
         Region name to plot score maps for.
     score_data: VerifiedData
-        prediction and target stored in the data class. 
+        prediction and target stored in the data class.
     metrics: str
         List of all metrics to plot.
     fstep:
-        forecast step to plot. 
-    
+        forecast step to plot.
+
     Return
     ------
     None
     """
 
     cfg = reader.global_plotting_options
-    
+
     plotter = Plotter(
         {
             "image_format": cfg.get("image_format", "png"),
@@ -216,7 +219,7 @@ def _plot_score_maps_per_stream(
 
     map_dir = reader.runplot_dir / "score_maps" / stream
     map_dir.mkdir(parents=True, exist_ok=True)
-    
+
     preds = score_data.prediction
 
     plot_metrics = xr.concat(
@@ -228,24 +231,28 @@ def _plot_score_maps_per_stream(
         lat=preds.lat.reset_coords(drop=True),
         lon=preds.lon.reset_coords(drop=True),
         metric=metrics,
-    ).compute() 
-  
+    ).compute()
+
     if "ens" in preds.dims:
         plot_metrics["ens"] = preds.ens
 
     has_ens = "ens" in plot_metrics.coords
     ens_values = plot_metrics.coords["ens"].values if has_ens else [None]
-    
+
     for metric in plot_metrics.coords["metric"].values:
         for ens_val in tqdm(ens_values, f"Plotting metric - {metric}"):
-            tag = f"score_maps_{region}_{metric}_fstep_{fstep}" + (f"_ens_{ens_val}" if ens_val is not None else "")
+            tag = f"score_maps_{region}_{metric}_fstep_{fstep}" + (
+                f"_ens_{ens_val}" if ens_val is not None else ""
+            )
             for channel in plot_metrics.coords["channel"].values:
                 sel = {"metric": metric, "channel": channel}
                 if ens_val is not None:
                     sel["ens"] = ens_val
 
                 data = plot_metrics.sel(**sel).squeeze()
-                title = f"{metric} - {channel}: fstep {fstep}" + (f", ens {ens_val}" if ens_val is not None else "")
+                title = f"{metric} - {channel}: fstep {fstep}" + (
+                    f", ens {ens_val}" if ens_val is not None else ""
+                )
                 plotter.scatter_plot(data, map_dir, channel, tag=tag, title=title)
 
 
@@ -443,7 +450,9 @@ def metric_list_to_json(
     )
 
 
-def retrieve_metric_from_json(reader: Reader, stream: str, region: str, metric: str) -> xr.DataArray | None:
+def retrieve_metric_from_json(
+    reader: Reader, stream: str, region: str, metric: str
+) -> xr.DataArray | None:
     """
     Retrieve the score for a given run, stream, metric, epoch, and rank from a JSON file.
 
