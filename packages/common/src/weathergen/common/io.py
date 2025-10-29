@@ -161,6 +161,7 @@ class OutputDataset:
 
     name: str
     item_key: ItemKey
+    source_interval: TimeRange
 
     # (datapoints, channels, ens)
     data: ArrayType  # wrong type => array like
@@ -177,6 +178,16 @@ class OutputDataset:
     channels: list[str]
     geoinfo_channels: list[str]
     # lead time in hours defined as forecast step * length of forecast step (len_hours)
+
+    @classmethod
+    def create(cls, name, key, arrays: dict[str, ArrayType], attrs: dict[str, typing.Any]):
+        """
+        Create Output dataset from dictonaries.
+        """
+        assert "source_interval" in attrs, "missing expected attribute 'source_interval'"
+
+        source_interval = TimeRange(**attrs["source_interval"])
+        return cls(name, key, source_interval, **arrays, **attrs)
 
     @functools.cached_property
     def arrays(self) -> dict[str, ArrayType]:
