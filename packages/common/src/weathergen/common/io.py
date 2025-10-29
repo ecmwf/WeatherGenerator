@@ -297,7 +297,7 @@ class ZarrIO:
         """Get datasets for a output item."""
         group = self._get_group(key)
         datasets = {
-            name: OutputDataset(name, key, **dict(dataset.arrays()), **dataset.attrs)
+            name: OutputDataset.create(name, key, dict(dataset.arrays()), dataset.attrs)
             for name, dataset in group.groups()
         }
         datasets["key"] = key
@@ -328,7 +328,7 @@ class ZarrIO:
     def _write_metadata(self, dataset_group: zarr.Group, dataset: OutputDataset):
         dataset_group.attrs["channels"] = dataset.channels
         dataset_group.attrs["geoinfo_channels"] = dataset.geoinfo_channels
-        
+        dataset_group.attrs["source_interval"] = dataclasses.asdict(dataset.source_interval)
 
     def _write_arrays(self, dataset_group: zarr.Group, dataset: OutputDataset):
         for array_name, array in dataset.arrays.items():  # suffix is eg. data or coords
