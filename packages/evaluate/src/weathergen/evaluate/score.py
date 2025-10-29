@@ -53,7 +53,7 @@ def _get_skill_score(
 
     Returns
     ----------
-    skiil_score : xr.DataArray
+    skill_score : xr.DataArray
         Skill score data array
     """
 
@@ -179,10 +179,13 @@ class Scores:
             "l2": self.calc_l2,
             "mse": self.calc_mse,
             "rmse": self.calc_rmse,
+            "vrmse": self.calc_vrmse,
             "bias": self.calc_bias,
             "acc": self.calc_acc,
             "froct": self.calc_froct,
             "troct": self.calc_troct,
+            "fact": self.calc_fact,
+            "tact": self.calc_tact,
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
@@ -265,21 +268,25 @@ class Scores:
 
         arg_names: list[str] = inspect.getfullargspec(f).args[1:]
 
-        if score_name in ["froct", "troct"]:
-            args = {
-                "p": data.prediction,
-                "gt": data.ground_truth,
-                "p_next": data.prediction_next,
-                "gt_next": data.ground_truth_next,
-            }
-        elif score_name == "acc":
-            args = {
-                "p": data.prediction,
-                "gt": data.ground_truth,
-                "c": data.climatology,
-            }
-        else:
-            args = {"p": data.prediction, "gt": data.ground_truth}
+        score_args_map = {
+            "froct": ["p", "gt", "p_next", "gt_next"],
+            "troct": ["p", "gt", "p_next", "gt_next"],
+            "acc":   ["p", "gt", "c"],
+            "fact":  ["p", "c"],
+            "tact":  ["gt", "c"],
+        }
+
+        available = {
+            "p": data.prediction,
+            "gt": data.ground_truth,
+            "p_next": data.prediction_next,
+            "gt_next": data.ground_truth_next,
+            "c": data.climatology,
+        }
+
+        #assign p and gt by default if metrics do not have specific args
+        keys = score_args_map.get(score_name, ["p", "gt"])
+        args = {k: available[k] for k in keys}
 
         # Add group_by_coord if provided
         if group_by_coord is not None:
@@ -618,6 +625,28 @@ class Scores:
 
         return rmse
 
+    def calc_vrmse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
+        """
+        Calculate variance-normalized root mean squared error (VRMSE) of forecast data w.r.t. reference data
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the VRMSE score.
+        """
+        if self._agg_dims is None:
+            raise ValueError(
+                "Cannot calculate variance-normalized root mean squared error without aggregation dimensions (agg_dims=None)."
+            )
+
+        vrmse = np.sqrt(self.calc_mse(p, gt, group_by_coord) / (gt.var(dim=self._agg_dims)+1e-6))
+
+        return vrmse
+
     @staticmethod
     def sort_by_coords(da_to_sort: xr.DataArray, da_reference: xr.DataArray) -> xr.DataArray:
         """
@@ -737,7 +766,7 @@ class Scores:
         """
         if self._agg_dims is None:
             raise ValueError(
-                "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
+                "Cannot calculate rate of change without aggregation dimensions (agg_dims=None)."
             )
 
         froct = self.calc_change_rate(p, p_next)
@@ -776,7 +805,7 @@ class Scores:
         """
         if self._agg_dims is None:
             raise ValueError(
-                "Cannot calculate forecast activity without aggregation dimensions (agg_dims=None)."
+                "Cannot calculate rate of change without aggregation dimensions (agg_dims=None)."
             )
 
         troct = self.calc_change_rate(gt, gt_next)
@@ -788,12 +817,131 @@ class Scores:
 
         return troct
 
-    def _calc_acc_group(self, fcst: xr.DataArray, obs: xr.DataArray, spatial_dims: list[str]) -> xr.DataArray:
-        """ Calculate ACC for a single group
+    def _calc_act(
+        self,
+        x: xr.DataArray,
+        c: xr.DataArray,
+        group_by_coord: str | None = None,
+        spatial_dims: list = None,
+    ):
+        """
+        Calculate activity metric as standard deviation of forecast or target anomaly.
+
+        NOTE:
+        The climatlogical mean data clim_mean must fit to the forecast and ground truth data.
+
         Parameters
-        ----------  
+        ----------
+        x: xr.DataArray
+            Forecast or target data array
+        c: xr.DataArray
+            Climatological mean data array, which is used to calculate anomalies
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the activity score.
+        spatial_dims: List[str]
+            Names of spatial dimensions over which activity is calculated.
+            Note: No averaging is possible over these dimensions.
+        """
+
+        # Check if spatial_dims are in the data
+        spatial_dims = ["ipoint"] if spatial_dims is None else to_list(spatial_dims)
+
+        for dim in spatial_dims:
+            if dim not in x.dims:
+                raise ValueError(
+                    f"Spatial dimension '{dim}' not found in prediction data dimensions: {x.dims}"
+                )
+        if c is None:
+            return xr.full_like(x.sum(spatial_dims), np.nan)
+
+        # Calculate anomalies
+        ano = x - c
+
+        if group_by_coord:
+            # Apply groupby and calculate activity within each group using apply
+            ano_grouped = ano.groupby(group_by_coord)
+
+            # Use apply to calculate activity for each group - this preserves the coordinate structure
+            act = xr.concat(
+                [ano_group.std(dim=spatial_dims) for group_label, ano_group in ano_grouped],
+                dim=group_by_coord,
+            ).assign_coords({group_by_coord: list(ano_grouped.groups.keys())})
+
+        else:
+            # Calculate forecast activity over spatial dimensions (no grouping)
+            act = ano.std(dim=spatial_dims)
+
+        return act
+    
+    def calc_fact(
+        self,
+        p: xr.DataArray,
+        c: xr.DataArray,
+        group_by_coord: str | None = None,
+        spatial_dims: list = None,
+    ):
+        """
+        Calculate forecast activity metric as standard deviation of forecast anomaly.
+
+        NOTE:
+        The climatlogical mean data clim_mean must fit to the forecast data.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        c: xr.DataArray
+            Climatological mean data array, which is used to calculate anomalies
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the activity score.
+        spatial_dims: List[str]
+            Names of spatial dimensions over which activity is calculated.
+            Note: No averaging is possible over these dimensions.
+        """
+
+        return self._calc_act(p, c, group_by_coord, spatial_dims)
+    
+    def calc_tact(
+        self,
+        gt: xr.DataArray,
+        c: xr.DataArray,
+        group_by_coord: str | None = None,
+        spatial_dims: list = None,
+    ):
+        """
+        Calculate target activity metric as standard deviation of target anomaly.
+
+        NOTE:
+        The climatlogical mean data clim_mean must fit to the target data.
+
+        Parameters
+        ----------
+        gt: xr.DataArray
+            Target data array
+        c: xr.DataArray
+            Climatological mean data array, which is used to calculate anomalies
+        group_by_coord: str
+            Name of the coordinate to group by.
+            If provided, the coordinate becomes a new dimension of the activity score.
+        spatial_dims: List[str]
+            Names of spatial dimensions over which activity is calculated.
+            Note: No averaging is possible over these dimensions.
+        """
+
+        return self._calc_act(gt, c, group_by_coord, spatial_dims)
+
+    def _calc_acc_group(
+        self, fcst: xr.DataArray, obs: xr.DataArray, spatial_dims: list[str]
+    ) -> xr.DataArray:
+        """Calculate ACC for a single group
+        Parameters
+        ----------
+        ----------
         fcst: xr.DataArray
-            Forecast data for the group 
+            Forecast data for the group
+            Forecast data for the group
         obs: xr.DataArray
             Observation data for the group
         spatial_dims: List[str]
@@ -807,7 +955,7 @@ class Scores:
         return (fcst * obs).sum(spatial_dims) / np.sqrt(
             (fcst**2).sum(spatial_dims) * (obs**2).sum(spatial_dims)
         )
-    
+
     def calc_acc(
         self,
         p: xr.DataArray,
@@ -854,7 +1002,6 @@ class Scores:
         fcst_ano, obs_ano = p - c, gt - c
 
         if group_by_coord:
-
             # Apply groupby and calculate ACC within each group using apply
             fcst_grouped = fcst_ano.groupby(group_by_coord)
             obs_grouped = obs_ano.groupby(group_by_coord)
@@ -870,8 +1017,10 @@ class Scores:
 
         else:
             # Calculate ACC over spatial dimensions (no grouping)
-            acc = self._calc_acc_group(fcst_ano, obs_ano, spatial_dims) 
-           
+            acc = self._calc_acc_group(fcst_ano, obs_ano, spatial_dims)
+
+            acc = self._calc_acc_group(fcst_ano, obs_ano, spatial_dims)
+
         return acc
 
     def calc_bias(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):

@@ -61,6 +61,34 @@ def detect_grid_type(input_data_array: xr.DataArray) -> str:
     # Otherwise it's Gaussian (irregular spacing or reduced grid)
     return "gaussian"
 
+def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
+    """
+    Find all the pressure levels for each variable using regex and returns a dictionary
+    mapping variable names to their corresponding pressure levels.
+    Parameters
+    ----------
+        all_variables : list of variable names with pressure levels (e.g.,'q_500','t_2m').
+    Returns
+    -------
+        A tuple containing:
+        - var_dict: dict
+            Dictionary mapping variable names to lists of their corresponding pressure levels.
+        - pl: list of int
+            List of unique pressure levels found in the variable names.
+    """
+    var_dict = {}
+    pl = []
+    for var in all_variables:
+        match = re.search(r"^([a-zA-Z0-9_]+)_(\d+)$", var)
+        if match:
+            var_name = match.group(1)
+            pressure_level = int(match.group(2))
+            pl.append(pressure_level)
+            var_dict.setdefault(var_name, []).append(var)
+        else:
+            var_dict.setdefault(var, []).append(var)
+    pl = list(set(pl))
+    return var_dict, pl
 
 def reshape_dataset_adaptive(input_data_array: xr.DataArray) -> xr.Dataset:
     """
@@ -78,18 +106,7 @@ def reshape_dataset_adaptive(input_data_array: xr.DataArray) -> xr.Dataset:
     """
     grid_type = detect_grid_type(input_data_array)
 
-    if grid_type == "regular":
-        # Use original reshape logic for regular grids
-        return reshape_dataset_regular(input_data_array)
-    else:
-        # Use new logic for Gaussian/unstructured grids
-        return reshape_dataset_gaussian(input_data_array)
-
-
-def reshape_dataset_regular(input_data_array: xr.DataArray) -> xr.Dataset:
-    """
-    Original reshape logic for regular lat/lon grids.
-    """
+    # Original logic
     var_dict, pl = find_pl(input_data_array.channel.values)
     data_vars = {}
 
@@ -111,113 +128,20 @@ def reshape_dataset_regular(input_data_array: xr.DataArray) -> xr.Dataset:
         pressure_level=pl,
     )
 
-    # This is safe for regular grids
-    reshaped_dataset = reshaped_dataset.set_index(ipoint=("valid_time", "lat", "lon")).unstack(
-        "ipoint"
-    )
-
-    return reshaped_dataset
-
-
-def reshape_dataset_gaussian(input_data_array: xr.DataArray) -> xr.Dataset:
-    """
-    Reshape for Gaussian/unstructured grids - keeps spatial dimension as 'ncells'.
-    Follows CF conventions for unstructured grids.
-
-    Parameters
-    ----------
-    input_data_array : xr.DataArray
-        Input data with dimensions (ipoint, channel) - single timestep
-
-    Returns
-    -------
-    xr.Dataset
-        Dataset with dimensions (ncells,) or (pressure_level, ncells) for single timestep
-    """
-    var_dict, pl = find_pl(input_data_array.channel.values)
-
-    # Since we're processing one forecast step at a time, we have a single timestep
-    # Extract spatial coordinates
-    lats = input_data_array.coords["lat"].values
-    lons = input_data_array.coords["lon"].values
-    n_spatial = len(lats)
-
-    # Get the valid_time for this forecast step
-    if "valid_time" in input_data_array.coords:
-        valid_time = input_data_array.coords["valid_time"].values
-    elif "time" in input_data_array.coords:
-        valid_time = input_data_array.coords["time"].values
+    if grid_type == "regular":
+        # Use original reshape logic for regular grids
+        # This is safe for regular grids
+        reshaped_dataset = reshaped_dataset.set_index(ipoint=("valid_time", "lat", "lon")).unstack(
+            "ipoint"
+        )
     else:
-        valid_time = None
-
-    # Get forecast_step if available
-    if "forecast_step" in input_data_array.coords:
-        forecast_step = input_data_array.coords["forecast_step"].values
-    else:
-        forecast_step = None
-
-    # Get stream if available
-    if "stream" in input_data_array.coords:
-        stream = input_data_array.coords["stream"].values
-    else:
-        stream = None
-
-    # Reshape data: keep as (n_spatial,) or (n_levels, n_spatial)
-    data_vars = {}
-
-    for new_var, old_vars in var_dict.items():
-        if len(old_vars) > 1:
-            # Variable with pressure levels: (ipoint, n_levels) -> (n_levels, ipoint)
-            data = input_data_array.sel(channel=old_vars).values.T
-
-            data_vars[new_var] = xr.DataArray(
-                data,
-                dims=["pressure_level", "ncells"],
-            )
-        else:
-            # Surface variable: (ipoint,)
-            data = input_data_array.sel(channel=old_vars[0]).values
-
-            data_vars[new_var] = xr.DataArray(
-                data,
-                dims=["ncells"],
-            )
-
-    # Create dataset with proper coordinates
-    reshaped_dataset = xr.Dataset(data_vars)
-
-    # Add coordinates
-    coords_dict = {
-        "ncells": np.arange(n_spatial),
-        "lat": (["ncells"], lats),
-        "lon": (["ncells"], lons),
-    }
-
-    # Add optional coordinates
-    for coord_name, coord_value in [
-        ("pressure_level", pl),
-        ("valid_time", valid_time),
-        ("forecast_step", forecast_step),
-        ("stream", stream),
-    ]:
-        if coord_value is not None:
-            coords_dict[coord_name] = coord_value
-    reshaped_dataset = reshaped_dataset.assign_coords(**coords_dict)
-
-    # Add attributes to lat/lon to mark them as auxiliary coordinates
-    reshaped_dataset["lat"].attrs = {
-        "standard_name": "latitude",
-        "long_name": "latitude",
-        "units": "degrees_north",
-    }
-    reshaped_dataset["lon"].attrs = {
-        "standard_name": "longitude",
-        "long_name": "longitude",
-        "units": "degrees_east",
-    }
-
-    # Add grid mapping information
-    reshaped_dataset.attrs["grid_type"] = "gaussian"
+        # Use new logic for Gaussian/unstructured grids
+        reshaped_dataset = reshaped_dataset.set_index(ipoint2=("ipoint", "valid_time")).unstack(
+            "ipoint2"
+        )
+        # rename ipoint to ncells
+        reshaped_dataset = reshaped_dataset.rename_dims({"ipoint": "ncells"})
+        reshaped_dataset = reshaped_dataset.rename_vars({"ipoint": "ncells"})
 
     return reshaped_dataset
 
@@ -241,11 +165,8 @@ def add_gaussian_grid_metadata(ds: xr.Dataset, grid_info: dict | None = None) ->
         Dataset with added grid metadata
     """
     ds = ds.copy()
-
-    # Add coordinates attribute to data variables
-    for var in ds.data_vars:
-        if "ncells" in ds[var].dims:
-            ds[var].attrs["coordinates"] = "lat lon"
+    # Add grid mapping information
+    ds.attrs["grid_type"] = "gaussian"
 
     # If grid info provided, add it
     if grid_info:
@@ -254,6 +175,31 @@ def add_gaussian_grid_metadata(ds: xr.Dataset, grid_info: dict | None = None) ->
 
     return ds
 
+
+
+
+def add_conventions(stream: str, run_id: str, ds: xr.Dataset) -> xr.Dataset:
+    """
+    Add CF conventions to the dataset attributes.
+    Parameters
+    ----------
+        stream : Stream name to include in the title attribute.
+        run_id : Run ID to include in the title attribute.
+        ds : Input xarray Dataset to add conventions to.
+    Returns
+    -------
+        xarray Dataset with CF conventions added to attributes.
+    """
+    ds = ds.copy()
+    ds.attrs["title"] = f"WeatherGenerator Output for {run_id} using stream {stream}"
+    ds.attrs["institution"] = "WeatherGenerator Project"
+    ds.attrs["source"] = "WeatherGenerator v0.0"
+    ds.attrs["history"] = (
+        "Created using the export_inference.py script on "
+        + np.datetime_as_string(np.datetime64("now"), unit="s")
+    )
+    ds.attrs["Conventions"] = "CF-1.12"
+    return ds
 
 def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
     """
@@ -376,60 +322,6 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
     dataset.attrs = ds.attrs
 
     return dataset
-
-
-def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
-    """
-    Find all the pressure levels for each variable using regex and returns a dictionary
-    mapping variable names to their corresponding pressure levels.
-    Parameters
-    ----------
-        all_variables : list of variable names with pressure levels (e.g.,'q_500','t_2m').
-    Returns
-    -------
-        A tuple containing:
-        - var_dict: dict
-            Dictionary mapping variable names to lists of their corresponding pressure levels.
-        - pl: list of int
-            List of unique pressure levels found in the variable names.
-    """
-    var_dict = {}
-    pl = []
-    for var in all_variables:
-        match = re.search(r"^([a-zA-Z0-9_]+)_(\d+)$", var)
-        if match:
-            var_name = match.group(1)
-            pressure_level = int(match.group(2))
-            pl.append(pressure_level)
-            var_dict.setdefault(var_name, []).append(var)
-        else:
-            var_dict.setdefault(var, []).append(var)
-    pl = list(set(pl))
-    return var_dict, pl
-
-
-def add_conventions(stream: str, run_id: str, ds: xr.Dataset) -> xr.Dataset:
-    """
-    Add CF conventions to the dataset attributes.
-    Parameters
-    ----------
-        stream : Stream name to include in the title attribute.
-        run_id : Run ID to include in the title attribute.
-        ds : Input xarray Dataset to add conventions to.
-    Returns
-    -------
-        xarray Dataset with CF conventions added to attributes.
-    """
-    ds = ds.copy()
-    ds.attrs["title"] = f"WeatherGenerator Output for {run_id} using stream {stream}"
-    ds.attrs["institution"] = "WeatherGenerator Project"
-    ds.attrs["source"] = "WeatherGenerator v0.0"
-    ds.attrs["history"] = "Created using the zarr_nc.py script on " + np.datetime_as_string(
-        np.datetime64("now"), unit="s"
-    )
-    ds.attrs["Conventions"] = "CF-1.12"
-    return ds
-
 
 def output_filename(
     prefix: str,
@@ -661,6 +553,7 @@ def parse_args(args: list) -> argparse.Namespace:
         "--run-id",
         type=str,
         help=" Zarr folder which contains target and inference results",
+        required=True,
     )
 
     parser.add_argument(
@@ -669,12 +562,14 @@ def parse_args(args: list) -> argparse.Namespace:
         choices=["prediction", "target"],
         nargs="+",
         help="List of type of data to convert (e.g. prediction target)",
+        required=True,
     )
 
     parser.add_argument(
         "--output-dir",
         type=str,
         help="Output directory to save the NetCDF files",
+        required=True,
     )
 
     parser.add_argument(
@@ -682,6 +577,7 @@ def parse_args(args: list) -> argparse.Namespace:
         type=str,
         choices=["netcdf", "grib"],
         help="Output file format (currently only netcdf supported)",
+        required=True,
     )
 
     parser.add_argument(
@@ -689,6 +585,7 @@ def parse_args(args: list) -> argparse.Namespace:
         type=str,
         choices=["ERA5"],
         help="Stream name to retrieve data for",
+        required=True,
     )
 
     parser.add_argument(
