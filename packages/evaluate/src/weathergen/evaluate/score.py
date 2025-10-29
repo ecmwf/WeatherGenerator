@@ -241,8 +241,8 @@ class Scores:
         if score_name in self.det_metrics_dict.keys():
             f = self.det_metrics_dict[score_name]
         elif score_name in self.prob_metrics_dict.keys():
-            assert self._ens_dim in data.prediction.dims, (
-                f"Probablistic score {score_name} chosen, but ensemble dimension {self._ens_dim} not found in prediction data"
+            assert self.ens_dim in data.prediction.dims, (
+                f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} not found in prediction data"
             )
             f = self.prob_metrics_dict[score_name]
         else:
@@ -258,6 +258,7 @@ class Scores:
             # Aggregate over all dimensions of the prediction data
             self._agg_dims = list(data.prediction.dims)
         else:
+            # Check if _agg_dims is in prediction data
             for dim in self._agg_dims_in:
                 if dim not in data.prediction.dims:
                     raise ValueError(
@@ -270,9 +271,9 @@ class Scores:
         score_args_map = {
             "froct": ["p", "gt", "p_next", "gt_next"],
             "troct": ["p", "gt", "p_next", "gt_next"],
-            "acc": ["p", "gt", "c"],
-            "fact": ["p", "c"],
-            "tact": ["gt", "c"],
+            "acc":   ["p", "gt", "c"],
+            "fact":  ["p", "c"],
+            "tact":  ["gt", "c"],
         }
 
         available = {
@@ -283,7 +284,7 @@ class Scores:
             "c": data.climatology,
         }
 
-        # assign p and gt by default if metrics do not have specific args
+        #assign p and gt by default if metrics do not have specific args
         keys = score_args_map.get(score_name, ["p", "gt"])
         args = {k: available[k] for k in keys}
 
@@ -312,7 +313,6 @@ class Scores:
             return [dims]
         if isinstance(dims, list) and all(isinstance(d, str) for d in dims):
             return dims
-
         raise ValueError("agg_dims must be 'all', a string, or list of strings.")
 
     def _validate_ens_dim(self, dim: str) -> str:
@@ -643,7 +643,7 @@ class Scores:
                 "Cannot calculate variance-normalized root mean squared error without aggregation dimensions (agg_dims=None)."
             )
 
-        vrmse = np.sqrt(self.calc_mse(p, gt, group_by_coord) / (gt.var(dim=self._agg_dims) + 1e-6))
+        vrmse = np.sqrt(self.calc_mse(p, gt, group_by_coord) / (gt.var(dim=self._agg_dims)+1e-6))
 
         return vrmse
 
@@ -873,7 +873,7 @@ class Scores:
             act = ano.std(dim=spatial_dims)
 
         return act
-
+    
     def calc_fact(
         self,
         p: xr.DataArray,
@@ -902,7 +902,7 @@ class Scores:
         """
 
         return self._calc_act(p, c, group_by_coord, spatial_dims)
-
+    
     def calc_tact(
         self,
         gt: xr.DataArray,
@@ -1242,7 +1242,7 @@ class Scores:
         """
         Calculate the spread of the forecast ensemble
         """
-        ens_std = p.std(dim=self._ens_dim)
+        ens_std = p.std(dim=self.ens_dim)
 
         if group_by_coord:
             ens_std = ens_std.groupby(group_by_coord)
@@ -1309,15 +1309,15 @@ class Scores:
         if method == "ensemble":
             func_kwargs = {
                 "forecasts": p,
-                "member_dim": self._ens_dim,
+                "member_dim": self.ens_dim,
                 "dim": self._agg_dims,
                 **kwargs,
             }
             crps_func = xskillscore.crps_ensemble
         elif method == "gaussian":
             func_kwargs = {
-                "mu": p.mean(dim=self._ens_dim),
-                "sig": p.std(dim=self._ens_dim),
+                "mu": p.mean(dim=self.ens_dim),
+                "sig": p.std(dim=self.ens_dim),
                 "dim": self._agg_dims,
                 **kwargs,
             }
@@ -1400,13 +1400,13 @@ class Scores:
                 )
 
         # calculate ranks for all data points
-        rank = (obs_stacked >= fcst_stacked).sum(dim=self._ens_dim)
+        rank = (obs_stacked >= fcst_stacked).sum(dim=self.ens_dim)
         # and count occurence of rank values
         rank.name = "rank"  # name for xr.DataArray is required for histogram-method
         rank_counts = histogram(
             rank,
             dim=["npoints"],
-            bins=np.arange(len(fcst_stacked[self._ens_dim]) + 2),
+            bins=np.arange(len(fcst_stacked[self.ens_dim]) + 2),
             block_size=None if rank.chunks is None else "auto",
         )
 
@@ -1423,7 +1423,7 @@ class Scores:
         See https://xskillscore.readthedocs.io/en/stable/api
         Note: this version is found to be very slow. Use calc_rank_histogram alternatively.
         """
-        rank_hist = xskillscore.rank_histogram(gt, p, member_dim=self._ens_dim, dim=self._agg_dims)
+        rank_hist = xskillscore.rank_histogram(gt, p, member_dim=self.ens_dim, dim=self._agg_dims)
 
         return rank_hist
 
