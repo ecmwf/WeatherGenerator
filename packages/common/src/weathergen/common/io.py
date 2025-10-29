@@ -25,6 +25,7 @@ from numpy.typing import NDArray
 CHUNK_N_SAMPLES = 16392
 type DType = np.float32
 type NPDT64 = datetime64
+type ArrayType = zarr.Array | np.NDArray[DType]
 
 
 _logger = logging.getLogger(__name__)
@@ -134,23 +135,23 @@ class OutputDataset:
     item_key: ItemKey
 
     # (datapoints, channels, ens)
-    data: zarr.Array | NDArray  # wrong type => array like
+    data: ArrayType  # wrong type => array like
 
     # (datapoints,)
-    times: zarr.Array | NDArray
+    times: ArrayType
 
     # (datapoints, 2)
-    coords: zarr.Array | NDArray
+    coords: ArrayType
 
     # (datapoints, geoinfos) geoinfos are stream dependent => 0 for most gridded data
-    geoinfo: zarr.Array | NDArray
+    geoinfo: ArrayType
 
     channels: list[str]
     geoinfo_channels: list[str]
     # lead time in hours defined as forecast step * length of forecast step (len_hours)
 
     @functools.cached_property
-    def arrays(self) -> dict[str, zarr.Array | NDArray]:
+    def arrays(self) -> dict[str, ArrayType]:
         """Iterate over the arrays and their names."""
         return {
             "data": self.data,
