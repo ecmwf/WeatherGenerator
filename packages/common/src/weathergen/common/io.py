@@ -37,6 +37,34 @@ def is_ndarray(obj: typing.Any) -> bool:
 
 
 @dataclasses.dataclass
+class TimeRange:
+    start: np.datetime64
+    end: np.datetime64
+
+    def __post_init__(self):
+        # ensure consistent type
+        self.start = self.start.astype("np.datetime64[ns]")
+        self.end = self.end.astype("np.datetime64[ns]")
+
+        assert self.start < self.end
+
+    def forecast_interval(self, forecast_dt_hours: int, fstep: int) -> "TimeRange":
+        assert forecast_dt_hours > 0 and fstep >= 0
+        offset = np.timedelta64(forecast_dt_hours * fstep, "h")
+        return TimeRange(self.start + offset, self.end + offset)
+
+    def get_lead_time(
+        self, abs_time: np.datetime64 | NDArray[np.datetime64]
+    ) -> NDArray[np.datetime64]:
+        if isinstance(abs_time, np.datetime64):
+            abs_time = np.array([abs_time])
+
+        abs_time.astype("np.datetiem64[ns]")
+        assert all(abs_time > self.end)
+        return abs_time - self.end
+
+
+@dataclasses.dataclass
 class IOReaderData:
     """
     Equivalent to data_reader_base.ReaderData
