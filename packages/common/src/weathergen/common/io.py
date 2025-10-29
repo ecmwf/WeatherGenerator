@@ -392,6 +392,9 @@ class OutputBatchData:
     # sample, stream, tensor(datapoint, channel+coords)
     # => datapoints is accross all datasets per stream
     sources: list[list[IOReaderData]]
+    
+    # sample
+    source_intervals: list[TimeRange]
 
     # fstep, stream, redundant dim (size 1), tensor(sample x datapoint, channel)
     targets: list[list[list]]
@@ -444,9 +447,7 @@ class OutputBatchData:
         stream_idx = self.streams[key.stream]
         datapoints = self._get_datapoints_per_sample(offset_key, stream_idx)
 
-        # TODO extract real source interval start/end times
-        dummy_date = np.datetime64("2020-01-01")
-        source_interval = TimeRange(dummy_date, dummy_date + np.timedelta64(5, "D"))
+        source_interval = self.source_intervals[offset_key.sample]
 
         _logger.debug(
             f"forecast_step: {key.forecast_step} = {offset_key.forecast_step} (rel_step) + "
