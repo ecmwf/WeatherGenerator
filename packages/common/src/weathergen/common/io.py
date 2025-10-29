@@ -418,7 +418,6 @@ class OutputBatchData:
 
     sample_start: int
     forecast_offset: int
-    t_window_len_hours: int
 
     @functools.cached_property
     def samples(self):
