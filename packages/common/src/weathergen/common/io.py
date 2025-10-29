@@ -392,7 +392,7 @@ class OutputBatchData:
     # sample, stream, tensor(datapoint, channel+coords)
     # => datapoints is accross all datasets per stream
     sources: list[list[IOReaderData]]
-    
+
     # sample
     source_intervals: list[TimeRange]
 
