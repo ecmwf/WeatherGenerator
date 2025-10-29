@@ -173,7 +173,7 @@ def calc_scores_per_stream(
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
-    return combined_metrics, points_per_sample
+    return metric_stream, points_per_sample
 
 
 def _plot_score_maps_per_stream(
