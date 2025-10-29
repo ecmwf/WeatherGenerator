@@ -25,9 +25,11 @@ from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.icon_dataset import IconDataset
 from weathergen.datasets.masking import Masker
+from weathergen.datasets.cropping import Cropper
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
+from weathergen.datasets.tokenizer_cropping import TokenizerCropping
 from weathergen.datasets.utils import (
     compute_idxs_predict,
     compute_offsets_scatter_embed,
@@ -233,6 +235,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             msg = "masked token modeling does not support self.input_window_steps > 1; "
             msg += "increase window length"
             assert self.input_window_steps == 1, msg
+        elif cf.training_mode == "cropping":
+            cropper = Cropper(cf)
+            self.tokenizer = TokenizerMasking(cf.healpix_level, cropper)
         else:
             assert False, f"Unsupported training mode: {cf.training_mode}"
 
@@ -379,7 +384,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             stream_ds[0].mean[stream_ds[0].source_idx],
                         )
                         stream_data.source_is_spoof = True
+                    
+                    logger.debug("[Sampler] idx=%s | stream=%s | time_win=%s | token_size=%s",
+                                idx, stream_info.get("name", "?"), str(time_win_source), stream_info.get("token_size"))
 
+                    logger.debug("[Sampler] rdata.data.shape=%s", rdata.data.shape)
                     # preprocess data for model input
                     (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                         stream_info,
@@ -387,7 +396,21 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         (time_win_source.start, time_win_source.end),
                         stream_ds[0].normalize_coords,
                     )
-
+                    logger.debug("[Sampler] ss_cells.len=%s | ss_lens.shape=%s | ss_centroids.shape=%s",
+                                len(ss_cells), ss_lens.shape, len(ss_centroids))
+                    
+                    # count how many cells are non-empty
+                    non_empty_cells = 0
+                    for l in ss_lens:
+                        if l > 0:
+                            non_empty_cells += 1
+                    logger.debug("[Sampler] non_empty_cells=%s / %s", non_empty_cells, len(ss_lens))
+                    
+                    # debug the ss_cells content 10 idx only
+                    for cidx, cell in enumerate(ss_cells):
+                        if cidx < 1034 and cidx >= 1024:
+                            logger.debug("[Sampler] ss_cells[%s].shape=%s", cidx, cell.shape)
+                        
                     # TODO: rdata only be collected in validation mode
                     stream_data.add_source(rdata, ss_lens, ss_cells, ss_centroids)
 
