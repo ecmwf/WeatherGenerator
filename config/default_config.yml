@@ -210,3 +210,4 @@ train_log_freq:
   metrics: 20
   checkpoint: 250
 
+log_level: DEBUG
