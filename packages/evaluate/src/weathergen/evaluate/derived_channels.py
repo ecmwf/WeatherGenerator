@@ -21,9 +21,11 @@ class DeriveChannels:
         Initializes the DeriveChannels class with necessary configurations for channel derivation.
 
         Args:
-            available_channels (np.array): an array of all available channel names in the datasets (target or pred).
+            available_channels (np.array): an array of all available channel names 
+            in the datasets (target or pred).
             channels (list): A list of channels of interest to be evaluated and/or plotted.
-            stream_cfg (dict): A dictionary containing the stream configuration settings for evaluation and plottings.
+            stream_cfg (dict): A dictionary containing the stream configuration settings for 
+            evaluation and plottings.
 
         Returns:
             None
@@ -147,6 +149,7 @@ class DeriveChannels:
                     )
             else:
                 _logger.debug(
-                    f"Calculation of {tag} is skipped because it is included in the available channels..."
+                    f"Calculation of {tag} is skipped because it is included "
+                    "in the available channels..."
                 )
         return data_tars, data_preds, self.channels
