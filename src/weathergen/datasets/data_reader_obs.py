@@ -185,6 +185,7 @@ class DataReaderObs(DataReaderBase):
                 self.indices_end = np.append(
                     self.indices_end,
                     np.ones(
+                        # add (len_hrs + 1) since above we also have diff_in_hours_start + len_hrs
                         (diff_in_hours_end - self.hrly_index.shape[0] + (len_hrs + 1)) // step_hrs,
                         dtype=int,
                     )
