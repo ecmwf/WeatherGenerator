@@ -191,19 +191,21 @@ def evaluate_from_config(cfg, mlflow_client):
 
         channels_set = collect_channels(scores_dict, metric, region, runs)
 
-        for run_id, metrics_dict in reordered_dict.items():
-            parent_run = get_or_create_mlflow_parent_run(mlflow_client, run_id)
+        for run_id, run in runs.items():
+            reader = WeatherGenReader(run, run_id, private_paths)
+            from_run_id = reader.inference_cfg["from_run_id"]
+            parent_run = get_or_create_mlflow_parent_run(mlflow_client, from_run_id)
             _logger.info(f"MLFlow parent run: {parent_run}")
             phase = "eval"
             with mlflow.start_run(run_id=parent_run.info.run_id):
                 with mlflow.start_run(
-                    run_name=f"{phase}_{run_id}",
+                    run_name=f"{phase}_{from_run_id}_{run_id}",
                     parent_run_id=parent_run.info.run_id,
                     nested=True,
                 ) as run:
                     mlflow.set_tags(MlFlowUpload.run_tags(run_id, phase))
                     log_scores(
-                        metrics_dict,
+                        reordered_dict[run_id],
                         mlflow_client,
                         run.info.run_id,
                         channels_set,
