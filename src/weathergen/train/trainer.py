@@ -48,7 +48,7 @@ from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
-from weathergen.train.trainer_base import TrainerBase
+from weathergen.train.trainer_base import TrainerBase, get_target_and_aux_calculator
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.utils import get_dtype
@@ -331,6 +331,8 @@ class Trainer(TrainerBase):
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
 
+        self.target_and_aux_calculator = get_target_and_aux_calculator(cf, self.model, None, ema_model = self.ema_model)
+
         # if with_fsdp then parameter count is unreliable
         if is_root() and not cf.with_fsdp and not cf.with_ddp:
             self.model.print_num_parameters()
@@ -604,6 +606,7 @@ class Trainer(TrainerBase):
                 enabled=cf.with_mixed_precision,
             ):
                 output = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
+                targets, aux_outputs = self.target_and_aux_calculator.compute(bidx, batch, self.model)
             targets = {"physical": batch[0]}
             loss, loss_values = self.loss_calculator.compute_loss(
                 preds=output,
@@ -613,10 +616,13 @@ class Trainer(TrainerBase):
                 kl = torch.cat([posterior.kl() for posterior in output.latent])
                 loss += cf.latent_noise_kl_weight * kl.mean()
 
+            self.target_and_aux_calculator.update_state_pre_backward(bidx, batch, self.model)
+
             # backward pass
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss).backward()
             # loss_values.loss.backward()
+
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
@@ -635,6 +641,8 @@ class Trainer(TrainerBase):
             self.grad_scaler.step(self.optimizer)
             self.grad_scaler.update()
             # self.optimizer.step()
+
+            self.target_and_aux_calculator.update_state_post_opt_step(bidx, batch, self.model)
 
             # update learning rate
             self.lr_scheduler.step()
