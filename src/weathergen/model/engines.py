@@ -386,7 +386,6 @@ class EnsPredictionHead(torch.nn.Module):
                 self.pred_heads[-1].append(fal)
 
     #########################################
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
     def forward(self, toks):
         preds = []
         for pred_head in self.pred_heads:

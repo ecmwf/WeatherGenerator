@@ -16,13 +16,35 @@ import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
 
+from weathergen.evaluate.clim_utils import get_climatology
 from weathergen.evaluate.io_reader import Reader
-from weathergen.evaluate.plot_utils import plot_metric_region
-from weathergen.evaluate.plotter import LinePlots, Plotter
+from weathergen.evaluate.plot_utils import (
+    bar_plot_metric_region,
+    plot_metric_region,
+    score_card_metric_region,
+)
+from weathergen.evaluate.plotter import BarPlots, LinePlots, Plotter, ScoreCards
 from weathergen.evaluate.score import VerifiedData, get_score
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
+
+
+def get_next_data(fstep, da_preds, da_tars, fsteps):
+    """
+    Get the next forecast step data for the given forecast step.
+    """
+    fstep_idx = fsteps.index(fstep)
+    # Get the next forecast step
+    next_fstep = fsteps[fstep_idx + 1] if fstep_idx + 1 < len(fsteps) else None
+    if next_fstep is not None:
+        preds_next = da_preds.get(next_fstep, None)
+        tars_next = da_tars.get(next_fstep, None)
+    else:
+        preds_next = None
+        tars_next = None
+
+    return preds_next, tars_next
 
 
 def calc_scores_per_stream(
@@ -47,18 +69,22 @@ def calc_scores_per_stream(
     Tuple of xarray DataArray containing the scores and the number of points per sample.
     """
 
-    _logger.info(
-        f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}..."
-    )
+    _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
 
     available_data = reader.check_availability(stream, mode="evaluation")
+
+    fsteps = available_data.fsteps
+    samples = available_data.samples
+    channels = available_data.channels
+    ensemble = available_data.ensemble
 
     output_data = reader.get_data(
         stream,
         region=region,
-        fsteps=available_data.fsteps,
-        samples=available_data.samples,
-        channels=available_data.channels,
+        fsteps=fsteps,
+        samples=samples,
+        channels=channels,
+        ensemble=ensemble,
         return_counts=True,
     )
 
@@ -66,20 +92,11 @@ def calc_scores_per_stream(
     da_tars = output_data.target
     points_per_sample = output_data.points_per_sample
 
-    # get coordinate information from retrieved data
-    fsteps = [int(k) for k in da_tars.keys()]
-
-    first_da = list(da_preds.values())[0]
-
-    # TODO: improve the way we handle samples.
-    samples = list(np.atleast_1d(np.unique(first_da.sample.values)))
-    channels = list(np.atleast_1d(first_da.channel.values))
-
-    metric_list = []
+    aligned_clim_data = get_climatology(reader, da_tars, stream)
 
     metric_stream = xr.DataArray(
         np.full(
-            (len(samples), len(fsteps), len(channels), len(metrics)),
+            (len(samples), len(fsteps), len(channels), len(metrics), len(ensemble)),
             np.nan,
         ),
         coords={
@@ -87,25 +104,27 @@ def calc_scores_per_stream(
             "forecast_step": fsteps,
             "channel": channels,
             "metric": metrics,
+            "ens": ensemble,
         },
     )
 
-    for (fstep, tars), (_, preds) in zip(
-        da_tars.items(), da_preds.items(), strict=False
-    ):
+    for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         _logger.debug(f"Verifying data for stream {stream}...")
 
-        if preds.ipoint.size > 0:
-            score_data = VerifiedData(preds, tars)
+        preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
 
+        if preds.ipoint.size > 0:
+            climatology = aligned_clim_data[fstep] if aligned_clim_data else None
+            score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
             # Build up computation graphs for all metrics
-            _logger.debug(
-                f"Build computation graphs for metrics for stream {stream}..."
-            )
+            _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
 
             combined_metrics = [
                 get_score(
-                    score_data, metric, agg_dims="ipoint", group_by_coord="sample"
+                    score_data,
+                    metric,
+                    agg_dims="ipoint",
+                    group_by_coord="sample",
                 )
                 for metric in metrics
             ]
@@ -117,6 +136,7 @@ def calc_scores_per_stream(
             combined_metrics = combined_metrics.compute()
             combined_metrics = scalar_coord_to_dim(combined_metrics, "channel")
             combined_metrics = scalar_coord_to_dim(combined_metrics, "sample")
+            combined_metrics = scalar_coord_to_dim(combined_metrics, "ens")
         else:
             # depending on the datset, there might be no data (e.g. no CERRA in southern hemisphere region)
             _logger.warning(
@@ -124,19 +144,27 @@ def calc_scores_per_stream(
             )
             continue
 
-        metric_list.append(combined_metrics)
+        assert int(combined_metrics.forecast_step) == int(fstep), (
+            "Different steps in data and metrics. Please check."
+        )
 
-        metric_stream.loc[{"forecast_step": int(fstep)}] = combined_metrics
+        criteria = {
+            "forecast_step": int(combined_metrics.forecast_step),
+            "sample": combined_metrics.sample,
+            "channel": combined_metrics.channel,
+        }
+
+        if "ens" in combined_metrics.dims:
+            criteria["ens"] = combined_metrics.ens
+
+        metric_stream.loc[criteria] = combined_metrics
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
-
-    metric_stream = xr.concat(metric_list, dim="forecast_step")
-    metric_stream = metric_stream.assign_coords({"forecast_step": fsteps})
 
     return metric_stream, points_per_sample
 
 
-def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[str]:
+def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
     """
     Plot the data for a given run and stream.
 
@@ -148,10 +176,6 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
         Stream name to plot data for.
     global_plotting_opts: dict
         Dictionary containing all plotting options that apply globally to all run_ids
-
-    Returns
-    -------
-    List of plot names generated during the plotting process.
     """
     run_id = reader.run_id
 
@@ -176,9 +200,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
         "image_format": global_plotting_opts.get("image_format", "png"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
-        "plot_subtimesteps": reader.get_inference_stream_attr(
-            stream, "tokenize_spacetime", False
-        ),
+        "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
     }
 
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
@@ -189,6 +211,10 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
     plot_maps = plot_settings.get("plot_maps", False)
     if not isinstance(plot_maps, bool):
         raise TypeError("plot_maps must be a boolean.")
+
+    plot_target = plot_settings.get("plot_target", True)
+    if not isinstance(plot_target, bool):
+        raise TypeError("plot_target must be a boolean.")
 
     # Check if histograms should be plotted
     plot_histograms = plot_settings.get("plot_histograms", False)
@@ -204,6 +230,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
         samples=available_data.samples,
         fsteps=available_data.fsteps,
         channels=available_data.channels,
+        ensemble=available_data.ensemble,
     )
 
     da_tars = model_output.target
@@ -220,19 +247,11 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
         da_tars, da_preds, available_data.channels, global_plotting_opts[stream]
     )
 
-    plot_names = []
-
-    for (fstep, tars), (_, preds) in zip(
-        da_tars.items(), da_preds.items(), strict=False
-    ):
+    for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         plot_chs = list(np.atleast_1d(tars.channel.values))
         plot_samples = list(np.unique(tars.sample.values))
 
-        for sample in tqdm(
-            plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"
-        ):
-            plots = []
-
+        for sample in tqdm(plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"):
             data_selection = {
                 "sample": sample,
                 "stream": stream,
@@ -240,35 +259,39 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> list[s
             }
 
             if plot_maps:
-                map_tar = plotter.create_maps_per_sample(
-                    tars, plot_chs, data_selection, "targets", maps_config
-                )
+                if plot_target:
+                    plotter.create_maps_per_sample(
+                        tars, plot_chs, data_selection, "targets", maps_config
+                    )
+                for ens in available_data.ensemble:
+                    preds_ens = (
+                        preds.sel(ens=ens) if "ens" in preds.dims and ens != "mean" else preds
+                    )
+                    preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
+                    preds_name = "_".join(
+                        filter(None, ["preds", preds_tag])
+                    )  # avoid trailing underscore
 
-                map_pred = plotter.create_maps_per_sample(
-                    preds, plot_chs, data_selection, "preds", maps_config
-                )
-                plots.extend([map_tar, map_pred])
+                    plotter.create_maps_per_sample(
+                        preds_ens, plot_chs, data_selection, preds_name, maps_config
+                    )
 
-            if plot_histograms:
-                h = plotter.create_histograms_per_sample(
-                    tars, preds, plot_chs, data_selection
-                )
-                plots.append(h)
+                    if plot_histograms:
+                        plotter.create_histograms_per_sample(
+                            tars, preds_ens, plot_chs, data_selection, preds_tag
+                        )
 
             plotter = plotter.clean_data_selection()
 
-            plot_names.append(plots)
-
     if plot_animations:
         plot_fsteps = da_tars.keys()
-        h = plotter.animation(
-            plot_samples, plot_fsteps, plot_chs, data_selection, "preds"
-        )
-        h = plotter.animation(
-            plot_samples, plot_fsteps, plot_chs, data_selection, "targets"
-        )
+        for ens in available_data.ensemble:
+            preds_name = "preds" if "ens" not in preds.dims else f"preds_ens_{ens}"
+            plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, preds_name)
+        if plot_target:
+            plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
 
-    return plot_names
+    return
 
 
 def metric_list_to_json(
@@ -317,9 +340,7 @@ def metric_list_to_json(
             metric_now = metrics_stream.sel(metric=metric)
 
             # Save as individual DataArray, not Dataset
-            metric_now.attrs["npoints_per_sample"] = (
-                npoints_sample_stream.values.tolist()
-            )
+            metric_now.attrs["npoints_per_sample"] = npoints_sample_stream.values.tolist()
             metric_dict = metric_now.to_dict()
 
             # Match the expected filename pattern
@@ -398,15 +419,19 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         "fig_size": plt_opt.get("fig_size", (8, 10)),
         "log_scale": eval_opt.get("log_scale", False),
         "add_grid": eval_opt.get("add_grid", False),
+        "plot_ensemble": eval_opt.get("plot_ensemble", False),
     }
 
     plotter = LinePlots(plot_cfg, summary_dir)
-
+    sc_plotter = ScoreCards(plot_cfg, summary_dir)
+    br_plotter = BarPlots(plot_cfg, summary_dir)
     for region in regions:
         for metric in metrics:
-            plot_metric_region(
-                metric, region, runs, scores_dict, plotter, print_summary
-            )
+            plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+            if eval_opt.get("score_cards", False):
+                score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
+            if eval_opt.get("bar_plots", False):
+                bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
 
 
 ############# Utility functions ############
@@ -441,6 +466,7 @@ def common_ranges(
         if var in maps_config:
             if not isinstance(maps_config[var].get("vmax"), (int | float)):
                 list_max = calc_bounds(data_tars, data_preds, var, "max")
+                list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
 
                 maps_config[var].update({"vmax": float(max(list_max))})
 
@@ -451,12 +477,12 @@ def common_ranges(
 
         else:
             list_max = calc_bounds(data_tars, data_preds, var, "max")
+            list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
 
             list_min = calc_bounds(data_tars, data_preds, var, "min")
+            list_min = np.concatenate([arr.flatten() for arr in list_min]).tolist()
 
-            maps_config.update(
-                {var: {"vmax": float(max(list_max)), "vmin": float(min(list_min))}}
-            )
+            maps_config.update({var: {"vmax": float(max(list_max)), "vmin": float(min(list_min))}})
 
     return maps_config
 

@@ -10,7 +10,6 @@ authors = [
 requires-python = ">=3.12,<3.13"
 # TODO: split the plotting dependencies into their own dep groups, they are not required.
 dependencies = [
- 'torch==2.6.0',
  'numpy~=2.2',
  'astropy_healpix~=1.1.2',
  'zarr~=2.17',
@@ -22,15 +21,15 @@ dependencies = [
  'packaging',
  'wheel',
  'psutil',
- "flash-attn; sys_platform == 'linux'",
  "polars~=1.25.2",
  "omegaconf~=2.3.0",
  "dask~=2025.5.1",
  "hatchling",
+ "numexpr>=2.11.0",
  "weathergen-common",
  "weathergen-evaluate",
- "numexpr>=2.11.0",
 ]
+
 
 [project.urls]
 Homepage = "https://www.weathergenerator.eu"
@@ -44,6 +43,7 @@ train_continue = "weathergen.run_train:train_continue"
 inference = "weathergen.run_train:inference"
 evaluate = "weathergen.evaluate.run_evaluation:evaluate"
 plot_train = "weathergen.utils.plot_training:plot_train"
+export = "weathergen.evaluate.export_inference:export"
 
 [build-system]
 requires = ["hatchling"]
@@ -62,6 +62,26 @@ dev = [
  "ruff==0.9.7",
  "tensorboard>=2.20.0",
  "pdbpp>=0.11.7",
+ "pyrefly==0.36.0",
+]
+
+
+# Torch listed as optional dependencies.
+# uv and python can only filter dependencies by platform, not by capability.
+# Following the recommendations from https://docs.astral.sh/uv/guides/integration/pytorch
+# We need to support:
+# x86_64: cpu (unit tests) + gpu 
+# aarch64: gpu
+[project.optional-dependencies]
+
+cpu = [
+  'torch==2.6.0',
+]
+
+gpu = [
+  'torch==2.6.0+cu126',
+  # flash-attn also has a torch dependency.
+  "flash-attn",
 ]
 
 
@@ -124,9 +144,11 @@ ignore = [
 line-ending = "lf"
 
 
+
+
 [tool.uv]
 # Most work is done a distributed filesystem, where hardlink is not always possible.
-# Also, trying to resolve some permissions issue, see #344.
+# Also, trying to resolve some permissions issue, see 44.
 link-mode = "symlink"
 # This guarantees that the build is deterministic and will not be impacted 
 # by future releases of dependencies or sub-dependencies. 
@@ -140,15 +162,48 @@ link-mode = "symlink"
 # Also, relatively recent versions are required to support workspaces.
 required-version = ">=0.7.0"
 
-# Following the recommendations from https://docs.astral.sh/uv/guides/integration/pytorch
-# The current setup is:
-# linux == GPU + flashattention
-# windows == GPU
-# macos == CPU
+# The supported environments
+# TODO: add macos and windows (CPU only, for running tests)
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+#    "sys_platform == 'darwin'",
+]
+
+# One can only have cpu or gpu.
+conflicts = [
+  [
+    { extra = "cpu" },
+    { extra = "gpu" },
+  ],
+]
+
+
 [[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
 explicit = true
+
+
+[tool.pyrefly]
+project-includes = ["src/"]
+project-excludes = [
+]
+
+[tool.pyrefly.errors]
+bad-argument-type = false
+unsupported-operation = false
+missing-attribute = false
+no-matching-overload = false
+bad-context-manager = false
+
+# To do:
+bad-assignment = false
+bad-return = false
+index-error = false
+not-iterable = false
+not-callable = false
+
 
 
 [[tool.uv.index]]
@@ -159,14 +214,26 @@ explicit = true
 [tool.uv.sources]
 weathergen-common = { workspace = true }
 weathergen-evaluate = { workspace = true }
-torch = [
-  { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-  { index = "pytorch-cpu", marker = "sys_platform == 'macosx'"},
-]
-# This URL was evaluated this way:
-# uv run ~/WeatherGenerator-private/hpc/hpc2020/ecmwf/get-flash-atten.sh
+
+
 flash-attn = [
-  { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'"  },
+# The build of Cathal O'Brien is not compatible with the libc build on santis.
+# Hardcode the reference to the swiss cluster for the time being.
+# TODO: open issue
+#  { url = "https://github.com/cathalobrien/get-flash-attn/releases/download/v0.1-alpha/flash_attn-2.7.4+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+# This version was rebuilt locally on santis and uploaded.
+  { url = "https://object-store.os-api.cci1.ecmwf.int/weathergenerator-dev/wheels/flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+  { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiTRUE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
+#  { index = "pytorch-cpu", marker = "sys_platform == 'darwin'"},
+]
+
+
+torch = [
+# Explicit pin for GPU
+  { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-linux_aarch64.whl", marker = 'sys_platform == "linux" and platform_machine == "aarch64"', extra="gpu" },
+  { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl", marker = 'sys_platform == "linux"  and platform_machine == "x86_64"', extra="gpu" },
+# Use the public repo for CPU versions.
+  { index = "pytorch-cpu", marker = "sys_platform == 'linux'", extra="cpu"},
 ]
 
 [tool.pytest.ini_options]
@@ -181,3 +248,4 @@ members = [
    "packages/evaluate",
    "packages/common"
 ]
+

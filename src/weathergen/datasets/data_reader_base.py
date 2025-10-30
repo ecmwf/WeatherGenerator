@@ -71,8 +71,24 @@ def str_to_datetime64(s: str | int | NPDT64) -> NPDT64:
     """
     if isinstance(s, datetime64):
         return s
-    format_str = "%Y%m%d%H%M%S"
-    return np.datetime64(datetime.datetime.strptime(str(s), format_str))
+    s_str = str(s)
+
+    supported_formats = [
+        "%Y%m%d%H%M%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+    ]
+
+    for fmt in supported_formats:
+        try:
+            dt_obj = datetime.datetime.strptime(s_str, fmt)
+            return np.datetime64(dt_obj)
+        except ValueError:
+            pass
+
+    raise ValueError(f"Unable to parse the date string '{s}'. Original string might be invalid.")
 
 
 def str_to_timedelta(s: str | datetime.timedelta) -> pd.Timedelta:
@@ -214,6 +230,26 @@ class ReaderData:
         """
         return len(self.data)
 
+    def remove_nan_coords(self) -> "ReaderData":
+        """
+        Remove all data points where coords are NaN
+
+        Returns
+        -------
+        self
+        """
+        idx_valid = ~np.isnan(self.coords)
+        # filter should be if any (of the two) coords is NaN
+        idx_valid = np.logical_and(idx_valid[:, 0], idx_valid[:, 1])
+
+        # apply
+        return ReaderData(
+            self.coords[idx_valid],
+            self.geoinfos[idx_valid],
+            self.data[idx_valid],
+            self.datetimes[idx_valid],
+        )
+
 
 def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     """
@@ -262,6 +298,10 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
 class DataReaderBase(metaclass=ABCMeta):
     """
     Base class for data readers.
+
+    Coordinates must be provided in standard geographical format:
+    latitude in degrees from -90 (South) to +90 (North),
+    and longitude in degrees from -180 (West) to +180 (East).
     """
 
     # The fields that need to be set by the child classes
@@ -271,6 +311,7 @@ class DataReaderBase(metaclass=ABCMeta):
     source_idx: list[int] = abstract_attribute()
     target_idx: list[int] = abstract_attribute()
     geoinfo_idx: list[int] = abstract_attribute()
+    target_channel_weights: list[float] = abstract_attribute()
 
     def __init__(
         self,
@@ -292,6 +333,7 @@ class DataReaderBase(metaclass=ABCMeta):
 
         self.time_window_handler = tw_handler
         self.stream_info = stream_info
+        self.target_channel_weights = None
 
     def init_empty(self) -> None:
         """
@@ -304,6 +346,7 @@ class DataReaderBase(metaclass=ABCMeta):
         self.source_idx = []
         self.target_idx = []
         self.geoinfo_idx = []
+        self.target_channel_weights = []
 
         self.mean = np.zeros(0)
         self.stdev = np.ones(0)
@@ -439,6 +482,28 @@ class DataReaderBase(metaclass=ABCMeta):
         size of geoinfos
         """
         return len(self.geoinfo_idx)
+
+    def parse_target_channel_weights(
+        self,
+    ) -> list[float] | None:
+        target_channel_weights = [
+            self.stream_info["channel_weights"].get(ch, 1.0)
+            if self.stream_info.get("channel_weights", None)
+            else 1.0
+            for ch in self.target_channels
+        ]
+
+        if self.stream_info.get("channel_weights", None) is not None:
+            # Check whether all given channel_weights could be matched to a channel.
+            ch_unmatched = [
+                ch for ch in self.stream_info["channel_weights"] if ch not in self.target_channels
+            ]
+            if len(ch_unmatched) > 0:
+                _logger.info(
+                    f"Unmatched channel_weights in {self.stream_info.name}: {ch_unmatched}"
+                )
+
+        return target_channel_weights
 
     def normalize_coords(self, coords: NDArray[DType]) -> NDArray[DType]:
         """

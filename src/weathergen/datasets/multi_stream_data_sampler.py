@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 import pathlib
 
 import numpy as np
@@ -16,7 +17,6 @@ from weathergen.common.io import IOReaderData
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
-    ReaderData,
     TimeWindowHandler,
     TIndex,
     str_to_datetime64,
@@ -26,7 +26,7 @@ from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.data_reader_icon import DataReaderIcon
 from weathergen.datasets.data_reader_cams  import DataReaderCams
 from weathergen.datasets.masking import Masker
-from weathergen.datasets.stream_data import StreamData
+from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
@@ -34,10 +34,49 @@ from weathergen.datasets.utils import (
     compute_offsets_scatter_embed,
     compute_source_cell_lens,
 )
-from weathergen.utils.logger import logger
+from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
+
+logger = logging.getLogger(__name__)
+
+
+def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
+    """
+    Convert data, coords, and geoinfos to torch tensor
+    """
+    rdata.coords = torch.tensor(rdata.coords)
+    rdata.geoinfos = torch.tensor(rdata.geoinfos)
+    rdata.data = torch.tensor(rdata.data)
+
+    return rdata
+
+
+def collect_datasources(stream_datasets: list, idx: int, type: str) -> IOReaderData:
+    """
+    Utility function to collect all sources / targets from streams list
+    """
+
+    rdatas = []
+
+    for ds in stream_datasets:
+        if type == "source":
+            get_reader_data = ds.get_source
+            normalize_channels = ds.normalize_source_channels
+        elif type == "target":
+            get_reader_data = ds.get_target
+            normalize_channels = ds.normalize_target_channels
+        else:
+            assert False, "invalid value for argument `type`"
+
+        # get source (of potentially multi-step length)
+        rdata = get_reader_data(idx).remove_nan_coords()
+        rdata.data = normalize_channels(rdata.data)
+        rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
+        rdatas += [rdata]
+
+    return IOReaderData.combine(rdatas)
 
 
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
@@ -65,10 +104,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.len_hrs: int = cf.len_hrs
         self.step_hrs: int = cf.step_hrs
         self.time_window_handler = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
-        logger.info(
-            f"Time window handler: start={start_date}, end={end_date},"
-            f"len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
-        )
+        if is_root():
+            logger.info(
+                f"Time window handler: start={start_date}, end={end_date},"
+                f"len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
+            )
 
         self.forecast_offset = cf.forecast_offset
         self.forecast_delta_hrs = (
@@ -79,7 +119,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             [cf.forecast_steps] if isinstance(cf.forecast_steps, int) else cf.forecast_steps
         )
         if cf.forecast_policy is not None:
-            if self.forecast_steps.max() == 0:
+            if self.forecast_steps.max() == 0 and is_root():
                 logger.warning("forecast policy is not None but number of forecast steps is 0.")
         self.forecast_policy = cf.forecast_policy
 
@@ -134,10 +174,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         raise FileNotFoundError(msg)
 
                 ds_type = stream_info["type"]
-                logger.info(
-                    f"Opening dataset with type: {ds_type}"
-                    + f" from stream config {stream_info['name']}.",
-                )
+                if is_root():
+                    logger.info(
+                        f"Opening dataset with type: {ds_type}"
+                        + f" from stream config {stream_info['name']}.",
+                    )
                 ds = dataset(filename=filename, **kwargs)
 
                 fsm = self.forecast_steps[0]
@@ -147,6 +188,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # MODIFIES config !!!
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
                 stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
+                stream_info["target_channel_weights"] = (
+                    ds.target_channel_weights
+                    if ds.target_channel_weights is not None
+                    else [1.0 for _ in ds.target_channels]
+                )
 
                 self.streams_datasets[-1] += [ds]
 
@@ -154,12 +200,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.len = int(index_range.end - index_range.start)
         self.len = min(self.len, samples_per_epoch if samples_per_epoch else self.len)
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
-        len_chunk = ((self.len // cf.num_ranks) // batch_size) * batch_size
+        len_chunk = ((self.len // cf.world_size) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)
         logger.info(f"index_range={index_range}, len={self.len}, len_chunk={len_chunk}")
 
         self.rank = cf.rank
-        self.num_ranks = cf.num_ranks
+        self.world_size = cf.world_size
 
         self.streams = cf.streams
         self.shuffle = shuffle
@@ -179,10 +225,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             else cf.data_loader_rng_seed * 13
         )
 
-        self.healpix_level_source: int = cf.healpix_level
-        self.healpix_level_target: int = cf.healpix_level
-        self.num_healpix_cells_source: int = 12 * 4**self.healpix_level_source
-        self.num_healpix_cells_target: int = 12 * 4**self.healpix_level_target
+        self.healpix_level: int = cf.healpix_level
+        self.num_healpix_cells: int = 12 * 4**self.healpix_level
 
         if cf.training_mode == "forecast":
             self.tokenizer = TokenizerForecast(cf.healpix_level)
@@ -273,14 +317,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.tokenizer.reset_rng(self.rng)
 
     ###################################################
-    def denormalize_source_channels(self, obs_id, data):
+    def denormalize_source_channels(self, stream_id, data) -> torch.Tensor:
         # TODO: with multiple ds per stream we need to distinguish these here
-        return self.streams_datasets[obs_id][0].denormalize_source_channels(data)
+        return self.streams_datasets[stream_id][0].denormalize_source_channels(data)
 
     ###################################################
-    def denormalize_target_channels(self, obs_id, data):
+    def denormalize_target_channels(self, stream_id, data) -> torch.Tensor:
         # TODO: with multiple ds per stream we need to distinguish these here
-        return self.streams_datasets[obs_id][0].denormalize_target_channels(data)
+        return self.streams_datasets[stream_id][0].denormalize_target_channels(data)
 
     ###################################################
     def __iter__(self):
@@ -296,9 +340,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # create new shuffeling
         self.reset()
-
-        nhc_target = self.num_healpix_cells_target
-        nhc_source = self.num_healpix_cells_source
 
         # bidx is used to count the #batches that have been emitted
         # idx_raw is used to index into the dataset; the decoupling is needed
@@ -316,7 +357,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 idx: TIndex = self.perms[idx_raw % self.perms.shape[0]]
                 idx_raw += 1
 
-                time_win1 = self.time_window_handler.window(idx)
+                time_win_source = self.time_window_handler.window(idx)
 
                 # Sample masking strategy once per batch item
                 if hasattr(self.tokenizer, "masker"):
@@ -327,67 +368,70 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # for all streams
                 for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
                     stream_data = StreamData(
-                        idx, forecast_dt + self.forecast_offset, nhc_source, nhc_target
+                        idx, forecast_dt + self.forecast_offset, self.num_healpix_cells
                     )
 
-                    # for all sources for current stream
-                    for _, ds in enumerate(stream_ds):
-                        # source window (of potentially multi-step length)
-                        rdata: ReaderData = ds.get_source(idx)
+                    # collect all targets for current stream
+                    rdata: IOReaderData = collect_datasources(stream_ds, idx, "source")
 
-                        # rdata needs to be wrapped in a different class
-                        # to avoid unwanted dependencies => see IOReaderData docstring
-                        rdata_wrapped = IOReaderData.create(rdata)
+                    if rdata.is_empty():
+                        # work around for https://github.com/pytorch/pytorch/issues/158719
+                        # create non-empty mean data instead of empty tensor
+                        rdata = spoof(
+                            self.healpix_level,
+                            time_win_source.start,
+                            stream_ds[0].get_geoinfo_size(),
+                            stream_ds[0].mean[stream_ds[0].source_idx],
+                        )
+                        stream_data.source_is_spoof = True
+
+                    # preprocess data for model input
+                    (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
+                        stream_info,
+                        readerdata_to_torch(rdata),
+                        (time_win_source.start, time_win_source.end),
+                        stream_ds[0].normalize_coords,
+                    )
+
+                    # TODO: rdata only be collected in validation mode
+                    stream_data.add_source(rdata, ss_lens, ss_cells, ss_centroids)
+
+                    # target
+
+                    # collect for all forecast steps
+                    for fstep in range(
+                        self.forecast_offset, self.forecast_offset + forecast_dt + 1
+                    ):
+                        step_forecast_dt = idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
+                        time_win_target = self.time_window_handler.window(step_forecast_dt)
+
+                        # collect all targets for current stream
+                        rdata: IOReaderData = collect_datasources(
+                            stream_ds, step_forecast_dt, "target"
+                        )
 
                         if rdata.is_empty():
-                            stream_data.add_empty_source(rdata_wrapped)
-                        else:
-                            # TODO: handling of conversion from numpy to torch here and below
-                            # TODO: this should only be collected in validation mode
-
-                            (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
-                                stream_info,
-                                torch.from_numpy(rdata.coords),
-                                torch.from_numpy(rdata.geoinfos),
-                                torch.from_numpy(rdata.data),
-                                rdata.datetimes,
-                                (time_win1.start, time_win1.end),
-                                ds,
+                            # work around for https://github.com/pytorch/pytorch/issues/158719
+                            # create non-empty mean data instead of empty tensor
+                            rdata = spoof(
+                                self.healpix_level,
+                                time_win_target.start,
+                                stream_ds[0].get_geoinfo_size(),
+                                stream_ds[0].mean[stream_ds[0].target_idx],
                             )
+                            stream_data.target_is_spoof = True
 
-                            stream_data.add_source(rdata_wrapped, ss_lens, ss_cells, ss_centroids)
+                        # preprocess data for model input
+                        (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
+                            stream_info,
+                            self.sampling_rate_target,
+                            readerdata_to_torch(rdata),
+                            (time_win_target.start, time_win_target.end),
+                        )
 
-                        # target
-
-                        # collect for all forecast steps
-                        for fstep in range(
-                            self.forecast_offset, self.forecast_offset + forecast_dt + 1
-                        ):
-                            step_forecast_dt = (
-                                idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
-                            )
-                            time_win2 = self.time_window_handler.window(step_forecast_dt)
-
-                            rdata = ds.get_target(step_forecast_dt)
-
-                            if rdata.is_empty():
-                                stream_data.add_empty_target(fstep)
-                            else:
-                                (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
-                                    stream_info,
-                                    self.sampling_rate_target,
-                                    torch.from_numpy(rdata.coords),
-                                    torch.from_numpy(rdata.geoinfos),
-                                    torch.from_numpy(rdata.data),
-                                    rdata.datetimes,
-                                    (time_win2.start, time_win2.end),
-                                    ds,
-                                )
-
-                                stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t)
+                        stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t)
 
                     # merge inputs for sources and targets for current stream
-                    stream_data.merge_inputs()
                     streams_data += [stream_data]
 
                 # Reset masking strategy for next batch item
@@ -422,7 +466,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         worker_info = torch.utils.data.get_worker_info()
 
         if worker_info is None:
-            assert self.num_ranks == 1
+            assert self.world_size == 1, self.world_size
             iter_start = 0
             iter_end = len(self)
 

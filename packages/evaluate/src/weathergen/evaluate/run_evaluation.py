@@ -14,10 +14,10 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
-from weathergen.evaluate.io_reader import Reader
+from weathergen.evaluate.io_reader import WeatherGenReader
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
@@ -37,17 +37,23 @@ def evaluate() -> None:
 
 
 def evaluate_from_args(argl: list[str]) -> None:
-    parser = argparse.ArgumentParser(
-        description="Fast evaluation of WeatherGenerator runs."
-    )
+    parser = argparse.ArgumentParser(description="Fast evaluation of WeatherGenerator runs.")
     parser.add_argument(
         "--config",
         type=str,
+        default=None,
         help="Path to the configuration yaml file for plotting. e.g. config/plottig_config.yaml",
     )
 
     args = parser.parse_args(argl)
-    evaluate_from_config(OmegaConf.load(args.config))
+    if args.config:
+        config = Path(args.config)
+    else:
+        _logger.info(
+            "No config file provided, using the default template config (please edit accordingly)"
+        )
+        config = Path(_REPO_ROOT / "config" / "evaluate" / "eval_config.yml")
+    evaluate_from_config(OmegaConf.load(config))
 
 
 def evaluate_from_config(cfg):
@@ -69,7 +75,7 @@ def evaluate_from_config(cfg):
     metrics = cfg.evaluation.metrics
     regions = cfg.evaluation.get("regions", ["global"])
 
-    global_plotting_opts = cfg.get("global_plotting_options", DictConfig)
+    global_plotting_opts = cfg.get("global_plotting_options", {})
 
     # to get a structure like: scores_dict[metric][region][stream][run_id] = plot
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
@@ -77,12 +83,17 @@ def evaluate_from_config(cfg):
     for run_id, run in runs.items():
         _logger.info(f"RUN {run_id}: Getting data...")
 
-        reader = Reader(run, run_id, private_paths)
+        reader = WeatherGenReader(run, run_id, private_paths)
 
         for stream in reader.streams:
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
 
             stream_dict = reader.get_stream(stream)
+            if not stream_dict:
+                _logger.info(
+                    f"Stream {stream} does not exist in source data or config file is empty. Skipping."
+                )
+                continue
 
             if stream_dict.get("plotting"):
                 _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
@@ -107,16 +118,14 @@ def evaluate_from_config(cfg):
                                 stream, metric_data, mode="evaluation"
                             )
 
-                            if not available_data.json_availability:
+                            if not available_data.score_availability:
                                 metrics_to_compute.append(metric)
                             else:
                                 # simply select the chosen eval channels, samples, fsteps here...
-                                scores_dict[metric][region][stream][run_id] = (
-                                    metric_data.sel(
-                                        sample=available_data.samples,
-                                        channel=available_data.channels,
-                                        forecast_step=available_data.fsteps,
-                                    )
+                                scores_dict[metric][region][stream][run_id] = metric_data.sel(
+                                    sample=available_data.samples,
+                                    channel=available_data.channels,
+                                    forecast_step=available_data.fsteps,
                                 )
                         except (FileNotFoundError, KeyError):
                             metrics_to_compute.append(metric)

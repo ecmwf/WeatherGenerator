@@ -7,12 +7,13 @@ on:
 
 permissions:
   pull-requests: write
-  contents: read
-  issues: read
+  contents: write
+  issues: write
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Apply issue labels to PR
         uses: actions/github-script@v7
@@ -36,7 +37,14 @@ jobs:
                 }
               }
             `;
-            const data = await github.graphql(query, { owner, repo, number: prNumber });
+            let data;
+            try { 
+              data = await github.graphql(query, { owner, repo, number: prNumber });
+            } catch (e) {
+              // Print a warning and stop here if the query fails (e.g., no linked issues)
+              core.warning(`GraphQL query failed: ${e.message}`);
+              return;
+            }
             const issues = data.repository.pullRequest.closingIssuesReferences.nodes;
 
             // 2) Collect unique label names from those issues
@@ -51,11 +59,15 @@ jobs:
 
             // 3) Apply to the PR (PRs are "issues" in the REST API)
             if (labels.length) {
-              await github.rest.issues.addLabels({
-                owner, repo,
-                issue_number: prNumber,
-                labels
-              });
+              try {
+                await github.rest.issues.addLabels({
+                  owner, repo,
+                  issue_number: prNumber,
+                  labels
+                });
+              } catch (e) {
+                core.warning(`Failed to apply labels to PR ${prNumber}: ${e.message}`);
+              }
               core.info(`Applied labels to PR ${prNumber}: ${labels.join(", ")}`);
             } else {
               core.info("No labels to apply from linked issues.");
