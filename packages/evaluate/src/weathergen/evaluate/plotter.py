@@ -132,7 +132,7 @@ class Plotter:
         da:
             xarray DataArray to select data from.
         selection:
-            Dictionary of selectors where keys are coordinate names and values are the values to 
+            Dictionary of selectors where keys are coordinate names and values are the values to
             select.
 
         Returns
@@ -324,7 +324,7 @@ class Plotter:
             Additional keyword arguments for the map.
             Known keys are:
                 - marker_size: base size of the marker (default is 1)
-                - scale_marker_size: if True, the marker size will be scaled based on latitude 
+                - scale_marker_size: if True, the marker size will be scaled based on latitude
                   (default is False)
                 - marker: marker style (default is 'o')
             Unknown keys will be passed to the scatter plot function.
@@ -614,12 +614,12 @@ class LinePlots:
         -------
             data_list, label_list - lists of data and labels
         """
-        assert (
-            isinstance(data, xr.DataArray | list)
-        ), "Compare::plot - Data should be of type xr.DataArray or list"
-        assert (
-            isinstance(labels, str | list)
-        ), "Compare::plot - Labels should be of type str or list"
+        assert isinstance(data, xr.DataArray | list), (
+            "Compare::plot - Data should be of type xr.DataArray or list"
+        )
+        assert isinstance(labels, str | list), (
+            "Compare::plot - Labels should be of type str or list"
+        )
 
         # convert to lists
 
@@ -749,9 +749,9 @@ class LinePlots:
 
         data_list, label_list = self._check_lengths(data, labels)
 
-        assert (
-            x_dim in data_list[0].dims
-        ), "x dimension '{x_dim}' not found in data dimensions {data_list[0].dims}"
+        assert x_dim in data_list[0].dims, (
+            "x dimension '{x_dim}' not found in data dimensions {data_list[0].dims}"
+        )
 
         fig = plt.figure(figsize=(12, 6), dpi=self.dpi_val)
 
@@ -834,7 +834,7 @@ class ScoreCards:
         self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
     ) -> None:
         """
-        Plot score cards comparing performance between run_ids against a baseline over channels 
+        Plot score cards comparing performance between run_ids against a baseline over channels
         of interest.
 
         Parameters
@@ -1048,7 +1048,7 @@ class ScoreCards:
         color: str
             The color "red" or "blue" that indicates improvement or deterioration over baseline.
         triangle: str
-            The triangle symbol "^" or "v" that indicates improvement or deterioration over 
+            The triangle symbol "^" or "v" that indicates improvement or deterioration over
             baseline.
         size: xr.DataArray
             Size of the triangles in the final plot
@@ -1109,7 +1109,7 @@ class BarPlots:
         self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
     ) -> None:
         """
-        Plot (ratio) bar plots comparing performance between different run_ids over channels of 
+        Plot (ratio) bar plots comparing performance between different run_ids over channels of
         interest.
 
         Parameters
@@ -1208,7 +1208,7 @@ class BarPlots:
 
     def colors(self, ratio_score: np.array) -> list[tuple]:
         """
-        This function calculates colormaps based on the skill scores. From negative value blue 
+        This function calculates colormaps based on the skill scores. From negative value blue
         color variations should be given otherwise red color variations should be given.
 
         Parameters
@@ -1230,7 +1230,7 @@ def calculate_average_over_dim(
     x_dim: str, baseline_var: xr.DataArray, data_var: xr.DataArray
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
-    Calculate average over xarray dimensions that are larger than 1. Those might be the 
+    Calculate average over xarray dimensions that are larger than 1. Those might be the
     forecast-steps or the samples.
 
     Parameters

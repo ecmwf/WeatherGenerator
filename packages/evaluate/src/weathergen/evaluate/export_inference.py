@@ -42,11 +42,11 @@ def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
     """
     Find all the pressure levels for each variable using regex and returns a dictionary
     mapping variable names to their corresponding pressure levels.
-    
+
     Parameters
     ----------
         all_variables : list of variable names with pressure levels (e.g.,'q_500','t_2m').
-    
+
     Returns
     -------
         A tuple containing:
@@ -75,11 +75,11 @@ def reshape_dataset(input_data_array: xr.DataArray) -> xr.Dataset:
     Reshape the input xarray DataArray to have dimensions (ipoint, pressure_level)
     for variables with multiple pressure levels, and (ipoint,) for surface variables.
     Removes ipoint to valid_time, lat, lon after splitting for each sample
-    
+
     Parameters
     ----------
         input_data_array : Input xarray DataArray with dimensions (ipoint, channel).
-    
+
     Returns
     ------
         reshaped_dataset : xr.Dataset
@@ -209,9 +209,9 @@ def output_filename(
     forecast_ref_time: np.datetime64,
 ) -> Path:
     """
-    Generate output filename based on prefix (should refer to type e.g. pred/targ), run_id, sample 
+    Generate output filename based on prefix (should refer to type e.g. pred/targ), run_id, sample
     index, output directory, format and forecast_ref_time.
-    
+
     Parameters
     ----------
         prefix : Prefix for file name (e.g., 'pred' or 'targ').
@@ -219,7 +219,7 @@ def output_filename(
         output_dir : Directory to save the output file.
         output_format : Output file format (currently only 'netcdf' supported).
         forecast_ref_time : Forecast reference time to include in the filename.
-    
+
     Returns
     -------
         Full path to the output file.
@@ -237,11 +237,11 @@ def output_filename(
 def get_data_worker(args: tuple) -> xr.DataArray:
     """
     Worker function to retrieve data for a single sample and forecast step.
-    
+
     Parameters
     ----------
         args : Tuple containing (sample, fstep, run_id, stream, type).
-    
+
     Returns
     -------
         xarray DataArray for the specified sample and forecast step.
@@ -377,13 +377,13 @@ def save_sample_to_netcdf(
 ) -> None:
     """
     Uses list of pred/target xarray DataArrays to save one sample to a NetCDF file.
-    
+
     Parameters
     ----------
     type_str : str
         Type of data ('pred' or 'targ') to include in the filename.
     dict_sample_all_steps : dict
-        Dictionary where keys is sample index and values is a list of xarray DataArrays 
+        Dictionary where keys is sample index and values is a list of xarray DataArrays
         for all the forecast steps
     fstep_hours : np.timedelta64
         Time difference between forecast steps (e.g., 6 hours).

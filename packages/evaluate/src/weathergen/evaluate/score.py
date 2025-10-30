@@ -40,7 +40,7 @@ def _get_skill_score(
 ) -> xr.DataArray:
     """
     Calculate the skill score of a forecast data array w.r.t. a reference and a perfect score.
-    Definition follows Wilks, Statistical Methods in the Atmospheric Sciences (2006), 
+    Definition follows Wilks, Statistical Methods in the Atmospheric Sciences (2006),
     Chapter 7.1.4, Equation 7.4
 
     Parameters
@@ -242,10 +242,10 @@ class Scores:
         if score_name in self.det_metrics_dict.keys():
             f = self.det_metrics_dict[score_name]
         elif score_name in self.prob_metrics_dict.keys():
-            assert (
-                self.ens_dim in data.prediction.dims
-            ), (f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} "
-                "not found in prediction data")
+            assert self.ens_dim in data.prediction.dims, (
+                f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} "
+                "not found in prediction data"
+            )
             f = self.prob_metrics_dict[score_name]
         else:
             raise ValueError(
@@ -325,10 +325,10 @@ class Scores:
 
     def _validate_groupby_coord(self, data: VerifiedData, group_by_coord: str | None) -> bool:
         """
-        Check if the group_by_coord is present in both prediction and ground truth data 
+        Check if the group_by_coord is present in both prediction and ground truth data
         and compatible. Raises ValueError if conditions are not met.
         If group_by_coord does not have more than one unique value in the prediction data,
-        a warning is logged and the function returns False, indicating that grouping is 
+        a warning is logged and the function returns False, indicating that grouping is
         not applicable.
 
         Parameters
@@ -347,7 +347,7 @@ class Scores:
         if group_by_coord not in p.coords or group_by_coord not in gt.coords:
             raise ValueError(
                 f"Coordinate '{group_by_coord}' must be present in both prediction "
-                 "and ground truth data."
+                "and ground truth data."
             )
 
         # Check if the dims associated with the groupby_coord are compatible
@@ -483,7 +483,7 @@ class Scores:
         """
         Calculate the L1 error norm of forecast data w.r.t. reference data.
         Note that the L1 error norm is calculated as the sum of absolute differences.
-        If scale_dims is not None, the L1 will scaled by the number of elements in the average 
+        If scale_dims is not None, the L1 will scaled by the number of elements in the average
         dimensions.
         """
         l1 = np.abs(p - gt)
@@ -496,10 +496,10 @@ class Scores:
         if scale_dims:
             scale_dims = to_list(scale_dims)
 
-            assert all(
-                [dim in p.dims for dim in scale_dims]
-            ), f"Provided scale dimensions {scale_dims} are not all present in the prediction data "
-            "dimensions {p.dims}."
+            assert all([dim in p.dims for dim in scale_dims]), (
+                f"Provided scale dimensions {scale_dims} are not all present in the prediction "
+                f"data dimensions {p.dims}."
+            )
 
             len_dims = np.array([p.sizes[dim] for dim in scale_dims])
             l1 /= np.prod(len_dims)
@@ -528,12 +528,12 @@ class Scores:
             If provided, the coordinate becomes a new dimension of the L2 score.
         scale_dims: list | None
             List of dimensions over which the L2 score will be scaled.
-            If provided, the L2 score will be divided by the product of the sizes of these 
+            If provided, the L2 score will be divided by the product of the sizes of these
             dimensions.
         squared_l2: bool
             If True, the L2 score will be returned as the sum of squared differences.
-            If False, the L2 score will be returned as the square root of the sum of squared 
-            differences. Default is False, i.e. the L2 score is returned as the square root of the 
+            If False, the L2 score will be returned as the square root of the sum of squared
+            differences. Default is False, i.e. the L2 score is returned as the square root of the
             sum of squared differences.
         """
         l2 = np.square(p - gt)
@@ -549,10 +549,10 @@ class Scores:
         if scale_dims:
             scale_dims = to_list(scale_dims)
 
-            assert all(
-                [dim in p.dims for dim in scale_dims]
-            ), f"Provided scale dimensions {scale_dims} are not all present in the prediction data "
-            "dimensions {p.dims}."
+            assert all([dim in p.dims for dim in scale_dims]), (
+                f"Provided scale dimensions {scale_dims} are not all present in the prediction "
+                f"data dimensions {p.dims}."
+            )
 
             len_dims = np.array([p.sizes[dim] for dim in scale_dims])
             l2 /= np.prod(len_dims)
@@ -640,9 +640,9 @@ class Scores:
 
     def calc_vrmse(self, p: xr.DataArray, gt: xr.DataArray, group_by_coord: str | None = None):
         """
-        Calculate variance-normalized root mean squared error (VRMSE) of forecast data w.r.t. 
+        Calculate variance-normalized root mean squared error (VRMSE) of forecast data w.r.t.
         reference data
-        
+
         Parameters
         ----------
         p: xr.DataArray
@@ -718,7 +718,7 @@ class Scores:
         if np.any(unmatched_mask):
             n_unmatched = np.sum(unmatched_mask)
             _logger.info(
-                f"Found {n_unmatched} reference coordinates with no matching coordinates in array" 
+                f"Found {n_unmatched} reference coordinates with no matching coordinates in array"
                 "to sort. Returning NaN DataArray."
             )
             return xr.full_like(da_reference, np.nan)
@@ -732,7 +732,7 @@ class Scores:
         s1: xr.DataArray,
     ):
         """
-        Calculate the "change rate" of a data array as the mean absolute difference between two 
+        Calculate the "change rate" of a data array as the mean absolute difference between two
         consecutive time steps.
 
         Parameters
@@ -880,7 +880,7 @@ class Scores:
             # Apply groupby and calculate activity within each group using apply
             ano_grouped = ano.groupby(group_by_coord)
 
-            # Use apply to calculate activity for each group - this preserves the coordinate 
+            # Use apply to calculate activity for each group - this preserves the coordinate
             # structure
             act = xr.concat(
                 [ano_group.std(dim=spatial_dims) for group_label, ano_group in ano_grouped],
@@ -1106,8 +1106,8 @@ class Scores:
         non_spatial_avg_dims: list[str] = None,
     ):
         """
-        Calculates the ratio between the spatial variability of differental operator 
-        with order 1 (higher values unsupported yet) forecast and ground truth data using 
+        Calculates the ratio between the spatial variability of differental operator
+        with order 1 (higher values unsupported yet) forecast and ground truth data using
         the calc_geo_spatial-method.
 
         NOTE:
@@ -1196,9 +1196,9 @@ class Scores:
             return 1.0 - seeps_val
 
         if p.ndim == 3:
-            assert (
-                len(spatial_dims) == 2
-            ), "Provide two spatial dimensions for three-dimensional data."
+            assert len(spatial_dims) == 2, (
+                "Provide two spatial dimensions for three-dimensional data."
+            )
             prediction, ground_truth = (
                 p.stack({"xy": spatial_dims}),
                 gt.stack({"xy": spatial_dims}),
@@ -1213,10 +1213,10 @@ class Scores:
             raise ValueError("Data must be a two-or-three-dimensional array.")
 
         # check dimensioning of data
-        assert (
-            prediction.ndim <= 2
-        ), (f"Data must be one- or two-dimensional, but has {prediction.ndim} dimensions. "
-             "Check if stacking with spatial_dims may help.")
+        assert prediction.ndim <= 2, (
+            f"Data must be one- or two-dimensional, but has {prediction.ndim} dimensions. "
+            "Check if stacking with spatial_dims may help."
+        )
 
         if prediction.ndim == 1:
             seeps_values_all = seeps(ground_truth, prediction, t1.values, t3, seeps_weights)
@@ -1314,7 +1314,7 @@ class Scores:
         method: str
             Method to calculate CRPS. Supported methods: ["ensemble", "gaussian"]
         kwargs: dict
-            Other keyword parameters supported by respective CRPS-method from 
+            Other keyword parameters supported by respective CRPS-method from
             the xskillscore package
 
         Returns
@@ -1373,24 +1373,24 @@ class Scores:
         gt: xr.DataArray
             Ground truth data array
         norm: bool
-            Flag if normalized counts should be returned. If True, the rank histogram will be 
+            Flag if normalized counts should be returned. If True, the rank histogram will be
             normalized by the number of ensemble members in the forecast data.
         group_by_coord: str | None
             Name of the coordinate to group by.
             If provided, the coordinate becomes a new dimension of the rank histogram.
         add_noise: bool
             Flag if a small amount of random noise should be added to the data to avoid ties in the
-            rank histogram. 
+            rank histogram.
             This is recommended for fair computations, cf. Sec. 4.2.2 in Harris et al. 2022
         noise_fac: float
-            Magnitude of random noise to be added to the data if add_noise is True. 
+            Magnitude of random noise to be added to the data if add_noise is True.
             Default is 1.0e-03. This value is only relevant if add_noise is True
         """
         if group_by_coord is not None:
             p = p.groupby(group_by_coord)
             gt = gt.groupby(group_by_coord)
 
-        # unstack stacked time-dimension beforehand if required (time may be stacked for forecast 
+        # unstack stacked time-dimension beforehand if required (time may be stacked for forecast
         # data)
         ground_truth = gt
         if "time" in ground_truth.indexes:
@@ -1474,18 +1474,18 @@ class Scores:
             radius of the sphere
         dom_avg: bool
             average over the whole domain
-        
+
         Returns
         -------
         var_diff_amplitude: xr.DataArray
-            the amplitude of the gradient/laplacian at each grid point or over the 
+            the amplitude of the gradient/laplacian at each grid point or over the
             whole domain (see dom_avg)
         """
         method = Scores.calc_geo_spatial_diff.__name__
         # sanity checks
-        assert isinstance(
-            scalar_field, xr.DataArray
-        ), f"Scalar_field of {method} must be a xarray DataArray."
+        assert isinstance(scalar_field, xr.DataArray), (
+            f"Scalar_field of {method} must be a xarray DataArray."
+        )
         assert order in [1, 2], f"Order for {method} must be either 1 or 2."
 
         dims = list(scalar_field.dims)

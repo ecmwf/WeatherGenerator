@@ -138,7 +138,7 @@ def calc_scores_per_stream(
             combined_metrics = scalar_coord_to_dim(combined_metrics, "sample")
             combined_metrics = scalar_coord_to_dim(combined_metrics, "ens")
         else:
-            # depending on the datset, there might be no data (e.g. no CERRA in southern 
+            # depending on the datset, there might be no data (e.g. no CERRA in southern
             # hemisphere region)
             _logger.warning(
                 f"No data available for stream {stream} at forecast step {fstep} in "
@@ -146,9 +146,9 @@ def calc_scores_per_stream(
             )
             continue
 
-        assert int(combined_metrics.forecast_step) == int(
-            fstep
-        ), "Different steps in data and metrics. Please check."
+        assert int(combined_metrics.forecast_step) == int(fstep), (
+            "Different steps in data and metrics. Please check."
+        )
 
         criteria = {
             "forecast_step": int(combined_metrics.forecast_step),
@@ -326,9 +326,9 @@ def metric_list_to_json(
     epoch :
         Epoch number.
     """
-    assert (
-        len(metrics_list) == len(npoints_sample_list) == len(streams)
-    ), "The lengths of metrics_list, npoints_sample_list, and streams must be the same."
+    assert len(metrics_list) == len(npoints_sample_list) == len(streams), (
+        "The lengths of metrics_list, npoints_sample_list, and streams must be the same."
+    )
 
     reader.metrics_dir.mkdir(parents=True, exist_ok=True)
 
@@ -519,7 +519,7 @@ def calc_bounds(
     bound,
 ):
     """
-    Calculate the minimum and maximum values per variable for all forecasteps for both targets and 
+    Calculate the minimum and maximum values per variable for all forecasteps for both targets and
     predictions
 
     Parameters

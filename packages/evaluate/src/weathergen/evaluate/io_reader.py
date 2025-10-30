@@ -140,7 +140,7 @@ class Reader:
         ii) available in the source file (e.g. the Zarr file, return error otherwise)
         Additionally, if channels, forecast steps or samples is None/'all', it will
         i) set the variable to all available vars in source file
-        ii) return True only if the respective variable contains the same indeces in metric file 
+        ii) return True only if the respective variable contains the same indeces in metric file
             and source file (return False otherwise)
 
         Parameters
@@ -258,7 +258,7 @@ class Reader:
 
     def _get_channels_fsteps_samples(self, stream: str, mode: str) -> DataAvailability:
         """
-        Get channels, fsteps and samples for a given run and stream from the config. 
+        Get channels, fsteps and samples for a given run and stream from the config.
         Replace 'all' with None.
 
         Parameters
@@ -276,9 +276,9 @@ class Reader:
             - fsteps: list of forecast steps or None if 'all'
             - samples: list of samples or None if 'all'
         """
-        assert (
-            mode == "plotting" or mode == "evaluation"
-        ), "get_channels_fsteps_samples:: Mode should be either 'plotting' or 'evaluation'"
+        assert mode == "plotting" or mode == "evaluation", (
+            "get_channels_fsteps_samples:: Mode should be either 'plotting' or 'evaluation'"
+        )
 
         stream_cfg = self.get_stream(stream)
         assert stream_cfg.get(mode, False), "Mode does not exist in stream config. Please add it."
@@ -291,14 +291,14 @@ class Reader:
             ensemble = ["mean"]
 
         if isinstance(fsteps, str) and fsteps != "all":
-            assert re.match(
-                r"^\d+-\d+$", fsteps
-            ), "String format for forecast_step in config must be 'digit-digit' or 'all'"
+            assert re.match(r"^\d+-\d+$", fsteps), (
+                "String format for forecast_step in config must be 'digit-digit' or 'all'"
+            )
             fsteps = list(range(int(fsteps.split("-")[0]), int(fsteps.split("-")[1]) + 1))
         if isinstance(samples, str) and samples != "all":
-            assert re.match(
-                r"^\d+-\d+$", samples
-            ), "String format for sample in config must be 'digit-digit' or 'all'"
+            assert re.match(r"^\d+-\d+$", samples), (
+                "String format for sample in config must be 'digit-digit' or 'all'"
+            )
             samples = list(range(int(samples.split("-")[0]), int(samples.split("-")[1]) + 1))
 
         return DataAvailability(
@@ -357,7 +357,7 @@ class WeatherGenReader(Reader):
 
     def get_inference_config(self):
         """
-        load the config associated to the inference run (different from the eval_cfg which 
+        load the config associated to the inference run (different from the eval_cfg which
         contains plot and evaluaiton options.)
 
         Returns
@@ -400,7 +400,7 @@ class WeatherGenReader(Reader):
         cfg :
             Configuration dictionary containing all information for the evaluation.
         results_dir : Path
-            Directory where the inference results are stored. 
+            Directory where the inference results are stored.
             Expected scheme `<results_base_dir>/<run_id>`.
         stream :
             Stream name to retrieve data for.
@@ -421,7 +421,7 @@ class WeatherGenReader(Reader):
             A dataclass containing:
             - target: Dictionary of xarray DataArrays for targets, indexed by forecast step.
             - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast step.
-            - points_per_sample: xarray DataArray containing the number of points per sample, 
+            - points_per_sample: xarray DataArray containing the number of points per sample,
               if `return_counts` is True.
         """
 
