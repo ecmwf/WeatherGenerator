@@ -549,16 +549,16 @@ class Model(torch.nn.Module):
         return new_params
 
     #########################################
-    def load(self, run_id: str, epoch: str = -1) -> None:
+    def load(self, run_id: str, mini_epoch: str = -1) -> None:
         """Loads model state from checkpoint and checks for missing and unused keys.
         Args:
             run_id : model_id of the trained model
-            epoch : The epoch to load. Default (-1) is the latest epoch
+            mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
         """
 
         path_run = Path(self.cf.model_path) / run_id
-        epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"
-        filename = f"{run_id}_{epoch_id}.chkpt"
+        mini_epoch_id = f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
+        filename = f"{run_id}_{mini_epoch_id}.chkpt"
 
         params = torch.load(
             path_run / filename, map_location=torch.device("cpu"), weights_only=True

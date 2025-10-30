@@ -154,7 +154,7 @@ class LearningRateScheduler:
         self.i_step = 0
         self.lr = self.cur_scheduler.get_last_lr()
 
-        # advance manually to step_contd (last_epoch parameter for schedulers is not working and
+        # advance manually to step_contd (last_mini_epoch parameter for schedulers is not working and
         # this is also more brittle with the different phases)
         # optimizer.step() as required by torch;
         # won't have a material effect since grads are zero at this point
@@ -218,8 +218,8 @@ class LearningRateScheduler:
         Use as LearningRateScheduler.plot()
         """
 
-        num_epochs = 42
-        num_samples_per_epoch = 4096
+        num_mini_epochs = 42
+        num_samples_per_mini_epoch = 4096
 
         lr_start = 0.000001
         lr_max = 0.000015
@@ -245,7 +245,7 @@ class LearningRateScheduler:
             lr_final_decay,
             lr_final,
             lr_steps_warmup,
-            num_epochs * num_samples_per_epoch,
+            num_mini_epochs * num_samples_per_mini_epoch,
             lr_steps_cooldown,
             lr_policy_warmup,
             lr_policy_decay,
@@ -254,7 +254,7 @@ class LearningRateScheduler:
         lrs = []
 
         for _ in range(
-            num_epochs * num_samples_per_epoch + lr_steps_warmup + lr_steps_cooldown + 1023
+            num_mini_epochs * num_samples_per_mini_epoch + lr_steps_warmup + lr_steps_cooldown + 1023
         ):
             optimizer.step()
             lrs.append(optimizer.param_groups[0]["lr"])
@@ -279,7 +279,7 @@ class LearningRateScheduler:
             lr_final_decay,
             lr_final,
             lr_steps_warmup,
-            num_epochs * num_samples_per_epoch,
+            num_mini_epochs * num_samples_per_mini_epoch,
             lr_steps_cooldown,
             lr_policy_warmup,
             lr_policy_decay,
@@ -288,7 +288,7 @@ class LearningRateScheduler:
         lrs = []
 
         for _ in range(
-            num_epochs * num_samples_per_epoch + lr_steps_warmup + lr_steps_cooldown + 1023
+            num_mini_epochs * num_samples_per_mini_epoch + lr_steps_warmup + lr_steps_cooldown + 1023
         ):
             optimizer.step()
             lrs.append(optimizer.param_groups[0]["lr"])

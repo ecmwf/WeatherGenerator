@@ -304,7 +304,7 @@ class WeatherGenReader(Reader):
 
         super().__init__(eval_cfg, run_id, private_paths)
 
-        self.epoch = eval_cfg.epoch
+        self.mini_epoch = eval_cfg.mini_epoch
         self.rank = eval_cfg.rank
 
         # Load model configuration and set (run-id specific) directories
@@ -334,7 +334,7 @@ class WeatherGenReader(Reader):
         )
 
         self.fname_zarr = self.results_dir.joinpath(
-            f"validation_epoch{self.epoch:05d}_rank{self.rank:04d}.zarr"
+            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
         )
 
         if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
@@ -356,12 +356,12 @@ class WeatherGenReader(Reader):
             _logger.info(
                 f"Loading config for run {self.run_id} from private paths: {self.private_paths}"
             )
-            config = load_config(self.private_paths, self.run_id, self.epoch)
+            config = load_config(self.private_paths, self.run_id, self.mini_epoch)
         else:
             _logger.info(
                 f"Loading config for run {self.run_id} from model directory: {self.model_base_dir}"
             )
-            config = load_model_config(self.run_id, self.epoch, self.model_base_dir)
+            config = load_model_config(self.run_id, self.mini_epoch, self.model_base_dir)
 
         if type(config) not in [dict, oc.DictConfig]:
             _logger.warning("Model config not found. inference config will be empty.")

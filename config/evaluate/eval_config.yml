@@ -30,7 +30,7 @@ run_ids :
   ar40mckx:
     label: "pretrained model ar40mckx"
     results_base_dir : "./results/"
-    epoch: 0
+    mini_epoch: 0
     rank: 0
     streams:
       ERA5:
@@ -61,7 +61,7 @@ run_ids :
   c8g5katp:
     label: "2 steps window"
     results_base_dir : "./results/"
-    epoch: 0
+    mini_epoch: 0
     rank: 0
     streams:
       ERA5:

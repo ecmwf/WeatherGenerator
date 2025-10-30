@@ -54,23 +54,23 @@ def format_cf(config: Config) -> str:
     return stream.getvalue()
 
 
-def save(config: Config, epoch: int | None):
+def save(config: Config, mini_epoch: int | None):
     """Save current config into the current runs model directory."""
     path_models = Path(config.model_path)
     # save in directory with model files
     dirname = path_models / config.run_id
     dirname.mkdir(exist_ok=True, parents=True)
 
-    fname = dirname / _get_model_config_file_name(config.run_id, epoch)
+    fname = dirname / _get_model_config_file_name(config.run_id, mini_epoch)
 
     json_str = json.dumps(OmegaConf.to_container(config))
     with fname.open("w") as f:
         f.write(json_str)
 
 
-def load_model_config(run_id: str, epoch: int | None, model_path: str | None) -> Config:
+def load_model_config(run_id: str, mini_epoch: int | None, model_path: str | None) -> Config:
     """
-    Load a configuration file from a given run_id and epoch.
+    Load a configuration file from a given run_id and mini_epoch.
     If run_id is a full path, loads it from the full path.
     """
     if Path(run_id).exists():  # load from the full path if a full path is provided
@@ -84,13 +84,13 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
                 config=pconf, attribute_name="model_path", fallback="models"
             )
         path = Path(model_path)
-        fname = path / run_id / _get_model_config_file_name(run_id, epoch)
+        fname = path / run_id / _get_model_config_file_name(run_id, mini_epoch)
         assert fname.exists(), (
             "The fallback path to the model does not exist. Please provide a `model_path`.",
             fname,
         )
 
-    _logger.info(f"Loading config from specified run_id and epoch: {fname}")
+    _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
 
     with fname.open() as f:
         json_str = f.read()
@@ -100,22 +100,22 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
     return _apply_fixes(config)
 
 
-def _get_model_config_file_name(run_id: str, epoch: int | None):
-    if epoch is None:
-        epoch_str = ""
-    elif epoch == -1:
-        epoch_str = "_latest"
+def _get_model_config_file_name(run_id: str, mini_epoch: int | None):
+    if mini_epoch is None:
+        mini_epoch_str = ""
+    elif mini_epoch == -1:
+        mini_epoch_str = "_latest"
     else:
-        epoch_str = f"_epoch{epoch:05d}"
-    return f"model_{run_id}{epoch_str}.json"
+        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
+    return f"model_{run_id}{mini_epoch_str}.json"
 
 
-def get_model_results(run_id: str, epoch: int, rank: int) -> Path:
+def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     """
-    Get the path to the model results zarr store from a given run_id and epoch.
+    Get the path to the model results zarr store from a given run_id and mini_epoch.
     """
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
-    zarr_path = run_results / f"validation_epoch{epoch:05d}_rank{rank:04d}.zarr"
+    zarr_path = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.zarr"
     if not zarr_path.exists() or not zarr_path.is_dir():
         raise FileNotFoundError(f"Zarr file {zarr_path} does not exist or is not a directory.")
     return zarr_path
@@ -150,7 +150,7 @@ def _check_logging(config: Config) -> Config:
 def load_config(
     private_home: Path | None,
     from_run_id: str | None,
-    epoch: int | None,
+    mini_epoch: int | None,
     *overwrites: Path | dict | Config,
 ) -> Config:
     """
@@ -161,7 +161,7 @@ def load_config(
         private_home: Configuration file containing platform dependent information and secretes
         from_run_id: Run id of the pretrained WeatherGenerator model
         to continue training or inference
-        epoch: epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        mini_epoch: mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
         *overwrites: Additional overwrites from different sources
 
     Note: The order of precendence for merging the final config is in ascending order:
@@ -191,7 +191,7 @@ def load_config(
     if from_run_id is None:
         base_config = _load_default_conf()
     else:
-        base_config = load_model_config(from_run_id, epoch, private_config.get("model_path", None))
+        base_config = load_model_config(from_run_id, mini_epoch, private_config.get("model_path", None))
         from_run_id = base_config.run_id
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
@@ -456,9 +456,9 @@ def get_path_model(config: Config) -> Path:
     return Path(config.model_path) / config.run_id
 
 
-def get_path_output(config: Config, epoch: int) -> Path:
+def get_path_output(config: Config, mini_: int) -> Path:
     base_path = get_path_run(config)
-    fname = f"validation_epoch{epoch:05d}_rank{config.rank:04d}.zarr"
+    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.zarr"
 
     return base_path / fname
 
@@ -523,7 +523,7 @@ def validate_forecast_policy_and_steps(cf: OmegaConf):
     valid_forecast_policies = (
         "Valid values for 'forecast_policy' are, e.g., 'fixed' when using constant "
         "forecast steps throughout the training, or 'sequential' when varying the forecast "
-        "steps over epochs, such as, e.g., 'forecast_steps: [2, 2, 4, 4]'. "
+        "steps over mini_epochs, such as, e.g., 'forecast_steps: [2, 2, 4, 4]'. "
     )
     valid_forecast_steps = (
         "'forecast_steps' must be a positive integer or a non-empty list of positive integers. "

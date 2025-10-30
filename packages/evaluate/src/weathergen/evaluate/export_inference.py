@@ -363,8 +363,8 @@ def get_data_worker(args: tuple) -> xr.DataArray:
     -------
         xarray DataArray for the specified sample and forecast step.
     """
-    sample, fstep, run_id, stream, dtype, epoch, rank = args
-    fname_zarr = get_model_results(run_id, epoch, rank)
+    sample, fstep, run_id, stream, dtype, mini_epoch, rank = args
+    fname_zarr = get_model_results(run_id, mini_epoch, rank)
     with ZarrIO(fname_zarr) as zio:
         out = zio.get_data(sample, stream, fstep)
         if dtype == "target":
@@ -383,7 +383,7 @@ def get_data(
     channels: list,
     fstep_hours: int,
     n_processes: list,
-    epoch: int,
+    mini_epoch: int,
     rank: int,
     output_dir: str,
     output_format: str,
@@ -402,7 +402,7 @@ def get_data(
         fsteps : List of forecast steps to retrieve. If None, retrieves all available forecast steps.
         channels :List of channels to retrieve. If None, retrieves all available channels.
         n_processes : Number of parallel processes to use for data retrieval.
-        ecpoch : Epoch number to identify the Zarr store.
+        mini_epoch : Mini_epoch number to identify the Zarr store.
         rank : Rank number to identify the Zarr store.
         output_dir : Directory to save the NetCDF files.
         output_format : Output file format (currently only 'netcdf' supported).
@@ -411,7 +411,7 @@ def get_data(
     if dtype not in ["target", "prediction"]:
         raise ValueError(f"Invalid type: {dtype}. Must be 'target' or 'prediction'.")
 
-    fname_zarr = get_model_results(run_id, epoch, rank)
+    fname_zarr = get_model_results(run_id, mini_epoch, rank)
     with ZarrIO(fname_zarr) as zio:
         zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
         zio_samples = sorted([int(sample) for sample in zio.samples])
@@ -430,7 +430,7 @@ def get_data(
         for sample_idx in tqdm(samples):
             da_fs = []
             step_tasks = [
-                (sample_idx, fstep, run_id, stream, dtype, epoch, rank) for fstep in fsteps
+                (sample_idx, fstep, run_id, stream, dtype, mini_epoch, rank) for fstep in fsteps
             ]
             for result in tqdm(
                 pool.imap_unordered(get_data_worker, step_tasks, chunksize=1),
@@ -627,10 +627,10 @@ def parse_args(args: list) -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--epoch",
+        "--mini_epoch",
         type=int,
         default=0,
-        help="Epoch number to identify the Zarr store",
+        help="mini_epoch number to identify the Zarr store",
     )
 
     parser.add_argument(
@@ -673,7 +673,7 @@ def export_from_args(args: list) -> None:
     fstep_hours = np.timedelta64(args.fstep_hours, "h")
     channels = args.channels
     n_processes = args.n_processes
-    epoch = args.epoch
+    mini_epoch = args.mini_epoch
     rank = args.rank
 
     # Ensure output directory exists
@@ -697,7 +697,7 @@ def export_from_args(args: list) -> None:
             channels,
             fstep_hours,
             n_processes,
-            epoch,
+            mini_epoch,
             rank,
             output_dir,
             output_format,
