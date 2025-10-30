@@ -24,7 +24,7 @@ from weathergen.model.embeddings import (
     StreamEmbedLinear,
     StreamEmbedTransformer,
 )
-from weathergen.model.layers import MLP, LayerNormBlock
+from weathergen.model.layers import FEMLP, MLP
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
@@ -318,26 +318,28 @@ class ForecastingEngine:
                         )
                     )
 
-                # Add MLP block
-                self.fe_blocks.append(
-                    MLP(
-                        self.cf.ae_global_dim_embed,
-                        self.cf.ae_global_dim_embed,
-                        with_residual=True,
-                        dropout_rate=self.cf.fe_dropout_rate,
-                        norm_type=self.cf.norm_type,
-                        dim_aux=1,
-                        norm_eps=self.cf.mlp_norm_eps,
-                    )
-                )
-
-                # Add a LayerNorm block as the last block of the FE
-                if i + 1 == self.cf.fe_num_blocks:
+                if i + 1 == self.cf.ae_global_num_blocks:
                     self.fe_blocks.append(
-                        LayerNormBlock(
+                        FEMLP(
                             self.cf.ae_global_dim_embed,
+                            self.cf.ae_global_dim_embed,
+                            with_residual=True,
+                            dropout_rate=self.cf.fe_dropout_rate,
+                            norm_type=self.cf.norm_type,
+                            dim_aux=1,
                             norm_eps=self.cf.mlp_norm_eps,
-                            elementwise_affine=False,
+                        )
+                    )
+                else:
+                    self.fe_blocks.append(
+                        MLP(
+                            self.cf.ae_global_dim_embed,
+                            self.cf.ae_global_dim_embed,
+                            with_residual=True,
+                            dropout_rate=self.cf.fe_dropout_rate,
+                            norm_type=self.cf.norm_type,
+                            dim_aux=1,
+                            norm_eps=self.cf.mlp_norm_eps,
                         )
                     )
 
