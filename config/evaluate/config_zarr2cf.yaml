@@ -1,0 +1,143 @@
+# This file controls the conversion from Zarr format to CF-compliant NetCDF files in weathergen.evaluate.zarr_nc.zarr_to_netcdf.
+# It defines the mapping of variable and dimension names, their standard names, units, and level types.
+variables:
+  q:
+    var: q
+    long: specific_humidity_on_pressure_level
+    std: specific_humidity
+    wg_unit: kg kg**-1
+    std_unit: kg kg-1
+    level_type: pl
+  t:
+    var: t
+    long: temperature_on_pressure_levels
+    std: air_temperature
+    wg_unit: K
+    std_unit: K
+    level_type: pl
+  u:
+    var: u
+    long: u_wind_on_pressure_levels
+    std: x_wind
+    wg_unit: m s**-1
+    std_unit: m s-1
+    level_type: pl
+  v:
+    var: v
+    long: v_wind_on_pressure_levels
+    std: y_wind
+    wg_unit: m s**-1
+    std_unit: m s-1
+    level_type: pl
+  z:
+    var: z
+    long: geopotential_height_on_pressure_levels
+    std: geopotential_height
+    wg_unit: m**2 s**-2
+    std_unit: m
+    level_type: pl
+  10u:
+    var: u10
+    long: u_wind_at_10m
+    std: x_wind
+    wg_unit: m s**-1
+    std_unit: m s-1
+    level_type: sfc
+  10v:
+    var: v10
+    long: v_wind_at_10m
+    std: y_wind
+    wg_unit: m s**-1
+    std_unit: m s-1
+    level_type: sfc
+  2d:
+    var: d2m
+    long: 2m_dewpoint_temperature
+    std: dew_point_temperature
+    wg_unit: K
+    std_unit: K
+    level_type: sfc
+  2t:
+    var: t2m
+    long: 2m_temperature
+    std: air_temperature
+    #near-surface (usually, 2 meter) : https://pcmdi.llnl.gov/mips/cmip3/variableList.html
+    wg_unit: K
+    std_unit: K
+    level_type: sfc
+  msl:
+    var: msl
+    long: mean_sea_level_pressure
+    std: air_pressure_at_mean_sea_level
+    wg_unit: Pa
+    std_unit: Pa
+    level_type: sfc
+  skt:
+    var: skt
+    # The standard name for skin temperature is sea_surface_skin_temperature, which is defined as "The temperature of the very thin layer at the surface of the sea that is in contact with the atmosphere".
+  # It is strongly recommended that a variable with this standard name should have a units_metadata attribute, with one of the values "on-scale" or "difference", whichever is appropriate for the data, because it is essential to know whether the temperature is on-scale (meaning relative to the origin of the scale indicated by the units) or refers to temperature differences (implying that the origin of the temperature scale is irrevelant)
+    long: skin_temperature
+    std: sea_surface_skin_temperature
+    wg_unit: K
+    std_unit: K
+    level_type: sfc
+  sp:
+    var: sp
+    long: surface_pressure
+    std: surface_air_pressure
+    wg_unit: Pa
+    std_unit: Pa
+    level_type: sfc
+  
+
+coordinates:
+    sfc:
+        valid_time: valid_time
+        lat: latitude
+        lon: longitude
+        stream: stream
+        forecast_step: forecast_period
+        forecast_ref_time: forecast_ref_time
+        ncells: ncells
+    pl:
+        pressure_level: pressure
+        valid_time: valid_time
+        lat: latitude
+        lon: longitude
+        stream: stream
+        forecast_step: forecast_period
+        forecast_ref_time: forecast_ref_time
+        ncells: ncells
+
+dimensions:
+    valid_time:
+      wg: valid_time
+      std: time
+    lat: 
+      wg: latitude
+      std: latitude
+      std_unit: degrees_north
+    lon: 
+      wg: longitude
+      std: longitude
+      std_unit: degrees_east
+    pressure_level: 
+      wg: pressure
+      std: air_pressure
+      std_unit: hPa
+    forecast_ref_time: 
+      wg: forecast_ref_time
+      std: forecast_ref_time
+    forecast_step:
+      wg: forecast_period
+      std: forecast_period
+    stream:
+      wg: stream
+      std: stream
+    ncells:
+      wg: ncells
+      std: ncells
+    #TODO maybe absorb stream as an attribute
+    # forecast_step: forecast_step
+    # don't want forecast_step anyway
+

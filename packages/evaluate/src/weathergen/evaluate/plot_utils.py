@@ -67,7 +67,7 @@ def plot_metric_region(
     scores_dict: dict,
     plotter: object,
     print_summary: bool,
-):
+) -> None:
     """Plot data for all streams and channels for a given metric and region.
 
     Parameters
@@ -103,9 +103,7 @@ def plot_metric_region(
                 run_ids.append(run_id)
 
             if selected_data:
-                _logger.info(
-                    f"Creating plot for {metric} - {region} - {stream} - {ch}."
-                )
+                _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
                 name = "_".join([metric, region] + sorted(set(run_ids)) + [stream, ch])
                 plotter.plot(
                     selected_data,
@@ -157,9 +155,7 @@ def score_card_metric_region(
             if channels_common is None:
                 channels_common = set(channels_per_run)
             else:
-                channels_common = set(channels_common).intersection(
-                    set(channels_per_run)
-                )
+                channels_common = set(channels_common).intersection(set(channels_per_run))
 
         if not channels_common:
             continue
@@ -175,6 +171,51 @@ def score_card_metric_region(
         else:
             _logger.info(
                 f"Only one run_id under stream: {stream}. Creating score card is skipped..."
+            )
+
+
+def bar_plot_metric_region(
+    metric: str,
+    region: str,
+    runs: dict,
+    scores_dict: dict,
+    br_plotter: object,
+) -> None:
+    """
+    Create bar plots for all streams and run_ids for a given metric and region.
+
+    Parameters
+    ----------
+    metric: str
+        String specifying the metric to plot
+    region: str
+        String specifying the region to plot
+    runs: dict
+        Dictionary containing the config for all runs
+    scores_dict : dict
+        The dictionary containing all computed metrics.
+    plotter:
+        Plotter object to handle the plotting part
+    """
+    streams_set = collect_streams(runs)
+    channels_set = collect_channels(scores_dict, metric, region, runs)
+
+    for stream in streams_set:
+        selected_data, run_ids = [], []
+
+        for run_id, data in scores_dict[metric][region].get(stream, {}).items():
+            if data.isnull().all():
+                continue
+            selected_data.append(data)
+            run_ids.append(run_id)
+
+        if selected_data and len(selected_data) > 1.0:
+            _logger.info(f"Creating bar plots for {metric} - {region} - {stream}.")
+            name = "_".join([metric, region, stream])
+            br_plotter.plot(selected_data, run_ids, channels_set, name)
+        else:
+            _logger.info(
+                f"Only one run_id for ({region}) region under stream : {stream}. Creating bar plot is skipped..."
             )
 
 
@@ -207,9 +248,7 @@ class DefaultMarkerSize:
         float
             The default marker size for the stream.
         """
-        return cls._marker_size_stream.get(
-            stream_name.lower(), cls._default_marker_size
-        )
+        return cls._marker_size_stream.get(stream_name.lower(), cls._default_marker_size)
 
     @classmethod
     def list_streams(cls):
