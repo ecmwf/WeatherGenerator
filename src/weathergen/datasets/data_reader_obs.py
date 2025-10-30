@@ -82,6 +82,8 @@ class DataReaderObs(DataReaderBase):
 
         self.len = min(len(self.indices_start), len(self.indices_end))
 
+        # import code; code.interact( local=locals())
+
     @override
     def length(self) -> int:
         return self.len
@@ -179,19 +181,18 @@ class DataReaderObs(DataReaderBase):
                     )
                     * self.indices_start[-1],
                 )
+
                 self.indices_end = np.append(
                     self.indices_end,
                     np.ones(
-                        (diff_in_hours_end - self.hrly_index.shape[0] - 1) // step_hrs, dtype=int
+                        (diff_in_hours_end - self.hrly_index.shape[0] + (len_hrs + 1)) // step_hrs,
+                        dtype=int,
                     )
                     * self.indices_end[-1],
                 )
 
-        # Prevent -1 in samples before the we have data
+        # Prevent -1 in samples before we have data
         self.indices_end = np.maximum(self.indices_end, 0)
-
-        if self.indices_end.shape != self.indices_start.shape:
-            self.indices_end = np.append(self.indices_end, self.indices_end[-1])
 
         # If end (yyyymmddhhmm) is not a multiple of len_hrs
         # truncate the last sample so that it doesn't go beyond the requested dataset end date
@@ -224,6 +225,11 @@ class DataReaderObs(DataReaderBase):
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
+
+        if len(self.indices_end) <= idx:
+            import code
+
+            code.interact(local=locals())
 
         start_row = self.indices_start[idx - 1]
         end_row = self.indices_end[idx]
