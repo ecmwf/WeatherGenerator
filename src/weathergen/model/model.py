@@ -810,7 +810,7 @@ class Model(torch.nn.Module):
         for block in self.fe_blocks:
             aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
             tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
-            tokens = self.layernorm(tokens)
+        tokens = self.layernorm(tokens)
 
         return tokens
 
