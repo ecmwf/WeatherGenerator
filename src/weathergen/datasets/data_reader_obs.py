@@ -82,8 +82,6 @@ class DataReaderObs(DataReaderBase):
 
         self.len = min(len(self.indices_start), len(self.indices_end))
 
-        # import code; code.interact( local=locals())
-
     @override
     def length(self) -> int:
         return self.len
@@ -226,11 +224,6 @@ class DataReaderObs(DataReaderBase):
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
-
-        if len(self.indices_end) <= idx:
-            import code
-
-            code.interact(local=locals())
 
         start_row = self.indices_start[idx - 1]
         end_row = self.indices_end[idx]
