@@ -562,6 +562,10 @@ class Model(torch.nn.Module):
         )
         filename = f"{run_id}_{mini_epoch_id}.chkpt"
 
+        if not (path_run / filename).exists():
+            mini_epoch_id = f"epoch{mini_epoch:05d}"
+            filename = f"{run_id}_{mini_epoch_id}.chkpt"
+
         params = torch.load(
             path_run / filename, map_location=torch.device("cpu"), weights_only=True
         )

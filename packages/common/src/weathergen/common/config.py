@@ -61,7 +61,7 @@ def save(config: Config, mini_epoch: int | None):
     dirname = path_models / config.run_id
     dirname.mkdir(exist_ok=True, parents=True)
 
-    fname = dirname / _get_model_config_file_name(config.run_id, mini_epoch)
+    fname = _get_model_config_file_name(path_models, config.run_id, mini_epoch)
 
     json_str = json.dumps(OmegaConf.to_container(config))
     with fname.open("w") as f:
@@ -84,7 +84,7 @@ def load_model_config(run_id: str, mini_epoch: int | None, model_path: str | Non
                 config=pconf, attribute_name="model_path", fallback="models"
             )
         path = Path(model_path)
-        fname = path / run_id / _get_model_config_file_name(run_id, mini_epoch)
+        fname = _get_model_config_file_name(path, run_id, mini_epoch)
         assert fname.exists(), (
             "The fallback path to the model does not exist. Please provide a `model_path`.",
             fname,
@@ -100,14 +100,15 @@ def load_model_config(run_id: str, mini_epoch: int | None, model_path: str | Non
     return _apply_fixes(config)
 
 
-def _get_model_config_file_name(run_id: str, mini_epoch: int | None):
+def _get_model_config_file_name(path: pathlib.Path, run_id: str, mini_epoch: int | None):
     if mini_epoch is None:
         mini_epoch_str = ""
     elif mini_epoch == -1:
         mini_epoch_str = "_latest"
-    else:
-        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
-    return f"model_{run_id}{mini_epoch_str}.json"
+    elif (path / run_id / f"model_{run_id}_chkpt{mini_epoch:05d}.json").exists():
+        return path / run_id / f"model_{run_id}_chkpt{mini_epoch:05d}.json"
+    
+    return path / run_id / f"model_{run_id}_epoch{mini_epoch:05d}.json"
 
 
 def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
@@ -115,9 +116,20 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     Get the path to the model results zarr store from a given run_id and mini_epoch.
     """
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
-    zarr_path = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.zarr"
-    if not zarr_path.exists() or not zarr_path.is_dir():
-        raise FileNotFoundError(f"Zarr file {zarr_path} does not exist or is not a directory.")
+
+    zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.zarr"
+    zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.zarr"
+
+    if zarr_path_new.exists() or zarr_path_new.is_dir():
+        zarr_path = zarr_path_new
+    elif zarr_path_old.exists() or zarr_path_old.is_dir():
+        zarr_path = zarr_path_old
+    else:
+        raise FileNotFoundError(
+            f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
+            f"exist or is not a directory."
+        )
+
     return zarr_path
 
 
