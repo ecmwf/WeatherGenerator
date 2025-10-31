@@ -376,10 +376,11 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-    def forward(self, tokens, use_reentrant):
-        for it, block in enumerate(self.fe_blocks):
-            aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
-            tokens = checkpoint(block, tokens, aux_info, use_reentrant=use_reentrant)
+    def forward(self, tokens, fstep):
+        aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
+        for block in self.fe_blocks:
+            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+
         return tokens
 
 
