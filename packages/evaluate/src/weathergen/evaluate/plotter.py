@@ -14,8 +14,8 @@ import xarray as xr
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
-
 from weathergen.common.config import _load_private_conf
+
 from weathergen.evaluate.plot_utils import (
     DefaultMarkerSize,
 )
@@ -64,7 +64,7 @@ class Plotter:
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
-        self.animations_duration = plotter_cfg.get("animations_duration")
+        self.fps = plotter_cfg.get("fps")
         self.plot_subtimesteps = plotter_cfg.get(
             "plot_subtimesteps", False
         )  # True if plots are created for each valid time separately
@@ -520,6 +520,9 @@ class Plotter:
         self.update_data_selection(select)
         map_output_dir = self.get_map_output_dir(tag)
 
+        # Convert FPS to duration in milliseconds
+        duration_ms = int(1000 / self.fps) if self.fps > 0 else 400
+
         for _, sa in enumerate(samples):
             for _, var in enumerate(variables):
                 _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
@@ -544,14 +547,18 @@ class Plotter:
                     names = glob.glob(fname)
                     image_paths += names
 
-                images = [Image.open(path) for path in image_paths]
-                images[0].save(
-                    f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{var}.gif",
-                    save_all=True,
-                    append_images=images[1:],
-                    duration=self.animations_duration,
-                    loop=0,
-                )
+                if image_paths:
+                    images = [Image.open(path) for path in image_paths]
+                    images[0].save(
+                        f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{var}.gif",
+                        save_all=True,
+                        append_images=images[1:],
+                        duration=duration_ms,
+                        loop=0,
+                    )
+
+                else:
+                    _logger.warning(f"No images found for animation {var} sample {sa}")
 
         return image_paths
 

@@ -200,7 +200,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         "image_format": global_plotting_opts.get("image_format", "png"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
-        "animations_duration": global_plotting_opts.get("animations_duration", 400),
+        "fps": global_plotting_opts.get("fps", 2),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
     }
 
