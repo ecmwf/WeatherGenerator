@@ -68,31 +68,32 @@ class Masker:
         if self.current_strategy == "healpix":
             hl_data = self.healpix_level_data
             hl_mask = self.masking_strategy_config.get("hl_mask")
-            assert hl_data is not None and hl_mask is not None, (
-                "If HEALPix masking, hl_mask must be given in masking_strategy_config."
-            )
+            assert (
+                hl_data is not None and hl_mask is not None
+            ), "If HEALPix masking, hl_mask must be given in masking_strategy_config."
             assert hl_mask < hl_data, "hl_mask must be less than hl_data for HEALPix masking."
 
         if self.current_strategy == "channel":
             # Ensure that masking_strategy_config contains either 'global' or 'per_cell'
-            assert self.masking_strategy_config.get("mode") in ["global", "per_cell"], (
-                "masking_strategy_config must contain 'mode' key with value 'global' or 'per_cell'."
-            )
+            assert self.masking_strategy_config.get("mode") in [
+                "global",
+                "per_cell",
+            ], "masking_strategy_config must contain 'mode' key with value 'global' or 'per_cell'."
 
             # check all streams that source and target channels are identical
             for stream in cf.streams:
                 # check explicit includes
                 source_include = stream.get("source_include", [])
                 target_include = stream.get("target_include", [])
-                assert set(source_include) == set(target_include), (
-                    "Source and target channels not identical. Required for masking_mode=channel"
-                )
+                assert set(source_include) == set(
+                    target_include
+                ), "Source and target channels not identical. Required for masking_mode=channel"
                 # check excludes
                 source_exclude = stream.get("source_exclude", [])
                 target_exclude = stream.get("target_exclude", [])
-                assert set(source_exclude) == set(target_exclude), (
-                    "Source and target channels not identical. Required for masking_mode=channel"
-                )
+                assert set(source_exclude) == set(
+                    target_exclude
+                ), "Source and target channels not identical. Required for masking_mode=channel"
 
     def reset_rng(self, rng) -> None:
         """
@@ -277,6 +278,9 @@ class Masker:
 
         # process all tokens used for embedding
         for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
+            if len(cc) == 0:  # Skip if there's no target data
+                pass
+
             if self.current_strategy == "channel":
                 # If masking strategy is channel, handle target tokens differently.
                 # We don't have Booleans per cell, instead per channel per cell,
@@ -293,11 +297,28 @@ class Masker:
 
             elif self.current_strategy == "causal":
                 # select only the target times where mask is True
-                selected_tensors = [c for i, c in enumerate(cc) if pp[i]]
+                if len(cc) == len(pp):
+                    selected_tensors = [c for i, c in enumerate(cc) if pp[i]]
+                elif len(pp) == 0:
+                    selected_tensors = cc
+                else:  # If length of target and mask doesn't match, create new mask
+                    ratio = np.sum(pp) / len(pp)  # Ratio of masked tokens in source
+                    indx = max(1, int(ratio * len(cc)))  # Get the same for target
+                    selected_tensors = cc[-indx:]
 
+            elif self.current_strategy == "healpix":
+                selected_tensors = (
+                    cc if len(pp) > 0 and pp[0] else []
+                )  # All tokens inside healpix cell have the same mask
+
+            elif self.current_strategy == "random":
+                # For random masking, we simply select the tensors where the mask is True.
+                # When there's no mask it's assumed to be False. This is done via strict=False
+                selected_tensors = [c for c, p in zip(cc, pp, strict=False) if p]
             else:
-                # For other masking strategies, we simply select the tensors where the mask is True.
-                selected_tensors = [c for c, p in zip(cc, pp, strict=True) if p]
+                raise NotImplementedError(
+                    f"Masking strategy {self.current_strategy} is not supported."
+                )
 
             # Append the selected tensors to the processed_target_tokens list.
             if selected_tensors:
@@ -346,9 +367,9 @@ class Masker:
         hl_data = self.healpix_level_data
         hl_mask = self.masking_strategy_config.get("hl_mask")
 
-        assert len(token_lens) == self.healpix_num_cells, (
-            f"Expected {self.healpix_num_cells} cells at level {hl_data}, got {len(token_lens)}."
-        )
+        assert (
+            len(token_lens) == self.healpix_num_cells
+        ), f"Expected {self.healpix_num_cells} cells at level {hl_data}, got {len(token_lens)}."
 
         # Calculate the number of parent cells at the mask level (hl_mask)
         num_parent_cells = 12 * (4**hl_mask)
@@ -487,14 +508,16 @@ class Masker:
         # Create masks with list comprehension
         # Needed to handle variable lengths
         full_mask = [
-            np.concatenate(
-                [
-                    np.zeros(start_idx, dtype=bool),
-                    np.ones(max(0, token_len - start_idx), dtype=bool),
-                ]
+            (
+                np.concatenate(
+                    [
+                        np.zeros(start_idx, dtype=bool),
+                        np.ones(max(0, token_len - start_idx), dtype=bool),
+                    ]
+                )
+                if token_len > 1
+                else (np.zeros(1, dtype=bool) if token_len == 1 else np.array([], dtype=bool))
             )
-            if token_len > 1
-            else (np.zeros(1, dtype=bool) if token_len == 1 else np.array([], dtype=bool))
             for token_len, start_idx in zip(token_lens, start_mask_indices, strict=False)
         ]
 
