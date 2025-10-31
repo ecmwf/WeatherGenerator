@@ -804,9 +804,7 @@ class Model(torch.nn.Module):
             ValueError: For unexpected arguments in checkpoint method
         """
 
-        for block in self.forecast_engine.fe_blocks:
-            aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
-            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+        self.forecast_engine(tokens, fstep)
 
         return tokens
 
