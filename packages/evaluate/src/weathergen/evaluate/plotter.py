@@ -64,6 +64,7 @@ class Plotter:
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
+        self.animations_duration = plotter_cfg.get("animations_duration")
         self.plot_subtimesteps = plotter_cfg.get(
             "plot_subtimesteps", False
         )  # True if plots are created for each valid time separately
@@ -548,7 +549,7 @@ class Plotter:
                     f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{var}.gif",
                     save_all=True,
                     append_images=images[1:],
-                    duration=500,
+                    duration=self.animations_duration,
                     loop=0,
                 )
 
