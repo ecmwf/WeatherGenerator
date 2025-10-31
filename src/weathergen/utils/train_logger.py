@@ -187,7 +187,9 @@ class TrainLogger:
         """
         # Load config from given model_path if provided, otherwise use path from private config
         if model_path:
-            cf = config.load_model_config(run_id=run_id, mini_epoch=mini_epoch, model_path=model_path)
+            cf = config.load_model_config(
+                run_id=run_id, mini_epoch=mini_epoch, model_path=model_path
+            )
         else:
             cf = config.load_config(private_home=None, from_run_id=run_id, mini_epoch=mini_epoch)
         run_id = cf.run_id

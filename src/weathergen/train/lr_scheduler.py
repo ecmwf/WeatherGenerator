@@ -254,7 +254,10 @@ class LearningRateScheduler:
         lrs = []
 
         for _ in range(
-            num_mini_epochs * num_samples_per_mini_epoch + lr_steps_warmup + lr_steps_cooldown + 1023
+            num_mini_epochs * num_samples_per_mini_epoch
+            + lr_steps_warmup
+            + lr_steps_cooldown
+            + 1023
         ):
             optimizer.step()
             lrs.append(optimizer.param_groups[0]["lr"])
@@ -288,7 +291,10 @@ class LearningRateScheduler:
         lrs = []
 
         for _ in range(
-            num_mini_epochs * num_samples_per_mini_epoch + lr_steps_warmup + lr_steps_cooldown + 1023
+            num_mini_epochs * num_samples_per_mini_epoch
+            + lr_steps_warmup
+            + lr_steps_cooldown
+            + 1023
         ):
             optimizer.step()
             lrs.append(optimizer.param_groups[0]["lr"])

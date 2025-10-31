@@ -301,7 +301,9 @@ class Trainer(TrainerBase):
             self.model.reset_parameters()
         else:
             if is_root():
-                logger.info(f"Continuing run with id={self.cf.from_run_id} at mini_epoch {mini_epoch_contd}.")
+                logger.info(
+                    f"Continuing run with id={self.cf.from_run_id} at mini_epoch {mini_epoch_contd}."
+                )
             self.load_model(self.cf.from_run_id, mini_epoch_contd)
             if is_root():
                 logger.info(f"Loaded model id={run_id_contd}.")
@@ -408,7 +410,8 @@ class Trainer(TrainerBase):
                 len(self.dataset) // (self.world_size_original * cf.batch_size_per_gpu)
             ) * cf.batch_size_per_gpu
             mini_epoch_base = int(
-                self.cf.istep / (min(len_per_rank, cf.samples_per_mini_epoch) * self.world_size_original)
+                self.cf.istep
+                / (min(len_per_rank, cf.samples_per_mini_epoch) * self.world_size_original)
             )
 
         # torch.autograd.set_detect_anomaly(True)
@@ -753,7 +756,9 @@ class Trainer(TrainerBase):
         """
 
         path_run = Path(self.cf.model_path) / run_id
-        mini_epoch_id = f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
+        mini_epoch_id = (
+            f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
+        )
         filename = f"{run_id}_{mini_epoch_id}.chkpt"
 
         params = torch.load(

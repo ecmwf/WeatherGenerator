@@ -557,7 +557,9 @@ class Model(torch.nn.Module):
         """
 
         path_run = Path(self.cf.model_path) / run_id
-        mini_epoch_id = f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
+        mini_epoch_id = (
+            f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
+        )
         filename = f"{run_id}_{mini_epoch_id}.chkpt"
 
         params = torch.load(

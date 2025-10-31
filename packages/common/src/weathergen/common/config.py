@@ -191,7 +191,9 @@ def load_config(
     if from_run_id is None:
         base_config = _load_default_conf()
     else:
-        base_config = load_model_config(from_run_id, mini_epoch, private_config.get("model_path", None))
+        base_config = load_model_config(
+            from_run_id, mini_epoch, private_config.get("model_path", None)
+        )
         from_run_id = base_config.run_id
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
@@ -456,7 +458,7 @@ def get_path_model(config: Config) -> Path:
     return Path(config.model_path) / config.run_id
 
 
-def get_path_output(config: Config, mini_: int) -> Path:
+def get_path_output(config: Config, mini_epoch: int) -> Path:
     base_path = get_path_run(config)
     fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.zarr"
 
