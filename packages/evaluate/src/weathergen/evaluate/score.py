@@ -271,9 +271,9 @@ class Scores:
         score_args_map = {
             "froct": ["p", "gt", "p_next", "gt_next"],
             "troct": ["p", "gt", "p_next", "gt_next"],
-            "acc":   ["p", "gt", "c"],
-            "fact":  ["p", "c"],
-            "tact":  ["gt", "c"],
+            "acc": ["p", "gt", "c"],
+            "fact": ["p", "c"],
+            "tact": ["gt", "c"],
         }
 
         available = {
@@ -284,7 +284,7 @@ class Scores:
             "c": data.climatology,
         }
 
-        #assign p and gt by default if metrics do not have specific args
+        # assign p and gt by default if metrics do not have specific args
         keys = score_args_map.get(score_name, ["p", "gt"])
         args = {k: available[k] for k in keys}
 
@@ -643,7 +643,7 @@ class Scores:
                 "Cannot calculate variance-normalized root mean squared error without aggregation dimensions (agg_dims=None)."
             )
 
-        vrmse = np.sqrt(self.calc_mse(p, gt, group_by_coord) / (gt.var(dim=self._agg_dims)+1e-6))
+        vrmse = np.sqrt(self.calc_mse(p, gt, group_by_coord) / (gt.var(dim=self._agg_dims) + 1e-6))
 
         return vrmse
 
@@ -873,7 +873,7 @@ class Scores:
             act = ano.std(dim=spatial_dims)
 
         return act
-    
+
     def calc_fact(
         self,
         p: xr.DataArray,
@@ -902,7 +902,7 @@ class Scores:
         """
 
         return self._calc_act(p, c, group_by_coord, spatial_dims)
-    
+
     def calc_tact(
         self,
         gt: xr.DataArray,
