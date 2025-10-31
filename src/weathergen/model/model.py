@@ -804,7 +804,7 @@ class Model(torch.nn.Module):
             ValueError: For unexpected arguments in checkpoint method
         """
 
-        self.forecast_engine(tokens, fstep)
+        tokens = self.forecast_engine(tokens, fstep)
 
         return tokens
 
