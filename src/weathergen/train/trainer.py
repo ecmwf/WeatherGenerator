@@ -331,7 +331,9 @@ class Trainer(TrainerBase):
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
 
-        self.target_and_aux_calculator = get_target_and_aux_calculator(cf, self.model, None, ema_model = self.ema_model)
+        self.target_and_aux_calculator = get_target_and_aux_calculator(
+            cf, self.model, None, ema_model=self.ema_model
+        )
 
         # if with_fsdp then parameter count is unreliable
         if is_root() and not cf.with_fsdp and not cf.with_ddp:
@@ -622,7 +624,6 @@ class Trainer(TrainerBase):
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss).backward()
             # loss_values.loss.backward()
-
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
