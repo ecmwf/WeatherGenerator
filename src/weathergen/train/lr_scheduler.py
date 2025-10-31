@@ -154,8 +154,8 @@ class LearningRateScheduler:
         self.i_step = 0
         self.lr = self.cur_scheduler.get_last_lr()
 
-        # advance manually to step_contd (last_mini_epoch parameter for schedulers is not working and
-        # this is also more brittle with the different phases)
+        # advance manually to step_contd (last_mini_epoch parameter for schedulers is not working
+        # and this is also more brittle with the different phases)
         # optimizer.step() as required by torch;
         # won't have a material effect since grads are zero at this point
         if self.step_contd > 0:

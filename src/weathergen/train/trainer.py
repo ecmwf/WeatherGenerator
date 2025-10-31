@@ -302,7 +302,8 @@ class Trainer(TrainerBase):
         else:
             if is_root():
                 logger.info(
-                    f"Continuing run with id={self.cf.from_run_id} at mini_epoch {mini_epoch_contd}."
+                    f"""Continuing run with id={self.cf.from_run_id} at mini_epoch
+                    {mini_epoch_contd}."""
                 )
             self.load_model(self.cf.from_run_id, mini_epoch_contd)
             if is_root():
@@ -1038,7 +1039,8 @@ class Trainer(TrainerBase):
             if is_root():
                 if stage == VAL:
                     logger.info(
-                        f"validation ({self.cf.run_id}) : {mini_epoch:03d} : {avg_loss.nanmean().item()}"
+                        f"""validation ({self.cf.run_id}) : {mini_epoch:03d} : 
+                        {avg_loss.nanmean().item()}"""
                     )
                     for _, st in enumerate(self.cf.streams):
                         logger.info(
