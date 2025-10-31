@@ -323,7 +323,9 @@ class Trainer(TrainerBase):
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
 
-        self.target_and_aux_calculator = get_target_and_aux_calculator(cf, self.model, None, ema_model = self.ema_model)
+        self.target_and_aux_calculator = get_target_and_aux_calculator(
+            cf, self.model, None, ema_model=self.ema_model
+        )
 
         # if with_fsdp then parameter count is unreliable
         if (is_root() and not cf.with_fsdp) or not cf.with_ddp:
@@ -594,10 +596,12 @@ class Trainer(TrainerBase):
                     self.model_params, batch, cf.forecast_offset, forecast_steps
                 )
 
-            targets, aux_outputs = self.target_and_aux_calculator.compute(bidx, batch, self.model)
+            targets, aux_outputs = self.target_and_aux_calculator.compute(
+                bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
+            )
             loss_values = self.loss_calculator.compute_loss(
                 preds=preds,
-                streams_data=batch[0], # should additionally take targets?
+                streams_data=batch[0],  # should additionally take targets?
             )
             if cf.latent_noise_kl_weight > 0.0:
                 kl = torch.cat([posterior.kl() for posterior in posteriors])
@@ -609,7 +613,6 @@ class Trainer(TrainerBase):
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss_values.loss).backward()
             # loss_values.loss.backward()
-
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
