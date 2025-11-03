@@ -178,7 +178,7 @@ class LearningRateScheduler:
             return self.lr
 
         end_decay = self.n_steps_warmup + self.n_steps_decay
-        phase_decay = (self.i_step > self.n_steps_warmup) and (self.i_step < end_decay)
+        phase_decay = (self.i_step > self.n_steps_warmup) and (self.i_step <= end_decay)
 
         if self.policy_decay == "sqrt" and phase_decay:
             self.lr = (
