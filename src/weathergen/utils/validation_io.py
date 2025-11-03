@@ -60,6 +60,7 @@ def write_output(
 
     data = io.OutputBatchData(
         sources,
+        source_intervals,
         targets_all,
         preds_all,
         targets_coords_all,
