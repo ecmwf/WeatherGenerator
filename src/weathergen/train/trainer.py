@@ -202,19 +202,19 @@ class Trainer(TrainerBase):
                 MultiSelfAttentionHeadVarlen,
             )
 
-            for module in model.ae_local_blocks.modules():
+            for module in model.ae_local_engine.ae_local_blocks.modules():
                 if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)
 
-            for module in model.ae_adapter.modules():
+            for module in model.ae_local_global_engine.ae_adapter.modules():
                 if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)
 
-            for module in model.ae_global_blocks.modules():
+            for module in model.ae_global_engine.ae_global_blocks.modules():
                 if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)
 
-            for module in model.fe_blocks.modules():
+            for module in model.forecast_engine.fe_blocks.modules():
                 if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)
 
@@ -248,7 +248,7 @@ class Trainer(TrainerBase):
         # functions in the embedding engine as forward functions. Thus, yielding a crash
         # because the input tensors are not converted to DTensors. This seems to primarily
         # occur during validation.
-        for embed in model.embeds:
+        for embed in model.embed_engine.embeds:
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
@@ -759,6 +759,9 @@ class Trainer(TrainerBase):
         params = torch.load(
             path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
         )
+
+        # Ensure backward compatibility with old model checkpoints
+        params = self.model.rename_old_state_dict(params)
 
         model_state_dict = self.model.state_dict()
         params = {
