@@ -123,6 +123,10 @@ class LearningRateScheduler:
             self.decay_factor = self.lr_max_scaled * np.sqrt(n_steps_warmup)
             self.scheduler_decay = None
 
+        elif policy_decay == "constant":
+            self.decay_factor = 0.0
+            self.scheduler_decay = None
+
         else:
             assert False, "Unsupported decay policy for learning rate scheduler"
 
@@ -173,11 +177,10 @@ class LearningRateScheduler:
         if self.i_step >= (self.n_steps_warmup + self.n_steps_decay + self.n_steps_cooldown):
             return self.lr
 
-        if (
-            self.policy_decay == "sqrt"
-            and self.i_step > self.n_steps_warmup
-            and self.i_step < self.n_steps_warmup + self.n_steps_decay
-        ):
+        end_decay = self.n_steps_warmup + self.n_steps_decay
+        phase_decay = (self.i_step > self.n_steps_warmup) and (self.i_step <= end_decay)
+
+        if self.policy_decay == "sqrt" and phase_decay:
             self.lr = (
                 (self.decay_factor / np.sqrt(self.i_step))
                 if self.i_step > 0
@@ -185,6 +188,13 @@ class LearningRateScheduler:
             )
             for g in self.optimizer.param_groups:
                 g["lr"] = self.lr
+        elif self.policy_decay == "constant" and phase_decay:
+            cur_lr = self.lr
+            self.lr = self.lr_max_scaled
+            # make sure lr_max_scaled rate is used if warm-up end is not lr_max_scaled
+            if cur_lr < self.lr:
+                for g in self.optimizer.param_groups:
+                    g["lr"] = self.lr
         else:
             self.cur_scheduler.step()
             self.lr = self.cur_scheduler.get_last_lr()[0]
