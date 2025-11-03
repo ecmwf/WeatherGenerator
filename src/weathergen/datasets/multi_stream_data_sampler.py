@@ -36,7 +36,7 @@ from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import Stage
 
-type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
+type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs | DataReaderEObs
 
 logger = logging.getLogger(__name__)
 
