@@ -322,6 +322,9 @@ class Model(torch.nn.Module):
             )
 
         self.forecast_engine = ForecastingEngine(cf, self.num_healpix_cells)
+        self.fe_layernorm = torch.nn.LayerNorm(
+            self.cf.ae_global_dim_embed, elementwise_affine=False
+        )
 
         ###############
         # embed coordinates yielding one query token for each target token
@@ -623,6 +626,8 @@ class Model(torch.nn.Module):
         # roll-out in latent space
         preds_all = []
         for fstep in range(forecast_offset, forecast_offset + forecast_steps):
+            tokens = self.fe_layernorm(tokens)
+
             # prediction
             preds_all += [
                 self.predict(
@@ -642,6 +647,7 @@ class Model(torch.nn.Module):
 
             tokens = self.forecast(model_params, tokens, fstep)
 
+        tokens = self.fe_layernorm(tokens)
         # prediction for final step
         preds_all += [
             self.predict(
