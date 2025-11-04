@@ -191,7 +191,7 @@ class OutputDataset:
         """
         assert "source_interval" in attrs, "missing expected attribute 'source_interval'"
 
-        source_interval = TimeRange(**attrs["source_interval"])
+        source_interval = TimeRange(**attrs.pop("source_interval"))
         return cls(name, key, source_interval, **arrays, **attrs)
 
     @functools.cached_property
