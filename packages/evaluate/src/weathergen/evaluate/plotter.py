@@ -789,7 +789,8 @@ class LinePlots:
                 )
         else:
             _logger.warning(
-                f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. Skipping ensemble plotting."
+                f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. "
+                "Skippingensemble plotting."
             )
 
     def plot(

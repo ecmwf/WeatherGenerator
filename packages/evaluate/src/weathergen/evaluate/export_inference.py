@@ -472,7 +472,8 @@ def get_data(
                                 f"{list(set(channels) - set(existing_channels))}. Skipping them."
                             )
                         result = result.sel(channel=existing_channels)
-                    # reshape result - use adaptive function to handle both regular and Gaussian grids
+                    # reshape result - use adaptive function to handle both regular and Gaussian
+                    # grids
                     result = reshape_dataset_adaptive(result)
                     da_fs.append(result)
 

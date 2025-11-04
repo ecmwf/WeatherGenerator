@@ -548,7 +548,7 @@ class Scores:
         """
         Calculate the L1 error norm of forecast data w.r.t. reference data.
         Note that the L1 error norm is calculated as the sum of absolute differences.
-        
+
         Parameters
         ----------
         p: xr.DataArray
@@ -557,9 +557,9 @@ class Scores:
             Ground truth data array
         scale_dims: list | None
             List of dimensions over which the L1 score will be scaled.
-            If provided, the L1 score will be divided by the product of the sizes of these 
+            If provided, the L1 score will be divided by the product of the sizes of these
             dimensions.
-        
+
         Returns
         -------
         xr.DataArray
@@ -1341,7 +1341,7 @@ class Scores:
         gt: xr.DataArray
             Ground truth data array
         norm: bool
-            Flag if normalized counts should be returned. If True, the rank histogram will be 
+            Flag if normalized counts should be returned. If True, the rank histogram will be
             normalized by the number of ensemble members in the forecast data.
         add_noise: bool
             Flag if a small amount of random noise should be added to the data to avoid ties in the
@@ -1350,7 +1350,7 @@ class Scores:
         noise_fac: float
             Magnitude of random noise to be added to the data if add_noise is True.
             Default is 1.0e-03. This value is only relevant if add_noise is True
-        
+
         Returns
         -------
         xr.DataArray
@@ -1470,13 +1470,14 @@ class Scores:
         r_e: float
             Radius of the sphere
         dom_avg: bool
-            Flag whether to return the domain-averaged amplitude or the amplitude at each 
+            Flag whether to return the domain-averaged amplitude or the amplitude at each
             grid point
-        
+
         Returns
         -------
         xr.DataArray
-            the amplitude of the gradient/laplacian at each grid point or over the whole domain (see dom_avg)
+            the amplitude of the gradient/laplacian at each grid point or over the whole domain
+            (see dom_avg)
         """
         method = Scores.calc_geo_spatial_diff.__name__
         # sanity checks
