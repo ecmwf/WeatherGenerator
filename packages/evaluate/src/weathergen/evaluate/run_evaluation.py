@@ -16,7 +16,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import mlflow
-# from mlflow.client import MlflowClient
+from mlflow.client import MlflowClient
 from omegaconf import OmegaConf
 from xarray import DataArray
 
