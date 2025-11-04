@@ -43,8 +43,8 @@ class TimeRange:
 
     def __post_init__(self):
         # ensure consistent type
-        self.start = self.start.astype("np.datetime64[ns]")
-        self.end = self.end.astype("np.datetime64[ns]")
+        self.start = self.start.astype("datetime64[ns]")
+        self.end = self.end.astype("datetime64[ns]")
 
         assert self.start < self.end
 
