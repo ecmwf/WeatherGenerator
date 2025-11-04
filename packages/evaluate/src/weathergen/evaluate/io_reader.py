@@ -482,13 +482,6 @@ class WeatherGenReader(Reader):
                         _logger.debug(f"Selecting ensemble members {ensemble}.")
                         pred = pred.sel(ens=ensemble)
 
-                    if ensemble == ["mean"]:
-                        _logger.debug("Averaging over ensemble members.")
-                        pred = pred.mean("ens", keepdims=True)
-                    else:
-                        _logger.debug(f"Selecting ensemble members {ensemble}.")
-                        pred = pred.sel(ens=ensemble)
-
                     da_tars_fs.append(target.squeeze())
                     da_preds_fs.append(pred.squeeze())
                     pps.append(npoints)
@@ -516,6 +509,10 @@ class WeatherGenReader(Reader):
                         [a.expand_dims(sample=[int(a.sample.values)]) for a in da_preds_fs],
                         dim="sample",
                     )
+
+                    da_preds_fs = _force_consistent_grids(da_preds_fs)
+                    da_tars_fs = _force_consistent_grids(da_tars_fs)
+
                 else:
                     # Irregular (scatter) case. concatenate over ipoint
                     da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
@@ -644,7 +641,17 @@ class WeatherGenReader(Reader):
         return all_channels
 
     def get_ensemble(self, stream: str | None = None) -> list[str]:
-        """Get the list of ensemble member names for a given stream from the config."""
+        """Get the list of ensemble member names for a given stream from the config.
+        Parameters
+        ----------
+        stream : str
+            The name of the stream to get channels for.
+
+        Returns
+        -------
+        list[str]
+            A list of ensemble members.
+        """
         _logger.debug(f"Getting ensembles for stream {stream}...")
 
         # TODO: improve this to get ensemble from io class
@@ -654,7 +661,17 @@ class WeatherGenReader(Reader):
 
     # TODO: improve this
     def is_regular(self, stream: str) -> bool:
-        """Check if the latitude and longitude coordinates are regularly spaced for a given stream."""
+        """Check if the latitude and longitude coordinates are regularly spaced for a given stream.
+        Parameters
+        ----------
+        stream : str
+            The name of the stream to get channels for.
+
+        Returns
+        -------
+        bool
+            True if the stream is regularly spaced. False otherwise. 
+        """
         _logger.debug(f"Checking regular spacing for stream {stream}...")
 
         with ZarrIO(self.fname_zarr) as zio:
@@ -696,3 +713,34 @@ class WeatherGenReader(Reader):
             if stream.get("name") == stream_name:
                 return stream.get(key, default)
         return default
+
+################### Helper functions ########################
+
+def _force_consistent_grids(ds: xr.DataArray) -> xr.DataArray:
+        """
+        Force all samples to share the same ipoint order.
+        
+        Parameters
+        ----------
+        ds: 
+           Input dataset
+        Returns
+        -------
+            xr.DataArray
+            Returns a Dataset where all samples have the same lat lon and ipoint ordering    
+        """
+      
+        # Pick first sample as reference
+        ref_lat = ds.lat.isel(sample=0)
+        ref_lon = ds.lon.isel(sample=0)
+
+        # Sort the entire DataArray according to the reference
+        sort_idx = np.lexsort((ref_lon.values, ref_lat.values))
+        pred_sorted = ds.isel(ipoint=sort_idx)
+
+        pred_sorted = pred_sorted.assign_coords(
+            lat=("ipoint", ref_lat.values[sort_idx]),
+            lon=("ipoint", ref_lon.values[sort_idx])
+        )
+            
+        return pred_sorted
