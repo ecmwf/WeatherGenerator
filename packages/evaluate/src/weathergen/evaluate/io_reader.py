@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,6 +65,7 @@ class DataAvailability:
     channels: list[str] | None
     fsteps: list[int] | None
     samples: list[int] | None
+    ensemble: list[str] | None = None
 
 
 class Reader:
@@ -122,6 +124,10 @@ class Reader:
         """Placeholder implementation channel names getter. Override in subclass."""
         return list()
 
+    def get_ensemble(self, stream: str | None = None) -> list[str]:
+        """Placeholder implementation ensemble member names getter. Override in subclass."""
+        return list()
+
     def check_availability(
         self,
         stream: str,
@@ -157,24 +163,29 @@ class Reader:
         channels = requested_data.channels
         fsteps = requested_data.fsteps
         samples = requested_data.samples
+        ensemble = requested_data.ensemble
 
         requested = {
             "channel": set(channels) if channels is not None else None,
             "fstep": set(fsteps) if fsteps is not None else None,
             "sample": set(samples) if samples is not None else None,
+            "ensemble": set(ensemble) if ensemble is not None else None,
         }
 
         # fill info from available metric file (if provided)
         available = {
             "channel": set(available_data["channel"].values.ravel())
             if available_data is not None
-            else {},
+            else set(),
             "fstep": set(available_data["forecast_step"].values.ravel())
             if available_data is not None
-            else {},
+            else set(),
             "sample": set(available_data.coords["sample"].values.ravel())
             if available_data is not None
-            else {},
+            else set(),
+            "ensemble": set(available_data["ens"].values.ravel())
+            if available_data is not None and "ens" in available_data.coords
+            else set(),
         }
 
         # fill info from reader
@@ -182,11 +193,12 @@ class Reader:
             "fstep": set(int(f) for f in self.get_forecast_steps()),
             "sample": set(int(s) for s in self.get_samples()),
             "channel": set(self.get_channels(stream)),
+            "ensemble": set(self.get_ensemble(stream)),
         }
 
         check_score = True
         corrected = False
-        for name in ["channel", "fstep", "sample"]:
+        for name in ["channel", "fstep", "sample", "ensemble"]:
             if requested[name] is None:
                 # Default to all in Zarr
                 requested[name] = reader_data[name]
@@ -200,12 +212,16 @@ class Reader:
             # Must be subset of Zarr
             if not requested[name] <= reader_data[name]:
                 missing = requested[name] - reader_data[name]
-                _logger.info(
-                    f"Requested {name}(s) {missing} do(es) not exist in Zarr. "
-                    f"Removing missing {name}(s) for {mode}."
-                )
-                requested[name] = requested[name] & reader_data[name]
-                corrected = True
+
+                if name == "ensemble" and "mean" in missing:
+                    missing.remove("mean")
+                if missing:
+                    _logger.info(
+                        f"Requested {name}(s) {missing} do(es) not exist in Zarr. "
+                        f"Removing missing {name}(s) for {mode}."
+                    )
+                    requested[name] = requested[name] & reader_data[name]
+                    corrected = True
 
             # Must be a subset of available_data (if provided)
             if available_data is not None and not requested[name] <= available[name]:
@@ -226,6 +242,7 @@ class Reader:
             channels=sorted(list(requested["channel"])),
             fsteps=sorted(list(requested["fstep"])),
             samples=sorted(list(requested["sample"])),
+            ensemble=sorted(list(requested["ensemble"])),
         )
 
     def _get_channels_fsteps_samples(self, stream: str, mode: str) -> DataAvailability:
@@ -257,12 +274,27 @@ class Reader:
         samples = stream_cfg[mode].get("sample", None)
         fsteps = stream_cfg[mode].get("forecast_step", None)
         channels = stream_cfg.get("channels", None)
+        ensemble = stream_cfg[mode].get("ensemble", None)
+        if ensemble == "mean":
+            ensemble = ["mean"]
+
+        if isinstance(fsteps, str) and fsteps != "all":
+            assert re.match(r"^\d+-\d+$", fsteps), (
+                "String format for forecast_step in config must be 'digit-digit' or 'all'"
+            )
+            fsteps = list(range(int(fsteps.split("-")[0]), int(fsteps.split("-")[1]) + 1))
+        if isinstance(samples, str) and samples != "all":
+            assert re.match(r"^\d+-\d+$", samples), (
+                "String format for sample in config must be 'digit-digit' or 'all'"
+            )
+            samples = list(range(int(samples.split("-")[0]), int(samples.split("-")[1]) + 1))
 
         return DataAvailability(
             score_availability=True,
             channels=None if (channels == "all" or channels is None) else list(channels),
             fsteps=None if (fsteps == "all" or fsteps is None) else list(fsteps),
             samples=None if (samples == "all" or samples is None) else list(samples),
+            ensemble=None if (ensemble == "all" or ensemble is None) else list(ensemble),
         )
 
 
@@ -344,6 +376,7 @@ class WeatherGenReader(Reader):
         samples: list[int] | None = None,
         fsteps: list[str] | None = None,
         channels: list[str] | None = None,
+        ensemble: list[str] | None = None,
         return_counts: bool = False,
     ) -> ReaderOutput:
         """
@@ -388,11 +421,12 @@ class WeatherGenReader(Reader):
 
             # TODO: Avoid conversion of fsteps and sample to integers (as obtained from the ZarrIO)
             fsteps = sorted([int(fstep) for fstep in fsteps])
-            samples = sorted(
-                [int(sample) for sample in self.get_samples()] if samples is None else samples
-            )
+            samples = samples or sorted([int(sample) for sample in self.get_samples()])
             channels = channels or stream_cfg.get("channels", all_channels)
             channels = to_list(channels)
+
+            ensemble = ensemble or self.get_ensemble(stream)
+            ensemble = to_list(ensemble)
 
             dc = DeriveChannels(
                 all_channels,
@@ -436,6 +470,13 @@ class WeatherGenReader(Reader):
                             f"Skipping {stream} sample {sample} forecast step: {fstep}. Dataset is empty."
                         )
                         continue
+
+                    if ensemble == ["mean"]:
+                        _logger.debug("Averaging over ensemble members.")
+                        pred = pred.mean("ens", keepdims=True)
+                    else:
+                        _logger.debug(f"Selecting ensemble members {ensemble}.")
+                        pred = pred.sel(ens=ensemble)
 
                     da_tars_fs.append(target.squeeze())
                     da_preds_fs.append(pred.squeeze())
@@ -493,6 +534,44 @@ class WeatherGenReader(Reader):
 
     ######## reader utils ########
 
+    def get_climatology_filename(self, stream: str) -> str | None:
+        """
+        Get the climatology filename for a given stream from the inference configuration.
+        Parameters
+        ----------
+        stream : str
+            Name of the data stream.
+        Returns
+        -------
+        str or None
+            Climatology filename if specified, otherwise None.
+        """
+
+        stream_dict = self.get_stream(stream)
+
+        clim_data_path = stream_dict.get("climatology_path", None)
+        if not clim_data_path:
+            clim_base_dir = self.inference_cfg.get("data_path_aux", None)
+
+            clim_fn = next(
+                (
+                    item.get("climatology_filename")
+                    for item in self.inference_cfg["streams"]
+                    if item.get("name") == stream
+                ),
+                None,
+            )
+
+            if clim_base_dir and clim_fn:
+                clim_data_path = Path(clim_base_dir).join(clim_fn)
+            else:
+                _logger.warning(
+                    f"No climatology path specified for stream {stream}. Setting climatology to NaN. "
+                    "Add 'climatology_path' to evaluation config to use metrics like ACC."
+                )
+
+        return clim_data_path
+
     def get_stream(self, stream: str):
         """
         returns the dictionary associated to a particular stream.
@@ -515,10 +594,12 @@ class WeatherGenReader(Reader):
         return stream_dict
 
     def get_samples(self) -> set[int]:
+        """Get the set of sample indices from the Zarr file."""
         with ZarrIO(self.fname_zarr) as zio:
             return set(int(s) for s in zio.samples)
 
     def get_forecast_steps(self) -> set[int]:
+        """Get the set of forecast steps from the Zarr file."""
         with ZarrIO(self.fname_zarr) as zio:
             return set(int(f) for f in zio.forecast_steps)
 
@@ -540,6 +621,15 @@ class WeatherGenReader(Reader):
         all_channels = self.get_inference_stream_attr(stream, "val_target_channels")
         _logger.debug(f"Channels found in config: {all_channels}")
         return all_channels
+
+    def get_ensemble(self, stream: str | None = None) -> list[str]:
+        """Get the list of ensemble member names for a given stream from the config."""
+        _logger.debug(f"Getting ensembles for stream {stream}...")
+
+        # TODO: improve this to get ensemble from io class
+        with ZarrIO(self.fname_zarr) as zio:
+            dummy = zio.get_data(0, stream, zio.forecast_steps[0])
+        return list(dummy.prediction.as_xarray().coords["ens"].values)
 
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """
