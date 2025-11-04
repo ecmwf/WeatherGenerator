@@ -193,10 +193,6 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
 
         channels_set = collect_channels(scores_dict, metric, region, runs)
 
-        import pdb
-
-        pdb.set_trace()
-
         for run_id, run in runs.items():
             reader = WeatherGenReader(run, run_id, private_paths)
             from_run_id = reader.inference_cfg["from_run_id"]
