@@ -64,8 +64,9 @@ class TimeRange:
         if isinstance(abs_time, np.datetime64):
             abs_time = np.array([abs_time])
 
-        abs_time.astype("np.datetiem64[ns]")
-        assert all(abs_time > self.end)
+        abs_time.astype("datetime64[ns]")
+        # this fails for forecast offset = 0 / fstep 0
+        # assert all(abs_time >= self.end)
         return abs_time - self.end
 
 
@@ -224,25 +225,24 @@ class OutputDataset:
         geoinfo = {name: ("ipoint", geoinfo[:, i]) for i, name in enumerate(self.geoinfo_channels)}
         # TODO: make sample, stream, forecast_step DataArray attribute, test how it
         # interacts with concatenating
-        return xr.DataArray(
-            expanded_data,
-            dims=["sample", "stream", "forecast_step", "ipoint", "channel", "ens"],
-            coords={
-                "sample": [self.item_key.sample],
-                "source_interval_start": ("sample", [self.source_interval.start]),
-                "source_interval_end": ("sample", self.source_interval.end),
-                "stream": [self.item_key.stream],
-                "forecast_step": [self.item_key.forecast_step],
-                "ipoint": self.datapoints,
-                "channel": self.channels,  # TODO: make sure channel names align with data
-                "valid_time": ("ipoint", times),
-                "lead_time": ("ipoint", self.source_interval.get_lead_time(times)),
-                "lat": ("ipoint", coords[..., 0]),
-                "lon": ("ipoint", coords[..., 1]),
-                **geoinfo,
-            },
-            name=self.name,
-        )
+        dims = ["sample", "stream", "forecast_step", "ipoint", "channel", "ens"]
+        breakpoint()
+        ds_coords = {
+            "sample": [self.item_key.sample],
+            "source_interval_start": ("sample", [self.source_interval.start]),
+            "source_interval_end": ("sample", [self.source_interval.end]),
+            "stream": [self.item_key.stream],
+            "forecast_step": [self.item_key.forecast_step],
+            "ipoint": self.datapoints,
+            "channel": self.channels,  # TODO: make sure channel names align with data
+            "valid_time": ("ipoint", times),
+            "lead_time": ("ipoint", self.source_interval.get_lead_time(times)),
+            "lat": ("ipoint", coords[..., 0]),
+            "lon": ("ipoint", coords[..., 1]),
+            **geoinfo,
+        }
+        breakpoint()
+        return xr.DataArray(expanded_data, dims=dims, coords=ds_coords, name=self.name)
 
 
 class OutputItem:
@@ -302,7 +302,12 @@ class ZarrIO:
         """Get datasets for a output item."""
         group = self._get_group(key)
         datasets = {
-            name: OutputDataset.create(name, key, dict(dataset.arrays()), dataset.attrs)
+            name: OutputDataset.create(
+                name,
+                key,
+                dict(dataset.arrays()),
+                dict(dataset.attrs).copy()
+            )
             for name, dataset in group.groups()
         }
         datasets["key"] = key
