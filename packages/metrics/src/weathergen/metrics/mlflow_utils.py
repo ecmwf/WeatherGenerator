@@ -1,5 +1,6 @@
 import logging
 import os
+from xarray import DataArray
 
 import mlflow
 import mlflow.client
@@ -30,11 +31,11 @@ class MlFlowUpload:
     }
 
     @classmethod
-    def run_tags(cls, run_id: str, phase: str) -> dict[str, str]:
+    def run_tags(cls, run_id: str, phase: str, from_run_id: str | None) -> dict[str, str]:
         """
         Returns the tags to be set for a run.
         """
-        return {
+        dct = {
             "lifecycle": project_lifecycle,
             "hpc": _platform_env.get_hpc() or "unknown",
             "run_id": run_id,
@@ -43,6 +44,9 @@ class MlFlowUpload:
             "uploader": _platform_env.get_hpc_user() or "unknown",
             "completion_status": "success",
         }
+        if from_run_id:
+            dct["from_run_id"] = from_run_id
+        return dct
 
 
 def log_metrics(
@@ -74,37 +78,16 @@ def log_metrics(
     )
 
 
-# def log_scores(
-#     metrics: list,
-#     fsteps: list,
-#     label: str,
-#     mlflow_client: MlflowClient,
-#     mlflow_run_id: str,
-# ):
-#     """
-#     Logs the evaluation scores to MLFlow.
-#     """
-#     ts = 0
-#     mlflow_metrics = [
-#         Metric(key=label, value=y, timestamp=ts, step=int(x))
-#         for x, y in zip(fsteps, metrics, strict=False)
-#     ]
-
-#     mlflow_client.log_batch(
-#         run_id=mlflow_run_id,
-#         metrics=mlflow_metrics,
-#     )
-
-
 def log_scores(
-    metrics_dict: dict,
+    metrics_dict: dict[str, dict[str, dict[str, DataArray]]],
     mlflow_client: MlflowClient,
     mlflow_run_id: str,
-    channels_set: list,
+    channels_set: list[str],
     x_dim="forecast_step",
 ):
     """
     Logs the evaluation scores to MLFlow.
+    metrics_dict: metric -> region -> stream -> DataArray
     """
 
     ts = 0
@@ -174,7 +157,7 @@ def get_or_create_mlflow_parent_run(mlflow_client: MlflowClient, run_id: str) ->
         _logger.info(f"No existing parent run found for run_id {run_id}, creating new run")
         return mlflow_client.create_run(
             experiment_id=exp.experiment_id,
-            tags=MlFlowUpload.run_tags(run_id, "unknown"),
+            tags=MlFlowUpload.run_tags(run_id, "unknown", from_run_id=None),
             run_name=run_id,
         )
     if len(l) > 1:

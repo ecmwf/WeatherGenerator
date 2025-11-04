@@ -5,7 +5,7 @@ description = "The WeatherGenerator Machine Learning Earth System Model"
 readme = "../../README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "mlflow",
+    "mlflow-skinny",
     "weathergen-common",
 ]
 
@@ -14,7 +14,7 @@ dev = [
  "pytest~=8.3.5",
  "pytest-mock>=3.14.1",
  "ruff==0.9.7",
- "pyrefly==0.33.0",
+ "pyrefly==0.36.0",
 ]
 
 

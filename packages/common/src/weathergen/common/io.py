@@ -83,8 +83,6 @@ class IOReaderData:
 
         others is list of ReaderData instances.
         """
-        # TODO: do we need it in common package?
-
         assert len(others) > 0, len(others)
 
         other = others[0]

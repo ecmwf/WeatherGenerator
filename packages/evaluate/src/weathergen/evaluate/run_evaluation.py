@@ -14,6 +14,7 @@ import logging
 import sys
 from collections import defaultdict
 from pathlib import Path
+from xarray import DataArray
 
 import mlflow
 from omegaconf import OmegaConf
@@ -179,7 +180,7 @@ def evaluate_from_config(cfg, mlflow_client):
     if mlflow_client:
         # Reorder scores_dict to push to MLFlow per run_id:
         # Create a new defaultdict with the target structure: [run_id][metric][region][stream]
-        reordered_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+        reordered_dict: dict[str, dict[str, dict[str, dict[str, DataArray]]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
 
         # Iterate through the original dictionary to get all keys and the final value
         for metric, regions_dict in scores_dict.items():
@@ -203,7 +204,7 @@ def evaluate_from_config(cfg, mlflow_client):
                     parent_run_id=parent_run.info.run_id,
                     nested=True,
                 ) as run:
-                    mlflow.set_tags(MlFlowUpload.run_tags(run_id, phase))
+                    mlflow.set_tags(MlFlowUpload.run_tags(run_id, phase, from_run_id))
                     log_scores(
                         reordered_dict[run_id],
                         mlflow_client,

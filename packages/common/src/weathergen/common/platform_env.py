@@ -5,6 +5,7 @@ These are loaded from secrets in the private repository.
 """
 
 import importlib
+import importlib.util
 from functools import lru_cache
 from typing import Protocol
 
@@ -25,15 +26,6 @@ class PlatformEnv(Protocol):
     def get_hpc_certificate(self) -> str | None: ...
 
 
-# def get_private_conf() -> OmegaConf:
-#     """
-#     Loads the private configuration from the private repository.
-#     Excludes secrets.
-
-#     In doudbt, use this function.
-#     """
-
-
 @lru_cache(maxsize=1)
 def get_platform_env() -> PlatformEnv:
     """
@@ -43,8 +35,4 @@ def get_platform_env() -> PlatformEnv:
     spec = importlib.util.spec_from_file_location("platform_env", env_script_path)
     platform_env = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(platform_env)  # type: ignore
-    return platform_env
-
-
-if __name__ == "__main__":
-    print(f"Loaded platform environment: {env.get_hpc()}")
+    return platform_env #type: ignore
