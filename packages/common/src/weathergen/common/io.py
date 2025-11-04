@@ -60,11 +60,12 @@ class TimeRange:
 
     def get_lead_time(
         self, abs_time: np.datetime64 | NDArray[np.datetime64]
-    ) -> NDArray[np.datetime64]:
+    ) -> NDArray[np.timedelta64]:
         if isinstance(abs_time, np.datetime64):
             abs_time = np.array([abs_time])
 
-        abs_time.astype("datetime64[ns]")
+        abs_time = abs_time.astype("datetime64[ns]")
+        # end = self.end.astype("datetime64[ns]")
         # this fails for forecast offset = 0 / fstep 0
         # assert all(abs_time >= self.end)
         return abs_time - self.end
@@ -226,7 +227,6 @@ class OutputDataset:
         # TODO: make sample, stream, forecast_step DataArray attribute, test how it
         # interacts with concatenating
         dims = ["sample", "stream", "forecast_step", "ipoint", "channel", "ens"]
-        breakpoint()
         ds_coords = {
             "sample": [self.item_key.sample],
             "source_interval_start": ("sample", [self.source_interval.start]),
@@ -241,7 +241,6 @@ class OutputDataset:
             "lon": ("ipoint", coords[..., 1]),
             **geoinfo,
         }
-        breakpoint()
         return xr.DataArray(expanded_data, dims=dims, coords=ds_coords, name=self.name)
 
 
@@ -303,10 +302,7 @@ class ZarrIO:
         group = self._get_group(key)
         datasets = {
             name: OutputDataset.create(
-                name,
-                key,
-                dict(dataset.arrays()),
-                dict(dataset.attrs).copy()
+                name, key, dict(dataset.arrays()), dict(dataset.attrs).copy()
             )
             for name, dataset in group.groups()
         }
