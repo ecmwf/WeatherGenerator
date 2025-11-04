@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -163,7 +164,6 @@ class Reader:
         fsteps = requested_data.fsteps
         samples = requested_data.samples
         ensemble = requested_data.ensemble
-
         requested = {
             "channel": set(channels) if channels is not None else None,
             "fstep": set(fsteps) if fsteps is not None else None,
@@ -276,6 +276,17 @@ class Reader:
         ensemble = stream_cfg[mode].get("ensemble", None)
         if ensemble == "mean":
             ensemble = ["mean"]
+
+        if isinstance(fsteps, str) and fsteps != "all":
+            assert re.match(r"^\d+-\d+$", fsteps), (
+                "String format for forecast_step in config must be 'digit-digit' or 'all'"
+            )
+            fsteps = list(range(int(fsteps.split("-")[0]), int(fsteps.split("-")[1]) + 1))
+        if isinstance(samples, str) and samples != "all":
+            assert re.match(r"^\d+-\d+$", samples), (
+                "String format for sample in config must be 'digit-digit' or 'all'"
+            )
+            samples = list(range(int(samples.split("-")[0]), int(samples.split("-")[1]) + 1))
 
         return DataAvailability(
             score_availability=True,
@@ -458,6 +469,13 @@ class WeatherGenReader(Reader):
                             f"Skipping {stream} sample {sample} forecast step: {fstep}. Dataset is empty."
                         )
                         continue
+
+                    if ensemble == ["mean"]:
+                        _logger.debug("Averaging over ensemble members.")
+                        pred = pred.mean("ens", keepdims=True)
+                    else:
+                        _logger.debug(f"Selecting ensemble members {ensemble}.")
+                        pred = pred.sel(ens=ensemble)
 
                     if ensemble == ["mean"]:
                         _logger.debug("Averaging over ensemble members.")

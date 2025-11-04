@@ -2511,18 +2511,18 @@ wheels = [
 
 [[package]]
 name = "pyrefly"
-version = "0.33.0"
+version = "0.36.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/3c/5d/3c448fb19a81a21a1f7e9a76280473273e85a2a5df7c0a2195deccf3c2a2/pyrefly-0.33.0.tar.gz", hash = "sha256:30c842ba7a6142c2e5cb8638b829d2b093c966e4b1211fee81ed42fedaa08632", size = 1399636, upload-time = "2025-09-15T14:57:04.787Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/67/c5983b8cd002132b9d0e4ecbe096c04bbd86bd6898ee1f3eb63413f0b07e/pyrefly-0.36.0.tar.gz", hash = "sha256:f0fbadae9e6fadbf078eeafaa1c415ec1ede863a621132ecaad45ed316a944a8", size = 1670536, upload-time = "2025-10-06T17:50:28.856Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f1/e6/2ca0921cde526c40a55392001e15eba9078d3b0cfcb0e2dfbcc92caa3477/pyrefly-0.33.0-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:f235737e53a70925b94b8928131d81d6097cbf5413011c10d8730bae3970ad42", size = 6676391, upload-time = "2025-09-15T14:56:48.652Z" },
-    { url = "https://files.pythonhosted.org/packages/ff/45/5401c34f85e408b98cc0583a25e591e5da0f04876da708286e69d4091c79/pyrefly-0.33.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:21bc7d9d2fd63d6144b156ae56ecc84ec30e29b8024fcc6ddf7c3ea2faab4025", size = 6218255, upload-time = "2025-09-15T14:56:50.941Z" },
-    { url = "https://files.pythonhosted.org/packages/e9/9c/d05f80582979e20630741d5995fbcfc74951e755a6052c31c4e3c361d143/pyrefly-0.33.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:c63518cbbe50d4f63f1d8876466744787110ab218773f244f3bd7c6c923717a9", size = 6461939, upload-time = "2025-09-15T14:56:52.893Z" },
-    { url = "https://files.pythonhosted.org/packages/82/eb/7a94d9fe7ce7099fdacb9056b647cf7fddc94cc32e511194ac5b043619ba/pyrefly-0.33.0-py3-none-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:66eefc5453b097206b133d0ba205d07c815147239dbd40dbeeec1c066dd8c02c", size = 7277173, upload-time = "2025-09-15T14:56:54.957Z" },
-    { url = "https://files.pythonhosted.org/packages/c7/90/91014e9e1525af0e53c9663782453311e19fd886098b1dceee5d7d977a04/pyrefly-0.33.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:33ed004ed22d207f68a558b2a38ce671200c0fcdf3f810b729fa481e350a8246", size = 6943644, upload-time = "2025-09-15T14:56:56.646Z" },
-    { url = "https://files.pythonhosted.org/packages/69/92/f99f8b3cf7289617b80f4903d3c5b60dbb2bb948b394baaf20d6efeaa9e3/pyrefly-0.33.0-py3-none-win32.whl", hash = "sha256:bf814c4468cb9b9b35ca2d7d44947995a6543c3bbd03fe3cb2e3fdfde22a751b", size = 6438608, upload-time = "2025-09-15T14:56:58.842Z" },
-    { url = "https://files.pythonhosted.org/packages/dd/fa/61a929f85e6423f0455a22bb4dd609888d3940dd25f719bcf52822d147f2/pyrefly-0.33.0-py3-none-win_amd64.whl", hash = "sha256:5b08be1a43e51e2aa7e5125ba8b5c30d07f76ea965b857b10322667e96f396e6", size = 6864842, upload-time = "2025-09-15T14:57:00.72Z" },
-    { url = "https://files.pythonhosted.org/packages/8a/e4/88b64c6d4a7a4f57f4530226734efab23ada37087e4c41848491410660fd/pyrefly-0.33.0-py3-none-win_arm64.whl", hash = "sha256:b858343993ee10fb8173348ef2ac879ff19d2ef4bbc4190b5c447fa5dd80a94d", size = 6476161, upload-time = "2025-09-15T14:57:03.316Z" },
+    { url = "https://files.pythonhosted.org/packages/52/09/a5ac35332359f1882e83062660db0361034352353a5aad49668148deec4c/pyrefly-0.36.0-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:614d6f6597024f2cbc2bd6c26b9123f6020bb22f0f905b9698f0786131e1afd4", size = 6803144, upload-time = "2025-10-06T17:50:13.38Z" },
+    { url = "https://files.pythonhosted.org/packages/4c/ca/1cefd294d57977e1e2711da38dbd2f7636a454adaa8a21227db97f8dc83b/pyrefly-0.36.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:bdd5ce618ddea4d47982a2223b1f67196fa774cd2e223bfb85b202ad15144afb", size = 6350887, upload-time = "2025-10-06T17:50:15.75Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/85/2abcf08a8e663a231394b3ce9ee31257521dde0b53289bf3553ccf960320/pyrefly-0.36.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4cabdf10811c4af9d7960a7450a2d59c7e5d0ae1a4c19ffb1bbc7d81c00f4862", size = 6593770, upload-time = "2025-10-06T17:50:17.74Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/ca/1b2832a28a64e5145a070143dfaeaf4bb9083fe35b7bf179e0c84a8aa7e9/pyrefly-0.36.0-py3-none-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:222d49512d6c832a2cf661847d8e709a9b00a570f68ece2173bd840128385296", size = 7424514, upload-time = "2025-10-06T17:50:19.744Z" },
+    { url = "https://files.pythonhosted.org/packages/73/23/fbcf6e094df39902cbc3733e8edf8e3ac2bb4875b48050e2f514622af54b/pyrefly-0.36.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:937f79660786dc670bccba55279db347c1f3a51869af50e5602a84f8eeac4688", size = 7079712, upload-time = "2025-10-06T17:50:21.908Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/90/62c11f6324dd6d9990e05067758b6380cee7abf4589be8c51bc1786fa504/pyrefly-0.36.0-py3-none-win32.whl", hash = "sha256:f8683df8e3635de882163fdb7c74c643a5f2387a8f1c9f40ef36aba7722d697c", size = 6607047, upload-time = "2025-10-06T17:50:23.923Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/a3/44c7764dfab004fc4221ed326b9032ac446f26ce1231169d155007e02697/pyrefly-0.36.0-py3-none-win_amd64.whl", hash = "sha256:3327948305b37efcf7e30db74fd29c9b7e6e6d5d2e16effdb2508d611ff69fca", size = 7034208, upload-time = "2025-10-06T17:50:25.697Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/4b/e98f462612e3a335fb7cefb35d581d7fdd8ddce92f050a78b721b5855a19/pyrefly-0.36.0-py3-none-win_arm64.whl", hash = "sha256:e2fcb3a1f27418f71585e2300d8addc1d63aeb77f022cac1edae489f19da7a4b", size = 6626879, upload-time = "2025-10-06T17:50:27.312Z" },
 ]
 
 [[package]]
@@ -3352,7 +3352,7 @@ dev = [
     { name = "ipykernel", specifier = ">=6.30.0" },
     { name = "jupytext", specifier = ">=1.17.2" },
     { name = "pdbpp", specifier = ">=0.11.7" },
-    { name = "pyrefly", specifier = "==0.33.0" },
+    { name = "pyrefly", specifier = "==0.36.0" },
     { name = "pytest", specifier = "~=8.3.5" },
     { name = "pytest-mock", specifier = ">=3.14.1" },
     { name = "ruff", specifier = "==0.9.7" },
@@ -3364,8 +3364,11 @@ name = "weathergen-common"
 version = "0.1.0"
 source = { editable = "packages/common" }
 dependencies = [
+    { name = "astropy-healpix", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "dask", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "numcodecs", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
+    { name = "omegaconf", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
+    { name = "pyyaml", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "xarray", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "zarr", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
 ]
@@ -3380,15 +3383,18 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "astropy-healpix", specifier = "~=1.1.2" },
     { name = "dask", specifier = ">=2024.9.1" },
     { name = "numcodecs", specifier = "<0.16.0" },
+    { name = "omegaconf", specifier = "~=2.3.0" },
+    { name = "pyyaml" },
     { name = "xarray", specifier = ">=2025.6.1" },
     { name = "zarr", specifier = "==2.18.4,<3" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pyrefly", specifier = "==0.33.0" },
+    { name = "pyrefly", specifier = "==0.36.0" },
     { name = "pytest", specifier = "~=8.3.5" },
     { name = "pytest-mock", specifier = ">=3.14.1" },
     { name = "ruff", specifier = "==0.9.7" },
@@ -3411,6 +3417,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "pyrefly", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "pytest", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "pytest-mock", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "ruff", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
@@ -3430,6 +3437,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "pyrefly", specifier = "==0.36.0" },
     { name = "pytest", specifier = "~=8.3.5" },
     { name = "pytest-mock", specifier = ">=3.14.1" },
     { name = "ruff", specifier = "==0.9.7" },

@@ -8,15 +8,13 @@
 # nor does it submit to any jurisdiction.
 
 import json
-import random
-import string
 
 import torch
 
-from weathergen.common.config import get_run_id as get_run_id_common
+from weathergen.common import config
 
-# TODO: remove the reference
-get_run_id = get_run_id_common
+# TODO: remove this definition, it should directly using common.
+get_run_id = config.get_run_id
 
 
 def str_to_tensor(modelid):

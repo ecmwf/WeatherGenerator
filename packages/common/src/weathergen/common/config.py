@@ -11,19 +11,18 @@ import io
 import json
 import logging
 import os
+import random
+import string
 import subprocess
 from pathlib import Path
 import string 
 import random
 
 import yaml
+import yaml.constructor
+import yaml.scanner
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
-
-def get_run_id():
-    s1 = string.ascii_lowercase
-    s2 = string.ascii_lowercase + string.digits
-    return "".join(random.sample(s1, 1)) + "".join(random.sample(s2, 7))
 
 
 _REPO_ROOT = Path(
@@ -35,6 +34,12 @@ _logger = logging.getLogger(__name__)
 
 
 Config = DictConfig
+
+
+def get_run_id():
+    s1 = string.ascii_lowercase
+    s2 = string.ascii_lowercase + string.digits
+    return "".join(random.sample(s1, 1)) + "".join(random.sample(s2, 7))
 
 
 def format_cf(config: Config) -> str:
@@ -81,10 +86,11 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
             model_path = _get_config_attribute(
                 config=pconf, attribute_name="model_path", fallback="models"
             )
-        model_path = Path(model_path)
-        fname = model_path / run_id / _get_model_config_file_name(run_id, epoch)
+        path = Path(model_path)
+        fname = path / run_id / _get_model_config_file_name(run_id, epoch)
         assert fname.exists(), (
-            "The fallback path to the model does not exist. Please provide a `model_path`."
+            "The fallback path to the model does not exist. Please provide a `model_path`.",
+            fname,
         )
 
     _logger.info(f"Loading config from specified run_id and epoch: {fname}")
@@ -94,7 +100,7 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
 
     config = OmegaConf.create(json.loads(json_str))
 
-    return _check_logging(config)
+    return _apply_fixes(config)
 
 
 def _get_model_config_file_name(run_id: str, epoch: int | None):
@@ -193,7 +199,9 @@ def load_config(
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
     # use OmegaConf.unsafe_merge if too slow
-    return OmegaConf.merge(base_config, private_config, *overwrite_configs)
+    c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
+    assert isinstance(c, Config)
+    return c
 
 
 def _load_streams_in_config(config: Config) -> Config:
@@ -284,6 +292,7 @@ def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
             msg = f"Cannot build config from overwrite: {overwrite}, with type {type(overwrite)}"
             raise ValueError(msg)
 
+    assert isinstance(overwrite_config, DictConfig)
     return overwrite_config
 
 
@@ -339,12 +348,15 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     if "secrets" in private_cf:
         del private_cf["secrets"]
 
+    assert isinstance(private_cf, DictConfig)
     return private_cf
 
 
 def _load_default_conf() -> Config:
     """Deserialize default configuration."""
-    return OmegaConf.load(_DEFAULT_CONFIG_PTH)
+    c = OmegaConf.load(_DEFAULT_CONFIG_PTH)
+    assert isinstance(c, Config)
+    return c
 
 
 def load_streams(streams_directory: Path) -> list[Config]:

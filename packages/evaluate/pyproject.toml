@@ -20,6 +20,7 @@ dev = [
  "pytest~=8.3.5",
  "pytest-mock>=3.14.1",
  "ruff==0.9.7",
+ "pyrefly==0.36.0",
 ]
 
 [project.scripts]
