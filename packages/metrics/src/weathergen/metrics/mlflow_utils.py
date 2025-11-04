@@ -99,7 +99,10 @@ def log_scores(
                 for ch in channels_set:
                     # skip if channel is missing or contains NaN
                     if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
-                        _logger.info(f"Skipping channel {ch} for {metric} - {region} - {stream} due to missing data.")
+                        _logger.info(
+                            f"Skipping channel {ch} for {metric} - {region} - {stream} ",
+                            "due to missing data.",
+                        )
                         continue
                     _logger.info(f"Collecting data for {metric} - {region} - {stream} - {ch}.")
                     data_ch = data.sel(channel=ch)

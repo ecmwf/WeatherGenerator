@@ -16,7 +16,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import mlflow
-from mlflow.client import MlflowClient
+# from mlflow.client import MlflowClient
 from omegaconf import OmegaConf
 from xarray import DataArray
 
@@ -88,7 +88,6 @@ def evaluate_from_args(argl: list[str]) -> None:
 
 
 def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
-
     # load configuration
 
     runs = cfg.run_ids
@@ -194,7 +193,9 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
 
         channels_set = collect_channels(scores_dict, metric, region, runs)
 
-        import pdb; pdb.set_trace()
+        import pdb
+
+        pdb.set_trace()
 
         for run_id, run in runs.items():
             reader = WeatherGenReader(run, run_id, private_paths)
