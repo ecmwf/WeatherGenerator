@@ -133,7 +133,8 @@ class Plotter:
         da:
             xarray DataArray to select data from.
         selection:
-            Dictionary of selectors where keys are coordinate names and values are the values to select.
+            Dictionary of selectors where keys are coordinate names and values are the values to
+            select.
 
         Returns
         -------
@@ -264,7 +265,8 @@ class Plotter:
         plt.xlabel(f"Variable: {varname}")
         plt.ylabel("Frequency")
         plt.title(
-            f"Histogram of Target and Prediction: {self.stream}, {varname} : fstep = {self.fstep:03}"
+            f"Histogram of Target and Prediction: {self.stream}, {varname} : "
+            f"fstep = {self.fstep:03}"
         )
         plt.legend(frameon=False)
 
@@ -322,7 +324,8 @@ class Plotter:
             Additional keyword arguments for the map.
             Known keys are:
                 - marker_size: base size of the marker (default is 1)
-                - scale_marker_size: if True, the marker size will be scaled based on latitude (default is False)
+                - scale_marker_size: if True, the marker size will be scaled based on latitude
+                  (default is False)
                 - marker: marker style (default is 'o')
             Unknown keys will be passed to the scatter plot function.
 
@@ -618,17 +621,17 @@ class LinePlots:
         -------
             data_list, label_list - lists of data and labels
         """
-        assert type(data) == xr.DataArray or type(data) == list, (
+        assert isinstance(data, xr.DataArray | list), (
             "Compare::plot - Data should be of type xr.DataArray or list"
         )
-        assert type(labels) == str or type(labels) == list, (
+        assert isinstance(labels, str | list), (
             "Compare::plot - Labels should be of type str or list"
         )
 
         # convert to lists
 
-        data_list = [data] if type(data) == xr.DataArray else data
-        label_list = [labels] if type(labels) == str else labels
+        data_list = [data] if isinstance(data, xr.DataArray) else data
+        label_list = [labels] if isinstance(labels, str) else labels
 
         assert len(data_list) == len(label_list), "Compare::plot - Data and Labels do not match"
 
@@ -714,7 +717,8 @@ class LinePlots:
                 )
         else:
             _logger.warning(
-                f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. Skipping ensemble plotting."
+                f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. "
+                "Skipping ensemble plotting."
             )
 
     def _plot_ensemble(self, data: xr.DataArray, x_dim: str, label: str) -> None:
@@ -785,7 +789,8 @@ class LinePlots:
                 )
         else:
             _logger.warning(
-                f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. Skipping ensemble plotting."
+                f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. "
+                "Skippingensemble plotting."
             )
 
     def plot(
@@ -837,7 +842,8 @@ class LinePlots:
             else:
                 if non_zero_dims:
                     _logger.info(
-                        f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
+                        f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. "
+                        "Averaging..."
                     )
 
                 averaged = data.mean(
@@ -906,7 +912,8 @@ class ScoreCards:
         self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
     ) -> None:
         """
-        Plot score cards comparing performance between run_ids against a baseline over channels of interest.
+        Plot score cards comparing performance between run_ids against a baseline over channels
+        of interest.
 
         Parameters
         ----------
@@ -1119,7 +1126,8 @@ class ScoreCards:
         color: str
             The color "red" or "blue" that indicates improvement or deterioration over baseline.
         triangle: str
-            The triangle symbol "^" or "v" that indicates improvement or deterioration over baseline.
+            The triangle symbol "^" or "v" that indicates improvement or deterioration over
+            baseline.
         size: xr.DataArray
             Size of the triangles in the final plot
         """
@@ -1179,7 +1187,8 @@ class BarPlots:
         self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
     ) -> None:
         """
-        Plot (ratio) bar plots comparing performance between different run_ids over channels of interest.
+        Plot (ratio) bar plots comparing performance between different run_ids over channels of
+        interest.
 
         Parameters
         ----------
@@ -1220,7 +1229,8 @@ class BarPlots:
             )
             ax[run_index - 1].invert_yaxis()
             ax[run_index - 1].set_xlabel(
-                f"Relative {data[0].coords['metric'].item().upper()}: Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
+                f"Relative {data[0].coords['metric'].item().upper()}: "
+                f"Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
             )
 
         _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
@@ -1276,8 +1286,8 @@ class BarPlots:
 
     def colors(self, ratio_score: np.array) -> list[tuple]:
         """
-        This function calculates colormaps based on the skill scores. From negative value blue color variations
-        should be given otherwise red color variations should be given.
+        This function calculates colormaps based on the skill scores. From negative value blue
+        color variations should be given otherwise red color variations should be given.
 
         Parameters
         ----------
@@ -1298,7 +1308,8 @@ def calculate_average_over_dim(
     x_dim: str, baseline_var: xr.DataArray, data_var: xr.DataArray
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
-    Calculate average over xarray dimensions that are larger than 1. Those might be the forecast-steps or the samples.
+    Calculate average over xarray dimensions that are larger than 1. Those might be the
+    forecast-steps or the samples.
 
     Parameters
     ----------

@@ -140,7 +140,8 @@ class Reader:
         ii) available in the source file (e.g. the Zarr file, return error otherwise)
         Additionally, if channels, forecast steps or samples is None/'all', it will
         i) set the variable to all available vars in source file
-        ii) return True only if the respective variable contains the same indeces in metric file and source file (return False otherwise)
+        ii) return True only if the respective variable contains the same indeces in metric file
+            and source file (return False otherwise)
 
         Parameters
         ----------
@@ -173,18 +174,26 @@ class Reader:
 
         # fill info from available metric file (if provided)
         available = {
-            "channel": set(available_data["channel"].values.ravel())
-            if available_data is not None
-            else set(),
-            "fstep": set(available_data["forecast_step"].values.ravel())
-            if available_data is not None
-            else set(),
-            "sample": set(available_data.coords["sample"].values.ravel())
-            if available_data is not None
-            else set(),
-            "ensemble": set(available_data["ens"].values.ravel())
-            if available_data is not None and "ens" in available_data.coords
-            else set(),
+            "channel": (
+                set(available_data["channel"].values.ravel())
+                if available_data is not None
+                else set()
+            ),
+            "fstep": (
+                set(available_data["forecast_step"].values.ravel())
+                if available_data is not None
+                else set()
+            ),
+            "sample": (
+                set(available_data.coords["sample"].values.ravel())
+                if available_data is not None
+                else set()
+            ),
+            "ensemble": (
+                set(available_data["ens"].values.ravel())
+                if available_data is not None and "ens" in available_data.coords
+                else set()
+            ),
         }
 
         # fill info from reader
@@ -204,7 +213,8 @@ class Reader:
                 # If file with metrics exists, must exactly match
                 if available_data is not None and reader_data[name] != available[name]:
                     _logger.info(
-                        f"Requested all {name}s for {mode}, but previous config was a strict subset. Recomputing."
+                        f"Requested all {name}s for {mode}, but previous config was a "
+                        "strict subset. Recomputing."
                     )
                     check_score = False
 
@@ -233,7 +243,8 @@ class Reader:
         if check_score and not corrected:
             scope = "metric file" if available_data is not None else "Zarr file"
             _logger.info(
-                f"All checks passed – All channels, samples, fsteps requested for {mode} are present in {scope}..."
+                f"All checks passed – All channels, samples, fsteps requested for {mode} are "
+                f"present in {scope}..."
             )
 
         return DataAvailability(
@@ -246,7 +257,8 @@ class Reader:
 
     def _get_channels_fsteps_samples(self, stream: str, mode: str) -> DataAvailability:
         """
-        Get channels, fsteps and samples for a given run and stream from the config. Replace 'all' with None.
+        Get channels, fsteps and samples for a given run and stream from the config.
+        Replace 'all' with None.
 
         Parameters
         ----------
@@ -344,7 +356,8 @@ class WeatherGenReader(Reader):
 
     def get_inference_config(self):
         """
-        load the config associated to the inference run (different from the eval_cfg which contains plot and evaluaiton options.)
+        load the config associated to the inference run (different from the eval_cfg which
+        contains plot and evaluaiton options.)
 
         Returns
         -------
@@ -386,7 +399,8 @@ class WeatherGenReader(Reader):
         cfg :
             Configuration dictionary containing all information for the evaluation.
         results_dir : Path
-            Directory where the inference results are stored. Expected scheme `<results_base_dir>/<run_id>`.
+            Directory where the inference results are stored.
+            Expected scheme `<results_base_dir>/<run_id>`.
         stream :
             Stream name to retrieve data for.
         region :
@@ -406,7 +420,8 @@ class WeatherGenReader(Reader):
             A dataclass containing:
             - target: Dictionary of xarray DataArrays for targets, indexed by forecast step.
             - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast step.
-            - points_per_sample: xarray DataArray containing the number of points per sample, if `return_counts` is True.
+            - points_per_sample: xarray DataArray containing the number of points per sample,
+              if `return_counts` is True.
         """
 
         bbox = RegionBoundingBox.from_region_name(region)
@@ -458,7 +473,8 @@ class WeatherGenReader(Reader):
 
                     if region != "global":
                         _logger.debug(
-                            f"Applying bounding box mask for region '{region}' to targets and predictions..."
+                            f"Applying bounding box mask for region '{region}' to targets "
+                            "and predictions..."
                         )
                         target = bbox.apply_mask(target)
                         pred = bbox.apply_mask(pred)
@@ -466,7 +482,8 @@ class WeatherGenReader(Reader):
                     npoints = len(target.ipoint)
                     if npoints == 0:
                         _logger.info(
-                            f"Skipping {stream} sample {sample} forecast step: {fstep}. Dataset is empty."
+                            f"Skipping {stream} sample {sample} forecast step: {fstep}. "
+                            "Dataset is empty."
                         )
                         continue
 
@@ -492,7 +509,8 @@ class WeatherGenReader(Reader):
                     fsteps_final.append(fstep)
 
                 _logger.debug(
-                    f"Concatenating targets and predictions for stream {stream}, forecast_step {fstep}..."
+                    f"Concatenating targets and predictions for stream {stream}, "
+                    f"forecast_step {fstep}..."
                 )
 
                 if da_tars_fs:
@@ -515,7 +533,8 @@ class WeatherGenReader(Reader):
 
                     if set(channels) != set(all_channels):
                         _logger.debug(
-                            f"Restricting targets and predictions to channels {channels} for stream {stream}..."
+                            f"Restricting targets and predictions to channels {channels} "
+                            f"for stream {stream}..."
                         )
 
                         da_tars_fs, da_preds_fs, channels = dc.get_derived_channels(
@@ -572,8 +591,8 @@ class WeatherGenReader(Reader):
                 clim_data_path = Path(clim_base_dir).join(clim_fn)
             else:
                 _logger.warning(
-                    f"No climatology path specified for stream {stream}. Setting climatology to NaN. "
-                    "Add 'climatology_path' to evaluation config to use metrics like ACC."
+                    f"No climatology path specified for stream {stream}. Setting climatology to "
+                    "NaN. Add 'climatology_path' to evaluation config to use metrics like ACC."
                 )
 
         return clim_data_path

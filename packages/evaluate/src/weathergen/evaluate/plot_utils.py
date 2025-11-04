@@ -215,7 +215,8 @@ def bar_plot_metric_region(
             br_plotter.plot(selected_data, run_ids, channels_set, name)
         else:
             _logger.info(
-                f"Only one run_id for ({region}) region under stream : {stream}. Creating bar plot is skipped..."
+                f"Only one run_id for ({region}) region under stream : {stream}. "
+                "Creating bar plot is skipped..."
             )
 
 

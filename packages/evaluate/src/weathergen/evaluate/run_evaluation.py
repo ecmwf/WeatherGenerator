@@ -91,7 +91,8 @@ def evaluate_from_config(cfg):
             stream_dict = reader.get_stream(stream)
             if not stream_dict:
                 _logger.info(
-                    f"Stream {stream} does not exist in source data or config file is empty. Skipping."
+                    f"Stream {stream} does not exist in source data or config file is empty. "
+                    "Skipping."
                 )
                 continue
 
