@@ -119,18 +119,31 @@ def calc_scores_per_stream(
             # Build up computation graphs for all metrics
             _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
 
-            combined_metrics = [
-                get_score(
-                    score_data,
-                    metric,
-                    agg_dims="ipoint",
-                    group_by_coord="sample",
-                )
+            # Add it only if it is not None
+            valid_scores = [
+                score
                 for metric in metrics
+                if (
+                    score := get_score(
+                        score_data,
+                        metric,
+                        agg_dims="ipoint",
+                        group_by_coord="sample",
+                    )
+                )
+                is not None
             ]
 
-            combined_metrics = xr.concat(combined_metrics, dim="metric")
-            combined_metrics["metric"] = metrics
+            # Keep only metrics corresponding to valid_scores
+            valid_metric_names = [
+                metric
+                for metric, score in zip(metrics, valid_scores, strict=False)
+                if score is not None
+            ]
+
+            # Concatenate along a new "metric" dimension and assign metric names
+            combined_metrics = xr.concat(valid_scores, dim="metric")
+            combined_metrics = combined_metrics.assign_coords(metric=valid_metric_names)
 
             _logger.debug(f"Running computation of metrics for stream {stream}...")
             combined_metrics = combined_metrics.compute()
@@ -154,11 +167,11 @@ def calc_scores_per_stream(
             "forecast_step": int(combined_metrics.forecast_step),
             "sample": combined_metrics.sample,
             "channel": combined_metrics.channel,
+            "metric": combined_metrics.metric,
         }
 
         if "ens" in combined_metrics.dims:
             criteria["ens"] = combined_metrics.ens
-
         metric_stream.loc[criteria] = combined_metrics
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
@@ -202,6 +215,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         "image_format": global_plotting_opts.get("image_format", "png"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
+        "fps": global_plotting_opts.get("fps", 2),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
     }
 
@@ -471,7 +485,6 @@ def common_ranges(
             if not isinstance(maps_config[var].get("vmax"), (int | float)):
                 list_max = calc_bounds(data_tars, data_preds, var, "max")
                 list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
-
                 maps_config[var].update({"vmax": float(max(list_max))})
 
             if not isinstance(maps_config[var].get("vmin"), (int | float)):
@@ -482,7 +495,6 @@ def common_ranges(
         else:
             list_max = calc_bounds(data_tars, data_preds, var, "max")
             list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
-
             list_min = calc_bounds(data_tars, data_preds, var, "min")
             list_min = np.concatenate([arr.flatten() for arr in list_min]).tolist()
 

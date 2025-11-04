@@ -63,6 +63,7 @@ def detect_grid_type(input_data_array: xr.DataArray) -> str:
     # Otherwise it's Gaussian (irregular spacing or reduced grid)
     return "gaussian"
 
+
 def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
     """
     Find all the pressure levels for each variable using regex and returns a dictionary
@@ -93,6 +94,7 @@ def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
             var_dict.setdefault(var, []).append(var)
     pl = list(set(pl))
     return var_dict, pl
+
 
 def reshape_dataset_adaptive(input_data_array: xr.DataArray) -> xr.Dataset:
     """
@@ -180,8 +182,6 @@ def add_gaussian_grid_metadata(ds: xr.Dataset, grid_info: dict | None = None) ->
     return ds
 
 
-
-
 def add_conventions(stream: str, run_id: str, ds: xr.Dataset) -> xr.Dataset:
     """
     Add CF conventions to the dataset attributes.
@@ -204,6 +204,7 @@ def add_conventions(stream: str, run_id: str, ds: xr.Dataset) -> xr.Dataset:
     )
     ds.attrs["Conventions"] = "CF-1.12"
     return ds
+
 
 def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
     """
@@ -326,6 +327,7 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
     dataset.attrs = ds.attrs
 
     return dataset
+
 
 def output_filename(
     prefix: str,
