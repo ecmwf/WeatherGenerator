@@ -10,8 +10,8 @@
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
-
 from weathergen.common.config import Config
+
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -24,7 +24,7 @@ from weathergen.model.embeddings import (
     StreamEmbedLinear,
     StreamEmbedTransformer,
 )
-from weathergen.model.layers import MLP, LayerNormBlock
+from weathergen.model.layers import FEMLP, MLP
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
@@ -320,30 +320,31 @@ class ForecastingEngine:
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                         )
                     )
-                # Add MLP block
-                self.fe_blocks.append(
-                    MLP(
-                        self.cf.ae_global_dim_embed,
-                        self.cf.ae_global_dim_embed,
-                        with_residual=True,
-                        dropout_rate=self.cf.fe_dropout_rate,
-                        norm_type=self.cf.norm_type,
-                        dim_aux=1,
-                        norm_eps=self.cf.mlp_norm_eps,
-                    )
-                )
 
-                if self.cf.FE_with_LayerNorm:
-                    logger.info("Adding LayerNorm block to the Forecasting Engine")
-                    # Add a LayerNorm block as the last block of the FE
-                    if i + 1 == self.cf.fe_num_blocks:
-                        self.fe_blocks.append(
-                            LayerNormBlock(
-                                self.cf.ae_global_dim_embed,
-                                norm_eps=self.cf.mlp_norm_eps,
-                                elementwise_affine=False,
-                            )
-                        )   
+                if i + 1 == self.cf.ae_global_num_blocks and self.cf.FE_with_LayerNorm:
+                    self.fe_blocks.append(
+                        FEMLP(
+                            self.cf.ae_global_dim_embed,
+                            self.cf.ae_global_dim_embed,
+                            with_residual=True,
+                            dropout_rate=self.cf.fe_dropout_rate,
+                            norm_type=self.cf.norm_type,
+                            dim_aux=1,
+                            norm_eps=self.cf.mlp_norm_eps,
+                        )
+                    )
+                elif not self.cf.FE_with_LayerNorm:
+                    self.fe_blocks.append(
+                        MLP(
+                            self.cf.ae_global_dim_embed,
+                            self.cf.ae_global_dim_embed,
+                            with_residual=True,
+                            dropout_rate=self.cf.fe_dropout_rate,
+                            norm_type=self.cf.norm_type,
+                            dim_aux=1,
+                            norm_eps=self.cf.mlp_norm_eps,
+                        )
+                    )  
 
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):

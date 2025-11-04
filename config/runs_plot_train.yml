@@ -1,0 +1,6 @@
+train : 
+  plot :
+    lnjzhore : 
+      slurm_id: 0
+      description: "Christian's naoj54ch with new code"
+      eval: vgbndhco
