@@ -161,3 +161,5 @@ train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
+
+FE_with_LayerNorm: False

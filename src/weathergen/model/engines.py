@@ -24,9 +24,12 @@ from weathergen.model.embeddings import (
     StreamEmbedLinear,
     StreamEmbedTransformer,
 )
-from weathergen.model.layers import MLP
+from weathergen.model.layers import MLP, LayerNormBlock
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingEngine:
@@ -329,6 +332,18 @@ class ForecastingEngine:
                         norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
+
+                if self.cf.FE_with_LayerNorm:
+                    logger.info("Adding LayerNorm block to the Forecasting Engine")
+                    # Add a LayerNorm block as the last block of the FE
+                    if i + 1 == self.cf.fe_num_blocks:
+                        self.fe_blocks.append(
+                            LayerNormBlock(
+                                self.cf.ae_global_dim_embed,
+                                norm_eps=self.cf.mlp_norm_eps,
+                                elementwise_affine=False,
+                            )
+                        )   
 
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):

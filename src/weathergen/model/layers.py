@@ -93,3 +93,17 @@ class MLP(torch.nn.Module):
                 x = x + x_in.repeat([*[1 for _ in x.shape[:-1]], x.shape[-1] // x_in.shape[-1]])
 
         return x
+
+
+class LayerNormBlock(torch.nn.Module):
+    def __init__(self, dim_out, norm_eps=1e-5, elementwise_affine=False):
+        super().__init__()
+        self.ln = nn.LayerNorm(
+            dim_out,
+            eps=norm_eps,
+            elementwise_affine=elementwise_affine,
+        )
+
+    def forward(self, *args):
+        x = args[0]
+        return self.ln(x)
