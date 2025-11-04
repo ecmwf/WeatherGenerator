@@ -14,6 +14,8 @@ import logging
 import math
 import warnings
 
+import copy
+
 import astropy_healpix as hp
 import astropy_healpix.healpy
 import numpy as np
@@ -875,3 +877,15 @@ class Model(torch.nn.Module):
             preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
 
         return preds_tokens
+
+def get_model(cf: Config, sources_size, targets_num_channels, targets_coords_size, **kwargs):
+    if cf["training_mode"] == "student-teacher-pretrain":
+        student = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+        teacher_cf = copy.deepcopy(cf)
+        for key, val in teacher_cf["teacher_model"].items():
+            teacher_cf[key] = val
+        teacher = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+        return student, teacher
+    elif cf["training_mode"] == "forecasting":
+        model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+        return model, None
