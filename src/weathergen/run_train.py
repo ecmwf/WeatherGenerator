@@ -97,7 +97,7 @@ def train_continue_from_args(argl: list[str]):
         finetune_overwrite = dict(
             training_mode="forecast",
             forecast_delta_hrs=6,  # 12
-            forecast_steps= 7,  # [j for j in range(1,9) for i in range(4)]
+            forecast_steps= 4,  # [j for j in range(1,9) for i in range(4)]
             forecast_policy="fixed",  # 'sequential_random' # 'fixed' #'sequential' #_random'
             forecast_att_dense_rate=1.0,  # 0.25
             fe_num_blocks=8,
