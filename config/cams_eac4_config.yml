@@ -1,17 +1,13 @@
 streams_directory:  "./config/streams/streams_cams_eac4/"
 
 start_date: 200301010000
-# end_date: 202112310000
-# start_date_val: 202201010000
-# end_date_val: 202205300000
 
-num_epochs: 45 # 10
-
-# samples_per_epoch: 700  # HERE
-# samples_per_validation: 200  # HERE
-# shuffle: True
+num_epochs: 64
 
 loader_num_workers: 4
 
 masking_rate: 0.8
-# forecast_offset : 1 # HERE
+
+FE_with_LayerNorm: False
+
+forecast_offset : 1
