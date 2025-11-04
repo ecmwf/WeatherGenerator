@@ -5,11 +5,10 @@ These are loaded from secrets in the private repository.
 """
 
 import importlib
-from pathlib import Path
-from typing import Protocol
-from omegaconf import OmegaConf
-from weathergen.common.config import _REPO_ROOT
 from functools import lru_cache
+from typing import Protocol
+
+from weathergen.common.config import _REPO_ROOT
 
 
 class PlatformEnv(Protocol):
@@ -17,23 +16,19 @@ class PlatformEnv(Protocol):
     Interface for platform environment configuration.
     """
 
-    def get_hpc(self) -> str | None:
-        ...
+    def get_hpc(self) -> str | None: ...
 
-    def get_hpc_user(self) -> str | None:
-        ...
+    def get_hpc_user(self) -> str | None: ...
 
-    def get_hpc_config(self) -> str | None:
-        ...
+    def get_hpc_config(self) -> str | None: ...
 
-    def get_hpc_certificate(self) -> str | None:
-        ...
+    def get_hpc_certificate(self) -> str | None: ...
 
 
 # def get_private_conf() -> OmegaConf:
 #     """
 #     Loads the private configuration from the private repository.
-#     Excludes secrets. 
+#     Excludes secrets.
 
 #     In doudbt, use this function.
 #     """

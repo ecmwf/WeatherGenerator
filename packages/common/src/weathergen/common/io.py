@@ -84,8 +84,6 @@ class IOReaderData:
         others is list of ReaderData instances.
         """
         # TODO: do we need it in common package?
-        import astropy_healpix as hp
-
 
         assert len(others) > 0, len(others)
 
