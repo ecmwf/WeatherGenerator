@@ -36,17 +36,22 @@ def is_ndarray(obj: typing.Any) -> bool:
     return isinstance(obj, (np.ndarray))  # noqa: TID251
 
 
-@dataclasses.dataclass
 class TimeRange:
-    start: np.datetime64
-    end: np.datetime64
-
-    def __post_init__(self):
-        # ensure consistent type
-        self.start = self.start.astype("datetime64[ns]")
-        self.end = self.end.astype("datetime64[ns]")
+    def __init__(self, start: NPDT64 | str, end: NPDT64 | str):
+        # ensure consistent type => convert serialized strings
+        self.start = np.datetime64(start, "ns")
+        self.end = np.datetime64(end, "ns")
 
         assert self.start < self.end
+
+    def as_dict(self):
+        """Convert instance to a JSON-serializable dict."""
+
+        # will output as "YYYY-MM-DDThh:mm:s.sssssssss"
+        return {
+            "start": str(self.start),
+            "end": str(self.end),
+        }
 
     def forecast_interval(self, forecast_dt_hours: int, fstep: int) -> "TimeRange":
         assert forecast_dt_hours > 0 and fstep >= 0
@@ -328,7 +333,7 @@ class ZarrIO:
     def _write_metadata(self, dataset_group: zarr.Group, dataset: OutputDataset):
         dataset_group.attrs["channels"] = dataset.channels
         dataset_group.attrs["geoinfo_channels"] = dataset.geoinfo_channels
-        dataset_group.attrs["source_interval"] = dataclasses.asdict(dataset.source_interval)
+        dataset_group.attrs["source_interval"] = dataset.source_interval.as_dict()
 
     def _write_arrays(self, dataset_group: zarr.Group, dataset: OutputDataset):
         for array_name, array in dataset.arrays.items():  # suffix is eg. data or coords
