@@ -151,9 +151,11 @@ def calc_scores_per_stream(
             combined_metrics = scalar_coord_to_dim(combined_metrics, "sample")
             combined_metrics = scalar_coord_to_dim(combined_metrics, "ens")
         else:
-            # depending on the datset, there might be no data (e.g. no CERRA in southern hemisphere region)
+            # depending on the datset, there might be no data (e.g. no CERRA in southern
+            # hemisphere region)
             _logger.warning(
-                f"No data available for stream {stream} at forecast step {fstep} in region {region}. Skipping metrics calculation."
+                f"No data available for stream {stream} at forecast step {fstep} in "
+                f"region {region}. Skipping metrics calculation."
             )
             continue
 
@@ -368,7 +370,8 @@ def metric_list_to_json(
                 json.dump(metric_dict, f, indent=4)
 
     _logger.info(
-        f"Saved all results of inference run {reader.run_id} - epoch {reader.epoch:d} successfully to {reader.metrics_dir}."
+        f"Saved all results of inference run {reader.run_id} - epoch {reader.epoch:d} successfully "
+        f"to {reader.metrics_dir}."
     )
 
 
@@ -473,7 +476,8 @@ def common_ranges(
     Returns
     -------
     maps_config :
-        the global plotting configuration with the ranges added and included for each variable (and for each stream).
+        the global plotting configuration with the ranges added and included for each variable (and
+        for each stream).
     """
 
     for var in plot_chs:
@@ -527,7 +531,8 @@ def calc_bounds(
     bound,
 ):
     """
-    Calculate the minimum and maximum values per variable for all forecasteps for both targets and predictions
+    Calculate the minimum and maximum values per variable for all forecasteps for both targets and
+    predictions
 
     Parameters
     ----------
