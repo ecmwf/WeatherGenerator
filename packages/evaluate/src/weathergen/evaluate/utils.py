@@ -48,7 +48,7 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
 
 
 def calc_scores_per_stream(
-    reader: Reader, stream: str, region: str, metrics: list[str], plot_score_maps: bool = False
+    reader: Reader, stream: str, region: str, metrics: list[str], plot_score_maps: bool = False, 
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -74,8 +74,12 @@ def calc_scores_per_stream(
     _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
     if plot_score_maps:
         _logger.info(f"RUN {reader.run_id} - {stream}: Plotting scores is enabled.")
+
+        map_dir = reader.runplot_dir / "maps" / "score_maps" / stream
+        map_dir.mkdir(parents=True, exist_ok=True)
+        
         _logger.info(
-            f"RUN {reader.run_id} - {stream}: Saving plotted scores to {reader.runplot_dir}/score_maps"
+            f"RUN {reader.run_id} - {stream}: Saving plotted scores to {map_dir}"
         )
 
     available_data = reader.check_availability(stream, mode="evaluation")
@@ -85,6 +89,7 @@ def calc_scores_per_stream(
     channels = available_data.channels
     ensemble = available_data.ensemble
     is_regular = reader.is_regular(stream)
+    group_by_coord = None if is_regular else "sample"
 
     output_data = reader.get_data(
         stream,
@@ -115,7 +120,7 @@ def calc_scores_per_stream(
             "ens": ensemble,
         },
     )
-
+        
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         if preds.ipoint.size == 0:
             _logger.warning(
@@ -126,23 +131,36 @@ def calc_scores_per_stream(
         _logger.debug(f"Verifying data for stream {stream}...")
 
         preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
-
+        
         climatology = aligned_clim_data[fstep] if aligned_clim_data else None
         score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
         # Build up computation graphs for all metrics
         _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
 
-        combined_metrics = [
-            get_score(
-                score_data,
-                metric,
-                agg_dims="ipoint",
-                group_by_coord="sample",
-            )
+        # Add it only if it is not None
+        valid_scores = [
+            score
             for metric in metrics
+            if (
+                score := get_score(
+                    score_data,
+                    metric,
+                    agg_dims="ipoint",
+                    group_by_coord=group_by_coord,
+                )
+            )
+            is not None
         ]
 
-        combined_metrics = xr.concat(combined_metrics, dim="metric").assign_coords(metric=metrics)
+        # Keep only metrics corresponding to valid_scores
+        valid_metric_names = [
+            metric
+            for metric, score in zip(metrics, valid_scores, strict=False)
+            if score is not None
+        ]
+        
+        combined_metrics = xr.concat(valid_scores, dim="metric")
+        combined_metrics = combined_metrics.assign_coords(metric=valid_metric_names)
 
         _logger.debug(f"Running computation of metrics for stream {stream}...")
         combined_metrics = combined_metrics.compute()
@@ -158,18 +176,18 @@ def calc_scores_per_stream(
             "forecast_step": int(combined_metrics.forecast_step),
             "sample": combined_metrics.sample,
             "channel": combined_metrics.channel,
+            "metric": combined_metrics.metric,
         }
 
         if "ens" in combined_metrics.dims:
             criteria["ens"] = combined_metrics.ens
-
         metric_stream.loc[criteria] = combined_metrics
 
         #########
 
         if is_regular and plot_score_maps:
             _logger.info(f"Plotting scores on a map {stream} - forecast step: {fstep}...")
-            _plot_score_maps_per_stream(reader, stream, region, score_data, metrics, fstep)
+            _plot_score_maps_per_stream(reader, map_dir, stream, region, score_data, metrics, fstep)
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
@@ -178,6 +196,7 @@ def calc_scores_per_stream(
 
 def _plot_score_maps_per_stream(
     reader: Reader,
+    map_dir: str, 
     stream: str,
     region: str,
     score_data: VerifiedData,
@@ -189,6 +208,8 @@ def _plot_score_maps_per_stream(
     ----------
     reader: Reader
         Reader object containing all infos about the run
+    map_dir: str
+        Directory where the plots are saved. 
     stream: str
         Stream name to plot score maps for.
      region :
@@ -217,22 +238,19 @@ def _plot_score_maps_per_stream(
         stream,
     )
 
-    map_dir = reader.runplot_dir / "score_maps" / stream
-    map_dir.mkdir(parents=True, exist_ok=True)
-
     preds = score_data.prediction
 
     plot_metrics = xr.concat(
         [get_score(score_data, m, agg_dims="sample") for m in metrics],
-        dim="metric",
+        dim="metric"
     )
-
+    
     plot_metrics = plot_metrics.assign_coords(
         lat=preds.lat.reset_coords(drop=True),
         lon=preds.lon.reset_coords(drop=True),
         metric=metrics,
     ).compute()
-
+   
     if "ens" in preds.dims:
         plot_metrics["ens"] = preds.ens
 
@@ -571,7 +589,6 @@ def common_ranges(
         else:
             list_max = calc_bounds(data_tars, data_preds, var, "max")
             list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
-
             list_min = calc_bounds(data_tars, data_preds, var, "min")
             list_min = np.concatenate([arr.flatten() for arr in list_min]).tolist()
 

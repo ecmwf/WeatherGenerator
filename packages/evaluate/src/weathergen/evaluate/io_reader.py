@@ -170,7 +170,6 @@ class Reader:
         fsteps = requested_data.fsteps
         samples = requested_data.samples
         ensemble = requested_data.ensemble
-
         requested = {
             "channel": set(channels) if channels is not None else None,
             "fstep": set(fsteps) if fsteps is not None else None,
@@ -475,6 +474,13 @@ class WeatherGenReader(Reader):
                             f"Skipping {stream} sample {sample} forecast step: {fstep}. Dataset is empty."
                         )
                         continue
+
+                    if ensemble == ["mean"]:
+                        _logger.debug("Averaging over ensemble members.")
+                        pred = pred.mean("ens", keepdims=True)
+                    else:
+                        _logger.debug(f"Selecting ensemble members {ensemble}.")
+                        pred = pred.sel(ens=ensemble)
 
                     if ensemble == ["mean"]:
                         _logger.debug("Averaging over ensemble members.")
