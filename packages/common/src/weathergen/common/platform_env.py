@@ -35,4 +35,4 @@ def get_platform_env() -> PlatformEnv:
     spec = importlib.util.spec_from_file_location("platform_env", env_script_path)
     platform_env = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(platform_env)  # type: ignore
-    return platform_env #type: ignore
+    return platform_env  # type: ignore

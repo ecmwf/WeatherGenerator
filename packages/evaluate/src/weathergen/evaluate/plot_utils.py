@@ -56,7 +56,7 @@ def collect_channels(scores_dict: dict, metric: str, region: str, runs) -> list[
             if run_id not in run_data:
                 continue
             values = run_data[run_id]["channel"].values
-            channels.update(str(np.atleast_1d(values)))
+            channels.update([str(x) for x in np.atleast_1d(values)])
     return list(channels)
 
 

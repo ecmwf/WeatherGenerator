@@ -1,6 +1,5 @@
 import logging
 import os
-from xarray import DataArray
 
 import mlflow
 import mlflow.client
@@ -8,6 +7,7 @@ import numpy as np
 from mlflow.client import MlflowClient
 from mlflow.entities.metric import Metric
 from mlflow.entities.run import Run
+from xarray import DataArray
 
 from weathergen.common.config import Config
 from weathergen.common.platform_env import get_platform_env
@@ -99,6 +99,7 @@ def log_scores(
                 for ch in channels_set:
                     # skip if channel is missing or contains NaN
                     if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
+                        _logger.info(f"Skipping channel {ch} for {metric} - {region} - {stream} due to missing data.")
                         continue
                     _logger.info(f"Collecting data for {metric} - {region} - {stream} - {ch}.")
                     data_ch = data.sel(channel=ch)
@@ -127,9 +128,11 @@ def log_scores(
                             ]
                         )
 
+    all_metrics = [met for dict in mlflow_metrics for met in dict]
+    _logger.info(f"Logging total of {len(all_metrics)} metrics to MLFlow.")
     mlflow_client.log_batch(
         run_id=mlflow_run_id,
-        metrics=[met for dict in mlflow_metrics for met in dict],
+        metrics=all_metrics,
     )
 
 
@@ -149,19 +152,22 @@ def get_or_create_mlflow_parent_run(mlflow_client: MlflowClient, run_id: str) ->
     _logger.info(f"Setting experiment name to {exp_name}: host: {os.environ['DATABRICKS_HOST']}")
     exp = mlflow.set_experiment(exp_name)
     _logger.info(f"Experiment {exp_name} created with ID {exp.experiment_id}: {exp}")
-    l = mlflow_client.search_runs(
+    runs = mlflow_client.search_runs(
         experiment_ids=[exp.experiment_id],
         filter_string=f"tags.run_id='{run_id}' AND tags.stage='unknown'",
     )
-    if len(l) == 0:
+    if len(runs) == 0:
         _logger.info(f"No existing parent run found for run_id {run_id}, creating new run")
         return mlflow_client.create_run(
             experiment_id=exp.experiment_id,
             tags=MlFlowUpload.run_tags(run_id, "unknown", from_run_id=None),
             run_name=run_id,
         )
-    if len(l) > 1:
+    if len(runs) > 1:
         _logger.warning(
-            f"Multiple existing parent runs found for run_id {run_id}, using the first one: {l[0].info.run_id}"
+            (
+                f"Multiple existing parent runs found for run_id {run_id},",
+                f" using the first one: {runs[0].info.run_id}",
+            )
         )
-    return l[0]
+    return runs[0]

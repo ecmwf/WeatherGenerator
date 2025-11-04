@@ -14,10 +14,11 @@ import logging
 import sys
 from collections import defaultdict
 from pathlib import Path
-from xarray import DataArray
 
 import mlflow
+from mlflow.client import MlflowClient
 from omegaconf import OmegaConf
+from xarray import DataArray
 
 from weathergen.common.config import _REPO_ROOT
 from weathergen.common.platform_env import get_platform_env
@@ -50,6 +51,8 @@ def evaluate() -> None:
 
 
 def evaluate_from_args(argl: list[str]) -> None:
+    # configure logging
+    logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Fast evaluation of WeatherGenerator runs.")
     parser.add_argument(
         "--config",
@@ -72,9 +75,8 @@ def evaluate_from_args(argl: list[str]) -> None:
             "No config file provided, using the default template config (please edit accordingly)"
         )
         config = Path(_REPO_ROOT / "config" / "evaluate" / "eval_config.yml")
-    mlflow_client = None
+    mlflow_client: MlflowClient | None = None
     if args.push_metrics:
-        # logging.basicConfig(level=logging.INFO)
         hpc_conf = _platform_env.get_hpc_config()
         assert hpc_conf is not None
         private_home = Path(hpc_conf)
@@ -85,9 +87,7 @@ def evaluate_from_args(argl: list[str]) -> None:
     evaluate_from_config(OmegaConf.load(config), mlflow_client)
 
 
-def evaluate_from_config(cfg, mlflow_client):
-    # configure logging
-    logging.basicConfig(level=logging.INFO)
+def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
 
     # load configuration
 
@@ -180,7 +180,9 @@ def evaluate_from_config(cfg, mlflow_client):
     if mlflow_client:
         # Reorder scores_dict to push to MLFlow per run_id:
         # Create a new defaultdict with the target structure: [run_id][metric][region][stream]
-        reordered_dict: dict[str, dict[str, dict[str, dict[str, DataArray]]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+        reordered_dict: dict[str, dict[str, dict[str, dict[str, DataArray]]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(dict))
+        )
 
         # Iterate through the original dictionary to get all keys and the final value
         for metric, regions_dict in scores_dict.items():
@@ -191,6 +193,8 @@ def evaluate_from_config(cfg, mlflow_client):
                         reordered_dict[run_id][metric][region][stream] = final_dict
 
         channels_set = collect_channels(scores_dict, metric, region, runs)
+
+        import pdb; pdb.set_trace()
 
         for run_id, run in runs.items():
             reader = WeatherGenReader(run, run_id, private_paths)
