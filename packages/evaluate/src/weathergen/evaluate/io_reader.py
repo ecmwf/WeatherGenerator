@@ -427,9 +427,6 @@ class WeatherGenReader(Reader):
             ensemble = ensemble or self.get_ensemble(stream)
             ensemble = to_list(ensemble)
 
-            ensemble = ensemble or self.get_ensemble(stream)
-            ensemble = to_list(ensemble)
-
             dc = DeriveChannels(
                 all_channels,
                 channels,
