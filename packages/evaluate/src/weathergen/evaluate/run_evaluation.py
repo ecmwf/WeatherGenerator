@@ -143,7 +143,7 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
 
                     for metric in metrics:
                     
-                        metric_data = reader.retrieve_scores(
+                        metric_data = reader.load_scores(
                             stream,
                             region,
                             metric,

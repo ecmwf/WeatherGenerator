@@ -9,6 +9,7 @@
 
 import logging
 import re
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -71,8 +72,6 @@ class DataAvailability:
 
 class Reader:
 
-    data: pd.DataFrame | None # Data attributes (if specified)
-
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict[str, str] | None = None):
         """
         Generic data reader class.
@@ -132,8 +131,8 @@ class Reader:
         """Placeholder implementation ensemble member names getter. Override in subclass."""
         return list()
     
-    def retrieve_computed_scores(self, stream: str, region: str, metric: str) -> xr.DataArray:
-        """Placeholder to retrieve the score for a given run, stream, metric"""
+    def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray:
+        """Placeholder to load pre-computed scores for a given run, stream, metric"""
         return None
 
     def check_availability(
@@ -407,9 +406,9 @@ class CsvReader(Reader):
         """ get score values in the right format """
         return self.data.values[np.newaxis, :, :, np.newaxis].T
     
-    def retrieve_computed_scores(self, stream: str, region: str, metric: str) -> xr.DataArray:
+    def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray:
         """
-        Retrieve the scores for a given run, stream and metric.
+        Load the existing scores for a given run, stream and metric.
         
         Parameters
         ----------
@@ -458,7 +457,7 @@ class CsvReader(Reader):
                 "channel": available_data.channels,
                 "metric": [metric],
             },
-            attrs={"npoints_per_sample": reader.npoints_per_sample},
+            attrs={"npoints_per_sample": self.npoints_per_sample},
         )
 
         return da
@@ -811,9 +810,9 @@ class WeatherGenReader(Reader):
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
         return list(dummy.prediction.as_xarray().coords["ens"].values)
 
-    def retrieve_computed_scores(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
+    def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
         """
-        Retrieve the scores for a given run, stream and metric and epoch.
+        Load the pre-computed scores for a given run, stream and metric and epoch.
         
         Parameters
         ----------
