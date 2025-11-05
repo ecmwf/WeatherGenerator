@@ -173,11 +173,11 @@ class TrainerBase:
 
 
 # should be moved to its own file so as to prevent cyclical imports
-def get_target_and_aux_calculator(config, model, rng, **kwargs):
+def get_target_and_aux_calculator(config, model, rng, batch_size, **kwargs):
     target_and_aux_calc = config.get("target_and_aux_calc", None)
     if target_and_aux_calc is None or target_and_aux_calc == "identity":
         return IdentityTargetAndAux(model, rng, config)
     elif target_and_aux_calc == "EMATeacher":
-        return EMATeacher(model, rng, kwargs["ema_model"])
+        return EMATeacher(model, rng, kwargs["ema_model"], batch_size)
     else:
-        raise NotImplemented(f"{target_and_aux_calc} is not implemented")
+        raise NotImplementedError(f"{target_and_aux_calc} is not implemented")

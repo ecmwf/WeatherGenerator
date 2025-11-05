@@ -13,6 +13,9 @@ class EMATeacher(TargetAndAuxModuleBase):
         self.ema_model = ema_model
         self.batch_size = batch_size
 
+        self.reset()
+        import pdb; pdb.set_trace()
+
     def reset(self, batch_size = None):
         self.ema_model.reset()
         if batch_size is not None:
