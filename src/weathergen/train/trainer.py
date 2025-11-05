@@ -614,9 +614,9 @@ class Trainer(TrainerBase):
                     self.model_params, batch, cf.forecast_offset, forecast_steps
                 )
 
-            targets, aux_outputs = self.target_and_aux_calculator.compute(
-                bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
-            )
+                targets, aux_outputs = self.target_and_aux_calculator.compute(
+                    bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
+                )
             loss_values = self.loss_calculator.compute_loss(
                 preds=preds,
                 streams_data=batch[0],  # should additionally take targets?
