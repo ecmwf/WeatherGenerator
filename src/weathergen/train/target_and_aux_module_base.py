@@ -1,5 +1,6 @@
 from typing import Any
 
+
 class TargetAndAuxModuleBase:
     def __init__(self, model, rng, **kwargs):
         pass
@@ -32,5 +33,3 @@ class IdentityTargetAndAux(TargetAndAuxModuleBase):
 
     def compute(self, istep, batch, *args, **kwargs):
         return batch[0], None
-
-

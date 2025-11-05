@@ -44,14 +44,14 @@ from weathergen.model.attention import (
 )
 from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
-from weathergen.model.model import get_model, Model, ModelParams
+from weathergen.model.model import Model, ModelParams, get_model
 from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase, get_target_and_aux_calculator
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
-from weathergen.utils.utils import get_dtype, get_batch_size
+from weathergen.utils.utils import get_batch_size, get_dtype
 from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
