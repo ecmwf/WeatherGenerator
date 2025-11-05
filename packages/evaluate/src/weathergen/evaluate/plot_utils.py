@@ -30,7 +30,7 @@ def collect_streams(runs: dict):
     return sorted({s for run in runs.values() for s in run["streams"].keys()})
 
 
-def collect_channels(scores_dict: dict, metric: str, region: str, runs) -> dict:
+def collect_channels(scores_dict: dict, metric: str, region: str, runs) -> list[str]:
     """Get all unique channels available for given metric and region across runs.
 
     Parameters
@@ -56,7 +56,7 @@ def collect_channels(scores_dict: dict, metric: str, region: str, runs) -> dict:
             if run_id not in run_data:
                 continue
             values = run_data[run_id]["channel"].values
-            channels.update(np.atleast_1d(values))
+            channels.update([str(x) for x in np.atleast_1d(values)])
     return list(channels)
 
 
