@@ -28,8 +28,7 @@ from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
     plot_data,
-    plot_summary,
-    retrieve_metric_from_file,
+    plot_summary
 )
 from weathergen.metrics.mlflow_utils import (
     MlFlowUpload,
@@ -143,29 +142,30 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                     metrics_to_compute = []
 
                     for metric in metrics:
-                        try:
-                            metric_data = retrieve_metric_from_file(
-                                reader,
-                                stream,
-                                region,
-                                metric,
-                            )
+                    
+                        metric_data = reader.retrieve_scores(
+                            stream,
+                            region,
+                            metric,
+                        )
 
-                            available_data = reader.check_availability(
-                                stream, metric_data, mode="evaluation"
-                            )
-
-                            if not available_data.score_availability:
-                                metrics_to_compute.append(metric)
-                            else:
-                                # simply select the chosen eval channels, samples, fsteps here...
-                                scores_dict[metric][region][stream][run_id] = metric_data.sel(
-                                    sample=available_data.samples,
-                                    channel=available_data.channels,
-                                    forecast_step=available_data.fsteps,
-                                )
-                        except (FileNotFoundError, KeyError):
+                        if metric_data is None:
                             metrics_to_compute.append(metric)
+                            continue
+                        
+                        available_data = reader.check_availability(
+                            stream, metric_data, mode="evaluation"
+                        )
+
+                        if not available_data.score_availability:
+                            metrics_to_compute.append(metric)
+                        else:
+                            # simply select the chosen eval channels, samples, fsteps here...
+                            scores_dict[metric][region][stream][run_id] = metric_data.sel(
+                                sample=available_data.samples,
+                                channel=available_data.channels,
+                                forecast_step=available_data.fsteps,
+                            )
 
                     if metrics_to_compute:
                         all_metrics, points_per_sample = calc_scores_per_stream(

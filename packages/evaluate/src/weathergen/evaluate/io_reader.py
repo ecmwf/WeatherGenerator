@@ -131,6 +131,10 @@ class Reader:
     def get_ensemble(self, stream: str | None = None) -> list[str]:
         """Placeholder implementation ensemble member names getter. Override in subclass."""
         return list()
+    
+    def retrieve_computed_scores(self, stream: str, region: str, metric: str) -> xr.DataArray:
+        """Placeholder to retrieve the score for a given run, stream, metric"""
+        return None
 
     def check_availability(
         self,
@@ -402,6 +406,63 @@ class CsvReader(Reader):
     def get_values(self) -> xr.DataArray:
         """ get score values in the right format """
         return self.data.values[np.newaxis, :, :, np.newaxis].T
+    
+    def retrieve_computed_scores(self, stream: str, region: str, metric: str) -> xr.DataArray:
+        """
+        Retrieve the scores for a given run, stream and metric.
+        
+        Parameters
+        ----------
+        reader :
+            Reader object containing all info for a specific run_id
+        stream :
+            Stream name.
+        region :
+            Region name.
+        metric :
+            Metric name.
+
+        Returns
+        -------
+        xr.DataArray
+            The metric DataArray.
+        """
+
+        available_data = self.check_availability(stream, mode="evaluation")
+
+        # fill it only for matching metric
+        if (
+            metric == self.metric
+            and region == self.region
+            and stream == self.stream
+        ):
+            data = self.get_values()
+        else:
+
+            data = np.full(
+                (
+                    len(available_data.samples),
+                    len(available_data.fsteps),
+                    len(available_data.channels),
+                    1,
+                ),
+                np.nan,
+            )
+
+        da = xr.DataArray(
+            data.astype(np.float32),
+            dims=("sample", "forecast_step", "channel", "metric"),
+            coords={
+                "sample": available_data.samples,
+                "forecast_step": available_data.fsteps,
+                "channel": available_data.channels,
+                "metric": [metric],
+            },
+            attrs={"npoints_per_sample": reader.npoints_per_sample},
+        )
+
+        return da
+
 
 class WeatherGenReader(Reader):
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
@@ -749,6 +810,39 @@ class WeatherGenReader(Reader):
         with ZarrIO(self.fname_zarr) as zio:
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
         return list(dummy.prediction.as_xarray().coords["ens"].values)
+
+    def retrieve_computed_scores(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
+        """
+        Retrieve the scores for a given run, stream and metric and epoch.
+        
+        Parameters
+        ----------
+        reader :
+            Reader object containing all info for a specific run_id
+        stream :
+            Stream name.
+        region :
+            Region name.
+        metric :
+            Metric name.
+
+        Returns
+        -------
+        xr.DataArray
+            The metric DataArray or None if the file does not exist.
+        """
+        score_path = (
+            Path(self.metrics_dir)
+            / f"{self.run_id}_{stream}_{region}_{metric}_epoch{self.epoch:05d}.json"
+        )
+        _logger.debug(f"Looking for: {score_path}")
+
+        if score_path.exists():
+            with open(score_path) as f:
+                data_dict = json.load(f)
+                return xr.DataArray.from_dict(data_dict)
+        else:
+            return None
 
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """
