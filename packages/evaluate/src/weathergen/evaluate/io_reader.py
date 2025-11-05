@@ -480,6 +480,8 @@ class WeatherGenReader(Reader):
                         pred = bbox.apply_mask(pred)
 
                     npoints = len(target.ipoint)
+                    pps.append(npoints)
+
                     if npoints == 0:
                         _logger.info(
                             f"Skipping {stream} sample {sample} forecast step: {fstep}. "
@@ -503,7 +505,6 @@ class WeatherGenReader(Reader):
 
                     da_tars_fs.append(target.squeeze())
                     da_preds_fs.append(pred.squeeze())
-                    pps.append(npoints)
 
                 if len(da_tars_fs) > 0:
                     fsteps_final.append(fstep)
@@ -546,6 +547,7 @@ class WeatherGenReader(Reader):
 
                     da_tars.append(da_tars_fs)
                     da_preds.append(da_preds_fs)
+
                     if return_counts:
                         points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
 
