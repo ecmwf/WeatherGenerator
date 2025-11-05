@@ -248,7 +248,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ###################################################
     def get_sources_size(self):
         return [
-            ds[0].get_source_num_channels()
+            0
+            if ds[0].get_source_num_channels() == 0
+            else ds[0].get_source_num_channels()
             + ds[0].get_geoinfo_size()
             + ds[0].get_coords_size()
             + self.tokenizer.get_size_time_embedding()
