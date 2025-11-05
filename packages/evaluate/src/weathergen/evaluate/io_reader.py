@@ -349,10 +349,10 @@ class WeatherGenReader(Reader):
         )
 
         if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
-            _logger.error(f"Zarr file {self.fname_zarr} does not exist or is not a directory.")
-            raise FileNotFoundError(
-                f"Zarr file {self.fname_zarr} does not exist or is not a directory."
-            )
+            _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
+            # raise FileNotFoundError(
+            #     f"Zarr file {self.fname_zarr} does not exist or is not a directory."
+            # )
 
     def get_inference_config(self):
         """
