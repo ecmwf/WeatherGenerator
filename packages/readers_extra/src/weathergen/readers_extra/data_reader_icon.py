@@ -16,6 +16,7 @@ import fsspec
 import numpy as np
 import xarray as xr
 import zarr
+from numpy.typing import NDArray
 
 from weathergen.datasets.data_reader_anemoi import _clip_lat, _clip_lon
 from weathergen.datasets.data_reader_base import (
@@ -25,7 +26,6 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
     check_reader_data,
 )
-
 
 _logger = logging.getLogger(__name__)
 
@@ -168,14 +168,15 @@ class DataReaderIconBase(DataReaderTimestep):
         if len(non_positive_stds) != 0:
             bad_vars = [self.colnames[selected_channel_indices[i]] for i in non_positive_stds]
             raise ValueError(
-                f"Abort: Encountered non-positive standard deviations for selected columns {bad_vars}."
+                f"Abort: Encountered non-positive standard deviations"
+                f" for selected columns {bad_vars}."
             )
 
         # === Geo-info channels (currently unused) ===
         self.geoinfo_channels = []
         self.geoinfo_idx = []
 
-    def select(self, ch_filters: list[str]) -> (np.array, list[str]):
+    def select(self, ch_filters: list[str]) -> (NDArray, list[str]):
         """
         Allow user to specify which columns they want to access.
         Get functions only returned for these specified columns.
@@ -199,7 +200,7 @@ class DataReaderIconBase(DataReaderTimestep):
 
         return selected_colnames, selected_cols_idx
 
-    def select_by_level(self, ch_type: str) -> tuple[list[str], np.ndarray]:
+    def select_by_level(self, ch_type: str) -> tuple[list[str], NDArray[np.int64]]:
         """
         Select channels constrained by allowed pressure levels and optional excludes.
         ch_type: "source" or "target" (for *_exclude key in stream_info)
@@ -214,7 +215,9 @@ class DataReaderIconBase(DataReaderTimestep):
             if len(parts) == 2 and parts != "":
                 level = parts[1]
                 ch_base = parts[0]
-                if (not allowed_levels or level in allowed_levels) and ch_base not in channels_exclude:
+                if (
+                    not allowed_levels or level in allowed_levels
+                ) and ch_base not in channels_exclude:
                     new_colnames.append(ch)
             else:
                 if ch not in channels_exclude:
@@ -464,7 +467,7 @@ class DataReaderIconCmip6(DataReaderIconBase):
         channels = np.array(self.colnames)[channels_idx]
 
         start_ts = dtr.start
-        end_ts = dtr.end -  np.timedelta64(1, "h")
+        end_ts = dtr.end - np.timedelta64(1, "h")
 
         try:
             data_per_channel = []
@@ -473,7 +476,12 @@ class DataReaderIconCmip6(DataReaderIconBase):
 
             for ch in channels:
                 ch_parts = ch.split("_")
-                if hasattr(self, "levels") and self.levels and len(ch_parts) == 2 and ch_parts[1] in self.levels:
+                if (
+                    hasattr(self, "levels")
+                    and self.levels
+                    and len(ch_parts) == 2
+                    and ch_parts[1] in self.levels
+                ):
                     ch_ = ch_parts[0]
                     plev_int = ch_parts[1]
                     levels_all = self.ds[ch_]["plev"][0].values
