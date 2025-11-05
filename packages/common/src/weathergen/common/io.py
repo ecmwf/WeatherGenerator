@@ -85,27 +85,6 @@ class TimeRange:
         offset = np.timedelta64(forecast_dt_hours * fstep, "h")
         return TimeRange(self.start + offset, self.end + offset)
 
-    def get_lead_time(
-        self, abs_time: np.datetime64 | NDArray[np.datetime64]
-    ) -> NDArray[np.timedelta64]:
-        """
-        Calculate lead times based on the end of the TimeRange.
-
-        Args:
-            abs_time: Single timestamp or array of timestamps.
-
-        Returns:
-            Array of time differences (lead times) for each input timestamp.
-        """
-        if isinstance(abs_time, np.datetime64):
-            abs_time = np.array([abs_time])
-
-        abs_time = abs_time.astype("datetime64[ns]")
-        # end = self.end.astype("datetime64[ns]")
-        # this fails for forecast offset = 0 / fstep 0
-        # assert all(abs_time >= self.end)
-        return abs_time - self.end
-
 
 @dataclasses.dataclass
 class IOReaderData:
@@ -220,7 +199,6 @@ class OutputDataset:
 
     channels: list[str]
     geoinfo_channels: list[str]
-    # lead time in hours defined as forecast step * length of forecast step (len_hours)
 
     @classmethod
     def create(cls, name, key, arrays: dict[str, ArrayType], attrs: dict[str, typing.Any]):
@@ -278,7 +256,6 @@ class OutputDataset:
             "ipoint": self.datapoints,
             "channel": self.channels,  # TODO: make sure channel names align with data
             "valid_time": ("ipoint", times),
-            "lead_time": ("ipoint", self.source_interval.get_lead_time(times)),
             "lat": ("ipoint", coords[..., 0]),
             "lon": ("ipoint", coords[..., 1]),
             **geoinfo,
