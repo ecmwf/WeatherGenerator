@@ -106,9 +106,9 @@ class DataReaderEObs(DataReaderTimestep):
             # Open the Zarr dataset with xarray
             self.ds = xr.open_zarr(
                 self._filename,
-                consolidated=False,
+                consolidated=True,
                 chunks=None,
-                zarr_format=3
+                zarr_format=2
                 )
         except Exception as e:
             name = self._stream_info["name"]
