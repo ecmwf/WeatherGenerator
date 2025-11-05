@@ -17,6 +17,11 @@ from torch import Tensor
 from weathergen.common.config import Config
 from weathergen.utils.train_logger import Stage
 
+# @dataclasses.dataclass
+# class InputOutputStructure:
+
+#     targets.latent
+
 
 @dataclasses.dataclass
 class LossValues:

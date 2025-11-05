@@ -70,9 +70,12 @@ latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
 loss_fcts:
-  -
+  - 
     - "mse"
     - 1.0
+  # -
+  #   - "latent:mse"
+  #   - 0.3
 loss_fcts_val:
   -
     - "mse"
