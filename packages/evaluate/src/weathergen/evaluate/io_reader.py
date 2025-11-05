@@ -7,9 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import json
 import logging
 import re
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -71,7 +71,6 @@ class DataAvailability:
 
 
 class Reader:
-
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict[str, str] | None = None):
         """
         Generic data reader class.
@@ -130,7 +129,7 @@ class Reader:
     def get_ensemble(self, stream: str | None = None) -> list[str]:
         """Placeholder implementation ensemble member names getter. Override in subclass."""
         return list()
-    
+
     def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray:
         """Placeholder to load pre-computed scores for a given run, stream, metric"""
         return None
@@ -315,34 +314,34 @@ class Reader:
             ensemble=None if (ensemble == "all" or ensemble is None) else list(ensemble),
         )
 
+
 ##### Helper function for CSVReader ####
 def _rename_channels(data) -> pd.DataFrame:
-        """
-        The scores downloaded from Quaver have a different convention. Need renaming. 
-        Rename channel names to include underscore between letters and digits.
-        E.g., 'z500' -> 'z_500', 't850' -> 't_850', '2t' -> '2t', '10ff' -> '10ff'
+    """
+    The scores downloaded from Quaver have a different convention. Need renaming.
+    Rename channel names to include underscore between letters and digits.
+    E.g., 'z500' -> 'z_500', 't850' -> 't_850', '2t' -> '2t', '10ff' -> '10ff'
 
-        Parameters
-        ----------
-        name : str
-            Original channel name.
+    Parameters
+    ----------
+    name : str
+        Original channel name.
 
-        Returns
-        -------
-        pd.DataFrame
-            Dataset with renamed channel names.
-        """
-        for name in list(data.index):
-            # If it starts with digits (surface vars like 2t, 10ff) → leave unchanged
-            if re.match(r"^\d", name):
-                continue
+    Returns
+    -------
+    pd.DataFrame
+        Dataset with renamed channel names.
+    """
+    for name in list(data.index):
+        # If it starts with digits (surface vars like 2t, 10ff) → leave unchanged
+        if re.match(r"^\d", name):
+            continue
 
-            # Otherwise, insert underscore between letters and digits
-            data = data.rename(
-                index={name: re.sub(r"([a-zA-Z])(\d+)", r"\1_\2", name)}
-            )
+        # Otherwise, insert underscore between letters and digits
+        data = data.rename(index={name: re.sub(r"([a-zA-Z])(\d+)", r"\1_\2", name)})
 
-        return data
+    return data
+
 
 class CsvReader(Reader):
     """
@@ -373,9 +372,7 @@ class CsvReader(Reader):
         self.metrics_base_dir = Path(self.csv_path).parent
         # for backward compatibility allow metric_dir to be specified in the run config
         self.metrics_dir = Path(
-            self.eval_cfg.get(
-                "metrics_dir", self.metrics_base_dir / self.run_id / "evaluation"
-            )
+            self.eval_cfg.get("metrics_dir", self.metrics_base_dir / self.run_id / "evaluation")
         )
 
         assert len(eval_cfg.streams.keys()) == 1, "CsvReader only supports one stream."
@@ -389,27 +386,27 @@ class CsvReader(Reader):
         self.region = eval_cfg.get("region")
 
     def get_samples(self) -> set[int]:
-        """ get set of samples for the retrieved scores (initialisation times) """
+        """get set of samples for the retrieved scores (initialisation times)"""
         return set(self.samples)  # Placeholder implementation
 
     def get_forecast_steps(self) -> set[int]:
-        """ get set of forecast steps """
+        """get set of forecast steps"""
         return set(self.forecast_steps)  # Placeholder implementation
 
     # TODO: get this from config
     def get_channels(self, stream: str | None = None) -> list[str]:
-        """ get set of channels """
+        """get set of channels"""
         assert stream == self.stream, "streams do not match in CSVReader."
         return list(self.channels)  # Placeholder implementation
 
     def get_values(self) -> xr.DataArray:
-        """ get score values in the right format """
+        """get score values in the right format"""
         return self.data.values[np.newaxis, :, :, np.newaxis].T
-    
+
     def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray:
         """
         Load the existing scores for a given run, stream and metric.
-        
+
         Parameters
         ----------
         reader :
@@ -430,14 +427,9 @@ class CsvReader(Reader):
         available_data = self.check_availability(stream, mode="evaluation")
 
         # fill it only for matching metric
-        if (
-            metric == self.metric
-            and region == self.region
-            and stream == self.stream
-        ):
+        if metric == self.metric and region == self.region and stream == self.stream:
             data = self.get_values()
         else:
-
             data = np.full(
                 (
                     len(available_data.samples),
@@ -813,7 +805,7 @@ class WeatherGenReader(Reader):
     def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
         """
         Load the pre-computed scores for a given run, stream and metric and epoch.
-        
+
         Parameters
         ----------
         reader :

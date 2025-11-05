@@ -374,6 +374,7 @@ def metric_list_to_json(
         f"to {reader.metrics_dir}."
     )
 
+
 def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     """
     Plot summary of the evaluation results.

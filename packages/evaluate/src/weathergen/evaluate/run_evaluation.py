@@ -28,7 +28,7 @@ from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
     plot_data,
-    plot_summary
+    plot_summary,
 )
 from weathergen.metrics.mlflow_utils import (
     MlFlowUpload,
@@ -116,9 +116,7 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
         elif type == "csv":
             reader = CsvReader(run, run_id, private_paths)
         else:
-            raise ValueError(
-                f"Unknown run type {type} for run {run_id}. Supported: zarr, csv."
-            )
+            raise ValueError(f"Unknown run type {type} for run {run_id}. Supported: zarr, csv.")
 
         for stream in reader.streams:
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
@@ -142,7 +140,6 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                     metrics_to_compute = []
 
                     for metric in metrics:
-                    
                         metric_data = reader.load_scores(
                             stream,
                             region,
@@ -152,7 +149,7 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                         if metric_data is None:
                             metrics_to_compute.append(metric)
                             continue
-                        
+
                         available_data = reader.check_availability(
                             stream, metric_data, mode="evaluation"
                         )
