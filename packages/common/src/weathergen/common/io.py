@@ -37,6 +37,18 @@ def is_ndarray(obj: typing.Any) -> bool:
 
 
 class TimeRange:
+    """
+    Holds information about a time interval used in forecasting.
+
+    Time interval is left-closed, right-open. TimeRange can be instatiated from
+    numpy datetime64 objects or strings as outputed by TimeRange.as_dict.
+    Both will be converted to datetime64 with nanosecond precision.
+
+    Attrs:
+        start: Start of the time range in nanoseconds.
+        end: End of the time range in nanoseconds
+    """
+
     def __init__(self, start: NPDT64 | str, end: NPDT64 | str):
         # ensure consistent type => convert serialized strings
         self.start = np.datetime64(start, "ns")
@@ -44,16 +56,31 @@ class TimeRange:
 
         assert self.start < self.end
 
-    def as_dict(self):
-        """Convert instance to a JSON-serializable dict."""
+    def as_dict(self) -> dict[str, str]:
+        """
+        Convert instance to a JSON-serializable dict.
 
-        # will output as "YYYY-MM-DDThh:mm:s.sssssssss"
+        will convert datetime objects as "YYYY-MM-DDThh:mm:s.sssssssss"
+
+        Returns:
+            JSON-serializable dict, wher datetime objects were converted to strings.
+        """
         return {
             "start": str(self.start),
             "end": str(self.end),
         }
 
     def forecast_interval(self, forecast_dt_hours: int, fstep: int) -> "TimeRange":
+        """
+        Infer the interval cosidered at forecast step `fstep`.
+
+        Args:
+            forecast_dt_hours: number of hours the source TimeRange is shifted per forecast step.
+            fstep: current forecast step.
+
+        Returns:
+            New TimeRange shifted TimeRange.
+        """
         assert forecast_dt_hours > 0 and fstep >= 0
         offset = np.timedelta64(forecast_dt_hours * fstep, "h")
         return TimeRange(self.start + offset, self.end + offset)
@@ -61,6 +88,15 @@ class TimeRange:
     def get_lead_time(
         self, abs_time: np.datetime64 | NDArray[np.datetime64]
     ) -> NDArray[np.timedelta64]:
+        """
+        Calculate lead times based on the end of the TimeRange.
+
+        Args:
+            abs_time: Single timestamp or array of timestamps.
+
+        Returns:
+            Array of time differences (lead times) for each input timestamp.
+        """
         if isinstance(abs_time, np.datetime64):
             abs_time = np.array([abs_time])
 
@@ -190,6 +226,12 @@ class OutputDataset:
     def create(cls, name, key, arrays: dict[str, ArrayType], attrs: dict[str, typing.Any]):
         """
         Create Output dataset from dictonaries.
+        
+        Args:
+            name: Name of dataset (target/prediction/source)
+            item_key: ItemKey to associated with the parent OutputItem.
+            arrays: Data and Coordinate arrays.
+            attrs: Additional metadata.
         """
         assert "source_interval" in attrs, "missing expected attribute 'source_interval'"
 
