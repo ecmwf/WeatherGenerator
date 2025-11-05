@@ -37,7 +37,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         tw_handler: TimeWindowHandler,
         filename: Path,
         stream_info: dict,
-    ) -> None:
+        ) -> None:
         """
         Construct data reader for anemoi dataset
 
