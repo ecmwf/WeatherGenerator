@@ -248,7 +248,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ###################################################
     def get_sources_size(self):
         return [
-            ds[0].get_source_num_channels()
+            0
+            if ds[0].get_source_num_channels() == 0
+            else ds[0].get_source_num_channels()
             + ds[0].get_geoinfo_size()
             + ds[0].get_coords_size()
             + self.tokenizer.get_size_time_embedding()
@@ -313,12 +315,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.tokenizer.reset_rng(self.rng)
 
     ###################################################
-    def denormalize_source_channels(self, stream_id, data):
+    def denormalize_source_channels(self, stream_id, data) -> torch.Tensor:
         # TODO: with multiple ds per stream we need to distinguish these here
         return self.streams_datasets[stream_id][0].denormalize_source_channels(data)
 
     ###################################################
-    def denormalize_target_channels(self, stream_id, data):
+    def denormalize_target_channels(self, stream_id, data) -> torch.Tensor:
         # TODO: with multiple ds per stream we need to distinguish these here
         return self.streams_datasets[stream_id][0].denormalize_target_channels(data)
 

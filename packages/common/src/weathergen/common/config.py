@@ -86,7 +86,8 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
         path = Path(model_path)
         fname = path / run_id / _get_model_config_file_name(run_id, epoch)
         assert fname.exists(), (
-            "The fallback path to the model does not exist. Please provide a `model_path`."
+            "The fallback path to the model does not exist. Please provide a `model_path`.",
+            fname,
         )
 
     _logger.info(f"Loading config from specified run_id and epoch: {fname}")
@@ -96,7 +97,7 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
 
     config = OmegaConf.create(json.loads(json_str))
 
-    return _check_logging(config)
+    return _apply_fixes(config)
 
 
 def _get_model_config_file_name(run_id: str, epoch: int | None):

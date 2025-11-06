@@ -10,7 +10,9 @@
 # weathergen-common = { path = "../../../../../packages/common" }
 # weathergen = { path = "../../../../../" }
 # ///
-## Example USAGE: uv run export --run-id grwnhykd --stream ERA5 --output-dir /p/home/jusers/owens1/jureca/WeatherGen/test_output1 --format netcdf --type prediction target --fsteps 1 --samples 1
+## Example USAGE: uv run export --run-id grwnhykd --stream ERA5 \
+## --output-dir /p/home/jusers/owens1/jureca/WeatherGen/test_output1 \
+## --format netcdf --type prediction target --fsteps 1 --samples 1
 import argparse
 import logging
 import re
@@ -35,14 +37,42 @@ if not _logger.handlers:
     handler.setFormatter(formatter)
     _logger.addHandler(handler)
 
+"""
+Enhanced functions to handle Gaussian grids when converting from Zarr to NetCDF.
+"""
+
+
+def detect_grid_type(input_data_array: xr.DataArray) -> str:
+    """Detect whether data is on a regular lat/lon grid or Gaussian grid."""
+    if "lat" not in input_data_array.coords or "lon" not in input_data_array.coords:
+        return "unknown"
+
+    lats = input_data_array.coords["lat"].values
+    lons = input_data_array.coords["lon"].values
+
+    unique_lats = np.unique(lats)
+    unique_lons = np.unique(lons)
+
+    # Check if all (lat, lon) combinations exist (regular grid)
+    if len(lats) == len(unique_lats) * len(unique_lons):
+        lat_lon_pairs = set(zip(lats, lons, strict=False))
+        expected_pairs = {(lat, lon) for lat in unique_lats for lon in unique_lons}
+        if lat_lon_pairs == expected_pairs:
+            return "regular"
+
+    # Otherwise it's Gaussian (irregular spacing or reduced grid)
+    return "gaussian"
+
 
 def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
     """
     Find all the pressure levels for each variable using regex and returns a dictionary
     mapping variable names to their corresponding pressure levels.
+
     Parameters
     ----------
         all_variables : list of variable names with pressure levels (e.g.,'q_500','t_2m').
+
     Returns
     -------
         A tuple containing:
@@ -66,20 +96,26 @@ def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
     return var_dict, pl
 
 
-def reshape_dataset(input_data_array: xr.DataArray) -> xr.Dataset:
+def reshape_dataset_adaptive(input_data_array: xr.DataArray) -> xr.Dataset:
     """
-    Reshape the input xarray DataArray to have dimensions (ipoint, pressure_level)
-    for variables with multiple pressure levels, and (ipoint,) for surface variables.
-    Removes ipoint to valid_time, lat, lon after splitting for each sample
+    Reshape dataset while preserving grid structure (regular or Gaussian).
+
     Parameters
     ----------
-        input_data_array : Input xarray DataArray with dimensions (ipoint, channel).
+    input_data_array : xr.DataArray
+        Input data with dimensions (ipoint, channel)
+
     Returns
-    ------
-        reshaped_dataset : Single xarray DataSet with reshaped dimensions.
+    -------
+    xr.Dataset
+        Reshaped dataset appropriate for the grid type
     """
+    grid_type = detect_grid_type(input_data_array)
+
+    # Original logic
     var_dict, pl = find_pl(input_data_array.channel.values)
     data_vars = {}
+
     for new_var, old_vars in var_dict.items():
         if len(old_vars) > 1:
             data_vars[new_var] = xr.DataArray(
@@ -91,15 +127,59 @@ def reshape_dataset(input_data_array: xr.DataArray) -> xr.Dataset:
                 input_data_array.sel(channel=old_vars[0]).values,
                 dims=["ipoint"],
             )
+
     reshaped_dataset = xr.Dataset(data_vars)
     reshaped_dataset = reshaped_dataset.assign_coords(
         ipoint=input_data_array.coords["ipoint"],
         pressure_level=pl,
     )
-    reshaped_dataset = reshaped_dataset.set_index(ipoint=("valid_time", "lat", "lon")).unstack(
-        "ipoint"
-    )
+
+    if grid_type == "regular":
+        # Use original reshape logic for regular grids
+        # This is safe for regular grids
+        reshaped_dataset = reshaped_dataset.set_index(ipoint=("valid_time", "lat", "lon")).unstack(
+            "ipoint"
+        )
+    else:
+        # Use new logic for Gaussian/unstructured grids
+        reshaped_dataset = reshaped_dataset.set_index(ipoint2=("ipoint", "valid_time")).unstack(
+            "ipoint2"
+        )
+        # rename ipoint to ncells
+        reshaped_dataset = reshaped_dataset.rename_dims({"ipoint": "ncells"})
+        reshaped_dataset = reshaped_dataset.rename_vars({"ipoint": "ncells"})
+
     return reshaped_dataset
+
+
+def add_gaussian_grid_metadata(ds: xr.Dataset, grid_info: dict | None = None) -> xr.Dataset:
+    """
+    Add Gaussian grid metadata following CF conventions.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset to add metadata to
+    grid_info : dict, optional
+        Dictionary with grid information:
+        - 'N': Gaussian grid number (e.g., N320)
+        - 'reduced': Whether it's a reduced Gaussian grid
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset with added grid metadata
+    """
+    ds = ds.copy()
+    # Add grid mapping information
+    ds.attrs["grid_type"] = "gaussian"
+
+    # If grid info provided, add it
+    if grid_info:
+        ds.attrs["gaussian_grid_number"] = grid_info.get("N", "unknown")
+        ds.attrs["gaussian_grid_type"] = "reduced" if grid_info.get("reduced", False) else "regular"
+
+    return ds
 
 
 def add_conventions(stream: str, run_id: str, ds: xr.Dataset) -> xr.Dataset:
@@ -118,79 +198,134 @@ def add_conventions(stream: str, run_id: str, ds: xr.Dataset) -> xr.Dataset:
     ds.attrs["title"] = f"WeatherGenerator Output for {run_id} using stream {stream}"
     ds.attrs["institution"] = "WeatherGenerator Project"
     ds.attrs["source"] = "WeatherGenerator v0.0"
-    ds.attrs["history"] = "Created using the zarr_nc.py script on " + np.datetime_as_string(
-        np.datetime64("now"), unit="s"
+    ds.attrs["history"] = (
+        "Created using the export_inference.py script on "
+        + np.datetime_as_string(np.datetime64("now"), unit="s")
     )
     ds.attrs["Conventions"] = "CF-1.12"
     return ds
 
 
-def cf_parser(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
+def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
     """
-    Parse the dataset according to the CF conventions specified in the config.
+    Modified CF parser that handles both regular and Gaussian grids.
+
     Parameters
     ----------
-        config : Loaded config for cf_parser function.
-        ds : Input xarray Dataset to be parsed.
+    config : OmegaConf
+        Configuration for CF parsing
+    ds : xr.Dataset
+        Input dataset
+
     Returns
     -------
-        Parsed xarray Dataset with CF conventions applied.
+    xr.Dataset
+        Parsed dataset with appropriate structure for grid type
     """
-    # Start a new xarray dataset from scratch, it's easier than deleting / renaming (I tried!).
+    # Detect if this is a Gaussian grid
+    is_gaussian = "ncells" in ds.dims
+
     variables = {}
     mapping = config["variables"]
 
-    ds_attributes = {}
-    for dim_name, dim_dict in config["dimensions"].items():
-        # clear dimensions if key and dim_dict['wg'] are the same
-        if dim_name == dim_dict["wg"]:
-            dim_attributes = dict(
-                standard_name=dim_dict.get("std", None),
+    # Handle dimensions based on grid type
+    if is_gaussian:
+        # For Gaussian grids, keep ncells and don't try to create lat/lon dimensions
+        for var_name in ds.data_vars:
+            if var_name in ["lat", "lon"]:
+                continue
+
+            variable = ds[var_name]
+
+            if var_name not in mapping:
+                # Variable not in mapping - skip or keep as-is
+                variables[var_name] = variable
+                continue
+
+            dims = list(variable.dims)
+
+            attributes = dict(
+                standard_name=mapping[var_name].get("std", var_name),
+                units=mapping[var_name].get("std_unit", "unknown"),
+                coordinates="lat lon",  # Mark auxiliary coordinates
             )
-            if dim_dict.get("std_unit", None) is not None:
+
+            # Get mapped variable name or use original
+            mapped_name = mapping[var_name].get("var", var_name)
+
+            variables[mapped_name] = xr.DataArray(
+                data=variable.values,
+                dims=dims,
+                coords={coord: ds.coords[coord] for coord in variable.coords if coord in ds.coords},
+                attrs=attributes,
+                name=mapped_name,
+            )
+
+        # Preserve lat/lon as coordinate variables with proper attributes
+        if "lat" in ds.coords:
+            ds.coords["lat"].attrs = {
+                "standard_name": "latitude",
+                "long_name": "latitude",
+                "units": "degrees_north",
+            }
+        if "lon" in ds.coords:
+            ds.coords["lon"].attrs = {
+                "standard_name": "longitude",
+                "long_name": "longitude",
+                "units": "degrees_east",
+            }
+
+    else:
+        # Original logic for regular grids
+        ds_attributes = {}
+        for dim_name, dim_dict in config["dimensions"].items():
+            if dim_name == dim_dict["wg"]:
+                dim_attributes = dict(standard_name=dim_dict.get("std", None))
+                if dim_dict.get("std_unit", None) is not None:
+                    dim_attributes["units"] = dim_dict["std_unit"]
+                ds_attributes[dim_dict["wg"]] = dim_attributes
+                continue
+
+            if dim_name in ds.dims:
+                ds = ds.rename_dims({dim_name: dim_dict["wg"]})
+
+            dim_attributes = dict(standard_name=dim_dict.get("std", None))
+            if "std_unit" in dim_dict and dim_dict["std_unit"] is not None:
                 dim_attributes["units"] = dim_dict["std_unit"]
             ds_attributes[dim_dict["wg"]] = dim_attributes
-            continue
-        if dim_name in ds.dims:
-            ds = ds.rename_dims({dim_name: dim_dict["wg"]})
-        dim_attributes = dict(
-            standard_name=dim_dict.get("std", None),
-        )
-        if "std_unit" in dim_dict and dim_dict["std_unit"] is not None:
-            dim_attributes["units"] = dim_dict["std_unit"]
-        ds_attributes[dim_dict["wg"]] = dim_attributes
-    for var_name in ds:
-        dims = [
-            "pressure",
-            "valid_time",
-            "latitude",
-            "longitude",
-        ]
-        if mapping[var_name]["level_type"] == "sfc":
-            dims.remove("pressure")
-        coordinates = {}
-        for coord, new_name in config["coordinates"][mapping[var_name]["level_type"]].items():
-            coordinates |= {
-                new_name: (
-                    ds.coords[coord].dims,
-                    ds.coords[coord].values,
-                    ds_attributes[new_name],
-                )
-            }
-        variable = ds[var_name]
-        attributes = dict(
-            standard_name=mapping[var_name]["std"],
-            units=mapping[var_name]["std_unit"],
-        )
-        variables[mapping[var_name]["var"]] = xr.DataArray(
-            data=variable.values,
-            dims=dims,
-            coords={**coordinates, "valid_time": ds["valid_time"].values},
-            attrs=attributes,
-            name=mapping[var_name]["var"],
-        )
+
+        for var_name in ds.data_vars:
+            dims = ["pressure", "valid_time", "latitude", "longitude"]
+            if mapping[var_name]["level_type"] == "sfc":
+                dims.remove("pressure")
+
+            coordinates = {}
+            for coord, new_name in config["coordinates"][mapping[var_name]["level_type"]].items():
+                coordinates |= {
+                    new_name: (
+                        ds.coords[coord].dims,
+                        ds.coords[coord].values,
+                        ds_attributes[new_name],
+                    )
+                }
+
+            variable = ds[var_name]
+            attributes = dict(
+                standard_name=mapping[var_name]["std"],
+                units=mapping[var_name]["std_unit"],
+            )
+
+            variables[mapping[var_name]["var"]] = xr.DataArray(
+                data=variable.values,
+                dims=dims,
+                coords={**coordinates, "valid_time": ds["valid_time"].values},
+                attrs=attributes,
+                name=mapping[var_name]["var"],
+            )
+
     dataset = xr.merge(variables.values())
     dataset.attrs = ds.attrs
+
     return dataset
 
 
@@ -202,7 +337,9 @@ def output_filename(
     forecast_ref_time: np.datetime64,
 ) -> Path:
     """
-    Generate output filename based on prefix (should refer to type e.g. pred/targ), run_id, sample index, output directory, format and forecast_ref_time.
+    Generate output filename based on prefix (should refer to type e.g. pred/targ), run_id, sample
+    index, output directory, format and forecast_ref_time.
+
     Parameters
     ----------
         prefix : Prefix for file name (e.g., 'pred' or 'targ').
@@ -210,6 +347,7 @@ def output_filename(
         output_dir : Directory to save the output file.
         output_format : Output file format (currently only 'netcdf' supported).
         forecast_ref_time : Forecast reference time to include in the filename.
+
     Returns
     -------
         Full path to the output file.
@@ -227,9 +365,11 @@ def output_filename(
 def get_data_worker(args: tuple) -> xr.DataArray:
     """
     Worker function to retrieve data for a single sample and forecast step.
+
     Parameters
     ----------
         args : Tuple containing (sample, fstep, run_id, stream, type).
+
     Returns
     -------
         xarray DataArray for the specified sample and forecast step.
@@ -266,18 +406,30 @@ def get_data(
 
     Parameters
     ----------
-        run_id : Run ID to identify the Zarr store.
-        samples : Sample to process
-        stream : Stream name to retrieve data for (e.g., 'ERA5').
-        type : Type of data to retrieve ('target' or 'prediction').
-        fsteps : List of forecast steps to retrieve. If None, retrieves all available forecast steps.
-        channels :List of channels to retrieve. If None, retrieves all available channels.
-        n_processes : Number of parallel processes to use for data retrieval.
-        ecpoch : Epoch number to identify the Zarr store.
-        rank : Rank number to identify the Zarr store.
-        output_dir : Directory to save the NetCDF files.
-        output_format : Output file format (currently only 'netcdf' supported).
-        config : Loaded config for cf_parser function.
+        run_id : str
+            Run ID to identify the Zarr store.
+        samples : list
+            Sample to process
+        stream : str
+            Stream name to retrieve data for (e.g., 'ERA5').
+        dtype : str
+            Type of data to retrieve ('target' or 'prediction').
+        fsteps : list
+            List of forecast steps to retrieve. If None, retrieves all available forecast steps.
+        channels : list
+            List of channels to retrieve. If None, retrieves all available channels.
+        n_processes : list
+            Number of parallel processes to use for data retrieval.
+        ecpoch : int
+            Epoch number to identify the Zarr store.
+        rank : int
+            Rank number to identify the Zarr store.
+        output_dir : str
+            Directory to save the NetCDF files.
+        output_format : str
+            Output file format (currently only 'netcdf' supported).
+        config : OmegaConf
+            Loaded config for cf_parser function.
     """
     if dtype not in ["target", "prediction"]:
         raise ValueError(f"Invalid type: {dtype}. Must be 'target' or 'prediction'.")
@@ -320,8 +472,9 @@ def get_data(
                                 f"{list(set(channels) - set(existing_channels))}. Skipping them."
                             )
                         result = result.sel(channel=existing_channels)
-                    # reshape result
-                    result = reshape_dataset(result)
+                    # reshape result - use adaptive function to handle both regular and Gaussian
+                    # grids
+                    result = reshape_dataset_adaptive(result)
                     da_fs.append(result)
 
             _logger.info(f"Retrieved {len(da_fs)} forecast steps for type {dtype}.")
@@ -353,12 +506,14 @@ def save_sample_to_netcdf(
 ) -> None:
     """
     Uses list of pred/target xarray DataArrays to save one sample to a NetCDF file.
+
     Parameters
     ----------
     type_str : str
         Type of data ('pred' or 'targ') to include in the filename.
     dict_sample_all_steps : dict
-        Dictionary where keys is sample index and values is a list of xarray DataArrays for all the forecast steps
+        Dictionary where keys is sample index and values is a list of xarray DataArrays
+        for all the forecast steps
     fstep_hours : np.timedelta64
         Time difference between forecast steps (e.g., 6 hours).
     run_id : str
@@ -388,11 +543,18 @@ def save_sample_to_netcdf(
         _logger.info(f"Saving to {out_fname}.")
         sample_all_steps = sample_all_steps.assign_coords(forecast_ref_time=frt)
         stream = str(sample_all_steps.coords["stream"].values)
-        sample_all_steps = sample_all_steps.drop_vars("sample")
-        sample_all_steps = cf_parser(config, sample_all_steps)
+
+        if "sample" in sample_all_steps.coords:
+            sample_all_steps = sample_all_steps.drop_vars("sample")
+
+        sample_all_steps = cf_parser_gaussian_aware(config, sample_all_steps)
+        # Add Gaussian grid metadata if detected
+        if "ncells" in sample_all_steps.dims:
+            sample_all_steps = add_gaussian_grid_metadata(sample_all_steps)
+            _logger.info("Detected and preserved Gaussian grid structure")
         # add forecast_period attributes
         n_hours = fstep_hours.astype("int64")
-        sample_all_steps["forecast_period"] = sample_all_steps["forecast_period"] * n_hours
+        sample_all_steps["forecast_period"] = sample_all_steps["forecast_step"] * n_hours
         sample_all_steps["forecast_period"].attrs = {
             "standard_name": "forecast_period",
             "long_name": "time since forecast_reference_time",
@@ -417,6 +579,7 @@ def parse_args(args: list) -> argparse.Namespace:
         "--run-id",
         type=str,
         help=" Zarr folder which contains target and inference results",
+        required=True,
     )
 
     parser.add_argument(
@@ -425,12 +588,14 @@ def parse_args(args: list) -> argparse.Namespace:
         choices=["prediction", "target"],
         nargs="+",
         help="List of type of data to convert (e.g. prediction target)",
+        required=True,
     )
 
     parser.add_argument(
         "--output-dir",
         type=str,
         help="Output directory to save the NetCDF files",
+        required=True,
     )
 
     parser.add_argument(
@@ -438,6 +603,7 @@ def parse_args(args: list) -> argparse.Namespace:
         type=str,
         choices=["netcdf", "grib"],
         help="Output file format (currently only netcdf supported)",
+        required=True,
     )
 
     parser.add_argument(
@@ -445,6 +611,7 @@ def parse_args(args: list) -> argparse.Namespace:
         type=str,
         choices=["ERA5"],
         help="Stream name to retrieve data for",
+        required=True,
     )
 
     parser.add_argument(
@@ -452,7 +619,8 @@ def parse_args(args: list) -> argparse.Namespace:
         type=int,
         nargs="+",
         default=None,
-        help="List of forecast steps to retrieve (e.g. 1 2 3). If not provided, retrieves all available forecast steps.",
+        help="List of forecast steps to retrieve (e.g. 1 2 3). "
+        "If not provided, retrieves all available forecast steps.",
     )
 
     parser.add_argument(
@@ -468,7 +636,8 @@ def parse_args(args: list) -> argparse.Namespace:
         type=str,
         nargs="+",
         default=None,
-        help="List of channels to retrieve (e.g., 'q_500 t_2m'). If not provided, retrieves all available channels.",
+        help="List of channels to retrieve (e.g., 'q_500 t_2m'). "
+        "If not provided, retrieves all available channels.",
     )
 
     parser.add_argument(

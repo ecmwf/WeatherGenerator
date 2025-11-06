@@ -119,18 +119,31 @@ def calc_scores_per_stream(
             # Build up computation graphs for all metrics
             _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
 
-            combined_metrics = [
-                get_score(
-                    score_data,
-                    metric,
-                    agg_dims="ipoint",
-                    group_by_coord="sample",
-                )
+            # Add it only if it is not None
+            valid_scores = [
+                score
                 for metric in metrics
+                if (
+                    score := get_score(
+                        score_data,
+                        metric,
+                        agg_dims="ipoint",
+                        group_by_coord="sample",
+                    )
+                )
+                is not None
             ]
 
-            combined_metrics = xr.concat(combined_metrics, dim="metric")
-            combined_metrics["metric"] = metrics
+            # Keep only metrics corresponding to valid_scores
+            valid_metric_names = [
+                metric
+                for metric, score in zip(metrics, valid_scores, strict=False)
+                if score is not None
+            ]
+
+            # Concatenate along a new "metric" dimension and assign metric names
+            combined_metrics = xr.concat(valid_scores, dim="metric")
+            combined_metrics = combined_metrics.assign_coords(metric=valid_metric_names)
 
             _logger.debug(f"Running computation of metrics for stream {stream}...")
             combined_metrics = combined_metrics.compute()
@@ -138,9 +151,11 @@ def calc_scores_per_stream(
             combined_metrics = scalar_coord_to_dim(combined_metrics, "sample")
             combined_metrics = scalar_coord_to_dim(combined_metrics, "ens")
         else:
-            # depending on the datset, there might be no data (e.g. no CERRA in southern hemisphere region)
+            # depending on the datset, there might be no data (e.g. no CERRA in southern
+            # hemisphere region)
             _logger.warning(
-                f"No data available for stream {stream} at forecast step {fstep} in region {region}. Skipping metrics calculation."
+                f"No data available for stream {stream} at forecast step {fstep} in "
+                f"region {region}. Skipping metrics calculation."
             )
             continue
 
@@ -152,11 +167,11 @@ def calc_scores_per_stream(
             "forecast_step": int(combined_metrics.forecast_step),
             "sample": combined_metrics.sample,
             "channel": combined_metrics.channel,
+            "metric": combined_metrics.metric,
         }
 
         if "ens" in combined_metrics.dims:
             criteria["ens"] = combined_metrics.ens
-
         metric_stream.loc[criteria] = combined_metrics
 
     _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
@@ -200,6 +215,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         "image_format": global_plotting_opts.get("image_format", "png"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
+        "fps": global_plotting_opts.get("fps", 2),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
     }
 
@@ -354,42 +370,9 @@ def metric_list_to_json(
                 json.dump(metric_dict, f, indent=4)
 
     _logger.info(
-        f"Saved all results of inference run {reader.run_id} - epoch {reader.epoch:d} successfully to {reader.metrics_dir}."
+        f"Saved all results of inference run {reader.run_id} - epoch {reader.epoch:d} successfully "
+        f"to {reader.metrics_dir}."
     )
-
-
-def retrieve_metric_from_json(reader: Reader, stream: str, region: str, metric: str):
-    """
-    Retrieve the score for a given run, stream, metric, epoch, and rank from a JSON file.
-
-    Parameters
-    ----------
-    reader :
-        Reader object containing all info for a specific run_id
-    stream :
-        Stream name.
-    region :
-        Region name.
-    metric :
-        Metric name.
-
-    Returns
-    -------
-    xr.DataArray
-        The metric DataArray.
-    """
-    score_path = (
-        Path(reader.metrics_dir)
-        / f"{reader.run_id}_{stream}_{region}_{metric}_epoch{reader.epoch:05d}.json"
-    )
-    _logger.debug(f"Looking for: {score_path}")
-
-    if score_path.exists():
-        with open(score_path) as f:
-            data_dict = json.load(f)
-            return xr.DataArray.from_dict(data_dict)
-    else:
-        raise FileNotFoundError(f"File {score_path} not found in the archive.")
 
 
 def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
@@ -459,7 +442,8 @@ def common_ranges(
     Returns
     -------
     maps_config :
-        the global plotting configuration with the ranges added and included for each variable (and for each stream).
+        the global plotting configuration with the ranges added and included for each variable (and
+        for each stream).
     """
 
     for var in plot_chs:
@@ -467,7 +451,6 @@ def common_ranges(
             if not isinstance(maps_config[var].get("vmax"), (int | float)):
                 list_max = calc_bounds(data_tars, data_preds, var, "max")
                 list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
-
                 maps_config[var].update({"vmax": float(max(list_max))})
 
             if not isinstance(maps_config[var].get("vmin"), (int | float)):
@@ -478,7 +461,6 @@ def common_ranges(
         else:
             list_max = calc_bounds(data_tars, data_preds, var, "max")
             list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
-
             list_min = calc_bounds(data_tars, data_preds, var, "min")
             list_min = np.concatenate([arr.flatten() for arr in list_min]).tolist()
 
@@ -515,7 +497,8 @@ def calc_bounds(
     bound,
 ):
     """
-    Calculate the minimum and maximum values per variable for all forecasteps for both targets and predictions
+    Calculate the minimum and maximum values per variable for all forecasteps for both targets and
+    predictions
 
     Parameters
     ----------

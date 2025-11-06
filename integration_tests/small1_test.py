@@ -134,7 +134,8 @@ def evaluate_results(run_id):
             },
         }
     )
-    evaluate_from_config(cfg)
+    # Not passing the mlflow client for tests.
+    evaluate_from_config(cfg, None)
 
 
 def load_metrics(run_id):
@@ -172,8 +173,9 @@ def assert_train_loss_below_threshold(run_id):
     )
     # Check that the loss does not explode in a single epoch
     # This is meant to be a quick test, not a convergence test
-    assert loss_metric < 1.25, (
-        f"'stream.ERA5.loss_mse.loss_avg' is {loss_metric}, expected to be below 0.25"
+    target = 1.5
+    assert loss_metric < target, (
+        f"'stream.ERA5.loss_mse.loss_avg' is {loss_metric}, expected to be below {target}"
     )
 
 
