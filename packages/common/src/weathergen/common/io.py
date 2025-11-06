@@ -485,15 +485,51 @@ class OutputBatchData:
         _logger.debug(f"extracting subset: {key}")
         offset_key = self._offset_key(key)
         stream_idx = self.streams[key.stream]
-        datapoints = self._get_datapoints_per_sample(offset_key, stream_idx)
 
         source_interval = self.source_intervals[offset_key.sample]
-
         _logger.debug(
             f"forecast_step: {key.forecast_step} = {offset_key.forecast_step} (rel_step) + "
             + f"{self.forecast_offset} (forecast_offset)"
         )
         _logger.debug(f"stream: {key.stream} with index: {stream_idx}")
+
+        assert self.forecast_offset in (0, 1)
+        if key.with_source:
+            source_dataset = self._extract_sources(
+                offset_key.sample, stream_idx, key, source_interval
+            )
+        else:
+            source_dataset = None
+
+        target_dataset, prediction_dataset = self._extract_targets_predictions(
+            stream_idx, offset_key, key, source_interval
+        )
+
+        return OutputItem(
+            key=key,
+            source=source_dataset,
+            target=target_dataset,
+            prediction=prediction_dataset,
+        )
+
+    def _offset_key(self, key: ItemKey):
+        """
+        Correct indices in key to be useable for data extraction.
+
+        `key` contains indices that are adjusted to have better output semantics.
+        To be useable in extraction these have to be adjusted to bridge the differences
+        compared to the semantics of the data.
+            - `sample` is adjusted from a global continous index to a per batch index
+            - `forecast_step` is adjusted from including `forecast_offset` to indexing
+               the data (always starts at 0)
+        """
+        return ItemKey(
+            key.sample - self.sample_start, key.forecast_step - self.forecast_offset, key.stream
+        )
+
+    def _extract_targets_predictions(self, stream_idx, offset_key, key, source_interval):
+        datapoints = self._get_datapoints_per_sample(offset_key, stream_idx)
+        data_coords = self._extract_coordinates(stream_idx, offset_key, datapoints)
 
         if (datapoints.stop - datapoints.start) == 0:
             target_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
@@ -504,8 +540,6 @@ class OutputBatchData:
                 1, 2, 0
             )[datapoints]
 
-        data_coords = self._extract_coordinates(stream_idx, offset_key, datapoints)
-
         assert len(data_coords.channels) == target_data.shape[1], (
             "Number of channel names does not align with target data."
         )
@@ -513,33 +547,22 @@ class OutputBatchData:
             "Number of channel names does not align with prediction data."
         )
 
-        if key.with_source:
-            source_dataset = self._extract_sources(
-                offset_key.sample, stream_idx, key, source_interval
-            )
-        else:
-            source_dataset = None
-
-        assert is_ndarray(target_data), f"Expected ndarray but got: {type(target_data)}"
-        assert is_ndarray(preds_data), f"Expected ndarray but got: {type(preds_data)}"
-        return OutputItem(
-            key=key,
-            source=source_dataset,
-            target=OutputDataset(
-                "target",
-                key,
-                source_interval,
-                target_data,
-                **dataclasses.asdict(data_coords),
-            ),
-            prediction=OutputDataset(
-                "prediction",
-                key,
-                source_interval,
-                preds_data,
-                **dataclasses.asdict(data_coords),
-            ),
+        target_dataset = OutputDataset(
+            "target",
+            key,
+            source_interval,
+            target_data,
+            **dataclasses.asdict(data_coords),
         )
+        prediction_dataset = OutputDataset(
+            "prediction",
+            key,
+            source_interval,
+            preds_data,
+            **dataclasses.asdict(data_coords),
+        )
+
+        return target_dataset, prediction_dataset
 
     def _get_datapoints_per_sample(self, offset_key, stream_idx):
         lens = self.targets_lens[offset_key.forecast_step][stream_idx]
@@ -558,21 +581,6 @@ class OutputBatchData:
         )
 
         return slice(start, start + n_samples)
-
-    def _offset_key(self, key: ItemKey):
-        """
-        Correct indices in key to be useable for data extraction.
-
-        `key` contains indices that are adjusted to have better output semantics.
-        To be useable in extraction these have to be adjusted to bridge the differences
-        compared to the semantics of the data.
-            - `sample` is adjusted from a global continous index to a per batch index
-            - `forecast_step` is adjusted from including `forecast_offset` to indexing
-               the data (always starts at 0)
-        """
-        return ItemKey(
-            key.sample - self.sample_start, key.forecast_step - self.forecast_offset, key.stream
-        )
 
     def _extract_coordinates(self, stream_idx, offset_key, datapoints) -> DataCoordinates:
         _coords = self.targets_coords[offset_key.forecast_step][stream_idx][datapoints].numpy()
