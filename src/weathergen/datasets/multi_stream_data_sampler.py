@@ -19,7 +19,6 @@ from weathergen.datasets.data_reader_base import (
     DataReaderBase,
     TimeWindowHandler,
     TIndex,
-    str_to_datetime64,
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
@@ -33,7 +32,7 @@ from weathergen.datasets.utils import (
     compute_offsets_scatter_embed,
     compute_source_cell_lens,
 )
-from weathergen.utils.distributed import is_root
+from weathergen.utils.distributed import get_rank, get_world_size, is_root
 from weathergen.utils.train_logger import Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
@@ -83,8 +82,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     def __init__(
         self,
         cf,
-        start_date_,
-        end_date_,
+        start_date,
+        end_date,
         batch_size,
         samples_per_epoch,
         stage: Stage,
@@ -92,123 +91,42 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ):
         super(MultiStreamDataSampler, self).__init__()
 
-        start_date = str_to_datetime64(start_date_)
-        end_date = str_to_datetime64(end_date_)
-
-        assert end_date > start_date, (end_date, start_date)
-
         self.mask_value = 0.0
         self._stage = stage
 
-        self.len_hrs: int = cf.len_hrs
-        self.step_hrs: int = cf.step_hrs
         self.time_window_handler = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
         if is_root():
-            logger.info(
-                f"Time window handler: start={start_date}, end={end_date},"
-                f"len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
-            )
+            logger.info(f"Time window handler: {self.time_window_handler}")
 
         self.forecast_offset = cf.forecast_offset
-        self.forecast_delta_hrs = (
-            cf.forecast_delta_hrs if cf.forecast_delta_hrs > 0 else self.len_hrs
-        )
-        assert self.forecast_delta_hrs == self.len_hrs, "Only supported option at the moment"
+        self.forecast_delta_hrs = cf.forecast_delta_hrs if cf.forecast_delta_hrs > 0 else cf.len_hrs
+        assert self.forecast_delta_hrs == cf.len_hrs, "Only supported option at the moment"
         self.forecast_steps = np.array(
             [cf.forecast_steps] if isinstance(cf.forecast_steps, int) else cf.forecast_steps
         )
-        if cf.forecast_policy is not None:
-            if self.forecast_steps.max() == 0 and is_root():
-                logger.warning("forecast policy is not None but number of forecast steps is 0.")
         self.forecast_policy = cf.forecast_policy
 
-        self.len = 100000000
+        self.streams_datasets: list[list[AnyDataReader]] = [
+            create_datasets(stream_info, self.time_window_handler, cf) for stream_info in cf.streams
+        ]
 
-        self.streams_datasets: list[list[AnyDataReader]] = []
-        for _, stream_info in enumerate(cf.streams):
-            self.streams_datasets.append([])
+        # MODIFIES config !!!
+        for stream_info, stream_datasets in zip(cf.streams, self.streams_datasets, strict=True):
+            # assume all datasets within one stream have the same channels
+            sample_ds = stream_datasets[0]
+            stream_info[f"{self._stage}_source_channels"] = sample_ds.source_channels
+            stream_info[f"{self._stage}_target_channels"] = sample_ds.target_channels
+            # TODO no need to modify the stream config here
+            stream_info["target_channel_weights"] = (
+                sample_ds.target_channel_weights
+                if sample_ds.target_channel_weights is not None
+                else [1.0 for _ in sample_ds.target_channels]
+            )
 
-            for fname in stream_info["filenames"]:
-                kwargs = {
-                    "tw_handler": self.time_window_handler,
-                    "stream_info": stream_info,
-                }
-                dataset: type[AnyDataReader] | None = None
-                match stream_info["type"]:
-                    case "obs":
-                        dataset = DataReaderObs
-                        datapath = cf.data_path_obs
-                        # kwargs["end"] = end_date_padded # TODO: implement the padding
-                    case "anemoi":
-                        dataset = DataReaderAnemoi
-                        datapath = cf.data_path_anemoi
-                    case "fesom":
-                        dataset = DataReaderFesom
-                        datapath = cf.data_path_fesom
-                    case "icon":
-                        dataset = IconDataset
-                        datapath = cf.data_path_icon
-                    case _:
-                        msg = f"Unsupported stream type {stream_info['type']}"
-                        f"for stream name '{stream_info['name']}'."
-                        raise ValueError(msg)
+        self._len = self._get_len(self.time_window_handler, samples_per_epoch, batch_size)
 
-                datapath = pathlib.Path(datapath)
-                fname = pathlib.Path(fname)
-                # dont check if file exists since zarr stores might be directories
-                if fname.exists():
-                    # check if fname is a valid path to allow for simple overwriting
-                    filename = fname
-                else:
-                    filename = pathlib.Path(datapath) / fname
-
-                    if not filename.exists():  # see above
-                        msg = (
-                            f"Did not find input data for {stream_info['type']} "
-                            f"stream '{stream_info['name']}': {filename}."
-                        )
-                        raise FileNotFoundError(msg)
-
-                ds_type = stream_info["type"]
-                if is_root():
-                    logger.info(
-                        f"Opening dataset with type: {ds_type}"
-                        + f" from stream config {stream_info['name']}.",
-                    )
-                ds = dataset(filename=filename, **kwargs)
-
-                fsm = self.forecast_steps[0]
-                if len(ds) > 0:
-                    self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
-
-                # MODIFIES config !!!
-                stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
-                stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
-                stream_info["target_channel_weights"] = (
-                    ds.target_channel_weights
-                    if ds.target_channel_weights is not None
-                    else [1.0 for _ in ds.target_channels]
-                )
-
-                self.streams_datasets[-1] += [ds]
-
-        index_range = self.time_window_handler.get_index_range()
-        self.len = int(index_range.end - index_range.start)
-        self.len = min(self.len, samples_per_epoch if samples_per_epoch else self.len)
-        # adjust len to split loading across all workers and ensure it is multiple of batch_size
-        len_chunk = ((self.len // cf.world_size) // batch_size) * batch_size
-        self.len = min(self.len, len_chunk)
-        logger.info(f"index_range={index_range}, len={self.len}, len_chunk={len_chunk}")
-
-        self.rank = cf.rank
-        self.world_size = cf.world_size
-
-        self.streams = cf.streams
         self.shuffle = shuffle
-        # TODO: remove options that are no longer supported
-        self.input_window_steps = cf.input_window_steps
-        self.embed_local_coords = cf.embed_local_coords
-        self.embed_centroids_local_coords = cf.embed_centroids_local_coords
+
         self.sampling_rate_target = cf.sampling_rate_target
 
         self.batch_size = batch_size
@@ -230,9 +148,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             masker = Masker(cf)
             self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
-            msg = "masked token modeling does not support self.input_window_steps > 1; "
-            msg += "increase window length"
-            assert self.input_window_steps == 1, msg
         else:
             assert False, f"Unsupported training mode: {cf.training_mode}"
 
@@ -277,7 +192,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     def reset(self):
         # initialize the random number generator: self.data_loader_rng_seed is set to a DDP-unique
         # value in worker_workset()
-        self.rng = np.random.default_rng(self.data_loader_rng_seed)
+        rng = np.random.default_rng(self.data_loader_rng_seed)
 
         fsm = (
             self.forecast_steps[min(self.epoch, len(self.forecast_steps) - 1)]
@@ -289,14 +204,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # data
         index_range = self.time_window_handler.get_index_range()
-        idx_end = index_range.end
         # native length of datasets, independent of epoch length that has potentially been specified
-        forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
-        idx_end -= forecast_len + self.forecast_offset
-        assert idx_end > 0, "dataset size too small for forecast range"
-        self.perms = np.arange(index_range.start, idx_end)
+        len_hrs = self.time_window_handler.t_window_len
+        step_hrs = self.time_window_handler.t_window_step
+        forecast_len = (len_hrs * (fsm + 1)) // step_hrs
+
+        # maximum index to generate a forecast that falls within the datasets
+        index_max = index_range.stop - forecast_len + self.forecast_offset
+        assert index_max > 0, "dataset size too small for forecast range"
+        self.perms = np.arange(index_range.start, index_max)
         if self.shuffle:
-            self.perms = self.rng.permutation(self.perms)
+            self.perms = rng.permutation(self.perms)
 
         # forecast time steps
         len_dt_samples = len(self) // self.batch_size
@@ -306,13 +224,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.perms_forecast_dt = fsm * np.ones(len_dt_samples, dtype=np.int64)
         elif self.forecast_policy == "random" or self.forecast_policy == "sequential_random":
             # randint high=one-past
-            self.perms_forecast_dt = self.rng.integers(
+            self.perms_forecast_dt = rng.integers(
                 low=self.forecast_steps.min(), high=fsm + 1, size=len_dt_samples, dtype=np.int64
             )
         else:
             assert False
 
-        self.tokenizer.reset_rng(self.rng)
+        self.tokenizer.reset_rng(rng)
 
     ###################################################
     def denormalize_source_channels(self, stream_id, data) -> torch.Tensor:
@@ -334,7 +252,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             len[*] : number of streams
         """
         iter_start, iter_end = self.worker_workset()
-        logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={self.len}")
+        logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={len(self)}")
 
         # create new shuffeling
         self.reset()
@@ -363,7 +281,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 streams_data: list[StreamData] = []
 
                 # for all streams
-                for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
+                for stream_ds in self.streams_datasets:
+                    stream_info = stream_ds[0].stream_info
                     stream_data = StreamData(
                         idx, forecast_dt + self.forecast_offset, self.num_healpix_cells
                     )
@@ -399,7 +318,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     for fstep in range(
                         self.forecast_offset, self.forecast_offset + forecast_dt + 1
                     ):
-                        step_forecast_dt = idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
+                        step_forecast_dt = (
+                            idx + (self.forecast_delta_hrs * fstep)
+                            // self.time_window_handler.t_window_step
+                        )
                         time_win_target = self.time_window_handler.window(step_forecast_dt)
 
                         # collect all targets for current stream
@@ -454,16 +376,30 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     ###################################################
     def __len__(self):
-        return self.len
+        return self._len
+
+    @staticmethod
+    def _get_len(twh: TimeWindowHandler, samples_per_epoch, batch_size) -> int:
+        index_range = twh.get_index_range()
+        _len = len(index_range)
+        samples_per_epoch = samples_per_epoch if samples_per_epoch else _len
+        _len = min(_len, samples_per_epoch)
+
+        # adjust len to split loading across all workers and ensure it is multiple of batch_size
+        len_chunk = ((_len // get_world_size()) // batch_size) * batch_size
+        _len = min(_len, len_chunk)
+        logger.info(f"index_range={index_range}, len={_len}, len_chunk={len(_len)}")
+        return _len
 
     ###################################################
     def worker_workset(self):
-        local_start, local_end = self.rank * self.len, (self.rank + 1) * self.len
+        rank = get_rank()
+        local_start, local_end = rank * len(self), (rank + 1) * len(self)
 
         worker_info = torch.utils.data.get_worker_info()
 
         if worker_info is None:
-            assert self.world_size == 1, self.world_size
+            assert get_world_size() == 1, get_world_size()
             iter_start = 0
             iter_end = len(self)
 
@@ -488,8 +424,67 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if worker_info.id + 1 == worker_info.num_workers:
                 iter_end = local_end
             logger.info(
-                f"{self.rank}::{worker_info.id}"
+                f"{rank}::{worker_info.id}"
                 + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
             )
 
         return iter_start, iter_end
+
+
+def create_datasets(stream_info, time_window_handler, cf) -> list[DataReaderBase]:
+    datasets: list[DataReaderBase] = []
+
+    for fname in stream_info["filenames"]:
+        kwargs = {
+            "tw_handler": time_window_handler,
+            "stream_info": stream_info,
+        }
+        dataset: type[AnyDataReader] | None = None
+        match stream_info["type"]:
+            case "obs":
+                dataset = DataReaderObs
+                datapath = cf.data_path_obs
+                # kwargs["end"] = end_date_padded # TODO: implement the padding
+            case "anemoi":
+                dataset = DataReaderAnemoi
+                datapath = cf.data_path_anemoi
+            case "fesom":
+                dataset = DataReaderFesom
+                datapath = cf.data_path_fesom
+            case "icon":
+                dataset = IconDataset
+                datapath = cf.data_path_icon
+            case _:
+                msg = f"Unsupported stream type {stream_info['type']}"
+                f"for stream name '{stream_info['name']}'."
+                raise ValueError(msg)
+
+        datapath = pathlib.Path(datapath)
+        fname = pathlib.Path(fname)
+        # dont check if file exists since zarr stores might be directories
+        if fname.exists():
+            # check if fname is a valid path to allow for simple overwriting
+            filename = fname
+        else:
+            filename = pathlib.Path(datapath) / fname
+
+            if not filename.exists():  # see above
+                msg = (
+                    f"Did not find input data for {stream_info['type']} "
+                    f"stream '{stream_info['name']}': {filename}."
+                )
+                raise FileNotFoundError(msg)
+
+        ds_type = stream_info["type"]
+        if is_root():
+            logger.info(
+                f"Opening dataset with type: {ds_type}"
+                + f" from stream config {stream_info['name']}.",
+            )
+
+        ds = dataset(filename=filename, **kwargs)
+
+        datasets += [ds]
+    
+    return datasets
+

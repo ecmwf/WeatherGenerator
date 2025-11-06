@@ -10,6 +10,7 @@
 import datetime
 import logging
 from abc import abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 import numpy as np
@@ -46,7 +47,17 @@ class TimeIndexRange:
     """
 
     start: TIndex
-    end: TIndex
+    stop: TIndex
+    step: TIndex = 1
+
+    def __post_init__(self):
+        self._range = range(self.start, self.stop, self.step)
+
+    def __iter__(self) -> Iterator[TIndex]:
+        return iter(self._range)
+    
+    def __len__(self) -> int:
+        return len(self._range)
 
 
 @dataclass
@@ -151,7 +162,7 @@ class TimeWindowHandler:
 
     def get_index_range(self) -> TimeIndexRange:
         """
-        Temporal window corresponding to index
+        Range of indices identifying time ranges, from start to end.
 
         Parameters
         ----------
@@ -188,6 +199,11 @@ class TimeWindowHandler:
 
         return DTRange(t_start_win, t_end_win)
 
+    def __str__(self)-> str:
+        return (
+            f"start={self.t_start}, end={self.t_end},"
+            +f"len_hrs={self.t_window_len}, step_hrs={self.t_window_step}"
+        )
 
 @dataclass
 class ReaderData:
