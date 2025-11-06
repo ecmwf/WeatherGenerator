@@ -148,9 +148,9 @@ def calc_scores_per_stream(
                     agg_dims="ipoint",
                     group_by_coord=group_by_coord,
                 )
-            )
+                )
             is not None
-        ]
+        ]            
 
         # Keep only metrics corresponding to valid_scores
         valid_metric_names = [
@@ -310,6 +310,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         "image_format": global_plotting_opts.get("image_format", "png"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
+        "fps": global_plotting_opts.get("fps", 2),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
     }
 
@@ -464,46 +465,9 @@ def metric_list_to_json(
                 json.dump(metric_dict, f, indent=4)
 
     _logger.info(
-        f"Saved all results of inference run {reader.run_id} - epoch {reader.epoch:d} successfully to {reader.metrics_dir}."
+        f"Saved all results of inference run {reader.run_id} - epoch {reader.epoch:d} successfully "
+        f"to {reader.metrics_dir}."
     )
-
-
-def retrieve_metric_from_json(
-    reader: Reader, stream: str, region: str, metric: str
-) -> xr.DataArray | None:
-    """
-    Retrieve the score for a given run, stream, metric, epoch, and rank from a JSON file.
-
-    Parameters
-    ----------
-    reader :
-        Reader object containing all info for a specific run_id
-    stream :
-        Stream name.
-    region :
-        Region name.
-    metric :
-        Metric name.
-
-    Returns
-    -------
-    xr.DataArray
-        The metric DataArray.
-    """
-    score_path = (
-        Path(reader.metrics_dir)
-        / f"{reader.run_id}_{stream}_{region}_{metric}_epoch{reader.epoch:05d}.json"
-    )
-    _logger.debug(f"Looking for: {score_path}")
-
-    if score_path.exists():
-        with open(score_path) as f:
-            data_dict = json.load(f)
-            return xr.DataArray.from_dict(data_dict)
-    else:
-        _logger.info(f"File {score_path} not found in the archive.")
-        return None
-
 
 def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     """
@@ -546,9 +510,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
             if eval_opt.get("bar_plots", False):
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
 
-
 ############# Utility functions ############
-
 
 def common_ranges(
     data_tars: list[dict],
@@ -572,7 +534,8 @@ def common_ranges(
     Returns
     -------
     maps_config :
-        the global plotting configuration with the ranges added and included for each variable (and for each stream).
+        the global plotting configuration with the ranges added and included for each variable (and
+        for each stream).
     """
     for var in plot_chs:
         if var in maps_config:
@@ -625,7 +588,8 @@ def calc_bounds(
     bound,
 ):
     """
-    Calculate the minimum and maximum values per variable for all forecasteps for both targets and predictions
+    Calculate the minimum and maximum values per variable for all forecasteps for both targets and
+    predictions
 
     Parameters
     ----------

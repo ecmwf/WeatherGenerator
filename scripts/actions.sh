@@ -49,6 +49,16 @@ case "$1" in
         exit 1
       fi
 
+      # weathergen-metrics
+      uv sync --project packages/metrics --no-install-workspace
+      uv pip list
+      uv run --project packages/metrics --frozen pyrefly check packages/metrics
+      # Fail for errors on weathergen-metrics:
+      if [ $? -ne 0 ]; then
+        echo "Type checking failed for weathergen-metrics."
+        exit 1
+      fi
+
       # weathergen-evaluate
       uv sync --project packages/evaluate --no-install-workspace --package weathergen-evaluate 
       uv pip list

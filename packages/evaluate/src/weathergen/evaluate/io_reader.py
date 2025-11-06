@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from pathlib import Path
 
 import numpy as np
 import omegaconf as oc
+import pandas as pd
 import xarray as xr
 from tqdm import tqdm
 
@@ -85,7 +87,6 @@ class Reader:
         self.eval_cfg = eval_cfg
         self.run_id = run_id
         self.private_paths = private_paths
-
         self.streams = eval_cfg.streams.keys()
         # TODO: propagate it to the other functions using global plotting opts
         self.global_plotting_options = eval_cfg.get("global_plotting_options", {})
@@ -133,6 +134,10 @@ class Reader:
     def is_regular(self, stream: str) -> bool:
         """Placeholder implementation to check if lat/lon are regularly spaced. Override in subclass."""
         return True
+    
+    def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray:
+        """Placeholder to load pre-computed scores for a given run, stream, metric"""
+        return None
 
     def check_availability(
         self,
@@ -146,7 +151,8 @@ class Reader:
         ii) available in the source file (e.g. the Zarr file, return error otherwise)
         Additionally, if channels, forecast steps or samples is None/'all', it will
         i) set the variable to all available vars in source file
-        ii) return True only if the respective variable contains the same indeces in metric file and source file (return False otherwise)
+        ii) return True only if the respective variable contains the same indeces in metric file
+            and source file (return False otherwise)
 
         Parameters
         ----------
@@ -179,18 +185,26 @@ class Reader:
 
         # fill info from available metric file (if provided)
         available = {
-            "channel": set(available_data["channel"].values.ravel())
-            if available_data is not None
-            else set(),
-            "fstep": set(available_data["forecast_step"].values.ravel())
-            if available_data is not None
-            else set(),
-            "sample": set(available_data.coords["sample"].values.ravel())
-            if available_data is not None
-            else set(),
-            "ensemble": set(available_data["ens"].values.ravel())
-            if available_data is not None and "ens" in available_data.coords
-            else set(),
+            "channel": (
+                set(available_data["channel"].values.ravel())
+                if available_data is not None
+                else set()
+            ),
+            "fstep": (
+                set(available_data["forecast_step"].values.ravel())
+                if available_data is not None
+                else set()
+            ),
+            "sample": (
+                set(available_data.coords["sample"].values.ravel())
+                if available_data is not None
+                else set()
+            ),
+            "ensemble": (
+                set(available_data["ens"].values.ravel())
+                if available_data is not None and "ens" in available_data.coords
+                else set()
+            ),
         }
 
         # fill info from reader
@@ -210,7 +224,8 @@ class Reader:
                 # If file with metrics exists, must exactly match
                 if available_data is not None and reader_data[name] != available[name]:
                     _logger.info(
-                        f"Requested all {name}s for {mode}, but previous config was a strict subset. Recomputing."
+                        f"Requested all {name}s for {mode}, but previous config was a "
+                        "strict subset. Recomputing."
                     )
                     check_score = False
 
@@ -239,7 +254,8 @@ class Reader:
         if check_score and not corrected:
             scope = "metric file" if available_data is not None else "Zarr file"
             _logger.info(
-                f"All checks passed – All channels, samples, fsteps requested for {mode} are present in {scope}..."
+                f"All checks passed – All channels, samples, fsteps requested for {mode} are "
+                f"present in {scope}..."
             )
 
         return DataAvailability(
@@ -252,7 +268,8 @@ class Reader:
 
     def _get_channels_fsteps_samples(self, stream: str, mode: str) -> DataAvailability:
         """
-        Get channels, fsteps and samples for a given run and stream from the config. Replace 'all' with None.
+        Get channels, fsteps and samples for a given run and stream from the config.
+        Replace 'all' with None.
 
         Parameters
         ----------
@@ -303,6 +320,146 @@ class Reader:
         )
 
 
+##### Helper function for CSVReader ####
+def _rename_channels(data) -> pd.DataFrame:
+    """
+    The scores downloaded from Quaver have a different convention. Need renaming.
+    Rename channel names to include underscore between letters and digits.
+    E.g., 'z500' -> 'z_500', 't850' -> 't_850', '2t' -> '2t', '10ff' -> '10ff'
+
+    Parameters
+    ----------
+    name : str
+        Original channel name.
+
+    Returns
+    -------
+    pd.DataFrame
+        Dataset with renamed channel names.
+    """
+    for name in list(data.index):
+        # If it starts with digits (surface vars like 2t, 10ff) → leave unchanged
+        if re.match(r"^\d", name):
+            continue
+
+        # Otherwise, insert underscore between letters and digits
+        data = data.rename(index={name: re.sub(r"([a-zA-Z])(\d+)", r"\1_\2", name)})
+
+    return data
+
+
+class CsvReader(Reader):
+    """
+    Reader class to read evaluation data from CSV files and convert to xarray DataArray.
+    """
+
+    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
+        """
+        Initialize the CsvReader.
+
+        Parameters
+        ----------
+        eval_cfg : dir
+            config with plotting and evaluation options for that run id
+        run_id : str
+            run id of the model
+        private_paths: lists
+            list of private paths for the supported HPC
+        """
+
+        super().__init__(eval_cfg, run_id, private_paths)
+        self.csv_path = eval_cfg.get("csv_path")
+        assert self.csv_path is not None, "CSV path must be provided in the config."
+
+        pd_data = pd.read_csv(self.csv_path, index_col=0)
+
+        self.data = _rename_channels(pd_data)
+        self.metrics_base_dir = Path(self.csv_path).parent
+        # for backward compatibility allow metric_dir to be specified in the run config
+        self.metrics_dir = Path(
+            self.eval_cfg.get("metrics_dir", self.metrics_base_dir / self.run_id / "evaluation")
+        )
+
+        assert len(eval_cfg.streams.keys()) == 1, "CsvReader only supports one stream."
+        self.stream = list(eval_cfg.streams.keys())[0]
+        self.channels = self.data.index.tolist()
+        self.samples = [0]
+        self.forecast_steps = [int(col.split()[0]) for col in self.data.columns]
+        self.npoints_per_sample = [0]
+        self.epoch = eval_cfg.get("epoch", 0)
+        self.metric = eval_cfg.get("metric")
+        self.region = eval_cfg.get("region")
+
+    def get_samples(self) -> set[int]:
+        """get set of samples for the retrieved scores (initialisation times)"""
+        return set(self.samples)  # Placeholder implementation
+
+    def get_forecast_steps(self) -> set[int]:
+        """get set of forecast steps"""
+        return set(self.forecast_steps)  # Placeholder implementation
+
+    # TODO: get this from config
+    def get_channels(self, stream: str | None = None) -> list[str]:
+        """get set of channels"""
+        assert stream == self.stream, "streams do not match in CSVReader."
+        return list(self.channels)  # Placeholder implementation
+
+    def get_values(self) -> xr.DataArray:
+        """get score values in the right format"""
+        return self.data.values[np.newaxis, :, :, np.newaxis].T
+
+    def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray:
+        """
+        Load the existing scores for a given run, stream and metric.
+
+        Parameters
+        ----------
+        reader :
+            Reader object containing all info for a specific run_id
+        stream :
+            Stream name.
+        region :
+            Region name.
+        metric :
+            Metric name.
+
+        Returns
+        -------
+        xr.DataArray
+            The metric DataArray.
+        """
+
+        available_data = self.check_availability(stream, mode="evaluation")
+
+        # fill it only for matching metric
+        if metric == self.metric and region == self.region and stream == self.stream:
+            data = self.get_values()
+        else:
+            data = np.full(
+                (
+                    len(available_data.samples),
+                    len(available_data.fsteps),
+                    len(available_data.channels),
+                    1,
+                ),
+                np.nan,
+            )
+
+        da = xr.DataArray(
+            data.astype(np.float32),
+            dims=("sample", "forecast_step", "channel", "metric"),
+            coords={
+                "sample": available_data.samples,
+                "forecast_step": available_data.fsteps,
+                "channel": available_data.channels,
+                "metric": [metric],
+            },
+            attrs={"npoints_per_sample": self.npoints_per_sample},
+        )
+
+        return da
+
+
 class WeatherGenReader(Reader):
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
         """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
@@ -343,14 +500,15 @@ class WeatherGenReader(Reader):
         )
 
         if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
-            _logger.error(f"Zarr file {self.fname_zarr} does not exist or is not a directory.")
-            raise FileNotFoundError(
-                f"Zarr file {self.fname_zarr} does not exist or is not a directory."
-            )
+            _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
+            # raise FileNotFoundError(
+            #     f"Zarr file {self.fname_zarr} does not exist or is not a directory."
+            # )
 
     def get_inference_config(self):
         """
-        load the config associated to the inference run (different from the eval_cfg which contains plot and evaluaiton options.)
+        load the config associated to the inference run (different from the eval_cfg which
+        contains plot and evaluaiton options.)
 
         Returns
         -------
@@ -392,7 +550,8 @@ class WeatherGenReader(Reader):
         cfg :
             Configuration dictionary containing all information for the evaluation.
         results_dir : Path
-            Directory where the inference results are stored. Expected scheme `<results_base_dir>/<run_id>`.
+            Directory where the inference results are stored.
+            Expected scheme `<results_base_dir>/<run_id>`.
         stream :
             Stream name to retrieve data for.
         region :
@@ -412,7 +571,8 @@ class WeatherGenReader(Reader):
             A dataclass containing:
             - target: Dictionary of xarray DataArrays for targets, indexed by forecast step.
             - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast step.
-            - points_per_sample: xarray DataArray containing the number of points per sample, if `return_counts` is True.
+            - points_per_sample: xarray DataArray containing the number of points per sample,
+              if `return_counts` is True.
         """
 
         bbox = RegionBoundingBox.from_region_name(region)
@@ -463,15 +623,19 @@ class WeatherGenReader(Reader):
 
                     if region != "global":
                         _logger.debug(
-                            f"Applying bounding box mask for region '{region}' to targets and predictions..."
+                            f"Applying bounding box mask for region '{region}' to targets "
+                            "and predictions..."
                         )
                         target = bbox.apply_mask(target)
                         pred = bbox.apply_mask(pred)
 
                     npoints = len(target.ipoint)
+                    pps.append(npoints)
+
                     if npoints == 0:
                         _logger.info(
-                            f"Skipping {stream} sample {sample} forecast step: {fstep}. Dataset is empty."
+                            f"Skipping {stream} sample {sample} forecast step: {fstep}. "
+                            "Dataset is empty."
                         )
                         continue
 
@@ -484,7 +648,6 @@ class WeatherGenReader(Reader):
 
                     da_tars_fs.append(target.squeeze())
                     da_preds_fs.append(pred.squeeze())
-                    pps.append(npoints)
 
                 if not da_tars_fs:
                     _logger.info(
@@ -495,7 +658,8 @@ class WeatherGenReader(Reader):
                 fsteps_final.append(fstep)
 
                 _logger.debug(
-                    f"Concatenating targets and predictions for stream {stream}, forecast_step {fstep}..."
+                    f"Concatenating targets and predictions for stream {stream}, "
+                    f"forecast_step {fstep}..."
                 )
 
                 # faster processing
@@ -527,7 +691,8 @@ class WeatherGenReader(Reader):
 
                 if set(channels) != set(all_channels):
                     _logger.debug(
-                        f"Restricting targets and predictions to channels {channels} for stream {stream}..."
+                        f"Restricting targets and predictions to channels {channels} "
+                        f"for stream {stream}..."
                     )
 
                     da_tars_fs, da_preds_fs, channels = dc.get_derived_channels(
@@ -584,8 +749,8 @@ class WeatherGenReader(Reader):
                 clim_data_path = Path(clim_base_dir).join(clim_fn)
             else:
                 _logger.warning(
-                    f"No climatology path specified for stream {stream}. Setting climatology to NaN. "
-                    "Add 'climatology_path' to evaluation config to use metrics like ACC."
+                    f"No climatology path specified for stream {stream}. Setting climatology to "
+                    "NaN. Add 'climatology_path' to evaluation config to use metrics like ACC."
                 )
 
         return clim_data_path
@@ -690,6 +855,39 @@ class WeatherGenReader(Reader):
 
         _logger.debug("Latitude and longitude coordinates are regularly spaced.")
         return True
+    
+    def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
+        """
+        Load the pre-computed scores for a given run, stream and metric and epoch.
+
+        Parameters
+        ----------
+        reader :
+            Reader object containing all info for a specific run_id
+        stream :
+            Stream name.
+        region :
+            Region name.
+        metric :
+            Metric name.
+
+        Returns
+        -------
+        xr.DataArray
+            The metric DataArray or None if the file does not exist.
+        """
+        score_path = (
+            Path(self.metrics_dir)
+            / f"{self.run_id}_{stream}_{region}_{metric}_epoch{self.epoch:05d}.json"
+        )
+        _logger.debug(f"Looking for: {score_path}")
+
+        if score_path.exists():
+            with open(score_path) as f:
+                data_dict = json.load(f)
+                return xr.DataArray.from_dict(data_dict)
+        else:
+            return None
 
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """
