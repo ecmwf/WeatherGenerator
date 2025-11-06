@@ -484,14 +484,14 @@ class Plotter:
             parts.append(str(self.sample))
 
         if "valid_time" in data.coords:
-            valid_time = (
-                data["valid_time"][0]
-                .values.astype("datetime64[m]")
+            valid_time = data["valid_time"][0].values
+            if ~np.isnat(valid_time):
+                valid_time = (valid_time.astype("datetime64[m]")
                 .astype(datetime.datetime)
                 .strftime("%Y-%m-%dT%H%M")
-            )
+                )
 
-            parts.append(valid_time)
+                parts.append(valid_time)
 
         if self.stream:
             parts.append(self.stream)

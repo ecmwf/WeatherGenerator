@@ -227,7 +227,15 @@ def _plot_score_maps_per_stream(
     """
 
     cfg = reader.global_plotting_options
-    
+
+    #TODO: add support for climatology-dependent metrics as well
+    metrics_filtered = metrics
+    # non_supported_metrics = ["tact", "fact", "acc"]
+    # metrics_filtered = [metric for metric in metrics if metric not in non_supported_metrics]
+    # excluded_metrics =  set(metrics) & set(non_supported_metrics)
+    # if excluded_metrics : 
+    #     _logger.warning(f"Plotting of the following metrics {excluded_metrics} is not supported at the moment. Excluding them from plotting.")
+
     plotter = Plotter(
         {
             "image_format": cfg.get("image_format", "png"),
