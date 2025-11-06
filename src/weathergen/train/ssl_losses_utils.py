@@ -23,19 +23,29 @@ class iBOTPatchTargetProcessing(nn.Module):
     https://github.com/facebookresearch/dinov2/tree/main
 
     Needs to be nn.Module because of the registered_buffer, it means we should have a forward
-    function, previously was the softmax computation, maybe we can make it the 
+    function, previously was the softmax computation, maybe we can make it the
     softmax_center_teacher, etc
     """
 
-    def __init__(self, patch_out_dim, student_temp=0.1, center_momentum=0.9):
+    def __init__(
+        self,
+        patch_out_dim,
+        student_temp=0.1,
+        teacher_temp=0.1,
+        center_momentum=0.9,
+        teacher_style="softmax_center",
+    ):
         super().__init__()
         self.student_temp = student_temp
+        self.teacher_temp = teacher_temp
         self.center_momentum = center_momentum
         self.register_buffer("center", torch.zeros(1, 1, patch_out_dim))
         self.updated = True
         self.reduce_handle = None
         self.len_teacher_patch_tokens = None
         self.async_batch_center = None
+        self.teacher_style = teacher_style
+        assert teacher_style in ["softmax_center", "sinkhorn_knopp"], f"{teacher_style} is unknown"
 
     @torch.no_grad()
     def softmax_center_teacher(self, teacher_patch_tokens, teacher_temp):
@@ -126,6 +136,20 @@ class iBOTPatchTargetProcessing(nn.Module):
     #     loss = loss * masks_weight
     #     return -loss.sum() / student_masks_flat.shape[0]
 
+    def forward(self, teacher_output):
+        # TODO deal with the iBOT head question, use the forward_masked
+        if self.teacher_style == "softmax_center":
+            processed_teacher_output = self.softmax_center_teacher(
+                teacher_output, self.teacher_temp
+            )
+            self.update_center(teacher_output)
+            return processed_teacher_output
+        elif self.teacher_style == "sinkhorn_knopp":
+            return self.sinkhorn_knopp_teacher(teacher_output, self.teacher_temp)
+        else:
+            # this code should never be reached, see assert in __init__
+            return teacher_output
+
     @torch.no_grad()
     def update_center(self, teacher_patch_tokens):
         self.reduce_center_update(teacher_patch_tokens)
@@ -151,10 +175,6 @@ class iBOTPatchTargetProcessing(nn.Module):
 
             self.updated = True
 
-    def forward(self):
-        # TODO implement
-        pass
-
 
 class DINOTargetProcessing(nn.Module):
     """
@@ -162,23 +182,29 @@ class DINOTargetProcessing(nn.Module):
     https://github.com/facebookresearch/dinov2/tree/main
 
     Needs to be nn.Module because of the registered_buffer, it means we should have a forward
-    function, previously was the softmax computation, maybe we can make it the 
+    function, previously was the softmax computation, maybe we can make it the
     softmax_center_teacher, etc
     """
+
     def __init__(
         self,
         out_dim,
         student_temp=0.1,
         center_momentum=0.9,
+        teacher_temp=0.1,
+        teacher_style="softmax_center",
     ):
         super().__init__()
         self.student_temp = student_temp
+        self.teacher_temp = teacher_temp
         self.center_momentum = center_momentum
         self.register_buffer("center", torch.zeros(1, out_dim))
         self.updated = True
         self.reduce_handle = None
         self.len_teacher_output = None
         self.async_batch_center = None
+        self.teacher_style = teacher_style
+        assert teacher_style in ["softmax_center", "sinkhorn_knopp"], f"{teacher_style} is unknown"
 
     @torch.no_grad()
     def softmax_center_teacher(self, teacher_output, teacher_temp):
@@ -190,7 +216,9 @@ class DINOTargetProcessing(nn.Module):
     def sinkhorn_knopp_teacher(self, teacher_output, teacher_temp, n_iterations=3):
         teacher_output = teacher_output.float()
         world_size = dist.get_world_size() if dist.is_initialized() else 1
-        Q = torch.exp(teacher_output / teacher_temp).t()  # Q is K-by-B for consistency with notations from our paper
+        Q = torch.exp(
+            teacher_output / teacher_temp
+        ).t()  # Q is K-by-B for consistency with notations from our paper
         B = Q.shape[1] * world_size  # number of samples to assign
         K = Q.shape[0]  # how many prototypes
 
@@ -214,6 +242,20 @@ class DINOTargetProcessing(nn.Module):
 
         Q *= B  # the columns must sum to 1 so that Q is an assignment
         return Q.t()
+
+    def forward(self, teacher_output):
+        # TODO deal with the DINO head question
+        if self.teacher_style == "softmax_center":
+            processed_teacher_output = self.softmax_center_teacher(
+                teacher_output, self.teacher_temp
+            )
+            self.update_center(teacher_output)
+            return processed_teacher_output
+        elif self.teacher_style == "sinkhorn_knopp":
+            return self.sinkhorn_knopp_teacher(teacher_output, self.teacher_temp)
+        else:
+            # this code should never be reached, see assert in __init__
+            return teacher_output
 
     # def forward(self, student_output_list, teacher_out_softmaxed_centered_list):
     #     """
@@ -252,10 +294,6 @@ class DINOTargetProcessing(nn.Module):
             self.center = self.center * self.center_momentum + _t * (1 - self.center_momentum)
 
             self.updated = True
-
-    def forward(self):
-        # TODO implement
-        pass
 
 
 class JEPATargetProcessing(nn.Module):

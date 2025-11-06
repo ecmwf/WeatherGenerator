@@ -1,5 +1,7 @@
 from typing import Any
 
+import torch
+
 from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase
 from weathergen.train.ssl_losses_utils import iBOTPatchTargetProcessing, DINOTargetProcessing, JEPATargetProcessing 
 
@@ -43,7 +45,8 @@ class EMATeacher(TargetAndAuxModuleBase):
         )
         targets = {}
         for loss_name, target_module in self.postprocess_targets.items():
-            targets[loss_name] = target_module
+            with torch.no_grad():
+                targets[loss_name] = target_module(targets)
         return targets, None
 
 
