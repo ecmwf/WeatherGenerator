@@ -207,7 +207,7 @@ class OutputDataset:
     def create(cls, name, key, arrays: dict[str, ArrayType], attrs: dict[str, typing.Any]):
         """
         Create Output dataset from dictonaries.
-        
+
         Args:
             name: Name of dataset (target/prediction/source)
             item_key: ItemKey to associated with the parent OutputItem.
@@ -280,14 +280,26 @@ class OutputItem:
         self.prediction = prediction
         self.source = source
 
-        self.datasets = [self.target, self.prediction]
+        self.datasets = []
+        forecast_offset = 0
 
         if self.key.with_source:
-            if self.source:
-                self.datasets.append(self.source)
-            else:
-                msg = f"Missing source dataset for item: {self.key.path}"
-                raise ValueError(msg)
+            self._append_dataset(self.source, "source")
+
+            # forecast offset=1 should produce no targets
+            if not self.target:
+                forecast_offset = 1
+
+        if self.key.with_target(forecast_offset):
+            self._append_dataset(self.target, "target")
+            self._append_dataset(self.prediction, "prediction")
+
+    def _append_dataset(self, dataset: OutputDataset | None, name: str):
+        if dataset:
+            self.datasets.append(dataset)
+        else:
+            msg = f"Missing {name} dataset for item: {self.key.path}"
+            raise ValueError(msg)
 
 
 class ZarrIO:
