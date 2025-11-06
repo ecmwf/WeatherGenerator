@@ -375,40 +375,6 @@ def metric_list_to_json(
     )
 
 
-def retrieve_metric_from_json(reader: Reader, stream: str, region: str, metric: str):
-    """
-    Retrieve the score for a given run, stream, metric, mini_epoch, and rank from a JSON file.
-
-    Parameters
-    ----------
-    reader :
-        Reader object containing all info for a specific run_id
-    stream :
-        Stream name.
-    region :
-        Region name.
-    metric :
-        Metric name.
-
-    Returns
-    -------
-    xr.DataArray
-        The metric DataArray.
-    """
-    score_path = (
-        Path(reader.metrics_dir)
-        / f"{reader.run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
-    )
-    _logger.debug(f"Looking for: {score_path}")
-
-    if score_path.exists():
-        with open(score_path) as f:
-            data_dict = json.load(f)
-            return xr.DataArray.from_dict(data_dict)
-    else:
-        raise FileNotFoundError(f"File {score_path} not found in the archive.")
-
-
 def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     """
     Plot summary of the evaluation results.

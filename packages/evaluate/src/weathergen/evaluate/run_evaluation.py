@@ -22,14 +22,13 @@ from xarray import DataArray
 
 from weathergen.common.config import _REPO_ROOT
 from weathergen.common.platform_env import get_platform_env
-from weathergen.evaluate.io_reader import WeatherGenReader
+from weathergen.evaluate.io_reader import CsvReader, WeatherGenReader
 from weathergen.evaluate.plot_utils import collect_channels
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
     plot_data,
     plot_summary,
-    retrieve_metric_from_json,
 )
 from weathergen.metrics.mlflow_utils import (
     MlFlowUpload,
@@ -111,7 +110,13 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
     for run_id, run in runs.items():
         _logger.info(f"RUN {run_id}: Getting data...")
 
-        reader = WeatherGenReader(run, run_id, private_paths)
+        type = run.get("type", "zarr")
+        if type == "zarr":
+            reader = WeatherGenReader(run, run_id, private_paths)
+        elif type == "csv":
+            reader = CsvReader(run, run_id, private_paths)
+        else:
+            raise ValueError(f"Unknown run type {type} for run {run_id}. Supported: zarr, csv.")
 
         for stream in reader.streams:
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
@@ -135,29 +140,29 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                     metrics_to_compute = []
 
                     for metric in metrics:
-                        try:
-                            metric_data = retrieve_metric_from_json(
-                                reader,
-                                stream,
-                                region,
-                                metric,
-                            )
+                        metric_data = reader.load_scores(
+                            stream,
+                            region,
+                            metric,
+                        )
 
-                            available_data = reader.check_availability(
-                                stream, metric_data, mode="evaluation"
-                            )
-
-                            if not available_data.score_availability:
-                                metrics_to_compute.append(metric)
-                            else:
-                                # simply select the chosen eval channels, samples, fsteps here...
-                                scores_dict[metric][region][stream][run_id] = metric_data.sel(
-                                    sample=available_data.samples,
-                                    channel=available_data.channels,
-                                    forecast_step=available_data.fsteps,
-                                )
-                        except (FileNotFoundError, KeyError):
+                        if metric_data is None:
                             metrics_to_compute.append(metric)
+                            continue
+
+                        available_data = reader.check_availability(
+                            stream, metric_data, mode="evaluation"
+                        )
+
+                        if not available_data.score_availability:
+                            metrics_to_compute.append(metric)
+                        else:
+                            # simply select the chosen eval channels, samples, fsteps here...
+                            scores_dict[metric][region][stream][run_id] = metric_data.sel(
+                                sample=available_data.samples,
+                                channel=available_data.channels,
+                                forecast_step=available_data.fsteps,
+                            )
 
                     if metrics_to_compute:
                         all_metrics, points_per_sample = calc_scores_per_stream(
