@@ -82,7 +82,7 @@ def calc_scores_per_stream(
     if plot_score_maps:
         _logger.info(f"RUN {reader.run_id} - {stream}: Plotting scores is enabled.")
 
-        map_dir = reader.runplot_dir / "maps" / "score_maps" / stream
+        map_dir = reader.runplot_dir / "plots" / stream / "score_maps"
         map_dir.mkdir(parents=True, exist_ok=True)
 
         _logger.info(f"RUN {reader.run_id} - {stream}: Saving plotted scores to {map_dir}")
