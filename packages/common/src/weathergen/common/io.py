@@ -465,12 +465,16 @@ class OutputBatchData:
     @functools.cached_property
     def samples(self):
         """Continous indices of all samples accross all batches."""
+
+        # TODO associate samples with the sampel idx used for the time window
         return np.arange(len(self.sources)) + self.sample_start
 
     @functools.cached_property
     def forecast_steps(self):
         """Indices of all forecast steps adjusted by the forecast offset"""
-        return np.arange(len(self.targets)) + self.forecast_offset
+        # forecast offset should be either 1 for forecasting or 0 for MTM
+        assert self.forecast_offset in (0, 1)
+        return np.arange(len(self.targets) + self.forecast_offset)
 
     def items(self) -> typing.Generator[OutputItem, None, None]:
         """Iterate over possible output items"""
@@ -501,9 +505,12 @@ class OutputBatchData:
         else:
             source_dataset = None
 
-        target_dataset, prediction_dataset = self._extract_targets_predictions(
-            stream_idx, offset_key, key, source_interval
-        )
+        if key.with_target(self.forecast_offset):
+            target_dataset, prediction_dataset = self._extract_targets_predictions(
+                stream_idx, offset_key, key, source_interval
+            )
+        else:
+            target_dataset, prediction_dataset = (None, None)
 
         return OutputItem(
             key=key,
