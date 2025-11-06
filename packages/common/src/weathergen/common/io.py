@@ -165,16 +165,19 @@ class ItemKey:
     stream: str
 
     @property
-    def path(self):
+    def path(self) -> str:
         """Unique path within a hierarchy for one output item."""
         return f"{self.sample}/{self.stream}/{self.forecast_step}"
 
     @property
-    def with_source(self):
+    def with_source(self) -> bool:
         """Decide if output item should contain source dataset."""
-        # TODO: is this valid for the adjusted (offsetted) forecast steps?
-        # => if config.forecast_offset > 0 source will be never written
         return self.forecast_step == 0
+
+    def with_target(self, forecast_offset: typing.Literal[0, 1]) -> bool:
+        """Decide if output item should contain target and predictions."""
+        assert forecast_offset in (0, 1)
+        return (not self.with_source) or (forecast_offset == 0)
 
 
 @dataclasses.dataclass
