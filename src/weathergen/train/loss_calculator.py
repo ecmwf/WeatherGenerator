@@ -80,6 +80,8 @@ class LossCalculator:
             loss_values[type] = calculator.compute_loss(preds=preds[type], targets=targets[type])
             loss += loss_values[type].loss
 
+        # Bring all loss values together
+        # TODO: keys should tell what type of loss was used, e.g loss_mse.latent.loss_2t
         losses_all = {}
         stddev_all = {}
         for _, v in loss_values.items():
