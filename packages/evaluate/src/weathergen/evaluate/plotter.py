@@ -58,7 +58,8 @@ class Plotter:
             Base directory under which the plots will be saved.
             Expected scheme `<results_base_dir>/<run_id>`.
         stream:
-            Stream identifier for which the plots will be created. It can also be set later via update_data_selection.
+            Stream identifier for which the plots will be created.
+            It can also be set later via update_data_selection.
         """
 
         _logger.info(f"Taking cartopy paths from {work_dir}")
@@ -456,7 +457,8 @@ class Plotter:
         ax.coastlines()
 
         assert data["lon"].shape == data["lat"].shape == data.shape, (
-            f"Scatter plot:: Data shape do not match. Shapes: lon {data['lon'].shape}, lat {data['lat'].shape}, data {data.shape}."
+            f"Scatter plot:: Data shape do not match. Shapes: "
+            f"lon {data['lon'].shape}, lat {data['lat'].shape}, data {data.shape}."
         )
 
         scatter_plt = ax.scatter(
@@ -486,9 +488,10 @@ class Plotter:
         if "valid_time" in data.coords:
             valid_time = data["valid_time"][0].values
             if ~np.isnat(valid_time):
-                valid_time = (valid_time.astype("datetime64[m]")
-                .astype(datetime.datetime)
-                .strftime("%Y-%m-%dT%H%M")
+                valid_time = (
+                    valid_time.astype("datetime64[m]")
+                    .astype(datetime.datetime)
+                    .strftime("%Y-%m-%dT%H%M")
                 )
 
                 parts.append(valid_time)
@@ -1145,6 +1148,11 @@ class ScoreCards:
         size: xr.DataArray
             Size of the triangles in the final plot
         """
+        # Conservative choice
+        alt = "two-sided"
+        modus = "different"
+        color = "gray"
+
         if diff_mean > 0:
             # A better than B
             alt = "greater"
@@ -1155,10 +1163,6 @@ class ScoreCards:
             alt = "less"
             modus = "worse"
             color = "red"
-        else:
-            # Equal performance (conservative fallback)
-            alt = "two-sided"
-            modus = "different"
 
         triangle = "^" if modus == "better" else "v"
 

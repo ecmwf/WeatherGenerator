@@ -125,9 +125,11 @@ def align_clim_data(
         samples = np.unique(target_data.sample.values)
         for sample in tqdm(samples, f"Aligning climatology for forecast step {fstep}"):
             sel_key = "sample" if "sample" in target_data.dims else "ipoint"
-            sel_val = sample if "sample" in target_data.dims else (target_data.sample.values == sample)
+            sel_val = (
+                sample if "sample" in target_data.dims else (target_data.sample.values == sample)
+            )
             sel_mask = {sel_key: sel_val}
-            
+
             timestamp = target_data.sel(sel_mask).valid_time.values[0]
             # Prepare climatology data for each sample
             matching_time_idx = match_climatology_time(timestamp, clim_data)

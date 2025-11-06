@@ -48,7 +48,11 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
 
 
 def calc_scores_per_stream(
-    reader: Reader, stream: str, region: str, metrics: list[str], plot_score_maps: bool = False, 
+    reader: Reader,
+    stream: str,
+    region: str,
+    metrics: list[str],
+    plot_score_maps: bool = False,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -64,8 +68,11 @@ def calc_scores_per_stream(
     metrics :
         List of metric names to calculate.
     plot_score_maps :
-        When it is True and the stream is on a regular grid the scores are recomputed as a function of the "ipoint" and plotted on a 2D scatter map.
-        NOTE: the scores are averaged over the "sample" dimension and for most of the metrics this does not give the same results as averaging over the "ipoint" dimension.
+        When it is True and the stream is on a regular grid the scores are
+        recomputed as a function of the "ipoint" and plotted on a 2D scatter map.
+        NOTE: the scores are averaged over the "sample" dimension and for most
+        of the metrics this does not give the same results as averaging over
+        the "ipoint" dimension.
     Returns
     -------
     Tuple of xarray DataArray containing the scores and the number of points per sample.
@@ -77,10 +84,8 @@ def calc_scores_per_stream(
 
         map_dir = reader.runplot_dir / "maps" / "score_maps" / stream
         map_dir.mkdir(parents=True, exist_ok=True)
-        
-        _logger.info(
-            f"RUN {reader.run_id} - {stream}: Saving plotted scores to {map_dir}"
-        )
+
+        _logger.info(f"RUN {reader.run_id} - {stream}: Saving plotted scores to {map_dir}")
 
     available_data = reader.check_availability(stream, mode="evaluation")
 
@@ -120,7 +125,7 @@ def calc_scores_per_stream(
             "ens": ensemble,
         },
     )
-        
+
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         if preds.ipoint.size == 0:
             _logger.warning(
@@ -131,26 +136,23 @@ def calc_scores_per_stream(
         _logger.debug(f"Verifying data for stream {stream}...")
 
         preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
-        
+
         climatology = aligned_clim_data[fstep] if aligned_clim_data else None
         score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
         # Build up computation graphs for all metrics
         _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
 
         # Add it only if it is not None
-        valid_scores = [
-            score
-            for metric in metrics
-            if (
-                score := get_score(
-                    score_data,
-                    metric,
-                    agg_dims="ipoint",
-                    group_by_coord=group_by_coord,
-                )
-                )
-            is not None
-        ]            
+        valid_scores = []
+        for metric in metrics:
+            score = get_score(
+                score_data,
+                metric,
+                agg_dims="ipoint",
+                group_by_coord=group_by_coord,
+            )
+            if score is not None:
+                valid_scores.append(score)
 
         # Keep only metrics corresponding to valid_scores
         valid_metric_names = [
@@ -158,7 +160,7 @@ def calc_scores_per_stream(
             for metric, score in zip(metrics, valid_scores, strict=False)
             if score is not None
         ]
-        
+
         combined_metrics = xr.concat(valid_scores, dim="metric")
         combined_metrics = combined_metrics.assign_coords(metric=valid_metric_names)
 
@@ -196,7 +198,7 @@ def calc_scores_per_stream(
 
 def _plot_score_maps_per_stream(
     reader: Reader,
-    map_dir: str, 
+    map_dir: str,
     stream: str,
     region: str,
     score_data: VerifiedData,
@@ -209,7 +211,7 @@ def _plot_score_maps_per_stream(
     reader: Reader
         Reader object containing all infos about the run
     map_dir: str
-        Directory where the plots are saved. 
+        Directory where the plots are saved.
     stream: str
         Stream name to plot score maps for.
      region :
@@ -228,13 +230,7 @@ def _plot_score_maps_per_stream(
 
     cfg = reader.global_plotting_options
 
-    #TODO: add support for climatology-dependent metrics as well
-    metrics_filtered = metrics
-    # non_supported_metrics = ["tact", "fact", "acc"]
-    # metrics_filtered = [metric for metric in metrics if metric not in non_supported_metrics]
-    # excluded_metrics =  set(metrics) & set(non_supported_metrics)
-    # if excluded_metrics : 
-    #     _logger.warning(f"Plotting of the following metrics {excluded_metrics} is not supported at the moment. Excluding them from plotting.")
+    # TODO: add support for climatology-dependent metrics as well
 
     plotter = Plotter(
         {
@@ -247,18 +243,17 @@ def _plot_score_maps_per_stream(
     )
 
     preds = score_data.prediction
-    
+
     plot_metrics = xr.concat(
-        [get_score(score_data, m, agg_dims="sample") for m in metrics_filtered],
-        dim="metric"
+        [get_score(score_data, m, agg_dims="sample") for m in metrics], dim="metric"
     )
-    
+
     plot_metrics = plot_metrics.assign_coords(
         lat=preds.lat.reset_coords(drop=True),
         lon=preds.lon.reset_coords(drop=True),
-        metric=metrics_filtered,
+        metric=metrics,
     ).compute()
-   
+
     if "ens" in preds.dims:
         plot_metrics["ens"] = preds.ens
 
@@ -477,6 +472,7 @@ def metric_list_to_json(
         f"to {reader.metrics_dir}."
     )
 
+
 def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     """
     Plot summary of the evaluation results.
@@ -518,7 +514,9 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
             if eval_opt.get("bar_plots", False):
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
 
+
 ############# Utility functions ############
+
 
 def common_ranges(
     data_tars: list[dict],

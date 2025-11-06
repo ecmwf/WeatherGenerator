@@ -132,9 +132,12 @@ class Reader:
         return list()
 
     def is_regular(self, stream: str) -> bool:
-        """Placeholder implementation to check if lat/lon are regularly spaced. Override in subclass."""
+        """
+        Placeholder implementation to check if lat/lon are regularly spaced.
+        Override in subclass.
+        """
         return True
-    
+
     def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray:
         """Placeholder to load pre-computed scores for a given run, stream, metric"""
         return None
@@ -576,7 +579,7 @@ class WeatherGenReader(Reader):
         """
 
         bbox = RegionBoundingBox.from_region_name(region)
-        
+
         with ZarrIO(self.fname_zarr) as zio:
             stream_cfg = self.get_stream(stream)
             all_channels = self.get_channels(stream)
@@ -613,7 +616,6 @@ class WeatherGenReader(Reader):
 
             fsteps_final = []
 
-            
             for fstep in fsteps:
                 _logger.info(f"RUN {self.run_id} - {stream}: Processing fstep {fstep}...")
                 da_tars_fs, da_preds_fs, pps = [], [], []
@@ -698,7 +700,7 @@ class WeatherGenReader(Reader):
                 da_preds.append(da_preds_fs)
                 if return_counts:
                     points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
-            
+
             # Safer than a list
             da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=True)}
             da_preds = {fstep: da for fstep, da in zip(fsteps_final, da_preds, strict=True)}
@@ -827,33 +829,36 @@ class WeatherGenReader(Reader):
         Returns
         -------
         bool
-            True if the stream is regularly spaced. False otherwise. 
+            True if the stream is regularly spaced. False otherwise.
         """
         _logger.debug(f"Checking regular spacing for stream {stream}...")
 
         with ZarrIO(self.fname_zarr) as zio:
-
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
-            
+
             sample_idx = zio.samples[1] if len(zio.samples) > 1 else zio.samples[0]
-            fstep_idx = zio.forecast_steps[1] if len(zio.forecast_steps) > 1 else zio.forecast_steps[0]
+            fstep_idx = (
+                zio.forecast_steps[1] if len(zio.forecast_steps) > 1 else zio.forecast_steps[0]
+            )
             dummy1 = zio.get_data(sample_idx, stream, fstep_idx)
 
         da = dummy.prediction.as_xarray()
         da1 = dummy1.prediction.as_xarray()
 
-        if da["lat"].shape != da1["lat"].shape or \
-           da["lon"].shape != da1["lon"].shape or \
-            not (
+        if (
+            da["lat"].shape != da1["lat"].shape
+            or da["lon"].shape != da1["lon"].shape
+            or not (
                 np.allclose(sorted(da["lat"].values), sorted(da1["lat"].values))
                 and np.allclose(sorted(da["lon"].values), sorted(da1["lon"].values))
-            ):
+            )
+        ):
             _logger.debug("Latitude and/or longitude coordinates are not regularly spaced.")
             return False
 
         _logger.debug("Latitude and longitude coordinates are regularly spaced.")
         return True
-    
+
     def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
         """
         Load the pre-computed scores for a given run, stream and metric and epoch.
@@ -910,40 +915,39 @@ class WeatherGenReader(Reader):
                 return stream.get(key, default)
         return default
 
+
 ################### Helper functions ########################
 
+
 def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
-        """
-        Force all samples to share the same ipoint order.
-        
-        Parameters
-        ----------
-        ref: 
-           Input dataset
-        Returns
-        -------
-            xr.DataArray
-            Returns a Dataset where all samples have the same lat lon and ipoint ordering    
-        """
-        
-    
-        # Pick first sample as reference
-        ref_lat = ref[0].lat
-        ref_lon = ref[0].lon
-        
-        sort_idx = np.lexsort((ref_lon.values, ref_lat.values))
-        ipoint_idx = ref[0].isel(ipoint=sort_idx)
-        npoints = sort_idx.size
-        aligned = []
-        for a in ref:
-            
-            a_sorted = a.isel(ipoint=sort_idx)
+    """
+    Force all samples to share the same ipoint order.
 
-            a_sorted = a_sorted.assign_coords(
-                ipoint=np.arange(npoints), 
-                lat=("ipoint", ref_lat.values[sort_idx]),
-                lon=("ipoint", ref_lon.values[sort_idx]), 
-            )
-            aligned.append(a_sorted)
+    Parameters
+    ----------
+    ref:
+       Input dataset
+    Returns
+    -------
+        xr.DataArray
+        Returns a Dataset where all samples have the same lat lon and ipoint ordering
+    """
 
-        return xr.concat(aligned, dim="sample") 
+    # Pick first sample as reference
+    ref_lat = ref[0].lat
+    ref_lon = ref[0].lon
+
+    sort_idx = np.lexsort((ref_lon.values, ref_lat.values))
+    npoints = sort_idx.size
+    aligned = []
+    for a in ref:
+        a_sorted = a.isel(ipoint=sort_idx)
+
+        a_sorted = a_sorted.assign_coords(
+            ipoint=np.arange(npoints),
+            lat=("ipoint", ref_lat.values[sort_idx]),
+            lon=("ipoint", ref_lon.values[sort_idx]),
+        )
+        aligned.append(a_sorted)
+
+    return xr.concat(aligned, dim="sample")
