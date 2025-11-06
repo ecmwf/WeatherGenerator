@@ -501,9 +501,9 @@ class WeatherGenReader(Reader):
 
         if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
             _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
-            # raise FileNotFoundError(
-            #     f"Zarr file {self.fname_zarr} does not exist or is not a directory."
-            # )
+            raise FileNotFoundError(
+                f"Zarr file {self.fname_zarr} does not exist or is not a directory."
+            )
 
     def get_inference_config(self):
         """
@@ -576,7 +576,7 @@ class WeatherGenReader(Reader):
         """
 
         bbox = RegionBoundingBox.from_region_name(region)
-
+        
         with ZarrIO(self.fname_zarr) as zio:
             stream_cfg = self.get_stream(stream)
             all_channels = self.get_channels(stream)
@@ -613,6 +613,7 @@ class WeatherGenReader(Reader):
 
             fsteps_final = []
 
+            
             for fstep in fsteps:
                 _logger.info(f"RUN {self.run_id} - {stream}: Processing fstep {fstep}...")
                 da_tars_fs, da_preds_fs, pps = [], [], []
@@ -665,15 +666,6 @@ class WeatherGenReader(Reader):
                 # faster processing
                 if self.is_regular(stream):
                     # Efficient concatenation for regular grid
-                    da_tars_fs = xr.concat(
-                        [a.expand_dims(sample=[int(a.sample.values)]) for a in da_tars_fs],
-                        dim="sample",
-                    )
-                    da_preds_fs = xr.concat(
-                        [a.expand_dims(sample=[int(a.sample.values)]) for a in da_preds_fs],
-                        dim="sample",
-                    )
-
                     da_preds_fs = _force_consistent_grids(da_preds_fs)
                     da_tars_fs = _force_consistent_grids(da_tars_fs)
 
@@ -706,7 +698,7 @@ class WeatherGenReader(Reader):
                 da_preds.append(da_preds_fs)
                 if return_counts:
                     points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
-
+            
             # Safer than a list
             da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=True)}
             da_preds = {fstep: da for fstep, da in zip(fsteps_final, da_preds, strict=True)}
@@ -840,16 +832,22 @@ class WeatherGenReader(Reader):
         _logger.debug(f"Checking regular spacing for stream {stream}...")
 
         with ZarrIO(self.fname_zarr) as zio:
+
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
-            dummy1 = zio.get_data(0, stream, zio.forecast_steps[1])
+            
+            sample_idx = zio.samples[1] if len(zio.samples) > 1 else zio.samples[0]
+            fstep_idx = zio.forecast_steps[1] if len(zio.forecast_steps) > 1 else zio.forecast_steps[0]
+            dummy1 = zio.get_data(sample_idx, stream, fstep_idx)
 
         da = dummy.prediction.as_xarray()
         da1 = dummy1.prediction.as_xarray()
 
-        if not (
-            np.allclose(sorted(da["lat"].values), sorted(da1["lat"].values))
-            and np.allclose(sorted(da["lon"].values), sorted(da1["lon"].values))
-        ):
+        if da["lat"].shape != da1["lat"].shape or \
+           da["lon"].shape != da1["lon"].shape or \
+            not (
+                np.allclose(sorted(da["lat"].values), sorted(da1["lat"].values))
+                and np.allclose(sorted(da["lon"].values), sorted(da1["lon"].values))
+            ):
             _logger.debug("Latitude and/or longitude coordinates are not regularly spaced.")
             return False
 
@@ -914,31 +912,38 @@ class WeatherGenReader(Reader):
 
 ################### Helper functions ########################
 
-def _force_consistent_grids(ds: xr.DataArray) -> xr.DataArray:
+def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
         """
         Force all samples to share the same ipoint order.
         
         Parameters
         ----------
-        ds: 
+        ref: 
            Input dataset
         Returns
         -------
             xr.DataArray
             Returns a Dataset where all samples have the same lat lon and ipoint ordering    
         """
-      
+        
+    
         # Pick first sample as reference
-        ref_lat = ds.lat.isel(sample=0)
-        ref_lon = ds.lon.isel(sample=0)
-
-        # Sort the entire DataArray according to the reference
+        ref_lat = ref[0].lat
+        ref_lon = ref[0].lon
+        
         sort_idx = np.lexsort((ref_lon.values, ref_lat.values))
-        pred_sorted = ds.isel(ipoint=sort_idx)
-
-        pred_sorted = pred_sorted.assign_coords(
-            lat=("ipoint", ref_lat.values[sort_idx]),
-            lon=("ipoint", ref_lon.values[sort_idx])
-        )
+        ipoint_idx = ref[0].isel(ipoint=sort_idx)
+        npoints = sort_idx.size
+        aligned = []
+        for a in ref:
             
-        return pred_sorted
+            a_sorted = a.isel(ipoint=sort_idx)
+
+            a_sorted = a_sorted.assign_coords(
+                ipoint=np.arange(npoints), 
+                lat=("ipoint", ref_lat.values[sort_idx]),
+                lon=("ipoint", ref_lon.values[sort_idx]), 
+            )
+            aligned.append(a_sorted)
+
+        return xr.concat(aligned, dim="sample") 

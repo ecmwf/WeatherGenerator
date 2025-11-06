@@ -227,7 +227,7 @@ def _plot_score_maps_per_stream(
     """
 
     cfg = reader.global_plotting_options
-
+    
     plotter = Plotter(
         {
             "image_format": cfg.get("image_format", "png"),
@@ -239,16 +239,16 @@ def _plot_score_maps_per_stream(
     )
 
     preds = score_data.prediction
-
+    
     plot_metrics = xr.concat(
-        [get_score(score_data, m, agg_dims="sample") for m in metrics],
+        [get_score(score_data, m, agg_dims="sample") for m in metrics_filtered],
         dim="metric"
     )
     
     plot_metrics = plot_metrics.assign_coords(
         lat=preds.lat.reset_coords(drop=True),
         lon=preds.lon.reset_coords(drop=True),
-        metric=metrics,
+        metric=metrics_filtered,
     ).compute()
    
     if "ens" in preds.dims:
