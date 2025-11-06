@@ -128,6 +128,10 @@ def align_clim_data(
             timestamp = target_data.valid_time.values[sample_mask][0]
             # Prepare climatology data for each sample
             matching_time_idx = match_climatology_time(timestamp, clim_data)
+
+            if matching_time_idx is None:
+                continue
+
             prepared_clim_data = (
                 clim_data.data.isel(
                     time=matching_time_idx,
@@ -209,7 +213,7 @@ def get_climatology(reader, da_tars, stream: str) -> xr.Dataset | None:
 
     aligned_clim_data = None
 
-    if clim_data_path:
+    if clim_data_path is not None:
         clim_data = xr.open_dataset(clim_data_path)
         _logger.info("Aligning climatological data with target structure...")
         aligned_clim_data = align_clim_data(da_tars, clim_data)

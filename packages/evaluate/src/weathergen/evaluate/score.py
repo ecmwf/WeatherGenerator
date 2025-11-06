@@ -307,7 +307,9 @@ class Scores:
             group_names = list(next(iter(grouped_args.values())).groups.keys())
             results = []
             for name in group_names:
-                group_slice = {k: v[name] for k, v in grouped_args.items()}
+                group_slice = {
+                    k: (v[name] if v is not None else v) for k, v in grouped_args.items()
+                }
                 res = f(**group_slice)
                 # Add coordinate for concatenation
                 res = res.expand_dims({group_by_coord: [name]})
