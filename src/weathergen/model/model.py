@@ -9,6 +9,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 import math
 import warnings
 from pathlib import Path
@@ -18,6 +19,7 @@ import astropy_healpix as hp
 import astropy_healpix.healpy
 import numpy as np
 import torch
+import torch.nn as nn
 from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
 from torch.nn.functional import silu
@@ -36,18 +38,76 @@ from weathergen.model.engines import (
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.utils import get_num_parameters
-from weathergen.utils.logger import logger
+from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
-import sys
+
+logger = logging.getLogger(__name__)
 
 
 class ModelParams(torch.nn.Module):
     """Creation of query and embedding parameters of the model."""
 
-    def __init__(self) -> None:
+    def __init__(self, cf) -> None:
         super(ModelParams, self).__init__()
 
+        self.cf = cf
+
+        self.healpix_level = cf.healpix_level
+        self.num_healpix_cells = 12 * 4**cf.healpix_level
+        self.dtype = get_dtype(cf.attention_dtype)
+
+        bs = cf.batch_size_per_gpu
+        nqs = 9
+        s = [bs, self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed]
+
+        ### POSITIONAL EMBEDDINGS ###
+        len_token_seq = 1024
+        self.pe_embed = torch.nn.Parameter(
+            torch.zeros(len_token_seq, cf.ae_local_dim_embed, dtype=self.dtype), requires_grad=False
+        )
+
+        pe = torch.zeros(
+            self.num_healpix_cells,
+            cf.ae_local_num_queries,
+            cf.ae_global_dim_embed,
+            dtype=self.dtype,
+        )
+        self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
+
+        ### HEALPIX NEIGHBOURS ###
+        hlc = self.healpix_level
+        with warnings.catch_warnings(action="ignore"):
+            temp = hp.neighbours(
+                np.arange(self.num_healpix_cells), 2**hlc, order="nested"
+            ).transpose()
+        # fix missing nbors with references to self
+        for i, row in enumerate(temp):
+            temp[i][row == -1] = i
+        self.hp_nbours = torch.nn.Parameter(
+            torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32),
+            requires_grad=False,
+        )
+        # self.hp_nbours = torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32)
+
+        if cf.target_cell_local_prediction:
+            tokens_lens_value = nqs * s[2]
+        else:
+            tokens_lens_value = nqs * s[1] * s[2]
+        self.tokens_lens = torch.nn.Parameter(
+            tokens_lens_value * torch.ones(bs * s[1] + 1, dtype=torch.int32), requires_grad=False
+        )
+        self.tokens_lens.data[0] = 0
+
+        self.q_cells_lens = torch.nn.Parameter(
+            torch.ones(self.num_healpix_cells + 1, dtype=torch.int32), requires_grad=False
+        )
+        self.q_cells_lens.data[0] = 0
+
     def create(self, cf: Config) -> "ModelParams":
+        self.reset_parameters(cf)
+        return self
+
+    def reset_parameters(self, cf: Config) -> "ModelParams":
         """Creates positional embedding for each grid point for each stream used after stream
         embedding, positional embedding for all stream assimilated cell-level local embedding,
         initializing queries for local-to-global adapters, HEALPix neighbourhood based parameter
@@ -66,39 +126,43 @@ class ModelParams(torch.nn.Module):
         Args:
             cf : Configuration
         """
-        self.healpix_level = cf.healpix_level
-        self.num_healpix_cells = 12 * 4**cf.healpix_level
-        self.dtype = get_dtype(cf.attention_dtype)
 
         # positional encodings
 
         dim_embed = cf.ae_local_dim_embed
         len_token_seq = 1024
-        position = torch.arange(0, len_token_seq).unsqueeze(1)
-        div = torch.exp(torch.arange(0, dim_embed, 2) * -(math.log(len_token_seq) / dim_embed))
-        pe_embed = torch.zeros(len_token_seq, dim_embed, dtype=self.dtype)
-        pe_embed[:, 0::2] = torch.sin(position * div[: pe_embed[:, 0::2].shape[1]])
-        pe_embed[:, 1::2] = torch.cos(position * div[: pe_embed[:, 1::2].shape[1]])
-        self.pe_embed = torch.nn.Parameter(pe_embed, requires_grad=False)
+        self.pe_embed.data.fill_(0.0)
+        position = torch.arange(0, len_token_seq, device=self.pe_embed.device).unsqueeze(1)
+        div = torch.exp(
+            torch.arange(0, dim_embed, 2, device=self.pe_embed.device)
+            * -(math.log(len_token_seq) / dim_embed),
+        )
+        self.pe_embed.data[:, 0::2] = torch.sin(position * div[: self.pe_embed[:, 0::2].shape[1]])
+        self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
 
         dim_embed = cf.ae_global_dim_embed
-        pe = torch.zeros(
-            self.num_healpix_cells, cf.ae_local_num_queries, dim_embed, dtype=self.dtype
+        self.pe_global.data.fill_(0.0)
+        xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
+        self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
+            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
         )
-        xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2) / dim_embed
-        pe[..., 0::2] = 0.5 * torch.sin(torch.outer(8 * torch.arange(cf.ae_local_num_queries), xs))
-        pe[..., 0::2] += (
-            torch.sin(torch.outer(torch.arange(self.num_healpix_cells), xs))
+        self.pe_global.data[..., 0::2] += (
+            torch.sin(
+                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+            )
             .unsqueeze(1)
             .repeat((1, cf.ae_local_num_queries, 1))
         )
-        pe[..., 1::2] = 0.5 * torch.cos(torch.outer(8 * torch.arange(cf.ae_local_num_queries), xs))
-        pe[..., 1::2] += (
-            torch.cos(torch.outer(torch.arange(self.num_healpix_cells), xs))
+        self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
+            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
+        )
+        self.pe_global.data[..., 1::2] += (
+            torch.cos(
+                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+            )
             .unsqueeze(1)
             .repeat((1, cf.ae_local_num_queries, 1))
         )
-        self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
         # healpix neighborhood structure
 
@@ -110,31 +174,28 @@ class ModelParams(torch.nn.Module):
         for i, row in enumerate(temp):
             temp[i][row == -1] = i
         # nbors *and* self
-        nbours = torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32)
-        nbours[:, 0] = torch.arange(temp.shape[0])
-        nbours[:, 1:] = torch.from_numpy(temp)
-        self.hp_nbours = torch.nn.Parameter(nbours, requires_grad=False)
+        self.hp_nbours.data[:, 0] = torch.arange(temp.shape[0], device=self.hp_nbours.device)
+        self.hp_nbours.data[:, 1:] = torch.from_numpy(temp).to(self.hp_nbours.device)
 
         # varlen index set for tokens
         assert cf.batch_size_per_gpu == cf.batch_size_validation_per_gpu
         bs = cf.batch_size_per_gpu
         nqs = 9
         s = [bs, self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed]
-        pad = torch.zeros(1, dtype=torch.int32)
         if cf.target_cell_local_prediction:
-            tokens_lens = torch.cat([pad, nqs * s[2] * torch.ones(bs * s[1], dtype=torch.int32)])
+            tokens_lens_value = nqs * s[2]
         else:
-            tokens_lens = torch.cat([pad, nqs * s[1] * s[2] * torch.ones(bs, dtype=torch.int32)])
-        self.tokens_lens = torch.nn.Parameter(tokens_lens, requires_grad=False)
+            tokens_lens_value = nqs * s[1] * s[2]
+        self.tokens_lens.data.fill_(tokens_lens_value)
+        self.tokens_lens.data[0] = 0
 
         # precompute for varlen attention
-        s = (self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed)
-        # q_cells_lens = s[1] * torch.ones( s[0], dtype=torch.int32)
-        q_cells_lens = torch.ones(s[0], dtype=torch.int32)
-        q_cells_lens = torch.cat([torch.zeros(1, dtype=torch.int32), q_cells_lens])
-        self.q_cells_lens = torch.nn.Parameter(q_cells_lens, requires_grad=False)
+        self.q_cells_lens.data.fill_(1)
+        self.q_cells_lens.data[0] = 0
 
-        return self
+        # ensure all params have grad set to False
+
+        return
 
 
 ####################################################################################################
@@ -205,11 +266,11 @@ class Model(torch.nn.Module):
         cf = self.cf
 
         # separate embedding networks for differnt observation types
-        self.embeds = EmbeddingEngine(cf, self.sources_size).create()
+        self.embed_engine = EmbeddingEngine(cf, self.sources_size)
 
         ##############
         # local assimilation engine
-        self.ae_local_blocks = LocalAssimilationEngine(cf).create()
+        self.ae_local_engine = LocalAssimilationEngine(cf)
 
         if cf.latent_noise_kl_weight > 0.0:
             self.interpolate_latents = LatentInterpolator(
@@ -221,7 +282,7 @@ class Model(torch.nn.Module):
 
         ##############
         # local -> global assimilation engine adapter
-        self.ae_adapter = Local2GlobalAssimilationEngine(cf).create()
+        self.ae_local_global_engine = Local2GlobalAssimilationEngine(cf)
 
         ##############
         # learnable queries
@@ -253,7 +314,7 @@ class Model(torch.nn.Module):
 
         ##############
         # global assimilation engine
-        self.ae_global_blocks = GlobalAssimilationEngine(cf, self.num_healpix_cells).create()
+        self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
 
         ###############
         # forecasting engine
@@ -312,7 +373,8 @@ class Model(torch.nn.Module):
                         dim_embed, dim_out, num_layers + 1, dtype=torch.int32
                     ).tolist()
 
-            logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
+            if is_root():
+                logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
 
             dim_coord_in = self.targets_coords_size[i_obs]
 
@@ -379,9 +441,10 @@ class Model(torch.nn.Module):
 
             # ensemble prediction heads to provide probabilistic prediction
             final_activation = si["pred_head"].get("final_activation", "Identity")
-            logger.debug(
-                f"{final_activation} activation as prediction head output of {si['name']} stream"
-            )
+            if is_root():
+                logger.debug(
+                    f"{final_activation} activation of prediction head of {si['name']} stream"
+                )
             self.pred_heads.append(
                 EnsPredictionHead(
                     dims_embed[-1],
@@ -396,7 +459,16 @@ class Model(torch.nn.Module):
 
         return self
 
-    #########################################
+    def reset_parameters(self):
+        def _reset_params(module):
+            if isinstance(module, nn.Linear | nn.LayerNorm):
+                module.reset_parameters()
+            else:
+                pass
+
+        self.apply(_reset_params)
+
+
     def freeze_weights_forecast(self) -> "Model":
         """Freezes core model weights and makes forecasting engine weights trainable"""
 
@@ -417,22 +489,21 @@ class Model(torch.nn.Module):
             for p in self.fe.map_noise.parameters():
                 p.requires_grad = True
 
-        return self
 
     #########################################
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
 
         cf = self.cf
-        num_params_embed = [get_num_parameters(embed) for embed in self.embeds]
+        num_params_embed = [get_num_parameters(embed) for embed in self.embed_engine.embeds]
         num_params_total = get_num_parameters(self)
-        num_params_ae_local = get_num_parameters(self.ae_local_blocks)
-        num_params_ae_global = get_num_parameters(self.ae_global_blocks)
+        num_params_ae_local = get_num_parameters(self.ae_local_engine.ae_local_blocks)
+        num_params_ae_global = get_num_parameters(self.ae_global_engine.ae_global_blocks)
 
         num_params_q_cells = np.prod(self.q_cells.shape) if self.q_cells.requires_grad else 0
-        num_params_ae_adapater = get_num_parameters(self.ae_adapter)
+        num_params_ae_adapater = get_num_parameters(self.ae_local_global_engine.ae_adapter)
 
-        num_params_fe = get_num_parameters(self.fe_blocks)
+        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
         num_params_pred_adapter = [get_num_parameters(kv) for kv in self.pred_adapter_kv]
         num_params_embed_tcs = [get_num_parameters(etc) for etc in self.embed_target_coords]
@@ -469,6 +540,45 @@ class Model(torch.nn.Module):
         print("-----------------")
 
     #########################################
+    def rename_old_state_dict(self, params: dict) -> dict:
+        """Checks if model from checkpoint is from the old model version and if so renames
+        the parameters accordingly to the new model version.
+
+        Args:
+            params : Dictionary with (old) model parameters from checkpoint
+        Returns:
+            new_params : Dictionary with (renamed) model parameters
+        """
+        params_cleanup = {
+            "embeds": "embed_engine.embeds",  # EmbeddingEngine
+            "ae_local_blocks": "ae_local_engine.ae_local_blocks",  # LocalAssimilationEngine
+            "ae_adapter": "ae_local_global_engine.ae_adapter",  # Local2GlobalAssimilationEngine
+            "ae_global_blocks": "ae_global_engine.ae_global_blocks",  # GlobalAssimilationEngine
+            "fe_blocks": "forecast_engine.fe_blocks",  # ForecastingEngine
+        }
+
+        new_params = {}
+
+        for k, v in params.items():
+            new_k = k
+            prefix = ""
+
+            # Strip "module." (prefix for DataParallel or DistributedDataParallel)
+            if new_k.startswith("module."):
+                prefix = "module."
+                new_k = new_k[len(prefix) :]
+
+            first_w, rest = new_k.split(".", 1) if "." in new_k else (new_k, "")
+            # Only check first word (root level modules) to avoid false matches.
+            if first_w in params_cleanup:
+                new_k = params_cleanup[first_w] + "." + rest
+
+            new_k = prefix + new_k
+            new_params[new_k] = v
+
+        return new_params
+
+    #########################################
     def load(self, run_id: str, epoch: str = -1) -> None:
         """Loads model state from checkpoint and checks for missing and unused keys.
         Args:
@@ -483,16 +593,21 @@ class Model(torch.nn.Module):
         params = torch.load(
             path_run / filename, map_location=torch.device("cpu"), weights_only=True
         )
+
+        # Ensure backward compatibility with old model checkpoints
+        params = self.rename_old_state_dict(params)
+
         params_renamed = {}
         for k in params.keys():
             params_renamed[k.replace("module.", "")] = params[k]
+
         mkeys, ukeys = self.load_state_dict(params_renamed, strict=False)
         # mkeys, ukeys = self.load_state_dict( params, strict=False)
 
-        if len(mkeys) > 0:
+        if len(mkeys) > 0 and is_root():
             logger.warning(f"Missing keys when loading model: {mkeys}")
 
-        if len(ukeys) > 0:
+        if len(ukeys) > 0 and is_root():
             logger.warning(f"Unused keys when loading model: {mkeys}")
 
     #########################################
@@ -572,7 +687,13 @@ class Model(torch.nn.Module):
             ]
 
             if not self.cf.forecast_policy == "diffusion":
-                tokens = self.forecast(model_params, tokens)
+                if self.training:
+                    # Impute noise to the latent state
+                    noise_std = self.cf.get("impute_latent_noise_std", 0.0)
+                    if noise_std > 0.0:
+                        tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
+
+                tokens = self.forecast(model_params, tokens, fstep)
                 tokens_all += [tokens]
             if self.cf.forecast_policy == "diffusion":
                 #change the latent targets to residuals
@@ -615,112 +736,74 @@ class Model(torch.nn.Module):
             Tokens for local assimilation
         """
 
-        source_tokens_lens = torch.stack(
-            [
-                torch.stack(
-                    [
-                        s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
-                        for s in stl_b
-                    ]
-                )
-                for stl_b in streams_data
-            ]
-        )
-        offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
-        tokens_all = torch.empty(
-            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=self.dtype, device="cuda"
-        )
-
-        for _, sb in enumerate(streams_data):
-            for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                if not s.source_empty():
-                    idxs = s.source_idxs_embed
-                    idxs_pe = s.source_idxs_embed_pe
-
-                    # create full scatter index
-                    # (there's no broadcasting which is likely highly inefficient)
-                    idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
-                    # there's undocumented limitation in flash_attn that will make embed fail if
-                    # #tokens is too large; code below is a work around
-                    # x_embed = torch.cat(
-                    #     [
-                    #         embed(s_c, c_c).flatten(0, 1)
-                    #         for s_c, c_c in zip(
-                    #             torch.split(s.source_tokens_cells, 49152),
-                    #             torch.split(s.source_centroids, 49152),
-                    #         )
-                    #     ]
-                    # )
-
-                    # scatter write to reorder from per stream to per cell ordering
-                    tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
+        device = next(self.parameters()).device
+        tokens_all = self.embed_engine(streams_data, model_params.pe_embed, self.dtype, device)
 
         return tokens_all
 
-    def embed_cells_targets_srclk(self, model_params: ModelParams, streams_data) -> torch.Tensor:
-        """Embeds target data similar to source tokens for each fstep and stream separately and rearranges it to cell-wise order
-        Args:
-            model_params : Query and embedding parameters
-            streams_data : Used to initialize first tokens for pre-processing
-        Returns:
-            Tokens for local assimilation
-        """
-        with torch.no_grad():
-            target_srclk_tokens_lens = torch.stack(
-                [
-                    torch.stack(
-                        [
-                            torch.stack(
-                                [
-                                    s.target_srclk_tokens_lens[fstep]
-                                    if len(s.target_srclk_tokens_lens[fstep]) > 0
-                                    else torch.tensor([])
-                                    for fstep in range(len(s.target_srclk_tokens_lens))
-                                ]
-                            )
-                            for s in stl_b
-                        ]
-                    )
-                    for stl_b in streams_data
-                ]
-            )
-            offsets_base = target_srclk_tokens_lens.sum(1).sum(0).cumsum(1)
-            num_fsteps = target_srclk_tokens_lens.shape[2]  # TODO: KCT, if there are diff no of tokens per fstep, this may fail
-            tokens_all = []
-            for fstep in range(num_fsteps):
-                tokens_all.append(
-                    torch.empty(
-                        (int(offsets_base[fstep][-1]), self.cf.ae_local_dim_embed),
-                        dtype=self.dtype,
-                        device="cuda",
-                    )
-                )
+    # def embed_cells_targets_srclk(self, model_params: ModelParams, streams_data) -> torch.Tensor:
+    #     """Embeds target data similar to source tokens for each fstep and stream separately and rearranges it to cell-wise order
+    #     Args:
+    #         model_params : Query and embedding parameters
+    #         streams_data : Used to initialize first tokens for pre-processing
+    #     Returns:
+    #         Tokens for local assimilation
+    #     """
+    #     with torch.no_grad():
+    #         target_srclk_tokens_lens = torch.stack(
+    #             [
+    #                 torch.stack(
+    #                     [
+    #                         torch.stack(
+    #                             [
+    #                                 s.target_srclk_tokens_lens[fstep]
+    #                                 if len(s.target_srclk_tokens_lens[fstep]) > 0
+    #                                 else torch.tensor([])
+    #                                 for fstep in range(len(s.target_srclk_tokens_lens))
+    #                             ]
+    #                         )
+    #                         for s in stl_b
+    #                     ]
+    #                 )
+    #                 for stl_b in streams_data
+    #             ]
+    #         )
+    #         offsets_base = target_srclk_tokens_lens.sum(1).sum(0).cumsum(1)
+    #         num_fsteps = target_srclk_tokens_lens.shape[2]  # TODO: KCT, if there are diff no of tokens per fstep, this may fail
+    #         tokens_all = []
+    #         for fstep in range(num_fsteps):
+    #             tokens_all.append(
+    #                 torch.empty(
+    #                     (int(offsets_base[fstep][-1]), self.cf.ae_local_dim_embed),
+    #                     dtype=self.dtype,
+    #                     device="cuda",
+    #                 )
+    #             )
 
-            tokens_all_scattered = []
-            for _, sb in enumerate(streams_data):
-                for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                    for fstep in range(num_fsteps):
-                        if not (s.target_srclk_tokens_lens[fstep].sum() == 0):
-                            idxs = s.target_srclk_idxs_embed[fstep]  
-                            idxs_pe = s.target_srclk_idxs_embed_pe[fstep]
+    #         tokens_all_scattered = []
+    #         for _, sb in enumerate(streams_data):
+    #             for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
+    #                 for fstep in range(num_fsteps):
+    #                     if not (s.target_srclk_tokens_lens[fstep].sum() == 0):
+    #                         idxs = s.target_srclk_idxs_embed[fstep]  
+    #                         idxs_pe = s.target_srclk_idxs_embed_pe[fstep]
 
-                            # create full scatter index
-                            # (there's no broadcasting which is likely highly inefficient)
-                            idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+    #                         # create full scatter index
+    #                         # (there's no broadcasting which is likely highly inefficient)
+    #                         idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
-                            x_embed = embed(
-                                s.target_srclk_tokens_cells[fstep], s.source_centroids # TODO: KCT, get this from the srclk targets
-                            ).flatten(0, 1)
+    #                         x_embed = embed(
+    #                             s.target_srclk_tokens_cells[fstep], s.source_centroids # TODO: KCT, get this from the srclk targets
+    #                         ).flatten(0, 1)
 
-                            # scatter write to reorder from per stream to per cell ordering
-                            tokens_all_fstep = tokens_all[fstep]
-                            tokens_all_fstep.scatter_(
-                                0, idxs, x_embed + model_params.pe_embed[idxs_pe]
-                            )
-                            tokens_all_scattered.append(tokens_all_fstep)
+    #                         # scatter write to reorder from per stream to per cell ordering
+    #                         tokens_all_fstep = tokens_all[fstep]
+    #                         tokens_all_fstep.scatter_(
+    #                             0, idxs, x_embed + model_params.pe_embed[idxs_pe]
+    #                         )
+    #                         tokens_all_scattered.append(tokens_all_fstep)
 
-        return tokens_all_scattered
+    #     return tokens_all_scattered
 
     #########################################
     def assimilate_local(
@@ -755,7 +838,7 @@ class Model(torch.nn.Module):
             + [model_params.q_cells_lens[1:] for _ in range(batch_size)]
         )
 
-        # # local assimilation model
+        # local assimilation model
         # for block in self.ae_local_blocks:
         #     tokens = checkpoint(block, tokens, cell_lens, use_reentrant=False)
 
@@ -782,7 +865,7 @@ class Model(torch.nn.Module):
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_all = []
         posteriors = []
-        zero_pad = torch.zeros(1, device="cuda", dtype=torch.int32)
+        zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
         for i in range((cell_lens.shape[0]) // clen):
             # make sure we properly catch all elements in last chunk
             i_end = (i + 1) * clen if i < (cell_lens.shape[0] // clen) - 1 else cell_lens.shape[0]
@@ -800,8 +883,8 @@ class Model(torch.nn.Module):
                 tokens_global_all += [tokens_global_c]
                 continue
 
-            for block in self.ae_local_blocks:
-                tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=False)
+            # local assimilation model
+            tokens_c = self.ae_local_engine(tokens_c, cell_lens_c, use_reentrant=False)
 
             if self.cf.latent_noise_kl_weight > 0.0:
                 tokens_c, posteriors_c = self.interpolate_latents.interpolate_with_noise(
@@ -811,15 +894,9 @@ class Model(torch.nn.Module):
             else:
                 tokens_c, posteriors = tokens_c, 0.0
 
-            for block in self.ae_adapter:
-                tokens_global_c = checkpoint(
-                    block,
-                    tokens_global_c,
-                    tokens_c,
-                    q_cells_lens_c,
-                    cell_lens_c,
-                    use_reentrant=False,
-                )
+            tokens_global_c = self.ae_local_global_engine(
+                tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant=False
+            )
 
             tokens_global_all += [tokens_global_c]
 
@@ -844,27 +921,29 @@ class Model(torch.nn.Module):
         """
 
         # global assimilation engine and adapter
-        for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=False)
+        tokens = self.ae_global_engine(tokens, use_reentrant=False)
 
         return tokens
 
     #########################################
-    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, noise_conditioning: None) -> torch.Tensor:
+    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int, noise_conditioning: None) -> torch.Tensor:
         """Advances latent space representation in time
 
         Args:
             model_params : Query and embedding parameters (never used)
             tokens : Input tokens to be processed by the model.
+            fstep: Current forecast step index (can be used as aux info).
         Returns:
             Processed tokens
         Raises:
             ValueError: For unexpected arguments in checkpoint method
         """
 
+        tokens = self.forecast_engine(tokens, fstep)
         for it, block in enumerate(self.fe_blocks):
             aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
             tokens = checkpoint(block, tokens, noise_conditioning, aux_info, use_reentrant=False)
+        exit() #WHAT ABOUT FSTEP
 
         return tokens
 
@@ -979,29 +1058,30 @@ class Model(torch.nn.Module):
 
             ## embed token coords, concatenating along batch dimension
             # (which is taking care of through the varlen attention)
-            with torch.amp.autocast("cuda", dtype=torch.float32, enabled=False):
-                tc_tokens = torch.cat(
-                    [
-                        checkpoint(
-                            tc_embed,
-                            streams_data[i_b][ii].target_coords[fstep],
-                            use_reentrant=False,
-                        )
-                        if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
-                        else streams_data[i_b][ii].target_coords[fstep]
-                        for i_b in range(len(streams_data))
-                    ]
-                )
+            # arguably we should to the mixed precision policy when creating the model in FSDP
+            tc_tokens = torch.cat(
+                [
+                    checkpoint(
+                        tc_embed,
+                        streams_data[i_b][ii].target_coords[fstep],
+                        use_reentrant=False,
+                    )
+                    if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
+                    else streams_data[i_b][ii].target_coords[fstep]
+                    for i_b in range(len(streams_data))
+                ]
+            )
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
                 nn = si["name"]
-                logger.warning(
-                    (
-                        f"Skipping prediction for {nn} because",
-                        f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
+                if is_root():
+                    logger.warning(
+                        (
+                            f"Skipping prediction for {nn} because",
+                            f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
+                        )
                     )
-                )
                 preds_tokens += [torch.tensor([], device=tc_tokens.device)]
                 continue
 

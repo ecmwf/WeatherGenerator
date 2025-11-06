@@ -1,0 +1,39 @@
+name: Bug Report
+description: Report a bug related to WeatherGenerator.
+title: Bug report
+labels:
+  - "bug"
+assignees: []
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: |
+        Expected Results: What was supposed to happen?
+
+        Actual Results: What happened when you got the bug?
+        
+        Additional Information: Add anything else you feel we need to know e.g. The exact error message printed
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: What are the steps to reproduce the bug?
+      description: |
+        Minimal steps to reproduce the behavior:
+        - code branch with ALL configuration files
+        - HPC
+        - run_id
+        - command run
+        - if applicable: node configuration
+    validations:
+      required: false
+  - type: input
+    id: data
+    attributes:
+      label: Hedgedoc link to logs and more information. This ticket is public, do not attach files directly.
+      description: Please put all relevant information (logs, plots, etc.) in the Hedgedoc and link it here.
+    validations:
+      required: false

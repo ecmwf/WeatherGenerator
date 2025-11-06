@@ -31,7 +31,7 @@ from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
 
-class EmbeddingEngine:
+class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
 
     def __init__(self, cf: Config, sources_size) -> None:
@@ -41,20 +41,15 @@ class EmbeddingEngine:
         :param cf: Configuration object containing parameters for the engine.
         :param sources_size: List of source sizes for each stream.
         """
+        super(EmbeddingEngine, self).__init__()
         self.cf = cf
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleList()
 
-    def create(self) -> torch.nn.ModuleList:
-        """
-        Creates and returns the module list (embeds).
-
-        :return: torch.nn.ModuleList containing the embedding layers.
-        """
         for i, si in enumerate(self.cf.streams):
             stream_name = si.get("name", i)
 
-            if "diagnostic" in si and si["diagnostic"]:
+            if si.get("diagnostic", False) or self.sources_size[i] == 0:
                 self.embeds.append(torch.nn.Identity())
                 continue
 
@@ -86,10 +81,53 @@ class EmbeddingEngine:
                 )
             else:
                 raise ValueError("Unsupported embedding network type")
-        return self.embeds
+
+    def forward(self, streams_data, pe_embed, dtype, device):
+        source_tokens_lens = torch.stack(
+            [
+                torch.stack(
+                    [
+                        s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
+                        for s in stl_b
+                    ]
+                )
+                for stl_b in streams_data
+            ]
+        )
+        offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
+
+        tokens_all = torch.empty(
+            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=dtype, device=device
+        )
+
+        for _, sb in enumerate(streams_data):
+            for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
+                if not s.source_empty():
+                    idxs = s.source_idxs_embed.to(device)
+                    idxs_pe = s.source_idxs_embed_pe.to(device)
+
+                    # create full scatter index
+                    # (there's no broadcasting which is likely highly inefficient)
+                    idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+                    x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
+                    # there's undocumented limitation in flash_attn that will make embed fail if
+                    # #tokens is too large; code below is a work around
+                    # x_embed = torch.cat(
+                    #     [
+                    #         embed(s_c, c_c).flatten(0, 1)
+                    #         for s_c, c_c in zip(
+                    #             torch.split(s.source_tokens_cells, 49152),
+                    #             torch.split(s.source_centroids, 49152),
+                    #         )
+                    #     ]
+                    # )
+
+                    # scatter write to reorder from per stream to per cell ordering
+                    tokens_all.scatter_(0, idxs, x_embed + pe_embed[idxs_pe])
+        return tokens_all
 
 
-class LocalAssimilationEngine:
+class LocalAssimilationEngine(torch.nn.Module):
     name: "LocalAssimilationEngine"
 
     def __init__(self, cf: Config) -> None:
@@ -98,15 +136,10 @@ class LocalAssimilationEngine:
 
         :param cf: Configuration object containing parameters for the engine.
         """
+        super(LocalAssimilationEngine, self).__init__()
         self.cf = cf
         self.ae_local_blocks = torch.nn.ModuleList()
 
-    def create(self) -> torch.nn.ModuleList:
-        """
-        Creates and returns the module list (ae_local_blocks).
-
-        :return: torch.nn.ModuleList containing the local assimilation blocks.
-        """
         for _ in range(self.cf.ae_local_num_blocks):
             self.ae_local_blocks.append(
                 MultiSelfAttentionHeadVarlen(
@@ -130,10 +163,14 @@ class LocalAssimilationEngine:
                     norm_eps=self.cf.mlp_norm_eps,
                 )
             )
-        return self.ae_local_blocks
+
+    def forward(self, tokens_c, cell_lens_c, use_reentrant):
+        for block in self.ae_local_blocks:
+            tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=use_reentrant)
+        return tokens_c
 
 
-class Local2GlobalAssimilationEngine:
+class Local2GlobalAssimilationEngine(torch.nn.Module):
     name: "Local2GlobalAssimilationEngine"
 
     def __init__(self, cf: Config) -> None:
@@ -142,15 +179,10 @@ class Local2GlobalAssimilationEngine:
 
         :param cf: Configuration object containing parameters for the engine.
         """
+        super(Local2GlobalAssimilationEngine, self).__init__()
         self.cf = cf
         self.ae_adapter = torch.nn.ModuleList()
 
-    def create(self) -> torch.nn.ModuleList:
-        """
-        Creates and returns the module list (ae_adapter).
-
-        :return: torch.nn.ModuleList containing the local-to-global assimilation adapter blocks.
-        """
         self.ae_adapter.append(
             MultiCrossAttentionHeadVarlenSlicedQ(
                 self.cf.ae_global_dim_embed,
@@ -193,10 +225,21 @@ class Local2GlobalAssimilationEngine:
                 attention_dtype=get_dtype(self.cf.attention_dtype),
             )
         )
-        return self.ae_adapter
+
+    def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant):
+        for block in self.ae_adapter:
+            tokens_global_c = checkpoint(
+                block,
+                tokens_global_c,
+                tokens_c,
+                q_cells_lens_c,
+                cell_lens_c,
+                use_reentrant=use_reentrant,
+            )
+        return tokens_global_c
 
 
-class GlobalAssimilationEngine:
+class GlobalAssimilationEngine(torch.nn.Module):
     name: "GlobalAssimilationEngine"
 
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
@@ -206,17 +249,12 @@ class GlobalAssimilationEngine:
         :param cf: Configuration object containing parameters for the engine.
         :param num_healpix_cells: Number of healpix cells used for local queries.
         """
+        super(GlobalAssimilationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
 
         self.ae_global_blocks = torch.nn.ModuleList()
 
-    def create(self) -> torch.nn.ModuleList:
-        """
-        Creates and returns the module list (ae_global_blocks).
-
-        :return: torch.nn.ModuleList containing the global assimilation blocks.
-        """
         global_rate = int(1 / self.cf.ae_global_att_dense_rate)
         for i in range(self.cf.ae_global_num_blocks):
             ## Alternate between local and global attention
@@ -262,10 +300,14 @@ class GlobalAssimilationEngine:
                     norm_eps=self.cf.mlp_norm_eps,
                 )
             )
-        return self.ae_global_blocks
+
+    def forward(self, tokens, use_reentrant):
+        for block in self.ae_global_blocks:
+            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+        return tokens
 
 
-class ForecastingEngine:
+class ForecastingEngine(torch.nn.Module):
     name: "ForecastingEngine"
 
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
@@ -275,6 +317,7 @@ class ForecastingEngine:
         :param cf: Configuration object containing parameters for the engine.
         :param num_healpix_cells: Number of healpix cells used for local queries.
         """
+        super(ForecastingEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
@@ -290,12 +333,6 @@ class ForecastingEngine:
             self.map_layer0 = Linear(in_features=self.cf.ae_global_dim_embed, out_features=self.cf.ae_global_dim_embed, **init)
             self.map_layer1 = Linear(in_features=self.cf.ae_global_dim_embed, out_features=self.cf.ae_global_dim_embed, **init)
 
-    def create(self) -> torch.nn.ModuleList:
-        """
-        Creates and returns the module list (fe_blocks).
-
-        :return: torch.nn.ModuleList containing the forecasting blocks.
-        """
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         diff_factor = 2 if self.cf.forecast_policy == "diffusion" else 1 #NOTE: this is a hot fix to handle conditioning on previous state via concatenation...
         if self.cf.forecast_policy is not None:
@@ -356,7 +393,12 @@ class ForecastingEngine:
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-        return self.fe_blocks
+    def forward(self, tokens, fstep):
+        aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
+        for block in self.fe_blocks:
+            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+
+        return tokens
 
 def edm_sampler(
     net, latents, class_labels=None, randn_like=torch.randn_like,
@@ -440,7 +482,6 @@ class EnsPredictionHead(torch.nn.Module):
                 self.pred_heads[-1].append(fal)
 
     #########################################
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
     def forward(self, toks):
         preds = []
         for pred_head in self.pred_heads:
