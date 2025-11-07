@@ -73,9 +73,6 @@ loss_fcts:
   - 
     - "mse"
     - 1.0
-  # -
-  #   - "latent:mse"
-  #   - 0.3
 loss_fcts_val:
   -
     - "mse"
@@ -97,6 +94,14 @@ ema_halflife_in_thousands: 1e-3
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
 training_mode: "masking"
+training_mode_config: {"losses": {LossPhysical: [['mse', 1.0]],}
+                      }
+# training_mode_config: {"loss": {LossPhysical: [['mse', 0.7]],
+#                                             LossLatent: [['mse', 0.3]],
+#                                             LossStudentTeacher: [{'iBOT': {<options>}, 'JEPA': {options}}],}
+#                       }
+validation_mode_config: {"losses": {LossPhysical: [['mse', 1.0]],}
+                        }
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)

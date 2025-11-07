@@ -18,13 +18,13 @@ from torch import Tensor
 
 import weathergen.train.loss as losses
 from weathergen.train.loss import stat_loss_fcts
-from weathergen.train.loss_calculator_base import LossCalculatorBase, LossValues
+from weathergen.train.loss_module_base import LossModuleBase, LossValues
 from weathergen.utils.train_logger import TRAIN, VAL, Stage
 
 _logger = logging.getLogger(__name__)
 
 
-class LossCalculatorPhysical(LossCalculatorBase):
+class LossPhysical(LossModuleBase):
     """
     Manages and computes the overall loss for a WeatherGenerator model during
     training and validation stages.
@@ -42,13 +42,13 @@ class LossCalculatorPhysical(LossCalculatorBase):
         stage: Stage,
         device: str,
     ):
-        LossCalculatorBase.__init__(self)
+        LossModuleBase.__init__(self)
         self.cf = cf
         self.stage = stage
         self.device = device
+        self.name = "LossPhysical"
 
         # Dynamically load loss functions based on configuration and stage
-
         self.loss_fcts = [
             [getattr(losses, name if name != "mse" else "mse_channel_location_weighted"), w]
             for name, w in loss_fcts
@@ -151,8 +151,8 @@ class LossCalculatorPhysical(LossCalculatorBase):
 
     def compute_loss(
         self,
-        preds: list[list[Tensor]],
-        targets: list[list[any]],
+        preds: dict,
+        targets: dict,
     ) -> LossValues:
         """
         Computes the total loss for a given batch of predictions and corresponding
@@ -184,7 +184,8 @@ class LossCalculatorPhysical(LossCalculatorBase):
                           of predictions for channels with statistical loss functions, normalized.
         """
 
-        streams_data = targets
+        preds = preds["physical"]
+        streams_data = targets["physical"]
 
         # gradient loss
         loss = torch.tensor(0.0, device=self.device, requires_grad=True)
@@ -292,7 +293,7 @@ class LossCalculatorPhysical(LossCalculatorBase):
         return LossValues(loss=loss, losses_all=losses_all, stddev_all=stddev_all)
 
 
-class LossCalculatorLatent(LossCalculatorBase):
+class LossLatent(LossModuleBase):
     """
     Calculates loss in latent space.
     """
@@ -304,10 +305,11 @@ class LossCalculatorLatent(LossCalculatorBase):
         stage: Stage,
         device: str,
     ):
-        LossCalculatorBase.__init__(self)
+        LossModuleBase.__init__(self)
         self.cf = cf
         self.stage = stage
         self.device = device
+        self.name = "LossLatent"
 
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
@@ -375,3 +377,22 @@ class LossCalculatorLatent(LossCalculatorBase):
         losses_all[losses_all == 0.0] = torch.nan
 
         return LossValues(loss=loss, losses_all=losses_all)
+
+
+class LossStudentTeacher(LossModuleBase):
+    """
+    Calculates loss in latent space.
+    """
+
+    def __init__(
+        self,
+        cf: DictConfig,
+        loss_fcts: list,
+        stage: Stage,
+        device: str,
+    ):
+        self.name = "LossStudentTeacher"
+        raise NotImplementedError()
+
+    def compute_loss(self, preds, targets):
+        return super().compute_loss(preds, targets)

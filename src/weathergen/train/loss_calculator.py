@@ -13,8 +13,8 @@ import logging
 
 from omegaconf import DictConfig
 
-from weathergen.train.loss_calculator_base import LossValues
-from weathergen.train.loss_calculator_classes import LossCalculatorLatent, LossCalculatorPhysical
+import weathergen.train.loss_module as LossModule
+from weathergen.train.loss_module_base import LossValues
 from weathergen.utils.train_logger import TRAIN, Stage
 
 _logger = logging.getLogger(__name__)
@@ -50,23 +50,17 @@ class LossCalculator:
         self.stage = stage
         self.device = device
 
-        loss_fcts = cf.loss_fcts if stage == TRAIN else cf.loss_fcts_val
+        calculator_configs = (
+            cf.training_mode_config.losses if stage == TRAIN else cf.validation_mode_config.losses
+        )
 
-        loss_fcts_physical = [[name, w] for name, w in loss_fcts if name.split(":")[0] != "latent"]
-        loss_fcts_latent = [
-            [name.split(":")[1], w] for name, w in loss_fcts if name.split(":")[0] == "latent"
+        calculator_configs = [
+            (getattr(LossModule, Cls), losses) for (Cls, losses) in calculator_configs.items()
         ]
 
-        calculator_configs = []
-
-        if loss_fcts_physical:
-            calculator_configs.append((LossCalculatorPhysical, loss_fcts_physical, "physical"))
-        if loss_fcts_latent:
-            calculator_configs.append((LossCalculatorLatent, loss_fcts_latent, "latent"))
-
         self.loss_calculators = [
-            (Cls(cf=cf, loss_fcts=losses, stage=stage, device=self.device), type)
-            for (Cls, losses, type) in calculator_configs
+            Cls(cf=cf, loss_fcts=losses, stage=stage, device=self.device)
+            for (Cls, losses) in calculator_configs
         ]
 
     def compute_loss(
@@ -76,12 +70,12 @@ class LossCalculator:
     ):
         loss_values = {}
         loss = 0
-        for calculator, type in self.loss_calculators:
-            loss_values[type] = calculator.compute_loss(preds=preds[type], targets=targets[type])
-            loss += loss_values[type].loss
+        for calculator in self.loss_calculators:
+            loss_values[calculator.name] = calculator.compute_loss(preds=preds, targets=targets)
+            loss += loss_values[calculator.name].loss
 
         # Bring all loss values together
-        # TODO: keys should tell what type of loss was used, e.g loss_mse.latent.loss_2t
+        # TODO: make sure keys are explicit, e.g loss_mse.latent.loss_2t
         losses_all = {}
         stddev_all = {}
         for _, v in loss_values.items():
