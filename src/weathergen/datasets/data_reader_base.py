@@ -317,7 +317,7 @@ class DataReaderBase(metaclass=ABCMeta):
         self,
         tw_handler: TimeWindowHandler,
         stream_info: dict,
-        ) -> None:
+    ) -> None:
         """
         Parameters
         ----------
@@ -704,7 +704,7 @@ def get_dataset_indexes_timestep(
     period: NPTDel64,
     idx: TIndex,
     tw_handler: TimeWindowHandler,
-    ) -> tuple[NDArray[np.int64], DTRange]:
+) -> tuple[NDArray[np.int64], DTRange]:
     """
     Get dataset indexes for a given time window index, when the dataset is periodic.
 
