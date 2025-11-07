@@ -332,9 +332,8 @@ class Trainer(TrainerBase):
                 rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
-        elif cf["training_mode"] == "masking":  # "student-teacher-pretrain":
+        elif cf["training_mode"] == "student-teacher":
             meta_ema_model = self.init_model_and_shard(cf, "teacher", devices)[0]
-            cf["target_and_aux_calc"] = "EMATeacher"
             self.ema_model = EMAModel(
                 self.model,
                 meta_ema_model,
@@ -624,6 +623,7 @@ class Trainer(TrainerBase):
                 enabled=cf.with_mixed_precision,
             ):
                 output = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
+
                 targets, aux_outputs = self.target_and_aux_calculator.compute(
                     self.cf.istep,
                     batch,

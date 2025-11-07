@@ -1,5 +1,25 @@
+#################
+###    Data   ###
+#################
 streams_directory: "./config/streams/era5_1deg/"
 
+start_date: 197901010000
+end_date: 202012310000
+start_date_val: 202101010000
+end_date_val: 202201010000
+len_hrs: 6
+step_hrs: 6
+input_window_steps: 1
+
+val_initial: False
+
+loader_num_workers: 8
+log_validation: 0
+analysis_streams_output: ["ERA5"]
+
+#################
+###   Model   ###
+#################
 embed_orientation: "channels"
 embed_local_coords: True
 embed_centroids_local_coords: False
@@ -40,6 +60,17 @@ pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
 
+healpix_level: 5
+
+latent_noise_kl_weight: 0.0 # 1e-5
+latent_noise_gamma: 2.0
+latent_noise_saturate_encodings: 5 
+latent_noise_use_additive_noise: False
+latent_noise_deterministic_latents: True 
+
+#################
+###  Forecast ###
+#################
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
 forecast_offset : 0
@@ -53,22 +84,9 @@ fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 impute_latent_noise_std: 0.0  # 1e-4
 
-healpix_level: 5
-
-with_mixed_precision: True
-with_flash_attention: True
-compile_model: False
-with_fsdp: True
-attention_dtype: bf16
-mlp_norm_eps: 1e-5
-norm_eps: 1e-4
-
-latent_noise_kl_weight: 0.0 # 1e-5
-latent_noise_gamma: 2.0
-latent_noise_saturate_encodings: 5 
-latent_noise_use_additive_noise: False
-latent_noise_deterministic_latents: True 
-
+#################
+###  Training ###
+#################
 loss_fcts:
   - 
     - "mse"
@@ -91,19 +109,21 @@ validate_with_ema: True
 ema_ramp_up_ratio: 0.09
 ema_halflife_in_thousands: 1e-3
 
-# training mode: "forecast" or "masking" (masked token modeling)
+# training mode: "forecast" or "masking" (masked token modeling) or "student-teacher"
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "masking"
-training_mode_config: {"losses": {LossPhysical: {weight: 0.7, loss_fcts: [['mse', 0.8], ['mae', 0.2]]},
-                                  LossPhysicalTwo: {weight: 0.3, loss_fcts: [['mse', 1.0]]},
-                                  }
-                      }
-# training_mode_config: {"loss": {LossPhysical: [['mse', 0.7]],
-#                                             LossLatent: [['mse', 0.3]],
-#                                             LossStudentTeacher: [{'iBOT': {<options>}, 'JEPA': {options}}],}
-#                       }
-validation_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},}
-                        }
+training_mode: "student-teacher"
+training_mode_config: {
+  "losses" : [ "iBOT", "DINO", "JEPA" ],
+  "shared_heads": False,
+  "student_temp": 0.1,
+  "teacher_temp": 0.1,
+  "dino_out_dim": 65536, # 2**16
+  "ibot_patch_out_dim": 65536, # 2**16
+  "teacher_style": "softmax_center",
+  "center_momentum": 0.9,
+  "target_and_aux_calc": "EMATeacher",
+  "teacher_model": {}
+}
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
@@ -125,6 +145,19 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
 
 num_mini_epochs: 32
 samples_per_mini_epoch: 4096
+#################
+###  Trainer  ###
+#################
+with_mixed_precision: True
+with_flash_attention: True
+compile_model: False
+with_fsdp: True
+attention_dtype: bf16
+mlp_norm_eps: 1e-5
+norm_eps: 1e-4
+
+num_epochs: 32
+samples_per_epoch: 4096
 samples_per_validation: 512
 
 shuffle: True
@@ -172,3 +205,4 @@ train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
+

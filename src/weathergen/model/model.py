@@ -45,10 +45,13 @@ from weathergen.utils.utils import get_dtype
 
 logger = logging.getLogger(__name__)
 
+
+@dataclasses.dataclass
 class ModelOutput:
     """
     A dataclass to encapsulate the model output and give a clear API.
     """
+
     physical: dict[str, torch.Tensor]
     latent: dict[str, torch.Tensor]
 
@@ -480,7 +483,7 @@ class Model(torch.nn.Module):
             self.latent_heads["iBOT-and-DINO-head"] = LatentPredictionHead(
                 "iBOT-and-DINO-head", cf.ae_global_dim_embed, cf.latent_pred_K
             )
-        elif ("JEPA" in target_losses or "iBOT" in target_losses or "DINO" in target_losses):
+        elif "JEPA" in target_losses or "iBOT" in target_losses or "DINO" in target_losses:
             for loss in target_losses:
                 self.latent_heads[loss] = LatentPredictionHead(
                     f"{loss}-head", cf.ae_global_dim_embed, cf.latent_pred_K
@@ -913,12 +916,12 @@ def get_model(
     targets_coords_size,
     **kwargs,
 ):
-    if student_or_teacher == "student" or student_or_teacher == "teacher":
+    if student_or_teacher == "student":
         return Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
     else:
-        if cf["training_mode"] == "masking":  # TODO implement mode "student-teacher-pretrain":
+        if cf["training_mode"] == "student-teacher":  # implement mode "student-teacher":
             teacher_cf = copy.deepcopy(cf)
-            for key, val in teacher_cf["teacher_model"].items():
+            for key, val in teacher_cf.training_mode_config["teacher_model"].items():
                 teacher_cf[key] = val
             teacher = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
             return teacher

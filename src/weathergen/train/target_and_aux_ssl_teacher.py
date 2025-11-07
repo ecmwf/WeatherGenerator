@@ -3,7 +3,11 @@ from typing import Any
 import torch
 
 from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase
-from weathergen.train.ssl_losses_utils import iBOTPatchTargetProcessing, DINOTargetProcessing, JEPATargetProcessing 
+from weathergen.train.ssl_losses_utils import (
+    iBOTPatchTargetProcessing,
+    DINOTargetProcessing,
+    JEPATargetProcessing,
+)
 
 
 class EMATeacher(TargetAndAuxModuleBase):
@@ -17,7 +21,7 @@ class EMATeacher(TargetAndAuxModuleBase):
         self.batch_size = batch_size
 
         # is a dict of TargetProcessing classes as we may use several in parallel
-        self.postprocess_targets = get_target_postprocessing(kwargs["target_losses"], **kwargs)
+        self.postprocess_targets = get_target_postprocessing(kwargs["losses"], **kwargs)
 
         self.reset()
 
@@ -40,15 +44,12 @@ class EMATeacher(TargetAndAuxModuleBase):
         DINO, iBOT, JEPA will have different heads, which then probably should be computed
         in the postprocess_targets modules, which are nn.Modules
         """
-        targets = self.ema_model.forward_eval(
-            model_params, batch, forecast_offset, forecast_steps
-        )
+        targets = self.ema_model.forward_eval(model_params, batch, forecast_offset, forecast_steps)
         targets = {}
         for loss_name, target_module in self.postprocess_targets.items():
             with torch.no_grad():
-                targets[loss_name] = target_module(targets["loss_name"])
+                targets[loss_name] = None  # target_module(targets["loss_name"])
         return targets, None
-
 
 
 def get_target_postprocessing(target_losses: list[str], **kwargs):
@@ -56,19 +57,22 @@ def get_target_postprocessing(target_losses: list[str], **kwargs):
     for loss_name in target_losses:
         if loss_name == "iBOT":
             return_dict[loss_name] = iBOTPatchTargetProcessing(
-                    patch_out_dim=kwargs["ibot_patch_out_dim"],
-                    center_momentum=kwargs["center_momentum"],
-                    student_temp=kwargs["student_temp"]
+                patch_out_dim=kwargs["ibot_patch_out_dim"],
+                center_momentum=kwargs["center_momentum"],
+                student_temp=kwargs["student_temp"],
+                teacher_temp=kwargs["teacher_temp"],
+                teacher_style=kwargs["teacher_style"],
             )
         elif loss_name == "DINO":
             return_dict[loss_name] = DINOTargetProcessing(
-                    patch_out_dim=kwargs["dino_out_dim"],
-                    center_momentum=kwargs["center_momentum"],
-                    student_temp=kwargs["student_temp"]
+                out_dim=kwargs["dino_out_dim"],
+                center_momentum=kwargs["center_momentum"],
+                student_temp=kwargs["student_temp"],
+                teacher_style=kwargs["teacher_style"],
             )
         elif loss_name == "JEPA":
             return_dict[loss_name] = JEPATargetProcessing()
         else:
-            raise NotImplementedError(f"Latent SSL loss {loss_name} is not implemented")
+            # We skip losses that are not handled by the EMATeacher
+            continue
     return return_dict
-

@@ -733,6 +733,7 @@ class TargetPredictionEngine(nn.Module):
         )
         return output
 
+
 class LatentPredictionHead(nn.Module):
     def __init__(self, name, in_dim, out_dim):
         super().__init__()
