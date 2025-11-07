@@ -11,14 +11,12 @@ import logging
 from pathlib import Path
 from typing import override
 
-import dask.array as da
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
-    DTRange,
     ReaderData,
     TimeWindowHandler,
     TIndex,
@@ -28,14 +26,15 @@ from weathergen.datasets.data_reader_base import (
 
 _logger = logging.getLogger(__name__)
 
+
 # TODO make this datareader works with multiple datasets in ZARR format
 class DataReaderEObs(DataReaderTimestep):
     """
     Data reader for gridded Zarr datasets with regular lat/lon structure.
-    
+
     This reader handles datasets stored as Zarr with dimensions (time, latitude, longitude)
     and converts the gridded data to point-wise format required by the framework.
-    
+
     The reader implements lazy initialization to work efficiently with multiple dataloader workers.
     """
 
@@ -76,7 +75,7 @@ class DataReaderEObs(DataReaderTimestep):
         self.geoinfo_channels = []
         self.geoinfo_idx = []
         self.properties = {}
-        
+
         # Grid properties
         self.latitudes: NDArray | None = None
         self.longitudes: NDArray | None = None
@@ -104,12 +103,7 @@ class DataReaderEObs(DataReaderTimestep):
 
         try:
             # Open the Zarr dataset with xarray
-            self.ds = xr.open_zarr(
-                self._filename,
-                consolidated=True,
-                chunks=None,
-                zarr_format=2
-                )
+            self.ds = xr.open_zarr(self._filename, consolidated=True, chunks=None, zarr_format=2)
         except Exception as e:
             name = self._stream_info["name"]
             _logger.error(f"Failed to open {name} at {self._filename}: {e}")
@@ -123,14 +117,9 @@ class DataReaderEObs(DataReaderTimestep):
         data_end_time = np.datetime64(time_coord[-1])
 
         # Check if dataset overlaps with requested time window
-        if (
-            self._tw_handler.t_start >= data_end_time
-            or self._tw_handler.t_end <= data_start_time
-        ):
+        if self._tw_handler.t_start >= data_end_time or self._tw_handler.t_end <= data_start_time:
             name = self._stream_info["name"]
-            _logger.warning(
-                f"{name} is not supported over data loader window. Stream is skipped."
-            )
+            _logger.warning(f"{name} is not supported over data loader window. Stream is skipped.")
             self.init_empty()
             self._initialized = True
             return
@@ -156,9 +145,7 @@ class DataReaderEObs(DataReaderTimestep):
         )
 
         # Calculate valid time range indices
-        time_mask = (time_coord >= self._tw_handler.t_start) & (
-            time_coord < self._tw_handler.t_end
-        )
+        time_mask = (time_coord >= self._tw_handler.t_start) & (time_coord < self._tw_handler.t_end)
         self.len = int(np.sum(time_mask))
 
         if self.len <= 0:
@@ -183,9 +170,7 @@ class DataReaderEObs(DataReaderTimestep):
                 f"Longitude values outside valid range [-180, 180] in stream "
                 f"'{self._stream_info['name']}'. Converting from [0, 360] format."
             )
-            self.longitudes = ((self.longitudes + 180.0) % 360.0 - 180.0).astype(
-                np.float32
-            )
+            self.longitudes = ((self.longitudes + 180.0) % 360.0 - 180.0).astype(np.float32)
 
         self.n_lat = len(self.latitudes)
         self.n_lon = len(self.longitudes)
@@ -405,9 +390,9 @@ class DataReaderEObs(DataReaderTimestep):
 
         # Create coordinate grid
         lon_grid, lat_grid = np.meshgrid(self.longitudes, self.latitudes)
-        coords_single = np.stack(
-            [lat_grid.flatten(), lon_grid.flatten()], axis=1
-        ).astype(np.float32)
+        coords_single = np.stack([lat_grid.flatten(), lon_grid.flatten()], axis=1).astype(
+            np.float32
+        )
 
         # Repeat coordinates for each timestep
         coords = np.tile(coords_single, (len(t_idxs), 1))

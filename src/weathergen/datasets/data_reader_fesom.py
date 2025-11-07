@@ -43,7 +43,7 @@ class DataReaderFesom(DataReaderTimestep):
         tw_handler: TimeWindowHandler,
         filename: Path,
         stream_info: dict,
-        ) -> None:
+    ) -> None:
         # Store configuration but DO NOT open files here
         self.filenames = sorted(glob.glob(str(filename) + "/*"))
         self._tw_handler = tw_handler
