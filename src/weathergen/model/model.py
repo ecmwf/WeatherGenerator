@@ -14,6 +14,8 @@ import copy
 import logging
 import math
 import warnings
+from pathlib import Path
+import dataclasses
 
 import astropy_healpix as hp
 import astropy_healpix.healpy
@@ -42,6 +44,13 @@ from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
 
 logger = logging.getLogger(__name__)
+
+class ModelOutput:
+    """
+    A dataclass to encapsulate the model output and give a clear API.
+    """
+    physical: dict[str, torch.Tensor]
+    latent: dict[str, torch.Tensor]
 
 
 @dataclasses.dataclass
@@ -463,16 +472,17 @@ class Model(torch.nn.Module):
             )
 
         # Latent heads for losses
+        # TODO write the forward function for this, has to wait until other Model PRs are done
         target_losses = cf.get("target_losses", [])
         shared_heads = cf.get("shared_heads", False)
-        latent_heads = nn.ModuleDict()
+        self.latent_heads = nn.ModuleDict()
         if ("iBOT" in target_losses and "DINO" in target_losses) and shared_heads:
-            latent_heads["iBOT-and-DINO-head"] = LatentPredictionHead(
+            self.latent_heads["iBOT-and-DINO-head"] = LatentPredictionHead(
                 "iBOT-and-DINO-head", cf.ae_global_dim_embed, cf.latent_pred_K
             )
         elif ("JEPA" in target_losses or "iBOT" in target_losses or "DINO" in target_losses):
             for loss in target_losses:
-                latent_heads[loss] = LatentPredictionHead(
+                self.latent_heads[loss] = LatentPredictionHead(
                     f"{loss}-head", cf.ae_global_dim_embed, cf.latent_pred_K
                 )
 
@@ -638,6 +648,8 @@ class Model(torch.nn.Module):
 
         latents = {}
         latents["posteriors"] = posteriors
+        for name, head in self.latent_heads:
+            latents[name] = head(posteriors.mode())
 
         return ModelOutput(physical=preds_all, latent=latents)
 

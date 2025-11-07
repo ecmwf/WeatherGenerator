@@ -638,8 +638,8 @@ class Trainer(TrainerBase):
                 targets=targets,
             )
             if cf.latent_noise_kl_weight > 0.0:
-                kl = torch.cat([posterior.kl() for posterior in output.latent])
-                loss += cf.latent_noise_kl_weight * kl.mean()
+                kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
+                loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
 
             self.target_and_aux_calculator.update_state_pre_backward(
                 self.cf.istep, batch, self.model
