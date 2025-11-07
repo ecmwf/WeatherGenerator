@@ -625,7 +625,12 @@ class Trainer(TrainerBase):
             ):
                 output = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
                 targets, aux_outputs = self.target_and_aux_calculator.compute(
-                    bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
+                    self.cf.istep,
+                    batch,
+                    self.model_params,
+                    self.model,
+                    cf.forecast_offset,
+                    forecast_steps,
                 )
             targets = {"physical": batch[0]}
             loss, loss_values = self.loss_calculator.compute_loss(
@@ -636,7 +641,9 @@ class Trainer(TrainerBase):
                 kl = torch.cat([posterior.kl() for posterior in output.latent])
                 loss += cf.latent_noise_kl_weight * kl.mean()
 
-            self.target_and_aux_calculator.update_state_pre_backward(bidx, batch, self.model)
+            self.target_and_aux_calculator.update_state_pre_backward(
+                self.cf.istep, batch, self.model
+            )
 
             # backward pass
             self.optimizer.zero_grad()

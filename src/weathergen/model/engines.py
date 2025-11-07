@@ -732,3 +732,14 @@ class TargetPredictionEngine(nn.Module):
             else output
         )
         return output
+
+class LatentPredictionHead(nn.Module):
+    def __init__(self, name, in_dim, out_dim):
+        super().__init__()
+
+        self.name = name
+        # For now this is a Linear Layer TBD what this architecture should be
+        self.layer = nn.Linear(in_dim, out_dim, bias=False)
+
+    def forward(self, x):
+        return self.layer(x)

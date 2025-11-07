@@ -33,6 +33,7 @@ from weathergen.model.engines import (
     LocalAssimilationEngine,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
+    LatentPredictionHead,
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
@@ -460,6 +461,20 @@ class Model(torch.nn.Module):
                     stream_name=stream_name,
                 )
             )
+
+        # Latent heads for losses
+        target_losses = cf.get("target_losses", [])
+        shared_heads = cf.get("shared_heads", False)
+        latent_heads = nn.ModuleDict()
+        if ("iBOT" in target_losses and "DINO" in target_losses) and shared_heads:
+            latent_heads["iBOT-and-DINO-head"] = LatentPredictionHead(
+                "iBOT-and-DINO-head", cf.ae_global_dim_embed, cf.latent_pred_K
+            )
+        elif ("JEPA" in target_losses or "iBOT" in target_losses or "DINO" in target_losses):
+            for loss in target_losses:
+                latent_heads[loss] = LatentPredictionHead(
+                    f"{loss}-head", cf.ae_global_dim_embed, cf.latent_pred_K
+                )
 
         return self
 

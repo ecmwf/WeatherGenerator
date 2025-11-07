@@ -46,7 +46,7 @@ class EMATeacher(TargetAndAuxModuleBase):
         targets = {}
         for loss_name, target_module in self.postprocess_targets.items():
             with torch.no_grad():
-                targets[loss_name] = target_module(targets)
+                targets[loss_name] = target_module(targets["loss_name"])
         return targets, None
 
 
