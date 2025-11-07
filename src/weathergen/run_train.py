@@ -64,13 +64,14 @@ def inference_from_args(argl: list[str]):
     devices = Trainer.init_torch()
     cf = Trainer.init_ddp(cf)
 
-    init_loggers(cf.run_id)
+    run_dir_path = config.get_path_run(cf)
+    init_loggers(run_dir_path)
 
     logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
 
     cf.run_history += [(args.from_run_id, cf.istep)]
 
-    trainer = Trainer(cf.train_log_freq)
+    trainer = Trainer(cf.train_log_freq, run_dir_path)
     trainer.inference(cf, devices, args.from_run_id, args.epoch)
 
 
@@ -133,12 +134,13 @@ def train_continue_from_args(argl: list[str]):
     devices = Trainer.init_torch()
     cf = Trainer.init_ddp(cf)
 
-    init_loggers(cf.run_id)
+    run_dir_path = config.get_path_run(cf)
+    init_loggers(run_dir_path)
 
     # track history of run to ensure traceability of results
     cf.run_history += [(args.from_run_id, cf.istep)]
 
-    trainer = Trainer(cf.train_log_freq)
+    trainer = Trainer(cf.train_log_freq, run_dir_path)
     trainer.run(cf, devices, args.from_run_id, args.epoch)
 
 
@@ -175,7 +177,8 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     # if cf.rank == 0:
     # this line should probably come after the processes have been sorted out else we get lots
     # of duplication due to multiple process in the multiGPU case
-    init_loggers(cf.run_id)
+    run_dir_path = config.get_path_run(cf)
+    init_loggers(run_dir_path)
 
     logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
 
@@ -184,7 +187,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
 
-    trainer = Trainer(cf.train_log_freq)
+    trainer = Trainer(cf.train_log_freq, run_dir_path)
 
     try:
         trainer.run(cf, devices)

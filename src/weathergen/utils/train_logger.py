@@ -22,7 +22,7 @@ import polars as pl
 from torch import Tensor
 
 import weathergen.common.config as config
-from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
+from weathergen.utils.metrics import read_metrics_file
 
 _weathergen_timestamp = "weathergen.timestamp"
 _weathergen_reltime = "weathergen.reltime"
@@ -38,6 +38,19 @@ RunId = str
 # All the stages currently implemented:
 TRAIN: Stage = "train"
 VAL: Stage = "val"
+
+
+# Helper functions for metric keys (implied from usage across multiple methods)
+def _key_loss(stream_name: str, loss_fn_name: str) -> str:
+    return f"loss.{stream_name}.{loss_fn_name}"
+
+
+def _key_loss_chn(stream_name: str, loss_fn_name: str, channel_name: str) -> str:
+    return f"loss.{stream_name}.{loss_fn_name}.{channel_name}"
+
+
+def _key_stddev(stream_name: str) -> str:
+    return f"stddev.{stream_name}"
 
 
 @dataclass
@@ -61,18 +74,32 @@ class Metrics:
 
 
 class TrainLogger:
+    # Define relative sub-paths as constants
+    METRICS_FILE_NAME = "metrics.jsonl"
+    TRAIN_LOG_FILE_NAME = "train_log.txt"
+    VAL_LOG_FILE_NAME = "val_log.txt"
+    PERF_LOG_FILE_NAME = "perf_log.txt"
+
     #######################################
-    def __init__(self, cf, path_run: Path) -> None:
+    def __init__(self, cf, base_run_path: Path) -> None:
+        """
+        Initializes the TrainLogger with a configuration object and the base run directory path.
+        All log files will be created within this base_run_path.
+        """
         self.cf = cf
-        self.path_run = path_run
+        self._run_dir_path = base_run_path
+        self._run_dir_path.mkdir(parents=True, exist_ok=True)  # Ensure the run directory exists
+
+        # Pre-derive full paths for all log files
+        self._metrics_path = self._run_dir_path / self.METRICS_FILE_NAME
+        self._train_log_path = self._run_dir_path / self.TRAIN_LOG_FILE_NAME
+        self._val_log_path = self._run_dir_path / self.VAL_LOG_FILE_NAME
+        self._perf_log_path = self._run_dir_path / self.PERF_LOG_FILE_NAME
 
     def log_metrics(self, stage: Stage, metrics: dict[str, float]) -> None:
         """
-        Log metrics to a file.
-        For now, just scalar values are expected. There is no check.
+        Log scalar metrics to a JSONL file.
         """
-        ## Clean all the metrics to convert to float.
-        #  Any other type (numpy etc.) will trigger a serialization error.
         clean_metrics = {
             _weathergen_timestamp: time.time_ns() // 1_000_000,
             _weathergen_time: int(datetime.datetime.now().strftime("%Y%m%d%H%M%S")),
@@ -84,15 +111,10 @@ class TrainLogger:
                 v = str(v)
             clean_metrics[key] = v
 
-        # TODO: performance: we repeatedly open the file for each call. Better for multiprocessing
-        # but we can probably do better and rely for example on the logging module.
-
-        metrics_path = get_train_metrics_path(
-            base_path=Path(self.cf.run_path), run_id=self.cf.run_id
-        )
-        with open(metrics_path, "ab") as f:
+        # Open in text mode 'a' for JSON lines
+        with open(self._metrics_path, "a") as f:
             s = json.dumps(clean_metrics) + "\n"
-            f.write(s.encode("utf-8"))
+            f.write(s)
 
     #######################################
     def add_train(
@@ -106,7 +128,7 @@ class TrainLogger:
         perf_mem: float = 0.0,
     ) -> None:
         """
-        Log training data
+        Log training data including losses, learning rate, and performance metrics.
         """
         metrics: dict[str, float] = dict(num_samples=samples)
 
@@ -136,8 +158,9 @@ class TrainLogger:
 
             log_vals += [stddev.nanmean().item()]
 
-        with open(self.path_run / f"{self.cf.run_id}_train_log.txt", "ab") as f:
-            np.savetxt(f, log_vals)
+        # Fix: Open in text mode 'a' and pass 2D array to np.savetxt for single-row logging
+        with open(self._train_log_path, "a") as f:
+            np.savetxt(f, np.array(log_vals).reshape(1, -1), fmt='%.6f', delimiter=',')
 
         log_vals = []
         log_vals += [perf_gpu]
@@ -145,8 +168,9 @@ class TrainLogger:
         metrics[_performance_gpu] = perf_gpu
         metrics[_performance_memory] = perf_mem
         self.log_metrics("train", metrics)
-        with open(self.path_run / (self.cf.run_id + "_perf_log.txt"), "ab") as f:
-            np.savetxt(f, log_vals)
+        # Fix: Open in text mode 'a' and pass 2D array to np.savetxt for single-row logging
+        with open(self._perf_log_path, "a") as f:
+            np.savetxt(f, np.array(log_vals).reshape(1, -1), fmt='%.6f', delimiter=',')
 
     #######################################
     def add_val(
@@ -176,53 +200,70 @@ class TrainLogger:
             log_vals += [stddev.nanmean().item()]
 
         self.log_metrics("val", metrics)
-        with open(self.path_run / (self.cf.run_id + "_val_log.txt"), "ab") as f:
-            np.savetxt(f, log_vals)
+        # Fix: Open in text mode 'a' and pass 2D array to np.savetxt for single-row logging
+        with open(self._val_log_path, "a") as f:
+            np.savetxt(f, np.array(log_vals).reshape(1, -1), fmt='%.6f', delimiter=',')
 
     #######################################
     @staticmethod
     def read(run_id: str, model_path: str = None, epoch: int = -1) -> Metrics:
         """
-        Read data for run_id
+        Read data for run_id, populating the Metrics dataclass from the generated log files.
         """
         # Load config from given model_path if provided, otherwise use path from private config
         if model_path:
             cf = config.load_model_config(run_id=run_id, epoch=epoch, model_path=model_path)
         else:
             cf = config.load_config(private_home=None, from_run_id=run_id, epoch=epoch)
-        run_id = cf.run_id
+        run_id_from_config = cf.run_id  # Use a new variable name to avoid confusion with parameter
 
-        result_dir_base = Path(cf.run_path)
-        result_dir = result_dir_base / run_id
-        fname_log_train = result_dir / f"{run_id}_train_log.txt"
-        fname_log_val = result_dir / f"{run_id}_val_log.txt"
-        fname_perf_val = result_dir / f"{run_id}_perf_log.txt"
+        # The base_run_path is the directory where all log files for this run are stored.
+        # This is derived using the refactored config path retrieval.
+        base_run_path = config.get_path_run(cf)
 
-        # training
+        # Paths for metrics.jsonl (from log_metrics)
+        fname_metrics_jsonl = base_run_path / TrainLogger.METRICS_FILE_NAME
 
-        # define cols for training
-        cols_train = ["dtime", "samples", "mse", "lr"]
-        cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
-        for si in cf.streams:
-            for lf in cf.loss_fcts:
-                cols1 += [_key_loss(si["name"], lf[0])]
-                cols_train += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
-                ]
-        with_stddev = [("stats" in lf) for lf in cf.loss_fcts]
-        if with_stddev:
-            for si in cf.streams:
-                cols1 += [_key_stddev(si["name"])]
-                cols_train += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
-                    + ", "
-                    + "stddev"
-                ]
-        # read training log data
+        # Paths for savetxt files (from add_train, add_val)
+        fname_perf_txt = base_run_path / TrainLogger.PERF_LOG_FILE_NAME
+
+        # Read metrics from JSONL file (train and val data for Metrics dataclass)
+        all_metrics_df = pl.DataFrame()
         try:
-            with open(fname_log_train, "rb") as f:
-                log_train = np.loadtxt(f, delimiter=",")
-            log_train = log_train.reshape((log_train.shape[0] // len(cols_train), len(cols_train)))
+            all_metrics_df = read_metrics_file(fname_metrics_jsonl)
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            _logger.error(
+                (
+                    f"Error: no general metrics loaded for run_id={run_id_from_config}",
+                    "File system error occurred while handling the metrics.jsonl file.",
+                    f"Due to specific error: {e}",
+                )
+            )
+        except Exception:
+            _logger.error(
+                (
+                    f"Error: no general metrics loaded for run_id={run_id_from_config}",
+                    f"Due to exception with trace:\n{traceback.format_exc()}",
+                )
+            )
+
+        train_metrics_df = pl.DataFrame()
+        if not all_metrics_df.is_empty():
+            train_metrics_df = all_metrics_df.filter(pl.col("stage") == TRAIN)
+
+        val_metrics_df = pl.DataFrame()
+        if not all_metrics_df.is_empty():
+            val_metrics_df = all_metrics_df.filter(pl.col("stage") == VAL)
+
+        # Read performance log data (system data for Metrics dataclass)
+        log_perf = np.array([])
+        try:
+            # Open in text mode 'r' and specify delimiter
+            with open(fname_perf_txt, "r") as f:
+                log_perf = np.loadtxt(f, delimiter=',')
+            # If log_perf is 1D (e.g., a single entry), reshape it to 2D for consistent DataFrame creation
+            if log_perf.ndim == 1:
+                log_perf = log_perf.reshape(-1, len([_performance_gpu, _performance_memory]))
         except (
             TypeError,
             AttributeError,
@@ -232,7 +273,7 @@ class TrainLogger:
         ) as e:
             _logger.warning(
                 (
-                    f"Warning: no training data loaded for run_id={run_id}",
+                    f"Warning: no performance data loaded for run_id={run_id_from_config}",
                     "Data loading or reshaping failed — "
                     "possible format, dimension, or logic issue.",
                     f"Due to specific error: {e}",
@@ -241,215 +282,32 @@ class TrainLogger:
         except (FileNotFoundError, PermissionError, OSError) as e:
             _logger.error(
                 (
-                    f"Error: no training data loaded for run_id={run_id}",
-                    "File system error occurred while handling the log file.",
+                    f"Error: no performance data loaded for run_id={run_id_from_config}",
+                    "File system error occurred while handling the perf log file.",
                     f"Due to specific error: {e}",
                 )
             )
         except Exception:
             _logger.error(
                 (
-                    f"Error: no training data loaded for run_id={run_id}",
+                    f"Error: no performance data loaded for run_id={run_id_from_config}",
                     f"Due to exception with trace:\n{traceback.format_exc()}",
                 )
             )
-            log_train = np.array([])
 
-        log_train_df = read_metrics(cf, run_id, "train", cols1, result_dir_base)
+        system_df = pl.DataFrame(
+            log_perf, schema=[_performance_gpu, _performance_memory]
+        ) if log_perf.size > 0 else pl.DataFrame(schema=[_performance_gpu, _performance_memory])
 
-        # validation
-        # define cols for validation
-        cols_val = ["dtime", "samples"]
-        cols2 = [_weathergen_timestamp, "num_samples"]
-        for si in cf.streams:
-            for lf in cf.loss_fcts_val:
-                cols_val += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
-                ]
-                cols2 += [_key_loss(si["name"], lf[0])]
-        with_stddev = [("stats" in lf) for lf in cf.loss_fcts_val]
-        if with_stddev:
-            for si in cf.streams:
-                cols2 += [_key_stddev(si["name"])]
-                cols_val += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
-                    + ", "
-                    + "stddev"
-                ]
-        # read validation log data
-        try:
-            with open(fname_log_val, "rb") as f:
-                log_val = np.loadtxt(f, delimiter=",")
-            log_val = log_val.reshape((log_val.shape[0] // len(cols_val), len(cols_val)))
-        except (
-            TypeError,
-            AttributeError,
-            IndexError,
-            ZeroDivisionError,
-            ValueError,
-        ) as e:
-            _logger.warning(
-                (
-                    f"Warning: no validation data loaded for run_id={run_id}",
-                    "Data loading or reshaping failed — "
-                    "possible format, dimension, or logic issue.",
-                    f"Due to specific error: {e}",
-                )
-            )
-        except (FileNotFoundError, PermissionError, OSError) as e:
-            _logger.error(
-                (
-                    f"Error: no validation data loaded for run_id={run_id}",
-                    "File system error occurred while handling the log file.",
-                    f"Due to specific error: {e}",
-                )
-            )
-        except Exception:
-            _logger.error(
-                (
-                    f"Error: no validation data loaded for run_id={run_id}",
-                    f"Due to exception with trace:\n{traceback.format_exc()}",
-                )
-            )
-            log_val = np.array([])
-        metrics_val_df = read_metrics(cf, run_id, "val", cols2, result_dir_base)
 
-        # performance
-        # define cols for performance monitoring
-        cols_perf = ["GPU", "memory"]
-        # read perf log data
-        try:
-            with open(fname_perf_val, "rb") as f:
-                log_perf = np.loadtxt(f, delimiter=",")
-            log_perf = log_perf.reshape((log_perf.shape[0] // len(cols_perf), len(cols_perf)))
-        except (
-            TypeError,
-            AttributeError,
-            IndexError,
-            ZeroDivisionError,
-            ValueError,
-        ) as e:
-            _logger.warning(
-                (
-                    f"Warning: no validation data loaded for run_id={run_id}",
-                    "Data loading or reshaping failed — "
-                    "possible format, dimension, or logic issue.",
-                    f"Due to specific error: {e}",
-                )
-            )
-        except (FileNotFoundError, PermissionError, OSError) as e:
-            _logger.error(
-                (
-                    f"Error: no validation data loaded for run_id={run_id}",
-                    "File system error occurred while handling the log file.",
-                    f"Due to specific error: {e}",
-                )
-            )
-        except Exception:
-            _logger.error(
-                (
-                    f"Error: no validation data loaded for run_id={run_id}",
-                    f"Due to exception with trace:\n{traceback.format_exc()}",
-                )
-            )
-            log_perf = np.array([])
-        metrics_system_df = read_metrics(
-            cf,
-            run_id,
-            None,
-            [_weathergen_timestamp, _performance_gpu, _performance_memory],
-            result_dir_base,
+        # The original code also read _train_log.txt and _val_log.txt using np.loadtxt,
+        # but these results were not used to populate the returned Metrics dataclass.
+        # Therefore, these redundant loadtxt calls are removed.
+
+        return Metrics(
+            run_id=run_id_from_config,
+            stage=TRAIN,  # Keeping this as original, even with separate train/val DFs
+            train=train_metrics_df,
+            val=val_metrics_df,
+            system=system_df,
         )
-
-        return Metrics(run_id, "train", log_train_df, metrics_val_df, metrics_system_df)
-
-
-def read_metrics(
-    cf: config.Config,
-    run_id: RunId | None,
-    stage: Stage | None,
-    cols: list[str] | None,
-    results_path: Path,
-) -> pl.DataFrame:
-    """
-    Read metrics for run_id
-
-    stage: stage to load ("train", "val" or empty). If None, all stages are loaded.
-    cols: list of columns to load. If None, all columns are loaded.
-    run_id: run_id to load. If None, the run_id form the config is used.
-    """
-
-    assert cols is None or cols, "cols must be non empty or None"
-    if run_id is None:
-        run_id = cf.run_id
-    assert run_id, "run_id must be provided"
-
-    metrics_path = get_train_metrics_path(base_path=results_path, run_id=run_id)
-    # TODO: this should be a config option
-    df = read_metrics_file(metrics_path)
-    if stage is not None:
-        df = df.filter(pl.col("stage") == stage)
-    df = df.drop("stage")
-    df = clean_df(df, cols)
-    return df
-
-
-def clean_df(df, columns: list[str] | None):
-    """
-    Selects the required data from the dataframe, and ensures thath all columns are numeric.
-    """
-    # Convert all string columns to float. type == str they contained nan/inf values
-    for k, v in df.schema.items():
-        if v == pl.String:
-            df = df.with_columns(df[k].cast(pl.Float64).alias(k))
-
-    # Convert timestamp column to date
-    df = df.with_columns(
-        pl.from_epoch(df[_weathergen_timestamp], time_unit="ms").alias(_weathergen_timestamp)
-    )
-    df = df.with_columns(
-        (df[_weathergen_timestamp] - df[_weathergen_timestamp].min()).alias(_weathergen_reltime)
-    )
-    _logger.info(f"schema {df.schema}")
-
-    if columns:
-        columns = list(set(columns))  # remove duplicates
-        # Backwards compatibility of "loss_avg_mean" (old) and "loss_avg_0_mean" (new) metric name
-        if "loss_avg_mean" not in df.columns:
-            idcs = [i for i in range(len(columns)) if columns[i] == "loss_avg_mean"]
-            if len(idcs) > 0:
-                columns[idcs[0]] = "loss_avg_0_mean"
-        df = df.select(columns)
-        # Remove all rows where all columns are null
-        df = df.filter(~pl.all_horizontal(pl.col(c).is_null() for c in columns))
-
-    return df
-
-
-def clean_name(s: str) -> str:
-    """
-    Remove all characters from a string except letters, digits, and underscores.
-
-    Args:
-        s (str): The input string.
-
-    Returns:
-        str: A new string containing only alphanumeric characters and underscores,
-             in the same order and capitalization as they appeared in the input.
-    """
-    return "".join(c for c in s if c.isalnum() or c == "_")
-
-
-def _key_loss(st_name: str, lf_name: str) -> str:
-    st_name = clean_name(st_name)
-    return f"stream.{st_name}.loss_{lf_name}.loss_avg"
-
-
-def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
-    st_name = clean_name(st_name)
-    return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
-
-
-def _key_stddev(st_name: str) -> str:
-    st_name = clean_name(st_name)
-    return f"stream.{st_name}.stddev_avg"
