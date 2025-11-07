@@ -39,6 +39,29 @@ class TokenizerMasking(Tokenizer):
         self.masker.reset_rng(rng)
         self.rng = rng
 
+    def compute_crops(self, n_local: int, local_frac: float, local_strategy: str = "random"):
+        """
+        Ask the masker (Cropper) for one global crop and N local crops.
+        Returns (global_spec, [local_specs...]).
+        """
+        if hasattr(self.masker, "make_crops"):
+            return self.masker.make_crops(n_local=n_local, local_frac=local_frac, local_strategy=local_strategy)
+        # Fallback: no crops
+        L = self.healpix_level
+        num = 12 * (4 ** L)
+        empty = np.zeros(num, dtype=bool)
+        return (type("CS", (), {"level": L, "parent_level": 0, "keep_cells": empty}), [])
+
+    def use_keep_cells(self, keep_cells):
+        """
+        Context manager to apply a specific view (global/local) when batchifying.
+        """
+        if hasattr(self.masker, "use_keep_cells"):
+            return self.masker.use_keep_cells(keep_cells)
+        # no-op fallback
+        from contextlib import nullcontext
+        return nullcontext()
+
     def batchify_source(
         self,
         stream_info: dict,

@@ -28,7 +28,7 @@ from weathergen.datasets.cropping import Cropper
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
-from weathergen.datasets.tokenizer_cropping import TokenizerCropping
+#from weathergen.datasets.tokenizer_cropping import TokenizerCropping
 from weathergen.datasets.utils import (
     compute_idxs_predict,
     compute_offsets_scatter_embed,
@@ -240,8 +240,24 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             msg += "increase window length"
             assert self.input_window_steps == 1, msg
         elif cf.training_mode == "cropping":
+            print("The training_mode is cropping.")
             cropper = Cropper(cf)
             self.tokenizer = TokenizerMasking(cf.healpix_level, cropper)
+            print(f"[Sampler.__init__] cropping cfg: healpix_level={cf.healpix_level} | "
+                  f"hl_global={cf.cropping_config.get('hl_global', 0)} | "
+                  f"hl_child={cf.cropping_config.get('hl_child', cf.healpix_level)} | "
+                  f"rate_global={cf.cropping_rate_global} | "
+                  f"local_crops={cf.cropping_config.get('local_crops', False)} | "
+                  f"num_local={cf.cropping_config.get('num_local_crops', 1)} | "
+                  f"local_frac={cf.cropping_config.get('local_crop_frac', 1.0)} | "
+                  f"strategy={cf.cropping_config.get('local_strategy', 'random')}")
+            self._cropping = True
+            self._crop_cfg = dict(
+                n_local=int(cf.cropping_config.get("num_local_crops", 1)),
+                local_frac=float(cf.cropping_config.get("local_crop_frac", 0.2)),
+                local_strategy=str(cf.cropping_config.get("local_strategy", "random")),
+                generate_local_views=bool(cf.get("cropping_generate_local_views", False)),
+            )
         else:
             assert False, f"Unsupported training mode: {cf.training_mode}"
 
@@ -360,6 +376,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # use while loop due to the scattered nature of the data in time and to
             # ensure batches are not empty
             batch = []
+            views_batch = []  # for cropping local views
             while len(batch) < self.batch_size:
                 idx: TIndex = self.perms[idx_raw % self.perms.shape[0]]
                 idx_raw += 1
@@ -372,19 +389,33 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 streams_data: list[StreamData] = []
 
+                global_spec = None
+                local_specs = []
+                if getattr(self, "_cropping", False):
+                    global_spec, local_specs = self.tokenizer.compute_crops(
+                        n_local=self._crop_cfg["n_local"],
+                        local_frac=self._crop_cfg["local_frac"],
+                        local_strategy=self._crop_cfg["local_strategy"],
+                    )
+
+                # prepare holders for local student views if we intend to emit them
+                generate_locals = bool(getattr(self, "_cropping", False) and self._crop_cfg.get("generate_local_views", False))
+                locals_streams_all: list[list[StreamData]] = [[] for _ in range(len(local_specs))] if generate_locals else []
+
                 # for all streams
                 for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
+                    stream_name = stream_info.get("name", "?")
                     stream_data = StreamData(
                         idx, forecast_dt + self.forecast_offset, self.num_healpix_cells
                     )
 
                     # collect all targets for current stream
-                    rdata: IOReaderData = collect_datasources(stream_ds, idx, "source")
+                    rdata_src: IOReaderData = collect_datasources(stream_ds, idx, "source")
 
-                    if rdata.is_empty():
+                    if rdata_src.is_empty():
                         # work around for https://github.com/pytorch/pytorch/issues/158719
                         # create non-empty mean data instead of empty tensor
-                        rdata = spoof(
+                        rdata_src = spoof(
                             self.healpix_level,
                             time_win_source.start,
                             stream_ds[0].get_geoinfo_size(),
@@ -392,34 +423,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         )
                         stream_data.source_is_spoof = True
                     
-                    logger.debug("[Sampler] idx=%s | stream=%s | time_win=%s | token_size=%s",
-                                idx, stream_info.get("name", "?"), str(time_win_source), stream_info.get("token_size"))
-
-                    logger.debug("[Sampler] rdata.data.shape=%s", rdata.data.shape)
                     # preprocess data for model input
-                    (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
-                        stream_info,
-                        readerdata_to_torch(rdata),
-                        (time_win_source.start, time_win_source.end),
-                        stream_ds[0].normalize_coords,
-                    )
-                    logger.debug("[Sampler] ss_cells.len=%s | ss_lens.shape=%s | ss_centroids.shape=%s",
-                                len(ss_cells), ss_lens.shape, len(ss_centroids))
+                    with self.tokenizer.use_keep_cells(global_spec.keep_cells if global_spec else None):
+                        (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
+                            stream_info,
+                            readerdata_to_torch(rdata_src),
+                            (time_win_source.start, time_win_source.end),
+                            stream_ds[0].normalize_coords,
+                        )
                     
-                    # count how many cells are non-empty
-                    non_empty_cells = 0
-                    for l in ss_lens:
-                        if l > 0:
-                            non_empty_cells += 1
-                    logger.debug("[Sampler] non_empty_cells=%s / %s", non_empty_cells, len(ss_lens))
-                    
-                    # debug the ss_cells content 10 idx only
-                    for cidx, cell in enumerate(ss_cells):
-                        if cidx < 1034 and cidx >= 1024:
-                            logger.debug("[Sampler] ss_cells[%s].shape=%s", cidx, cell.shape)
-                        
                     # TODO: rdata only be collected in validation mode
-                    stream_data.add_source(rdata, ss_lens, ss_cells, ss_centroids)
+                    stream_data.add_source(rdata_src, ss_lens, ss_cells, ss_centroids)
 
                     # target
 
@@ -431,14 +445,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         time_win_target = self.time_window_handler.window(step_forecast_dt)
 
                         # collect all targets for current stream
-                        rdata: IOReaderData = collect_datasources(
+                        rdata_tgt: IOReaderData = collect_datasources(
                             stream_ds, step_forecast_dt, "target"
                         )
 
-                        if rdata.is_empty():
+                        if rdata_tgt.is_empty():
                             # work around for https://github.com/pytorch/pytorch/issues/158719
                             # create non-empty mean data instead of empty tensor
-                            rdata = spoof(
+                            rdata_tgt = spoof(
                                 self.healpix_level,
                                 time_win_target.start,
                                 stream_ds[0].get_geoinfo_size(),
@@ -450,7 +464,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
                             stream_info,
                             self.sampling_rate_target,
-                            readerdata_to_torch(rdata),
+                            readerdata_to_torch(rdata_tgt),
                             (time_win_target.start, time_win_target.end),
                         )
 
@@ -459,6 +473,49 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # merge inputs for sources and targets for current stream
                     streams_data += [stream_data]
 
+                    # ---- Build local student views (optional) ----
+                    if generate_locals:
+                        print("Generating local views for cropping...")
+                        
+
+                        for li, lspec in enumerate(local_specs):
+                            sd_loc = StreamData(idx, forecast_dt + self.forecast_offset, self.num_healpix_cells)
+                            rdata_src: IOReaderData = collect_datasources(stream_ds, idx, "source")
+                            with self.tokenizer.use_keep_cells(lspec.keep_cells):
+                                (ls_cells, ls_lens, ls_centroids) = self.tokenizer.batchify_source(
+                                    stream_info,
+                                    readerdata_to_torch(rdata_src),
+                                    (time_win_source.start, time_win_source.end),
+                                    stream_ds[0].normalize_coords,
+                                )
+                            sd_loc.add_source(rdata_src, ls_lens, ls_cells, ls_centroids)
+
+                            # Optional: also crop targets for locals (keeps consistency with teacher)
+                            for fstep in range(self.forecast_offset, self.forecast_offset + forecast_dt + 1):
+                                step_dt = idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
+                                time_win_target = self.time_window_handler.window(step_dt)
+
+                                # collect all targets for current stream (use target rdata)
+                                rdata_tgt: IOReaderData = collect_datasources(stream_ds, step_dt, "target")
+                                if rdata_tgt.is_empty():
+                                    rdata_tgt = spoof(
+                                        self.healpix_level,
+                                        time_win_target.start,
+                                        stream_ds[0].get_geoinfo_size(),
+                                        stream_ds[0].mean[stream_ds[0].target_idx],
+                                    )
+                                    sd_loc.target_is_spoof = True
+
+                                (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
+                                    stream_info,
+                                    self.sampling_rate_target,
+                                    readerdata_to_torch(rdata_tgt),
+                                    (time_win_target.start, time_win_target.end),
+                                )
+                                sd_loc.add_target(fstep, tt_cells, tc, tt_c, tt_t)
+
+                            locals_streams_all[li].append(sd_loc)
+
                 # Reset masking strategy for next batch item
                 if hasattr(self.tokenizer, "masker"):
                     self.tokenizer.masker.reset_batch_strategy()
@@ -466,19 +523,62 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # skip completely empty batch item or when all targets are empty -> no grad
                 if not (all(s.empty() or s.target_empty() for s in streams_data)):
                     batch += [streams_data]
+                    if generate_locals:
+                        views_batch += [{
+                            "global": global_spec,
+                            "locals": local_specs,
+                            "local_streams": locals_streams_all,  # [n_local][n_streams]
+                        }]
 
             # aggregated lens of tokens per cell
             source_cell_lens = compute_source_cell_lens(batch)
 
             # compute offsets for scatter computation after embedding
-            batch = compute_offsets_scatter_embed(batch)
+            batch = compute_offsets_scatter_embed(batch)        
 
             # compute offsets and auxiliary data needed for prediction computation
             # (info is not per stream so separate data structure)
             target_coords_idx = compute_idxs_predict(self.forecast_offset + forecast_dt, batch)
 
             assert len(batch) == self.batch_size
-            yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
+
+            # Prepare local views (full pass) if generated
+            locals_prepared = None
+            if getattr(self, "_cropping", False) and self._crop_cfg.get("generate_local_views", False):
+                n_locals = len(local_specs)
+                if n_locals > 0 and len(views_batch) == self.batch_size:
+                    locals_prepared = []
+                    for li in range(n_locals):
+                        # Collect li-th local view across batch items to form a "local batch"
+                        local_batch_items = [views_batch[b]["local_streams"][li] for b in range(len(batch))]
+                        # Compute lens / offsets / prediction indices for this local batch
+                        l_source_cell_lens = compute_source_cell_lens(local_batch_items)
+                        local_batch_items = compute_offsets_scatter_embed(local_batch_items)
+                        l_target_coords_idx = compute_idxs_predict(self.forecast_offset + forecast_dt, local_batch_items)
+                        locals_prepared.append({
+                            "batch": local_batch_items,                 # list[list[StreamData]]
+                            "source_cell_lens": l_source_cell_lens,     # tensor
+                            "target_coords_idx": l_target_coords_idx,   # list per forecast step
+                        })
+                    # Attach summary counts for quick inspection
+                    print("[Sampler] locals_prepared lens_summary=",
+                          [lp["source_cell_lens"].sum().item() for lp in locals_prepared])
+                else:
+                    print("[Sampler] Skipping locals_prepared (n_locals=0 or incomplete views_batch).")
+
+            ### OLD TESTING
+            if getattr(self, "_cropping", False) and self._crop_cfg.get("generate_local_views", False):
+                #yield (batch, source_cell_lens, target_coords_idx, forecast_dt, views_batch)
+                ####### TESTING PASSING A LOCAL VIEW #########
+                yield (local_batch_items, l_source_cell_lens, l_target_coords_idx, forecast_dt, batch)
+            else:
+                yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
+
+            #if getattr(self, "_cropping", False) and self._crop_cfg.get("generate_local_views", False):
+            #    # Yield teacher batch plus raw per-item views_batch and aggregated locals_prepared
+            #    yield (batch, source_cell_lens, target_coords_idx, forecast_dt, views_batch, locals_prepared)
+            #else:
+            #    yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
 
     ###################################################
     def __len__(self):
