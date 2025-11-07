@@ -15,15 +15,11 @@
 ## --format netcdf --type prediction target --fsteps 1 --samples 1
 import argparse
 import logging
-import re
 import sys
-from multiprocessing import Pool
 from pathlib import Path
 
 import numpy as np
-import xarray as xr
 from omegaconf import OmegaConf
-from tqdm import tqdm
 
 from weathergen.common.config import _REPO_ROOT
 from weathergen.evaluate.export.export_utils import get_data
@@ -36,6 +32,7 @@ if not _logger.handlers:
     formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     handler.setFormatter(formatter)
     _logger.addHandler(handler)
+
 
 def parse_args(args: list) -> argparse.Namespace:
     """

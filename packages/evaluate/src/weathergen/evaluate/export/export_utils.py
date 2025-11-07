@@ -9,12 +9,12 @@ from tqdm import tqdm
 
 from weathergen.common.config import get_model_results
 from weathergen.common.io import ZarrIO
-
-from weathergen.evaluate.export.metadata import add_gaussian_grid_metadata, add_conventions
+from weathergen.evaluate.export.metadata import add_conventions, add_gaussian_grid_metadata
 from weathergen.evaluate.export.regrid_utils import reshape_dataset_adaptive
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
+
 
 def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
     """
@@ -138,6 +138,7 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
 
     return dataset
 
+
 def output_filename(
     prefix: str,
     run_id: str,
@@ -192,6 +193,7 @@ def get_data_worker(args: tuple) -> xr.DataArray:
         elif dtype == "prediction":
             data = out.prediction
     return data
+
 
 def get_data(
     run_id: str,
@@ -370,6 +372,3 @@ def save_sample_to_netcdf(
         }
         sample_all_steps = add_conventions(stream, run_id, sample_all_steps)
         sample_all_steps.to_netcdf(out_fname, mode="w", compute=False)
-
-
-

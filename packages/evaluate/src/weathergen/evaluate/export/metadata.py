@@ -1,9 +1,11 @@
 import logging
+
 import numpy as np
 import xarray as xr
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
+
 
 def add_gaussian_grid_metadata(ds: xr.Dataset, grid_info: dict | None = None) -> xr.Dataset:
     """

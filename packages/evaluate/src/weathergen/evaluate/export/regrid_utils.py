@@ -1,5 +1,6 @@
 import logging
 import re
+
 import numpy as np
 import xarray as xr
 
@@ -9,6 +10,7 @@ _logger.setLevel(logging.INFO)
 """
 Enhanced functions to handle Gaussian grids when converting from Zarr to NetCDF.
 """
+
 
 def detect_grid_type(input_data_array: xr.DataArray) -> str:
     """Detect whether data is on a regular lat/lon grid or Gaussian grid."""
@@ -30,6 +32,7 @@ def detect_grid_type(input_data_array: xr.DataArray) -> str:
 
     # Otherwise it's Gaussian (irregular spacing or reduced grid)
     return "gaussian"
+
 
 def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
     """
