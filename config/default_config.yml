@@ -161,3 +161,24 @@ train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
+
+
+# Tags for experiment tracking
+# These tags will be logged in MLFlow along with completed runs for train, eval, val
+# The tags are free-form, with the following rules:
+# - tags should be primitive types (strings, numbers, booleans). NO lists or dictionaries
+# - tags should not duplicate existing config entries.
+# - try to reuse existing tags where possible. MLFlow does not like having too many unique tags
+# - do not use long strings in values (less than 20 characters is a good rule of thumb, we may enforce this in the future)
+wgtags:
+  # The name of the organization of the person running the experiment.
+  # This may be autofilled in the future. Expected values are lowercase strings:
+  # e.g. "ecmwf", "cmcc", "metnor", 
+  org: None
+  # The name of the experiment. This is a unique codename for the experiment campaign being run.
+  # This is expected to be the primary tag for comparing experiments in MLFlow.
+  # Expected values are lowercase strings with no spaces, just underscores:
+  # Examples: "rollout_ablation_grid"  
+  exp: None
+  # *** Experiment-specific tags ***
+  grid: None
