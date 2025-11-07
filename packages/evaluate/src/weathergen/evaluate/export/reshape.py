@@ -12,13 +12,26 @@ Enhanced functions to handle Gaussian grids when converting from Zarr to NetCDF.
 """
 
 
-def detect_grid_type(input_data_array: xr.DataArray) -> str:
-    """Detect whether data is on a regular lat/lon grid or Gaussian grid."""
-    if "lat" not in input_data_array.coords or "lon" not in input_data_array.coords:
+def detect_grid_type(data: xr.DataArray) -> str:
+    """
+    Detect whether data is on a regular lat/lon grid or Gaussian grid.
+
+    Parameters
+    ----------
+    data:
+        input dataset.
+
+    Returns
+    -------
+    str:
+        String with the grid type.
+        Supported options at the moment: "unknown", "regular", "gaussian"
+    """
+    if "lat" not in data.coords or "lon" not in data.coords:
         return "unknown"
 
-    lats = input_data_array.coords["lat"].values
-    lons = input_data_array.coords["lon"].values
+    lats = data.coords["lat"].values
+    lons = data.coords["lon"].values
 
     unique_lats = np.unique(lats)
     unique_lons = np.unique(lons)
@@ -34,14 +47,14 @@ def detect_grid_type(input_data_array: xr.DataArray) -> str:
     return "gaussian"
 
 
-def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
+def find_pl(vars: list) -> tuple[dict[str, list[str]], list[int]]:
     """
     Find all the pressure levels for each variable using regex and returns a dictionary
     mapping variable names to their corresponding pressure levels.
 
     Parameters
     ----------
-        all_variables : list of variable names with pressure levels (e.g.,'q_500','t_2m').
+        vars : list of variable names with pressure levels (e.g.,'q_500','t_2m').
 
     Returns
     -------
@@ -53,7 +66,7 @@ def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
     """
     var_dict = {}
     pl = []
-    for var in all_variables:
+    for var in vars:
         match = re.search(r"^([a-zA-Z0-9_]+)_(\d+)$", var)
         if match:
             var_name = match.group(1)
@@ -66,13 +79,13 @@ def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
     return var_dict, pl
 
 
-def reshape_dataset_adaptive(input_data_array: xr.DataArray) -> xr.Dataset:
+def reshape_dataset_adaptive(data: xr.DataArray) -> xr.Dataset:
     """
     Reshape dataset while preserving grid structure (regular or Gaussian).
 
     Parameters
     ----------
-    input_data_array : xr.DataArray
+    data : xr.DataArray
         Input data with dimensions (ipoint, channel)
 
     Returns
@@ -80,27 +93,27 @@ def reshape_dataset_adaptive(input_data_array: xr.DataArray) -> xr.Dataset:
     xr.Dataset
         Reshaped dataset appropriate for the grid type
     """
-    grid_type = detect_grid_type(input_data_array)
+    grid_type = detect_grid_type(data)
 
     # Original logic
-    var_dict, pl = find_pl(input_data_array.channel.values)
+    var_dict, pl = find_pl(data.channel.values)
     data_vars = {}
 
     for new_var, old_vars in var_dict.items():
         if len(old_vars) > 1:
             data_vars[new_var] = xr.DataArray(
-                input_data_array.sel(channel=old_vars).values,
+                data.sel(channel=old_vars).values,
                 dims=["ipoint", "pressure_level"],
             )
         else:
             data_vars[new_var] = xr.DataArray(
-                input_data_array.sel(channel=old_vars[0]).values,
+                data.sel(channel=old_vars[0]).values,
                 dims=["ipoint"],
             )
 
     reshaped_dataset = xr.Dataset(data_vars)
     reshaped_dataset = reshaped_dataset.assign_coords(
-        ipoint=input_data_array.coords["ipoint"],
+        ipoint=data.coords["ipoint"],
         pressure_level=pl,
     )
 

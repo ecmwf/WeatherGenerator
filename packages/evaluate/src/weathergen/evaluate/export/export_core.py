@@ -1,201 +1,25 @@
 import logging
 from multiprocessing import Pool
-from pathlib import Path
 
-import numpy as np
 import xarray as xr
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
 from weathergen.common.config import get_model_results
 from weathergen.common.io import ZarrIO
-from weathergen.evaluate.export.metadata import add_conventions, add_gaussian_grid_metadata
-from weathergen.evaluate.export.regrid_utils import reshape_dataset_adaptive
+from weathergen.evaluate.export.cf_utils import (
+    add_conventions,
+    add_gaussian_grid_metadata,
+    cf_parser_gaussian_aware,
+)
+from weathergen.evaluate.export.io_utils import get_data_worker, output_filename
+from weathergen.evaluate.export.reshape import reshape_dataset_adaptive
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
 
-def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
-    """
-    Modified CF parser that handles both regular and Gaussian grids.
-
-    Parameters
-    ----------
-    config : OmegaConf
-        Configuration for CF parsing
-    ds : xr.Dataset
-        Input dataset
-
-    Returns
-    -------
-    xr.Dataset
-        Parsed dataset with appropriate structure for grid type
-    """
-    # Detect if this is a Gaussian grid
-    is_gaussian = "ncells" in ds.dims
-
-    variables = {}
-    mapping = config["variables"]
-
-    # Handle dimensions based on grid type
-    if is_gaussian:
-        # For Gaussian grids, keep ncells and don't try to create lat/lon dimensions
-        for var_name in ds.data_vars:
-            if var_name in ["lat", "lon"]:
-                continue
-
-            variable = ds[var_name]
-
-            if var_name not in mapping:
-                # Variable not in mapping - skip or keep as-is
-                variables[var_name] = variable
-                continue
-
-            dims = list(variable.dims)
-
-            attributes = dict(
-                standard_name=mapping[var_name].get("std", var_name),
-                units=mapping[var_name].get("std_unit", "unknown"),
-                coordinates="lat lon",  # Mark auxiliary coordinates
-            )
-
-            # Get mapped variable name or use original
-            mapped_name = mapping[var_name].get("var", var_name)
-
-            variables[mapped_name] = xr.DataArray(
-                data=variable.values,
-                dims=dims,
-                coords={coord: ds.coords[coord] for coord in variable.coords if coord in ds.coords},
-                attrs=attributes,
-                name=mapped_name,
-            )
-
-        # Preserve lat/lon as coordinate variables with proper attributes
-        if "lat" in ds.coords:
-            ds.coords["lat"].attrs = {
-                "standard_name": "latitude",
-                "long_name": "latitude",
-                "units": "degrees_north",
-            }
-        if "lon" in ds.coords:
-            ds.coords["lon"].attrs = {
-                "standard_name": "longitude",
-                "long_name": "longitude",
-                "units": "degrees_east",
-            }
-
-    else:
-        # Original logic for regular grids
-        ds_attributes = {}
-        for dim_name, dim_dict in config["dimensions"].items():
-            if dim_name == dim_dict["wg"]:
-                dim_attributes = dict(standard_name=dim_dict.get("std", None))
-                if dim_dict.get("std_unit", None) is not None:
-                    dim_attributes["units"] = dim_dict["std_unit"]
-                ds_attributes[dim_dict["wg"]] = dim_attributes
-                continue
-
-            if dim_name in ds.dims:
-                ds = ds.rename_dims({dim_name: dim_dict["wg"]})
-
-            dim_attributes = dict(standard_name=dim_dict.get("std", None))
-            if "std_unit" in dim_dict and dim_dict["std_unit"] is not None:
-                dim_attributes["units"] = dim_dict["std_unit"]
-            ds_attributes[dim_dict["wg"]] = dim_attributes
-
-        for var_name in ds.data_vars:
-            dims = ["pressure", "valid_time", "latitude", "longitude"]
-            if mapping[var_name]["level_type"] == "sfc":
-                dims.remove("pressure")
-
-            coordinates = {}
-            for coord, new_name in config["coordinates"][mapping[var_name]["level_type"]].items():
-                coordinates |= {
-                    new_name: (
-                        ds.coords[coord].dims,
-                        ds.coords[coord].values,
-                        ds_attributes[new_name],
-                    )
-                }
-
-            variable = ds[var_name]
-            attributes = dict(
-                standard_name=mapping[var_name]["std"],
-                units=mapping[var_name]["std_unit"],
-            )
-
-            variables[mapping[var_name]["var"]] = xr.DataArray(
-                data=variable.values,
-                dims=dims,
-                coords={**coordinates, "valid_time": ds["valid_time"].values},
-                attrs=attributes,
-                name=mapping[var_name]["var"],
-            )
-
-    dataset = xr.merge(variables.values())
-    dataset.attrs = ds.attrs
-
-    return dataset
-
-
-def output_filename(
-    prefix: str,
-    run_id: str,
-    output_dir: str,
-    output_format: str,
-    forecast_ref_time: np.datetime64,
-) -> Path:
-    """
-    Generate output filename based on prefix (should refer to type e.g. pred/targ), run_id, sample
-    index, output directory, format and forecast_ref_time.
-
-    Parameters
-    ----------
-        prefix : Prefix for file name (e.g., 'pred' or 'targ').
-        run_id :Run ID to include in the filename.
-        output_dir : Directory to save the output file.
-        output_format : Output file format (currently only 'netcdf' supported).
-        forecast_ref_time : Forecast reference time to include in the filename.
-
-    Returns
-    -------
-        Full path to the output file.
-    """
-    if output_format not in ["netcdf"]:
-        raise ValueError(
-            f"Unsupported output format: {output_format}, supported formates are ['netcdf']"
-        )
-    file_extension = "nc"
-    frt = np.datetime_as_string(forecast_ref_time, unit="h")
-    out_fname = Path(output_dir) / f"{prefix}_{frt}_{run_id}.{file_extension}"
-    return out_fname
-
-
-def get_data_worker(args: tuple) -> xr.DataArray:
-    """
-    Worker function to retrieve data for a single sample and forecast step.
-
-    Parameters
-    ----------
-        args : Tuple containing (sample, fstep, run_id, stream, type).
-
-    Returns
-    -------
-        xarray DataArray for the specified sample and forecast step.
-    """
-    sample, fstep, run_id, stream, dtype, epoch, rank = args
-    fname_zarr = get_model_results(run_id, epoch, rank)
-    with ZarrIO(fname_zarr) as zio:
-        out = zio.get_data(sample, stream, fstep)
-        if dtype == "target":
-            data = out.target
-        elif dtype == "prediction":
-            data = out.prediction
-    return data
-
-
-def get_data(
+def export_model_outputs(
     run_id: str,
     samples: list,
     stream: str,

@@ -22,7 +22,7 @@ import numpy as np
 from omegaconf import OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
-from weathergen.evaluate.export.export_utils import get_data
+from weathergen.evaluate.export.export_core import export_model_outputs
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -40,10 +40,13 @@ def parse_args(args: list) -> argparse.Namespace:
 
     Parameters
     ----------
-        args : List of command line arguments.
+    args :
+        List of command line arguments.
+
     Returns
     -------
-        Parsed command line arguments."""
+        Parsed command line arguments.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--run-id",
@@ -186,7 +189,7 @@ def export_from_args(args: list) -> None:
 
     for dtype in data_type:
         _logger.info(f"Starting processing {dtype} for run ID {run_id}.")
-        get_data(
+        export_model_outputs(
             run_id,
             samples,
             stream,
