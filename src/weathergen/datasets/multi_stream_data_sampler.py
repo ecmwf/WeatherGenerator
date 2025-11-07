@@ -567,18 +567,18 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     print("[Sampler] Skipping locals_prepared (n_locals=0 or incomplete views_batch).")
 
             ### OLD TESTING
-            if getattr(self, "_cropping", False) and self._crop_cfg.get("generate_local_views", False):
-                #yield (batch, source_cell_lens, target_coords_idx, forecast_dt, views_batch)
-                ####### TESTING PASSING A LOCAL VIEW #########
-                yield (local_batch_items, l_source_cell_lens, l_target_coords_idx, forecast_dt, batch)
-            else:
-                yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
-
             #if getattr(self, "_cropping", False) and self._crop_cfg.get("generate_local_views", False):
-            #    # Yield teacher batch plus raw per-item views_batch and aggregated locals_prepared
-            #    yield (batch, source_cell_lens, target_coords_idx, forecast_dt, views_batch, locals_prepared)
+            #    #yield (batch, source_cell_lens, target_coords_idx, forecast_dt, views_batch)
+            #    ####### TESTING PASSING A LOCAL VIEW #########
+            #    yield (local_batch_items, l_source_cell_lens, l_target_coords_idx, forecast_dt, batch)
             #else:
             #    yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
+
+            if getattr(self, "_cropping", False) and self._crop_cfg.get("generate_local_views", False):
+                # Yield teacher batch plus raw per-item views_batch and aggregated locals_prepared
+                yield (batch, source_cell_lens, target_coords_idx, forecast_dt, views_batch, locals_prepared)
+            else:
+                yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
 
     ###################################################
     def __len__(self):
