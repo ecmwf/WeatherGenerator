@@ -147,7 +147,7 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                             metric,
                         )
 
-                        if metric_data is None:
+                        if metric_data is None or plot_score_maps:
                             metrics_to_compute.append(metric)
                             continue
 
