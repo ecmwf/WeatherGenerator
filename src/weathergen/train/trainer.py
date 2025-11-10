@@ -164,6 +164,21 @@ class Trainer(TrainerBase):
 
         if cf.with_ddp and not cf.with_fsdp:
             model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+        else:
+            with torch.device("meta"):
+                model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+
+        # freeze request model part
+        for name, module in model.named_modules():
+            name = module.name if hasattr(module, "name") else name
+            # avoid the whole model element which has name ''
+            if name == "":
+                continue
+            if re.fullmatch(self.freeze_modules, name) is not None:
+                freeze_weights(module)
+
+        if cf.with_ddp and not cf.with_fsdp:
+            # create DDP model if running without FSDP
             model = model.to("cuda")
             model = torch.nn.parallel.DistributedDataParallel(
                 model,
@@ -172,19 +187,9 @@ class Trainer(TrainerBase):
                 gradient_as_bucket_view=True,
                 bucket_cap_mb=512,
             )
-        else:
-            with torch.device("meta"):
-                model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
 
-            for name, module in model.named_modules():
-                name = module.name if hasattr(module, "name") else name
-                # avoid the whole model element which has name ''
-                if name == "":
-                    continue
-                if re.fullmatch(self.freeze_modules, name) is not None:
-                    freeze_weights(module)
-
-        if cf.with_ddp and cf.with_fsdp:
+        elif cf.with_ddp and cf.with_fsdp:
+            # with DDP *and() FSDP
             fsdp_kwargs = {
                 "mp_policy": (
                     MixedPrecisionPolicy(
