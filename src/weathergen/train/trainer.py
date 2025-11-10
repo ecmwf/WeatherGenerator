@@ -579,7 +579,7 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
-            forecast_steps = batch[-1]
+            forecast_steps = batch[3]
             batch = self.batch_to_device(batch)
 
             # evaluate model
@@ -665,7 +665,7 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    forecast_steps = batch[-1]
+                    forecast_steps = batch[3]
                     batch = self.batch_to_device(batch)
 
                     # evaluate model

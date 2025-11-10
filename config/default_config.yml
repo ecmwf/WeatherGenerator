@@ -93,7 +93,7 @@ ema_halflife_in_thousands: 1e-3
 
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "masking"
+training_mode: "cropping"
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
@@ -112,6 +112,22 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           "hl_mask": 3, "mode": "per_cell",
                           "same_strategy_per_batch": false
                           }
+
+# cropping configuration
+cropping_rate_global: 0.5
+cropping_rate_sampling: True
+cropping_config: {
+  hl_global: 0,
+  hl_child: 5,
+  cell_centroids: None,
+  # global_keep_m : None,
+  global_consecutive: True,
+  local_crops: True,
+  num_local_crops: 5,
+  local_crop_frac : 0.6,
+  local_strategy: "random",
+  }
+cropping_generate_local_views: True
 
 num_epochs: 32
 samples_per_epoch: 4096
@@ -160,4 +176,6 @@ run_id: ???
 train_log_freq:
   terminal: 10
   metrics: 20
-  checkpoint: 250
+  checkpoint: 20
+
+log_level: DEBUG
