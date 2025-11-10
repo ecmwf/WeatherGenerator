@@ -334,7 +334,7 @@ class ForecastingEngine:
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
-                if i in getattr(self.cf, "fe_layer_norm_at_layers", []):
+                if i in getattr(self.cf, "fe_layer_norm_after_blocks", []):
                     self.fe_blocks.append(
                         torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
                     )
