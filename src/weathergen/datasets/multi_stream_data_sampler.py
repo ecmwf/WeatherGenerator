@@ -21,7 +21,6 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
     str_to_datetime64,
 )
-from weathergen.datasets.data_reader_eobs import DataReaderEObs
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.masking import Masker
@@ -37,7 +36,7 @@ from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import Stage
 
-type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs | DataReaderEObs
+type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 
 logger = logging.getLogger(__name__)
 
