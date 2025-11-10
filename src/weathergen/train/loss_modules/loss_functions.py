@@ -10,6 +10,7 @@
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 stat_loss_fcts = ["stats", "kernel_crps"]  # Names of loss functions that need std computed
 
@@ -255,3 +256,66 @@ def gamma_decay(forecast_steps, gamma):
     fsteps = np.arange(forecast_steps)
     weights = gamma**fsteps
     return weights * (len(fsteps) / np.sum(weights))
+
+
+def student_teacher_patch_softmax(
+    student_patches, teacher_patches, student_masks_flat, student_temp
+):
+    """
+    Cross-entropy between softmax outputs of the teacher and student networks.
+    student_patches: (B, N, D) tensor
+    teacher_patches: (B, N, D) tensor
+    student_masks_flat: (B, N) tensor
+    student_temp: float
+    """
+    loss = torch.sum(
+        teacher_patches * F.log_softmax(student_patches / student_temp, dim=-1), dim=-1
+    )
+    loss = torch.sum(loss * student_masks_flat.float(), dim=-1) / student_masks_flat.sum(
+        dim=-1
+    ).clamp(min=1.0)
+    return -loss.mean()
+
+def softmax(t, s, temp):
+    return torch.sum(t * F.log_softmax(s / temp, dim=-1), dim=-1)
+
+def masked_student_teacher_patch_softmax(
+    student_patches_masked,
+    teacher_patches_masked,
+    student_masks_flat,
+    student_temp,
+    n_masked_patches,
+    masks_weight,
+):
+    """
+    Cross-entropy between softmax outputs of the teacher and student networks.
+    student_patches_masked,
+    teacher_patches_masked,
+    student_masks_flat,
+    student_temp,
+    n_masked_patches=None,
+    masks_weight=None,
+    """
+    # loss = torch.sum(t * F.log_softmax(s / self.student_temp, dim=-1), dim=-1)
+    loss = softmax(teacher_patches_masked, student_patches_masked, student_temp)
+    if masks_weight is None:
+        masks_weight = (
+            (1 / student_masks_flat.sum(-1).clamp(min=1.0))
+            .unsqueeze(-1)
+            .expand_as(student_masks_flat)[student_masks_flat]
+        )
+    if n_masked_patches is not None:
+        loss = loss[:n_masked_patches]
+    loss = loss * masks_weight
+    return -loss.sum() / student_masks_flat.shape[0]
+
+
+def student_teacher_global_softmax(student_outputs, student_temp, teacher_outputs):
+    total_loss = 0
+    for s in student_outputs:
+        lsm = F.log_softmax(s / student_temp, dim=-1)
+        for t in teacher_outputs:
+            loss = torch.sum(t * lsm, dim=-1)
+            total_loss -= loss.mean()
+    return total_loss
+
