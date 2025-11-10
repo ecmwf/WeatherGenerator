@@ -88,7 +88,8 @@ class Reader:
         self.run_id = run_id
         self.private_paths = private_paths
         self.streams = eval_cfg.streams.keys()
-        self.data = None
+        # TODO: propagate it to the other functions using global plotting opts
+        self.global_plotting_options = eval_cfg.get("global_plotting_options", {})
 
         # If results_base_dir and model_base_dir are not provided, default paths are used
         self.model_base_dir = self.eval_cfg.get("model_base_dir", None)
@@ -129,6 +130,13 @@ class Reader:
     def get_ensemble(self, stream: str | None = None) -> list[str]:
         """Placeholder implementation ensemble member names getter. Override in subclass."""
         return list()
+
+    def is_regular(self, stream: str) -> bool:
+        """
+        Placeholder implementation to check if lat/lon are regularly spaced.
+        Override in subclass.
+        """
+        return True
 
     def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray:
         """Placeholder to load pre-computed scores for a given run, stream, metric"""
@@ -496,9 +504,9 @@ class WeatherGenReader(Reader):
 
         if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
             _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
-            # raise FileNotFoundError(
-            #     f"Zarr file {self.fname_zarr} does not exist or is not a directory."
-            # )
+            raise FileNotFoundError(
+                f"Zarr file {self.fname_zarr} does not exist or is not a directory."
+            )
 
     def get_inference_config(self):
         """
@@ -610,8 +618,7 @@ class WeatherGenReader(Reader):
 
             for fstep in fsteps:
                 _logger.info(f"RUN {self.run_id} - {stream}: Processing fstep {fstep}...")
-                da_tars_fs, da_preds_fs = [], []
-                pps = []
+                da_tars_fs, da_preds_fs, pps = [], [], []
 
                 for sample in tqdm(samples, desc=f"Processing {self.run_id} - {stream} - {fstep}"):
                     out = zio.get_data(sample, stream, fstep)
@@ -642,60 +649,57 @@ class WeatherGenReader(Reader):
                         _logger.debug(f"Selecting ensemble members {ensemble}.")
                         pred = pred.sel(ens=ensemble)
 
-                    if ensemble == ["mean"]:
-                        _logger.debug("Averaging over ensemble members.")
-                        pred = pred.mean("ens", keepdims=True)
-                    else:
-                        _logger.debug(f"Selecting ensemble members {ensemble}.")
-                        pred = pred.sel(ens=ensemble)
-
                     da_tars_fs.append(target.squeeze())
                     da_preds_fs.append(pred.squeeze())
 
-                if len(da_tars_fs) > 0:
-                    fsteps_final.append(fstep)
+                if not da_tars_fs:
+                    _logger.info(
+                        f"[{self.run_id} - {stream}] No valid data found for fstep {fstep}."
+                    )
+                    continue
+
+                fsteps_final.append(fstep)
 
                 _logger.debug(
                     f"Concatenating targets and predictions for stream {stream}, "
                     f"forecast_step {fstep}..."
                 )
 
-                if da_tars_fs:
+                # faster processing
+                if self.is_regular(stream):
+                    # Efficient concatenation for regular grid
+                    da_preds_fs = _force_consistent_grids(da_preds_fs)
+                    da_tars_fs = _force_consistent_grids(da_tars_fs)
+
+                else:
+                    # Irregular (scatter) case. concatenate over ipoint
                     da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
                     da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
-                    if len(samples) == 1:
-                        # Ensure sample coordinate is repeated along ipoint even if only one sample
-                        da_tars_fs = da_tars_fs.assign_coords(
-                            sample=(
-                                "ipoint",
-                                np.repeat(da_tars_fs.sample.values, len(da_tars_fs.ipoint)),
-                            )
-                        )
-                        da_preds_fs = da_preds_fs.assign_coords(
-                            sample=(
-                                "ipoint",
-                                np.repeat(da_preds_fs.sample.values, len(da_preds_fs.ipoint)),
-                            )
+
+                if len(samples) == 1:
+                    _logger.debug("Repeating sample coordinate for single-sample case.")
+                    for da in (da_tars_fs, da_preds_fs):
+                        da.assign_coords(
+                            sample=("ipoint", np.repeat(da.sample.values, da.sizes["ipoint"]))
                         )
 
-                    if set(channels) != set(all_channels):
-                        _logger.debug(
-                            f"Restricting targets and predictions to channels {channels} "
-                            f"for stream {stream}..."
-                        )
+                if set(channels) != set(all_channels):
+                    _logger.debug(
+                        f"Restricting targets and predictions to channels {channels} "
+                        f"for stream {stream}..."
+                    )
 
-                        da_tars_fs, da_preds_fs, channels = dc.get_derived_channels(
-                            da_tars_fs, da_preds_fs
-                        )
+                    da_tars_fs, da_preds_fs, channels = dc.get_derived_channels(
+                        da_tars_fs, da_preds_fs
+                    )
 
-                        da_tars_fs = da_tars_fs.sel(channel=channels)
-                        da_preds_fs = da_preds_fs.sel(channel=channels)
+                    da_tars_fs = da_tars_fs.sel(channel=channels)
+                    da_preds_fs = da_preds_fs.sel(channel=channels)
 
-                    da_tars.append(da_tars_fs)
-                    da_preds.append(da_preds_fs)
-
-                    if return_counts:
-                        points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
+                da_tars.append(da_tars_fs)
+                da_preds.append(da_preds_fs)
+                if return_counts:
+                    points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
 
             # Safer than a list
             da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=True)}
@@ -796,13 +800,64 @@ class WeatherGenReader(Reader):
         return all_channels
 
     def get_ensemble(self, stream: str | None = None) -> list[str]:
-        """Get the list of ensemble member names for a given stream from the config."""
+        """Get the list of ensemble member names for a given stream from the config.
+        Parameters
+        ----------
+        stream : str
+            The name of the stream to get channels for.
+
+        Returns
+        -------
+        list[str]
+            A list of ensemble members.
+        """
         _logger.debug(f"Getting ensembles for stream {stream}...")
 
         # TODO: improve this to get ensemble from io class
         with ZarrIO(self.fname_zarr) as zio:
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
         return list(dummy.prediction.as_xarray().coords["ens"].values)
+
+    # TODO: improve this
+    def is_regular(self, stream: str) -> bool:
+        """Check if the latitude and longitude coordinates are regularly spaced for a given stream.
+        Parameters
+        ----------
+        stream : str
+            The name of the stream to get channels for.
+
+        Returns
+        -------
+        bool
+            True if the stream is regularly spaced. False otherwise.
+        """
+        _logger.debug(f"Checking regular spacing for stream {stream}...")
+
+        with ZarrIO(self.fname_zarr) as zio:
+            dummy = zio.get_data(0, stream, zio.forecast_steps[0])
+
+            sample_idx = zio.samples[1] if len(zio.samples) > 1 else zio.samples[0]
+            fstep_idx = (
+                zio.forecast_steps[1] if len(zio.forecast_steps) > 1 else zio.forecast_steps[0]
+            )
+            dummy1 = zio.get_data(sample_idx, stream, fstep_idx)
+
+        da = dummy.prediction.as_xarray()
+        da1 = dummy1.prediction.as_xarray()
+
+        if (
+            da["lat"].shape != da1["lat"].shape
+            or da["lon"].shape != da1["lon"].shape
+            or not (
+                np.allclose(sorted(da["lat"].values), sorted(da1["lat"].values))
+                and np.allclose(sorted(da["lon"].values), sorted(da1["lon"].values))
+            )
+        ):
+            _logger.debug("Latitude and/or longitude coordinates are not regularly spaced.")
+            return False
+
+        _logger.debug("Latitude and longitude coordinates are regularly spaced.")
+        return True
 
     def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
         """
@@ -859,3 +914,40 @@ class WeatherGenReader(Reader):
             if stream.get("name") == stream_name:
                 return stream.get(key, default)
         return default
+
+
+################### Helper functions ########################
+
+
+def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
+    """
+    Force all samples to share the same ipoint order.
+
+    Parameters
+    ----------
+    ref:
+       Input dataset
+    Returns
+    -------
+        xr.DataArray
+        Returns a Dataset where all samples have the same lat lon and ipoint ordering
+    """
+
+    # Pick first sample as reference
+    ref_lat = ref[0].lat
+    ref_lon = ref[0].lon
+
+    sort_idx = np.lexsort((ref_lon.values, ref_lat.values))
+    npoints = sort_idx.size
+    aligned = []
+    for a in ref:
+        a_sorted = a.isel(ipoint=sort_idx)
+
+        a_sorted = a_sorted.assign_coords(
+            ipoint=np.arange(npoints),
+            lat=("ipoint", ref_lat.values[sort_idx]),
+            lon=("ipoint", ref_lon.values[sort_idx]),
+        )
+        aligned.append(a_sorted)
+
+    return xr.concat(aligned, dim="sample")
