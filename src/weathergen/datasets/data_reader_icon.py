@@ -26,8 +26,6 @@ from weathergen.datasets.data_reader_base import (
     check_reader_data,
 )
 
-from dask.diagnostics import ProgressBar
-
 
 _logger = logging.getLogger(__name__)
 
@@ -216,7 +214,9 @@ class DataReaderIconBase(DataReaderTimestep):
             if len(parts) == 2 and parts != "":
                 level = parts[1]
                 ch_base = parts[0]
-                if (not allowed_levels or level in allowed_levels) and ch_base not in channels_exclude:
+                if (
+                    not allowed_levels or level in allowed_levels
+                ) and ch_base not in channels_exclude:
                     new_colnames.append(ch)
             else:
                 if ch not in channels_exclude:
@@ -466,7 +466,7 @@ class DataReaderIconCmip6(DataReaderIconBase):
         channels = np.array(self.colnames)[channels_idx]
 
         start_ts = dtr.start
-        end_ts = dtr.end -  np.timedelta64(1, "h")
+        end_ts = dtr.end - np.timedelta64(1, "h")
 
         try:
             data_per_channel = []
@@ -475,7 +475,12 @@ class DataReaderIconCmip6(DataReaderIconBase):
 
             for ch in channels:
                 ch_parts = ch.split("_")
-                if hasattr(self, "levels") and self.levels and len(ch_parts) == 2 and ch_parts[1] in self.levels:
+                if (
+                    hasattr(self, "levels")
+                    and self.levels
+                    and len(ch_parts) == 2
+                    and ch_parts[1] in self.levels
+                ):
                     ch_ = ch_parts[0]
                     plev_int = ch_parts[1]
                     levels_all = self.ds[ch_]["plev"][0].values
