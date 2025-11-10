@@ -548,6 +548,25 @@ class Model(torch.nn.Module):
         return tuple(preds_all[0])
 
     #########################################
+    def plot_token_distribution(self, tokens, fstep):
+        plot_path = Path(self.cf.run_path, self.cf.run_id, "plots", "ERA5", "latent_hists")
+        import os
+
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        ax.hist(tokens.flatten().to("cpu").numpy(), bins=30)
+        if not hasattr(self, "xlim"):
+            self.xlim = ax.get_xlim()
+            self.ylim = ax.get_ylim()
+        ax.set_xlim(self.xlim)
+        ax.set_ylim(self.ylim)
+        ax.set_title(f"Forecast step {fstep}")
+        os.makedirs(plot_path, exist_ok=True)
+        fig.savefig(plot_path / f"fstep_{str(fstep).zfill(2)}.png")
+        plt.close()
+
+    #########################################
     def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
         """Performs the forward pass of the model to generate forecasts
 
@@ -576,6 +595,9 @@ class Model(torch.nn.Module):
 
         tokens = self.assimilate_global(model_params, tokens)
 
+        if not self.training:
+            self.plot_token_distribution(tokens=tokens, fstep=0)
+
         # roll-out in latent space
         preds_all = []
         for fstep in range(forecast_offset, forecast_offset + forecast_steps):
@@ -597,6 +619,9 @@ class Model(torch.nn.Module):
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
             tokens = self.forecast(model_params, tokens)
+
+            if not self.training:
+                self.plot_token_distribution(tokens=tokens, fstep=fstep)
 
         # prediction for final step
         preds_all += [
@@ -807,7 +832,10 @@ class Model(torch.nn.Module):
 
         for it, block in enumerate(self.fe_blocks):
             aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
-            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+            if isinstance(block, torch.nn.modules.normalization.LayerNorm):
+                tokens = block(tokens)
+            else:
+                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
 
         return tokens
 
