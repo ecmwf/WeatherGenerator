@@ -1936,6 +1936,7 @@ dependencies = [
     { name = "torch", version = "2.6.0+cu124", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "tqdm" },
     { name = "weathergen-common" },
+    { name = "weathergen-evaluate" },
     { name = "wheel" },
     { name = "zarr" },
 ]
@@ -1967,6 +1968,7 @@ requires-dist = [
     { name = "torch", marker = "sys_platform == 'macosx'", specifier = "==2.6.0", index = "https://download.pytorch.org/whl/cpu" },
     { name = "tqdm" },
     { name = "weathergen-common", editable = "packages/common" },
+    { name = "weathergen-evaluate", editable = "packages/evaluate" },
     { name = "wheel" },
     { name = "zarr", specifier = "~=2.17" },
 ]
