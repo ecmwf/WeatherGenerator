@@ -1,17 +1,16 @@
 [project]
-name = "weathergen-common"
+name = "weathergen-readers-extra"
 version = "0.1.0"
 description = "The WeatherGenerator Machine Learning Earth System Model"
 readme = "../../README.md"
 requires-python = ">=3.12,<3.13"
+# TODO: incomplete: it also implicitly depends on the main project for the base classes
+# There is currently a circular dependency readers-extra => root => readers-extra
+# It needs to be broken by moving the base class of the readers code to its own package.
 dependencies = [
-    "xarray>=2025.6.1",
-    "dask>=2024.9.1",
-    "zarr==2.18.4, <3",
-    "numcodecs<0.16.0",
-   "astropy_healpix~=1.1.2",
-   "omegaconf~=2.3.0",
-   "pyyaml",
+    "xarray",
+    "zarr",
+    "weathergen-common",
 ]
 
 [dependency-groups]
@@ -34,6 +33,13 @@ unsupported-operation = false
 missing-attribute = false
 no-matching-overload = false
 bad-context-manager = false
+
+# To do:
+bad-assignment = false
+bad-return = false
+index-error = false
+not-iterable = false
+not-callable = false
 
 
 

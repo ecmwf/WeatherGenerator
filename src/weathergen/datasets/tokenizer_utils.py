@@ -179,8 +179,6 @@ def tokenize_window_space(
     hl,
     hpy_verts_rots,
     n_coords: CoordNormalizer,
-    n_geoinfos,
-    n_data,
     enc_time,
     pad_tokens=True,
     local_coords=True,
@@ -197,8 +195,8 @@ def tokenize_window_space(
     # pad with zero at the beggining for token size padding
     times_enc = enc_time(times, time_win)
     times_enc_padded = torch.cat([torch.zeros_like(times_enc[0]).unsqueeze(0), times_enc])
-    geoinfos_padded = torch.cat([torch.zeros_like(geoinfos[0]).unsqueeze(0), n_geoinfos(geoinfos)])
-    source_padded = torch.cat([torch.zeros_like(source[0]).unsqueeze(0), n_data(source)])
+    geoinfos_padded = torch.cat([torch.zeros_like(geoinfos[0]).unsqueeze(0), geoinfos])
+    source_padded = torch.cat([torch.zeros_like(source[0]).unsqueeze(0), source])
 
     # convert to local coordinates
     # TODO: avoid that padded lists are rotated, which means potentially a lot of zeros
@@ -247,8 +245,6 @@ def tokenize_window_spacetime(
     hl,
     hpy_verts_rots,
     n_coords,
-    n_geoinfos,
-    n_data,
     enc_time,
     pad_tokens=True,
     local_coords=True,
@@ -274,8 +270,6 @@ def tokenize_window_spacetime(
             hl,
             hpy_verts_rots,
             n_coords,
-            n_geoinfos,
-            n_data,
             enc_time,
             pad_tokens,
             local_coords,

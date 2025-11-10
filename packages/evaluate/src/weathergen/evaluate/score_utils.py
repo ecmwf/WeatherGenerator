@@ -70,7 +70,8 @@ class RegionBoundingBox:
             )
         if not (-180 <= self.lon_min <= 180 and -180 <= self.lon_max <= 180):
             raise ValueError(
-                f"Longitude bounds must be between -180 and 180. Got: {self.lon_min}, {self.lon_max}"
+                "Longitude bounds must be between -180 and 180. "
+                + f"Got: {self.lon_min}, {self.lon_max}"
             )
         if self.lat_min >= self.lat_max:
             raise ValueError(
@@ -83,9 +84,7 @@ class RegionBoundingBox:
 
     def contains(self, lat: float, lon: float) -> bool:
         """Check if a lat/lon point is within the bounding box."""
-        return (self.lat_min <= lat <= self.lat_max) and (
-            self.lon_min <= lon <= self.lon_max
-        )
+        return (self.lat_min <= lat <= self.lat_max) and (self.lon_min <= lon <= self.lon_max)
 
     def apply_mask(
         self,
