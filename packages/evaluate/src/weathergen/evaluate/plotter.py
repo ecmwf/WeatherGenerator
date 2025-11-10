@@ -909,7 +909,12 @@ class ScoreCards:
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def plot(
-        self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
+        self,
+        data: list[xr.DataArray],
+        runs: list[str],
+        metric: str,
+        channels: list[str],
+        tag: str,
     ) -> None:
         """
         Plot score cards comparing performance between run_ids against a baseline over channels
@@ -921,6 +926,8 @@ class ScoreCards:
             List of (xarray) DataArrays with the scores (stream, region and metric specific)
         runs:
             List containing runs (in str format) to be compared (provided in the config)
+        metric:
+            Metric for which we are plotting
         channels:
             List containing channels (in str format) of interest (provided in the config)
         tag:
@@ -935,14 +942,16 @@ class ScoreCards:
         for run_index in range(1, n_runs):
             skill_model = 0.0
             for var_index, var in enumerate(channels):
-                diff, diff_mean, skill = self.compare_models(data, baseline, run_index, var)
-                skill_model += skill.values
+                diff, avg_diff, avg_skill = self.compare_models(
+                    data, baseline, run_index, var, metric
+                )
+                skill_model += avg_skill.values
 
                 # Get symbols based on difference and performance as well as coordinates
                 # for the position of the triangles.
 
                 x, y, alt, color, triangle, size = self.get_plot_symbols(
-                    run_index, var_index, skill, diff_mean
+                    run_index, var_index, avg_skill, avg_diff, metric
                 )
 
                 ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
@@ -1023,6 +1032,7 @@ class ScoreCards:
         baseline: xr.DataArray,
         run_index: int,
         var: str,
+        metric: str,
         x_dim="forecast_step",
     ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray]:
         """
@@ -1063,86 +1073,110 @@ class ScoreCards:
         baseline_score, model_score = calculate_average_over_dim(x_dim, baseline_var, data_var)
         diff = baseline_score - model_score
 
-        skill = self.get_skill_score(model_score, baseline_score, 0.0)
+        skill = self.get_skill_score(model_score, baseline_score, metric)
         return diff, diff.mean(dim=x_dim), skill.mean(dim=x_dim)
 
     def get_skill_score(
-        self, score_model: xr.DataArray, score_ref: xr.DataArray, score_perf: float
+        self, score_model: xr.DataArray, score_ref: xr.DataArray, metric: str
     ) -> xr.DataArray:
         """
-        Calculation function for calculating skill score between a model and the baseline.
+        Calculate skill score comparing a model against a baseline.
+
+        Skill score is defined as: (model_score - baseline_score) / (perfect_score - baseline_score)
 
         Parameters
         ----------
-        score_model: xr.DataArray
-            The scores of the model that we aim to compare with the baseline.
-
-        score_ref: xr.DataArray
-            The scores of the baseline model.
-
-        score_perf: float
-            The perfect score based on the metric. For example for RMSE is 0.
+        score_model : xr.DataArray
+            The scores of the model being evaluated
+        score_ref : xr.DataArray
+            The scores of the reference/baseline model
+        metric : str
+            The metric name for which to calculate skill score
 
         Returns
-        ----------
-        skill_score: xr.DataArray
-            Skill scores of a model compared with baseline.
-
+        -------
+        xr.DataArray
+            Skill scores comparing model to baseline
         """
-
-        skill_score = (score_model - score_ref) / (score_perf - score_ref)
+        perf_score = self.get_perf_score(metric)
+        skill_score = (score_model - score_ref) / (perf_score - score_ref)
         return skill_score
 
-    def get_plot_symbols(
-        self, run_index: int, var_index: int, skill: xr.DataArray, diff_mean: xr.DataArray
-    ) -> tuple[int, float, str, str, str, xr.DataArray]:
+    def get_perf_score(self, metric: str) -> float:
         """
-        Get the triangle symbols per comparison model with the correct size and color
-        based on score improvement or deterioration.
+        Get the perfect score for a given metric.
+
+        Perfect scores represent ideal performance:
+        - Error metrics: 0 (lower is better)
+        - Skill/score metrics: 1 (higher is better)
+        - PSNR: 100 (higher is better)
 
         Parameters
         ----------
-        run_index: int
-            The order index over the run_ids.
-        var_index: float
-            The order index over the channels.
-        skill: xarray.DataArray
-            The skill of the model
-        diff_mean: xr.DataArray
-            The average difference between the baseline and the model. Determines improvement or
-            deterioration over baseline.
+        metric : str
+            Metric name
 
         Returns
-        ----------
-        x: int
-            x coordinate of the triangle that indicates improvement or deterioration over baseline.
-
-        y: float
-            y coordinate of the triangle that indicates improvement or deterioration over baseline.
-
-        alt: str
-            str that indicates the alternative hypothesis test for Wilcoxon test of significance.
-
-        color: str
-            The color "red" or "blue" that indicates improvement or deterioration over baseline.
-        triangle: str
-            The triangle symbol "^" or "v" that indicates improvement or deterioration over
-            baseline.
-        size: xr.DataArray
-            Size of the triangles in the final plot
+        -------
+        float
+            Perfect score for the specified metric
         """
-        if diff_mean > 0:
-            # A better than B
+        # Metrics where lower values indicate better performance (error metrics)
+        if lower_is_better(metric):
+            return 0.0
+
+        # Metrics where higher values indicate better performance (with specific perfect score)
+        elif metric in ["psnr"]:
+            return 100.0
+
+        # Metrics where higher values indicate better performance (default perfect score)
+        else:
+            return 1.0
+
+    def get_plot_symbols(
+        self,
+        run_index: int,
+        var_index: int,
+        avg_skill: xr.DataArray,
+        avg_diff: xr.DataArray,
+        metric: str,
+    ) -> tuple[int, float, str, str, str, xr.DataArray]:
+        """
+        Determine plot symbol properties based on performance difference.
+
+        Parameters
+        ----------
+        run_index : int
+            Index of the model.
+        var_index : int
+            Index of the variable/channel.
+        avg_skill : xr.DataArray
+            Average skill score of the model.
+        avg_diff : xr.DataArray
+            Average difference between baseline and model.
+        metric : str
+            Metric used for interpretation.
+
+        Returns
+        -------
+        Tuple[int, float, str, str, str, xr.DataArray]
+            x, y coordinates, alternative hypothesis, color, triangle symbol, size.
+        """
+
+        # Determine if diff_mean indicates improvement
+        is_improvement = (avg_diff > 0 and lower_is_better(metric)) or (
+            avg_diff < 0 and not lower_is_better(metric)
+        )
+
+        if is_improvement:
             alt = "greater"
             modus = "better"
             color = "blue"
-        elif diff_mean < 0:
-            # A worse than B
+        elif not is_improvement and avg_diff != 0:
             alt = "less"
             modus = "worse"
             color = "red"
         else:
-            # Equal performance (conservative fallback)
             alt = "two-sided"
             modus = "different"
 
@@ -1153,7 +1187,7 @@ class ScoreCards:
         # First row is model 1 vs model 0
         y = var_index + 0.5
 
-        size = 200 * (1 - (1 / (1 + abs(skill) / self.improvement)))  # Add base size to all
+        size = 200 * (1 - (1 / (1 + abs(avg_skill) / self.improvement)))  # Add base size to all
 
         return x, y, alt, color, triangle, size
 
@@ -1184,7 +1218,12 @@ class BarPlots:
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def plot(
-        self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
+        self,
+        data: list[xr.DataArray],
+        runs: list[str],
+        metric: str,
+        channels: list[str],
+        tag: str,
     ) -> None:
         """
         Plot (ratio) bar plots comparing performance between different run_ids over channels of
@@ -1196,6 +1235,8 @@ class BarPlots:
             List of (xarray) DataArrays with the scores (stream, region and metric specific)
         runs:
             List containing runs (in str format) to be compared (provided in the config)
+        metric:
+            Metric name
         channels:
             List containing channels (in str format) of interest (provided in the config)
         tag:
@@ -1219,7 +1260,7 @@ class BarPlots:
             ax[run_index - 1].barh(
                 np.arange(len(ratio_score)),
                 ratio_score,
-                color=self.colors(ratio_score),
+                color=self.colors(ratio_score, metric),
                 align="center",
                 edgecolor="black",
                 linewidth=0.5,
@@ -1244,7 +1285,11 @@ class BarPlots:
         plt.close(fig)
 
     def calc_ratio_per_run_id(
-        self, data: list[xr.DataArray], channels: list[str], run_index: int, x_dim="channel"
+        self,
+        data: list[xr.DataArray],
+        channels: list[str],
+        run_index: int,
+        x_dim="channel",
     ) -> tuple[np.array, str]:
         """
         This function calculates the ratio per comparison model for each channel.
@@ -1284,7 +1329,7 @@ class BarPlots:
         ratio_score = np.array(ratio_score) - 1
         return ratio_score, channels_per_comparison
 
-    def colors(self, ratio_score: np.array) -> list[tuple]:
+    def colors(self, ratio_score: np.array, metric: str) -> list[tuple]:
         """
         This function calculates colormaps based on the skill scores. From negative value blue
         color variations should be given otherwise red color variations should be given.
@@ -1293,13 +1338,18 @@ class BarPlots:
         ----------
         ratio_score: np.array
             The (ratio) skill for a specific model
+        metric: str
+            The metric of interest
         Returns
         ----------
         colors: list[tuple]
             The color magnitude (blue to red) of the bars in the plots
         """
         max_val = np.abs(ratio_score).max()
-        cmap = plt.get_cmap("bwr")
+        if lower_is_better(metric):
+            cmap = plt.get_cmap("bwr")
+        else:
+            cmap = plt.get_cmap("bwr_r")
         colors = [cmap(0.5 + v / (2 * max_val)) for v in ratio_score]
         return colors
 
@@ -1342,3 +1392,8 @@ def calculate_average_over_dim(
     model_score = data_var.mean(dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True)
 
     return baseline_score, model_score
+
+
+def lower_is_better(metric: str) -> bool:
+    # Determine whether lower or higher is better
+    return metric in {"l1", "l2", "mse", "rmse", "vrmse", "bias", "crps", "spread"}
