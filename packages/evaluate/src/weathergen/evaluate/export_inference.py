@@ -386,10 +386,10 @@ def get_data(
     fsteps = zio_forecast_steps if fsteps is None else sorted([int(fstep) for fstep in fsteps])
 
     samples = (
-        zio_samples
-        if samples is None
+        zio_samples if samples is None
         else sorted([int(sample) for sample in samples if sample in samples])
     )
+    
     with Pool(processes=n_processes, maxtasksperchild=5) as pool:
         for sample_idx in tqdm(samples):
             da_fs = []
@@ -479,7 +479,7 @@ def save_sample_to_netcdf(
             combine_attrs="drop",
         ).sortby("valid_time")
         _logger.info(f"Saving to {out_fname}.")
-        sample_all_steps = sample_all_steps.assign_coords(forecast_ref_time=frt)
+        sample_all_steps = sample_all_steps.assign_coords(forecast_reference_time=frt)
         stream = str(sample_all_steps.coords["stream"].values)
 
         if "sample" in sample_all_steps.coords:
@@ -490,6 +490,7 @@ def save_sample_to_netcdf(
         if "ncells" in sample_all_steps.dims:
             sample_all_steps = add_gaussian_grid_metadata(sample_all_steps)
             _logger.info("Detected and preserved Gaussian grid structure")
+
         # add forecast_period attributes
         n_hours = fstep_hours.astype("int64")
         sample_all_steps["forecast_period"] = sample_all_steps["forecast_period"] * n_hours
@@ -497,11 +498,19 @@ def save_sample_to_netcdf(
             "standard_name": "forecast_period",
             "long_name": "time since forecast_reference_time",
             "units": "hours",
-            "coordinates": "forecast_ref_time",
+            "coordinates": "forecast_reference_time",
         }
         sample_all_steps = add_conventions(stream, run_id, sample_all_steps)
         # now drop stream
         sample_all_steps = sample_all_steps.drop_vars("stream")
+
+        # ensure encoding for time variables is since 1970
+        sample_all_steps.valid_time.encoding["units"] = "hours since 1970-01-01 00:00:00"
+        sample_all_steps.valid_time.encoding["calendar"] = "gregorian"
+        sample_all_steps.forecast_reference_time.encoding["units"] = "hours since 1970-01-01 00:00:00"
+        sample_all_steps.forecast_reference_time.encoding["calendar"] = "gregorian"
+        
+        #save to netcdf
         sample_all_steps.to_netcdf(out_fname, mode="w", compute=False)
 
 
