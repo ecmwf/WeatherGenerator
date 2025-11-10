@@ -92,7 +92,7 @@ class Tokenizer:
             # Batch multiplication by the 3x3 rotation matrices.
             # shape: <healpix, 3, 3> @ <healpix, 4, 3> -> <healpix, 4, 3>
             # Needs to transpose first to <healpix, 3, 4> then transpose back.
-            t1 = torch.bmm(rot, verts.transpose(-1, -2).to(dtype=rot.dtype)).transpose(-2, -1)
+            t1 = torch.bmm(rot, verts.transpose(-1, -2)).transpose(-2, -1)
             t2 = ref - t1
             self.verts_local.append(t2.flatten(1, 2))
 
