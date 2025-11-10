@@ -28,6 +28,7 @@ dependencies = [
  "numexpr>=2.11.0",
  "weathergen-common",
  "weathergen-evaluate",
+ "weathergen-readers-extra",
 ]
 
 
@@ -214,6 +215,8 @@ explicit = true
 [tool.uv.sources]
 weathergen-common = { workspace = true }
 weathergen-evaluate = { workspace = true }
+weathergen-metrics = { workspace = true }
+weathergen-readers-extra = { workspace = true }
 
 
 flash-attn = [
@@ -245,7 +248,9 @@ log_cli_date_format = "%Y-%m-%d %H:%M:%S"
 
 [tool.uv.workspace]
 members = [
+   "packages/common",
    "packages/evaluate",
-   "packages/common"
+   "packages/metrics",
+   "packages/readers_extra",
 ]
 

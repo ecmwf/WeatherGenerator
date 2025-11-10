@@ -410,7 +410,6 @@ def clean_df(df, columns: list[str] | None):
     df = df.with_columns(
         (df[_weathergen_timestamp] - df[_weathergen_timestamp].min()).alias(_weathergen_reltime)
     )
-    _logger.info(f"schema {df.schema}")
 
     if columns:
         columns = list(set(columns))  # remove duplicates

@@ -83,7 +83,6 @@ class IOReaderData:
 
         others is list of ReaderData instances.
         """
-
         assert len(others) > 0, len(others)
 
         other = others[0]
