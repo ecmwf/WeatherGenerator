@@ -909,7 +909,12 @@ class ScoreCards:
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def plot(
-        self, data: list[xr.DataArray], runs: list[str], metric: str, channels: list[str], tag: str
+        self,
+        data: list[xr.DataArray],
+        runs: list[str],
+        metric: str,
+        channels: list[str],
+        tag: str,
     ) -> None:
         """
         Plot score cards comparing performance between run_ids against a baseline over channels
@@ -1117,7 +1122,7 @@ class ScoreCards:
             Perfect score for the specified metric
         """
         # Metrics where lower values indicate better performance (error metrics)
-        if metric in ["l1", "l2", "mse", "rmse", "vrmse", "bias", "crps", "spread"]:
+        if lower_is_better(metric):
             return 0.0
 
         # Metrics where higher values indicate better performance (with specific perfect score)
@@ -1158,12 +1163,9 @@ class ScoreCards:
             x, y coordinates, alternative hypothesis, color, triangle symbol, size.
         """
 
-        # Determine whether lower or higher is better
-        lower_is_better = metric in {"l1", "l2", "mse", "rmse", "vrmse", "bias", "crps", "spread"}
-
         # Determine if diff_mean indicates improvement
-        is_improvement = (avg_diff > 0 and lower_is_better) or (
-            avg_diff < 0 and not lower_is_better
+        is_improvement = (avg_diff > 0 and lower_is_better(metric)) or (
+            avg_diff < 0 and not lower_is_better(metric)
         )
 
         if is_improvement:
@@ -1216,7 +1218,12 @@ class BarPlots:
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def plot(
-        self, data: list[xr.DataArray], runs: list[str], metric: str, channels: list[str], tag: str
+        self,
+        data: list[xr.DataArray],
+        runs: list[str],
+        metric: str,
+        channels: list[str],
+        tag: str,
     ) -> None:
         """
         Plot (ratio) bar plots comparing performance between different run_ids over channels of
@@ -1278,7 +1285,11 @@ class BarPlots:
         plt.close(fig)
 
     def calc_ratio_per_run_id(
-        self, data: list[xr.DataArray], channels: list[str], run_index: int, x_dim="channel"
+        self,
+        data: list[xr.DataArray],
+        channels: list[str],
+        run_index: int,
+        x_dim="channel",
     ) -> tuple[np.array, str]:
         """
         This function calculates the ratio per comparison model for each channel.
@@ -1335,7 +1346,7 @@ class BarPlots:
             The color magnitude (blue to red) of the bars in the plots
         """
         max_val = np.abs(ratio_score).max()
-        if metric in ["l1", "l2", "mse", "rmse", "vrmse", "bias", "crps", "spread"]:
+        if lower_is_better(metric):
             cmap = plt.get_cmap("bwr")
         else:
             cmap = plt.get_cmap("bwr_r")
@@ -1381,3 +1392,8 @@ def calculate_average_over_dim(
     model_score = data_var.mean(dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True)
 
     return baseline_score, model_score
+
+
+def lower_is_better(metric: str) -> bool:
+    # Determine whether lower or higher is better
+    return metric in {"l1", "l2", "mse", "rmse", "vrmse", "bias", "crps", "spread"}
