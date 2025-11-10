@@ -29,7 +29,7 @@ from weathergen.datasets.data_reader_base import (
 _logger = logging.getLogger(__name__)
 
 
-class DataReaderIcon(DataReaderTimestep):
+class DataReaderIconArt(DataReaderTimestep):
     "Wrapper for ICON-ART variables - Reads Zarr format datasets"
 
     def __init__(
@@ -57,8 +57,8 @@ class DataReaderIcon(DataReaderTimestep):
         self.colnames = list(self.ds)
         self.cols_idx = np.array(list(np.arange(len(self.colnames))))
 
-        # Get pressure levels (empty for now, can be populated if needed)
-        self.levels = []
+        # Get levels from stream_info (e.g., ["h020"])
+        self.levels = stream_info.get("levels", [])
 
         # Will be inferred later based on the dataset's time variable
         self.temporal_frequency = None
@@ -132,14 +132,8 @@ class DataReaderIcon(DataReaderTimestep):
 
         # === Coordinates ===
 
-        # Convert to degrees if stored in radians
-        coords_units = self.ds[lat_attribute].attrs["units"]
-        if coords_units == "radian":
-            self.lat = np.rad2deg(self.ds[lat_attribute][:].astype("f"))
-            self.lon = np.rad2deg(self.ds[lon_attribute][:].astype("f"))
-        else:
-            self.lat = self.ds[lat_attribute][:].astype("f")
-            self.lon = self.ds[lon_attribute][:].astype("f")
+        self.lat = self.ds[lat_attribute][:].astype("f")
+        self.lon = self.ds[lon_attribute][:].astype("f")
 
         # Extract coordinates and pressure level
         self.lat = _clip_lat(self.lat)
