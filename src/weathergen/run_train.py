@@ -20,8 +20,8 @@ from pathlib import Path
 
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
-from weathergen.train.trainer import Trainer
 from weathergen.common.logger import init_loggers
+from weathergen.train.trainer import Trainer
 
 logger = logging.getLogger(__name__)
 
