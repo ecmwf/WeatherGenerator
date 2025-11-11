@@ -53,7 +53,7 @@ def evaluate() -> None:
 
 def evaluate_from_args(argl: list[str]) -> None:
     # configure logging
-    logging.basicConfig(level=logging.INFO)
+    init_loggers(None)
     parser = argparse.ArgumentParser(description="Fast evaluation of WeatherGenerator runs.")
     parser.add_argument(
         "--config",
@@ -89,8 +89,6 @@ def evaluate_from_args(argl: list[str]) -> None:
 
 
 def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
-    # load configuration
-
     runs = cfg.run_ids
 
     _logger.info(f"Detected {len(runs)} runs")
