@@ -21,7 +21,9 @@ class EMATeacher(TargetAndAuxModuleBase):
         self.batch_size = batch_size
 
         # is a dict of TargetProcessing classes as we may use several in parallel
-        self.postprocess_targets = get_target_postprocessing(kwargs["losses"], **kwargs)
+        self.postprocess_targets = get_target_postprocessing(
+            kwargs["losses"]["LossLatentSSLStudentTeacher"], **kwargs
+        )
 
         self.reset()
 
@@ -54,21 +56,21 @@ class EMATeacher(TargetAndAuxModuleBase):
 
 def get_target_postprocessing(target_losses: list[str], **kwargs):
     return_dict = {}
-    for loss_name in target_losses:
+    for loss_name, conf in target_losses.items():
         if loss_name == "iBOT":
             return_dict[loss_name] = iBOTPatchTargetProcessing(
-                patch_out_dim=kwargs["ibot_patch_out_dim"],
-                center_momentum=kwargs["center_momentum"],
-                student_temp=kwargs["student_temp"],
-                teacher_temp=kwargs["teacher_temp"],
-                teacher_style=kwargs["teacher_style"],
+                patch_out_dim=conf["ibot_patch_out_dim"],
+                center_momentum=conf["center_momentum"],
+                student_temp=conf["student_temp"],
+                teacher_temp=conf["teacher_temp"],
+                teacher_style=conf["teacher_style"],
             )
         elif loss_name == "DINO":
             return_dict[loss_name] = DINOTargetProcessing(
-                out_dim=kwargs["dino_out_dim"],
-                center_momentum=kwargs["center_momentum"],
-                student_temp=kwargs["student_temp"],
-                teacher_style=kwargs["teacher_style"],
+                out_dim=conf["dino_out_dim"],
+                center_momentum=conf["center_momentum"],
+                student_temp=conf["student_temp"],
+                teacher_style=conf["teacher_style"],
             )
         elif loss_name == "JEPA":
             return_dict[loss_name] = JEPATargetProcessing()

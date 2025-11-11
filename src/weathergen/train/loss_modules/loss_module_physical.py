@@ -16,10 +16,12 @@ import torch
 from omegaconf import DictConfig
 from torch import Tensor
 
-import weathergen.train.loss_modules.loss_functions as losses
+import weathergen.train.loss_modules.loss_functions as loss_fns
 from weathergen.train.loss_modules.loss_functions import stat_loss_fcts
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.utils.train_logger import TRAIN, VAL, Stage
+
+import torch.nn.functional as F
 
 _logger = logging.getLogger(__name__)
 
@@ -38,7 +40,7 @@ class LossPhysical(LossModuleBase):
     def __init__(
         self,
         cf: DictConfig,
-        loss_fcts: list,
+        losses: list,
         stage: Stage,
         device: str,
     ):
@@ -51,7 +53,7 @@ class LossPhysical(LossModuleBase):
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
             [getattr(losses, name if name != "mse" else "mse_channel_location_weighted"), w, name]
-            for name, w in loss_fcts
+            for name, w in losses
         ]
 
     def _get_weights(self, stream_info):
@@ -83,14 +85,14 @@ class LossPhysical(LossModuleBase):
         timestep_weight_config = self.cf.get("timestep_weight")
         if timestep_weight_config is None:
             return [1.0 for _ in range(forecast_steps)]
-        weights_timestep_fct = getattr(losses, timestep_weight_config[0])
+        weights_timestep_fct = getattr(loss_fns, timestep_weight_config[0])
         return weights_timestep_fct(forecast_steps, timestep_weight_config[1])
 
     def _get_location_weights(self, stream_info, stream_data, forecast_offset, fstep):
         location_weight_type = stream_info.get("location_weight", None)
         if location_weight_type is None:
             return None
-        weights_locations_fct = getattr(losses, location_weight_type)
+        weights_locations_fct = getattr(loss_fns, location_weight_type)
         weights_locations = weights_locations_fct(stream_data, forecast_offset, fstep)
         weights_locations = weights_locations.to(device=self.device, non_blocking=True)
 
@@ -582,3 +584,154 @@ class LossPhysicalTwo(LossModuleBase):
 
         # Return all computed loss components encapsulated in a ModelLoss dataclass
         return LossValues(loss=loss, losses_all=losses_all, stddev_all=stddev_all)
+
+
+class LossLatent(LossModuleBase):
+    """
+    Calculates loss in latent space.
+    """
+
+    def __init__(
+        self,
+        cf: DictConfig,
+        losses: list,
+        stage: Stage,
+        device: str,
+    ):
+        LossModuleBase.__init__(self)
+        self.cf = cf
+        self.stage = stage
+        self.device = device
+        self.name = "LossLatent"
+
+        # Dynamically load loss functions based on configuration and stage
+        self.loss_fcts = [
+            [getattr(loss_fns, name if name != "mse" else "mse_channel_location_weighted"), w]
+            for name, w in losses
+        ]
+
+    def _loss_per_loss_function(
+        self,
+        loss_fct,
+        target: torch.Tensor,
+        pred: torch.Tensor,
+    ):
+        """
+        Compute loss for given loss function
+        """
+
+        loss_val = loss_fct(target=target, ens=None, mu=pred)
+
+        return loss_val
+
+    def compute_loss(
+        self,
+        preds: list[list[Tensor]],
+        targets: list[list[any]],
+    ) -> LossValues:
+        losses_all: Tensor = torch.zeros(
+            len(self.loss_fcts),
+            device=self.device,
+        )
+
+        loss_fsteps_lat = torch.tensor(0.0, device=self.device, requires_grad=True)
+        ctr_fsteps_lat = 0
+        # TODO: KCT, do we need the below per fstep?
+        for fstep in range(
+            1, len(preds)
+        ):  # the first entry in tokens_all is the source itself, so skip it
+            loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
+            ctr_loss_fcts = 0
+            # if forecast_offset==0, then the timepoints correspond. Otherwise targets don't encode the source timestep, so we don't need to skip
+            fstep_targs = fstep if self.cf.forecast_offset == 0 else fstep - 1
+            for i_lfct, (loss_fct, loss_fct_weight) in enumerate(self.loss_fcts_lat):
+                loss_lfct = self._loss_per_loss_function(
+                    loss_fct,
+                    stream_info=None,
+                    target=targets[fstep_targs],
+                    pred=preds[fstep],
+                )
+
+                losses_all[i_lfct] += loss_lfct  # TODO: break into fsteps
+
+                # Add the weighted and normalized loss from this loss function to the total
+                # batch loss
+                loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct)
+                ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
+
+            loss_fsteps_lat = loss_fsteps_lat + (
+                loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0
+            )
+            ctr_fsteps_lat += 1 if ctr_loss_fcts > 0 else 0
+
+        loss = loss_fsteps_lat / (ctr_fsteps_lat if ctr_fsteps_lat > 0 else 1.0)
+
+        losses_all /= ctr_fsteps_lat if ctr_fsteps_lat > 0 else 1.0
+        losses_all[losses_all == 0.0] = torch.nan
+
+        return LossValues(loss=loss, losses_all=losses_all)
+
+
+class LossLatentSSLStudentTeacher(LossModuleBase):
+    """
+    Manages and computes the overall loss for a WeatherGenerator model pretraining using
+    DINO/iBOT/JEPA/BYOL style losses.
+
+    This class handles the initialization and application of various loss functions,
+    It provides both the main loss for backpropagation and detailed loss metrics for logging.
+    """
+
+    valid_loss_names = set(["DINO", "iBOT", "JEPA"])
+
+    def __init__(
+        self,
+        cf: DictConfig,
+        losses: list,
+        stage: Stage,
+        device: str,
+    ):
+        LossModuleBase.__init__(self)
+        self.cf = cf
+        self.stage = stage
+        self.device = device
+        self.name = "LossLatentSSLStudentTeacher"
+        self.local_cf = cf["training_mode_config"]["losses"][self.name]
+
+        # Dynamically load loss functions based on configuration and stage
+        self.losses = {
+            name: (self.local_cf[name]["weight"], get_loss_function_ssl(name))
+            for name in losses
+            if name in self.valid_loss_names
+        }
+
+    def compute_loss(
+        self,
+        preds: dict,
+        targets: dict,
+    ) -> LossValues:
+        # gradient loss
+        loss = torch.tensor(0.0, device=self.device, requires_grad=True)
+
+        # initialize dictionaries for detailed loss tracking and standard deviation statistics
+        # create tensor for each stream
+        losses_all: dict[str, Tensor] = {loss: 0.0 for loss in self.losses}
+
+        for name, (weight, loss_fn) in self.losses.items():
+            loss_value = loss_fn(preds.latent[name], targets[name]).mean()
+            loss += weight * loss_value
+            losses_all[name] = loss_value.item()
+
+        return loss
+
+
+def get_loss_function_ssl(name):
+    if name == "iBOT":
+        return loss_fns.masked_student_teacher_patch_softmax
+    elif name == "DINO":
+        return loss_fns.student_teacher_global_softmax
+    elif name == "JEPA":
+        return F.l1_loss
+    else:
+        raise NotImplementedError(
+            f"{name} is not an implemented loss for the LossLatentSSLStudentTeacher"
+        )

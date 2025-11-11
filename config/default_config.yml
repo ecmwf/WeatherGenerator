@@ -113,17 +113,21 @@ ema_halflife_in_thousands: 1e-3
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
 training_mode: "student-teacher"
 training_mode_config: {
-  "losses" : [ "iBOT", "DINO", "JEPA" ],
+  "losses" : { 
+    LossLatentSSLStudentTeacher: { 
+      "iBOT": {'weight': 0.5, "ibot_patch_out_dim": 65536, "student_temp": 0.1,"teacher_temp": 0.1,
+          "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      "DINO": {'weight': 0.5, "dino_out_dim": 65536, "student_temp": 0.1,"teacher_temp": 0.1,
+          "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      "JEPA": {'weight': 0.5} }
+  },
   "shared_heads": False,
-  "student_temp": 0.1,
-  "teacher_temp": 0.1,
-  "dino_out_dim": 65536, # 2**16
-  "ibot_patch_out_dim": 65536, # 2**16
-  "teacher_style": "softmax_center",
-  "center_momentum": 0.9,
   "target_and_aux_calc": "EMATeacher",
   "teacher_model": {}
 }
+# training_mode_config: {"losses": {LossPhysical: [['mse', 1.0]],}
+#                       }
+validation_mode_config: {"losses": {LossPhysical: [['mse', 1.0]],}}
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
