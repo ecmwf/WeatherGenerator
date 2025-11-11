@@ -423,7 +423,9 @@ class Trainer(TrainerBase):
             if is_root():
                 logger.info(str)
 
-        import pdb; pdb.set_trace()
+        import pdb
+
+        pdb.set_trace()
         # Instantiate loss calculator modules to compute losses
         self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=self.device)
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.device)

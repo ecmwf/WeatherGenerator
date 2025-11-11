@@ -13,6 +13,7 @@ import logging
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from omegaconf import DictConfig
 from torch import Tensor
 
@@ -20,8 +21,6 @@ import weathergen.train.loss_modules.loss_functions as loss_fns
 from weathergen.train.loss_modules.loss_functions import stat_loss_fcts
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.utils.train_logger import TRAIN, VAL, Stage
-
-import torch.nn.functional as F
 
 _logger = logging.getLogger(__name__)
 

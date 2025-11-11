@@ -9,13 +9,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import dataclasses
 import copy
+import dataclasses
 import logging
 import math
 import warnings
 from pathlib import Path
-import dataclasses
 
 import astropy_healpix as hp
 import astropy_healpix.healpy
@@ -31,11 +30,11 @@ from weathergen.model.engines import (
     EnsPredictionHead,
     ForecastingEngine,
     GlobalAssimilationEngine,
+    LatentPredictionHead,
     Local2GlobalAssimilationEngine,
     LocalAssimilationEngine,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
-    LatentPredictionHead,
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.parametrised_prob_dist import LatentInterpolator

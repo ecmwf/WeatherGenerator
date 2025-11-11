@@ -276,8 +276,10 @@ def student_teacher_patch_softmax(
     ).clamp(min=1.0)
     return -loss.mean()
 
+
 def softmax(t, s, temp):
     return torch.sum(t * F.log_softmax(s / temp, dim=-1), dim=-1)
+
 
 def masked_student_teacher_patch_softmax(
     student_patches_masked,
@@ -318,4 +320,3 @@ def student_teacher_global_softmax(student_outputs, student_temp, teacher_output
             loss = torch.sum(t * lsm, dim=-1)
             total_loss -= loss.mean()
     return total_loss
-

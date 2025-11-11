@@ -2,12 +2,12 @@ from typing import Any
 
 import torch
 
-from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase
 from weathergen.train.ssl_losses_utils import (
-    iBOTPatchTargetProcessing,
     DINOTargetProcessing,
     JEPATargetProcessing,
+    iBOTPatchTargetProcessing,
 )
+from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase
 
 
 class EMATeacher(TargetAndAuxModuleBase):
