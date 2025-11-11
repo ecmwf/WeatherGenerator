@@ -184,7 +184,7 @@ class LossPhysical(LossModuleBase):
                           of predictions for channels with statistical loss functions, normalized.
         """
 
-        preds = preds["physical"]
+        preds = preds.physical
         streams_data = targets["physical"]
 
         # gradient loss

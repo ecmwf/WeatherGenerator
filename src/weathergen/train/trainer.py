@@ -588,17 +588,14 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                predictions, posteriors = self.model(
-                    self.model_params, batch, cf.forecast_offset, forecast_steps
-                )
+                output = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
             targets = {"physical": batch[0]}
-            preds = {"physical": predictions, "latent": posteriors}
             loss_values = self.loss_calculator.compute_loss(
-                preds=preds,
+                preds=output,
                 targets=targets,
             )
             if cf.latent_noise_kl_weight > 0.0:
-                kl = torch.cat([posterior.kl() for posterior in posteriors])
+                kl = torch.cat([posterior.kl() for posterior in output.latent])
                 loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
 
             # backward pass
@@ -681,17 +678,17 @@ class Trainer(TrainerBase):
                             if self.ema_model is None
                             else self.ema_model.forward_eval
                         )
-                        preds, _ = model_forward(
+                        output = model_forward(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
-
-                    # compute loss and log output
+                    targets = {"physical": batch[0]}
+                    # compute loss
+                    loss_values = self.loss_calculator_val.compute_loss(
+                        preds=output,
+                        targets=targets,
+                    )
+                    # log output
                     if bidx < cf.log_validation:
-                        loss_values = self.loss_calculator_val.compute_loss(
-                            preds=preds,
-                            streams_data=batch[0],
-                        )
-
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
                         (
                             preds_all,
@@ -700,7 +697,7 @@ class Trainer(TrainerBase):
                             targets_times_all,
                             targets_lens,
                         ) = self._prepare_logging(
-                            preds=preds,
+                            preds=output,
                             forecast_offset=cf.forecast_offset,
                             forecast_steps=cf.forecast_steps,
                             streams_data=batch[0],
@@ -716,12 +713,6 @@ class Trainer(TrainerBase):
                             targets_coords_all,
                             targets_times_all,
                             targets_lens,
-                        )
-
-                    else:
-                        loss_values = self.loss_calculator_val.compute_loss(
-                            preds=preds,
-                            streams_data=batch[0],
                         )
 
                     self.loss_unweighted_hist += [loss_values.losses_all]
