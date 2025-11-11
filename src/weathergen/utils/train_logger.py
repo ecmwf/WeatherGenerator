@@ -142,10 +142,8 @@ class TrainLogger:
         log_vals = []
         log_vals += [perf_gpu]
         log_vals += [perf_mem]
-        if perf_gpu > 0.0:
-            metrics[_performance_gpu] = perf_gpu
-        if perf_mem > 0.0:
-            metrics[_performance_memory] = perf_mem
+        metrics[_performance_gpu] = perf_gpu
+        metrics[_performance_memory] = perf_mem
         self.log_metrics("train", metrics)
         with open(self.path_run / (self.cf.run_id + "_perf_log.txt"), "ab") as f:
             np.savetxt(f, log_vals)
@@ -412,7 +410,6 @@ def clean_df(df, columns: list[str] | None):
     df = df.with_columns(
         (df[_weathergen_timestamp] - df[_weathergen_timestamp].min()).alias(_weathergen_reltime)
     )
-    _logger.info(f"schema {df.schema}")
 
     if columns:
         columns = list(set(columns))  # remove duplicates

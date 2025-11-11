@@ -58,10 +58,12 @@ class DataReaderObs(DataReaderBase):
         # assert target_n_empty, "target is empty; at least one channels must be present."
 
         self.source_channels = self.select_channels(data_colnames, s_chs, s_chs_exclude)
-        self.source_idx = np.array([self.colnames.index(c) for c in self.source_channels])
+        self.source_idx = [self.colnames.index(c) for c in self.source_channels]
+        self.source_idx = np.array(self.source_idx, dtype=np.int64)
 
         self.target_channels = self.select_channels(data_colnames, t_chs, t_chs_exclude)
-        self.target_idx = np.array([self.colnames.index(c) for c in self.target_channels])
+        self.target_idx = [self.colnames.index(c) for c in self.target_channels]
+        self.target_idx = np.array(self.target_idx, dtype=np.int64)
 
         # determine idx for coords and geoinfos
         self.coords_idx = [self.colnames.index("lat"), self.colnames.index("lon")]
@@ -86,7 +88,7 @@ class DataReaderObs(DataReaderBase):
 
     def select_channels(
         self, colnames: list[str], cols_select: list[str] | None, cols_exclude: list[str] | None
-    ) -> None:
+    ) -> list[str]:
         """
         Allow user to specify which columns they want to access.
         Get functions only returned for these specified columns.
@@ -177,19 +179,19 @@ class DataReaderObs(DataReaderBase):
                     )
                     * self.indices_start[-1],
                 )
+
                 self.indices_end = np.append(
                     self.indices_end,
                     np.ones(
-                        (diff_in_hours_end - self.hrly_index.shape[0] - 1) // step_hrs, dtype=int
+                        # add (len_hrs + 1) since above we also have diff_in_hours_start + len_hrs
+                        (diff_in_hours_end - self.hrly_index.shape[0] + (len_hrs + 1)) // step_hrs,
+                        dtype=int,
                     )
                     * self.indices_end[-1],
                 )
 
-        # Prevent -1 in samples before the we have data
+        # Prevent -1 in samples before we have data
         self.indices_end = np.maximum(self.indices_end, 0)
-
-        if self.indices_end.shape != self.indices_start.shape:
-            self.indices_end = np.append(self.indices_end, self.indices_end[-1])
 
         # If end (yyyymmddhhmm) is not a multiple of len_hrs
         # truncate the last sample so that it doesn't go beyond the requested dataset end date
