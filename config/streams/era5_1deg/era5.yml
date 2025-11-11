@@ -24,6 +24,10 @@ ERA5 :
     num_heads : 8
     dim_embed : 256
     num_blocks : 2
+    use_perceiver: True
+    cross_attention : 
+      num_queries : 64 
+      num_heads : 8 
   embed_target_coords :
     net : linear
     dim_embed : 256
