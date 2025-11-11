@@ -1,7 +1,22 @@
 import os
+import logging
 
 import streamlit as st
 import streamlit_authenticator as stauth
+
+@st.cache_resource
+def get_logger():
+    logger = logging.getLogger()
+    if not logger.hasHandlers():
+        logging.basicConfig(
+            format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+            level=logging.INFO,
+        )
+    return logger
+
+_logger = get_logger()
+print("_logger initialized", _logger)
+
 
 user = os.getenv("USER_NAME")
 password = os.getenv("USER_PASSWORD")

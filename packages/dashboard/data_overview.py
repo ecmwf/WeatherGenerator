@@ -7,6 +7,7 @@ import polars as pl
 import streamlit as st
 
 _logger = logging.getLogger(__name__)
+print("_logger initialized", _logger)
 # List all the json files in ../stac/json:
 
 # Find the current absolute location of this file
@@ -15,7 +16,7 @@ _logger.info(f"Current file path: {current_file_path}")
 # Get the directory:
 current_dir = os.path.dirname(current_file_path)
 
-stac_dir = os.path.abspath(os.path.join(current_dir, "../stac/jsons"))
+stac_dir = os.path.abspath(os.path.join(current_dir, "../../stac/jsons"))
 _logger.info(f"STAC JSON directory: {stac_dir}")
 
 json_files = sorted([f for f in os.listdir(stac_dir) if f.endswith(".json")])
