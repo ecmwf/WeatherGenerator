@@ -162,11 +162,12 @@ class Trainer(TrainerBase):
         targets_num_channels = self.dataset.get_targets_num_channels()
         targets_coords_size = self.dataset.get_targets_coords_size()
 
-        if cf.with_ddp and not cf.with_fsdp:
-            model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-        else:
+        if cf.with_ddp and cf.with_fsdp:
             with torch.device("meta"):
                 model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+        else:
+            model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+            model = model.to("cuda")
 
         # freeze request model part
         for name, module in model.named_modules():
@@ -179,7 +180,6 @@ class Trainer(TrainerBase):
 
         if cf.with_ddp and not cf.with_fsdp:
             # create DDP model if running without FSDP
-            model = model.to("cuda")
             model = torch.nn.parallel.DistributedDataParallel(
                 model,
                 broadcast_buffers=True,
@@ -768,8 +768,13 @@ class Trainer(TrainerBase):
             path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
         )
 
-        # Ensure backward compatibility with old model checkpoints
-        params = self.model.rename_old_state_dict(params)
+        # # Ensure backward compatibility with old model checkpoints
+        # params = self.model.rename_old_state_dict(params)
+
+        # maybe_sharded_sd = {}
+        # for k in params.keys():
+        #     maybe_sharded_sd[k.replace("module.", "")] = params[k]
+        # params = maybe_sharded_sd
 
         model_state_dict = self.model.state_dict()
         params = {
@@ -791,9 +796,14 @@ class Trainer(TrainerBase):
                 )
                 maybe_sharded_sd[param_name.replace("module.", "")] = nn.Parameter(sharded_tensor)
         else:
-            maybe_sharded_sd = {}
-            for k in params.keys():
-                maybe_sharded_sd[k.replace("module.", "")] = params[k]
+            # maybe_sharded_sd = {}
+            # for k in params.keys():
+            #     maybe_sharded_sd[k.replace("module.", "")] = params[k]
+            mkeys, ukeys = self.model.load_state_dict(maybe_sharded_sd, strict=False)
+            import code
+
+            code.interact(local=locals())
+
         # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
         mkeys, ukeys = self.model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
 
