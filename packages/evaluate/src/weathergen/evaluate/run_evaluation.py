@@ -17,6 +17,7 @@ from pathlib import Path
 from omegaconf import OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
+from weathergen.common.logger import init_loggers
 from weathergen.evaluate.io_reader import WeatherGenReader
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
@@ -27,6 +28,41 @@ from weathergen.evaluate.utils import (
 )
 
 _logger = logging.getLogger(__name__)
+
+LOGGING_CONFIG = """
+{
+    "version": 1,
+    "disable_existing_loggers": false,
+    "formatters": {
+        "custom": {
+            "class": "weathergen.common.logger.ColoredRelPathFormatter",
+            "format": \
+                "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
+        }
+    },
+    "handlers": {
+        "stdout": {
+            "class": "logging.StreamHandler",
+            "level": "INFO",
+            "formatter": "custom",
+            "stream": "ext://sys.stdout"
+        },
+        "stderr": {
+            "class": "logging.StreamHandler",
+            "level": "ERROR",
+            "formatter": "custom",
+            "stream": "ext://sys.stderr"
+        }
+    },
+    "root": {
+        "level": "DEBUG",
+        "handlers": [
+            "stderr",
+            "stdout"
+        ]
+    }
+}
+"""
 
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
@@ -58,7 +94,7 @@ def evaluate_from_args(argl: list[str]) -> None:
 
 def evaluate_from_config(cfg):
     # configure logging
-    logging.basicConfig(level=logging.INFO)
+    init_loggers(0, logging_config=LOGGING_CONFIG)
 
     # load configuration
 

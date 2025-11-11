@@ -22,7 +22,7 @@ LOGGING_CONFIG = """
     "disable_existing_loggers": false,
     "formatters": {
         "custom": {
-            "class": "weathergen.utils.logger.ColoredRelPathFormatter",
+            "class": "weathergen.common.logger.ColoredRelPathFormatter",
             "format": \
                 "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
         }
@@ -44,7 +44,7 @@ LOGGING_CONFIG = """
             "class": "logging.FileHandler",
             "level": "DEBUG",
             "formatter": "custom",
-            "filename": "log.text",
+            "filename": "log.txt",
             "mode": "w"
         },
         "errorfile": {
