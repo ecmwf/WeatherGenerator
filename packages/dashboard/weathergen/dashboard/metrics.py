@@ -3,7 +3,6 @@ Downloads metrics from MLFlow.
 """
 
 import logging
-from functools import lru_cache
 
 import mlflow
 import mlflow.client

@@ -7,7 +7,6 @@ import polars as pl
 import streamlit as st
 
 _logger = logging.getLogger(__name__)
-print("_logger initialized", _logger)
 # List all the json files in ../stac/json:
 
 # Find the current absolute location of this file

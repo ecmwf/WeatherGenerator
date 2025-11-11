@@ -1,8 +1,9 @@
-import os
 import logging
+import os
 
 import streamlit as st
 import streamlit_authenticator as stauth
+
 
 @st.cache_resource
 def get_logger():
@@ -12,10 +13,11 @@ def get_logger():
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
             level=logging.INFO,
         )
+    print("_logger being returned", logger)  # noqa: T201
     return logger
 
+
 _logger = get_logger()
-print("_logger initialized", _logger)
 
 
 user = os.getenv("USER_NAME")
