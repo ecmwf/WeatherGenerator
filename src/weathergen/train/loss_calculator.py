@@ -13,8 +13,8 @@ import logging
 
 from omegaconf import DictConfig
 
-import weathergen.train.loss_module as LossModule
-from weathergen.train.loss_module_base import LossValues
+import weathergen.train.loss_modules as LossModules
+from weathergen.train.loss_modules.loss_module_base import LossValues
 from weathergen.utils.train_logger import TRAIN, Stage
 
 _logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class LossCalculator:
         )
 
         calculator_configs = [
-            (getattr(LossModule, Cls), losses) for (Cls, losses) in calculator_configs.items()
+            (getattr(LossModules, Cls), losses) for (Cls, losses) in calculator_configs.items()
         ]
 
         self.loss_calculators = [
