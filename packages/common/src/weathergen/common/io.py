@@ -427,7 +427,11 @@ class ZarrIO:
         _, example_sample = next(self.data_root.groups())
         _, example_stream = next(example_sample.groups())
 
-        return list(example_stream.group_keys())
+        all_steps = list(example_stream.group_keys())
+        if self.forecast_offset == 1:
+            return all_steps[1:]  # exclude fstep with no targets/preds
+        else:
+            return all_steps
 
 
 @dataclasses.dataclass
