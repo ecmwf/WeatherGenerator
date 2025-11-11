@@ -164,22 +164,6 @@ def export_from_args(args: list) -> None:
         args : List of command line arguments.
     """
     args = parse_args(sys.argv[1:])
-    run_id = args.run_id
-    data_type = args.type
-    output_dir = args.output_dir
-    output_format = args.format
-    samples = args.samples
-    stream = args.stream
-    fsteps = args.fsteps
-    fstep_hours = np.timedelta64(args.fstep_hours, "h")
-    channels = args.channels
-    n_processes = args.n_processes
-    epoch = args.epoch
-    rank = args.rank
-
-    # Ensure output directory exists
-    out_dir = Path(output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     # Load configuration
     config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2cf.yaml")
@@ -187,24 +171,28 @@ def export_from_args(args: list) -> None:
     # check config loaded correctly
     assert len(config["variables"].keys()) > 0, "Config file not loaded correctly"
 
-    for dtype in data_type:
-        _logger.info(f"Starting processing {dtype} for run ID {run_id}.")
-        export_model_outputs(
-            run_id,
-            samples,
-            stream,
-            dtype,
-            fsteps,
-            channels,
-            fstep_hours,
-            n_processes,
-            epoch,
-            rank,
-            output_dir,
-            output_format,
-            config,
-        )
-        _logger.info(f"Finished processing {dtype} for run ID {run_id}.")
+    config["run_id"] = args.run_id
+    config["output_dir"] = args.output_dir
+    config["output_format"] = args.format
+    config["samples"] = args.samples
+    config["stream"] = args.stream
+    config["fsteps"] = args.fsteps
+    config["fstep_hours"] = args.fstep_hours
+    config["channels"] = args.channels
+    config["n_processes"] = args.n_processes
+    config["epoch"] = args.epoch
+    config["rank"] = args.rank
+
+    # Ensure output directory exists
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for dtype in args.type:
+        _logger.info(f"Starting processing {dtype} for run ID {args.run_id}.")
+       
+        export_model_outputs(dtype, config)
+       
+        _logger.info(f"Finished processing {dtype} for run ID {args.run_id}.")
 
 
 if __name__ == "__main__":
