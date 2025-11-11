@@ -178,6 +178,17 @@ class ItemKey:
         """Decide if output item should contain target and predictions."""
         assert forecast_offset in (0, 1)
         return (not self.with_source) or (forecast_offset == 0)
+    
+    @staticmethod    
+    def _infer_forecast_offset(datasets: dict[str, typing.Any]) -> int:
+        """
+        Infer forecast offset by the (non)presence of targets at fstep 0.
+        
+        Args:
+            datasets: Datasets found in a fstep 0 OutputItem.
+        """
+        # forecast offset=1 should produce no targets at fstep 0
+        return 0 if "target" in datasets else 1
 
 
 @dataclasses.dataclass
@@ -308,10 +319,14 @@ class ZarrIO:
     def __init__(self, store_path: pathlib.Path):
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
+        self.forecast_offset: int | None = None 
 
     def __enter__(self) -> typing.Self:
         self._store = zarr.storage.DirectoryStore(self._store_path)
         self.data_root = zarr.group(store=self._store)
+        
+        fstep0_datasets = self._get_datasets(self.example_key)
+        self.forecast_offset = ItemKey._infer_forecast_offset(fstep0_datasets)
 
         return self
 
@@ -390,8 +405,8 @@ class ZarrIO:
     def example_key(self) -> ItemKey:
         sample, example_sample = next(self.data_root.groups())
         stream, example_stream = next(example_sample.groups())
-        fstep, example_item = next(example_stream.groups())
-
+        fstep = 0
+        
         return ItemKey(sample, fstep, stream)
 
     @functools.cached_property
