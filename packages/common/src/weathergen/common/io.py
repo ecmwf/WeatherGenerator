@@ -293,20 +293,15 @@ class OutputItem:
         self.source = source
 
         self.datasets = []
-        forecast_offset = 0
 
         if self.key.with_source:
             self._append_dataset(self.source, "source")
 
-            # forecast offset=1 should produce no targets
-            if not self.target:
-                forecast_offset = 1
-
         if self.key.with_target(forecast_offset):
             self._append_dataset(self.target, "target")
             self._append_dataset(self.prediction, "prediction")
-
-    def _append_dataset(self, dataset: OutputDataset | None, name: str):
+    
+    def _append_dataset(self, dataset: OutputDataset | None, name: str) -> None:
         if dataset:
             self.datasets.append(dataset)
         else:
