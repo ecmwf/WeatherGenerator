@@ -771,6 +771,9 @@ class Model(torch.nn.Module):
                 tokens_c, tokens_global_unmasked_c, q_cells_lens_c, cell_lens_c, use_reentrant=False
             )
 
+            # global assimilation engine and adapter
+            # tokens_global_unmasked_c = self.ae_global_engine(tokens_global_unmasked_c, use_reentrant=False)
+
             tokens_global_unmasked_all += [tokens_global_unmasked_c]
             tokens_global_masked_all += [tokens_global_masked_c]
 
