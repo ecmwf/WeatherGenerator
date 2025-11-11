@@ -29,40 +29,6 @@ from weathergen.evaluate.utils import (
 
 _logger = logging.getLogger(__name__)
 
-LOGGING_CONFIG = """
-{
-    "version": 1,
-    "disable_existing_loggers": false,
-    "formatters": {
-        "custom": {
-            "class": "weathergen.common.logger.ColoredRelPathFormatter",
-            "format": \
-                "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
-        }
-    },
-    "handlers": {
-        "stdout": {
-            "class": "logging.StreamHandler",
-            "level": "INFO",
-            "formatter": "custom",
-            "stream": "ext://sys.stdout"
-        },
-        "stderr": {
-            "class": "logging.StreamHandler",
-            "level": "ERROR",
-            "formatter": "custom",
-            "stream": "ext://sys.stderr"
-        }
-    },
-    "root": {
-        "level": "DEBUG",
-        "handlers": [
-            "stderr",
-            "stdout"
-        ]
-    }
-}
-"""
 
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
@@ -94,7 +60,7 @@ def evaluate_from_args(argl: list[str]) -> None:
 
 def evaluate_from_config(cfg):
     # configure logging
-    init_loggers(0, logging_config=LOGGING_CONFIG)
+    init_loggers(None)
 
     # load configuration
 
