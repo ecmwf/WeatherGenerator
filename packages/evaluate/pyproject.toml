@@ -10,8 +10,9 @@ dependencies = [
     "xhistogram",
     "panel",
     "omegaconf",
-    "weathergen-common",
     "plotly>=6.2.0",
+    "weathergen-common",
+    "weathergen-metrics",
 ]
 
 [dependency-groups]

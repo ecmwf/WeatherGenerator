@@ -307,7 +307,9 @@ class Scores:
             group_names = list(next(iter(grouped_args.values())).groups.keys())
             results = []
             for name in group_names:
-                group_slice = {k: v[name] for k, v in grouped_args.items()}
+                group_slice = {
+                    k: (v[name] if v is not None else v) for k, v in grouped_args.items()
+                }
                 res = f(**group_slice)
                 # Add coordinate for concatenation
                 res = res.expand_dims({group_by_coord: [name]})
@@ -891,7 +893,6 @@ class Scores:
         self,
         x: xr.DataArray,
         c: xr.DataArray,
-        spatial_dims: list = None,
     ):
         """
         Calculate activity metric as standard deviation of forecast or target anomaly.
@@ -905,25 +906,14 @@ class Scores:
             Forecast or target data array
         c: xr.DataArray
             Climatological mean data array, which is used to calculate anomalies
-        spatial_dims: List[str]
-            Names of spatial dimensions over which activity is calculated.
-            Note: No averaging is possible over these dimensions.
         """
 
-        # Check if spatial_dims are in the data
-        spatial_dims = ["ipoint"] if spatial_dims is None else to_list(spatial_dims)
-
-        for dim in spatial_dims:
-            if dim not in x.dims:
-                raise ValueError(
-                    f"Spatial dimension '{dim}' not found in prediction data dimensions: {x.dims}"
-                )
         if c is None:
-            return xr.full_like(x.sum(spatial_dims), np.nan)
+            return xr.full_like(x.sum(self._agg_dims), np.nan)
 
         # Calculate anomalies
         ano = x - c
-        act = ano.std(dim=spatial_dims)
+        act = ano.std(dim=self._agg_dims)
 
         return act
 
@@ -931,7 +921,6 @@ class Scores:
         self,
         p: xr.DataArray,
         c: xr.DataArray,
-        spatial_dims: list = None,
     ):
         """
         Calculate forecast activity metric as standard deviation of forecast anomaly.
@@ -945,18 +934,14 @@ class Scores:
             Forecast data array
         c: xr.DataArray
             Climatological mean data array, which is used to calculate anomalies
-        spatial_dims: List[str]
-            Names of spatial dimensions over which activity is calculated.
-            Note: No averaging is possible over these dimensions.
         """
 
-        return self._calc_act(p, c, spatial_dims)
+        return self._calc_act(p, c)
 
     def calc_tact(
         self,
         gt: xr.DataArray,
         c: xr.DataArray,
-        spatial_dims: list = None,
     ):
         """
         Calculate target activity metric as standard deviation of target anomaly.
@@ -970,19 +955,15 @@ class Scores:
             Target data array
         c: xr.DataArray
             Climatological mean data array, which is used to calculate anomalies
-        spatial_dims: List[str]
-            Names of spatial dimensions over which activity is calculated.
-            Note: No averaging is possible over these dimensions.
         """
 
-        return self._calc_act(gt, c, spatial_dims)
+        return self._calc_act(gt, c)
 
     def calc_acc(
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
         c: xr.DataArray,
-        spatial_dims: list = None,
     ) -> xr.DataArray:
         """
         Calculate anomaly correlation coefficient (ACC).
@@ -999,32 +980,22 @@ class Scores:
             Ground truth data array
         c: xr.DataArray
             Climatological mean data array, which is used to calculate anomalies
-        spatial_dims: List[str]
-            Names of spatial dimensions over which ACC is calculated.
-            Note: No averaging is possible over these dimensions.
+
         Returns
         -------
         xr.DataArray
             Anomaly correlation coefficient (ACC)
         """
 
-        # Check if spatial_dims are in the data
-        spatial_dims = ["ipoint"] if spatial_dims is None else to_list(spatial_dims)
-
-        for dim in spatial_dims:
-            if dim not in p.dims:
-                raise ValueError(
-                    f"Spatial dimension '{dim}' not found in prediction data dimensions: {p.dims}"
-                )
         if c is None:
-            return xr.full_like(p.sum(spatial_dims), np.nan)
+            return xr.full_like(p.sum(self._agg_dims), np.nan)
 
         # Calculate anomalies
         fcst_ano, obs_ano = p - c, gt - c
 
         # Calculate ACC over spatial dimensions (no grouping)
-        acc = (fcst_ano * obs_ano).sum(spatial_dims) / np.sqrt(
-            (fcst_ano**2).sum(spatial_dims) * (obs_ano**2).sum(spatial_dims)
+        acc = (fcst_ano * obs_ano).sum(self._agg_dims) / np.sqrt(
+            (fcst_ano**2).sum(self._agg_dims) * (obs_ano**2).sum(self._agg_dims)
         )
 
         return acc

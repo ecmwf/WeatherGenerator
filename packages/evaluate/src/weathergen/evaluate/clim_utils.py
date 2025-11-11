@@ -124,10 +124,19 @@ def align_clim_data(
     for fstep, target_data in target_output.items():
         samples = np.unique(target_data.sample.values)
         for sample in tqdm(samples, f"Aligning climatology for forecast step {fstep}"):
-            sample_mask = target_data.sample.values == sample
-            timestamp = target_data.valid_time.values[sample_mask][0]
+            sel_key = "sample" if "sample" in target_data.dims else "ipoint"
+            sel_val = (
+                sample if "sample" in target_data.dims else (target_data.sample.values == sample)
+            )
+            sel_mask = {sel_key: sel_val}
+
+            timestamp = target_data.sel(sel_mask).valid_time.values[0]
             # Prepare climatology data for each sample
             matching_time_idx = match_climatology_time(timestamp, clim_data)
+
+            if matching_time_idx is None:
+                continue
+
             prepared_clim_data = (
                 clim_data.data.isel(
                     time=matching_time_idx,
@@ -137,8 +146,8 @@ def align_clim_data(
                 )
                 .transpose("grid_points", "channels")  # dimensions specific to anemoi
             )
-            target_lats = target_data.loc[{"ipoint": sample_mask}].lat.values
-            target_lons = target_data.loc[{"ipoint": sample_mask}].lon.values
+            target_lats = target_data.loc[sel_mask].lat.values
+            target_lons = target_data.loc[sel_mask].lon.values
             # check if target coords match cached target coords
             # if they do, use cached clim_indices
             if (
@@ -170,7 +179,7 @@ def align_clim_data(
             clim_values = prepared_clim_data.isel(grid_points=clim_indices).values
             try:
                 if len(samples) > 1:
-                    aligned_clim_data[fstep].loc[{"ipoint": sample_mask}] = clim_values
+                    aligned_clim_data[fstep].loc[sel_mask] = clim_values
                 else:
                     aligned_clim_data[fstep] = clim_values
             except (ValueError, IndexError) as e:
@@ -209,7 +218,7 @@ def get_climatology(reader, da_tars, stream: str) -> xr.Dataset | None:
 
     aligned_clim_data = None
 
-    if clim_data_path:
+    if clim_data_path is not None:
         clim_data = xr.open_dataset(clim_data_path)
         _logger.info("Aligning climatological data with target structure...")
         aligned_clim_data = align_clim_data(da_tars, clim_data)
