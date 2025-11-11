@@ -281,6 +281,7 @@ class OutputItem:
     def __init__(
         self,
         key: ItemKey,
+        forecast_offset=int | None,
         target: OutputDataset | None = None,
         prediction: OutputDataset | None = None,
         source: OutputDataset | None = None,
@@ -349,15 +350,18 @@ class ZarrIO:
     def load_zarr(self, key: ItemKey) -> OutputItem:
         """Get datasets for a output item."""
         group = self._get_group(key)
-        datasets = {
+        datasets = self._get_datasets(group)
+
+        return OutputItem(key=key, forecast_offset=self.forecast_offset, **datasets)
+
+    def _get_datasets(self, key: ItemKey):
+        group = self._get_group(key)
+        return {
             name: OutputDataset.create(
                 name, key, dict(dataset.arrays()), dict(dataset.attrs).copy()
             )
             for name, dataset in group.groups()
         }
-        datasets["key"] = key
-
-        return OutputItem(**datasets)
 
     def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
@@ -529,6 +533,7 @@ class OutputBatchData:
 
         return OutputItem(
             key=key,
+            forecast_offset=self.forecast_offset,
             source=source_dataset,
             target=target_dataset,
             prediction=prediction_dataset,
