@@ -1,0 +1,2 @@
+# The default configuration file for multi streams training.
+streams_directory: "./config/streams/era5_strato/"
