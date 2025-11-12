@@ -52,6 +52,9 @@ fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 impute_latent_noise_std: 0.0  # 1e-4
+fe_preprocessor_config: {"preprocessor_type": ["identity", "impute_latent_noise", "diffusion_model_noiser"]
+                         
+                        }
 
 healpix_level: 5
 

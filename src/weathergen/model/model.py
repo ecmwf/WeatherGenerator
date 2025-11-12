@@ -35,6 +35,7 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
+from weathergen.model.preprocess import Preprocessor
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
@@ -321,6 +322,7 @@ class Model(torch.nn.Module):
                 "Empty forecast engine (fe_num_blocks = 0), but forecast_steps[i] > 0 for some i"
             )
 
+        self.preprocessor = Preprocessor(cf_preproc=cf.fe_preprocessing)
         self.forecast_engine = ForecastingEngine(cf, self.num_healpix_cells)
 
         ###############
@@ -634,12 +636,7 @@ class Model(torch.nn.Module):
                 )
             ]
 
-            if self.training:
-                # Impute noise to the latent state
-                noise_std = self.cf.get("impute_latent_noise_std", 0.0)
-                if noise_std > 0.0:
-                    tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
-
+            tokens, preproc_args = self.preprocessor.preprocess(tokens)
             tokens = self.forecast(model_params, tokens, fstep)
 
         # prediction for final step
