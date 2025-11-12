@@ -315,14 +315,10 @@ class ZarrIO:
     def __init__(self, store_path: pathlib.Path):
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
-        self.forecast_offset: int | None = None
 
     def __enter__(self) -> typing.Self:
         self._store = zarr.storage.DirectoryStore(self._store_path)
         self.data_root = zarr.group(store=self._store)
-
-        fstep0_datasets = self._get_datasets(self.example_key)
-        self.forecast_offset = ItemKey._infer_forecast_offset(fstep0_datasets)
 
         return self
 
@@ -399,6 +395,11 @@ class ZarrIO:
             + "into group: {group}."
         )
         group.create_dataset(name, data=array, chunks=chunks)
+
+    @functools.cached_property
+    def forecast_offset(self) -> int:
+        fstep0_datasets = self._get_datasets(self.example_key)
+        return ItemKey._infer_forecast_offset(fstep0_datasets)
 
     @functools.cached_property
     def example_key(self) -> ItemKey:
