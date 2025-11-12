@@ -249,5 +249,7 @@ members = [
    "packages/evaluate",
    "packages/metrics",
    "packages/readers_extra",
+# Explicitly not depending on 'packages/dashboard' : this causes issues when deploying
+# the streamlit dashboard.
 ]
 
