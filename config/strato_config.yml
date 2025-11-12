@@ -1,2 +1,4 @@
 # The default configuration file for multi streams training.
 streams_directory: "./config/streams/era5_strato/"
+
+analysis_streams_output: ["ERA5strato", "ERA5tropo"]  # List of streams to output during inference
