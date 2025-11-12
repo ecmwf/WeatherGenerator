@@ -60,6 +60,6 @@ def check_tomls(main_toml, *tomls):
 
 if __name__ == "__main__":
     main_toml = _REPO_ROOT / "pyproject.toml"
-    eval_toml = _REPO_ROOT / "packages" / "evaluate" / "pyproject.toml"
-    common_toml = _REPO_ROOT / "packages" / "common" / "pyproject.toml"
-    check_tomls(main_toml, eval_toml, common_toml)
+    sub_packages = ["evaluate", "common", "metrics", "readers_extra"]
+    tomls = [_REPO_ROOT / "packages" / package / "pyproject.toml" for package in sub_packages]
+    check_tomls(main_toml, *tomls)

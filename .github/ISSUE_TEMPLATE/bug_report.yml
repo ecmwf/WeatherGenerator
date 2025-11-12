@@ -1,6 +1,9 @@
 name: Bug Report
 description: Report a bug related to WeatherGenerator.
-labels: ["bug"]
+title: Bug report
+labels:
+  - "bug"
+assignees: []
 body:
   - type: textarea
     id: what-happened
@@ -32,3 +35,5 @@ body:
     attributes:
       label: Hedgedoc link to logs and more information. This ticket is public, do not attach files directly.
       description: Please put all relevant information (logs, plots, etc.) in the Hedgedoc and link it here.
+    validations:
+      required: false

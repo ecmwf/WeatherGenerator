@@ -127,7 +127,7 @@ lr_final: 0.0
 lr_steps_warmup: 512 
 lr_steps_cooldown: 512
 lr_policy_warmup: "cosine"
-lr_policy_decay: "linear"
+lr_policy_decay: "constant"
 lr_policy_cooldown: "linear"
 
 grad_clip: 1.0
