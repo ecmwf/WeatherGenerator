@@ -17,10 +17,9 @@ class DiffusionForecastEngine(torch.nn.Module):
 
     def __init__(
         self,
-        cf,
         stage: str,
         forecast_engine: ForecastingEngine,
-        sigma_min: float = 0.002,
+        sigma_min: float = 0.002,  # Adapt to GenCast?
         sigma_max: float = 80,
         sigma_data: float = 0.5,
         rho: float = 7,
@@ -47,7 +46,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             return self.inference(x=x)
 
     def forward_train(self, y) -> torch.Tensor:
-        # Determine noise level -- potentially move to "preprocessing"
+        # Determine noise level -- move to "preprocessing"
         noise = torch.randn(y.shape, device=y.device)
         sigma = (noise * self.p_std + self.p_mean).exp()
         n = torch.randn_like(y) * sigma
@@ -63,14 +62,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         x = self.preconditioner.precondition(x)
         net_out = self.net(c_in * x, c_noise)
         y_hat = c_skip * y + c_out * net_out  # Eq. (7)
-        # return y_hat
 
-        """
-        F_x = self.model((c_in * x).to(dtype), c_noise.flatten(), class_labels=class_labels, **model_kwargs)
-        assert F_x.dtype == dtype
-        D_x = c_skip * x + c_out * F_x.to(torch.float32)
-        return D_x
-        """
+        return y_hat
 
         # Compute loss -- move this to a separate loss calculator
         weight = (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2  # Table 1
@@ -126,7 +119,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
 class Preconditioner:
     # Preconditioner, e.g., to concatenate previous frames to the input
-    def __init_(self):
+    def __init__(self):
         pass
 
     def precondition(self, x):
