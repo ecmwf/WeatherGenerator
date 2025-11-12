@@ -19,6 +19,9 @@ from weathergen.datasets.tokenizer_utils import (
     arc_alpha,
     encode_times_source,
     encode_times_target,
+    tokenize_apply_mask,
+    tokenize_space,
+    tokenize_spacetime,
     tokenize_window_space,
     tokenize_window_spacetime,
 )
@@ -47,20 +50,9 @@ class TokenizerMasking(Tokenizer):
         normalize_coords,  # dataset
     ):
         token_size = stream_info["token_size"]
+        stream_id = stream_info["stream_id"]
+        assert token_size is not None, "stream did not specify token_size"
         is_diagnostic = stream_info.get("diagnostic", False)
-        tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
-
-        tokenize_window = partial(
-            tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
-            time_win=time_win,
-            token_size=token_size,
-            hl=self.hl_source,
-            hpy_verts_rots=self.hpy_verts_rots_source[-1],
-            n_coords=normalize_coords,
-            enc_time=encode_times_source,
-        )
-
-        self.token_size = token_size
 
         # return empty if there is no data or we are in diagnostic mode
         if is_diagnostic or rdata.data.shape[1] == 0 or len(rdata.data) < 2:
@@ -69,23 +61,35 @@ class TokenizerMasking(Tokenizer):
             source_centroids = [torch.tensor([])]
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
-        # tokenize all data first
-        tokenized_data = tokenize_window(
-            0,
-            rdata.coords,
-            rdata.geoinfos,
-            rdata.data,
-            rdata.datetimes,
+        # create tokenization index
+        tok = tokenize_spacetime if stream_info.get("tokenize_spacetime", False) else tokenize_space
+        idxs_cells, idxs_cells_lens = tok(rdata, token_size, self.hl_source, pad_tokens=True)
+
+        (mask_tokens, mask_channels) = self.masker.mask_source_idxs(
+            idxs_cells, idxs_cells_lens, rdata
         )
 
-        tokenized_data = [
-            torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in tokenized_data
-        ]
-
-        # Use the masker to get source tokens and the selection mask for the target
-        source_tokens_cells = self.masker.mask_source(
-            tokenized_data, rdata.coords, rdata.geoinfos, rdata.data
+        source_tokens_cells = tokenize_apply_mask(
+            idxs_cells,
+            idxs_cells_lens,
+            mask_tokens,
+            mask_channels,
+            stream_id,
+            rdata,
+            time_win,
+            self.hpy_verts_rots_source[-1],
+            normalize_coords,
+            encode_times_source,
         )
+
+        # tokenized_data = [
+        #     torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in tokenized_data
+        # ]
+
+        # # Use the masker to get source tokens and the selection mask for the target
+        # source_tokens_cells = self.masker.mask_source(
+        #     tokenized_data, rdata.coords, rdata.geoinfos, rdata.data
+        # )
 
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
         if source_tokens_lens.sum() > 0:

@@ -139,6 +139,50 @@ class Masker:
             # Non-combination strategy, return as is
             return self.masking_strategy
 
+    def mask_source_idxs(
+        self,
+        idxs_cells,
+        idxs_cells_lens,
+        rdata,
+    ) -> torch.Tensor:
+        """
+
+        Return:
+            torch.Tensor[bool] of length num_tokens that determines masking for each token
+        """
+
+        mask_tokens, mask_channels = None, None
+
+        num_tokens = torch.tensor([len(t) for t in idxs_cells_lens]).sum().item()
+
+        # If there are no tokens, return empty lists.
+        if num_tokens == 0:
+            return (mask_tokens, mask_channels)
+
+        # Clean strategy selection
+        self.current_strategy = self._select_strategy()
+
+        # Set the masking rate.
+        rate = self._get_sampling_rate()
+
+        if self.current_strategy == "random":
+            mask_tokens = self.rng.uniform(0, 1, num_tokens) < rate
+        elif self.current_strategy == "healpix":
+            # TODO: currently only for fixed level
+            num_cells = len(idxs_cells_lens)
+            mask_cells = self.rng.uniform(0, 1, num_cells) < rate
+            # translate cell mask to token mask, replicating using number of tokens per cell
+            mask_tokens = [
+                (torch.ones(2, dtype=torch.bool) * (1 if m else 0)).to(torch.bool)
+                for idxs_cell, m in zip(idxs_cells_lens, mask_cells, strict=False)
+            ]
+        else:
+            assert False, f"Unsupported masking strategy: {self.current_strategy}"
+
+        self.perm_sel = mask_tokens
+
+        return (mask_tokens, mask_channels)
+
     def mask_source(
         self,
         tokenized_data: list[torch.Tensor],
