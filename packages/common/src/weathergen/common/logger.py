@@ -96,7 +96,7 @@ class ColoredRelPathFormatter(logging.Formatter):
 
 
 @cache
-def init_loggers(run_id, logging_config=None):
+def init_loggers(run_id=None, logging_config=None):
     """
     Initialize the logger for the package and set output streams/files.
 
