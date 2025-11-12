@@ -215,7 +215,9 @@ class OutputDataset:
     geoinfo_channels: list[str]
 
     @classmethod
-    def create(cls, name, key, arrays: dict[str, ArrayType], attrs: dict[str, typing.Any]):
+    def create(
+        cls, name: str, key: ItemKey, arrays: dict[str, ArrayType], attrs: dict[str, typing.Any]
+    ):
         """
         Create Output dataset from dictonaries.
 
