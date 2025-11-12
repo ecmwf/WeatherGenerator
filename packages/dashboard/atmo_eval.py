@@ -107,7 +107,8 @@ for score, unit in important_scores:
     ## {score} at 48h
     The evaluation score at 48 hours into the forecast. Unit: {unit}
     """)
-    st.plotly_chart(
+    tab1, tab2 = st.tabs(["chart", "data"])
+    tab1.plotly_chart(
         px.scatter(
             score_data_48h.to_pandas(),
             x="start_time",
@@ -115,6 +116,7 @@ for score, unit in important_scores:
             hover_data=info_cols,
         )
     )
+    tab2.dataframe(score_data_48h.to_pandas())
 
 st.markdown("""
 # All latest evaluation scores
