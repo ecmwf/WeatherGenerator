@@ -152,7 +152,7 @@ def get_ref_times(fname_zarr, stream, samples, fstep_hours ) -> list[np.datetime
     with ZarrIO(fname_zarr) as zio:
         zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
         for sample in samples:
-            data = zio.get_data(0, stream, zio_forecast_steps[0])
+            data = zio.get_data(sample, stream, zio_forecast_steps[0])
             data = data.target.as_xarray().squeeze()
             ref_time = data.valid_time.values[0] - fstep_hours * int(data.forecast_step.values)
             ref_times.append(ref_time)
@@ -232,8 +232,9 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
 
         for s_idx, sample in enumerate(tqdm(samples)):
             ref_time = ref_times[s_idx]
+            
             step_tasks = [(sample, fstep, run_id, stream, data_type, epoch, rank) for fstep in fsteps]
-
+            
             results_iterator = pool.imap_unordered(get_data_worker, step_tasks, chunksize=1)
 
             parser.process_sample(

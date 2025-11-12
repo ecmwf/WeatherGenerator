@@ -10,6 +10,17 @@ from pathlib import Path
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
+"""
+Usage: 
+
+uv run export --run-id ciga1p9c --stream ERA5 
+--output-dir /ec/perm/ecm9336/test_output1 
+--format quaver --type prediction target  
+--samples 2 --fsteps 2 
+--template "/ec/weathergen/quaver_templates/aifs_{level_type}_o96_data.grib" 
+--expver test 
+"""
+
 class Quaver_Parser(CF_Parser):
     """
     Child class for handling Quaver output format.
@@ -75,6 +86,9 @@ class Quaver_Parser(CF_Parser):
             step = np.unique(result.forecast_step.values)
             if len(step) != 1:
                 raise ValueError(f"Expected single step value, got {step}")
+            
+            step = int(step[0])
+
             sf_fields = []
             pl_fields = []
             for var in self.channels:
@@ -83,9 +97,12 @@ class Quaver_Parser(CF_Parser):
                 _logger.info(f"[Worker] Encoding var={var}, level={level}")
                
                 field_data = da_fs.sel(channel=var)
-                template_field = self.template_cache[(var, level)]
+                template_field = self.template_cache.get((var, level), None)
+                if template_field is None:
+                    _logger.error(f"Template for var={var}, level={level} not found. Skipping.")
+                    continue
 
-                metadata = self.get_metadata(da_fs, step = step, level = level)
+                metadata = self.get_metadata(ref_time = ref_time, step = step, level = level)
                 
                 encoded = self.encoder.encode(
                         values=field_data.values,
@@ -199,9 +216,10 @@ class Quaver_Parser(CF_Parser):
         """
         Add metadata to the dataset attributes.
         """
+
         metadata = {
                         "date": ref_time,
-                        "step": step * self.fstep_hours, 
+                        "step": step * self.fstep_hours.astype(int), 
                         "expver": self.expver,
                         "marsClass": "rd",
                     }
@@ -224,8 +242,8 @@ class Quaver_Parser(CF_Parser):
             None
         """
 
-        target = self.pl_target if level_type == "pl" else self.sf_target
+        file = self.pl_file if level_type == "pl" else self.sf_file
 
         for field in encoded_fields:
-            target.write(field)
+            file.write(field)
         
