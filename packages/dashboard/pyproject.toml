@@ -13,7 +13,7 @@ dependencies = [
     "plotly~=6.1.2",
     "polars~=1.30.0",
     "requests~=2.32.4",
-    "streamlit>=1.46.0",
+    "streamlit~=1.46.0",
     "streamlit-authenticator>=0.4.2",
     "watchdog",
     "weathergen-common",
