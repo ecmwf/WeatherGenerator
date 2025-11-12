@@ -121,9 +121,10 @@ def init_loggers(run_id=None, logging_config=None):
     # timestamp = now.strftime("%Y-%m-%d-%H%M")
 
     # output_dir = f"./output/{timestamp}-{run_id}"
+    output_dir = ""
     if run_id is not None:
         output_dir = f"./output/{run_id}"
-
+    
     # load the structure for logging config
     if logging_config is None:
         logging_config = json.loads(LOGGING_CONFIG)
