@@ -17,7 +17,6 @@ _logger = logging.getLogger(__name__)
 project_name = "WeatherGenerator"
 project_lifecycle = "dev"
 
-_platform_env = get_platform_env()
 
 
 class MlFlowUpload:
@@ -35,13 +34,14 @@ class MlFlowUpload:
         """
         Returns the tags to be set for a run.
         """
+        # Directly calling get_platform_env() here because it may not be available at import time.
         dct = {
             "lifecycle": project_lifecycle,
-            "hpc": _platform_env.get_hpc() or "unknown",
+            "hpc": get_platform_env().get_hpc() or "unknown",
             "run_id": run_id,
             "stage": phase,
             "project": project_name,
-            "uploader": _platform_env.get_hpc_user() or "unknown",
+            "uploader": get_platform_env().get_hpc_user() or "unknown",
             "completion_status": "success",
         }
         if from_run_id:
