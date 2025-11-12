@@ -139,9 +139,13 @@ def log_scores(
     )
 
 
-def setup_mlflow(private_config: Config) -> MlflowClient:
-    os.environ["DATABRICKS_HOST"] = private_config["mlflow"]["tracking_uri"]
-    os.environ["DATABRICKS_TOKEN"] = private_config["secrets"]["mlflow_token"]
+def setup_mlflow(private_config: Config | None) -> MlflowClient:
+    if private_config is None:
+        assert os.environ.get("DATABRICKS_HOST") is not None, "DATABRICKS_HOST not set"
+        assert os.environ.get("DATABRICKS_TOKEN") is not None, "DATABRICKS_TOKEN not set"
+    else:
+        os.environ["DATABRICKS_HOST"] = private_config["mlflow"]["tracking_uri"]
+        os.environ["DATABRICKS_TOKEN"] = private_config["secrets"]["mlflow_token"]
     mlflow.set_tracking_uri(MlFlowUpload.tracking_uri)
     mlflow.set_registry_uri(MlFlowUpload.registry_uri)
     mlflow_client = mlflow.client.MlflowClient(

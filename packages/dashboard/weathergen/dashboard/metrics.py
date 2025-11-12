@@ -8,6 +8,9 @@ import mlflow
 import mlflow.client
 import polars as pl
 import streamlit as st
+from mlflow.client import MlflowClient
+
+from weathergen.metrics.mlflow_utils import setup_mlflow as setup_mlflow_utils
 
 _logger = logging.getLogger(__name__)
 
@@ -15,10 +18,10 @@ phase = "train"
 exp_lifecycle = "test"
 project = "WeatherGenerator"
 experiment_id = "384213844828345"
-all_stages = ["train", "val"]
+all_stages = ["train", "val", "eval"]
 
 # Cache TTL in seconds
-_ttl_sec = 600
+ST_TTL_SEC = 3600
 
 
 class MlFlowUpload:
@@ -27,21 +30,25 @@ class MlFlowUpload:
     experiment_name = "/Shared/weathergen-dev/core-model/defaultExperiment"
 
 
-@st.cache_resource(ttl=_ttl_sec)
-def setup_mflow():
-    # os.environ["DATABRICKS_HOST"] = None
-    # os.environ["DATABRICKS_TOKEN"] = None
-    mlflow.set_tracking_uri(MlFlowUpload.tracking_uri)
-    mlflow.set_registry_uri(MlFlowUpload.registry_uri)
-    mlflow_client = mlflow.client.MlflowClient(
-        tracking_uri=MlFlowUpload.tracking_uri, registry_uri=MlFlowUpload.registry_uri
-    )
-    _logger.info("MLFlow tracking URI: %s", mlflow.get_tracking_uri())
-    return mlflow_client
+@st.cache_resource(ttl=ST_TTL_SEC)
+def setup_mflow() -> MlflowClient:
+    return setup_mlflow_utils(private_config=None)
+    # # os.environ["DATABRICKS_HOST"] = None
+    # # os.environ["DATABRICKS_TOKEN"] = None
+    # mlflow.set_tracking_uri(MlFlowUpload.tracking_uri)
+    # mlflow.set_registry_uri(MlFlowUpload.registry_uri)
+    # mlflow_client = mlflow.client.MlflowClient(
+    #     tracking_uri=MlFlowUpload.tracking_uri, registry_uri=MlFlowUpload.registry_uri
+    # )
+    # _logger.info("MLFlow tracking URI: %s", mlflow.get_tracking_uri())
+    # return mlflow_client
 
 
-@st.cache_data(ttl=_ttl_sec, max_entries=2)
+@st.cache_data(ttl=ST_TTL_SEC, max_entries=2)
 def latest_runs():
+    """
+    Get the latest runs for each WG run_id and stage.
+    """
     _logger.info("Downloading latest runs from MLFlow")
     runs_pdf = pl.DataFrame(
         mlflow.search_runs(
@@ -60,7 +67,7 @@ def latest_runs():
     return latest_run_by_exp
 
 
-@st.cache_data(ttl=_ttl_sec, max_entries=2)
+@st.cache_data(ttl=ST_TTL_SEC, max_entries=2)
 def all_runs():
     _logger.info("Downloading all runs from MLFlow")
     runs_pdf = pl.DataFrame(

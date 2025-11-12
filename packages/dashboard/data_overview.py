@@ -64,7 +64,10 @@ stats_df = pl.DataFrame(stats)
 st.markdown("""
 # INode counts
 
-The number of inodes on each HPC
+The number of inodes on each HPC.
+            
+This is provided from the STAC catalog JSON files. It may not refelect the current
+state of the files on disk.
 """)
 
 st.plotly_chart(px.treemap(stats_df, path=["location", "name"], values="inodes"))

@@ -17,9 +17,6 @@ def get_logger():
     return logger
 
 
-_logger = get_logger()
-
-
 user = os.getenv("USER_NAME")
 password = os.getenv("USER_PASSWORD")
 auth_time_sec = int(os.getenv("AUTH_TIME_SEC", "1800"))
@@ -52,17 +49,15 @@ except Exception as e:
 if st.session_state.get("authentication_status"):
     pg = st.navigation(
         {
-            "Data": [st.Page("data_overview.py", title="overview")],
             "Engineering": [st.Page("eng_overview.py", title="overview")],
             "Model:atmo": [
                 st.Page("atmo_training.py", title="training"),
+                st.Page("atmo_eval.py", title="evaluation"),
             ],
+            "Data": [st.Page("data_overview.py", title="overview")],
         }
     )
     pg.run()
-    # st.sidebar.image(
-    #     "https://github.com/ecmwf/WeatherGenerator/raw/develop/assets/weathergenerator_logo.png"
-    # )
     st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/e/e1/ECMWF_logo.svg")
     st.sidebar.markdown("[weathergenerator.eu](https://weathergenerator.eu)")
     authenticator.logout()
