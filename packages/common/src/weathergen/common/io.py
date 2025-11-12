@@ -340,8 +340,7 @@ class ZarrIO:
 
     def load_zarr(self, key: ItemKey) -> OutputItem:
         """Get datasets for a output item."""
-        group = self._get_group(key)
-        datasets = self._get_datasets(group)
+        datasets = self._get_datasets(key)
 
         return OutputItem(key=key, forecast_offset=self.forecast_offset, **datasets)
 
