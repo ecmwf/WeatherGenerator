@@ -18,7 +18,6 @@ project_name = "WeatherGenerator"
 project_lifecycle = "dev"
 
 
-
 class MlFlowUpload:
     tracking_uri = "databricks"
     registry_uri = "databricks-uc"
