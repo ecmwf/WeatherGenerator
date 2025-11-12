@@ -101,6 +101,7 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
 
     metrics = cfg.evaluation.metrics
     regions = cfg.evaluation.get("regions", ["global"])
+    plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
 
     global_plotting_opts = cfg.get("global_plotting_options", {})
 
@@ -146,7 +147,7 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                             metric,
                         )
 
-                        if metric_data is None:
+                        if metric_data is None or plot_score_maps:
                             metrics_to_compute.append(metric)
                             continue
 
@@ -166,7 +167,7 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
 
                     if metrics_to_compute:
                         all_metrics, points_per_sample = calc_scores_per_stream(
-                            reader, stream, region, metrics_to_compute
+                            reader, stream, region, metrics_to_compute, plot_score_maps
                         )
 
                         metric_list_to_json(
