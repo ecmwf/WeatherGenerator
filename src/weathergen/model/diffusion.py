@@ -7,6 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+# ----------------------------------------------------------------------------
+# Third-Party Attribution: NVLABS/EDM (Elucidating the Design of Diffusion Models)
+# This file incorporates code originally from the 'NVlabs/edm' repository.
+#
+# Original Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# ----------------------------------------------------------------------------
+
 import torch
 
 from weathergen.model.engines import ForecastingEngine
