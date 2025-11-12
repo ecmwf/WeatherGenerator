@@ -1,18 +1,16 @@
-streams_directory: "./config/streams/streams_icon/"
-start_date: 202107010000
+streams_directory: "./config/streams/iconart_6h/"
+start_date: 202001010000
 end_date: 202107100000
-start_date_val: 202208310000
-end_date_val: 202212200000 # 202212200000 # dataset ends at 2022-12-31T00:00:00
+start_date_val: 202108310000
+end_date_val: 202112200000 # 202212200000 # dataset ends at 2022-12-31T00:00:00
 
+analysis_streams_output: ["ICONART"]
+
+training_mode: "forecast"
+forecast_offset : 1
+forecast_delta_hrs: 0
+forecast_steps: 2
 num_epochs: 10
-
-token_size: 64
-
-step_hrs: 1
 
 samples_per_epoch: 110
 samples_per_validation: 17 # TODO @asma: inspect # don't go lower or it would cause an error
-
-loader_num_workers: 8
-
-masking_rate: 0.8

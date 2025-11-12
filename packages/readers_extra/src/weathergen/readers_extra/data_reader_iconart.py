@@ -305,17 +305,15 @@ class DataReaderIconArt(DataReaderTimestep):
         datetimes = np.repeat(datetimes, self.mesh_size).reshape(-1, 1)
         datetimes = np.squeeze(datetimes)
 
-        # expanding indexes for data
-        start_row = t_idxs_start * self.mesh_size
-        end_row = t_idxs_end * self.mesh_size
-
-        # data
+        # data - load channels using optimized time-slicing approach
         channels = np.array(self.colnames)[channels_idx]
-
-        data_reshaped = [
-            np.asarray(self.ds[ch_]).reshape(-1, 1)[start_row:end_row] for ch_ in channels
+        
+        # Load only the needed time steps by slicing at xarray level before converting to numpy
+        data = [
+            self.ds[ch_].isel(time=slice(t_idxs_start, t_idxs_end)).values.reshape(-1, 1) for ch_ in channels
         ]
-        data = np.concatenate(data_reshaped, axis=1)
+
+        data = np.concatenate(data, axis=1)
 
         # empty geoinfos
         geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
