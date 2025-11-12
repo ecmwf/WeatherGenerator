@@ -71,11 +71,8 @@ class Quaver_Parser(CF_Parser):
         -------
             None
         """
+        for result in fstep_iterator_results:
 
-        for result in tqdm(
-            fstep_iterator_results,
-            desc=f"Processing {self.run_id} - stream: {self.stream} - sample: {ref_time}",
-        ):
             if result is None:
                 continue
 

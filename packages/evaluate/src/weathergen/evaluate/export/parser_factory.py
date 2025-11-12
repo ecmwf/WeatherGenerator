@@ -1,6 +1,7 @@
 from omegaconf import OmegaConf
-from weathergen.evaluate.export.cf_utils import CF_Parser, NetCDF_Parser
-from weathergen.evaluate.export.quaver_parser import Quaver_Parser
+from weathergen.evaluate.export.cf_utils import CF_Parser
+from weathergen.evaluate.export.parsers.netcdf_parser import NetCDF_Parser
+from weathergen.evaluate.export.parsers.quaver_parser import Quaver_Parser
 
 
 class CF_ParserFactory(object):

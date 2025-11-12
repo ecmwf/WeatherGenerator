@@ -60,8 +60,9 @@ def parse_args(args: list) -> argparse.Namespace:
         type=str,
         choices=["prediction", "target"],
         nargs="+",
+        default = ["prediction"], 
         help="List of type of data to convert (e.g. prediction target)",
-        required=True,
+        required=False,
     )
 
     parser.add_argument(
@@ -188,12 +189,14 @@ def export_from_args(args: list) -> None:
     
     kwargs = vars(args).copy()
 
+    _logger.info(kwargs)
+    
     # Ensure output directory exists
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for dtype in args.type:
-        _logger.info(f"Starting processing {dtype} for run ID {args.run_id}.")
+        _logger.info(f"Starting processing {dtype} for run ID {args.run_id}. Detected {args.samples} samples and {args.fsteps} forecast steps.")
        
         export_model_outputs(dtype, config, **kwargs)
        
