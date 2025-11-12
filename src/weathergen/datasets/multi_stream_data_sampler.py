@@ -14,6 +14,7 @@ import numpy as np
 import torch
 
 from weathergen.common.io import IOReaderData
+from weathergen.datasets.cropping import Cropper
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
@@ -25,11 +26,11 @@ from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.icon_dataset import IconDataset
 from weathergen.datasets.masking import Masker
-from weathergen.datasets.cropping import Cropper
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
-#from weathergen.datasets.tokenizer_cropping import TokenizerCropping
+
+# from weathergen.datasets.tokenizer_cropping import TokenizerCropping
 from weathergen.datasets.utils import (
     compute_idxs_predict,
     compute_offsets_scatter_embed,
@@ -239,14 +240,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             print("The training_mode is cropping.")
             cropper = Cropper(cf)
             self.tokenizer = TokenizerMasking(cf.healpix_level, cropper)
-            print(f"[Sampler.__init__] cropping cfg: healpix_level={cf.healpix_level} | "
-                  f"hl_global={cf.cropping_config.get('hl_global', 0)} | "
-                  f"hl_child={cf.cropping_config.get('hl_child', cf.healpix_level)} | "
-                  f"rate_global={cf.cropping_rate_global} | "
-                  f"local_crops={cf.cropping_config.get('local_crops', False)} | "
-                  f"num_local={cf.cropping_config.get('num_local_crops', 1)} | "
-                  f"local_frac={cf.cropping_config.get('local_crop_frac', 1.0)} | "
-                  f"strategy={cf.cropping_config.get('local_strategy', 'random')}")
             self._cropping = True
             self._crop_cfg = dict(
                 n_local=int(cf.cropping_config.get("num_local_crops", 1)),
@@ -392,12 +385,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     )
 
                 # prepare holders for local student views if we intend to emit them
-                generate_locals = bool(getattr(self, "_cropping", False) and self._crop_cfg.get("generate_local_views", False))
-                locals_streams_all: list[list[StreamData]] = [[] for _ in range(len(local_specs))] if generate_locals else []
+                generate_locals = bool(
+                    getattr(self, "_cropping", False)
+                    and self._crop_cfg.get("generate_local_views", False)
+                )
+                locals_streams_all: list[list[StreamData]] = (
+                    [[] for _ in range(len(local_specs))] if generate_locals else []
+                )
 
                 # for all streams
                 for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
-                    stream_name = stream_info.get("name", "?")
+                    # stream_name = stream_info.get("name", "?")
                     stream_data = StreamData(
                         idx, forecast_dt + self.forecast_offset, self.num_healpix_cells
                     )
@@ -415,16 +413,18 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             stream_ds[0].mean[stream_ds[0].source_idx],
                         )
                         stream_data.source_is_spoof = True
-                    
+
                     # preprocess data for model input
-                    with self.tokenizer.use_keep_cells(global_spec.keep_cells if global_spec else None):
+                    with self.tokenizer.use_keep_cells(
+                        global_spec.keep_cells if global_spec else None
+                    ):
                         (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                             stream_info,
                             readerdata_to_torch(rdata_src),
                             (time_win_source.start, time_win_source.end),
                             stream_ds[0].normalize_coords,
                         )
-                    
+
                     # TODO: rdata only be collected in validation mode
                     stream_data.add_source(rdata_src, ss_lens, ss_cells, ss_centroids)
 
@@ -468,11 +468,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                     # ---- Build local student views (optional) ----
                     if generate_locals:
-                        print("Generating local views for cropping...")
-                        
-
                         for li, lspec in enumerate(local_specs):
-                            sd_loc = StreamData(idx, forecast_dt + self.forecast_offset, self.num_healpix_cells)
+                            sd_loc = StreamData(
+                                idx, forecast_dt + self.forecast_offset, self.num_healpix_cells
+                            )
                             rdata_src: IOReaderData = collect_datasources(stream_ds, idx, "source")
                             with self.tokenizer.use_keep_cells(lspec.keep_cells):
                                 (ls_cells, ls_lens, ls_centroids) = self.tokenizer.batchify_source(
@@ -483,13 +482,18 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                                 )
                             sd_loc.add_source(rdata_src, ls_lens, ls_cells, ls_centroids)
 
-                            # Optional: also crop targets for locals (keeps consistency with teacher)
-                            for fstep in range(self.forecast_offset, self.forecast_offset + forecast_dt + 1):
+                            # Optional: also crop targets for locals
+                            # (keeps consistency with teacher)
+                            for fstep in range(
+                                self.forecast_offset, self.forecast_offset + forecast_dt + 1
+                            ):
                                 step_dt = idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
                                 time_win_target = self.time_window_handler.window(step_dt)
 
                                 # collect all targets for current stream (use target rdata)
-                                rdata_tgt: IOReaderData = collect_datasources(stream_ds, step_dt, "target")
+                                rdata_tgt: IOReaderData = collect_datasources(
+                                    stream_ds, step_dt, "target"
+                                )
                                 if rdata_tgt.is_empty():
                                     rdata_tgt = spoof(
                                         self.healpix_level,
@@ -517,17 +521,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if not (all(s.empty() or s.target_empty() for s in streams_data)):
                     batch += [streams_data]
                     if generate_locals:
-                        views_batch += [{
-                            "global": global_spec,
-                            "locals": local_specs,
-                            "local_streams": locals_streams_all,  # [n_local][n_streams]
-                        }]
+                        views_batch += [
+                            {
+                                "global": global_spec,
+                                "locals": local_specs,
+                                "local_streams": locals_streams_all,  # [n_local][n_streams]
+                            }
+                        ]
 
             # aggregated lens of tokens per cell
             source_cell_lens = compute_source_cell_lens(batch)
 
             # compute offsets for scatter computation after embedding
-            batch = compute_offsets_scatter_embed(batch)        
+            batch = compute_offsets_scatter_embed(batch)
 
             # compute offsets and auxiliary data needed for prediction computation
             # (info is not per stream so separate data structure)
@@ -537,39 +543,61 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # Prepare local views (full pass) if generated
             locals_prepared = None
-            if getattr(self, "_cropping", False) and self._crop_cfg.get("generate_local_views", False):
+            if getattr(self, "_cropping", False) and self._crop_cfg.get(
+                "generate_local_views", False
+            ):
                 n_locals = len(local_specs)
                 if n_locals > 0 and len(views_batch) == self.batch_size:
                     locals_prepared = []
                     for li in range(n_locals):
                         # Collect li-th local view across batch items to form a "local batch"
-                        local_batch_items = [views_batch[b]["local_streams"][li] for b in range(len(batch))]
+                        local_batch_items = [
+                            views_batch[b]["local_streams"][li] for b in range(len(batch))
+                        ]
                         # Compute lens / offsets / prediction indices for this local batch
                         l_source_cell_lens = compute_source_cell_lens(local_batch_items)
                         local_batch_items = compute_offsets_scatter_embed(local_batch_items)
-                        l_target_coords_idx = compute_idxs_predict(self.forecast_offset + forecast_dt, local_batch_items)
-                        locals_prepared.append({
-                            "batch": local_batch_items,                 # list[list[StreamData]]
-                            "source_cell_lens": l_source_cell_lens,     # tensor
-                            "target_coords_idx": l_target_coords_idx,   # list per forecast step
-                        })
+                        l_target_coords_idx = compute_idxs_predict(
+                            self.forecast_offset + forecast_dt, local_batch_items
+                        )
+                        locals_prepared.append(
+                            {
+                                "batch": local_batch_items,  # list[list[StreamData]]
+                                "source_cell_lens": l_source_cell_lens,  # tensor
+                                "target_coords_idx": l_target_coords_idx,  # list per forecast step
+                            }
+                        )
                     # Attach summary counts for quick inspection
-                    print("[Sampler] locals_prepared lens_summary=",
-                          [lp["source_cell_lens"].sum().item() for lp in locals_prepared])
+                    print(
+                        "[Sampler] locals_prepared lens_summary=",
+                        [lp["source_cell_lens"].sum().item() for lp in locals_prepared],
+                    )
                 else:
-                    print("[Sampler] Skipping locals_prepared (n_locals=0 or incomplete views_batch).")
+                    print(
+                        "[Sampler] Skipping locals_prepared (n_locals=0 or incomplete views_batch)."
+                    )
 
             ### OLD TESTING
-            #if getattr(self, "_cropping", False) and self._crop_cfg.get("generate_local_views", False):
-            #    #yield (batch, source_cell_lens, target_coords_idx, forecast_dt, views_batch)
+            #if getattr(self, "_cropping", False) and self._crop_cfg.get(
+            #    "generate_local_views", False
+            #):
+            #    # yield (batch, source_cell_lens, target_coords_idx, forecast_dt, views_batch)
             #    ####### TESTING PASSING A LOCAL VIEW #########
-            #    yield (local_batch_items, l_source_cell_lens, l_target_coords_idx, forecast_dt, batch)
+            #    yield (
+            #        local_batch_items,
+            #        l_source_cell_lens,
+            #        l_target_coords_idx,
+            #        forecast_dt,
+            #        batch,
+            #    )
             #else:
             #    yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
 
             if getattr(self, "_cropping", False) and self._crop_cfg.get("generate_local_views", False):
-                # Yield teacher batch plus raw per-item views_batch and aggregated locals_prepared
-                yield (batch, source_cell_lens, target_coords_idx, forecast_dt, views_batch, locals_prepared)
+                # Yield teacher batch plus raw per-item
+                # views_batch and aggregated locals_prepared
+                yield (batch, source_cell_lens, target_coords_idx,
+                       forecast_dt, views_batch, locals_prepared)
             else:
                 yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
 

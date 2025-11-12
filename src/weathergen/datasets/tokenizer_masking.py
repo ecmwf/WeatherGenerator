@@ -45,12 +45,17 @@ class TokenizerMasking(Tokenizer):
         Returns (global_spec, [local_specs...]).
         """
         if hasattr(self.masker, "make_crops"):
-            return self.masker.make_crops(n_local=n_local, local_frac=local_frac, local_strategy=local_strategy)
+            return self.masker.make_crops(
+                n_local=n_local, local_frac=local_frac, local_strategy=local_strategy
+            )
         # Fallback: no crops
-        L = self.healpix_level
-        num = 12 * (4 ** L)
+        healpix_level = self.healpix_level
+        num = 12 * (4**healpix_level)
         empty = np.zeros(num, dtype=bool)
-        return (type("CS", (), {"level": L, "parent_level": 0, "keep_cells": empty}), [])
+        return (
+            type("CS", (), {"level": healpix_level, "parent_level": 0, "keep_cells": empty}),
+            [],
+        )
 
     def use_keep_cells(self, keep_cells):
         """
@@ -60,6 +65,7 @@ class TokenizerMasking(Tokenizer):
             return self.masker.use_keep_cells(keep_cells)
         # no-op fallback
         from contextlib import nullcontext
+
         return nullcontext()
 
     def batchify_source(

@@ -124,7 +124,7 @@ cropping_config: {
   global_consecutive: True,
   local_crops: True,
   num_local_crops: 5,
-  local_crop_frac : 0.6,
+  local_crop_frac : 0.2,
   local_strategy: "random",
   }
 cropping_generate_local_views: True
@@ -161,7 +161,7 @@ input_window_steps: 1
 
 val_initial: False
 
-loader_num_workers: 8
+loader_num_workers: 0
 log_validation: 0
 analysis_streams_output: ["ERA5"]
 

@@ -580,7 +580,12 @@ class Trainer(TrainerBase):
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
             forecast_steps = batch[3]
+
+            # import pdb; pdb.set_trace()
+
             batch = self.batch_to_device(batch)
+
+            # import pdb; pdb.set_trace()
 
             # evaluate model
             with torch.autocast(
@@ -743,6 +748,8 @@ class Trainer(TrainerBase):
             [[d.to_device(self.device) for d in db] for db in batch[0]],
             batch[1].to(self.device),
             [[b.to(self.device) for b in bf] for bf in batch[2]],
+            #[[c.to(self.device) for c in cs] for cs in batch[4]],
+            #[[l.to(self.device) for l in lv] for lv in batch[5]],
         )
 
     def load_model(self, run_id: str, epoch=-1):

@@ -1,17 +1,18 @@
 import logging
+from contextlib import contextmanager
+from dataclasses import dataclass
+
 import numpy as np
 import torch
-from dataclasses import dataclass      
-from contextlib import contextmanager 
 
 _logger = logging.getLogger(__name__)
 
 
 @dataclass
 class CropSpec:
-    level: int                 # data level (healpix_level)
-    parent_level: int          # hl_global
-    keep_cells: np.ndarray     # [num_cells(level)] bool mask
+    level: int  # data level (healpix_level)
+    parent_level: int  # hl_global
+    keep_cells: np.ndarray  # [num_cells(level)] bool mask
 
 
 class Cropper:
@@ -43,17 +44,19 @@ class Cropper:
         self.cropping_rate_global = cf.cropping_rate_global
         self.cropping_rate_sampling = cf.cropping_rate_sampling
         self.cropping_config = cf.cropping_config if cf.cropping_config is not None else {}
-        self.dim_time_enc = 6     # hardcoded for now; not used here
+        self.dim_time_enc = 6  # hardcoded for now; not used here
         self.healpix_level_data = cf.healpix_level
-        self.masking_strategy = cf.get("masking_strategy") # not used here, needed for the tokenizer
+        self.masking_strategy = cf.get(
+            "masking_strategy"
+        )  # not used here, needed for the tokenizer
         assert self.healpix_level_data is not None, "cf.healpix_level must be set."
-        self.healpix_num_cells = 12 * (4 ** self.healpix_level_data)
-        
-        # define hl_global 
-        self.hl_global = int(self.cropping_config.get("hl_global", 0)) 
+        self.healpix_num_cells = 12 * (4**self.healpix_level_data)
+
+        # define hl_global
+        self.hl_global = int(self.cropping_config.get("hl_global", 0))
         # Selectable child level; defaults to data level
         self.hl_child = int(self.cropping_config.get("hl_child", self.healpix_level_data))
-        
+
         assert self.hl_global < self.hl_child <= self.healpix_level_data, (
             f"Require hl_global < hl_child <= healpix_level; got "
             f"hl_global={self.hl_global}, hl_child={self.hl_child}, level={self.healpix_level_data}"
@@ -69,7 +72,9 @@ class Cropper:
     def use_keep_cells(self, keep_cells: np.ndarray | None):
         """Temporarily override keep-cells used by mask_source/mask_target."""
         prev = self._override_keep_cells
-        self._override_keep_cells = None if keep_cells is None else np.asarray(keep_cells, dtype=bool)
+        self._override_keep_cells = (
+            None if keep_cells is None else np.asarray(keep_cells, dtype=bool)
+        )
         try:
             yield
         finally:
@@ -87,7 +92,7 @@ class Cropper:
         Ls = self.healpix_level_data
 
         # 1) choose parents at Lg
-        par_count = 12 * (4 ** Lg)
+        par_count = 12 * (4**Lg)
         if "global_keep_m" in self.cropping_config:
             m_par = int(self.cropping_config["global_keep_m"])
         else:
@@ -135,13 +140,13 @@ class Cropper:
                 return ids_child
             if strategy == "center":
                 s = (total_children - m_loc) // 2
-                return ids_child[s:s + m_loc]
+                return ids_child[s : s + m_loc]
             if strategy == "left":
                 return ids_child[:m_loc]
             if strategy == "right":
                 return ids_child[-m_loc:]
             s = int(self.rng.integers(0, total_children - m_loc + 1))
-            return ids_child[s:s + m_loc]
+            return ids_child[s : s + m_loc]
 
         local_specs: list[CropSpec] = []
         for k in range(n_local):
@@ -178,7 +183,6 @@ class Cropper:
         else:
             keep_cells = np.asarray(keep_cells, dtype=bool)
 
-
         if not keep_cells.any():
             self.perm_sel = [np.zeros(tl, dtype=bool) for tl in token_lens]
             return [t[:0] for t in tokenized_data]
@@ -186,24 +190,29 @@ class Cropper:
         flat_keep = np.repeat(keep_cells, token_lens)
         splits = np.cumsum(token_lens)[:-1]
         self.perm_sel = np.split(flat_keep, splits)
-        kept_tokens_total = int(sum(p.sum() for p in self.perm_sel))
 
-        source_kept = [data[p] if len(data) > 0 else data for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
+        source_kept = [
+            data[p] if len(data) > 0 else data
+            for data, p in zip(tokenized_data, self.perm_sel, strict=True)
+        ]
         return source_kept
 
-    
     # Here is mask target we basically just keep the same global view as for source
     # This is different from masking where we keep the complement
     # This is because we may want to have some reconstruction loss on the kept tokens later
     # This can be extended to support different views for the target if needed later
-    def mask_target(self, target_tokens_cells_nested, coords, geoinfos, source) -> list[torch.Tensor]:
-        assert self.perm_sel is not None and len(self.perm_sel) == len(target_tokens_cells_nested), (
-            "Cropper.perm_sel must be set by keep_source for the same #cells."
-        )
+    def mask_target(
+        self, target_tokens_cells_nested, coords, geoinfos, source
+    ) -> list[torch.Tensor]:
+        assert self.perm_sel is not None and len(self.perm_sel) == len(
+            target_tokens_cells_nested
+        ), "Cropper.perm_sel must be set by keep_source for the same #cells."
         feat_dim = self.dim_time_enc + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
 
         out: list[torch.Tensor] = []
-        for cell_idx, (cc, pp) in enumerate(zip(target_tokens_cells_nested, self.perm_sel, strict=True)):
+        for cell_idx, (cc, pp) in enumerate(
+            zip(target_tokens_cells_nested, self.perm_sel, strict=True)
+        ):
             if len(cc) == 0:
                 out.append(torch.empty(0, feat_dim, dtype=coords.dtype, device=coords.device))
                 continue
