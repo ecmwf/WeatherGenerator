@@ -9,6 +9,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 import itertools
+import dataclasses
 import logging
 import re
 import time
@@ -55,6 +56,27 @@ from weathergen.utils.utils import get_batch_size, get_dtype
 from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class Model2TargetInfo:
+    """
+    A dataclass to encapsulate the batch structure.
+    """
+
+    local2global: torch.Tensor
+    data_augmentation_info: dict[str, torch.Tensor]
+
+
+@dataclasses.dataclass
+class Batch:
+    """
+    A dataclass to encapsulate the batch structure.
+    """
+
+    model_input: tuple[StreamData, torch.Tensor, torch.Tensor]
+    target_input: tuple[StreamData, torch.Tensor, torch.Tensor]
+    metadata: Model2TargetInfo | None
 
 
 class Trainer(TrainerBase):
@@ -350,6 +372,8 @@ class Trainer(TrainerBase):
             batch_size=get_batch_size(cf, self.world_size_original),
         )
 
+        self.target_and_aux_calculator.to_device(self.device)
+
         # if with_fsdp then parameter count is unreliable
         if is_root() and not cf.with_fsdp and not cf.with_ddp:
             self.model.print_num_parameters()
@@ -423,9 +447,6 @@ class Trainer(TrainerBase):
             if is_root():
                 logger.info(str)
 
-        import pdb
-
-        pdb.set_trace()
         # Instantiate loss calculator modules to compute losses
         self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=self.device)
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.device)
@@ -618,7 +639,17 @@ class Trainer(TrainerBase):
         for bidx, batch in enumerate(dataset_iter):
             forecast_steps = batch[3]
             batch = self.batch_to_device(batch)
-            import pdb; pdb.set_trace()
+            batch = Batch(
+                model_input=batch,
+                target_input=batch,
+                metadata=Model2TargetInfo(
+                    local2global=torch.tensor([0.0], device=self.device),
+                    data_augmentation_info=None,
+                ),
+            )
+            import pdb
+
+            pdb.set_trace()
 
             # evaluate model
             with torch.autocast(
@@ -626,18 +657,19 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                output = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
+                output = self.model(
+                    self.model_params, batch.model_input, cf.forecast_offset, forecast_steps
+                )
 
                 targets, aux_outputs = self.target_and_aux_calculator.compute(
                     self.cf.istep,
-                    batch,
+                    batch.target_input,
                     self.model_params,
                     self.model,
                     cf.forecast_offset,
                     forecast_steps,
                 )
-            targets = {"physical": batch[0]}
-            loss, loss_values = self.loss_calculator.compute_loss(
+            loss_values = self.loss_calculator.compute_loss(
                 preds=output,
                 targets=targets,
             )

@@ -17,9 +17,12 @@ class TargetAndAuxModuleBase:
     def compute(self, *args, **kwargs) -> tuple[Any, Any]:
         pass
 
+    def to_device(self, device):
+        pass
+
 
 class IdentityTargetAndAux(TargetAndAuxModuleBase):
-    def __init__(self, model, rng, config):
+    def __init__(self, model, rng, **kwargs):
         return
 
     def reset(self):
@@ -32,4 +35,7 @@ class IdentityTargetAndAux(TargetAndAuxModuleBase):
         return
 
     def compute(self, istep, batch, *args, **kwargs):
-        return batch[0], None
+        return {"physical" : batch[0]}, None
+
+    def to_device(self, device):
+        return 

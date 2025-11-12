@@ -46,12 +46,19 @@ class EMATeacher(TargetAndAuxModuleBase):
         DINO, iBOT, JEPA will have different heads, which then probably should be computed
         in the postprocess_targets modules, which are nn.Modules
         """
-        targets = self.ema_model.forward_eval(model_params, batch, forecast_offset, forecast_steps)
+        outputs = self.ema_model.forward_eval(
+            model_params, batch, forecast_offset, forecast_steps
+        ).latent
         targets = {}
         for loss_name, target_module in self.postprocess_targets.items():
             with torch.no_grad():
-                targets[loss_name] = None  # target_module(targets["loss_name"])
+                targets[loss_name] = target_module(outputs[loss_name])
         return targets, None
+
+    def to_device(self, device):
+        for _, module in self.postprocess_targets.items():
+            module.to(device)
+
 
 
 def get_target_postprocessing(target_losses: list[str], **kwargs):
@@ -59,7 +66,7 @@ def get_target_postprocessing(target_losses: list[str], **kwargs):
     for loss_name, conf in target_losses.items():
         if loss_name == "iBOT":
             return_dict[loss_name] = iBOTPatchTargetProcessing(
-                patch_out_dim=conf["ibot_patch_out_dim"],
+                patch_out_dim=conf["out_dim"],
                 center_momentum=conf["center_momentum"],
                 student_temp=conf["student_temp"],
                 teacher_temp=conf["teacher_temp"],
@@ -67,7 +74,7 @@ def get_target_postprocessing(target_losses: list[str], **kwargs):
             )
         elif loss_name == "DINO":
             return_dict[loss_name] = DINOTargetProcessing(
-                out_dim=conf["dino_out_dim"],
+                out_dim=conf["out_dim"],
                 center_momentum=conf["center_momentum"],
                 student_temp=conf["student_temp"],
                 teacher_style=conf["teacher_style"],

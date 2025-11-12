@@ -103,46 +103,7 @@ class iBOTPatchTargetProcessing(nn.Module):
         Q *= B  # the columns must sum to 1 so that Q is an assignment
         return Q.t()
 
-    # def forward(self, student_patch_tokens, teacher_patch_tokens, student_masks_flat):
-    #     """
-    #     Cross-entropy between softmax outputs of the teacher and student networks.
-    #     student_patch_tokens: (B, N, D) tensor
-    #     teacher_patch_tokens: (B, N, D) tensor
-    #     student_masks_flat: (B, N) tensor
-    #     """
-    #     t = teacher_patch_tokens
-    #     s = student_patch_tokens
-    #     loss = torch.sum(t * F.log_softmax(s / self.student_temp, dim=-1), dim=-1)
-    #     loss = torch.sum(loss * student_masks_flat.float(), dim=-1) / student_masks_flat.sum(
-    #         dim=-1
-    #     ).clamp(min=1.0)
-    #     return -loss.mean()
-
-    # def forward_masked(
-    #     self,
-    #     student_patch_tokens_masked,
-    #     teacher_patch_tokens_masked,
-    #     student_masks_flat,
-    #     n_masked_patches=None,
-    #     masks_weight=None,
-    # ):
-    #     t = teacher_patch_tokens_masked
-    #     s = student_patch_tokens_masked
-    #     # loss = torch.sum(t * F.log_softmax(s / self.student_temp, dim=-1), dim=-1)
-    #     loss = lossfunc(t, s, self.student_temp)
-    #     if masks_weight is None:
-    #         masks_weight = (
-    #             (1 / student_masks_flat.sum(-1).clamp(min=1.0))
-    #             .unsqueeze(-1)
-    #             .expand_as(student_masks_flat)[student_masks_flat]
-    #         )
-    #     if n_masked_patches is not None:
-    #         loss = loss[:n_masked_patches]
-    #     loss = loss * masks_weight
-    #     return -loss.sum() / student_masks_flat.shape[0]
-
     def forward(self, teacher_output):
-        # TODO deal with the iBOT head question, use the forward_masked
         if self.teacher_style == "softmax_center":
             processed_teacher_output = self.softmax_center_teacher(
                 teacher_output, self.teacher_temp
@@ -249,7 +210,6 @@ class DINOTargetProcessing(nn.Module):
         return Q.t()
 
     def forward(self, teacher_output):
-        # TODO deal with the DINO head question
         if self.teacher_style == "softmax_center":
             processed_teacher_output = self.softmax_center_teacher(
                 teacher_output, self.teacher_temp
@@ -261,19 +221,6 @@ class DINOTargetProcessing(nn.Module):
         else:
             # this code should never be reached, see assert in __init__
             return teacher_output
-
-    # def forward(self, student_output_list, teacher_out_softmaxed_centered_list):
-    #     """
-    #     Cross-entropy between softmax outputs of the teacher and student networks.
-    #     """
-    #     # TODO: Use cross_entropy_distribution here
-    #     total_loss = 0
-    #     for s in student_output_list:
-    #         lsm = F.log_softmax(s / self.student_temp, dim=-1)
-    #         for t in teacher_out_softmaxed_centered_list:
-    #             loss = torch.sum(t * lsm, dim=-1)
-    #             total_loss -= loss.mean()
-    #     return total_loss
 
     @torch.no_grad()
     def update_center(self, teacher_output):

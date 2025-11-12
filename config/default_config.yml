@@ -13,7 +13,7 @@ input_window_steps: 1
 
 val_initial: False
 
-loader_num_workers: 8
+loader_num_workers: 0
 log_validation: 0
 analysis_streams_output: ["ERA5"]
 
@@ -115,11 +115,11 @@ training_mode: "student-teacher"
 training_mode_config: {
   "losses" : { 
     LossLatentSSLStudentTeacher: { 
-      "iBOT": {'weight': 0.5, "ibot_patch_out_dim": 65536, "student_temp": 0.1,"teacher_temp": 0.1,
+      "iBOT": {'weight': 0.5, "out_dim": 65536, "student_temp": 0.1,"teacher_temp": 0.1,
           "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      "DINO": {'weight': 0.5, "dino_out_dim": 65536, "student_temp": 0.1,"teacher_temp": 0.1,
+      "DINO": {'weight': 0.5, "out_dim": 65536, "student_temp": 0.1,"teacher_temp": 0.1,
           "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      "JEPA": {'weight': 0.5} }
+      "JEPA": {'weight': 0.5, "out_dim": 2048} }
   },
   "shared_heads": False,
   "target_and_aux_calc": "EMATeacher",

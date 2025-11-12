@@ -231,7 +231,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         if cf.training_mode == "forecast":
             self.tokenizer = TokenizerForecast(cf.healpix_level)
         elif (
-            cf.training_mode == "masking" or cf.training_mode == "student-teacher"
+            cf.training_mode == "masking" # or cf.training_mode == "student-teacher"
         ):  # TODO student-teacher data
             masker = Masker(cf)
             self.tokenizer = TokenizerMasking(cf.healpix_level, masker)

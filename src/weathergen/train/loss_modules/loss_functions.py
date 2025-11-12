@@ -286,8 +286,8 @@ def masked_student_teacher_patch_softmax(
     teacher_patches_masked,
     student_masks_flat,
     student_temp,
-    n_masked_patches,
-    masks_weight,
+    n_masked_patches=None,
+    masks_weight=None,
 ):
     """
     Cross-entropy between softmax outputs of the teacher and student networks.

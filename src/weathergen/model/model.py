@@ -37,7 +37,7 @@ from weathergen.model.engines import (
     TargetPredictionEngineClassic,
 )
 from weathergen.model.layers import MLP, NamedLinear
-from weathergen.model.parametrised_prob_dist import LatentInterpolator
+from weathergen.model.parametrised_prob_dist import LatentInterpolator, DiagonalGaussianDistribution
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
@@ -475,17 +475,21 @@ class Model(torch.nn.Module):
 
         # Latent heads for losses
         # TODO write the forward function for this, has to wait until other Model PRs are done
-        target_losses = cf.get("target_losses", [])
+        target_losses = cf["training_mode_config"]["losses"].get("LossLatentSSLStudentTeacher", [])
         shared_heads = cf.get("shared_heads", False)
         self.latent_heads = nn.ModuleDict()
-        if ("iBOT" in target_losses and "DINO" in target_losses) and shared_heads:
+        if ("iBOT" in target_losses.keys() and "DINO" in target_losses.keys()) and shared_heads:
             self.latent_heads["iBOT-and-DINO-head"] = LatentPredictionHead(
                 "iBOT-and-DINO-head", cf.ae_global_dim_embed, cf.latent_pred_K
             )
-        elif "JEPA" in target_losses or "iBOT" in target_losses or "DINO" in target_losses:
-            for loss in target_losses:
+        elif (
+            "JEPA" in target_losses.keys()
+            or "iBOT" in target_losses.keys()
+            or "DINO" in target_losses.keys()
+        ):
+            for loss, loss_conf in target_losses.items():
                 self.latent_heads[loss] = LatentPredictionHead(
-                    f"{loss}-head", cf.ae_global_dim_embed, cf.latent_pred_K
+                    f"{loss}-head", cf.ae_local_dim_embed, loss_conf["out_dim"]
                 )
 
         return self
@@ -650,8 +654,13 @@ class Model(torch.nn.Module):
 
         latents = {}
         latents["posteriors"] = posteriors
-        for name, head in self.latent_heads:
-            latents[name] = head(posteriors.mode())
+        z = (
+            posteriors.mode()
+            if isinstance(posteriors, DiagonalGaussianDistribution)
+            else posteriors
+        )
+        for name, head in self.latent_heads.items():
+            latents[name] = head(z)
 
         return ModelOutput(physical=preds_all, latent=latents)
 
@@ -757,7 +766,7 @@ class Model(torch.nn.Module):
                 )
                 posteriors += [posteriors_c]
             else:
-                tokens_c, posteriors = tokens_c, 0.0
+                tokens_c, posteriors = tokens_c, tokens_c
 
             tokens_global_c = self.ae_local_global_engine(
                 tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant=False
