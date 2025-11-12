@@ -18,7 +18,6 @@ import logging
 import sys
 from pathlib import Path
 
-import numpy as np
 from omegaconf import OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
@@ -60,7 +59,7 @@ def parse_args(args: list) -> argparse.Namespace:
         type=str,
         choices=["prediction", "target"],
         nargs="+",
-        default = ["prediction"], 
+        default=["prediction"],
         help="List of type of data to convert (e.g. prediction target)",
         required=False,
     )
@@ -144,14 +143,14 @@ def parse_args(args: list) -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--template", 
+        "--template",
         type=str,
         help="Path to GRIB template file",
         required=False,
     )
 
     parser.add_argument(
-        "--expver", 
+        "--expver",
         type=str,
         help="Expver to include in the output filename (i.e. 'iuoo')",
         required=False,
@@ -186,20 +185,23 @@ def export_from_args(args: list) -> None:
     config = OmegaConf.load(config_file)
     # check config loaded correctly
     assert len(config["variables"].keys()) > 0, "Config file not loaded correctly"
-    
+
     kwargs = vars(args).copy()
 
     _logger.info(kwargs)
-    
+
     # Ensure output directory exists
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for dtype in args.type:
-        _logger.info(f"Starting processing {dtype} for run ID {args.run_id}. Detected {args.samples} samples and {args.fsteps} forecast steps.")
-       
+        _logger.info(
+            f"Starting processing {dtype} for run ID {args.run_id}. "
+            f"Detected {args.samples} samples and {args.fsteps} forecast steps."
+        )
+
         export_model_outputs(dtype, config, **kwargs)
-       
+
         _logger.info(f"Finished processing {dtype} for run ID {args.run_id}.")
 
 

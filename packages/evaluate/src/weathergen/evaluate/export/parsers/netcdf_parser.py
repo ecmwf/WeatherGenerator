@@ -1,13 +1,13 @@
 import logging
-from tqdm import tqdm
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import xarray as xr
 from omegaconf import OmegaConf
-from typing import Dict, Any
-from pathlib import Path
+
+from weathergen.evaluate.export.cf_utils import CfParser
 from weathergen.evaluate.export.reshape import find_pl
-from weathergen.evaluate.export.cf_utils import CF_Parser
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -20,7 +20,8 @@ uv run export --run-id ciga1p9c --stream ERA5
 --format netcdf --samples 1 2  --fsteps 1 2 3
 """
 
-class NetCDF_Parser(CF_Parser):
+
+class NetcdfParser(CfParser):
     """
     Child class for handling NetCDF output format.
     """
@@ -44,10 +45,10 @@ class NetCDF_Parser(CF_Parser):
         for k, v in kwargs.items():
             setattr(self, k, v)
 
-        super().__init__(config= config, grid_type=self.grid_type)
-        
+        super().__init__(config=config, grid_type=self.grid_type)
+
         self.mapping = config.get("variables", {})
-    
+
     def process_sample(
         self,
         fstep_iterator_results: iter,
@@ -64,9 +65,8 @@ class NetCDF_Parser(CF_Parser):
             None
         """
         da_fs = []
-        
+
         for result in fstep_iterator_results:
-        
             if result is None:
                 continue
 
@@ -74,7 +74,7 @@ class NetCDF_Parser(CF_Parser):
             result = result.sel(channel=self.channels)
             result = self.reshape(result)
             da_fs.append(result)
-        
+
         _logger.info(f"Retrieved {len(da_fs)} forecast steps for type {self.data_type}.")
         _logger.info(f"Saved sample data to {self.output_format} in {self.output_dir}.")
 
@@ -87,8 +87,8 @@ class NetCDF_Parser(CF_Parser):
 
     def get_output_filename(self, forecast_ref_time: np.datetime64) -> Path:
         """
-        Generate output filename based on prefix (should refer to type e.g. pred/targ), run_id, sample
-        index, output directory, format and forecast_ref_time.
+        Generate output filename based on prefix (should refer to type e.g. pred/targ),
+        run_id, sample index, output directory, format and forecast_ref_time.
 
         Parameters
         ----------
@@ -100,8 +100,10 @@ class NetCDF_Parser(CF_Parser):
         """
 
         frt = np.datetime_as_string(forecast_ref_time, unit="h")
-        out_fname = Path(self.output_dir) / f"{self.data_type}_{frt}_{self.run_id}.{self.file_extension}"
-        return out_fname   
+        out_fname = (
+            Path(self.output_dir) / f"{self.data_type}_{frt}_{self.run_id}.{self.file_extension}"
+        )
+        return out_fname
 
     def reshape(self, data: xr.DataArray) -> xr.Dataset:
         """
@@ -144,9 +146,9 @@ class NetCDF_Parser(CF_Parser):
         if grid_type == "regular":
             # Use original reshape logic for regular grids
             # This is safe for regular grids
-            reshaped_dataset = reshaped_dataset.set_index(ipoint=("valid_time", "lat", "lon")).unstack(
-                "ipoint"
-            )
+            reshaped_dataset = reshaped_dataset.set_index(
+                ipoint=("valid_time", "lat", "lon")
+            ).unstack("ipoint")
         else:
             # Use new logic for Gaussian/unstructured grids
             reshaped_dataset = reshaped_dataset.set_index(ipoint2=("ipoint", "valid_time")).unstack(
@@ -159,15 +161,15 @@ class NetCDF_Parser(CF_Parser):
         return reshaped_dataset
 
     def concatenate(
-            self,
+        self,
         array_list,
-        dim = "valid_time",
-        data_vars = "minimal",
-        coords = "different",
-        compat = "equals",
-        combine_attrs = "drop",
-        sortby_dim = "valid_time"
-    ) -> xr.Dataset :
+        dim="valid_time",
+        data_vars="minimal",
+        coords="different",
+        compat="equals",
+        combine_attrs="drop",
+        sortby_dim="valid_time",
+    ) -> xr.Dataset:
         """
         Uses list of pred/target xarray DataArrays to save one sample to a NetCDF file.
 
@@ -178,7 +180,7 @@ class NetCDF_Parser(CF_Parser):
         array_list : list of xr.DataArray
             List of DataArrays to concatenate.
         dim : str, optional
-            Dimension along which to concatenate. Default is 'valid_time'.      
+            Dimension along which to concatenate. Default is 'valid_time'.
         data_vars : str, optional
             How to handle data variables during concatenation. Default is 'minimal'.
         coords : str, optional
@@ -188,14 +190,14 @@ class NetCDF_Parser(CF_Parser):
         combine_attrs : str, optional
             How to combine attributes. Default is 'drop'.
         sortby_dim : str, optional
-            Dimension to sort the final dataset by. Default is 'valid_time'.    
+            Dimension to sort the final dataset by. Default is 'valid_time'.
 
         Returns
         -------
         xr.Dataset
             Concatenated xarray Dataset.
         """
-   
+
         data = xr.concat(
             array_list,
             dim=dim,
@@ -224,12 +226,12 @@ class NetCDF_Parser(CF_Parser):
 
         if "sample" in ds.coords:
             ds = ds.drop_vars("sample")
-        
-        n_hours =self.fstep_hours.astype("int64")
+
+        n_hours = self.fstep_hours.astype("int64")
         ds["forecast_period"] = ds["forecast_step"] * n_hours
 
         return ds
-    
+
     def add_attrs(self, ds: xr.Dataset) -> xr.Dataset:
         """
         Add CF-compliant attributes to the dataset variables.
@@ -241,13 +243,13 @@ class NetCDF_Parser(CF_Parser):
         -------
             xarray Dataset with CF-compliant variable attributes.
         """
- 
+
         ds["forecast_period"].attrs = {
             "standard_name": "forecast_period",
             "long_name": "time since forecast_reference_time",
             "units": "hours",
         }
-        
+
         if self.grid_type == "gaussian":
             variables = self._attrs_gaussian_grid(ds)
         else:
@@ -266,8 +268,8 @@ class NetCDF_Parser(CF_Parser):
             ds : xr.Dataset
                 Input dataset.
         Returns
-        ------- 
-            xr.Dataset      
+        -------
+            xr.Dataset
                 Dataset with CF-compliant variable attributes.
         """
         variables = {}
@@ -304,9 +306,9 @@ class NetCDF_Parser(CF_Parser):
         ----------
 
             ds : xr.Dataset
-                Input dataset.  
+                Input dataset.
         Returns
-        ------- 
+        -------
             xr.Dataset
                 Dataset with CF-compliant variable attributes.
         """
@@ -324,8 +326,8 @@ class NetCDF_Parser(CF_Parser):
             if var_cfg.get("level_type") == "sfc":
                 dims.remove("pressure")
 
-            coords = self._build_coordinate_mapping(ds,var_cfg, ds_attrs)
-            
+            coords = self._build_coordinate_mapping(ds, var_cfg, ds_attrs)
+
             attrs = {
                 "standard_name": var_cfg.get("std", var_name),
                 "units": var_cfg.get("std_unit", "unknown"),
@@ -349,28 +351,33 @@ class NetCDF_Parser(CF_Parser):
             ds : xr.Dataset
                 Input dataset.
         Returns
-        ------- 
-            None   
+        -------
+            None
         """
         if "lat" in ds.coords:
-            ds.coords["lat"].attrs.update({
-                "standard_name": "latitude",
-                "long_name": "latitude",
-                "units": "degrees_north",
-            })
+            ds.coords["lat"].attrs.update(
+                {
+                    "standard_name": "latitude",
+                    "long_name": "latitude",
+                    "units": "degrees_north",
+                }
+            )
         if "lon" in ds.coords:
-            ds.coords["lon"].attrs.update({
-                "standard_name": "longitude",
-                "long_name": "longitude",
-                "units": "degrees_east",
-            })
+            ds.coords["lon"].attrs.update(
+                {
+                    "standard_name": "longitude",
+                    "long_name": "longitude",
+                    "units": "degrees_east",
+                }
+            )
 
-
-    def _assign_dim_attrs(self, ds: xr.Dataset, dim_cfg: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
+    def _assign_dim_attrs(
+        self, ds: xr.Dataset, dim_cfg: dict[str, Any]
+    ) -> dict[str, dict[str, str]]:
         """
         Assign CF attributes from given config file.
         Parameters
-        ----------          
+        ----------
             ds : xr.Dataset
                 Input dataset.
             dim_cfg : Dict[str, Any]
@@ -394,8 +401,9 @@ class NetCDF_Parser(CF_Parser):
 
         return ds_attrs
 
-
-    def _build_coordinate_mapping(self, ds: xr.Dataset, var_cfg: Dict[str, Any], attrs: Dict[str, Dict[str, str]]) -> Dict[str, Any]:
+    def _build_coordinate_mapping(
+        self, ds: xr.Dataset, var_cfg: dict[str, Any], attrs: dict[str, dict[str, str]]
+    ) -> dict[str, Any]:
         """Create coordinate mapping for a given variable.
         Parameters
         ----------
@@ -408,7 +416,7 @@ class NetCDF_Parser(CF_Parser):
         Returns
         -------
             Dict[str, Any]:
-                Coordinate mapping for the variable.    
+                Coordinate mapping for the variable.
         """
         coords = {}
         coord_map = self.config.get("coordinates", {}).get(var_cfg.get("level_type"), {})
@@ -440,10 +448,10 @@ class NetCDF_Parser(CF_Parser):
         xr.Dataset
             Dataset with added grid metadata
         """
-    
-        if not self.grid_type == "gaussian":
+
+        if self.grid_type != "gaussian":
             return ds
-        
+
         # ds = ds.copy()
         # Add grid mapping information
         ds.attrs["grid_type"] = "gaussian"
@@ -451,7 +459,9 @@ class NetCDF_Parser(CF_Parser):
         # If grid info provided, add it
         if grid_info:
             ds.attrs["gaussian_grid_number"] = grid_info.get("N", "unknown")
-            ds.attrs["gaussian_grid_type"] = "reduced" if grid_info.get("reduced", False) else "regular"
+            ds.attrs["gaussian_grid_type"] = (
+                "reduced" if grid_info.get("reduced", False) else "regular"
+            )
 
         return ds
 
@@ -477,7 +487,7 @@ class NetCDF_Parser(CF_Parser):
         ds.attrs["Conventions"] = "CF-1.12"
         return ds
 
-    def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64 ) -> None:
+    def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64) -> None:
         """
         Save the dataset to a NetCDF file.
 

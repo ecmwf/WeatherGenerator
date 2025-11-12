@@ -1,20 +1,17 @@
 import logging
-import tqdm
+from pathlib import Path
 
 import numpy as np
-import xarray as xr
-from omegaconf import OmegaConf
-from typing import Dict, Any
-from pathlib import Path
-from weathergen.evaluate.export.reshape import detect_grid_type, find_pl
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
-class CF_Parser(object):
+
+class CfParser:
     """
     Base class for CF parsers.
     """
+
     def __init__(self, config, **kwargs):
         """
         CF-compliant parser that handles both regular and Gaussian grids.
@@ -28,10 +25,10 @@ class CF_Parser(object):
 
         for k, v in kwargs.items():
             setattr(self, k, v)
-            
+
         self.config = config
         self.file_extension = _get_file_extension(self.output_format)
-        self.fstep_hours = np.timedelta64(self.fstep_hours, "h") 
+        self.fstep_hours = np.timedelta64(self.fstep_hours, "h")
 
     def get_output_filename(self) -> Path:
         """
@@ -44,15 +41,17 @@ class CF_Parser(object):
         Process results from get_data_worker: reshape, concatenate, add metadata, and save.
         Parameters
         ----------
-            fstep_iterator_results : Iterator over results from get_data_worker. 
+            fstep_iterator_results : Iterator over results from get_data_worker.
             ref_time : Forecast reference time for the sample.
         Returns
         -------
             None
         """
         pass
-           
+
+
 ##########################################
+
 
 # Helpers
 def _get_file_extension(output_format: str) -> str:
@@ -73,5 +72,6 @@ def _get_file_extension(output_format: str) -> str:
         return "grib"
     else:
         raise ValueError(
-            f"Unsupported output format: {output_format}, supported formats are ['netcdf', 'DWD', 'quaver']"
+            f"Unsupported output format: {output_format},"
+            "supported formats are ['netcdf', 'DWD', 'quaver']"
         )
