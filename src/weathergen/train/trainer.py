@@ -618,6 +618,7 @@ class Trainer(TrainerBase):
         for bidx, batch in enumerate(dataset_iter):
             forecast_steps = batch[3]
             batch = self.batch_to_device(batch)
+            import pdb; pdb.set_trace()
 
             # evaluate model
             with torch.autocast(
