@@ -30,6 +30,7 @@ from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
     compute_idxs_predict,
     compute_offsets_scatter_embed,
+    compute_offsets_scatter_embed_target_srclk,
     compute_source_cell_lens,
 )
 from weathergen.readers_extra.registry import get_extra_reader
@@ -304,7 +305,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         len_dt_samples = len(self) // self.batch_size
         if self.forecast_policy is None:
             self.perms_forecast_dt = np.zeros(len_dt_samples, dtype=np.int64)
-        elif self.forecast_policy == "fixed" or self.forecast_policy == "sequential":
+        elif self.forecast_policy == "fixed" or self.forecast_policy == "sequential" or self.forecast_policy == "diffusion":
             self.perms_forecast_dt = fsm * np.ones(len_dt_samples, dtype=np.int64)
         elif self.forecast_policy == "random" or self.forecast_policy == "sequential_random":
             # randint high=one-past
@@ -446,6 +447,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # compute offsets for scatter computation after embedding
             batch = compute_offsets_scatter_embed(batch)
+            batch = compute_offsets_scatter_embed_target_srclk(batch)
 
             # compute offsets and auxiliary data needed for prediction computation
             # (info is not per stream so separate data structure)

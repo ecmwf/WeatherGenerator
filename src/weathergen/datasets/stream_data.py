@@ -95,6 +95,24 @@ class StreamData:
         self.source_idxs_embed = self.source_idxs_embed.to(device, non_blocking=True)
         self.source_idxs_embed_pe = self.source_idxs_embed_pe.to(device, non_blocking=True)
 
+        self.target_srclk_raw = [t.to(device, non_blocking=True) for t in self.target_srclk_raw]
+        self.target_srclk_tokens_lens = [
+            t.to(device, non_blocking=True) for t in self.target_srclk_tokens_lens
+        ]
+        self.target_srclk_tokens_cells = [
+            t.to(device, non_blocking=True) for t in self.target_srclk_tokens_cells
+        ]
+        self.target_srclk_centroids = [
+            t.to(device, non_blocking=True) for t in self.target_srclk_centroids
+        ]
+        
+        self.target_srclk_idxs_embed = [
+            t.to(device, non_blocking=True) for t in self.target_srclk_idxs_embed
+        ]
+        self.target_srclk_idxs_embed_pe = [
+            t.to(device, non_blocking=True) for t in self.target_srclk_idxs_embed_pe
+        ]
+
         return self
 
     def add_empty_source(self, source: IOReaderData) -> None:
@@ -115,6 +133,22 @@ class StreamData:
         self.source_tokens_lens += [torch.ones([self.healpix_cells], dtype=torch.int32)]
         self.source_tokens_cells += [torch.tensor([])]
         self.source_centroids += [torch.tensor([])]
+
+    def add_empty_target_srclk(self, fstep: int) -> None:
+        """
+        Add an empty target for an input encoded like source.
+        Parameters
+        ----------
+        None
+        Returns
+        -------
+        None
+        """
+
+        self.target_srclk_raw[fstep] += [torch.tensor([])]
+        self.target_srclk_tokens_lens[fstep] += [torch.zeros([self.nhc_source], dtype=torch.int32)]
+        self.target_srclk_tokens_cells[fstep] += [torch.tensor([])]
+        self.target_srclk_centroids[fstep] += [torch.tensor([])]
 
     def add_empty_target(self, fstep: int) -> None:
         """

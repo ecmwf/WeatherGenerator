@@ -557,11 +557,18 @@ class DataReaderBase(metaclass=ABCMeta):
         -------
         Normalized data
         """
-        assert source.shape[-1] == len(self.source_idx), "incorrect number of source channels"
-        for i, ch in enumerate(self.source_idx):
-            source[..., i] = (source[..., i] - self.mean[ch]) / self.stdev[ch]
+        #TODO: KCT, do this properly, otherwise very dangerous
+        # assert source.shape[-1] == len(self.source_idx), "incorrect number of source channels"
+        if not (source.shape[-1] == len(self.source_idx)) and (source.shape[-1] == len(self.target_idx)):
+            # if the source is actually being called as a target (check by looking at the no of channels)
+            for i, ch in enumerate(self.target_idx):
+                source[..., i] = (source[..., i] - self.mean[ch]) / self.stdev[ch]
+            return source
+        else:
+            for i, ch in enumerate(self.source_idx):
+                source[..., i] = (source[..., i] - self.mean[ch]) / self.stdev[ch]
 
-        return source
+            return source
 
     def normalize_target_channels(self, target: NDArray[DType]) -> NDArray[DType]:
         """

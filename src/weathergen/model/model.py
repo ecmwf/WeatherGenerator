@@ -13,6 +13,7 @@ import logging
 import math
 import warnings
 from pathlib import Path
+import logging
 
 import astropy_healpix as hp
 import astropy_healpix.healpy
@@ -21,6 +22,7 @@ import torch
 import torch.nn as nn
 from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
+from torch.nn.functional import silu
 
 from weathergen.common.config import Config
 from weathergen.model.engines import (
@@ -254,6 +256,10 @@ class Model(torch.nn.Module):
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
 
+        self.P_mean = cf.P_mean if "P_mean" in cf else -1.2
+        self.P_std = cf.P_std if "P_std" in cf else 1.2
+        self.sigma_data = cf.sigma_data if "sigma_data" in cf else 1.0
+
     #########################################
     def create(self) -> "Model":
         """Create each individual module of the model"""
@@ -321,7 +327,8 @@ class Model(torch.nn.Module):
                 "Empty forecast engine (fe_num_blocks = 0), but forecast_steps[i] > 0 for some i"
             )
 
-        self.forecast_engine = ForecastingEngine(cf, self.num_healpix_cells)
+        self.fe = ForecastingEngine(cf, self.num_healpix_cells)
+        self.fe_blocks = self.fe.create()
 
         ###############
         # embed coordinates yielding one query token for each target token
@@ -461,6 +468,28 @@ class Model(torch.nn.Module):
 
         self.apply(_reset_params)
 
+
+    def freeze_weights_forecast(self) -> "Model":
+        """Freezes core model weights and makes forecasting engine weights trainable"""
+
+        # freeze everything
+        for p in self.parameters():
+            p.requires_grad = False
+        self.q_cells.requires_grad = False
+
+        # unfreeze forecast part
+        for p in self.fe_blocks.parameters():
+            p.requires_grad = True
+        
+        if self.cf.forecast_policy == "diffusion":
+            for p in self.fe.map_layer0.parameters():
+                p.requires_grad = True
+            for p in self.fe.map_layer1.parameters():
+                p.requires_grad = True
+            for p in self.fe.map_noise.parameters():
+                p.requires_grad = True
+
+
     #########################################
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
@@ -480,6 +509,7 @@ class Model(torch.nn.Module):
         num_params_embed_tcs = [get_num_parameters(etc) for etc in self.embed_target_coords]
         num_params_tte = [get_num_parameters(tte) for tte in self.target_token_engines]
         num_params_preds = [get_num_parameters(head) for head in self.pred_heads]
+        
 
         print("-----------------")
         print(f"Total number of trainable parameters: {num_params_total:,}")
@@ -620,8 +650,30 @@ class Model(torch.nn.Module):
 
         tokens = self.assimilate_global(model_params, tokens)
 
+        # now encode the targets into the latent space for all fsteps
+        if self.cf.get("encode_targets_latent", False) or (self.cf.forecast_policy == "diffusion"):
+            with torch.no_grad():
+                tokens_targets = []
+                tokens_targets_srclk = self.embed_cells_targets_srclk(model_params, streams_data)
+                for fstep in range(len(tokens_targets_srclk)):
+                    tokens_target, _ = self.assimilate_local(
+                        model_params, tokens_targets_srclk[fstep], source_cell_lens
+                    )
+                    tokens_target = self.assimilate_global(model_params, tokens_target)
+                    tokens_target_det = tokens_target.detach() # explicitly detach as well
+                    tokens_targets.append(tokens_target_det)
+
         # roll-out in latent space
         preds_all = []
+
+        #weights default to 1s
+        weights = torch.ones(tokens.shape[0], dtype=self.dtype, device=tokens.device)
+
+
+        if self.cf.forecast_policy == "diffusion":
+            assert forecast_steps == 1, "diffusion forecast only implemented for single step"
+
+        tokens_all = [tokens]
         for fstep in range(forecast_offset, forecast_offset + forecast_steps):
             # prediction
             preds_all += [
@@ -634,15 +686,31 @@ class Model(torch.nn.Module):
                 )
             ]
 
-            if self.training:
-                # Impute noise to the latent state
-                noise_std = self.cf.get("impute_latent_noise_std", 0.0)
-                if noise_std > 0.0:
-                    tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
+            if not self.cf.forecast_policy == "diffusion":
+                if self.training:
+                    # Impute noise to the latent state
+                    noise_std = self.cf.get("impute_latent_noise_std", 0.0)
+                    if noise_std > 0.0:
+                        tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
-            tokens = self.forecast(model_params, tokens, fstep)
+                tokens = self.forecast(model_params, tokens, fstep)
+                tokens_all += [tokens]
+            if self.cf.forecast_policy == "diffusion":
+                #change the latent targets to residuals
+                tokens_targets[fstep - forecast_offset] = tokens_targets[fstep - forecast_offset] - tokens
+                if self.training:
+                    logger.info('denoising step')
+                    #TODO should never denoise multipel delta_t...
+                    #in this case, we predict residual, and add it to previous state before decoding
+                    res_tokens, weights = self.edm_denoise(model_params, tokens, tokens_targets[fstep - forecast_offset])
+                else:
+                    logger.info('sampling step')
+                    res_tokens = self.edm_sample(model_params, tokens) #NOTE: weights are set to default 1s during sampling...
+                tokens = tokens + res_tokens
+                tokens_all += [res_tokens]
 
         # prediction for final step
+        #TODO: May exclude this step during forecast training when only latent loss is used (when working with diffusion)
         preds_all += [
             self.predict(
                 model_params,
@@ -652,8 +720,11 @@ class Model(torch.nn.Module):
                 target_coords_idxs,
             )
         ]
-
-        return preds_all, posteriors
+                    
+        if self.cf.get("encode_targets_latent", False) or (self.cf.forecast_policy == "diffusion"):
+            return preds_all, posteriors, weights, tokens_all, tokens_targets
+        else:
+            return preds_all, posteriors, weights, None, None
 
     #########################################
     def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
@@ -669,6 +740,70 @@ class Model(torch.nn.Module):
         tokens_all = self.embed_engine(streams_data, model_params.pe_embed, self.dtype, device)
 
         return tokens_all
+
+    # def embed_cells_targets_srclk(self, model_params: ModelParams, streams_data) -> torch.Tensor:
+    #     """Embeds target data similar to source tokens for each fstep and stream separately and rearranges it to cell-wise order
+    #     Args:
+    #         model_params : Query and embedding parameters
+    #         streams_data : Used to initialize first tokens for pre-processing
+    #     Returns:
+    #         Tokens for local assimilation
+    #     """
+    #     with torch.no_grad():
+    #         target_srclk_tokens_lens = torch.stack(
+    #             [
+    #                 torch.stack(
+    #                     [
+    #                         torch.stack(
+    #                             [
+    #                                 s.target_srclk_tokens_lens[fstep]
+    #                                 if len(s.target_srclk_tokens_lens[fstep]) > 0
+    #                                 else torch.tensor([])
+    #                                 for fstep in range(len(s.target_srclk_tokens_lens))
+    #                             ]
+    #                         )
+    #                         for s in stl_b
+    #                     ]
+    #                 )
+    #                 for stl_b in streams_data
+    #             ]
+    #         )
+    #         offsets_base = target_srclk_tokens_lens.sum(1).sum(0).cumsum(1)
+    #         num_fsteps = target_srclk_tokens_lens.shape[2]  # TODO: KCT, if there are diff no of tokens per fstep, this may fail
+    #         tokens_all = []
+    #         for fstep in range(num_fsteps):
+    #             tokens_all.append(
+    #                 torch.empty(
+    #                     (int(offsets_base[fstep][-1]), self.cf.ae_local_dim_embed),
+    #                     dtype=self.dtype,
+    #                     device="cuda",
+    #                 )
+    #             )
+
+    #         tokens_all_scattered = []
+    #         for _, sb in enumerate(streams_data):
+    #             for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
+    #                 for fstep in range(num_fsteps):
+    #                     if not (s.target_srclk_tokens_lens[fstep].sum() == 0):
+    #                         idxs = s.target_srclk_idxs_embed[fstep]  
+    #                         idxs_pe = s.target_srclk_idxs_embed_pe[fstep]
+
+    #                         # create full scatter index
+    #                         # (there's no broadcasting which is likely highly inefficient)
+    #                         idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+
+    #                         x_embed = embed(
+    #                             s.target_srclk_tokens_cells[fstep], s.source_centroids # TODO: KCT, get this from the srclk targets
+    #                         ).flatten(0, 1)
+
+    #                         # scatter write to reorder from per stream to per cell ordering
+    #                         tokens_all_fstep = tokens_all[fstep]
+    #                         tokens_all_fstep.scatter_(
+    #                             0, idxs, x_embed + model_params.pe_embed[idxs_pe]
+    #                         )
+    #                         tokens_all_scattered.append(tokens_all_fstep)
+
+    #     return tokens_all_scattered
 
     #########################################
     def assimilate_local(
@@ -791,7 +926,7 @@ class Model(torch.nn.Module):
         return tokens
 
     #########################################
-    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
+    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int, noise_conditioning: None) -> torch.Tensor:
         """Advances latent space representation in time
 
         Args:
@@ -805,8 +940,81 @@ class Model(torch.nn.Module):
         """
 
         tokens = self.forecast_engine(tokens, fstep)
+        for it, block in enumerate(self.fe_blocks):
+            aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
+            tokens = checkpoint(block, tokens, noise_conditioning, aux_info, use_reentrant=False)
+        exit() #WHAT ABOUT FSTEP
 
         return tokens
+
+    def edm_preconditioning(self, model_params: ModelParams, condition_tokens: torch.Tensor, noised_target: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
+
+        c_skip = self.sigma_data ** 2 / (noise ** 2 + self.sigma_data ** 2)
+        c_out = noise * self.sigma_data / (noise ** 2 + self.sigma_data ** 2).sqrt()
+        c_in = 1 / (self.sigma_data ** 2 + noise ** 2).sqrt()
+        c_noise = noise.log() / 4
+
+        target_tokens = c_in * noised_target
+
+        concat_x = torch.concat([condition_tokens, target_tokens], dim=1)
+    
+        #embed the noise
+        emb = self.fe.map_noise(c_noise.flatten())
+        emb = silu(self.fe.map_layer0(emb))
+        emb = silu(self.fe.map_layer1(emb)).to(concat_x.device)
+
+        F_x = self.forecast(model_params, concat_x, emb)
+        D_x = c_skip * noised_target + c_out * F_x[:, -target_tokens.shape[1]:, :]
+        return D_x
+
+    def edm_denoise(self, model_params: ModelParams, condition_tokens: torch.Tensor, target_tokens: torch.Tensor):
+        rnd_normal = torch.randn([target_tokens.shape[0], 1, 1], dtype=torch.float32, device=target_tokens.device)
+        sigma = (rnd_normal * self.P_std + self.P_mean).exp()
+        n = torch.randn_like(target_tokens) * sigma
+        noised_target = target_tokens + n
+        weight = (sigma ** 2 + self.sigma_data ** 2) / (sigma * self.sigma_data) ** 2
+
+        return self.edm_preconditioning(model_params, condition_tokens, noised_target, noise=sigma), weight
+
+    def edm_sample(
+        #default parameters taken form gencast supplementary, sampler architecture adapted form edm
+        self, model_params: ModelParams, condition_tokens: torch.Tensor, class_labels=None, randn_like=torch.randn_like,
+        num_steps=20, sigma_min=0.02, sigma_max=88, rho=7,
+        S_churn=2.5, S_min=0, S_max=80, S_noise=1.05,
+    ):
+        # Adjust noise levels based on what's supported by the network.
+        sigma_min = max(sigma_min, self.fe.sigma_min)
+        sigma_max = min(sigma_max, self.fe.sigma_max)
+
+        # Time step discretization.
+        step_indices = torch.arange(num_steps, dtype=torch.float32)
+        t_steps = (sigma_max ** (1 / rho) + step_indices / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))) ** rho
+        t_steps = torch.cat([torch.as_tensor(t_steps), torch.zeros_like(t_steps[:1])]) # t_N = 0
+
+        # Main sampling loop.
+        n = torch.randn(condition_tokens.shape, device=condition_tokens.device) #shape should be like target_tokens (may need adaptation if conditioning on multiple lags)
+        x_next =  (n * t_steps[0]).to(condition_tokens.device) #.to(torch.float64)
+        for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])): # 0, ..., N-1
+            x_cur = x_next
+
+            # Increase noise temporarily.
+            gamma = min(S_churn / num_steps, np.sqrt(2) - 1) if S_min <= t_cur <= S_max else 0
+            t_hat = torch.as_tensor(t_cur + gamma * t_cur).to(condition_tokens.device)
+            x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * randn_like(x_cur)
+
+            # Euler step.
+            denoised = self.edm_preconditioning(model_params, condition_tokens, x_hat, noise=t_hat) #.to(torch.float64)
+            d_cur = (x_hat - denoised) / t_hat
+            x_next = x_hat + (t_next - t_hat) * d_cur
+
+            # Apply 2nd order correction.
+            if i < num_steps - 1:
+                denoised = self.edm_preconditioning(model_params, condition_tokens, x_hat, noise=t_next) #.to(torch.float64)
+                d_prime = (x_next - denoised) / t_next
+                x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
+
+        return x_next
+
 
     #########################################
     def predict(

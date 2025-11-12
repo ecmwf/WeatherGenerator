@@ -15,7 +15,6 @@ from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
 
-
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     def __init__(
         self,
@@ -197,6 +196,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        with_noise_conditioning=False
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -242,10 +242,20 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         # compile for efficiency
         self.flex_attention = torch.compile(flex_attention, dynamic=False)
 
-    def forward(self, x, ada_ln_aux=None):
+        self.noise_conditioning = None
+        if with_noise_conditioning:
+            self.noise_conditioning = LinearNormConditioning(dim_embed, dtype=self.dtype)
+
+
+    def forward(self, x, noise_embedding=None, ada_ln_aux=None):
+
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+
+        if self.noise_conditioning:
+            assert noise_embedding is not None, "Need noise embedding if using noise conditioning"
+            x = self.noise_conditioning(x, noise_embedding)
 
         # project onto heads
         s = [x.shape[0], x.shape[1], self.num_heads, -1]
@@ -471,6 +481,36 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
 
         return outs
 
+class LinearNormConditioning(torch.nn.Module):
+    """Module for norm conditioning.
+
+    Conditions the normalization of `inputs` by applying a linear layer to the
+    `norm_conditioning` which produces the scale and offset for each channel.
+    """
+
+    def __init__(self, feature_size, dtype=torch.bfloat16):
+        super().__init__()
+        self.dtype = dtype
+
+        self.conditional_linear_layer = torch.nn.Linear(
+            in_features=feature_size,
+            out_features=2 * feature_size,
+        )
+        # Optional: initialize weights similar to TruncatedNormal(stddev=1e-8)
+        torch.nn.init.normal_(self.conditional_linear_layer.weight, std=1e-8)
+        torch.nn.init.zeros_(self.conditional_linear_layer.bias)
+
+    def forward(self, inputs, norm_conditioning, dtype = None):
+        # norm_conditioning: [batch, feature_size]
+        # inputs: [batch, ..., feature_size]
+        conditional_scale_offset = self.conditional_linear_layer(norm_conditioning.to(self.dtype))
+        scale_minus_one, offset = torch.chunk(conditional_scale_offset, 2, dim=-1)
+        scale = scale_minus_one + 1.0
+        # Reshape scale and offset for broadcasting if needed
+        while scale.dim() < inputs.dim():
+            scale = scale.unsqueeze(1)
+            offset = offset.unsqueeze(1)
+        return (inputs * scale + offset).to(self.dtype) #TODO: check if to(self.dtype) needed here
 
 class MultiSelfAttentionHead(torch.nn.Module):
     def __init__(
@@ -487,6 +527,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        with_noise_conditioning=False
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -526,11 +567,19 @@ class MultiSelfAttentionHead(torch.nn.Module):
         else:
             self.att = self.attention
             self.softmax = torch.nn.Softmax(dim=-1)
+        
+        self.noise_conditioning = None
+        if with_noise_conditioning:
+            self.noise_conditioning = LinearNormConditioning(dim_embed, dtype=self.dtype)
 
-    def forward(self, x, ada_ln_aux=None):
+    def forward(self, x, noise_embedding=None, ada_ln_aux=None):
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+
+        if self.noise_conditioning:
+            assert noise_embedding is not None, "Need noise embedding if using noise conditioning"
+            x = self.noise_conditioning(x, noise_embedding, dtype=self.dtype)
 
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
