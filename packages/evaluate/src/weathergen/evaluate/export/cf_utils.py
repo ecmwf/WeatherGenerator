@@ -1,4 +1,5 @@
 import logging
+import tqdm
 
 import numpy as np
 import xarray as xr
@@ -10,43 +11,11 @@ from weathergen.evaluate.export.reshape import detect_grid_type, find_pl
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
-class CF_ParserFactory(object):
-    """
-    Factory class to get appropriate CF parser based on output format.
-    """
-
-    @staticmethod
-    def get_parser(
-        config: OmegaConf,
-        grid_type: str,
-    ) -> "CF_Parser":
-        """
-        Get the appropriate CF parser based on the output format.
-
-        Parameters
-        ----------
-            config : OmegaConf
-                Configuration defining variable mappings and dimension metadata.
-            grid_type : str
-                Type of grid ('regular' or 'gaussian').
-    
-        Returns
-        -------
-            Instance of a CF_Parser subclass.
-        """
-        output_format = config.get("output_format", "netcdf")
-        if output_format == "netcdf":
-            return NetCDF_Parser(config, grid_type)
-        else:
-            raise ValueError(
-                f"Unsupported output format: {output_format}, supported formats are ['netcdf', 'DWD', 'quaver']"
-            )
-
 class CF_Parser(object):
     """
     Base class for CF parsers.
     """
-    def __init__(self, config: OmegaConf, grid_type: str):
+    def __init__(self, config, **kwargs):
         """
         CF-compliant parser that handles both regular and Gaussian grids.
         Parameters
@@ -56,55 +25,37 @@ class CF_Parser(object):
         grid_type : str
             Type of grid ('regular' or 'gaussian').
         """
-        self.grid_type = grid_type
+
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+            
         self.config = config
-        self.run_id = config.get("run_id", "unknown_run")
-        self.stream = config.get("stream", "unknown_stream")
-        self.output_dir = config.get("output_dir", ".")
-        self.output_format = config.get("output_format", "netcdf")
         self.file_extension = _get_file_extension(self.output_format)
-        self.output_filename = None 
-        self.fstep_hours = np.timedelta64(config.fstep_hours, "h") 
+        self.fstep_hours = np.timedelta64(self.fstep_hours, "h") 
 
-    def reshape(self):
+    def get_output_filename(self) -> Path:
         """
-        Reshape dataset while preserving grid structure (regular or Gaussian).
+        Generate output filename based on run_id and output directory.
         """
-        pass
-    
-    def concatenate(self):
-        """
-        Uses list of pred/target xarray DataArrays to save one sample to a file.
-        """
-        pass
-    
-    def assign_coords(self):
-        """
-        Assign forecast reference time coordinate to the dataset.
-        """
-        pass
-    
-    def add_attrs(self):
-        """
-        Add attributes to the dataset variables.
-        """
-        pass
-    
-    def add_metadata(self):
-        """
-        Add metadata to the dataset attributes.
-        """
-        pass
+        return Path(self.output_dir) / f"{self.run_id}.{self.file_extension}"
 
-    def save(self):
+    def process_sample(self, fstep_iterator_results: iter, ref_time: np.datetime64):
         """
-        Save the dataset to a file.
+        Process results from get_data_worker: reshape, concatenate, add metadata, and save.
+        Parameters
+        ----------
+            fstep_iterator_results : Iterator over results from get_data_worker. 
+            ref_time : Forecast reference time for the sample.
+        Returns
+        -------
+            None
         """
         pass
     
+
 class NetCDF_Parser(CF_Parser):
     """
-    Child class for NetCDF stuff
+    Child class for handling NetCDF output format.
     """
 
     def __init__(self, config: OmegaConf, grid_type: str):
@@ -123,17 +74,55 @@ class NetCDF_Parser(CF_Parser):
         xr.Dataset
             CF-compliant dataset with consistent naming and attributes.
         """
-        super().__init__(config, grid_type)
+        super().__init__(config= config, grid_type=grid_type)
         self.mapping = config.get("variables", {})
+    
+    def process_sample(
+        self,
+        fstep_iterator_results: iter,
+        ref_time: np.datetime64,
+    ):
+        """
+        Process results from get_data_worker: reshape, concatenate, add metadata, and save.
+        Parameters
+        ----------
+            fstep_iterator_results : Iterator over results from get_data_worker.
+            ref_time : Forecast reference time for the sample.
+        Returns
+        -------
+            None
+        """
+        da_fs = []
 
-    def get_output_filename(self, dtype: str, forecast_ref_time: np.datetime64) -> Path:
+        for result in tqdm(
+            fstep_iterator_results,
+            desc=f"Processing {self.run_id} - stream: {self.stream} - sample: {ref_time}",
+        ):
+            if result is None:
+                continue
+
+            result = result.as_xarray().squeeze()
+            result = result.sel(channel=self.channels)
+            result = self.reshape(result)
+            da_fs.append(result)
+        
+        _logger.info(f"Retrieved {len(da_fs)} forecast steps for type {self.data_type}.")
+        _logger.info(f"Saved sample data to {self.output_format} in {self.output_dir}.")
+
+        if da_fs:
+            da_fs = self.concatenate(da_fs)
+            da_fs = self.assign_coords(da_fs, ref_time)
+            da_fs = self.add_attrs(da_fs)
+            da_fs = self.add_metadata(da_fs)
+            self.save(da_fs, ref_time)
+
+    def get_output_filename(self, forecast_ref_time: np.datetime64) -> Path:
         """
         Generate output filename based on prefix (should refer to type e.g. pred/targ), run_id, sample
         index, output directory, format and forecast_ref_time.
 
         Parameters
         ----------
-            dtype : Prefix for file name (e.g., 'pred' or 'targ').
             forecast_ref_time : Forecast reference time to include in the filename.
 
         Returns
@@ -142,7 +131,7 @@ class NetCDF_Parser(CF_Parser):
         """
 
         frt = np.datetime_as_string(forecast_ref_time, unit="h")
-        out_fname = Path(self.output_dir) / f"{dtype}_{frt}_{self.run_id}.{self.file_extension}"
+        out_fname = Path(self.output_dir) / f"{self.data_type}_{frt}_{self.run_id}.{self.file_extension}"
         return out_fname   
 
     def reshape(self, data: xr.DataArray) -> xr.Dataset:
@@ -519,7 +508,7 @@ class NetCDF_Parser(CF_Parser):
         ds.attrs["Conventions"] = "CF-1.12"
         return ds
 
-    def save(self, ds: xr.Dataset, data_type: str, forecast_ref_time: np.datetime64 ) -> None:
+    def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64 ) -> None:
         """
         Save the dataset to a NetCDF file.
 
@@ -533,7 +522,7 @@ class NetCDF_Parser(CF_Parser):
         -------
             None
         """
-        out_fname = self.get_output_filename(data_type, forecast_ref_time)
+        out_fname = self.get_output_filename(forecast_ref_time)
         _logger.info(f"Saving to {out_fname}.")
         ds.to_netcdf(out_fname)
         _logger.info(f"Saved NetCDF file to {out_fname}.")
@@ -555,6 +544,8 @@ def _get_file_extension(output_format: str) -> str:
     """
     if output_format == "netcdf":
         return "nc"
+    elif output_format == "quaver":
+        return "grib"
     else:
         raise ValueError(
             f"Unsupported output format: {output_format}, supported formats are ['netcdf', 'DWD', 'quaver']"

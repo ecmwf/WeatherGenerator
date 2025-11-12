@@ -73,8 +73,9 @@ def parse_args(args: list) -> argparse.Namespace:
 
     parser.add_argument(
         "--format",
+        dest="output_format",
         type=str,
-        choices=["netcdf", "grib"],
+        choices=["netcdf", "grib", "quaver"],
         help="Output file format (currently only netcdf supported)",
         required=True,
     )
@@ -141,6 +142,20 @@ def parse_args(args: list) -> argparse.Namespace:
         help="Rank number to identify the Zarr store",
     )
 
+    parser.add_argument(
+        "--template", 
+        type=str,
+        help="Path to GRIB template file",
+        required=False,
+    )
+
+    parser.add_argument(
+        "--expver", 
+        type=str,
+        help="Expver to include in the output filename (i.e. 'iuoo')",
+        required=False,
+    )
+
     args, unknown_args = parser.parse_known_args(args)
     if unknown_args:
         _logger.warning(f"Unknown arguments: {unknown_args}")
@@ -170,18 +185,8 @@ def export_from_args(args: list) -> None:
     config = OmegaConf.load(config_file)
     # check config loaded correctly
     assert len(config["variables"].keys()) > 0, "Config file not loaded correctly"
-
-    config["run_id"] = args.run_id
-    config["output_dir"] = args.output_dir
-    config["output_format"] = args.format
-    config["samples"] = args.samples
-    config["stream"] = args.stream
-    config["fsteps"] = args.fsteps
-    config["fstep_hours"] = args.fstep_hours
-    config["channels"] = args.channels
-    config["n_processes"] = args.n_processes
-    config["epoch"] = args.epoch
-    config["rank"] = args.rank
+    
+    kwargs = vars(args).copy()
 
     # Ensure output directory exists
     out_dir = Path(args.output_dir)
@@ -190,7 +195,7 @@ def export_from_args(args: list) -> None:
     for dtype in args.type:
         _logger.info(f"Starting processing {dtype} for run ID {args.run_id}.")
        
-        export_model_outputs(dtype, config)
+        export_model_outputs(dtype, config, **kwargs)
        
         _logger.info(f"Finished processing {dtype} for run ID {args.run_id}.")
 
