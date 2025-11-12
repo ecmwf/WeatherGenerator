@@ -66,8 +66,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         return y_hat
 
         # Compute loss -- move this to a separate loss calculator
-        weight = (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2  # Table 1
-        loss = weight * ((y_hat - y) ** 2)
+        # weight = (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2  # Table 1
+        # loss = weight * ((y_hat - y) ** 2)
 
     def inference(
         self,
