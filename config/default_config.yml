@@ -93,7 +93,7 @@ ema_halflife_in_thousands: 1e-3
 
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "cropping"
+training_mode: "student_teacher"
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
@@ -112,6 +112,22 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           "hl_mask": 3, "mode": "per_cell",
                           "same_strategy_per_batch": false
                           }
+
+# Student-teacher configuration (only used when training_mode == "student_teacher")
+student_teacher:
+  global:
+    strategy: "healpix"  # Strategy for teacher (global) view: "random", "healpix"
+    rate: 0.5  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
+    # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
+    rate_sampling: true  # Add ±10% jitter to rate
+    hl_mask: 2  # HEALPix level for hierarchical selection (required if strategy == "healpix")
+  
+  locals:
+    num_views: 4  # Number of local (student) views to generate
+    strategy: "random"  # Strategy for student views: "random", "center", "left", "right"
+    rate: 0.2  # Fraction of teacher view to keep in each local view
+    hl_mask: null  # Optional: HEALPix level for local selection (null = use same as data level)
+
 
 # cropping configuration
 cropping_rate_global: 0.5
@@ -161,7 +177,7 @@ input_window_steps: 1
 
 val_initial: False
 
-loader_num_workers: 0
+loader_num_workers: 8
 log_validation: 0
 analysis_streams_output: ["ERA5"]
 
@@ -176,6 +192,6 @@ run_id: ???
 train_log_freq:
   terminal: 10
   metrics: 20
-  checkpoint: 20
+  checkpoint: 250
 
 log_level: DEBUG

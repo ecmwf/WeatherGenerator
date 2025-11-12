@@ -26,6 +26,11 @@ from weathergen.datasets.utils import (
     get_target_coords_local_ffast,
 )
 
+from contextlib import contextmanager
+
+
+
+
 
 class TokenizerMasking(Tokenizer):
     def __init__(self, healpix_level: int, masker: Masker):
@@ -57,16 +62,14 @@ class TokenizerMasking(Tokenizer):
             [],
         )
 
-    def use_keep_cells(self, keep_cells):
-        """
-        Context manager to apply a specific view (global/local) when batchifying.
-        """
+    @contextmanager
+    def use_keep_cells(self, keep_cells: np.ndarray | None):
+        """Context manager to apply view-specific cell masks."""
         if hasattr(self.masker, "use_keep_cells"):
-            return self.masker.use_keep_cells(keep_cells)
-        # no-op fallback
-        from contextlib import nullcontext
-
-        return nullcontext()
+            with self.masker.use_keep_cells(keep_cells):
+                yield
+        else:
+            yield  # No-op if no masker
 
     def batchify_source(
         self,
@@ -280,3 +283,20 @@ class TokenizerMasking(Tokenizer):
         ]
 
         return selected_tensors
+
+    @contextmanager
+    def use_keep_cells(self, keep_cells: np.ndarray | None):
+        """
+        Context manager to apply view-specific cell masks during tokenization.
+        
+        Delegates to Masker if in student-teacher mode, otherwise no-op.
+        
+        Args:
+            keep_cells: Boolean array [num_healpix_cells] indicating kept cells
+        """
+        if hasattr(self.masker, "use_keep_cells"):
+            with self.masker.use_keep_cells(keep_cells):
+                yield
+        else:
+            # No masker or masker doesn't support views (forecast mode)
+            yield

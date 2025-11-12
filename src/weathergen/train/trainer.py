@@ -33,6 +33,7 @@ from torch.distributed.tensor import DTensor, distribute_tensor
 import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
+from weathergen.datasets.views import ModelBatch 
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -567,10 +568,8 @@ class Trainer(TrainerBase):
     def train(self, epoch):
         cf = self.cf
         self.model.train()
-        # torch.autograd.set_detect_anomaly(True)
 
         dataset_iter = iter(self.data_loader)
-
         self.optimizer.zero_grad()
 
         # Unweighted loss, real weighted loss, std for losses that need it
@@ -579,27 +578,65 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
-            forecast_steps = batch[3]
-
-            # import pdb; pdb.set_trace()
-
+            forecast_steps = batch[-1]
             batch = self.batch_to_device(batch)
 
-            # import pdb; pdb.set_trace()
+            # Check if we're in student-teacher mode
+            is_student_teacher = isinstance(batch[0][0], ModelBatch) if len(batch[0]) > 0 else False
 
-            # evaluate model
-            with torch.autocast(
-                device_type=f"cuda:{cf.local_rank}",
-                dtype=self.mixed_precision_dtype,
-                enabled=cf.with_mixed_precision,
-            ):
-                preds, posteriors = self.model(
-                    self.model_params, batch, cf.forecast_offset, forecast_steps
+            if is_student_teacher:
+                # ===== STUDENT-TEACHER TRAINING =====
+                model_batches = batch[0]  # list[ModelBatch]
+                
+                # TODO: Implement student-teacher forward pass
+                # For now, just process teacher view (targets) for compatibility
+                teacher_streams_batch = [[mb.targets[0] for mb in model_batches]]
+                
+                with torch.autocast(
+                    device_type=f"cuda:{cf.local_rank}",
+                    dtype=self.mixed_precision_dtype,
+                    enabled=cf.with_mixed_precision,
+                ):
+                    # Forward pass on teacher (global) view
+                    preds, posteriors = self.model(
+                        self.model_params, teacher_streams_batch, cf.forecast_offset, forecast_steps
+                    )
+                
+                # Compute loss on teacher predictions
+                loss_values = self.loss_calculator.compute_loss(
+                    preds=preds,
+                    streams_data=teacher_streams_batch,
                 )
-            loss_values = self.loss_calculator.compute_loss(
-                preds=preds,
-                streams_data=batch[0],
-            )
+                
+                # Log student view metadata for future model development
+                if bidx == 0 and is_root():
+                    for mb_idx, mb in enumerate(model_batches):
+                        logger.info(f"ModelBatch {mb_idx}: {len(mb.model_inputs)} students, "
+                                  f"teacher={mb.view_metadata[0].view_id}")
+                        for vm in mb.view_metadata[1:]:  # student views
+                            kept_cells = vm.keep_mask.sum()
+                            total_cells = len(vm.keep_mask)
+                            logger.info(f"  {vm.view_id}: {kept_cells}/{total_cells} cells "
+                                      f"({kept_cells/total_cells:.1%}), strategy={vm.strategy}")
+            
+            else:
+                # ===== STANDARD TRAINING (forecast/masking) =====
+                with torch.autocast(
+                    device_type=f"cuda:{cf.local_rank}",
+                    dtype=self.mixed_precision_dtype,
+                    enabled=cf.with_mixed_precision,
+                ):
+                    preds, posteriors = self.model(
+                        self.model_params, batch, cf.forecast_offset, forecast_steps
+                    )
+                
+                loss_values = self.loss_calculator.compute_loss(
+                    preds=preds,
+                    streams_data=batch[0],
+                )
+            
+            
+            
             if cf.latent_noise_kl_weight > 0.0:
                 kl = torch.cat([posterior.kl() for posterior in posteriors])
                 loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
