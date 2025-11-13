@@ -760,6 +760,7 @@ class Model(torch.nn.Module):
             mask_c = cell_lens_c[1:].to(torch.bool)
             tokens_global_unmasked_c = tokens_global_c[mask_c]
             tokens_global_masked_c = tokens_global_c[~mask_c]
+            q_cells_lens_unmasked_c = torch.cat([zero_pad, q_cells_lens_c[1:][mask_c] ])
 
             if l0 == l1 or tokens_c.shape[0] == 0:
                 tokens_global_unmasked_all += [tokens_global_unmasked_c]
@@ -768,7 +769,7 @@ class Model(torch.nn.Module):
             
             # local to global adapter engine
             tokens_global_unmasked_c = self.ae_local_global_engine(
-                tokens_c, tokens_global_unmasked_c, q_cells_lens_c, cell_lens_c, use_reentrant=False
+                tokens_c, tokens_global_unmasked_c, q_cells_lens_unmasked_c, cell_lens_c, use_reentrant=False
             )
 
             # global assimilation engine and adapter
