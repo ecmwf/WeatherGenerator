@@ -548,23 +548,23 @@ class Model(torch.nn.Module):
         return tuple(preds_all[0])
 
     #########################################
-    def plot_token_distribution(self, tokens, fstep):
-        plot_path = Path(self.cf.run_path, self.cf.run_id, "plots", "ERA5", "latent_hists")
-        import os
+    # def plot_token_distribution(self, tokens, fstep):
+    #     plot_path = Path(self.cf.run_path, self.cf.run_id, "plots", "ERA5", "latent_hists")
+    #     import os
 
-        import matplotlib.pyplot as plt
+    #     import matplotlib.pyplot as plt
 
-        fig, ax = plt.subplots()
-        ax.hist(tokens.flatten().to("cpu").numpy(), bins=30)
-        if not hasattr(self, "xlim"):
-            self.xlim = ax.get_xlim()
-            self.ylim = ax.get_ylim()
-        ax.set_xlim(self.xlim)
-        ax.set_ylim(self.ylim)
-        ax.set_title(f"Forecast step {fstep}")
-        os.makedirs(plot_path, exist_ok=True)
-        fig.savefig(plot_path / f"fstep_{str(fstep).zfill(2)}.png")
-        plt.close()
+    #     fig, ax = plt.subplots()
+    #     ax.hist(tokens.flatten().to("cpu").numpy(), bins=30)
+    #     if not hasattr(self, "xlim"):
+    #         self.xlim = ax.get_xlim()
+    #         self.ylim = ax.get_ylim()
+    #     ax.set_xlim(self.xlim)
+    #     ax.set_ylim(self.ylim)
+    #     ax.set_title(f"Forecast step {fstep}")
+    #     os.makedirs(plot_path, exist_ok=True)
+    #     fig.savefig(plot_path / f"fstep_{str(fstep).zfill(2)}.png")
+    #     plt.close()
 
     #########################################
     def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
@@ -595,8 +595,8 @@ class Model(torch.nn.Module):
 
         tokens = self.assimilate_global(model_params, tokens)
 
-        if not self.training:
-            self.plot_token_distribution(tokens=tokens, fstep=0)
+        # if not self.training:
+        #     self.plot_token_distribution(tokens=tokens, fstep=0)
 
         # roll-out in latent space
         preds_all = []
@@ -620,8 +620,8 @@ class Model(torch.nn.Module):
 
             tokens = self.forecast(model_params, tokens)
 
-            if not self.training:
-                self.plot_token_distribution(tokens=tokens, fstep=fstep)
+            # if not self.training:
+            #     self.plot_token_distribution(tokens=tokens, fstep=fstep)
 
         # prediction for final step
         preds_all += [
