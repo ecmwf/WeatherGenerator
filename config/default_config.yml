@@ -125,7 +125,7 @@ student_teacher:
   locals:
     num_views: 4  # Number of local (student) views to generate
     strategy: "random"  # Strategy for student views: "random", "center", "left", "right"
-    rate: 0.2  # Fraction of teacher view to keep in each local view
+    rate: 0.1  # Fraction of teacher view to keep in each local view
     hl_mask: null  # Optional: HEALPix level for local selection (null = use same as data level)
 
 

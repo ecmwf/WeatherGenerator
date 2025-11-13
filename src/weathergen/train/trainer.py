@@ -587,25 +587,36 @@ class Trainer(TrainerBase):
             if is_student_teacher:
                 # ===== STUDENT-TEACHER TRAINING =====
                 model_batches = batch[0]  # list[ModelBatch]
+
+                print("What actually is batch[0]?", type(batch[0]), type(batch[0][0]))
+                print("Is batch[0] a ModelBatch?", isinstance(batch[0][0], ModelBatch))
                 
-                # TODO: Implement student-teacher forward pass
-                # For now, just process teacher view (targets) for compatibility
-                teacher_streams_batch = [[mb.targets[0] for mb in model_batches]]
+                # Extract teacher streams: flatten from list[ModelBatch] to list[list[StreamData]]
+                # model_batches[i].targets[0] is a list[StreamData] for model_batch i
+                # We want: [[stream0_batch0, stream1_batch0], [stream0_batch1, stream1_batch1], ...]
+                teacher_streams_batch = [mb.targets[0] for mb in model_batches]  # REMOVE the outer [[...]]
+                
+                # Reconstruct the full batch tuple with teacher data + other components
+                teacher_batch = (
+                    teacher_streams_batch,  # list[list[StreamData]], shape [batch_size][n_streams]
+                    batch[1],                # source_cell_lens (unchanged)
+                    batch[2],                # target_coords_idx (unchanged)
+                )
                 
                 with torch.autocast(
                     device_type=f"cuda:{cf.local_rank}",
                     dtype=self.mixed_precision_dtype,
                     enabled=cf.with_mixed_precision,
                 ):
-                    # Forward pass on teacher (global) view
+                    # Forward pass with complete batch tuple
                     preds, posteriors = self.model(
-                        self.model_params, teacher_streams_batch, cf.forecast_offset, forecast_steps
+                        self.model_params, teacher_batch, cf.forecast_offset, forecast_steps
                     )
                 
                 # Compute loss on teacher predictions
                 loss_values = self.loss_calculator.compute_loss(
                     preds=preds,
-                    streams_data=teacher_streams_batch,
+                    streams_data=teacher_streams_batch,  # SAME: no extra [[...]]
                 )
                 
                 # Log student view metadata for future model development
@@ -620,19 +631,27 @@ class Trainer(TrainerBase):
                                       f"({kept_cells/total_cells:.1%}), strategy={vm.strategy}")
             
             else:
-                # ===== STANDARD TRAINING (forecast/masking) =====
+                
+                model_batch = (
+                    batch[0],  # streams_data
+                    batch[1],  # source_cell_lens
+                    batch[2],  # target_coords_idx
+                    # batch[3] is forecast_dt, don't include it!
+                )                
+                
+                # Standard masking/forecast training.
                 with torch.autocast(
                     device_type=f"cuda:{cf.local_rank}",
                     dtype=self.mixed_precision_dtype,
                     enabled=cf.with_mixed_precision,
                 ):
                     preds, posteriors = self.model(
-                        self.model_params, batch, cf.forecast_offset, forecast_steps
+                        self.model_params, model_batch, cf.forecast_offset, forecast_steps
                     )
                 
                 loss_values = self.loss_calculator.compute_loss(
                     preds=preds,
-                    streams_data=batch[0],
+                    streams_data=model_batch[0],
                 )
             
             
@@ -776,17 +795,45 @@ class Trainer(TrainerBase):
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
 
+    # TODO: maybe move this to ModelBatch so it is handled there, or the function is
+    # I can't really do this yet, since masking is not using ModelBatch yet.
+    # TODO: this is nasty. How was this done before?
     def batch_to_device(self, batch):
-        # TODO: do not define new members outside of the init!!
-        self.device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{self.device_type}:{self.cf.local_rank}")
-        # forecast_steps is dropped here from the batch
+        """Move batch data to GPU/device, handling nested list structures."""
+        
+        def move_to_device(obj):
+            """Recursively move tensors in nested lists to device."""
+            if isinstance(obj, torch.Tensor):
+                return obj.to(self.device)
+            elif isinstance(obj, list):
+                return [move_to_device(item) for item in obj]
+            elif obj is None:
+                return None
+            else:
+                return obj
+        
+        # Check if student-teacher mode
+        is_student_teacher = batch[0] and isinstance(batch[0][0], ModelBatch)
+        
+        if is_student_teacher:
+            # Move ModelBatch objects (which internally move StreamData)
+            for mb in batch[0]:
+                mb.to_device(self.device)
+        else:
+            # Move StreamData objects directly
+            batch = (
+                [[d.to_device(self.device) for d in db] for db in batch[0]],
+                batch[1],
+                batch[2],
+                batch[3],
+            )
+        
+        # Move batch-level tensors (common to both modes)
         return (
-            [[d.to_device(self.device) for d in db] for db in batch[0]],
-            batch[1].to(self.device),
-            [[b.to(self.device) for b in bf] for bf in batch[2]],
-            #[[c.to(self.device) for c in cs] for cs in batch[4]],
-            #[[l.to(self.device) for l in lv] for lv in batch[5]],
+            batch[0],                      # ModelBatch list or StreamData list (already on device)
+            move_to_device(batch[1]),      # source_cell_lens
+            move_to_device(batch[2]),      # target_coords_idx (nested lists)
+            batch[3],                      # forecast_dt (int, stays on CPU)
         )
 
     def load_model(self, run_id: str, epoch=-1):

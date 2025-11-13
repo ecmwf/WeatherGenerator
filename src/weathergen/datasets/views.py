@@ -36,6 +36,10 @@ class ViewMetadata:
     parent_view_id: Optional[str] = None  # For students: which teacher they belong to
 
 
+# TODO: This doesn't handle the masking case, and we probably want it to,
+# where the model_inputs are the correct data for the masked source (and target?). Or target becomes the target?
+# Also should this model batch contain the source_cell_lens and target_coords_idx?
+
 @dataclass
 class ModelBatch:
     """
@@ -45,23 +49,40 @@ class ModelBatch:
     them with metadata describing how views were generated and their relationships.
     
     Training modes:
-      - Masking (MAE-style):
-          model_inputs: [single StreamData with unmasked tokens]
-          targets: [single StreamData with masked tokens]
-          view_metadata: [single ViewMetadata describing mask]
-      
       - Student-teacher (JEPA-style):
-          model_inputs: [list of StreamData, one per local/student view]
-          targets: [single StreamData with teacher/global view]
+          model_inputs: [list[list[StreamData]]] - [n_students][n_streams]
+          targets: [list[list[StreamData]]] - [1][n_streams] (teacher)
           view_metadata: [list of ViewMetadata: teacher first, then students]
     
     Attributes:
-        model_inputs: List of StreamData fed to encoder (students in ST, single in masking)
-        targets: List of StreamData for loss computation (teacher in ST, masked in masking)
+        model_inputs: List of student views, each containing StreamData for all streams
+        targets: List containing teacher view with StreamData for all streams
         view_metadata: List of ViewMetadata describing each view (teacher + students)
         batch_info: Optional dict with batch-level info (sample indices, forecast steps, etc.)
     """
-    model_inputs: list[StreamData]   # >= 1; students in ST mode, single view in masking
-    targets: list[StreamData]        # teacher in ST mode; masked tokens in masking
+    model_inputs: list[list[any]]   # [n_students][n_streams], the student views (ideally later for masking too)
+    targets: list[list[any]]        # [1][n_streams], teacher view
     view_metadata: list[ViewMetadata]
     batch_info: Optional[dict] = field(default_factory=dict)
+    
+    def to_device(self, device):
+        """
+        Move all StreamData objects to the specified device.
+        
+        Args:
+            device: device where we want to move
+        
+        Returns:
+            self
+        """
+        # Move all student views to device
+        for student_view in self.model_inputs:
+            for stream_data in student_view:
+                stream_data.to_device(device)
+        
+        # Move teacher view to device
+        for teacher_batch in self.targets:
+            for stream_data in teacher_batch:
+                stream_data.to_device(device)
+        
+        return self
