@@ -662,6 +662,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # NOTE: for current simplicity, we are returning source_cell_lens and target_coords_idx as before
                 # NOTE: here these correspond to the teacher view only
                 # TODO: change this. Wrap in ModelBatch too?
+                # TODO: wrap everything in ModelBatch. To do tomorrow morning. This is bizarre.
                 yield (model_batches, source_cell_lens, target_coords_idx, forecast_dt)
                 #                       ^^^^^^^^^ teacher ones ^^^^^^     
             else:                      

@@ -75,8 +75,15 @@ class ModelBatch:
     batch_info: Optional[dict] = field(default_factory=dict)
     
     # Offsets for student views (populated when needed for future student-teacher training)
+    # TODO: rename to model_input...source_cell/target_coords...
     student_source_cell_lens: Optional[list] = None  # [n_students] each is a tensor
     student_target_coords_idx: Optional[list] = None  # [n_students] each is a list of lists
+
+    # TODO: this also needs target_source_cell_lens and target_target_coords_idx for teacher views
+    # TODO fix this ridiculous naming
+
+    # TODO: add the timestep as an optional int for the model_inputs when we have multiple timesteps for the diffusion model...
+    # TODO add the forecast_dt as an optional int ? 
     
     def to_device(self, device):
         """Move all StreamData objects to the specified device."""
