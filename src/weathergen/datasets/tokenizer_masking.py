@@ -66,7 +66,7 @@ class TokenizerMasking(Tokenizer):
             idxs_cells, idxs_cells_lens, rdata
         )
 
-        source_tokens_cells, source_tokens_lens = tokenize_apply_mask(
+        source_tokens_cells, source_tokens_lens = tokenize_apply_mask_source(
             idxs_cells,
             idxs_cells_lens,
             mask_tokens,
@@ -96,7 +96,6 @@ class TokenizerMasking(Tokenizer):
         time_win: tuple,
     ):
         token_size = stream_info["token_size"]
-        stream_id = stream_info["stream_id"]
 
         # target is empty
         if len(self.mask_tokens) == 0:
@@ -119,7 +118,6 @@ class TokenizerMasking(Tokenizer):
             idxs_cells_lens,
             mask_tokens,
             mask_channels,
-            stream_id,
             rdata,
             time_win,
             self.hpy_verts_rots_target,

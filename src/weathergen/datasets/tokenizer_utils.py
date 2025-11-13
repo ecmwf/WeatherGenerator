@@ -225,7 +225,7 @@ def tokenize_spacetime(
     return idxs_cells, idxs_cells_lens
 
 
-def tokenize_apply_mask(
+def tokenize_apply_mask_source(
     idxs_cells,
     idxs_cells_lens,
     mask_tokens,
@@ -306,7 +306,6 @@ def tokenize_apply_mask_target(
     idxs_cells_lens,
     mask_tokens,
     mask_channels,
-    stream_id,
     rdata,
     time_win,
     hpy_verts_rots,
