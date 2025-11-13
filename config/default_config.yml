@@ -129,6 +129,7 @@ student_teacher:
     hl_mask: null  # Optional: HEALPix level for local selection (null = use same as data level)
 
 
+# DEPRECATED, TODO: REMOVE ONCE CHECKED
 # cropping configuration
 cropping_rate_global: 0.5
 cropping_rate_sampling: True
