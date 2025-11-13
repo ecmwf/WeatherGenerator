@@ -505,7 +505,7 @@ class WeatherGenReader(Reader):
             f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
         )
 
-        if fname_zarr_new.exists():
+        if fname_zarr_new.exists() or fname_zarr_new.is_dir():
             self.fname_zarr = fname_zarr_new
 
         self.fname_zarr = fname_zarr_old
