@@ -608,6 +608,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             assert len(batch) == self.batch_size
             
+            
+            # NOTE: THIS IS THE PREPARATION OF THE STUDENT VIEWS
+            # THESE ARE NOT CURRENTLY USED
             if self.use_student_teacher:
                 # Also compute for each student view in each ModelBatch
                 for mb in model_batches:
@@ -618,6 +621,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         compute_offsets_scatter_embed(student_batch)
                         compute_idxs_predict(self.forecast_offset + forecast_dt, student_batch)
                 
+                # NOTE: for current simplicity, we are returning source_cell_lens and target_coords_idx as before
+                # NOTE: here these correspond to the teacher view only
+                # TODO: change this. Wrap in ModelBatch too?
                 yield (model_batches, source_cell_lens, target_coords_idx, forecast_dt)
             else:
                 yield (batch, source_cell_lens, target_coords_idx, forecast_dt)

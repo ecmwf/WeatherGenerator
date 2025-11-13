@@ -153,6 +153,8 @@ class StreamData:
             [ torch.tensor( tokens per cell, token size, number of channels) ]
         ss_centroids : list(number of healpix cells )
             [ torch.tensor( for source , 5) ]
+        # TODO: THIS NEEDS TO HAVE TIMESTEP FOR DIFFUSION MODELS TO INCLUDE PAST TIMESTEPS
+        # TODO: THEN WE NEED LAST TIMESTEP OF SOURCE TO BE THE SAME AS TARGET
 
         Returns
         -------
