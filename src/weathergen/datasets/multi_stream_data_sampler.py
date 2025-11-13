@@ -534,11 +534,30 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         view_metadata=[teacher_view_meta] + student_view_metas,
                         batch_info={"sample_idx": int(idx), "forecast_dt": int(forecast_dt)},
                     )
+                    
+                    
+                    # **********************************************************************
+                    # NOTE:
+                    # So note at this point we have:
+                    # ModelBatch containing a lot of model_inputs (which are StreamData objects of local views)
+                    # Contains one target, which is a single Teacher StreamData object
+                    # View metadata describing the masks used, giving a view_id, and some information on the mask as the strategy and rate
+                    # For the students, this also has information on the parent global view that corresponds to this view.
+                    # NOTE: I am not sure how best it is to access this. NOTE, later on we do not pass this information on at the end of MultiStreamDataSampler
+                    # BUT we will need to, including for the diffusion random number
+                    # So we need to think about how best to pass this on.
+                    # There is also batch_info.
+                    # There is also the functionality to include the source_cell_lens and the target_coords_idx for the student views here too.
+                    # This is weird at the moment as we say we can do it for student but not the teacher.
+
+                    # import pdb; pdb.set_trace()
+                    
                     model_batches.append(model_batch)
                     batch.append(teacher_streams)  # for compatibility with compute_source_cell_lens
                     
                 else:
                     # ===== FORECAST / MASKING MODE =====
+                    # This is aiming to proceed more or less as before...
                     streams_data: list[StreamData] = []
                     
                     for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
@@ -601,31 +620,51 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     if not (all(s.empty() or s.target_empty() for s in streams_data)):
                         batch.append(streams_data)
 
-            # Compute offsets and indices for teacher batch (compatibility)
+            # Compute offsets and indices for teacher batch...
             source_cell_lens = compute_source_cell_lens(batch)
             batch = compute_offsets_scatter_embed(batch)
             target_coords_idx = compute_idxs_predict(self.forecast_offset + forecast_dt, batch)
 
+            # ...
             assert len(batch) == self.batch_size
             
             
             # NOTE: THIS IS THE PREPARATION OF THE STUDENT VIEWS
-            # THESE ARE NOT CURRENTLY USED
+            # THESE ARE NOT CURRENTLY USED, and is very rough
+            # this has not been stress-tested for delivery to the model
+            # but this is now preparing the student views for delivery to
+            # the model as it is written now 13/11/25
             if self.use_student_teacher:
-                # Also compute for each student view in each ModelBatch
                 for mb in model_batches:
+                    # Initialize storage lists
+                    mb.student_source_cell_lens = []
+                    mb.student_target_coords_idx = []
+                    
+                    # Compute for each student view
                     for student_view_streams in mb.model_inputs:
                         # Wrap in list to match expected shape for compute functions
                         student_batch = [student_view_streams]
-                        compute_source_cell_lens(student_batch)
+                        
+                        # Compute and store source cell lengths
+                        student_source_lens = compute_source_cell_lens(student_batch)
+                        mb.student_source_cell_lens.append(student_source_lens)
+                        
+                        # Compute offsets (modifies StreamData in-place...)
                         compute_offsets_scatter_embed(student_batch)
-                        compute_idxs_predict(self.forecast_offset + forecast_dt, student_batch)
+                        
+                        # Compute and store target coordinate indices
+                        student_target_idx = compute_idxs_predict(
+                            self.forecast_offset + forecast_dt, 
+                            student_batch
+                        )
+                        mb.student_target_coords_idx.append(student_target_idx)
                 
                 # NOTE: for current simplicity, we are returning source_cell_lens and target_coords_idx as before
                 # NOTE: here these correspond to the teacher view only
                 # TODO: change this. Wrap in ModelBatch too?
                 yield (model_batches, source_cell_lens, target_coords_idx, forecast_dt)
-            else:
+                #                       ^^^^^^^^^ teacher ones ^^^^^^     
+            else:                      
                 yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
 
     def __len__(self):

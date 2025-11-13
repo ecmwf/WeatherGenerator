@@ -117,10 +117,10 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
 student_teacher:
   global:
     strategy: "healpix"  # Strategy for teacher (global) view: "random", "healpix"
-    rate: 0.5  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
+    rate: 0.1  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
     # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
     rate_sampling: true  # Add ±10% jitter to rate
-    hl_mask: 2  # HEALPix level for hierarchical selection (required if strategy == "healpix")
+    hl_mask: 4  # HEALPix level for hierarchical selection (required if strategy == "healpix")
   
   locals:
     num_views: 4  # Number of local (student) views to generate
