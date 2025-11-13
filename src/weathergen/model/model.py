@@ -549,9 +549,12 @@ class Model(torch.nn.Module):
 
     #########################################
     def plot_token_distribution(self, tokens, fstep):
+        # When validating (distributed setup), don't plot the token distribution
+        if tokens.dtype == torch.bfloat16:
+            return
+        
         plot_path = Path(self.cf.run_path, self.cf.run_id, "plots", "ERA5", "latent_hists")
         import os
-
         import matplotlib.pyplot as plt
 
         fig, ax = plt.subplots()
