@@ -507,7 +507,7 @@ class WeatherGenReader(Reader):
 
         if fname_zarr_new.exists():
             self.fname_zarr = fname_zarr_new
-            
+
         self.fname_zarr = fname_zarr_old
 
         if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():

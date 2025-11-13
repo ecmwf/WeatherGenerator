@@ -100,15 +100,17 @@ def load_model_config(run_id: str, mini_epoch: int | None, model_path: str | Non
     return _apply_fixes(config)
 
 
-def _get_model_config_file_name(path: pathlib.Path, run_id: str, mini_epoch: int | None):
+def _get_model_config_file_name(path: Path, run_id: str, mini_epoch: int | None):
     if mini_epoch is None:
         mini_epoch_str = ""
     elif mini_epoch == -1:
         mini_epoch_str = "_latest"
     elif (path / run_id / f"model_{run_id}_chkpt{mini_epoch:05d}.json").exists():
-        return path / run_id / f"model_{run_id}_chkpt{mini_epoch:05d}.json"
-    
-    return path / run_id / f"model_{run_id}_epoch{mini_epoch:05d}.json"
+        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
+    else:
+        mini_epoch_str = f"_epoch{mini_epoch:05d}"
+
+    return path / run_id / f"model_{run_id}{mini_epoch_str}.json"
 
 
 def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
