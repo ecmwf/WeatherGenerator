@@ -419,7 +419,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             stream_data.target_is_spoof = True
 
                         # preprocess data for model input
-                        (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
+                        (tt_cells, tt_t, tt_c, tc) = self.tokenizer.batchify_target(
                             stream_info,
                             self.sampling_rate_target,
                             readerdata_to_torch(rdata),

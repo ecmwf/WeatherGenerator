@@ -284,7 +284,8 @@ def tokenize_apply_mask(
     coords_local = get_source_coords_local(coords, hpy_verts_rots, masked_points_per_cell)
 
     # create tensor that contains all info
-    tokens = torch.cat((datetimes, coords_local, geoinfos, data), 1)
+    stream_ids = torch.full([len(datetimes), 1], stream_id, dtype=torch.float32)
+    tokens = torch.cat((stream_ids, datetimes, coords_local, geoinfos, data), 1)
 
     # split up tensor into tokens
     # TODO: idxs_data_lens is currently only defined when mask_tokens is not None
@@ -329,7 +330,8 @@ def tokenize_apply_mask_target(
         idxs_data_lens = torch.tensor([t for t, m in zip(idxs_lens, mask_tokens, strict=True) if m])
 
         # apply mask
-        datetimes = enc_time(rdata.datetimes[idxs_data], time_win)
+        datetimes = rdata.datetimes[idxs_data]
+        datetimes_enc = enc_time(datetimes, time_win)
         geoinfos = rdata.geoinfos[idxs_data]
         coords = rdata.coords[idxs_data]
         data = rdata.data[idxs_data]
@@ -354,17 +356,17 @@ def tokenize_apply_mask_target(
             masked_points_per_cell,
             coords,
             geoinfos,
-            datetimes,
+            datetimes_enc,
             hpy_verts_rots,
             hpy_verts_local,
             hpy_nctrs,
         )
         coords_local.requires_grad = False
-        coords_local = list(coords_local.split(idxs_data_lens.tolist()))
+        tokens_coords_local = list(coords_local.split(idxs_data_lens.tolist()))
     else:
-        coords_local = torch.tensor([])
+        tokens_coords_local = torch.tensor([])
 
-    return coords_local
+    return data, datetimes, coords, tokens_coords_local
 
 
 def get_source_coords_local(

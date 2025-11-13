@@ -7,25 +7,20 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from functools import partial
 
-import numpy as np
 import torch
 
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
-    arc_alpha,
     encode_times_source,
     encode_times_target,
-    get_target_coords_local_ffast,
+    # get_target_coords_local_ffast,
     tokenize_apply_mask,
     tokenize_apply_mask_target,
     tokenize_space,
     tokenize_spacetime,
-    tokenize_window_space,
-    tokenize_window_spacetime,
 )
 
 
@@ -116,11 +111,11 @@ class TokenizerMasking(Tokenizer):
         idxs_cells, idxs_cells_lens = tok(rdata, token_size, self.hl_source, pad_tokens=False)
 
         mask_tokens = ~self.mask_tokens
-        # mask_channels = ~self.mask_channels if self.mask_channels is not None 
+        # mask_channels = ~self.mask_channels if self.mask_channels is not None
         # else self.mask_channels
         mask_channels = self.mask_channels
 
-        coords_token_cells = tokenize_apply_mask_target(
+        data, datetimes, coords, tokens_coords_local = tokenize_apply_mask_target(
             self.hl_target,
             idxs_cells,
             idxs_cells_lens,
@@ -135,112 +130,117 @@ class TokenizerMasking(Tokenizer):
             encode_times_target,
         )
 
-        import code
+        # # target_tokens, target_coords, target_coords_raw, target_times_raw)
 
-        code.interact(local=locals())
+        # import code
 
-        # identity function
-        def id(arg):
-            return arg
+        # code.interact(local=locals())
 
-        # set tokenization function, no normalization of coords
-        tokenize_window = partial(
-            tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
-            time_win=time_win,
-            token_size=token_size,
-            hl=self.hl_source,
-            hpy_verts_rots=self.hpy_verts_rots_source[-1],
-            n_coords=id,
-            enc_time=encode_times_target,
-            pad_tokens=False,
-            local_coords=False,
-        )
+        # # identity function
+        # def id(arg):
+        #     return arg
 
-        # tokenize
-        target_tokens_cells = tokenize_window(
-            0,
-            rdata.coords,
-            rdata.geoinfos,
-            rdata.data,
-            rdata.datetimes,
-        )
+        # # set tokenization function, no normalization of coords
+        # tokenize_window = partial(
+        #     tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
+        #     time_win=time_win,
+        #     token_size=token_size,
+        #     hl=self.hl_source,
+        #     hpy_verts_rots=self.hpy_verts_rots_source[-1],
+        #     n_coords=id,
+        #     enc_time=encode_times_target,
+        #     pad_tokens=False,
+        #     local_coords=False,
+        # )
 
-        target_tokens = self.masker.mask_target(
-            target_tokens_cells, rdata.coords, rdata.geoinfos, rdata.data
-        )
+        # # tokenize
+        # target_tokens_cells = tokenize_window(
+        #     0,
+        #     rdata.coords,
+        #     rdata.geoinfos,
+        #     rdata.data,
+        #     rdata.datetimes,
+        # )
 
-        target_tokens_lens = [len(t) for t in target_tokens]
-        total_target = sum(target_tokens_lens)
+        # target_tokens = self.masker.mask_target(
+        #     target_tokens_cells, rdata.coords, rdata.geoinfos, rdata.data
+        # )
 
-        # sampling the number of targets according to per-stream sampling_rate_target
-        # otherwise take global sampling_rate_target from config
-        sampling_rate_target = stream_info.get("sampling_rate_target", sampling_rate_target)
+        # target_tokens_lens = [len(t) for t in target_tokens]
+        # total_target = sum(target_tokens_lens)
 
-        samples = (torch.empty(total_target).uniform_() < sampling_rate_target).split(
-            target_tokens_lens
-        )
-        target_tokens = [
-            (tokens[samples]) for tokens, samples in zip(target_tokens, samples, strict=False)
-        ]
-        target_tokens_lens = [len(t) for t in target_tokens]
+        # # sampling the number of targets according to per-stream sampling_rate_target
+        # # otherwise take global sampling_rate_target from config
+        # sampling_rate_target = stream_info.get("sampling_rate_target", sampling_rate_target)
 
-        if torch.tensor(target_tokens_lens).sum() == 0:
-            return (torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([]))
+        # samples = (torch.empty(total_target).uniform_() < sampling_rate_target).split(
+        #     target_tokens_lens
+        # )
+        # target_tokens = [
+        #     (tokens[samples]) for tokens, samples in zip(target_tokens, samples, strict=False)
+        # ]
+        # target_tokens_lens = [len(t) for t in target_tokens]
 
-        tt_lin = torch.cat(target_tokens)
-        tt_lens = target_tokens_lens
+        # if torch.tensor(target_tokens_lens).sum() == 0:
+        #     return (torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([]))
 
-        if max_num_targets > 0:
-            target_tokens = self.sample_tensors_uniform_vectorized(
-                target_tokens, torch.tensor(tt_lens), max_num_targets
-            )
+        # tt_lin = torch.cat(target_tokens)
+        # tt_lens = target_tokens_lens
 
-        tt_lin = torch.cat(target_tokens)
-        target_tokens_lens = [len(t) for t in target_tokens]
-        tt_lens = target_tokens_lens
+        # if max_num_targets > 0:
+        #     target_tokens = self.sample_tensors_uniform_vectorized(
+        #         target_tokens, torch.tensor(tt_lens), max_num_targets
+        #     )
 
-        # TODO: can we avoid setting the offsets here manually?
-        # TODO: ideally we would not have recover it; but using tokenize_window seems necessary for
-        #       consistency -> split tokenize_window in two parts with the cat only happening in the
-        #       second
-        offset = 6
-        # offset of 1 : stream_id
-        target_times = torch.split(tt_lin[..., 1:offset], tt_lens)
-        target_coords = torch.split(tt_lin[..., offset : offset + rdata.coords.shape[-1]], tt_lens)
-        offset += rdata.coords.shape[-1]
-        target_geoinfos = torch.split(
-            tt_lin[..., offset : offset + rdata.geoinfos.shape[-1]], tt_lens
-        )
-        offset += rdata.geoinfos.shape[-1]
-        target_tokens = torch.split(tt_lin[..., offset:], tt_lens)
+        # tt_lin = torch.cat(target_tokens)
+        # target_tokens_lens = [len(t) for t in target_tokens]
+        # tt_lens = target_tokens_lens
 
-        offset = 6
-        target_coords_raw = torch.split(
-            tt_lin[:, offset : offset + rdata.coords.shape[-1]], tt_lens
-        )
-        # recover absolute time from relatives in encoded ones
-        # TODO: avoid recover; see TODO above
-        deltas_sec = (
-            arc_alpha(tt_lin[..., 1] - 0.5, tt_lin[..., 2] - 0.5) / (2.0 * np.pi) * (12 * 3600)
-        )
-        deltas_sec = deltas_sec.numpy().astype("timedelta64[s]")
-        target_times_raw = np.split(time_win[0] + deltas_sec, np.cumsum(tt_lens)[:-1])
+        # # TODO: can we avoid setting the offsets here manually?
+        # # TODO: ideally we would not have recover it; but using tokenize_window seems necessary for
+        # #       consistency -> split tokenize_window in two parts with the cat only happening in the
+        # #       second
+        # offset = 6
+        # # offset of 1 : stream_id
+        # target_times = torch.split(tt_lin[..., 1:offset], tt_lens)
+        # target_coords = torch.split(tt_lin[..., offset : offset + rdata.coords.shape[-1]], tt_lens)
+        # offset += rdata.coords.shape[-1]
+        # target_geoinfos = torch.split(
+        #     tt_lin[..., offset : offset + rdata.geoinfos.shape[-1]], tt_lens
+        # )
+        # offset += rdata.geoinfos.shape[-1]
+        # target_tokens = torch.split(tt_lin[..., offset:], tt_lens)
 
-        # compute encoding of target coordinates used in prediction network
-        if torch.tensor(tt_lens).sum() > 0:
-            target_coords = get_target_coords_local_ffast(
-                self.hl_target,
-                target_coords,
-                target_geoinfos,
-                target_times,
-                self.hpy_verts_rots_target,
-                self.hpy_verts_local_target,
-                self.hpy_nctrs_target,
-            )
-            target_coords.requires_grad = False
-            target_coords = list(target_coords.split(tt_lens))
+        # offset = 6
+        # target_coords_raw = torch.split(
+        #     tt_lin[:, offset : offset + rdata.coords.shape[-1]], tt_lens
+        # )
+        # # recover absolute time from relatives in encoded ones
+        # # TODO: avoid recover; see TODO above
+        # deltas_sec = (
+        #     arc_alpha(tt_lin[..., 1] - 0.5, tt_lin[..., 2] - 0.5) / (2.0 * np.pi) * (12 * 3600)
+        # )
+        # deltas_sec = deltas_sec.numpy().astype("timedelta64[s]")
+        # target_times_raw = np.split(time_win[0] + deltas_sec, np.cumsum(tt_lens)[:-1])
 
-        return (target_tokens, target_coords, target_coords_raw, target_times_raw)
+        # # compute encoding of target coordinates used in prediction network
+        # if torch.tensor(tt_lens).sum() > 0:
+        #     target_coords = get_target_coords_local_ffast(
+        #         self.hl_target,
+        #         target_coords,
+        #         target_geoinfos,
+        #         target_times,
+        #         self.hpy_verts_rots_target,
+        #         self.hpy_verts_local_target,
+        #         self.hpy_nctrs_target,
+        #     )
+        #     target_coords.requires_grad = False
+        #     target_coords = list(target_coords.split(tt_lens))
+
+        # return (target_tokens, target_coords, target_coords_raw, )
+        # data, tokens_coords_local, datetimes
+        # # target_tokens, target_coords, target_coords_raw, target_times_raw)
+        return (data, datetimes, coords, tokens_coords_local)
 
     def sample_tensors_uniform_vectorized(
         self, tensor_list: list, lengths: list, max_total_points: int
