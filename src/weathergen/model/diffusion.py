@@ -15,8 +15,31 @@
 # ----------------------------------------------------------------------------
 
 import torch
+from dataclass import dataclass
 
 from weathergen.model.engines import ForecastingEngine
+
+
+@dataclass
+class BatchData:
+    """
+    Mock function for the data that will be provided to the diffusion model. Will change.
+    """
+
+    model_samples: dict
+    target_samples: dict
+
+    def _get_sample_len(self):
+        return len(list(self.model_samples.keys()))
+
+    def _get_input_data(self, t: int):
+        return self.model_samples[t]["data"]
+
+    def _get_target_data(self, t: int):
+        return self.target_samples[t]["data"]
+    
+    def _get_target_metadata(self, t: int):
+        return self.target_samples[t]["metadata"]
 
 
 class DiffusionForecastEngine(torch.nn.Module):
@@ -24,7 +47,6 @@ class DiffusionForecastEngine(torch.nn.Module):
 
     def __init__(
         self,
-        stage: str,
         forecast_engine: ForecastingEngine,
         sigma_min: float = 0.002,  # Adapt to GenCast?
         sigma_max: float = 80,
@@ -34,7 +56,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         p_std: float = 1.2,
     ):
         super().__init__()
-        self.stage = stage
         self.net = forecast_engine
         self.preconditioner = Preconditioner()
 
@@ -46,16 +67,15 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.p_mean = p_mean
         self.p_std = p_std
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.stage == "train":
-            return self.forward_train(y=x)
-        else:
-            return self.inference(x=x)
+    def forward(self, data: BatchData) -> torch.Tensor:
+        # Retrieve conditionings [0:-1], target [-1], and noise from data object
+        cond = [data._get_input_data[t] for t in range(data._get_sample_len() - 1)]
+        y = data._get_target_data[-1]
+        eta = data._get_target_metadata[-1]
 
-    def forward_train(self, y) -> torch.Tensor:
-        # Determine noise level -- move to "preprocessing"
-        noise = torch.randn(y.shape, device=y.device)
-        sigma = (noise * self.p_std + self.p_mean).exp()
+        # Compute sigma (noise level) from eta
+        #noise = torch.randn(y.shape, device=y.device)
+        sigma = (eta * self.p_std + self.p_mean).exp()
         n = torch.randn_like(y) * sigma
 
         # Compute conditionings
@@ -66,7 +86,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Add noise, precondition input, and feed through network
         x = y + n
-        x = self.preconditioner.precondition(x)
+        x = self.preconditioner.precondition(x, cond)
         net_out = self.net(c_in * x, c_noise)
         y_hat = c_skip * y + c_out * net_out  # Eq. (7)
 
@@ -129,5 +149,5 @@ class Preconditioner:
     def __init__(self):
         pass
 
-    def precondition(self, x):
+    def precondition(self, x, c):
         return x
