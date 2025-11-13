@@ -90,7 +90,6 @@ class StreamData:
 
         self.target_coords = [t.to(device, non_blocking=True) for t in self.target_coords]
         self.target_tokens = [t.to(device, non_blocking=True) for t in self.target_tokens]
-        self.target_tokens_lens = [t.to(device, non_blocking=True) for t in self.target_tokens_lens]
 
         self.source_idxs_embed = self.source_idxs_embed.to(device, non_blocking=True)
         self.source_idxs_embed_pe = self.source_idxs_embed_pe.to(device, non_blocking=True)
@@ -131,7 +130,6 @@ class StreamData:
         """
 
         self.target_tokens[fstep] += [torch.tensor([], dtype=torch.int32)]
-        self.target_tokens_lens[fstep] += [torch.zeros([self.healpix_cells], dtype=torch.int32)]
         self.target_coords[fstep] += [torch.zeros((0, 105)) for _ in range(self.healpix_cells)]
         self.target_coords_lens[fstep] += [torch.zeros([self.healpix_cells], dtype=torch.int32)]
         self.target_coords_raw[fstep] += [torch.tensor([]) for _ in range(self.healpix_cells)]
@@ -172,6 +170,7 @@ class StreamData:
         fstep: int,
         targets: list,
         target_coords: torch.tensor,
+        target_coords_per_cell: torch.tensor,
         target_coords_raw: torch.tensor,
         times_raw: torch.tensor,
     ) -> None:
@@ -200,19 +199,10 @@ class StreamData:
         """
 
         self.target_tokens[fstep] = targets
-        self.target_coords[fstep] = torch.cat(target_coords)
+        self.target_coords[fstep] = target_coords
+        self.target_coords_lens[fstep] = target_coords_per_cell
         self.target_times_raw[fstep] = times_raw
         self.target_coords_raw[fstep] = target_coords_raw
-
-        tc = target_coords
-        self.target_coords_lens[fstep] = torch.tensor(
-            [len(f) for f in tc] if len(tc) > 1 else self.target_coords_lens[fstep],
-            dtype=torch.int,
-        )
-        self.target_tokens_lens[fstep] = torch.tensor(
-            [len(f) for f in targets] if len(targets) > 1 else self.target_tokens_lens[fstep],
-            dtype=torch.int,
-        )
 
     def target_empty(self) -> bool:
         """
@@ -229,7 +219,7 @@ class StreamData:
         """
 
         # cat over forecast steps
-        return torch.cat(self.target_tokens_lens).sum() == 0
+        return torch.cat(self.target_coords_lens).sum() == 0
 
     def source_empty(self) -> bool:
         """

@@ -170,7 +170,6 @@ def hpy_splits(
 
     # extract length and flatten nested list
     idxs_ord_lens = [[len(a) for a in aa] for aa in idxs_ord]
-    # idxs_ord = [torch.cat([idxs for idxs in iidxs]) for iidxs in idxs_ord]
 
     return idxs_ord, idxs_ord_lens, posr3
 
@@ -215,8 +214,13 @@ def tokenize_spacetime(
         )
         idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens)
 
-        idxs_cells = [t + list(tc) for t, tc in zip(idxs_cells, idxs_cur, strict=True)]
-        idxs_cells_lens = [t + tc for t, tc in zip(idxs_cells_lens, idxs_cur_lens, strict=True)]
+        idxs_cells = [
+            t + list(tc) if tc_l[0] > 0 else t
+            for t, tc, tc_l in zip(idxs_cells, idxs_cur, idxs_cur_lens, strict=True)
+        ]
+        idxs_cells_lens = [
+            t + tc for t, tc in zip(idxs_cells_lens, idxs_cur_lens, strict=True) if len(tc) > 0
+        ]
 
     return idxs_cells, idxs_cells_lens
 
@@ -275,6 +279,7 @@ def tokenize_apply_mask(
     # local coords
     num_tokens_per_cell = [len(idxs) for idxs in idxs_cells_lens]
     mask_tokens_per_cell = torch.split(torch.from_numpy(mask_tokens), num_tokens_per_cell)
+    tokens_per_cell = torch.tensor([t.sum() for t in mask_tokens_per_cell])
     masked_points_per_cell = torch.tensor(
         [
             torch.tensor([len(t) for t, m in zip(tt, mm, strict=False) if m]).sum()
@@ -283,7 +288,7 @@ def tokenize_apply_mask(
     ).to(dtype=torch.int32)
     coords_local = get_source_coords_local(coords, hpy_verts_rots, masked_points_per_cell)
 
-    # create tensor that contains all info
+    # create tensor that contains all data
     stream_ids = torch.full([len(datetimes), 1], stream_id, dtype=torch.float32)
     tokens = torch.cat((stream_ids, datetimes, coords_local, geoinfos, data), 1)
 
@@ -292,7 +297,7 @@ def tokenize_apply_mask(
     idxs_data_lens = idxs_data_lens.tolist()
     tokens_cells = torch.split(tokens, idxs_data_lens)
 
-    return tokens_cells
+    return tokens_cells, tokens_per_cell
 
 
 def tokenize_apply_mask_target(
@@ -326,8 +331,6 @@ def tokenize_apply_mask_target(
     if mask_tokens is not None:
         # filter tokens using mask to obtain flat per data point index list
         idxs_data = torch.cat([t for t, m in zip(idxs_tokens, mask_tokens, strict=True) if m])
-        # filter list of token lens using mask and obtain flat list for splitting
-        idxs_data_lens = torch.tensor([t for t, m in zip(idxs_lens, mask_tokens, strict=True) if m])
 
         # apply mask
         datetimes = rdata.datetimes[idxs_data]
@@ -362,11 +365,10 @@ def tokenize_apply_mask_target(
             hpy_nctrs,
         )
         coords_local.requires_grad = False
-        tokens_coords_local = list(coords_local.split(idxs_data_lens.tolist()))
     else:
-        tokens_coords_local = torch.tensor([])
+        coords_local = torch.tensor([])
 
-    return data, datetimes, coords, tokens_coords_local
+    return data, datetimes, coords, coords_local, masked_points_per_cell
 
 
 def get_source_coords_local(
@@ -498,146 +500,3 @@ def get_target_coords_local(
     a[..., (geoinfo_offset + zi) :] = target_coords[..., (geoinfo_offset + 2) :]
 
     return a
-
-
-####################################################################################################
-
-
-def tokenize_window_space(
-    stream_id: float,
-    coords: torch.tensor,
-    geoinfos,
-    source,
-    times,
-    time_win,
-    token_size,
-    hl,
-    hpy_verts_rots,
-    n_coords,
-    enc_time,
-    pad_tokens=True,
-    local_coords=True,
-):
-    """Process one window into tokens"""
-
-    # len(source)==1 would require special case handling that is not worth the effort
-    if len(source) < 2:
-        return
-
-    # idx_ord_lens is length is number of tokens per healpix cell
-    idxs_ord, idxs_ord_lens, posr3 = hpy_splits(coords, hl, token_size, pad_tokens)
-
-    # pad with zero at the beggining for token size padding
-    times_enc = enc_time(times, time_win)
-    times_enc_padded = torch.cat([torch.zeros_like(times_enc[0]).unsqueeze(0), times_enc])
-    geoinfos_padded = torch.cat([torch.zeros_like(geoinfos[0]).unsqueeze(0), geoinfos])
-    source_padded = torch.cat([torch.zeros_like(source[0]).unsqueeze(0), source])
-
-    # convert to local coordinates
-    # TODO: avoid that padded lists are rotated, which means potentially a lot of zeros
-    if local_coords:
-        coords_local = _coords_local(posr3, hpy_verts_rots, idxs_ord, n_coords)
-    else:
-        coords_local = torch.cat([torch.zeros_like(coords[0]).unsqueeze(0), coords])
-        coords_local = [coords_local[idxs] for idxs in idxs_ord]
-
-    # reorder based on cells (except for coords_local) and then cat along
-    # (time,coords,geoinfos,source) dimension and then split based on cells
-    tokens_cells = [
-        (
-            list(
-                torch.split(
-                    torch.cat(
-                        (
-                            torch.full([len(idxs), 1], stream_id, dtype=torch.float32),
-                            times_enc_padded[idxs],
-                            coords_local[i],
-                            geoinfos_padded[idxs],
-                            source_padded[idxs],
-                        ),
-                        1,
-                    ),
-                    idxs_lens,
-                )
-            )
-            if idxs_lens[0] > 0
-            else []
-        )
-        for i, (idxs, idxs_lens) in enumerate(zip(idxs_ord, idxs_ord_lens, strict=True))
-    ]
-
-    return tokens_cells
-
-
-def tokenize_window_spacetime(
-    stream_id,
-    coords,
-    geoinfos,
-    source,
-    times,
-    time_win,
-    token_size,
-    hl,
-    hpy_verts_rots,
-    n_coords,
-    enc_time,
-    pad_tokens=True,
-    local_coords=True,
-):
-    """Tokenize respecting an intrinsic time step in the data, i.e. each time step is tokenized
-    separately
-    """
-
-    num_healpix_cells = 12 * 4**hl
-    tokens_cells = [[] for _ in range(num_healpix_cells)]
-
-    t_unique = np.unique(times)
-    for _, t in enumerate(t_unique):
-        mask = t == times
-        tokens_cells_cur = tokenize_window_space(
-            stream_id,
-            coords[mask],
-            geoinfos[mask],
-            source[mask],
-            times[mask],
-            time_win,
-            token_size,
-            hl,
-            hpy_verts_rots,
-            n_coords,
-            enc_time,
-            pad_tokens,
-            local_coords,
-        )
-
-        tokens_cells = [t + tc for t, tc in zip(tokens_cells, tokens_cells_cur, strict=True)]
-
-    return tokens_cells
-
-
-# def _coords_local(
-#     posr3: Tensor, hpy_verts_rots: Tensor, idxs_ord: list[Tensor], n_coords: CoordNormalizer
-# ) -> list[Tensor]:
-#     """Compute simple local coordinates for a set of 3D positions on the unit sphere."""
-#     fp32 = torch.float32
-#     posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])  # prepend zero
-
-#     idxs_ords_lens_l = [len(idxs) for idxs in idxs_ord]
-#     # int32 should be enough
-#     idxs_ords_lens = torch.tensor(idxs_ords_lens_l, dtype=torch.int32)
-#     # concat all indices
-#     idxs_ords_c = torch.cat([torch.tensor(i) for i in idxs_ord])
-#     # Copy the rotation matrices for each healpix cell
-#     # num_points x 3 x 3
-#     rots = torch.repeat_interleave(hpy_verts_rots, idxs_ords_lens, dim=0)
-#     # BMM only works for b x n x m and b x m x 1
-#     # adding a dummy dimension to posr3
-#     # numpoints x 3 x 1
-#     posr3_sel = posr3[idxs_ords_c].unsqueeze(-1)
-#     vec_rot = torch.bmm(rots, posr3_sel)
-#     vec_rot = vec_rot.squeeze(-1)
-#     vec_scaled = n_coords(r3tos2(vec_rot).to(fp32))
-#     # split back to ragged list
-#     # num_points x 2
-#     coords_local = torch.split(vec_scaled, idxs_ords_lens_l, dim=0)
-#     return list(coords_local)
