@@ -591,13 +591,14 @@ class Trainer(TrainerBase):
                 # Extract teacher streams: flatten from list[ModelBatch] to list[list[StreamData]]
                 # model_batches[i].targets[0] is a list[StreamData] for model_batch i
                 # We want: [[stream0_batch0, stream1_batch0], [stream0_batch1, stream1_batch1], ...]
-                teacher_streams_batch = [mb.targets[0] for mb in model_batches]  # REMOVE the outer [[...]]
+                teacher_streams_batch = [mb.targets[0] for mb in model_batches] 
                 
                 # Reconstruct the full batch tuple with teacher data + other components
+                # TODO: tidy up with new ModelBatch containing source_cell_lens and target_coords_idx
                 teacher_batch = (
                     teacher_streams_batch,  # list[list[StreamData]], shape [batch_size][n_streams]
-                    batch[1],                # source_cell_lens (unchanged)
-                    batch[2],                # target_coords_idx (unchanged)
+                    batch[1],                # source_cell_lens
+                    batch[2],                # target_coords_idx
                 )
                 
                 with torch.autocast(
