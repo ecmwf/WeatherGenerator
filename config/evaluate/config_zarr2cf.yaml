@@ -53,14 +53,14 @@ variables:
   2d:
     var: d2m
     long: dew_point_temperature_at_screen_level
-    std: 2m_dewpoint_temperature
+    std: dew_point_temperature
     wg_unit: K
     std_unit: K
     level_type: sfc
   2t:
     var: t2m
     long: temperature_at_screen_level
-    std: 2m_temperature
+    std: air_temperature
     #near-surface (usually, 2 meter) : https://pcmdi.llnl.gov/mips/cmip3/variableList.html
     wg_unit: K
     std_unit: K
@@ -121,9 +121,9 @@ dimensions:
       wg: longitude
       std: longitude
       std_unit: degrees_east
-    pressure_level: 
+    pressure_level:
       wg: pressure
-      std: air_pressure
+      std: pressure
       std_unit: hPa
     forecast_reference_time: 
       wg: forecast_reference_time

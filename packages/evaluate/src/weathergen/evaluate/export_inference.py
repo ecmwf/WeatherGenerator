@@ -115,7 +115,7 @@ def reshape_dataset_adaptive(input_data_array: xr.DataArray) -> xr.Dataset:
         reshaped_dataset = reshaped_dataset.rename_dims({"ipoint": "ncells"})
         reshaped_dataset = reshaped_dataset.rename_vars({"ipoint": "ncells"})
         # remove lat lon dims -> should just be represented with ncells
-        
+
     return reshaped_dataset
 
 
@@ -217,6 +217,7 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
         attributes = dict(
             standard_name=mapping[var_name]["std"],
             units=mapping[var_name]["std_unit"],
+            long_name=mapping[var_name]["long"],
         )
         if is_gaussian:
             # adding auxiliary coordinates
@@ -259,7 +260,7 @@ def find_pl(all_variables: list) -> tuple[dict[str, list[str]], list[int]]:
             var_dict.setdefault(var_name, []).append(var)
         else:
             var_dict.setdefault(var, []).append(var)
-    pl = list(set(pl))
+    pl = sorted(set(pl))
     return var_dict, pl
 
 
@@ -386,10 +387,11 @@ def get_data(
     fsteps = zio_forecast_steps if fsteps is None else sorted([int(fstep) for fstep in fsteps])
 
     samples = (
-        zio_samples if samples is None
+        zio_samples
+        if samples is None
         else sorted([int(sample) for sample in samples if sample in samples])
     )
-    
+
     with Pool(processes=n_processes, maxtasksperchild=5) as pool:
         for sample_idx in tqdm(samples):
             da_fs = []
@@ -507,10 +509,12 @@ def save_sample_to_netcdf(
         # ensure encoding for time variables is since 1970
         sample_all_steps.valid_time.encoding["units"] = "hours since 1970-01-01 00:00:00"
         sample_all_steps.valid_time.encoding["calendar"] = "gregorian"
-        sample_all_steps.forecast_reference_time.encoding["units"] = "hours since 1970-01-01 00:00:00"
+        sample_all_steps.forecast_reference_time.encoding["units"] = (
+            "hours since 1970-01-01 00:00:00"
+        )
         sample_all_steps.forecast_reference_time.encoding["calendar"] = "gregorian"
-        
-        #save to netcdf
+
+        # save to netcdf
         sample_all_steps.to_netcdf(out_fname, mode="w", compute=False)
 
 
