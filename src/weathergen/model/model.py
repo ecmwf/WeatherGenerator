@@ -636,7 +636,7 @@ class Model(torch.nn.Module):
                 )
             ]
 
-            tokens, preproc_args = self.preprocessor.preprocess(tokens)
+            tokens, preproc_args = self.preprocessor.preprocess(tokens)  # dataclass?
             tokens = self.forecast(model_params, tokens, fstep)
 
         # prediction for final step
@@ -650,7 +650,7 @@ class Model(torch.nn.Module):
             )
         ]
 
-        return preds_all, posteriors
+        return preds_all, posteriors  # Becomes a dataclass return statement "ModelOutput"
 
     #########################################
     def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:

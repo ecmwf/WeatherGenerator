@@ -54,7 +54,7 @@ fe_with_qk_lnorm: True
 impute_latent_noise_std: 0.0  # 1e-4
 fe_preprocessor_config: {"preprocessor_type": ["identity", "impute_latent_noise", "diffusion_model_noiser"]
                          
-                        }
+                        } #1205 (Sophie), #1210 (Julian)
 
 healpix_level: 5
 
@@ -96,7 +96,7 @@ ema_halflife_in_thousands: 1e-3
 
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "masking"
+training_mode: "masking"  # add option diffusion-forecast
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
