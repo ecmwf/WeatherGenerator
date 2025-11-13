@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import warnings
 
 import astropy_healpix as hp
 import numpy as np
@@ -268,230 +267,7 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
 
 
 ####################################################################################################
-# def add_local_vert_coords_ctrs3( ctrs, verts, tcs, a, zi, geoinfo_offset) :
-
-#   ref = torch.tensor( [1., 0., 0.])
-
-#   local_locs = [
-#       torch.matmul(R, s.transpose( -1, -2)).transpose( -2, -1)
-#       for i,(R,s) in enumerate(zip(healpix_centers_rots,locs)) if len(s)>0
-#   ]
-#   aa = locs_to_cell_coords_ctrs( ctrs, verts.transpose(0,1))
-#   aa = ref - torch.cat( [aaa.unsqueeze(0).repeat( [*tt.shape[:-1],1,1])
-#                                                               if len(tt)>0 else torch.tensor([])
-#                                                               for tt,aaa in zip(tcs,aa)]
-#                                                               if tt>, 0 )
-#   aa = aa.flatten(1,2)
-#   a[...,(geoinfo_offset+zi):(geoinfo_offset+zi+aa.shape[-1])] = aa
-#   return a
-
-
-####################################################################################################
-def get_target_coords_local(hlc, target_coords, geoinfo_offset):
-    """Generate local coordinates for target coords w.r.t healpix cell vertices and
-    and for healpix cell vertices themselves
-    """
-
-    # target_coords_lens = [len(t) for t in target_coords]
-    tcs = [
-        (
-            s2tor3(
-                torch.deg2rad(90.0 - t[..., geoinfo_offset].to(torch.float64)),
-                torch.deg2rad(180.0 + t[..., geoinfo_offset + 1].to(torch.float64)),
-            )
-            if len(t) > 0
-            else torch.tensor([])
-        )
-        for t in target_coords
-    ]
-    target_coords = torch.cat(target_coords)
-    if target_coords.shape[0] == 0:
-        return torch.tensor([])
-
-    verts00 = healpix_verts(hlc, 0.0, 0.0)
-    verts10 = healpix_verts(hlc, 1.0, 0.0)
-    verts11 = healpix_verts(hlc, 1.0, 1.0)
-    verts01 = healpix_verts(hlc, 0.0, 1.0)
-    vertsmm = healpix_verts(hlc, 0.5, 0.5)
-
-    a = torch.zeros(
-        [*target_coords.shape[:-1], (target_coords.shape[-1] - 2) + 5 * (3 * 5) + 3 * 8]
-    )
-    a[..., :geoinfo_offset] = target_coords[..., :geoinfo_offset]
-    ref = torch.tensor([1.0, 0.0, 0.0])
-
-    zi = 0
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords(hlc, tcs, 0.0, 0.0)
-    )
-    a = add_local_vert_coords(hlc, a, verts10, tcs, 3, 0.0, 0.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts11, tcs, 6, 0.0, 0.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts01, tcs, 9, 0.0, 0.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, vertsmm, tcs, 12, 0.0, 0.0, geoinfo_offset)
-
-    zi = 15
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords(hlc, tcs, 1.0, 0.0)
-    )
-    a = add_local_vert_coords(hlc, a, verts00, tcs, 18, 1.0, 0.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts11, tcs, 21, 1.0, 0.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts01, tcs, 24, 1.0, 0.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, vertsmm, tcs, 27, 1.0, 0.0, geoinfo_offset)
-
-    zi = 30
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords(hlc, tcs, 1.0, 1.0)
-    )
-    a = add_local_vert_coords(hlc, a, verts00, tcs, 33, 1.0, 1.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts10, tcs, 36, 1.0, 1.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts01, tcs, 39, 1.0, 1.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, vertsmm, tcs, 42, 1.0, 1.0, geoinfo_offset)
-
-    zi = 45
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords(hlc, tcs, 0.0, 1.0)
-    )
-    a = add_local_vert_coords(hlc, a, verts00, tcs, 48, 0.0, 1.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts11, tcs, 51, 0.0, 1.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts10, tcs, 54, 0.0, 1.0, geoinfo_offset)
-    # a = add_local_vert_coords( hlc, a, verts10, tcs, 51, 0.0, 1.0, geoinfo_offset)
-    # a = add_local_vert_coords( hlc, a, verts01, tcs, 54, 0.0, 1.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, vertsmm, tcs, 57, 0.0, 1.0, geoinfo_offset)
-
-    zi = 60
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords(hlc, tcs, 0.5, 0.5)
-    )
-    a = add_local_vert_coords(hlc, a, verts00, tcs, 63, 0.5, 0.5, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts10, tcs, 66, 0.5, 0.5, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts11, tcs, 69, 0.5, 0.5, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts01, tcs, 72, 0.5, 0.5, geoinfo_offset)
-
-    # add centroids to neighboring cells wrt to cell center
-    num_healpix_cells = 12 * 4**hlc
-    with warnings.catch_warnings(action="ignore"):
-        temp = hp.neighbours(np.arange(num_healpix_cells), 2**hlc, order="nested").transpose()
-    # fix missing nbors with references to self
-    for i, row in enumerate(temp):
-        temp[i][row == -1] = i
-    # coords of centers of all centers
-    lons, lats = hp.healpix_to_lonlat(
-        np.arange(0, num_healpix_cells), 2**hlc, dx=0.5, dy=0.5, order="nested"
-    )
-    ctrs = s2tor3(torch.from_numpy(np.pi / 2.0 - lats.value), torch.from_numpy(lons.value))
-    ctrs = ctrs[temp.flatten()].reshape((num_healpix_cells, 8, 3)).transpose(1, 0)
-    # local coords with respect to all neighboring centers
-    tcs_ctrs = torch.cat([ref - torch.cat(locs_to_ctr_coords(c, tcs)) for c in ctrs], -1)
-    zi = 75
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + (3 * 8))] = tcs_ctrs
-
-    # remaining geoinfos (zenith angle etc)
-    zi = 99
-    a[..., (geoinfo_offset + zi) :] = target_coords[..., (geoinfo_offset + 2) :]
-
-    return a
-
-
-####################################################################################################
-# TODO: remove this function, it is dead code that will fail immediately
-def get_target_coords_local_fast(hlc, target_coords, geoinfo_offset):
-    """Generate local coordinates for target coords w.r.t healpix cell vertices and
-    and for healpix cell vertices themselves
-    """
-
-    # target_coords_lens = [len(t) for t in target_coords]
-    tcs = [
-        (
-            s2tor3(
-                torch.deg2rad(90.0 - t[..., geoinfo_offset].to(torch.float64)),
-                torch.deg2rad(180.0 + t[..., geoinfo_offset + 1].to(torch.float64)),
-            )
-            if len(t) > 0
-            else torch.tensor([])
-        )
-        for t in target_coords
-    ]
-    target_coords = torch.cat(target_coords)
-    if target_coords.shape[0] == 0:
-        return torch.tensor([])
-
-    verts00, verts00_rots = healpix_verts_rots(hlc, 0.0, 0.0)
-    verts10, verts10_rots = healpix_verts_rots(hlc, 1.0, 0.0)
-    verts11, verts11_rots = healpix_verts_rots(hlc, 1.0, 1.0)
-    verts01, verts01_rots = healpix_verts_rots(hlc, 0.0, 1.0)
-    vertsmm, vertsmm_rots = healpix_verts_rots(hlc, 0.5, 0.5)
-
-    a = torch.zeros(
-        [*target_coords.shape[:-1], (target_coords.shape[-1] - 2) + 5 * (3 * 5) + 3 * 8]
-    )
-    # a = torch.zeros( [*target_coords.shape[:-1],
-    #  (target_coords.shape[-1]-2) + 5*(3*5) + 3*8])
-    # a = torch.zeros( [*target_coords.shape[:-1], 148])
-    #    #(target_coords.shape[-1]-2) + 5*(3*5) + 3*8])
-    a[..., :geoinfo_offset] = target_coords[..., :geoinfo_offset]
-    ref = torch.tensor([1.0, 0.0, 0.0])
-
-    zi = 0
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts00_rots, tcs)
-    )
-    verts = torch.stack([verts10, verts11, verts01, vertsmm])
-    a = add_local_vert_coords_ctrs2(verts00_rots, verts, tcs, a, 3, geoinfo_offset)
-
-    zi = 15
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts10_rots, tcs)
-    )
-    verts = torch.stack([verts00, verts11, verts01, vertsmm])
-    a = add_local_vert_coords_ctrs2(verts10_rots, verts, tcs, a, 18, geoinfo_offset)
-
-    zi = 30
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts11_rots, tcs)
-    )
-    verts = torch.stack([verts00, verts10, verts01, vertsmm])
-    a = add_local_vert_coords_ctrs2(verts11_rots, verts, tcs, a, 33, geoinfo_offset)
-
-    zi = 45
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts01_rots, tcs)
-    )
-    verts = torch.stack([verts00, verts11, verts10, vertsmm])
-    a = add_local_vert_coords_ctrs2(verts01_rots, verts, tcs, a, 48, geoinfo_offset)
-
-    zi = 60
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(vertsmm_rots, tcs)
-    )
-    verts = torch.stack([verts00, verts10, verts11, verts01])
-    a = add_local_vert_coords_ctrs2(vertsmm_rots, verts, tcs, a, 63, geoinfo_offset)
-
-    # add local coords wrt to center of neighboring cells
-    # (since the neighbors are used in the prediction)
-    num_healpix_cells = 12 * 4**hlc
-    with warnings.catch_warnings(action="ignore"):
-        temp = hp.neighbours(np.arange(num_healpix_cells), 2**hlc, order="nested").transpose()
-    # fix missing nbors with references to self
-    for i, row in enumerate(temp):
-        temp[i][row == -1] = i
-    nctrs = vertsmm[temp.flatten()].reshape((num_healpix_cells, 8, 3)).transpose(1, 0)
-    # local coords with respect to all neighboring centers
-    tcs_ctrs = torch.cat([ref - torch.cat(locs_to_ctr_coords(c, tcs)) for c in nctrs], -1)
-    zi = 75
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + (3 * 8))] = tcs_ctrs
-    # a = add_local_vert_coords_ctrs2( vertsmm_rots, nctrs, tcs, a, 99, geoinfo_offset)
-
-    # remaining geoinfos (zenith angle etc)
-    # zi=99+3*8;
-    zi = 99
-    # assert target_coords.shape[-1] + zi < a.shape[-1]
-    a[..., (geoinfo_offset + zi) :] = target_coords[..., (geoinfo_offset + 2) :]
-
-    return a
-
-
-####################################################################################################
-def tcs_optimized(target_coords: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor]:
+def tcs_optimized(stacked_coords: torch.Tensor) -> tuple[list[torch.Tensor], torch.Tensor]:
     """
     Args:
     target_coords: List of 2D coordinate tensors, each with shape [N, 2]
@@ -500,9 +276,6 @@ def tcs_optimized(target_coords: list[torch.Tensor]) -> tuple[list[torch.Tensor]
         tcs: List of transformed coordinates
         concatenated_coords: All original coords concatenated
     """
-
-    # Concatenate all tensors
-    stacked_coords = torch.cat(target_coords, dim=0)  # [total_points, 2]
 
     # Single vectorized coordinate transformation
     theta_all = torch.deg2rad(90.0 - stacked_coords[..., 0])
@@ -514,19 +287,29 @@ def tcs_optimized(target_coords: list[torch.Tensor]) -> tuple[list[torch.Tensor]
     # Split back to original structure
     sizes = [t.shape[0] for t in target_coords]  # Get original tensor sizes
     tcs = list(torch.split(transformed_all, sizes, dim=0))  # Split back to list
-    return tcs, stacked_coords
+
+    return stacked_coords
 
 
 ####################################################################################################
 def get_target_coords_local_ffast(
-    hlc, target_coords, target_geoinfos, target_times, verts_rots, verts_local, nctrs
+    hlc,
+    masked_points_per_cell,
+    coords,
+    target_geoinfos,
+    target_times,
+    verts_rots,
+    verts_local,
+    nctrs,
 ):
     """Generate local coordinates for target coords w.r.t healpix cell vertices and
     and for healpix cell vertices themselves
     """
 
     # target_coords_lens = [len(t) for t in target_coords]
-    tcs, target_coords = tcs_optimized(target_coords)
+    # tcs, target_coords = tcs_optimized(target_coords)
+    target_coords = s2tor3(*theta_phi_to_standard_coords(coords))
+    tcs = torch.split(masked_points_per_cell)
 
     if target_coords.shape[0] == 0:
         return torch.tensor([])

@@ -54,10 +54,6 @@ class Masker:
         # number of healpix cells
         self.healpix_num_cells = 12 * (4**self.healpix_level_data)
 
-        # Initialize the mask, set to None initially,
-        # until it is generated in mask_source.
-        self.perm_sel: list[np.typing.NDArray] = None
-
         # Per-batch strategy tracking
         self.same_strategy_per_batch = self.masking_strategy_config.get(
             "same_strategy_per_batch", False
@@ -167,6 +163,10 @@ class Masker:
 
         if self.current_strategy == "random":
             mask_tokens = self.rng.uniform(0, 1, num_tokens) < rate
+        elif self.current_strategy == "forecast":
+            mask_tokens = np.zeros(
+                num_tokens,
+            )
         elif self.current_strategy == "healpix":
             # TODO: currently only for fixed level
             num_cells = len(idxs_cells_lens)
@@ -178,8 +178,6 @@ class Masker:
             ]
         else:
             assert False, f"Unsupported masking strategy: {self.current_strategy}"
-
-        self.perm_sel = mask_tokens
 
         return (mask_tokens, mask_channels)
 

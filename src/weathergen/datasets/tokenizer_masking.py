@@ -19,14 +19,13 @@ from weathergen.datasets.tokenizer_utils import (
     arc_alpha,
     encode_times_source,
     encode_times_target,
+    get_target_coords_local_ffast,
     tokenize_apply_mask,
+    tokenize_apply_mask_target,
     tokenize_space,
     tokenize_spacetime,
     tokenize_window_space,
     tokenize_window_spacetime,
-)
-from weathergen.datasets.utils import (
-    get_target_coords_local_ffast,
 )
 
 
@@ -41,6 +40,9 @@ class TokenizerMasking(Tokenizer):
         """
         self.masker.reset_rng(rng)
         self.rng = rng
+
+        self.mask_tokens = None
+        self.mask_channels = None
 
     def batchify_source(
         self,
@@ -78,24 +80,17 @@ class TokenizerMasking(Tokenizer):
             rdata,
             time_win,
             self.hpy_verts_rots_source[-1],
-            normalize_coords,
             encode_times_source,
         )
 
-        # tokenized_data = [
-        #     torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in tokenized_data
-        # ]
-
-        # # Use the masker to get source tokens and the selection mask for the target
-        # source_tokens_cells = self.masker.mask_source(
-        #     tokenized_data, rdata.coords, rdata.geoinfos, rdata.data
-        # )
-
         source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
-        if source_tokens_lens.sum() > 0:
-            source_centroids = self.compute_source_centroids(source_tokens_cells)
-        else:
-            source_centroids = torch.tensor([])
+        # if source_tokens_lens.sum() > 0:
+        #     source_centroids = self.compute_source_centroids(source_tokens_cells)
+        # else:
+        # TODO: remove completely?
+        source_centroids = [torch.tensor([])]
+
+        self.mask_tokens, self.mask_channels = mask_tokens, mask_channels
 
         return (source_tokens_cells, source_tokens_lens, source_centroids)
 
@@ -107,15 +102,42 @@ class TokenizerMasking(Tokenizer):
         time_win: tuple,
     ):
         token_size = stream_info["token_size"]
-        tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
         max_num_targets = stream_info.get("max_num_targets", -1)
-
-        target_tokens, target_coords = torch.tensor([]), torch.tensor([])
-        target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
+        stream_id = stream_info["stream_id"]
 
         # target is empty
-        if len(self.masker.perm_sel) == 0:
+        if len(self.mask_tokens) == 0:
+            target_tokens, target_coords = torch.tensor([]), torch.tensor([])
+            target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
             return (target_tokens, target_coords, torch.tensor([]), torch.tensor([]))
+
+        # create tokenization index
+        tok = tokenize_spacetime if stream_info.get("tokenize_spacetime", False) else tokenize_space
+        idxs_cells, idxs_cells_lens = tok(rdata, token_size, self.hl_source, pad_tokens=False)
+
+        mask_tokens = ~self.mask_tokens
+        # mask_channels = ~self.mask_channels if self.mask_channels is not None 
+        # else self.mask_channels
+        mask_channels = self.mask_channels
+
+        coords_token_cells = tokenize_apply_mask_target(
+            self.hl_target,
+            idxs_cells,
+            idxs_cells_lens,
+            mask_tokens,
+            mask_channels,
+            stream_id,
+            rdata,
+            time_win,
+            self.hpy_verts_rots_target,
+            self.hpy_verts_local_target,
+            self.hpy_nctrs_target,
+            encode_times_target,
+        )
+
+        import code
+
+        code.interact(local=locals())
 
         # identity function
         def id(arg):
