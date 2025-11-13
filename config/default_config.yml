@@ -131,20 +131,20 @@ student_teacher:
 
 # DEPRECATED, TODO: REMOVE ONCE CHECKED
 # cropping configuration
-cropping_rate_global: 0.5
-cropping_rate_sampling: True
-cropping_config: {
-  hl_global: 0,
-  hl_child: 5,
-  cell_centroids: None,
-  # global_keep_m : None,
-  global_consecutive: True,
-  local_crops: True,
-  num_local_crops: 5,
-  local_crop_frac : 0.2,
-  local_strategy: "random",
-  }
-cropping_generate_local_views: True
+#cropping_rate_global: 0.5
+#cropping_rate_sampling: True
+#cropping_config: {
+#  hl_global: 0,
+#  hl_child: 5,
+#  cell_centroids: None,
+#  # global_keep_m : None,
+#  global_consecutive: True,
+#  local_crops: True,
+#  num_local_crops: 5,
+#  local_crop_frac : 0.2,
+#  local_strategy: "random",
+#  }
+#cropping_generate_local_views: True
 
 num_epochs: 32
 samples_per_epoch: 4096
@@ -194,5 +194,3 @@ train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
-
-log_level: DEBUG
