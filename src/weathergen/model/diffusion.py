@@ -29,19 +29,19 @@ class BatchData:
     model_samples: dict
     target_samples: dict
 
-    def _get_sample_len(self):
+    def get_sample_len(self):
         return len(list(self.model_samples.keys()))
 
-    def _get_input_data(self, t: int):
+    def get_input_data(self, t: int):
         return self.model_samples[t]["data"]
     
-    def _get_input_metadata(self, t: int):
+    def get_input_metadata(self, t: int):
         return self.model_samples[t]["metadata"]
 
-    def _get_target_data(self, t: int):
+    def get_target_data(self, t: int):
         return self.target_samples[t]["data"]
     
-    def _get_target_metadata(self, t: int):
+    def get_target_metadata(self, t: int):
         return self.target_samples[t]["metadata"]
 
 
@@ -73,9 +73,9 @@ class DiffusionForecastEngine(torch.nn.Module):
     def forward(self, data: BatchData) -> torch.Tensor:
         # Retrieve conditionings [0:-1], target [-1], and noise from data object.
         # The data retrieval ignores batch and stream dimension for now (has to be adapted).
-        cond = [data._get_input_data(t) for t in range(data._get_sample_len() - 1)]
-        y = data._get_input_data(-1)
-        eta = data._get_input_metadata(-1)
+        cond = [data.get_input_data(t) for t in range(data.get_sample_len() - 1)]
+        y = data.get_input_data(-1)
+        eta = data.get_input_metadata(-1)
 
         # Compute sigma (noise level) from eta
         #noise = torch.randn(y.shape, device=y.device)
