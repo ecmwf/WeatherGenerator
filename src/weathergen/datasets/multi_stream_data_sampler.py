@@ -186,7 +186,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if len(ds) > 0:
                     self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
 
-                # MODIFIES config: add channel names for this stage
+                # MODIFIES config !!!
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
                 stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
                 stream_info["target_channel_weights"] = (
@@ -217,7 +217,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.batch_size = batch_size
 
-        # Ensure data_loader_rng_seed is not smaller than loader_num_workers
+        # ensure data_loader_rng_seed is not smaller than loader_num_workers to avoid
+        # issues in per loader rng seed computation
         self.data_loader_rng_seed = (
             cf.data_loader_rng_seed
             if cf.data_loader_rng_seed > cf.loader_num_workers
@@ -248,6 +249,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
             self.use_student_teacher = True
             assert self.forecast_offset == 0, "student-teacher training requires auto-encoder mode"
+            # TODO
             assert self.input_window_steps == 1, (
                 "student-teacher does not support input_window_steps > 1"
             )
@@ -258,14 +260,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             )
             
         else:
-            raise ValueError(f"Unsupported training mode: {self.training_mode}")
+            assert False, f"Unsupported training mode: {cf.training_mode}"
 
         self.epoch = 0
 
     def advance(self):
-        """Advance epoch (applied to worker processes)"""
+        """Advance epoch (this is applied to the template for the worker processes)"""
         self.epoch += 1
 
+    ###################################################
     def get_sources_size(self):
         return [
             ds[0].get_source_num_channels()
@@ -275,12 +278,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             for ds in self.streams_datasets
         ]
 
+    ###################################################
     def get_sources_num_channels(self):
         return [ds[0].get_source_num_channels() for ds in self.streams_datasets]
 
+    ###################################################
     def get_targets_num_channels(self):
         return [ds[0].get_target_num_channels() for ds in self.streams_datasets]
 
+    ###################################################
     def get_targets_coords_size(self):
         # TODO: avoid hard coding magic values
         # +6 at the end for stream_id and time encoding
@@ -288,8 +294,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             (ds[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6 for ds in self.streams_datasets
         ]
 
+    ###################################################
     def reset(self):
-        """Initialize RNG and shuffle data for new epoch"""
+        # initialize the random number generator: self.data_loader_rng_seed is set to a DDP-unique
+        # value in worker_workset()
         self.rng = np.random.default_rng(self.data_loader_rng_seed)
 
         fsm = (
@@ -303,6 +311,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # data
         index_range = self.time_window_handler.get_index_range()
         idx_end = index_range.end
+        # native length of datasets, independent of epoch length that has potentially been specified
         forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
         idx_end -= forecast_len + self.forecast_offset
         assert idx_end > 0, "dataset size too small for forecast range"
@@ -442,7 +451,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     self.tokenizer.masker.set_batch_strategy()
 
                 if self.use_student_teacher:
-                    # ===== STUDENT-TEACHER MODE =====
                     # Generate teacher and student views for all streams
                     
                     teacher_streams = []  # list[StreamData], one per stream
