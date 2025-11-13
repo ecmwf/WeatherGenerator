@@ -587,9 +587,6 @@ class Trainer(TrainerBase):
             if is_student_teacher:
                 # ===== STUDENT-TEACHER TRAINING =====
                 model_batches = batch[0]  # list[ModelBatch]
-
-                print("What actually is batch[0]?", type(batch[0]), type(batch[0][0]))
-                print("Is batch[0] a ModelBatch?", isinstance(batch[0][0], ModelBatch))
                 
                 # Extract teacher streams: flatten from list[ModelBatch] to list[list[StreamData]]
                 # model_batches[i].targets[0] is a list[StreamData] for model_batch i
