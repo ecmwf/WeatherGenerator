@@ -16,8 +16,7 @@ from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
     encode_times_source,
     encode_times_target,
-    # get_target_coords_local_ffast,
-    tokenize_apply_mask,
+    tokenize_apply_mask_source,
     tokenize_apply_mask_target,
     tokenize_space,
     tokenize_spacetime,
