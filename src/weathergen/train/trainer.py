@@ -585,7 +585,7 @@ class Trainer(TrainerBase):
             is_student_teacher = isinstance(batch[0][0], ModelBatch) if len(batch[0]) > 0 else False
 
             if is_student_teacher:
-                # ===== STUDENT-TEACHER TRAINING =====
+                # STUDENT-TEACHER TRAINING 
                 model_batches = batch[0]  # list[ModelBatch]
                 
                 # Extract teacher streams: flatten from list[ModelBatch] to list[list[StreamData]]
