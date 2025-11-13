@@ -766,7 +766,7 @@ class Model(torch.nn.Module):
                 tokens_c, posteriors = tokens_c, 0.0
             
             # create mask for global tokens, without first element (used for padding)
-            mask_c = cell_lens_c[1:].to(torch.bool) > 0
+            mask_c = cell_lens_c[1:].to(torch.bool)
             tokens_global_unmasked_c = tokens_global_c[mask_c]
             tokens_global_masked_c = tokens_global_c[~mask_c]
             q_cells_lens_unmasked_c = torch.cat([zero_pad, q_cells_lens_c[1:][mask_c] ])
