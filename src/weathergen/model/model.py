@@ -29,6 +29,7 @@ from weathergen.model.engines import (
     ForecastingEngine,
     GlobalAssimilationEngine,
     Local2GlobalAssimilationEngine,
+    QueryAggregationEngine,
     LocalAssimilationEngine,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
@@ -307,8 +308,14 @@ class Model(torch.nn.Module):
         self.q_cells = torch.nn.Parameter(q_cells, requires_grad=True)
 
         ##############
+        # query aggregation engine
+        self.ae_aggregation_engine = QueryAggregationEngine(cf, self.num_healpix_cells)
+
+        ##############
         # global assimilation engine
         self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
+        
+        
 
         ###############
         # forecasting engine
@@ -782,6 +789,9 @@ class Model(torch.nn.Module):
 
         tokens_global_unmasked = torch.cat(tokens_global_unmasked_all)
         tokens_global_masked = torch.cat(tokens_global_masked_all)
+        
+        # query aggregation engine on the query tokens in unmasked cells (applying this here assumes batch_size=1)
+        tokens_global_unmasked = self.ae_aggregation_engine(tokens_global_unmasked, use_reentrant=False)
 
         # create mask from cell lens
         mask = cell_lens.to(torch.bool)
