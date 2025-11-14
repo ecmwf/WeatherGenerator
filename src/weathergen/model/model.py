@@ -210,6 +210,9 @@ class Model(torch.nn.Module):
 
     ae_adapter: Assimilation engine adapter: Adapter to transform local assimilation engine
         information to the global assimilation engine.
+        
+    ae_aggregation_blocks: Query aggregation engine: after the learnable queries are created per non-masked healpix cell,
+        this engine combines information from all non-masked cells by using dense attention layers.
 
     ae_global_blocks: Global assimilation engine: Transformer network alternating between local and
         global attention based upon global attention density rate.
@@ -480,6 +483,7 @@ class Model(torch.nn.Module):
 
         num_params_q_cells = np.prod(self.q_cells.shape) if self.q_cells.requires_grad else 0
         num_params_ae_adapater = get_num_parameters(self.ae_local_global_engine.ae_adapter)
+        num_params_ae_aggregation = get_num_parameters(self.ae_aggregation_engine.ae_aggregation_blocks)
 
         num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
@@ -499,6 +503,7 @@ class Model(torch.nn.Module):
         print(f" Local assimilation engine: {num_params_ae_local:,}")
         print(f" Local-global adapter: {num_params_ae_adapater:,}")
         print(f" Learnable queries: {num_params_q_cells:,}")
+        print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")
         print(f" Forecast engine: {num_params_fe:,}")
         print(" kv-adapter, coordinate embedding, prediction networks and prediction heads:")

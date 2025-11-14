@@ -255,7 +255,7 @@ class QueryAggregationEngine(torch.nn.Module):
 
         self.ae_aggregation_blocks = torch.nn.ModuleList()
 
-        global_rate = int(1 / self.cf.ae_agregation_att_dense_rate)
+        global_rate = int(1 / self.cf.ae_aggregation_att_dense_rate)
         for i in range(self.cf.ae_aggregation_num_blocks):
             ## Alternate between local and global attention
             #  as controlled by cf.ae_dense_local_att_dense_rate
