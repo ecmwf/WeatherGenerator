@@ -61,6 +61,7 @@ def get_score_step_48h(score_col: str) -> pl.DataFrame:
     """
     Given a score name, return this score at the step corresponding to 48h.
     """
+    score = score_col.replace("metrics.", "")
     # Caching since it makes multiple MLFlow calls
     eval_runs = get_runs_with_scores()
     step_48h = 8  # Each step = 6 hours => look for step = 8*6 = 48 hours
@@ -76,7 +77,7 @@ def get_score_step_48h(score_col: str) -> pl.DataFrame:
         .sort("start_time")
         .filter(pl.col(score_col).is_not_null())
     )
-    _logger.info(f"Getting score data for {score} at 48h (step={step_48h}): len={len(score_data)}")
+    _logger.info(f"Getting score data for {score_col} at 48h (step={step_48h}): len={len(score_data)}")
 
     # Iterate over the runs to get the metric at step 48h
     scores_dt: list[float | None] = []
