@@ -33,6 +33,7 @@ from torch.distributed.tensor import DTensor, distribute_tensor
 import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
+from weathergen.datasets.stream_data import StreamData
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -162,9 +163,13 @@ class Trainer(TrainerBase):
         targets_num_channels = self.dataset.get_targets_num_channels()
         targets_coords_size = self.dataset.get_targets_coords_size()
 
-        with torch.device("meta"):
+        if cf.with_ddp and not cf.with_fsdp:
             model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+        else:
+            with torch.device("meta"):
+                model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
 
+        # freeze request model part
         for name, module in model.named_modules():
             name = module.name if hasattr(module, "name") else name
             # avoid the whole model element which has name ''
@@ -174,6 +179,8 @@ class Trainer(TrainerBase):
                 freeze_weights(module)
 
         if cf.with_ddp and not cf.with_fsdp:
+            # create DDP model if running without FSDP
+            model = model.to("cuda")
             model = torch.nn.parallel.DistributedDataParallel(
                 model,
                 broadcast_buffers=True,
@@ -182,7 +189,8 @@ class Trainer(TrainerBase):
                 bucket_cap_mb=512,
             )
 
-        if cf.with_ddp and cf.with_fsdp:
+        elif cf.with_ddp and cf.with_fsdp:
+            # with DDP *and() FSDP
             fsdp_kwargs = {
                 "mp_policy": (
                     MixedPrecisionPolicy(
@@ -243,14 +251,14 @@ class Trainer(TrainerBase):
             for tensor in itertools.chain(model.parameters(), model.buffers()):
                 assert tensor.device == torch.device("meta")
 
-        # For reasons we do not yet fully understand, when using train continue in some
-        # instances, FSDP2 does not register the forward_channels and forward_columns
-        # functions in the embedding engine as forward functions. Thus, yielding a crash
-        # because the input tensors are not converted to DTensors. This seems to primarily
-        # occur during validation.
-        for embed in model.embed_engine.embeds:
-            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
-            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
+            # For reasons we do not yet fully understand, when using train continue in some
+            # instances, FSDP2 does not register the forward_channels and forward_columns
+            # functions in the embedding engine as forward functions. Thus, yielding a crash
+            # because the input tensors are not converted to DTensors. This seems to primarily
+            # occur during validation.
+            for embed in model.embed_engine.embeds:
+                torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
+                torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
         return model, model_params
 
@@ -298,7 +306,8 @@ class Trainer(TrainerBase):
 
         if run_id_contd is None:
             self.model.to_empty(device="cuda")
-            self.model.reset_parameters()
+            if cf.with_fsdp:
+                self.model.reset_parameters()
         else:
             if is_root():
                 logger.info(f"Continuing run with id={self.cf.from_run_id} at epoch {epoch_contd}.")
@@ -324,7 +333,7 @@ class Trainer(TrainerBase):
             )
 
         # if with_fsdp then parameter count is unreliable
-        if (is_root() and not cf.with_fsdp) or not cf.with_ddp:
+        if is_root() and not cf.with_fsdp and not cf.with_ddp:
             self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
@@ -681,7 +690,9 @@ class Trainer(TrainerBase):
                         output = model_forward(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
+
                     targets = {"physical": batch[0]}
+                    streams_data: list[list[StreamData]] = batch[0]
                     # compute loss
                     loss_values = self.loss_calculator_val.compute_loss(
                         preds=output,
@@ -700,9 +711,11 @@ class Trainer(TrainerBase):
                             preds=output,
                             forecast_offset=cf.forecast_offset,
                             forecast_steps=cf.forecast_steps,
-                            streams_data=batch[0],
+                            streams_data=streams_data,
                         )
-                        sources = [[item.source_raw for item in b] for b in batch[0]]
+                        sources = [[item.source_raw for item in stream] for stream in streams_data]
+                        # sample idx should be the same across streams => select first
+                        sample_idxs = [item.sample_idx for item in streams_data[0]]
                         write_output(
                             self.cf,
                             epoch,
@@ -713,6 +726,7 @@ class Trainer(TrainerBase):
                             targets_coords_all,
                             targets_times_all,
                             targets_lens,
+                            sample_idxs,
                         )
 
                     self.loss_unweighted_hist += [loss_values.losses_all]

@@ -10,6 +10,7 @@
 FESOM_ELEM :
   type : fesom
   filenames : ['ocean_elem']
+  target_file: "/work/ab0995/a270088/Kacper/weathergenertor/AWICM3/ocean_node"
   loss_weight : 1.
   source : null
   target : null

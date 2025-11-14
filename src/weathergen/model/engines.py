@@ -47,7 +47,7 @@ class EmbeddingEngine(torch.nn.Module):
         for i, si in enumerate(self.cf.streams):
             stream_name = si.get("name", i)
 
-            if "diagnostic" in si and si["diagnostic"]:
+            if si.get("diagnostic", False) or self.sources_size[i] == 0:
                 self.embeds.append(torch.nn.Identity())
                 continue
 
