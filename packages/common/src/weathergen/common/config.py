@@ -105,10 +105,10 @@ def _get_model_config_file_name(path: Path, run_id: str, mini_epoch: int | None)
         mini_epoch_str = ""
     elif mini_epoch == -1:
         mini_epoch_str = "_latest"
-    elif (path / run_id / f"model_{run_id}_chkpt{mini_epoch:05d}.json").exists():
-        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
-    else:
+    elif (path / run_id / f"model_{run_id}_epoch{mini_epoch:05d}.json").exists():
         mini_epoch_str = f"_epoch{mini_epoch:05d}"
+    else:
+        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
 
     return path / run_id / f"model_{run_id}{mini_epoch_str}.json"
 
@@ -214,6 +214,12 @@ def load_config(
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
+    
+    # Ensure the config has mini-epoch notation
+    if hasattr(c, "samples_per_epoch"):
+        c.samples_per_mini_epoch = c.samples_per_epoch
+        c.num_mini_epochs = c.num_epochs
+
     return c
 
 
