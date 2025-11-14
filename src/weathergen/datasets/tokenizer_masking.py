@@ -57,8 +57,10 @@ class TokenizerMasking(Tokenizer):
         tok = tokenize_spacetime if stream_info.get("tokenize_spacetime", False) else tokenize_space
         idxs_cells, idxs_cells_lens = tok(rdata, token_size, self.hl_source, pad_tokens=True)
 
+        # select strategy from XXX depending on stream and if student or teacher
+
         (mask_tokens, mask_channels) = self.masker.mask_source_idxs(
-            idxs_cells, idxs_cells_lens, rdata
+            stream_info, idxs_cells, idxs_cells_lens, rdata
         )
 
         source_tokens_cells, source_tokens_lens = tokenize_apply_mask_source(
@@ -73,13 +75,7 @@ class TokenizerMasking(Tokenizer):
             encode_times_source,
         )
 
-        # if source_tokens_lens.sum() > 0:
-        #     source_centroids = self.compute_source_centroids(source_tokens_cells)
-        # else:
-        # TODO: remove completely?
-        source_centroids = [torch.tensor([])]
-
-        return (source_tokens_cells, source_tokens_lens, source_centroids)
+        return (source_tokens_cells, source_tokens_lens)
 
     def batchify_target(
         self,
@@ -95,13 +91,8 @@ class TokenizerMasking(Tokenizer):
         idxs_cells, idxs_cells_lens = tok(rdata, token_size, self.hl_source, pad_tokens=False)
 
         (mask_tokens, mask_channels) = self.masker.mask_targets_idxs(
-            idxs_cells, idxs_cells_lens, rdata
+            stream_info, idxs_cells, idxs_cells_lens, rdata
         )
-        # mask_tokens = ~self.mask_tokens
-        # # TODO
-        # # mask_channels = ~self.mask_channels if self.mask_channels is not None
-        # # else self.mask_channels
-        # mask_channels = self.mask_channels
 
         data, datetimes, coords, coords_local, coords_per_cell = tokenize_apply_mask_target(
             self.hl_target,

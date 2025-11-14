@@ -62,7 +62,6 @@ class StreamData:
         self.source_tokens_cells = []
         # length of source tokens per cell (without padding)
         self.source_tokens_lens = []
-        self.source_centroids = []
         # unprocessed source (for logging)
         self.source_raw = []
         # auxiliary data for scatter operation that changes from stream-centric to cell-centric
@@ -85,7 +84,6 @@ class StreamData:
         """
 
         self.source_tokens_cells = self.source_tokens_cells.to(device, non_blocking=True)
-        self.source_centroids = self.source_centroids.to(device, non_blocking=True)
         self.source_tokens_lens = self.source_tokens_lens.to(device, non_blocking=True)
 
         self.target_coords = [t.to(device, non_blocking=True) for t in self.target_coords]
@@ -113,7 +111,6 @@ class StreamData:
         self.source_raw += [source]
         self.source_tokens_lens += [torch.ones([self.healpix_cells], dtype=torch.int32)]
         self.source_tokens_cells += [torch.tensor([])]
-        self.source_centroids += [torch.tensor([])]
 
     def add_empty_target(self, fstep: int) -> None:
         """
@@ -137,9 +134,7 @@ class StreamData:
             np.array([], dtype="datetime64[ns]") for _ in range(self.healpix_cells)
         ]
 
-    def add_source(
-        self, ss_raw: IOReaderData, ss_lens: torch.tensor, ss_cells: list, ss_centroids: list
-    ) -> None:
+    def add_source(self, ss_raw: IOReaderData, ss_lens: torch.tensor, ss_cells: list) -> None:
         """
         Add data for source for one input.
 
@@ -149,8 +144,6 @@ class StreamData:
         ss_lens : torch.tensor( number of healpix cells )
         ss_cells : list( number of healpix cells )
             [ torch.tensor( tokens per cell, token size, number of channels) ]
-        ss_centroids : list(number of healpix cells )
-            [ torch.tensor( for source , 5) ]
 
         Returns
         -------
@@ -160,7 +153,6 @@ class StreamData:
         self.source_raw = ss_raw
         self.source_tokens_lens = ss_lens
         self.source_tokens_cells = torch.stack(ss_cells)
-        self.source_centroids = torch.cat(ss_centroids)
 
         idx = torch.isnan(self.source_tokens_cells)
         self.source_tokens_cells[idx] = self.mask_value

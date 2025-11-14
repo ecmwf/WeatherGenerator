@@ -206,8 +206,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.shuffle = shuffle
         # TODO: remove options that are no longer supported
         self.input_window_steps = cf.input_window_steps
-        self.embed_local_coords = cf.embed_local_coords
-        self.embed_centroids_local_coords = cf.embed_centroids_local_coords
         self.sampling_rate_target = cf.sampling_rate_target
 
         self.batch_size = batch_size
@@ -352,6 +350,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 streams_data: list[StreamData] = []
 
+                # tokenizer.generate_masks_for_sample()
+
                 # for all streams
                 for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
                     stream_data = StreamData(
@@ -373,14 +373,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         stream_data.source_is_spoof = True
 
                     # preprocess data for model input
-                    (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
+                    (ss_cells, ss_lens) = self.tokenizer.batchify_source(
                         stream_info,
                         readerdata_to_torch(rdata),
                         (time_win_source.start, time_win_source.end),
                     )
 
                     # collect data for stream
-                    stream_data.add_source(rdata, ss_lens, ss_cells, ss_centroids)
+                    stream_data.add_source(rdata, ss_lens, ss_cells)
 
                     # target
 

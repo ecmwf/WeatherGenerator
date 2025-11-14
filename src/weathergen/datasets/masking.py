@@ -137,6 +137,7 @@ class Masker:
 
     def mask_source_idxs(
         self,
+        stream_info,
         idxs_cells,
         idxs_cells_lens,
         rdata,
@@ -155,7 +156,7 @@ class Masker:
         if num_tokens == 0:
             return (self.mask_tokens, self.mask_channels)
 
-        # Clean strategy selection
+        # clean strategy selection
         self.current_strategy = self._select_strategy()
 
         # Set the masking rate.
@@ -163,8 +164,10 @@ class Masker:
 
         if self.current_strategy == "random":
             self.mask_tokens = self.rng.uniform(0, 1, num_tokens) < rate
+
         elif self.current_strategy == "forecast":
             self.mask_tokens = np.ones(num_tokens, dtype=np.bool)
+
         elif self.current_strategy == "healpix":
             # TODO: currently only for fixed level
             num_cells = len(idxs_cells_lens)
@@ -174,13 +177,17 @@ class Masker:
                 (torch.ones(2, dtype=torch.bool) * (1 if m else 0)).to(torch.bool)
                 for idxs_cell, m in zip(idxs_cells_lens, mask_cells, strict=False)
             ]
+        elif self.current_strategy == "cropping" or self.current_strategy == "causal":
+            pass
+
         else:
-            assert False, f"Unsupported masking strategy: {self.current_strategy}"
+            assert False, f"Unsupported masking strategy: {self.current_strategy}."
 
         return (self.mask_tokens, self.mask_channels)
 
     def mask_targets_idxs(
         self,
+        stream_info,
         idxs_cells,
         idxs_cells_lens,
         rdata,
@@ -192,6 +199,7 @@ class Masker:
         if self.current_strategy == "forecast":
             num_tokens = torch.tensor([len(t) for t in idxs_cells_lens]).sum().item()
             self.mask_tokens = np.ones(num_tokens, dtype=np.bool)
+
         else:
             # masking strategies: target is complement of source
             # TODO: ensure/enforce that forecast_offset==0

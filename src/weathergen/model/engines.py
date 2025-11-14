@@ -47,7 +47,7 @@ class EmbeddingEngine(torch.nn.Module):
         for i, si in enumerate(self.cf.streams):
             stream_name = si.get("name", i)
 
-            if si.get("diagnostic", False) or self.sources_size[i] == 0:
+            if "diagnostic" in si and si["diagnostic"]:
                 self.embeds.append(torch.nn.Identity())
                 continue
 
@@ -64,7 +64,6 @@ class EmbeddingEngine(torch.nn.Module):
                         num_heads=si["embed"]["num_heads"],
                         dropout_rate=self.cf.embed_dropout_rate,
                         norm_type=self.cf.norm_type,
-                        embed_size_centroids=self.cf.embed_size_centroids,
                         unembed_mode=self.cf.embed_unembed_mode,
                         stream_name=stream_name,
                     )
@@ -107,7 +106,7 @@ class EmbeddingEngine(torch.nn.Module):
                     # create full scatter index
                     # (there's no broadcasting which is likely highly inefficient)
                     idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
+                    x_embed = embed(s.source_tokens_cells).flatten(0, 1)
                     # there's undocumented limitation in flash_attn that will make embed fail if
                     # #tokens is too large; code below is a work around
                     # x_embed = torch.cat(
@@ -197,32 +196,35 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 attention_dtype=get_dtype(self.cf.attention_dtype),
             )
         )
-        self.ae_adapter.append(
-            MLP(
-                self.cf.ae_global_dim_embed,
-                self.cf.ae_global_dim_embed,
-                with_residual=True,
-                dropout_rate=self.cf.ae_adapter_dropout_rate,
-                norm_type=self.cf.norm_type,
-                norm_eps=self.cf.mlp_norm_eps,
+
+        ae_adapter_num_blocks = cf.get("ae_adapter_num_blocks", 2)
+        for _ in range(ae_adapter_num_blocks - 1):
+            self.ae_adapter.append(
+                MLP(
+                    self.cf.ae_global_dim_embed,
+                    self.cf.ae_global_dim_embed,
+                    with_residual=True,
+                    dropout_rate=self.cf.ae_adapter_dropout_rate,
+                    norm_type=self.cf.norm_type,
+                    norm_eps=self.cf.mlp_norm_eps,
+                )
             )
-        )
-        self.ae_adapter.append(
-            MultiCrossAttentionHeadVarlenSlicedQ(
-                self.cf.ae_global_dim_embed,
-                self.cf.ae_local_dim_embed,
-                num_slices_q=self.cf.ae_local_num_queries,
-                dim_head_proj=self.cf.ae_adapter_embed,
-                num_heads=self.cf.ae_adapter_num_heads,
-                with_residual=self.cf.ae_adapter_with_residual,
-                with_qk_lnorm=self.cf.ae_adapter_with_qk_lnorm,
-                dropout_rate=self.cf.ae_adapter_dropout_rate,
-                with_flash=self.cf.with_flash_attention,
-                norm_type=self.cf.norm_type,
-                norm_eps=self.cf.norm_eps,
-                attention_dtype=get_dtype(self.cf.attention_dtype),
+            self.ae_adapter.append(
+                MultiCrossAttentionHeadVarlenSlicedQ(
+                    self.cf.ae_global_dim_embed,
+                    self.cf.ae_local_dim_embed,
+                    num_slices_q=self.cf.ae_local_num_queries,
+                    dim_head_proj=self.cf.ae_adapter_embed,
+                    num_heads=self.cf.ae_adapter_num_heads,
+                    with_residual=self.cf.ae_adapter_with_residual,
+                    with_qk_lnorm=self.cf.ae_adapter_with_qk_lnorm,
+                    dropout_rate=self.cf.ae_adapter_dropout_rate,
+                    with_flash=self.cf.with_flash_attention,
+                    norm_type=self.cf.norm_type,
+                    norm_eps=self.cf.norm_eps,
+                    attention_dtype=get_dtype(self.cf.attention_dtype),
+                )
             )
-        )
 
     def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant):
         for block in self.ae_adapter:
@@ -299,6 +301,10 @@ class GlobalAssimilationEngine(torch.nn.Module):
                 )
             )
 
+        self.ae_global_blocks.append(
+            torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+        )
+
     def forward(self, tokens, use_reentrant):
         for block in self.ae_global_blocks:
             tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
@@ -333,7 +339,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            dim_aux=1,
+                            dim_aux=(1 if cf.forecast_with_step_conditioning else 0),
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                         )
@@ -349,7 +355,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            dim_aux=1,
+                            dim_aux=(1 if cf.forecast_with_step_conditioning else 0),
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                         )
@@ -367,6 +373,10 @@ class ForecastingEngine(torch.nn.Module):
                     )
                 )
 
+            self.fe_blocks.append(
+                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+            )
+
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
                 torch.nn.init.normal_(m.weight, mean=0, std=0.001)
@@ -377,11 +387,20 @@ class ForecastingEngine(torch.nn.Module):
             block.apply(init_weights_final)
 
     def forward(self, tokens, fstep):
+        # predict residual to last time step if requested
+        forecast_residual = self.cf.get("forecast_residual", False)
+        if forecast_residual:
+            tokens_in = tokens
+
+        # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
         aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
         for block in self.fe_blocks:
-            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+            if type(block) is torch.nn.LayerNorm:
+                tokens = block(tokens)
+            else:
+                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
 
-        return tokens
+        return tokens if not forecast_residual else (tokens_in + tokens)
 
 
 class EnsPredictionHead(torch.nn.Module):
