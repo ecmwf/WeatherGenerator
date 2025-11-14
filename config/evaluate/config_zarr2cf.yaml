@@ -137,9 +137,6 @@ dimensions:
     ncells:
       wg: ncells
       std: ncells
-    ncells:
-      wg: ncells
-      std: ncells
     #TODO maybe absorb stream as an attribute
     # forecast_step: forecast_step
     # don't want forecast_step anyway

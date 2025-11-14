@@ -141,6 +141,13 @@ def parse_args(args: list) -> argparse.Namespace:
         help="Rank number to identify the Zarr store",
     )
 
+    parser.add_argument(
+        "--regrid-degree",
+        type=float,
+        default=None,
+        help="If specified, regrid the data to a regular lat/lon grid with the given degree spacing (e.g., 2.0 for 2.0 degree grid).",
+    )
+
     args, unknown_args = parser.parse_known_args(args)
     if unknown_args:
         _logger.warning(f"Unknown arguments: {unknown_args}")
@@ -176,6 +183,7 @@ def export_from_args(args: list) -> None:
     n_processes = args.n_processes
     epoch = args.epoch
     rank = args.rank
+    regrid_degree = args.regrid_degree
 
     # Ensure output directory exists
     out_dir = Path(output_dir)
@@ -200,6 +208,7 @@ def export_from_args(args: list) -> None:
             n_processes,
             epoch,
             rank,
+            regrid_degree,
             output_dir,
             output_format,
             config,

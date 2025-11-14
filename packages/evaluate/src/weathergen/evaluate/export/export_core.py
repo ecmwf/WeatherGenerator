@@ -14,6 +14,7 @@ from weathergen.evaluate.export.cf_utils import (
 )
 from weathergen.evaluate.export.io_utils import get_data_worker, output_filename
 from weathergen.evaluate.export.reshape import reshape_dataset_adaptive
+from weathergen.evaluate.export.regrid import regrid_gaussian_ds
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -30,6 +31,7 @@ def export_model_outputs(
     n_processes: list,
     epoch: int,
     rank: int,
+    regrid_degree: float,
     output_dir: str,
     output_format: str,
     config: OmegaConf,
@@ -58,6 +60,8 @@ def export_model_outputs(
             Epoch number to identify the Zarr store.
         rank : int
             Rank number to identify the Zarr store.
+        regrid_degree : float
+            If specified, regrid the data to a regular lat/lon grid with the given degree
         output_dir : str
             Directory to save the NetCDF files.
         output_format : str
@@ -69,10 +73,11 @@ def export_model_outputs(
         raise ValueError(f"Invalid type: {dtype}. Must be 'target' or 'prediction'.")
 
     fname_zarr = get_model_results(run_id, epoch, rank)
+    print(f"Using Zarr store: {fname_zarr}")
     with ZarrIO(fname_zarr) as zio:
         zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
         zio_samples = sorted([int(sample) for sample in zio.samples])
-        dummy_out = zio.get_data(0, stream, zio_forecast_steps[0])
+        dummy_out = zio.get_data(zio_samples[0], stream, zio_forecast_steps[0])
         all_channels = dummy_out.target.channels
         channels = all_channels if channels is None else channels
 
@@ -116,7 +121,7 @@ def export_model_outputs(
                 f"Saving sample {sample_idx} data to {output_format} format in {output_dir}."
             )
 
-            save_sample_to_netcdf(
+            out_fname = save_sample_to_netcdf(
                 str(dtype)[:4],
                 da_fs,
                 fstep_hours,
@@ -125,6 +130,21 @@ def export_model_outputs(
                 output_format,
                 config,
             )
+
+            if regrid_degree is not None:
+                _logger.info(
+                    f"Regridding sample {sample_idx} data to regular lat/lon grid with "
+                    f"{regrid_degree} degree spacing."
+                )
+                da_fs_regridded = regrid_gaussian_ds(
+                    da_fs,
+                    grid_type='regular_ll',
+                    degree=regrid_degree,
+                )
+                out_fname_regrid = out_fname.split('.nc')[0] + f'_regular{regrid_degree, regrid_degree}.nc'
+                _logger.info(f"Saving regridded data to {out_fname_regrid}.")
+                da_fs_regridded.to_netcdf(out_fname_regrid, mode="w", compute=False)
+
         pool.terminate()
         pool.join()
 
@@ -208,3 +228,5 @@ def save_sample_to_netcdf(
 
         # save to netcdf
         sample_all_steps.to_netcdf(out_fname, mode="w", compute=False)
+        
+        return out_fname
