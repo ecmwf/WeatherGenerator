@@ -188,11 +188,23 @@ def save_sample_to_netcdf(
             _logger.info("Detected and preserved Gaussian grid structure")
         # add forecast_period attributes
         n_hours = fstep_hours.astype("int64")
-        sample_all_steps["forecast_period"] = sample_all_steps["forecast_step"] * n_hours
+        sample_all_steps["forecast_period"] = sample_all_steps["forecast_period"] * n_hours
         sample_all_steps["forecast_period"].attrs = {
             "standard_name": "forecast_period",
             "long_name": "time since forecast_reference_time",
             "units": "hours",
         }
         sample_all_steps = add_conventions(stream, run_id, sample_all_steps)
+        # now drop stream
+        sample_all_steps = sample_all_steps.drop_vars("stream")
+
+        # ensure encoding for time variables is since 1970
+        sample_all_steps.valid_time.encoding["units"] = "hours since 1970-01-01 00:00:00"
+        sample_all_steps.valid_time.encoding["calendar"] = "gregorian"
+        sample_all_steps.forecast_reference_time.encoding["units"] = (
+            "hours since 1970-01-01 00:00:00"
+        )
+        sample_all_steps.forecast_reference_time.encoding["calendar"] = "gregorian"
+
+        # save to netcdf
         sample_all_steps.to_netcdf(out_fname, mode="w", compute=False)

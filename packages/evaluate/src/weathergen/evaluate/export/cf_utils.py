@@ -65,7 +65,7 @@ def add_conventions(stream: str, run_id: str, ds: xr.Dataset) -> xr.Dataset:
 
 def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
     """
-    Modified CF parser that handles both regular and Gaussian grids.
+    CF parser that handles both regular and Gaussian grids.
 
     Parameters
     ----------
@@ -81,106 +81,68 @@ def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
     """
     # Detect if this is a Gaussian grid
     is_gaussian = "ncells" in ds.dims
-
+    # order important here
+    if is_gaussian:
+        dims_list = ["pressure", "ncells", "valid_time"]
+    else:
+        dims_list = [
+            "pressure",
+            "valid_time",
+            "latitude",
+            "longitude",
+        ]
+    # Start a new xarray dataset from scratch, it's easier than deleting / renaming (I tried!).
     variables = {}
     mapping = config["variables"]
 
-    # Handle dimensions based on grid type
-    if is_gaussian:
-        # For Gaussian grids, keep ncells and don't try to create lat/lon dimensions
-        for var_name in ds.data_vars:
-            if var_name in ["lat", "lon"]:
-                continue
-
-            variable = ds[var_name]
-
-            if var_name not in mapping:
-                # Variable not in mapping - skip or keep as-is
-                variables[var_name] = variable
-                continue
-
-            dims = list(variable.dims)
-
-            attributes = dict(
-                standard_name=mapping[var_name].get("std", var_name),
-                units=mapping[var_name].get("std_unit", "unknown"),
-                coordinates="lat lon",  # Mark auxiliary coordinates
+    ds_attributes = {}
+    for dim_name, dim_dict in config["dimensions"].items():
+        # clear dimensions if key and dim_dict['wg'] are the same
+        if dim_name == dim_dict["wg"]:
+            dim_attributes = dict(
+                standard_name=dim_dict.get("std", None),
             )
-
-            # Get mapped variable name or use original
-            mapped_name = mapping[var_name].get("var", var_name)
-
-            variables[mapped_name] = xr.DataArray(
-                data=variable.values,
-                dims=dims,
-                coords={coord: ds.coords[coord] for coord in variable.coords if coord in ds.coords},
-                attrs=attributes,
-                name=mapped_name,
-            )
-
-        # Preserve lat/lon as coordinate variables with proper attributes
-        if "lat" in ds.coords:
-            ds.coords["lat"].attrs = {
-                "standard_name": "latitude",
-                "long_name": "latitude",
-                "units": "degrees_north",
-            }
-        if "lon" in ds.coords:
-            ds.coords["lon"].attrs = {
-                "standard_name": "longitude",
-                "long_name": "longitude",
-                "units": "degrees_east",
-            }
-
-    else:
-        # Original logic for regular grids
-        ds_attributes = {}
-        for dim_name, dim_dict in config["dimensions"].items():
-            if dim_name == dim_dict["wg"]:
-                dim_attributes = dict(standard_name=dim_dict.get("std", None))
-                if dim_dict.get("std_unit", None) is not None:
-                    dim_attributes["units"] = dim_dict["std_unit"]
-                ds_attributes[dim_dict["wg"]] = dim_attributes
-                continue
-
-            if dim_name in ds.dims:
-                ds = ds.rename_dims({dim_name: dim_dict["wg"]})
-
-            dim_attributes = dict(standard_name=dim_dict.get("std", None))
-            if "std_unit" in dim_dict and dim_dict["std_unit"] is not None:
+            if dim_dict.get("std_unit", None) is not None:
                 dim_attributes["units"] = dim_dict["std_unit"]
             ds_attributes[dim_dict["wg"]] = dim_attributes
-
-        for var_name in ds.data_vars:
-            dims = ["pressure", "valid_time", "latitude", "longitude"]
-            if mapping[var_name]["level_type"] == "sfc":
-                dims.remove("pressure")
-
-            coordinates = {}
-            for coord, new_name in config["coordinates"][mapping[var_name]["level_type"]].items():
-                coordinates |= {
-                    new_name: (
-                        ds.coords[coord].dims,
-                        ds.coords[coord].values,
-                        ds_attributes[new_name],
-                    )
-                }
-
-            variable = ds[var_name]
-            attributes = dict(
-                standard_name=mapping[var_name]["std"],
-                units=mapping[var_name]["std_unit"],
-            )
-
-            variables[mapping[var_name]["var"]] = xr.DataArray(
-                data=variable.values,
-                dims=dims,
-                coords={**coordinates, "valid_time": ds["valid_time"].values},
-                attrs=attributes,
-                name=mapping[var_name]["var"],
-            )
-
+            continue
+        if dim_name in ds.dims:
+            ds = ds.rename_dims({dim_name: dim_dict["wg"]})
+        dim_attributes = dict(
+            standard_name=dim_dict.get("std", None),
+        )
+        if "std_unit" in dim_dict and dim_dict["std_unit"] is not None:
+            dim_attributes["units"] = dim_dict["std_unit"]
+        ds_attributes[dim_dict["wg"]] = dim_attributes
+    for var_name in ds:
+        dims = dims_list.copy()
+        if mapping[var_name]["level_type"] == "sfc":
+            dims.remove("pressure")
+        coordinates = {}
+        for coord, new_name in config["coordinates"][mapping[var_name]["level_type"]].items():
+            coordinates |= {
+                new_name: (
+                    ds.coords[coord].dims,
+                    ds.coords[coord].values,
+                    ds_attributes[new_name],
+                )
+            }
+        variable = ds[var_name]
+        attributes = dict(
+            standard_name=mapping[var_name]["std"],
+            units=mapping[var_name]["std_unit"],
+            long_name=mapping[var_name]["long"],
+        )
+        if is_gaussian:
+            # adding auxiliary coordinates
+            attributes["coordinates"] = "latitude longitude"
+        variables[mapping[var_name]["var"]] = xr.DataArray(
+            data=variable.values,
+            dims=dims,
+            coords={**coordinates, "valid_time": ds["valid_time"].values},
+            attrs=attributes,
+            name=mapping[var_name]["var"],
+        )
     dataset = xr.merge(variables.values())
     dataset.attrs = ds.attrs
-
     return dataset
