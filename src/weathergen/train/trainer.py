@@ -640,17 +640,23 @@ class Trainer(TrainerBase):
                     self.world_size_original * self.cf.batch_size_per_gpu,
                 )
 
-            self.loss_unweighted_hist += [loss_values.losses_all]
+            if bidx == 0:
+                self.loss_unweighted_hist = {k: [] for k in loss_values.loss_terms.keys()}
+                self.stdev_unweighted_hist = {k: [] for k in loss_values.loss_terms.keys()}
+                self.loss_model_hist = []
+            for name, loss_terms in loss_values.loss_terms.items():
+                self.loss_unweighted_hist[name].append(loss_terms.losses_all)
+                self.stdev_unweighted_hist[name].append(loss_terms.stddev_all)
             self.loss_model_hist += [loss_values.loss.item()]
-            self.stdev_unweighted_hist += [loss_values.stddev_all]
 
             perf_gpu, perf_mem = self.get_perf()
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
 
-            self._log_terminal(bidx, epoch, TRAIN)
-            if bidx % self.train_log_freq.metrics == 0:
-                self._log(TRAIN)
+            # NEED TO FIX LOGGING
+            # self._log_terminal(bidx, epoch, TRAIN)
+            # if bidx % self.train_log_freq.metrics == 0:
+            #     self._log(TRAIN)
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
@@ -665,7 +671,6 @@ class Trainer(TrainerBase):
         self.model.eval()
 
         dataset_val_iter = iter(self.data_loader_validation)
-        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
@@ -730,14 +735,22 @@ class Trainer(TrainerBase):
                             sample_idxs,
                         )
 
-                    self.loss_unweighted_hist += [loss_values.losses_all]
+                    self.loss_unweighted_hist += [loss_values.loss_terms]
                     self.loss_model_hist += [loss_values.loss.item()]
-                    self.stdev_unweighted_hist += [loss_values.stddev_all]
+                    if bidx == 0:
+                        self.loss_unweighted_hist = {k: [] for k in loss_values.loss_terms.keys()}
+                        self.stdev_unweighted_hist = {k: [] for k in loss_values.loss_terms.keys()}
+                        self.loss_model_hist = []
+                    for name, loss_terms in loss_values.loss_terms.items():
+                        self.loss_unweighted_hist[name].append(loss_terms.losses_all)
+                        self.stdev_unweighted_hist[name].append(loss_terms.stddev_all)
+                    self.loss_model_hist += [loss_values.loss.item()]
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
-                self._log_terminal(bidx, epoch, VAL)
-                self._log(VAL)
+                # NEED TO FIX LOGGING
+                # self._log_terminal(bidx, epoch, VAL)
+                # self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
@@ -961,21 +974,24 @@ class Trainer(TrainerBase):
             stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
                 per-channel standard deviation tensor.
         """
-        losses_all: dict[str, Tensor] = {}
-        stddev_all: dict[str, Tensor] = {}
+        losses_all: dict[dict[str, Tensor]] = {}
+        stddev_all: dict[dict[str, Tensor]] = {}
 
         # Make list of losses into a tensor. This is individual tensor per rank
         real_loss = torch.tensor(self.loss_model_hist, device=self.device)
         # Gather all tensors from all ranks into a list and stack them into one tensor again
         real_loss = torch.cat(all_gather_vlen(real_loss))
 
-        for stream in self.cf.streams:  # Loop over all streams
-            stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
-            stream_all = torch.stack(stream_hist).to(torch.float64)
-            losses_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
-            stream_hist = [stddev_all[stream.name] for stddev_all in self.stdev_unweighted_hist]
-            stream_all = torch.stack(stream_hist).to(torch.float64)
-            stddev_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
+        for name in self.loss_unweighted_hist.keys():
+            losses_all[name] = {}
+            stddev_all[name] = {}
+            for stream in self.cf.streams:  # Loop over all streams
+                stream_hist = [losses[stream.name] for losses in self.loss_unweighted_hist[name]]
+                stream_all = torch.stack(stream_hist).to(torch.float64)
+                losses_all[name][stream.name] = torch.cat(all_gather_vlen(stream_all))
+                stream_hist = [stddevs[stream.name] for stddevs in self.stdev_unweighted_hist[name]]
+                stream_all = torch.stack(stream_hist).to(torch.float64)
+                stddev_all[name][stream.name] = torch.cat(all_gather_vlen(stream_all))
 
         return real_loss, losses_all, stddev_all
 
@@ -1010,7 +1026,7 @@ class Trainer(TrainerBase):
                     self.perf_mem,
                 )
 
-        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+        self.loss_unweighted_hist, self.loss_model_hist = [], []
 
     def _get_tensor_item(self, tensor):
         """
