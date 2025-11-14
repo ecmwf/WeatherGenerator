@@ -702,16 +702,7 @@ class Model(torch.nn.Module):
             [model_params.q_cells_lens[0].unsqueeze(0)]
             + [model_params.q_cells_lens[1:] for _ in range(batch_size)]
         )
-        # model_params.q_cells_lens [0, 3, 5, 2, 1, 6, 7] 
-        # chunks are of size 3, 3
-        # chunk 1: q_cells_lens_c -> [0, 3, 5, 2]
-        # chunk 2: q_cells_lens_c -> [0, 1, 6, 7]
-        # cell_lens_c.shape[0] = 3
-        # but: q_cells_lens_c = q_cells_lens[: cell_lens_c.shape[0]]
-        # i.e. for chunk 1: q_cells_lens_c -> [0, 3, 5, 2]
-        # for chnk 2: q_cells_lens_c -> [0, 3, 5, 2]
-        
-
+     
         # local assimilation model
         # for block in self.ae_local_blocks:
         #     tokens = checkpoint(block, tokens, cell_lens, use_reentrant=False)
@@ -752,7 +743,7 @@ class Model(torch.nn.Module):
             tokens_c = tokens[l0:l1]
             tokens_global_c = tokens_global[i * clen : i_end]
             cell_lens_c = torch.cat([zero_pad, cell_lens[i * clen : i_end]])
-            q_cells_lens_c = q_cells_lens[: cell_lens_c.shape[0]] # KCT: is this correct, assuming always: [0, 1, 1, 1,...,1]?
+            q_cells_lens_c = q_cells_lens[: cell_lens_c.shape[0]]
 
             # local assimilation model
             tokens_c = self.ae_local_engine(tokens_c, cell_lens_c, use_reentrant=False)
