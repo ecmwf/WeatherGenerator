@@ -278,9 +278,6 @@ class Model(torch.nn.Module):
         # local -> global assimilation engine adapter
         self.ae_local_global_engine = Local2GlobalAssimilationEngine(cf)
 
-        # global assimilation engine for after local-to-global adapter
-        self.ae_global_assimilate_local = GlobalAssimilationEngine(cf, self.num_healpix_cells)
-
         ##############
         # learnable queries
         if cf.ae_local_queries_per_cell:
@@ -784,9 +781,6 @@ class Model(torch.nn.Module):
             tokens_global_unmasked_c = self.ae_local_global_engine(
                 tokens_c, tokens_global_unmasked_c, q_cells_lens_unmasked_c, cell_lens_unmasked_c, use_reentrant=False
             )
-
-            # global assimilation engine and adapter
-            # tokens_global_unmasked_c = self.ae_global_assimilate_local(tokens_global_unmasked_c, use_reentrant=False)
 
             tokens_global_unmasked_all += [tokens_global_unmasked_c]
             tokens_global_masked_all += [tokens_global_masked_c]
