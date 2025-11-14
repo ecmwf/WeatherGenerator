@@ -236,13 +236,14 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
             )
         return tokens_global_c
 
+
 class QueryAggregationEngine(torch.nn.Module):
     name: "QueryAggregationEngine"
 
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
         """
         Initialize the QueryAggregationEngine with the configuration.
-        
+
         This engine is used for aggregating information from all query tokens coming
         from healpix cells, that are not masked.
 

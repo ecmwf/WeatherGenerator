@@ -29,8 +29,8 @@ from weathergen.model.engines import (
     ForecastingEngine,
     GlobalAssimilationEngine,
     Local2GlobalAssimilationEngine,
-    QueryAggregationEngine,
     LocalAssimilationEngine,
+    QueryAggregationEngine,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
@@ -210,9 +210,10 @@ class Model(torch.nn.Module):
 
     ae_adapter: Assimilation engine adapter: Adapter to transform local assimilation engine
         information to the global assimilation engine.
-        
-    ae_aggregation_blocks: Query aggregation engine: after the learnable queries are created per non-masked healpix cell,
-        this engine combines information from all non-masked cells by using dense attention layers.
+
+    ae_aggregation_blocks: Query aggregation engine: after the learnable queries are created per
+        non-masked healpix cell, this engine combines information from all non-masked cells by
+        using dense attention layers.
 
     ae_global_blocks: Global assimilation engine: Transformer network alternating between local and
         global attention based upon global attention density rate.
@@ -317,8 +318,6 @@ class Model(torch.nn.Module):
         ##############
         # global assimilation engine
         self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
-        
-        
 
         ###############
         # forecasting engine
@@ -483,7 +482,9 @@ class Model(torch.nn.Module):
 
         num_params_q_cells = np.prod(self.q_cells.shape) if self.q_cells.requires_grad else 0
         num_params_ae_adapater = get_num_parameters(self.ae_local_global_engine.ae_adapter)
-        num_params_ae_aggregation = get_num_parameters(self.ae_aggregation_engine.ae_aggregation_blocks)
+        num_params_ae_aggregation = get_num_parameters(
+            self.ae_aggregation_engine.ae_aggregation_blocks
+        )
 
         num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
@@ -794,9 +795,12 @@ class Model(torch.nn.Module):
 
         tokens_global_unmasked = torch.cat(tokens_global_unmasked_all)
         tokens_global_masked = torch.cat(tokens_global_masked_all)
-        
-        # query aggregation engine on the query tokens in unmasked cells (applying this here assumes batch_size=1)
-        tokens_global_unmasked = self.ae_aggregation_engine(tokens_global_unmasked, use_reentrant=False)
+
+        # query aggregation engine on the query tokens in unmasked cells
+        # (applying this here assumes batch_size=1)
+        tokens_global_unmasked = self.ae_aggregation_engine(
+            tokens_global_unmasked, use_reentrant=False
+        )
 
         # create mask from cell lens
         mask = cell_lens.to(torch.bool)
