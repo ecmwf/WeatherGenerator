@@ -35,15 +35,11 @@ class TokenizerMasking(Tokenizer):
         self.masker.reset_rng(rng)
         self.rng = rng
 
-        self.mask_tokens = None
-        self.mask_channels = None
-
     def batchify_source(
         self,
         stream_info: dict,
         rdata: IOReaderData,
         time_win: tuple,
-        normalize_coords,  # dataset
     ):
         token_size = stream_info["token_size"]
         stream_id = stream_info["stream_id"]
@@ -77,15 +73,11 @@ class TokenizerMasking(Tokenizer):
             encode_times_source,
         )
 
-        # import code; code.interact( local=locals())
-
         # if source_tokens_lens.sum() > 0:
         #     source_centroids = self.compute_source_centroids(source_tokens_cells)
         # else:
         # TODO: remove completely?
         source_centroids = [torch.tensor([])]
-
-        self.mask_tokens, self.mask_channels = mask_tokens, mask_channels
 
         return (source_tokens_cells, source_tokens_lens, source_centroids)
 
@@ -98,20 +90,18 @@ class TokenizerMasking(Tokenizer):
     ):
         token_size = stream_info["token_size"]
 
-        # target is empty
-        if len(self.mask_tokens) == 0:
-            out = torch.tensor([])
-            return (out, out, out, out, out)
-
         # create tokenization index
         tok = tokenize_spacetime if stream_info.get("tokenize_spacetime", False) else tokenize_space
         idxs_cells, idxs_cells_lens = tok(rdata, token_size, self.hl_source, pad_tokens=False)
 
-        mask_tokens = ~self.mask_tokens
-        # TODO
-        # mask_channels = ~self.mask_channels if self.mask_channels is not None
-        # else self.mask_channels
-        mask_channels = self.mask_channels
+        (mask_tokens, mask_channels) = self.masker.mask_targets_idxs(
+            idxs_cells, idxs_cells_lens, rdata
+        )
+        # mask_tokens = ~self.mask_tokens
+        # # TODO
+        # # mask_channels = ~self.mask_channels if self.mask_channels is not None
+        # # else self.mask_channels
+        # mask_channels = self.mask_channels
 
         data, datetimes, coords, coords_local, coords_per_cell = tokenize_apply_mask_target(
             self.hl_target,

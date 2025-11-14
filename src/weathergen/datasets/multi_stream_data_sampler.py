@@ -26,7 +26,6 @@ from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.icon_dataset import IconDataset
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
-from weathergen.datasets.tokenizer_forecast import TokenizerForecast
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
     compute_idxs_predict,
@@ -224,17 +223,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.healpix_level: int = cf.healpix_level
         self.num_healpix_cells: int = 12 * 4**self.healpix_level
 
-        if cf.training_mode == "forecast":
-            self.tokenizer = TokenizerForecast(cf.healpix_level)
-        elif cf.training_mode == "masking":
-            masker = Masker(cf)
-            self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
-            assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
-            msg = "masked token modeling does not support self.input_window_steps > 1; "
-            msg += "increase window length"
-            assert self.input_window_steps == 1, msg
-        else:
-            assert False, f"Unsupported training mode: {cf.training_mode}"
+        masker = Masker(cf)
+        self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
 
         self.epoch = 0
 
@@ -387,10 +377,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         stream_info,
                         readerdata_to_torch(rdata),
                         (time_win_source.start, time_win_source.end),
-                        stream_ds[0].normalize_coords,
                     )
 
-                    # TODO: rdata only be collected in validation mode
+                    # collect data for stream
                     stream_data.add_source(rdata, ss_lens, ss_cells, ss_centroids)
 
                     # target

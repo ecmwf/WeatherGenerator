@@ -140,20 +140,20 @@ class Masker:
         idxs_cells,
         idxs_cells_lens,
         rdata,
-    ) -> torch.Tensor:
+    ) -> (torch.Tensor, torch.Tensor):
         """
 
         Return:
             torch.Tensor[bool] of length num_tokens that determines masking for each token
         """
 
-        mask_tokens, mask_channels = None, None
+        self.mask_tokens, self.mask_channels = None, None
 
         num_tokens = torch.tensor([len(t) for t in idxs_cells_lens]).sum().item()
 
         # If there are no tokens, return empty lists.
         if num_tokens == 0:
-            return (mask_tokens, mask_channels)
+            return (self.mask_tokens, self.mask_channels)
 
         # Clean strategy selection
         self.current_strategy = self._select_strategy()
@@ -162,24 +162,47 @@ class Masker:
         rate = self._get_sampling_rate()
 
         if self.current_strategy == "random":
-            mask_tokens = self.rng.uniform(0, 1, num_tokens) < rate
+            self.mask_tokens = self.rng.uniform(0, 1, num_tokens) < rate
         elif self.current_strategy == "forecast":
-            mask_tokens = np.zeros(
-                num_tokens,
-            )
+            self.mask_tokens = np.ones(num_tokens, dtype=np.bool)
         elif self.current_strategy == "healpix":
             # TODO: currently only for fixed level
             num_cells = len(idxs_cells_lens)
             mask_cells = self.rng.uniform(0, 1, num_cells) < rate
             # translate cell mask to token mask, replicating using number of tokens per cell
-            mask_tokens = [
+            self.mask_tokens = [
                 (torch.ones(2, dtype=torch.bool) * (1 if m else 0)).to(torch.bool)
                 for idxs_cell, m in zip(idxs_cells_lens, mask_cells, strict=False)
             ]
         else:
             assert False, f"Unsupported masking strategy: {self.current_strategy}"
 
-        return (mask_tokens, mask_channels)
+        return (self.mask_tokens, self.mask_channels)
+
+    def mask_targets_idxs(
+        self,
+        idxs_cells,
+        idxs_cells_lens,
+        rdata,
+    ) -> (torch.Tensor, torch.Tensor):
+        # mask_source_idxs is
+        assert (self.mask_tokens is not None) or (self.mask_tokens is not None)
+
+        # TODO: better handling of if statement
+        if self.current_strategy == "forecast":
+            num_tokens = torch.tensor([len(t) for t in idxs_cells_lens]).sum().item()
+            self.mask_tokens = np.ones(num_tokens, dtype=np.bool)
+        else:
+            # masking strategies: target is complement of source
+            # TODO: ensure/enforce that forecast_offset==0
+            if self.mask_tokens is not None:
+                self.mask_tokens = ~self.mask_tokens
+            if self.mask_channels is not None:
+                self.mask_channels = ~self.mask_channels
+
+        # TODO: self.mask_tokens seems brittle in terms of naming
+
+        return (self.mask_tokens, self.mask_channels)
 
     def mask_source(
         self,
