@@ -67,6 +67,8 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         # create tensor for each stream
         losses_all: dict[str, Tensor] = {loss: 0.0 for loss in self.losses}
 
+        import pdb; pdb.set_trace()
+
         for name, (weight, loss_fn) in self.losses.items():
             loss_value = loss_fn(preds.latent[name], targets[name]).mean()
             loss += weight * loss_value

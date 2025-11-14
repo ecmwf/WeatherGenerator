@@ -115,11 +115,11 @@ training_mode: "student-teacher"
 training_mode_config: {
   "losses" : { 
     LossLatentSSLStudentTeacher: { 
-      "iBOT": {'weight': 0.5, "out_dim": 65536, "student_temp": 0.1,"teacher_temp": 0.1,
+      "iBOT": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
           "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      "DINO": {'weight': 0.5, "out_dim": 65536, "student_temp": 0.1,"teacher_temp": 0.1,
+      "DINO": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
           "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      "JEPA": {'weight': 0.5, "out_dim": 2048} }
+      "JEPA": {'weight': 0.5, "out_dim": 2048, "n_register_tokens": 4} }
   },
   "shared_heads": False,
   "target_and_aux_calc": "EMATeacher",
@@ -136,7 +136,7 @@ masking_rate_sampling: True
 # sample a subset of all target points, useful e.g. to reduce memory requirements (also can specify per-stream)
 sampling_rate_target: 1.0
 # include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "causal" and "combination"
-masking_strategy: "random"
+masking_strategy: "student-teacher"
 # masking_strategy_config is a dictionary of additional parameters for the masking strategy
 # required for "healpix" and "channel" masking strategies
 # "healpix": requires healpix mask level to be specified with `hl_mask`

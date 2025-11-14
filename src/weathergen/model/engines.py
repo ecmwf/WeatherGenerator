@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import dataclasses
+
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
@@ -735,10 +737,11 @@ class TargetPredictionEngine(nn.Module):
 
 
 class LatentPredictionHead(nn.Module):
-    def __init__(self, name, in_dim, out_dim):
+    def __init__(self, name, in_dim, out_dim, class_token: bool):
         super().__init__()
 
         self.name = name
+        self.class_token = class_token
         # For now this is a Linear Layer TBD what this architecture should be
         self.layer = nn.Linear(in_dim, out_dim, bias=False)
 
