@@ -94,8 +94,8 @@ def encode_times_target(times, time_win) -> torch.tensor:
     time_tensor[..., 3] = np.cos(time_tensor[..., 3] / (12.0 * 3600.0) * 2.0 * np.pi)
     time_tensor[..., 4] = np.sin(time_tensor[..., 4] / (12.0 * 3600.0) * 2.0 * np.pi)
 
-    # We add + 0.5 as in ERA5 very often we otherwise get 0 as the first time and to prevent too
-    # many zeros in the input, where we cannot learn anything we add an offset
+    # We add + 0.5 as for datasets with regular time steps we otherwise very often get 0 as the
+    # first time and to prevent too many zeros in the input
     return time_tensor + 0.5
 
 
@@ -106,12 +106,10 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
       hpy_idxs_ord_split : list of per cell indices into thetas,phis,posr3
       thetas : thetas in rad
       phis : phis in rad
-      posr3 : (thetas,phis) as position in R3
     """
     thetas, phis = theta_phi_to_standard_coords(coords)
     # healpix cells for all points
     hpy_idxs = ang2pix(2**hl, thetas, phis, nest=True)
-    posr3 = s2tor3(thetas, phis)
 
     # extract information to split according to cells by first sorting and then finding split idxs
     hpy_idxs_ord = np.argsort(hpy_idxs, **numpy_argsort_args)
@@ -124,7 +122,7 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
     for b, x in zip(np.unique(np.unique(hpy_idxs[hpy_idxs_ord])), hpy_idxs_ord_temp, strict=True):
         hpy_idxs_ord_split[b] = x
 
-    return (hpy_idxs_ord_split, thetas, phis, posr3)
+    return (hpy_idxs_ord_split, thetas, phis)
 
 
 def hpy_splits(
@@ -138,11 +136,10 @@ def hpy_splits(
         idxs_ord : flat list of indices (to data points) per healpix cell
         idxs_ord_lens : lens of lists per cell
         (so that data[idxs_ord].split( idxs_ord_lens) provides per cell data)
-        posr3 : R^3 positions of coords
     """
 
     # list of data points per healpix cell
-    (hpy_idxs_ord_split, thetas, phis, posr3) = hpy_cell_splits(coords, hl)
+    (hpy_idxs_ord_split, thetas, phis) = hpy_cell_splits(coords, hl)
 
     # if token_size is exceeed split based on latitude
     # TODO: split by hierarchically traversing healpix scheme
@@ -161,17 +158,23 @@ def hpy_splits(
     offset = 1 if pad_tokens else 0
     int32 = torch.int32
     idxs_ord = [
-        torch.split(
-            torch.cat((torch.from_numpy(np.take(idxs, ts) + offset), torch.zeros(r, dtype=int32))),
-            token_size,
+        list(
+            torch.split(
+                torch.cat(
+                    (torch.from_numpy(np.take(idxs, ts) + offset), torch.zeros(r, dtype=int32))
+                ),
+                token_size,
+            )
         )
+        if len(idxs) > 0
+        else []
         for idxs, ts, r in zip(hpy_idxs_ord_split, thetas_sorted, rem, strict=True)
     ]
 
     # extract length and flatten nested list
     idxs_ord_lens = [[len(a) for a in aa] for aa in idxs_ord]
 
-    return idxs_ord, idxs_ord_lens, posr3
+    return idxs_ord, idxs_ord_lens
 
 
 def tokenize_space(
@@ -182,12 +185,8 @@ def tokenize_space(
 ):
     """Process one window into tokens"""
 
-    # len(source)==1 would require special case handling that is not worth the effort
-    if len(rdata.data) < 2:
-        return
-
     # idx_ord_lens is length is number of tokens per healpix cell
-    idxs_ord, idxs_ord_lens, _ = hpy_splits(rdata.coords, hl, token_size, pad_tokens)
+    idxs_ord, idxs_ord_lens = hpy_splits(rdata.coords, hl, token_size, pad_tokens)
 
     return idxs_ord, idxs_ord_lens
 
@@ -208,19 +207,16 @@ def tokenize_spacetime(
 
     t_unique = np.unique(rdata.datetimes)
     for _, t in enumerate(t_unique):
+        # data for current time step
         mask = t == rdata.datetimes
         rdata_cur = IOReaderData(
             rdata.coords[mask], rdata.geoinfos[mask], rdata.data[mask], rdata.datetimes[mask]
         )
         idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens)
 
-        idxs_cells = [
-            t + list(tc) if tc_l[0] > 0 else t
-            for t, tc, tc_l in zip(idxs_cells, idxs_cur, idxs_cur_lens, strict=True)
-        ]
-        idxs_cells_lens = [
-            t + tc for t, tc in zip(idxs_cells_lens, idxs_cur_lens, strict=True) if len(tc) > 0
-        ]
+        # collect data for all time steps
+        idxs_cells = [t + tc for t, tc in zip(idxs_cells, idxs_cur, strict=True)]
+        idxs_cells_lens = [t + tc_l for t, tc_l in zip(idxs_cells_lens, idxs_cur_lens, strict=True)]
 
     return idxs_cells, idxs_cells_lens
 
@@ -491,10 +487,8 @@ def get_target_coords_local(
     tcs_ctrs = torch.cat([ref - torch.cat(locs_to_ctr_coords(c, tcs)) for c in nctrs], -1)
     zi = 75
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + (3 * 8))] = tcs_ctrs
-    # a = add_local_vert_coords_ctrs2( vertsmm_rots, nctrs, tcs, a, 99, geoinfo_offset)
 
     # remaining geoinfos (zenith angle etc)
-    # zi=99+3*8;
     zi = 99
     a[..., (geoinfo_offset + zi) :] = target_coords[..., (geoinfo_offset + 2) :]
 

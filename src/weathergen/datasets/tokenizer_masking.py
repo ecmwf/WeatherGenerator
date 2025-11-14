@@ -77,6 +77,8 @@ class TokenizerMasking(Tokenizer):
             encode_times_source,
         )
 
+        # import code; code.interact( local=locals())
+
         # if source_tokens_lens.sum() > 0:
         #     source_centroids = self.compute_source_centroids(source_tokens_cells)
         # else:
