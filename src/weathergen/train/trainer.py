@@ -692,7 +692,7 @@ class Trainer(TrainerBase):
                         )
 
                     targets = {"physical": batch[0]}
-                    streams_data: list[list[StreamData]] = batch[0]
+
                     # compute loss
                     loss_values = self.loss_calculator_val.compute_loss(
                         preds=output,
@@ -701,6 +701,7 @@ class Trainer(TrainerBase):
                     # log output
                     if bidx < cf.log_validation:
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
+                        streams_data: list[list[StreamData]] = batch[0]
                         (
                             preds_all,
                             targets_all,
