@@ -8,7 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 ICONART :
-  type : iconart
+  type : icon
   filenames : ['icon_art_3d_DOM01_subset.zarr']
   source_channels : ['U_h020', 'V_h020',]
   target_channels : ['U_h020', 'V_h020',]
