@@ -1,6 +1,6 @@
 import json
 import logging
-import os
+from pathlib import Path
 
 import plotly.express as px
 import polars as pl
@@ -10,20 +10,20 @@ _logger = logging.getLogger(__name__)
 # List all the json files in ../stac/json:
 
 # Find the current absolute location of this file
-current_file_path = os.path.abspath(__file__)
+current_file_path = Path(__file__)
 _logger.info(f"Current file path: {current_file_path}")
 # Get the directory:
-current_dir = os.path.dirname(current_file_path)
+current_dir = current_file_path.parent
 
-stac_dir = os.path.abspath(os.path.join(current_dir, "../../stac/jsons"))
+stac_dir = (current_dir / "../../stac/jsons").resolve()
 _logger.info(f"STAC JSON directory: {stac_dir}")
 
-json_files = sorted([f for f in os.listdir(stac_dir) if f.endswith(".json")])
+json_files = sorted([f for f in stac_dir.iterdir() if f.suffix == ".json"])
 
 
 stats = []
 for json_file in json_files:
-    with open(os.path.join(stac_dir, json_file)) as f:
+    with open(json_file) as f:
         data = json.load(f)
         d_id = data.get("id")
         if "properties" not in data:

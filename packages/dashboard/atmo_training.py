@@ -6,7 +6,13 @@ import polars as pl
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from weathergen.dashboard.metrics import all_runs, latest_runs, setup_mflow
+from weathergen.dashboard.metrics import (
+    all_runs,
+    latest_runs,
+    setup_mflow,
+    stage_is_train,
+    stage_is_val,
+)
 
 _logger = logging.getLogger("atmo_training")
 
@@ -71,12 +77,11 @@ def make_plot(df):
 
 st.markdown("## Train")
 
-st.plotly_chart(make_plot(runs.filter(pl.col("tags.stage") == "train")))
+st.plotly_chart(make_plot(runs.filter(stage_is_train)))
 
 st.markdown("# Validation")
 
-st.plotly_chart(make_plot(runs.filter(pl.col("tags.stage") == "val")))
-
+st.plotly_chart(make_plot(runs.filter(stage_is_val)))
 
 st.markdown("""
 # Scaling
@@ -87,7 +92,7 @@ Hypothesis: loss ~ O(num_samples ^ {-alpha})
 The deep blue dots are the most recent runs, the light blue are the eldest.
 """)
 
-train_runs = runs.filter(pl.col("tags.stage") == "train")
+train_runs = runs.filter(stage_is_train)
 min_end_date = train_runs["start_time"].cast(pl.Float64).min()
 max_end_date = train_runs["start_time"].cast(pl.Float64).max()
 train_runs = train_runs.with_columns(

@@ -5,7 +5,7 @@ import polars as pl
 import streamlit as st
 from mlflow.client import MlflowClient
 
-from weathergen.dashboard.metrics import ST_TTL_SEC, latest_runs, setup_mflow
+from weathergen.dashboard.metrics import ST_TTL_SEC, latest_runs, setup_mflow, stage_is_eval
 
 _logger = logging.getLogger(__name__)
 
@@ -13,7 +13,7 @@ _logger.info("Setting up MLFlow")
 client: MlflowClient = setup_mflow()
 
 important_scores = [
-    ("score.global.rmse.ERA5.2t", "deg K"),
+    ("metrics.score.global.rmse.ERA5.2t", "deg K"),
 ]
 
 st.markdown("""
@@ -29,16 +29,18 @@ The evaluation scores logged during the main model training runs.
 def get_runs_with_scores() -> pl.DataFrame:
     """
     The runs that have evaluation scores logged.
+    - Only keep the eval stage runs
+    - Only keep the metrics.score.* metrics
     """
     # Fully encapsulated logic to allow caching
     runs = latest_runs()
-    eval_runs = runs.filter(pl.col("tags.stage") == "eval")
-    # In the metrics, only keep the score ones
+    eval_runs = runs.filter(stage_is_eval)
+    # Keep all non-metrics columns, plus metrics.score.* columns
+    # Do not keep gradient metrics or other metrics.
     target_cols = [
         col
         for col in eval_runs.columns
-        if ((not col.startswith("metrics")) and (not col.startswith("metrics.grad_norm")))
-        or (col.startswith("metrics.score."))
+        if (col.startswith("metrics.score.") or not col.startswith("metrics"))
     ]
     eval_runs = eval_runs.select(target_cols)
     return eval_runs
@@ -55,18 +57,17 @@ info_cols = [
 
 
 @st.cache_data(ttl=ST_TTL_SEC, max_entries=20)
-def get_score_step_48h(score: str) -> pl.DataFrame:
+def get_score_step_48h(score_col: str) -> pl.DataFrame:
     """
     Given a score name, return this score at the step corresponding to 48h.
     """
     # Caching since it makes multiple MLFlow calls
     eval_runs = get_runs_with_scores()
-    score_col = f"metrics.{score}"
-    step_48h = 16  # Each step = 3 hours => look for step = 16*3 = 48 hours
+    step_48h = 8  # Each step = 6 hours => look for step = 8*6 = 48 hours
     score_data = (
         eval_runs.select(
             [
-                pl.col("run_id"),
+                pl.col("run_id"),  # The MLFlow run ID
                 pl.col("start_time"),
                 pl.col(score_col),
             ]
@@ -80,10 +81,10 @@ def get_score_step_48h(score: str) -> pl.DataFrame:
     # Iterate over the runs to get the metric at step 48h
     scores_dt: list[float | None] = []
     for row in score_data.iter_rows(named=True):
-        run_id = row["run_id"]
-        _logger.info(f"Fetching metric history for run_id={run_id}, score={score}")
+        mlflow_run_id = row["run_id"]
+        _logger.info(f"Fetching metric history for run_id={mlflow_run_id}, score={score}")
         data = client.get_metric_history(
-            run_id=run_id,
+            run_id=mlflow_run_id,
             key=score,
         )
         # Find the value at step 48h
@@ -100,8 +101,9 @@ def get_score_step_48h(score: str) -> pl.DataFrame:
 
 
 # The specific score of interest:
-for score, unit in important_scores:
-    score_data_48h = get_score_step_48h(score)
+for score_col, unit in important_scores:
+    score_data_48h = get_score_step_48h(score_col)
+    score = score_col.replace("metrics.", "")
 
     st.markdown(f"""
     ## {score} at 48h

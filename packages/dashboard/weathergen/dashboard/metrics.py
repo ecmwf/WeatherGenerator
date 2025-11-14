@@ -20,6 +20,12 @@ project = "WeatherGenerator"
 experiment_id = "384213844828345"
 all_stages = ["train", "val", "eval"]
 
+# Polars utilities
+stage_is_eval = pl.col("tags.stage") == "eval"
+stage_is_train = pl.col("tags.stage") == "train"
+stage_is_val = pl.col("tags.stage") == "val"
+
+
 # Cache TTL in seconds
 ST_TTL_SEC = 3600
 
@@ -33,15 +39,6 @@ class MlFlowUpload:
 @st.cache_resource(ttl=ST_TTL_SEC)
 def setup_mflow() -> MlflowClient:
     return setup_mlflow_utils(private_config=None)
-    # # os.environ["DATABRICKS_HOST"] = None
-    # # os.environ["DATABRICKS_TOKEN"] = None
-    # mlflow.set_tracking_uri(MlFlowUpload.tracking_uri)
-    # mlflow.set_registry_uri(MlFlowUpload.registry_uri)
-    # mlflow_client = mlflow.client.MlflowClient(
-    #     tracking_uri=MlFlowUpload.tracking_uri, registry_uri=MlFlowUpload.registry_uri
-    # )
-    # _logger.info("MLFlow tracking URI: %s", mlflow.get_tracking_uri())
-    # return mlflow_client
 
 
 @st.cache_data(ttl=ST_TTL_SEC, max_entries=2)
