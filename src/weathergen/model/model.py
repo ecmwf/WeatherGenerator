@@ -702,7 +702,7 @@ class Model(torch.nn.Module):
             [model_params.q_cells_lens[0].unsqueeze(0)]
             + [model_params.q_cells_lens[1:] for _ in range(batch_size)]
         )
-     
+
         # local assimilation model
         # for block in self.ae_local_blocks:
         #     tokens = checkpoint(block, tokens, cell_lens, use_reentrant=False)
@@ -755,22 +755,26 @@ class Model(torch.nn.Module):
                 posteriors += [posteriors_c]
             else:
                 tokens_c, posteriors = tokens_c, 0.0
-            
+
             # create mask for global tokens, without first element (used for padding)
             mask_c = cell_lens_c[1:].to(torch.bool)
             tokens_global_unmasked_c = tokens_global_c[mask_c]
             tokens_global_masked_c = tokens_global_c[~mask_c]
-            q_cells_lens_unmasked_c = torch.cat([zero_pad, q_cells_lens_c[1:][mask_c] ])
-            cell_lens_unmasked_c = torch.cat([zero_pad, cell_lens_c[1:][mask_c] ])
+            q_cells_lens_unmasked_c = torch.cat([zero_pad, q_cells_lens_c[1:][mask_c]])
+            cell_lens_unmasked_c = torch.cat([zero_pad, cell_lens_c[1:][mask_c]])
 
             if l0 == l1 or tokens_c.shape[0] == 0:
                 tokens_global_unmasked_all += [tokens_global_unmasked_c]
                 tokens_global_masked_all += [tokens_global_masked_c]
                 continue
-            
+
             # local to global adapter engine
             tokens_global_unmasked_c = self.ae_local_global_engine(
-                tokens_c, tokens_global_unmasked_c, q_cells_lens_unmasked_c, cell_lens_unmasked_c, use_reentrant=False
+                tokens_c,
+                tokens_global_unmasked_c,
+                q_cells_lens_unmasked_c,
+                cell_lens_unmasked_c,
+                use_reentrant=False,
             )
 
             tokens_global_unmasked_all += [tokens_global_unmasked_c]
@@ -781,11 +785,11 @@ class Model(torch.nn.Module):
 
         # create mask from cell lens
         mask = cell_lens.to(torch.bool)
-        
+
         # create empty tensor to fill with (un)masked tokens
-        tokens_global_all = torch.empty((mask.size(0), s[-2], s[-1]),
-                                        dtype=tokens_global_unmasked.dtype,
-                                        device=tokens.device)
+        tokens_global_all = torch.empty(
+            (mask.size(0), s[-2], s[-1]), dtype=tokens_global_unmasked.dtype, device=tokens.device
+        )
 
         # fill empty tensor using mask for positions of (un)masked tokens
         tokens_global_all[mask] = tokens_global_unmasked
