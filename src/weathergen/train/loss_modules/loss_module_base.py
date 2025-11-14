@@ -21,7 +21,7 @@ from weathergen.utils.train_logger import Stage
 @dataclasses.dataclass
 class LossValues:
     """
-    A dataclass to encapsulate the various loss components computed by the LossCalculator.
+    A dataclass to encapsulate the loss components returned by each loss module.
 
     This provides a structured way to return the primary loss used for optimization,
     along with detailed per-stream/per-channel/per-loss-function losses for logging,
