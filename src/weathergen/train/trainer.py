@@ -89,6 +89,8 @@ class Trainer(TrainerBase):
         # world_size gets overwritten by current setting during init_ddp()
         self.world_size_original = cf.get("world_size", None)
 
+        self.log_grad_norms = cf.get("log_grad_norms", False)
+
         # create output directory
         if is_root():
             config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
@@ -538,6 +540,7 @@ class Trainer(TrainerBase):
 
         # Unweighted loss, real weighted loss, std for losses that need it
         self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+        self.last_grad_norm = 0.0
 
         # training loop
         self.t_start = time.time()
@@ -569,7 +572,13 @@ class Trainer(TrainerBase):
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=cf.grad_clip)
+            total_norm = torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=cf.grad_clip
+            )
+
+            # log gradient norms
+            if bidx % log_interval == 0 and self.log_grad_norms:
+                self._log_instant_grad_norms(TRAIN, total_norm)
 
             # optimizer step
             self.grad_scaler.step(self.optimizer)
@@ -914,6 +923,31 @@ class Trainer(TrainerBase):
 
         self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
+    def _log_instant_grad_norms(self, stage: Stage, total_norm):
+        """
+        Log instantaneous grad norms, we do not average because of the cost and because we want to
+        measure the actual values
+
+        TODO test DDP case
+        """
+        self.last_grad_norm = (
+            total_norm.full_tensor().item() if self.cf.world_size > 1 else total_norm.item()
+        )
+        grad_norms = {"total_grad_norm": self.last_grad_norm}
+        for name, param in self.model.named_parameters():
+            if param.grad is not None:
+                # grad_norms["grad_norm_" + name] = param.grad.norm().item()
+                grad_norms["grad_norm_" + name] = (
+                    param.grad.norm().full_tensor().item()
+                    if self.cf.world_size > 1
+                    else param.grad.norm().item()
+                )
+
+        # print(".item():", param.grad.norm().item())
+        # print(".full_tensor().item()", param.grad.norm().full_tensor().item())
+        if is_root():
+            self.train_logger.log_metrics(TRAIN, grad_norms)
+
     def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
         if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
@@ -935,7 +969,7 @@ class Trainer(TrainerBase):
                     # samples per sec
                     dt = time.time() - self.t_start
                     pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
-                    pstr += "(lr={:.2E}, s/sec={:.3f})"
+                    pstr += "(lr={:.2E}, gradient norm={:.3f}, s/sec={:.3f})"
                     len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
                     logger.info(
                         pstr.format(
@@ -945,6 +979,7 @@ class Trainer(TrainerBase):
                             self.cf.istep,
                             avg_loss.nanmean().item(),
                             self.lr_scheduler.get_lr(),
+                            self.last_grad_norm,
                             (self.print_freq * self.cf.batch_size_per_gpu) / dt,
                         ),
                     )

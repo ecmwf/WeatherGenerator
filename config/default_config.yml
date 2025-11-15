@@ -37,7 +37,7 @@ ae_global_trailing_layer_norm: False
 
 decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
 pred_adapter_kv: False
-pred_self_attention: True
+pred_self_attention: False
 pred_dyadic_dims: False
 pred_mlp_adaln: True
 
@@ -99,7 +99,7 @@ masking_rate: 0.6
 masking_rate_sampling: True
 # sample a subset of all target points, useful e.g. to reduce memory requirements (also can specify per-stream)
 sampling_rate_target: 1.0
-# include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "causal" and "combination"
+# include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "combination"
 masking_strategy: "random"
 # masking_strategy_config is a dictionary of additional parameters for the masking strategy
 # required for "healpix" and "channel" masking strategies
@@ -131,6 +131,7 @@ grad_clip: 1.0
 weight_decay: 0.1
 norm_type: "LayerNorm"
 nn_module: "te"
+log_grad_norms: False
 
 start_date: 197901010000
 end_date: 202012310000
