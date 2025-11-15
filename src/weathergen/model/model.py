@@ -38,13 +38,12 @@ from weathergen.model.engines import (
     TargetPredictionEngineClassic,
 )
 from weathergen.model.layers import MLP, NamedLinear
-from weathergen.model.parametrised_prob_dist import LatentInterpolator, DiagonalGaussianDistribution
+from weathergen.model.parametrised_prob_dist import DiagonalGaussianDistribution, LatentInterpolator
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
 
 logger = logging.getLogger(__name__)
-
 
 
 @dataclasses.dataclass
@@ -679,14 +678,14 @@ class Model(torch.nn.Module):
             posteriors.mode()
             if isinstance(posteriors, DiagonalGaussianDistribution)
             else posteriors
-        ).unsqueeze(0) # TODO have a real batch dimension in the model
+        ).unsqueeze(0)  # TODO have a real batch dimension in the model
 
         z = self.norm(z_pre_norm)
         latent_state = LatentState(
             class_token=z[:, : self.class_token_idx],
             register_tokens=z[:, self.class_token_idx : self.register_token_idx],
             patch_tokens=z[:, self.register_token_idx :],
-            z_pre_norm = z_pre_norm,
+            z_pre_norm=z_pre_norm,
         )
         latents["latent_state_pre_heads"] = latent_state
         for name, head in self.latent_heads.items():

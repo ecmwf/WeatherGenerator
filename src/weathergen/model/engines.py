@@ -735,6 +735,7 @@ class TargetPredictionEngine(nn.Module):
         )
         return output
 
+
 @dataclasses.dataclass
 class LatentState:
     """

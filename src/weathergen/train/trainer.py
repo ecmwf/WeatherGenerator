@@ -8,8 +8,8 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-import itertools
 import dataclasses
+import itertools
 import logging
 import re
 import time
@@ -36,7 +36,7 @@ import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.datasets.stream_data import StreamData
-from weathergen.datasets.views import ViewMetadata, ModelBatch
+from weathergen.datasets.views import ModelBatch, ViewMetadata
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -641,7 +641,7 @@ class Trainer(TrainerBase):
             forecast_steps = batch[3]
             batch = self.batch_to_device(batch)
             batch = ModelBatch(
-                model_inputs=[batch,batch],
+                model_inputs=[batch, batch],
                 targets=[batch],
                 view_metadata=[
                     ViewMetadata(
@@ -650,23 +650,26 @@ class Trainer(TrainerBase):
                         strategy="random",
                         healpix_level=None,
                         rate=None,
-                        parent_view_id=None),
+                        parent_view_id=None,
+                    ),
                     ViewMetadata(
                         view_id="student_local_0",
                         keep_mask=None,
                         strategy="masking",
                         healpix_level=None,
                         rate=0.5,
-                        parent_view_id="teacher_global"),
+                        parent_view_id="teacher_global",
+                    ),
                     ViewMetadata(
                         view_id="student_local_1",
                         keep_mask=None,
                         strategy="masking",
                         healpix_level=None,
                         rate=0.5,
-                        parent_view_id="teacher_global"),
+                        parent_view_id="teacher_global",
+                    ),
                 ],
-                batch_info=None
+                batch_info=None,
             )
             import pdb
 
@@ -680,27 +683,27 @@ class Trainer(TrainerBase):
             ):
                 outputs = []
                 for view in batch.model_inputs:
-                    outputs.append(self.model(
-                        self.model_params, view, cf.forecast_offset, forecast_steps
-                    ))
-                
+                    outputs.append(
+                        self.model(self.model_params, view, cf.forecast_offset, forecast_steps)
+                    )
+
                 targets_and_auxs = []
                 for view in batch.targets:
-                    targets_and_auxs.append(self.target_and_aux_calculator.compute(
-                        self.cf.istep,
-                        view,
-                        self.model_params,
-                        self.model,
-                        cf.forecast_offset,
-                        forecast_steps,
-                    ))
-                targets, aux = zip(*targets_and_auxs)
+                    targets_and_auxs.append(
+                        self.target_and_aux_calculator.compute(
+                            self.cf.istep,
+                            view,
+                            self.model_params,
+                            self.model,
+                            cf.forecast_offset,
+                            forecast_steps,
+                        )
+                    )
+                targets, aux = zip(*targets_and_auxs, strict=False)
             loss_values = self.loss_calculator.compute_loss(
-                preds=outputs,
-                targets=targets,
-                view_metadata=batch.view_metadata
+                preds=outputs, targets=targets, view_metadata=batch.view_metadata
             )
-            # TODO re-enable this, need to think on how to make it compatible with 
+            # TODO re-enable this, need to think on how to make it compatible with
             # student-teacher training
             # if cf.latent_noise_kl_weight > 0.0:
             #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])

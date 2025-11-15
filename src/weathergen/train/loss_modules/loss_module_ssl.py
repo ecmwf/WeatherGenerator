@@ -11,14 +11,13 @@
 
 import logging
 
-from omegaconf import DictConfig
-
-import torch.nn.functional as F
 import torch
+import torch.nn.functional as F
+from omegaconf import DictConfig
 from torch import Tensor
 
-from weathergen.datasets.views import ViewMetadata
 import weathergen.train.loss_modules.loss as loss_fns
+from weathergen.datasets.views import ViewMetadata
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.utils.train_logger import Stage
 
@@ -98,12 +97,12 @@ def get_loss_function_ssl(name):
 
 
 def gather_preds_for_loss(name, preds, view_metadata):
-    if name == "iBOT" or  name == "JEPA":
+    if name == "iBOT" or name == "JEPA":
         return {
             "stident_patches_masked": torch.stack(
                 [
                     p.latent[name]
-                    for p, info in zip(preds, view_metadata)
+                    for p, info in zip(preds, view_metadata, strict=False)
                     if info.strategy == "masking"
                 ],
                 dim=0,
@@ -117,7 +116,7 @@ def gather_preds_for_loss(name, preds, view_metadata):
         return torch.stack(
             [
                 p.latent[name]
-                for p, info in zip(preds, view_metadata)
+                for p, info in zip(preds, view_metadata, strict=False)
                 if info.strategy == "cropping"
             ],
             dim=0,
@@ -129,10 +128,10 @@ def gather_preds_for_loss(name, preds, view_metadata):
 
 
 def gather_targets_for_loss(name, targets, view_metadata):
-    if name == "iBOT" or name == "JEPA":
-        return torch.stack([p[name] for p, info in zip(targets, view_metadata)], dim=0)
-    elif name == "DINO":
-        return torch.stack([p[name] for p, info in zip(targets, view_metadata)], dim=0)
+    if name == "iBOT" or name == "JEPA" or name == "DINO":
+        return torch.stack(
+            [p[name] for p, info in zip(targets, view_metadata, strict=False)], dim=0
+        )
     else:
         raise NotImplementedError(
             f"{name} is not an implemented loss for the LossLatentSSLStudentTeacher"

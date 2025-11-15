@@ -13,7 +13,6 @@ import logging
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from omegaconf import DictConfig
 from torch import Tensor
 

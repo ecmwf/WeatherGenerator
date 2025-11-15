@@ -60,7 +60,6 @@ class EMATeacher(TargetAndAuxModuleBase):
             module.to(device)
 
 
-
 def get_target_postprocessing(target_losses: list[str], **kwargs):
     return_dict = {}
     for loss_name, conf in target_losses.items():
