@@ -31,7 +31,7 @@ from weathergen.model.engines import (
     ForecastingEngine,
     GlobalAssimilationEngine,
     LatentPredictionHead,
-    LatentHeadOutput,
+    LatentState,
     Local2GlobalAssimilationEngine,
     LocalAssimilationEngine,
     TargetPredictionEngine,
@@ -46,16 +46,6 @@ from weathergen.utils.utils import get_dtype
 logger = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass
-class LatentState:
-    """
-    A dataclass to encapsulate the output of latent heads.
-    """
-
-    class_token: torch.Tensor
-    register_tokens: torch.Tensor
-    patch_tokens: torch.Tensor
-
 
 @dataclasses.dataclass
 class ModelOutput:
@@ -64,7 +54,7 @@ class ModelOutput:
     """
 
     physical: dict[str, torch.Tensor]
-    latent: dict[str, torch.Tensor | LatentHeadOutput | DiagonalGaussianDistribution]
+    latent: dict[str, torch.Tensor | LatentState | DiagonalGaussianDistribution]
 
 
 class ModelParams(torch.nn.Module):
@@ -481,22 +471,41 @@ class Model(torch.nn.Module):
         shared_heads = cf.get("shared_heads", False)
         self.latent_heads = nn.ModuleDict()
         self.norm = nn.LayerNorm(cf.ae_local_dim_embed)
-        if ("iBOT" in target_losses.keys() and "DINO" in target_losses.keys()) and shared_heads:
-            assert False, "Not yet implemented and not a priority"
-            loss_conf = target_losses["DINO"]
-            self.latent_heads["iBOT-and-DINO-head"] = LatentPredictionHead(
-                "iBOT-and-DINO-head",
-                cf.ae_global_dim_embed,
-                loss_conf["out_dim"],
-                class_token=True,
-                n_register_tokens=loss_conf["n_register_tokens"],
-            )
-        elif (
-            "JEPA" in target_losses.keys()
-            or "iBOT" in target_losses.keys()
-            or "DINO" in target_losses.keys()
-        ):
-            for loss, loss_conf in target_losses.items():
+        # if ("iBOT" in target_losses.keys() and "DINO" in target_losses.keys()) and shared_heads:
+        #     assert False, "Not yet implemented and not a priority"
+        #     loss_conf = target_losses["DINO"]
+        #     self.latent_heads["iBOT-and-DINO-head"] = LatentPredictionHead(
+        #         "iBOT-and-DINO-head",
+        #         cf.ae_global_dim_embed,
+        #         loss_conf["out_dim"],
+        #         class_token=True,
+        #         n_register_tokens=loss_conf["n_register_tokens"],
+        #     )
+        # elif (
+        #     "JEPA" in target_losses.keys()
+        #     or "iBOT" in target_losses.keys()
+        #     or "DINO" in target_losses.keys()
+        # ):
+        #     for loss, loss_conf in target_losses.items():
+        #         self.latent_heads[loss] = LatentPredictionHead(
+        #             f"{loss}-head",
+        #             cf.ae_local_dim_embed,
+        #             loss_conf["out_dim"],
+        #             class_token=loss_conf["class_token"],
+        #         )
+        # TODO make these values configurable
+        # TODO make the model indeed have 1+ register_tokens + healpix cell tokens
+        self.class_token_idx = 1
+        self.register_token_idx = 3
+        for loss, loss_conf in target_losses.items():
+            if loss == "iBOT" or loss == "JEPA":
+                self.latent_heads[loss] = LatentPredictionHead(
+                    f"{loss}-head",
+                    cf.ae_local_dim_embed,
+                    loss_conf["out_dim"],
+                    class_token=False,
+                )
+            elif loss == "DINO":
                 self.latent_heads[loss] = LatentPredictionHead(
                     f"{loss}-head",
                     cf.ae_local_dim_embed,
@@ -670,7 +679,7 @@ class Model(torch.nn.Module):
             posteriors.mode()
             if isinstance(posteriors, DiagonalGaussianDistribution)
             else posteriors
-        )
+        ).unsqueeze(0) # TODO have a real batch dimension in the model
 
         z = self.norm(z_pre_norm)
         latent_state = LatentState(
@@ -681,8 +690,7 @@ class Model(torch.nn.Module):
         )
         latents["latent_state_pre_heads"] = latent_state
         for name, head in self.latent_heads.items():
-            head_input = latent_state.class_token if head.class_token else latent_state.patch_tokens
-            latents[name] = head(head_input)
+            latents[name] = head(latent_state)
 
         return ModelOutput(physical=preds_all, latent=latents)
 

@@ -735,6 +735,17 @@ class TargetPredictionEngine(nn.Module):
         )
         return output
 
+@dataclasses.dataclass
+class LatentState:
+    """
+    A dataclass to encapsulate the output of latent heads.
+    """
+
+    class_token: torch.Tensor
+    register_tokens: torch.Tensor
+    patch_tokens: torch.Tensor
+    z_pre_norm: torch.Tensor
+
 
 class LatentPredictionHead(nn.Module):
     def __init__(self, name, in_dim, out_dim, class_token: bool):
@@ -745,5 +756,8 @@ class LatentPredictionHead(nn.Module):
         # For now this is a Linear Layer TBD what this architecture should be
         self.layer = nn.Linear(in_dim, out_dim, bias=False)
 
-    def forward(self, x):
-        return self.layer(x)
+    def forward(self, x: LatentState):
+        if self.class_token:
+            return self.layer(x.class_token)
+        else:
+            return self.layer(x.patch_tokens)

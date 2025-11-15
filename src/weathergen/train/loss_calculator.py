@@ -78,11 +78,14 @@ class LossCalculator:
         self,
         preds: dict,
         targets: dict,
+        view_metadata,
     ):
         loss_terms = {}
         loss = torch.tensor(0.0, requires_grad=True)
         for weight, calculator in self.loss_calculators:
-            loss_terms[calculator.name] = calculator.compute_loss(preds=preds, targets=targets)
+            loss_terms[calculator.name] = calculator.compute_loss(
+                preds=preds, targets=targets, view_metadata=view_metadata
+            )
             loss = loss + weight * loss_terms[calculator.name].loss
 
         return loss, LossTerms(loss_terms=loss_terms)

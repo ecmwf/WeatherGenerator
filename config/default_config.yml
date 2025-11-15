@@ -136,7 +136,7 @@ masking_rate_sampling: True
 # sample a subset of all target points, useful e.g. to reduce memory requirements (also can specify per-stream)
 sampling_rate_target: 1.0
 # include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "causal" and "combination"
-masking_strategy: "student-teacher"
+masking_strategy: "random"
 # masking_strategy_config is a dictionary of additional parameters for the masking strategy
 # required for "healpix" and "channel" masking strategies
 # "healpix": requires healpix mask level to be specified with `hl_mask`
