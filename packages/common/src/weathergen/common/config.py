@@ -61,7 +61,7 @@ def save(config: Config, mini_epoch: int | None):
     dirname = path_models / config.run_id
     dirname.mkdir(exist_ok=True, parents=True)
 
-    fname = _get_model_config_file_name(path_models, config.run_id, mini_epoch)
+    fname = _get_model_config_file_write_name(path_models, config.run_id, mini_epoch)
 
     json_str = json.dumps(OmegaConf.to_container(config))
     with fname.open("w") as f:
@@ -84,7 +84,7 @@ def load_model_config(run_id: str, mini_epoch: int | None, model_path: str | Non
                 config=pconf, attribute_name="model_path", fallback="models"
             )
         path = Path(model_path)
-        fname = _get_model_config_file_name(path, run_id, mini_epoch)
+        fname = _get_model_config_file_read_name(path, run_id, mini_epoch)
         assert fname.exists(), (
             "The fallback path to the model does not exist. Please provide a `model_path`.",
             fname,
@@ -100,7 +100,18 @@ def load_model_config(run_id: str, mini_epoch: int | None, model_path: str | Non
     return _apply_fixes(config)
 
 
-def _get_model_config_file_name(path: Path, run_id: str, mini_epoch: int | None):
+def _get_model_config_file_write_name(path: Path, run_id: str, mini_epoch: int | None):
+    if mini_epoch is None:
+        mini_epoch_str = ""
+    elif mini_epoch == -1:
+        mini_epoch_str = "_latest"
+    else:
+        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
+
+    return path / run_id / f"model_{run_id}{mini_epoch_str}.json"
+
+
+def _get_model_config_file_read_name(path: Path, run_id: str, mini_epoch: int | None):
     if mini_epoch is None:
         mini_epoch_str = ""
     elif mini_epoch == -1:
