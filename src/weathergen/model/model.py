@@ -548,17 +548,6 @@ class Model(torch.nn.Module):
         return new_params
 
     #########################################
-    def forward_jac(self, *args):
-        sources = args[:-1]
-        sources_lens = args[-1]
-        # no-op when satisfied but needed for Jacobian
-        sources_lens = sources_lens.to(torch.int64).cpu()
-
-        preds_all = self.forward(sources, sources_lens)
-
-        return tuple(preds_all[0])
-
-    #########################################
     def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
         """Performs the forward pass of the model to generate forecasts
 
