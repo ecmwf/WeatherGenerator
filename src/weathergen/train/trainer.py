@@ -34,6 +34,7 @@ from torch.distributed.tensor import DTensor, distribute_tensor
 import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
+from weathergen.datasets.stream_data import StreamData
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -695,11 +696,12 @@ class Trainer(TrainerBase):
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
 
+                    streams_data: list[list[StreamData]] = batch[0]
                     # compute loss and log output
                     if bidx < cf.log_validation:
                         loss_values = self.loss_calculator_val.compute_loss(
                             preds=preds,
-                            streams_data=batch[0],
+                            streams_data=streams_data,
                         )
 
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
@@ -713,9 +715,11 @@ class Trainer(TrainerBase):
                             preds=preds,
                             forecast_offset=cf.forecast_offset,
                             forecast_steps=cf.forecast_steps,
-                            streams_data=batch[0],
+                            streams_data=streams_data,
                         )
-                        sources = [[item.source_raw for item in b] for b in batch[0]]
+                        sources = [[item.source_raw for item in stream] for stream in streams_data]
+                        # sample idx should be the same across streams => select first
+                        sample_idxs = [item.sample_idx for item in streams_data[0]]
                         write_output(
                             self.cf,
                             epoch,
@@ -726,12 +730,13 @@ class Trainer(TrainerBase):
                             targets_coords_all,
                             targets_times_all,
                             targets_lens,
+                            sample_idxs,
                         )
 
                     else:
                         loss_values = self.loss_calculator_val.compute_loss(
                             preds=preds,
-                            streams_data=batch[0],
+                            streams_data=streams_data,
                         )
 
                     self.loss_unweighted_hist += [loss_values.losses_all]

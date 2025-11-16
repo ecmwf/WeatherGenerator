@@ -123,8 +123,60 @@
             "Model.embed_cells",
             "Model.source_tokens",
             "Model.assimilate_local",
+            "Model.assimilate_global",
             "Model.forecast",
             "Model.predict"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
+        "color": "#C27BA0",
+        "module": "weathergen.model.attention",
+        "functions": [
+            "MultiSelfAttentionHeadVarlen.__init__",
+            "MultiSelfAttentionHeadVarlen.forward",
+            "MultiSelfAttentionHeadVarlenFlex.__init__",
+            "MultiSelfAttentionHeadVarlenFlex.forward",
+            "MultiSelfAttentionHeadLocal.__init__",
+            "MultiSelfAttentionHeadLocal.forward",
+            "MultiCrossAttentionHeadVarlen.__init__",
+            "MultiCrossAttentionHeadVarlen.forward",
+            "MultiCrossAttentionHeadVarlenSlicedQ.__init__",
+            "MultiCrossAttentionHeadVarlenSlicedQ.forward",
+            "MultiSelfAttentionHead.__init__",
+            "MultiSelfAttentionHead.forward",    
+            "MultiCrossAttentionHead.__init__",
+            "MultiCrossAttentionHead.forward"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
+        "color": "#83F5BF",
+        "module": "weathergen.model.layers",
+        "functions": [
+            "NamedLinear.forward",
+            "MLP.__init__",
+            "MLP.forward"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
+        "color": "#50CDF3",
+        "module": "weathergen.model.norms",
+        "functions": [
+            "RMSNorm.forward",
+            "RMSNorm.__init__",
+            "RMSNorm._norm",
+            "AdaLayerNorm.forward",
+            "AdaLayerNorm.__init__",
+            "SwiGLU.forward",
+            "SwiGLU.__init__",
+            "modulate",
+            "AdaLayerNormLayer.forward",
+            "AdaLayerNormLayer.__init__",
+            "AdaLayerNormLayer.initialise_weights",
+            "SaturateEncodings.forward",
+            "SaturateEncodings.__init__"            
         ]
     },
     {
@@ -162,6 +214,36 @@
             "StreamEmbedLinear.__init__",
             "StreamEmbedLinear.forward"
             
+        ]
+    },
+    {
+        "domain": "flash_attention",
+        "color": "ffff00",
+        "module": "flash_attn",
+        "functions": [
+            "flash_attn_func",
+            "flash_attn_varlen_func"
+            
+        ]
+    },
+    {
+        "domain": "PyTorch_flash_attention",
+        "color": "808000",
+        "module": "torch.nn.attention.flex_attention",
+        "functions": [
+            "create_block_mask",
+            "flex_attention"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
+        "color": "808000",
+        "module": "weathergen.model.positional_encoding",
+        "functions": [
+            "positional_encoding_harmonic",
+            "positional_encoding_harmonic_idx",
+            "positional_encoding_harmonic_global",
+            "positional_encoding_harmonic_coord"
         ]
     },
     {
