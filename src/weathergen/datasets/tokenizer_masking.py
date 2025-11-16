@@ -90,7 +90,7 @@ class TokenizerMasking(Tokenizer):
         tok = tokenize_spacetime if stream_info.get("tokenize_spacetime", False) else tokenize_space
         idxs_cells, idxs_cells_lens = tok(rdata, token_size, self.hl_source, pad_tokens=False)
 
-        (mask_tokens, mask_channels) = self.masker.mask_targets_idxs(
+        (mask_tokens, mask_channels, idxs_ord_inv) = self.masker.mask_targets_idxs(
             stream_info, idxs_cells, idxs_cells_lens, rdata
         )
 
@@ -111,7 +111,7 @@ class TokenizerMasking(Tokenizer):
         # TODO, TODO, TODO: max_num_targets
         # max_num_targets = stream_info.get("max_num_targets", -1)
 
-        return (data, datetimes, coords, coords_local, coords_per_cell)
+        return (data, datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv)
 
     def sample_tensors_uniform_vectorized(
         self, tensor_list: list, lengths: list, max_total_points: int

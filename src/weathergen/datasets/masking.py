@@ -194,11 +194,16 @@ class Masker:
     ) -> (torch.Tensor, torch.Tensor):
         # mask_source_idxs is
         assert (self.mask_tokens is not None) or (self.mask_tokens is not None)
+        idxs_ord_inv = torch.tensor([], dtype=torch.int64)
 
         # TODO: better handling of if statement
         if self.current_strategy == "forecast":
             num_tokens = torch.tensor([len(t) for t in idxs_cells_lens]).sum().item()
             self.mask_tokens = np.ones(num_tokens, dtype=np.bool)
+
+            # inverse map for reordering to output data points in same order as input
+            idxs_ord = torch.cat([t for tt in idxs_cells for t in tt])
+            idxs_ord_inv = torch.argsort(idxs_ord)
 
         else:
             # masking strategies: target is complement of source
@@ -210,7 +215,7 @@ class Masker:
 
         # TODO: self.mask_tokens seems brittle in terms of naming
 
-        return (self.mask_tokens, self.mask_channels)
+        return (self.mask_tokens, self.mask_channels, idxs_ord_inv)
 
     def mask_source(
         self,
