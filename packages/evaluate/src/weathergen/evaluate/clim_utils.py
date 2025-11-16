@@ -52,7 +52,8 @@ def match_climatology_time(target_datetime: pd.Timestamp, clim_data: xr.Dataset)
     # To Do: leap years and other edge cases
     if len(matching_indices) == 0:
         _logger.warning(
-            f"No matching climatology time found for {target_datetime} (DOY: {target_doy}, Hour: {target_hour})"
+            f"No matching climatology time found for {target_datetime} (DOY: {target_doy}, "
+            f"Hour: {target_hour})"
             f"Please check that climatology data and stream input data filenames match."
         )
         return None
@@ -123,10 +124,19 @@ def align_clim_data(
     for fstep, target_data in target_output.items():
         samples = np.unique(target_data.sample.values)
         for sample in tqdm(samples, f"Aligning climatology for forecast step {fstep}"):
-            sample_mask = target_data.sample.values == sample
-            timestamp = target_data.valid_time.values[sample_mask][0]
+            sel_key = "sample" if "sample" in target_data.dims else "ipoint"
+            sel_val = (
+                sample if "sample" in target_data.dims else (target_data.sample.values == sample)
+            )
+            sel_mask = {sel_key: sel_val}
+
+            timestamp = target_data.sel(sel_mask).valid_time.values[0]
             # Prepare climatology data for each sample
             matching_time_idx = match_climatology_time(timestamp, clim_data)
+
+            if matching_time_idx is None:
+                continue
+
             prepared_clim_data = (
                 clim_data.data.isel(
                     time=matching_time_idx,
@@ -136,8 +146,8 @@ def align_clim_data(
                 )
                 .transpose("grid_points", "channels")  # dimensions specific to anemoi
             )
-            target_lats = target_data.loc[{"ipoint": sample_mask}].lat.values
-            target_lons = target_data.loc[{"ipoint": sample_mask}].lon.values
+            target_lats = target_data.loc[sel_mask].lat.values
+            target_lons = target_data.loc[sel_mask].lon.values
             # check if target coords match cached target coords
             # if they do, use cached clim_indices
             if (
@@ -156,8 +166,8 @@ def align_clim_data(
                 if np.any(unmatched_mask):
                     n_unmatched = np.sum(unmatched_mask)
                     raise ValueError(
-                        f"Found {n_unmatched} target coordinates with no matching climatology coordinates. "
-                        f"This will cause incorrect ACC calculations. "
+                        f"Found {n_unmatched} target coordinates with no matching climatology "
+                        f"coordinates. This will cause incorrect ACC calculations. "
                         f"Check coordinate alignment between target and climatology data."
                     )
                 # Cache the computed indices and target coords
@@ -169,14 +179,16 @@ def align_clim_data(
             clim_values = prepared_clim_data.isel(grid_points=clim_indices).values
             try:
                 if len(samples) > 1:
-                    aligned_clim_data[fstep].loc[{"ipoint": sample_mask}] = clim_values
+                    aligned_clim_data[fstep].loc[sel_mask] = clim_values
                 else:
                     aligned_clim_data[fstep] = clim_values
             except (ValueError, IndexError) as e:
                 raise ValueError(
                     f"Failed to align climatology data with target data for ACC calculation. "
-                    f"This error typically occurs when the number of points per sample varies between samples. "
-                    f"ACC metric is currently only supported for forecasting data with constant points per sample. "
+                    f"This error typically occurs when the number of points per sample varies "
+                    f"between samples. "
+                    f"ACC metric is currently only supported for forecasting data with constant "
+                    f"points per sample. "
                     f"Please ensure all samples have the same spatial coverage and grid points. "
                     f"Original error: {e}"
                 ) from e
@@ -206,7 +218,7 @@ def get_climatology(reader, da_tars, stream: str) -> xr.Dataset | None:
 
     aligned_clim_data = None
 
-    if clim_data_path:
+    if clim_data_path is not None:
         clim_data = xr.open_dataset(clim_data_path)
         _logger.info("Aligning climatological data with target structure...")
         aligned_clim_data = align_clim_data(da_tars, clim_data)
