@@ -253,6 +253,9 @@ class LossCalculator:
             for fstep, (target, fstep_weight) in enumerate(
                 zip(targets, fstep_loss_weights, strict=False)
             ):
+                if len(preds[fstep]) == 0:
+                    continue
+
                 # skip if either target or prediction has no data points
                 pred = preds[fstep][i_stream_info]
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
@@ -314,7 +317,7 @@ class LossCalculator:
 
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)
-        loss = loss / ctr_streams
+        loss = loss / ctr_streams if ctr_streams > 0 else loss
 
         # Return all computed loss components encapsulated in a ModelLoss dataclass
         return LossValues(loss=loss, losses_all=losses_all, stddev_all=stddev_all)
