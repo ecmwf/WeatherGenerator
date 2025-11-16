@@ -9,6 +9,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import copy
 import logging
 import math
 import warnings
@@ -610,15 +611,9 @@ class Model(torch.nn.Module):
             A list containing all prediction results
         """
 
-        (streams_data, source_cell_lens, target_coords_idxs) = batch
+        (streams_data, _, target_coords_idxs) = batch
 
-        # embed
-        tokens = self.embed_cells(model_params, streams_data)
-
-        # local assimilation engine and adapter
-        tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
-
-        tokens = self.assimilate_global(model_params, tokens)
+        tokens, posteriors = self.encode(self, model_params=model_params, batch=batch)
 
         # roll-out in latent space
         preds_all = []
@@ -791,6 +786,35 @@ class Model(torch.nn.Module):
         return tokens
 
     #########################################
+    def encode(self, model_params: ModelParams, batch) -> torch.Tensor:
+        """Encodes the data into a latent state
+
+        Tokens are processed through the model components, which were defined in the create method.
+        Args:
+            model_params : Query and embedding parameters
+            batch :
+                streams_data : Contains tokenized source data and target data for each dataset and
+                    each stream
+                source_cell_lens : Used to identify range of tokens to use from generated tokens in
+                    cell embedding
+                target_coords_idxs : Indices of target coordinates for each dataset.
+        Returns:
+            Latent representation of the model
+        """
+
+        (streams_data, source_cell_lens, _) = batch
+
+        # embed
+        tokens = self.embed_cells(model_params, streams_data)
+
+        # local assimilation engine and adapter
+        tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
+
+        tokens = self.assimilate_global(model_params, tokens)
+
+        return tokens, posteriors
+
+    #########################################
     def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
         """Advances latent space representation in time
 
@@ -905,3 +929,26 @@ class Model(torch.nn.Module):
             preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
 
         return preds_tokens
+
+
+def get_model(
+    student_or_teacher,
+    cf: Config,
+    sources_size,
+    targets_num_channels,
+    targets_coords_size,
+    **kwargs,
+):
+    if student_or_teacher == "student" or student_or_teacher == "teacher":
+        return Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+    else:
+        if cf["training_mode"] == "masking":  # TODO implement mode "student-teacher-pretrain":
+            teacher_cf = copy.deepcopy(cf)
+            for key, val in teacher_cf["teacher_model"].items():
+                teacher_cf[key] = val
+            teacher = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+            return teacher
+        else:
+            raise NotImplementedError(
+                f"The training mode {cf['training_mode']} is not implemented."
+            )

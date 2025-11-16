@@ -20,6 +20,9 @@ from weathergen.common.config import Config
 from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.distributed import is_root
 
+from weathergen.train.target_and_aux_module_base import IdentityTargetAndAux
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
+
 PORT = 1345
 
 
@@ -167,3 +170,14 @@ class TrainerBase:
             perf_mem /= len(self.device_handles)
 
         return perf_gpu, perf_mem
+
+
+# should be moved to its own file so as to prevent cyclical imports
+def get_target_and_aux_calculator(config, model, rng, batch_size, **kwargs):
+    target_and_aux_calc = config.get("target_and_aux_calc", None)
+    if target_and_aux_calc is None or target_and_aux_calc == "identity":
+        return IdentityTargetAndAux(model, rng, config)
+    elif target_and_aux_calc == "EMATeacher":
+        return EMATeacher(model, rng, kwargs["ema_model"], batch_size)
+    else:
+        raise NotImplementedError(f"{target_and_aux_calc} is not implemented")
