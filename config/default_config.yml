@@ -10,14 +10,13 @@ embed_dropout_rate: 0.1
 target_cell_local_prediction: True
 
 ae_local_dim_embed: 1024
-ae_local_num_blocks: 0
+ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
 
 ae_local_num_queries: 1
 ae_local_queries_per_cell: False
-ae_adapter_num_blocks : 2
 ae_adapter_num_heads: 16
 ae_adapter_embed: 128
 ae_adapter_with_qk_lnorm: True
@@ -25,7 +24,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 6
+ae_global_num_blocks: 8
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -43,26 +42,23 @@ pred_mlp_adaln: True
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-forecast_offset : 1
-forecast_delta_hrs : 0
-forecast_steps: 4 #[ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-forecast_policy: "fixed" #"random"
-forecast_with_step_conditioning: False #True
-forecast_loss_all_step : False
-forecast_residual: True
-forecast_latent_noise_std: 3e-5
+forecast_offset : 0
+forecast_delta_hrs: 0
+forecast_steps: 0
+forecast_policy: null
 forecast_att_dense_rate: 1.0
-fe_num_blocks: 6
+fe_num_blocks: 0
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
+impute_latent_noise_std: 0.0  # 1e-4
 
 healpix_level: 5
 
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
-with_fsdp: False
+with_fsdp: True
 attention_dtype: bf16
 mlp_norm_eps: 1e-5
 norm_eps: 1e-4
@@ -97,7 +93,7 @@ ema_halflife_in_thousands: 1e-3
 
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "forecast"
+training_mode: "masking"
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
@@ -117,7 +113,7 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           "same_strategy_per_batch": false
                           }
 
-num_epochs: 96
+num_epochs: 32
 samples_per_epoch: 4096
 samples_per_validation: 512
 shuffle: True
