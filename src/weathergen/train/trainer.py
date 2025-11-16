@@ -228,8 +228,8 @@ class Trainer(TrainerBase):
         self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
         self.ema_model = None
 
-        # !! modifies config: adds config.streams[i].<stage>_source_channels
-        # and config.streams[i].<stage>_target_channels !!
+        # create data loader
+        # only one needed since we only run the validation code path
         self.dataset = MultiStreamDataSampler(
             cf,
             cf.start_date_val,
@@ -278,6 +278,7 @@ class Trainer(TrainerBase):
         self.device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
 
+        # create data loaders
         self.dataset = MultiStreamDataSampler(
             cf,
             cf.start_date,
