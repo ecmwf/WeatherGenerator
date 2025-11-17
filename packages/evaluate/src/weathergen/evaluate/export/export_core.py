@@ -75,9 +75,11 @@ def export_model_outputs(
     fname_zarr = get_model_results(run_id, epoch, rank)
     print(f"Using Zarr store: {fname_zarr}")
     with ZarrIO(fname_zarr) as zio:
-        zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
-        zio_samples = sorted([int(sample) for sample in zio.samples])
-        dummy_out = zio.get_data(zio_samples[0], stream, zio_forecast_steps[0])
+        # zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
+        # zio_samples = sorted([int(sample) for sample in zio.samples])
+        # print(stream)
+        # dummy_out = zio.get_data(zio_samples[0], stream, zio_forecast_steps[0])
+        dummy_out = zio.get_data(0, stream, 1)
         all_channels = dummy_out.target.channels
         channels = all_channels if channels is None else channels
 
