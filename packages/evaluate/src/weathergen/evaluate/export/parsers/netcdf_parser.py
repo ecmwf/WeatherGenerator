@@ -16,7 +16,7 @@ _logger.setLevel(logging.INFO)
 Usage:
 
 uv run export --run-id ciga1p9c --stream ERA5 
---output-dir /ec/perm/ecm9336/test_output1 
+--output-dir ./test_output1 
 --format netcdf --samples 1 2  --fsteps 1 2 3
 """
 

@@ -16,10 +16,10 @@ _logger.setLevel(logging.INFO)
 Usage: 
 
 uv run export --run-id ciga1p9c --stream ERA5 
---output-dir /ec/perm/ecm9336/test_output1 
+--output-dir ./test_output1 
 --format quaver --type prediction target  
 --samples 2 --fsteps 2 
---template "/ec/weathergen/quaver_templates/aifs_{level_type}_o96_data.grib" 
+--template "<path to quaver templates>/quaver_templates/aifs_{level_type}_o96_data.grib" 
 --expver test 
 """
 
