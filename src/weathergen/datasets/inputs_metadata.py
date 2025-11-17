@@ -80,7 +80,7 @@ class ModelBatch:
     
     model_inputs: list[list[any]]   # [n_students][n_streams]
     targets: list[list[any]]        # [1][n_streams] (teacher)
-    view_metadata: list[ViewMetadata]
+    view_metadata: dict[str, ViewMetadata] # perhaps dict, teacher_metadata : ViewMetadata, student_metadata: list[ViewMetadata]
     batch_info: Optional[dict] = field(default_factory=dict)
     
     # Offsets for student views (populated when needed for future student-teacher training)
