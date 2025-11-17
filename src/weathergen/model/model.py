@@ -794,7 +794,7 @@ class Model(torch.nn.Module):
             tokens_global_masked_all += [tokens_global_masked_c]
 
         tokens_global_unmasked = torch.cat(tokens_global_unmasked_all)
-        tokens_global_masked = torch.cat(tokens_global_masked_all)
+        tokens_global_masked = torch.cat(tokens_global_masked_all).to(tokens_global_unmasked.dtype)
 
         # query aggregation engine on the query tokens in unmasked cells
         # (applying this here assumes batch_size=1)
