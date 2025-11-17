@@ -59,16 +59,18 @@ class Masker:
         
         # HEALPix grid parameters
         self.healpix_level_data = cf.healpix_level
+        # number of healpix cells
         self.healpix_num_cells = 12 * (4 ** self.healpix_level_data)
         
         # Encoding dimensions
         self.dim_time_enc = 6
         self.mask_value = 0.0
         
-        # State: per-batch mask selection (set by mask_source, used by mask_target)
-        self.perm_sel: list[np.ndarray] | None = None
+        # Initialize the mask, set to None initially,
+        # until it is generated in mask_source.
+        self.perm_sel: list[np.typing.NDArray] | None = None
         
-        # Per-batch strategy tracking (for "combination" mode)
+        # Per-batch strategy tracking
         self.same_strategy_per_batch = self.masking_strategy_config.get(
             "same_strategy_per_batch", False
         )
@@ -109,10 +111,11 @@ class Masker:
         # Check channel masking requirements
         if self.current_strategy == "channel":
             # Ensure that masking_strategy_config contains either 'global' or 'per_cell'
-            mode = self.masking_strategy_config.get("mode")
-            assert mode in ["global", "per_cell"], (
-                "masking_strategy_config must contain 'mode' key with value 'global' or 'per_cell'."
-            )
+            assert self.masking_strategy_config.get("mode") in [
+                "global",
+                "per_cell",
+            ], "masking_strategy_config must contain 'mode' key with value 'global' or 'per_cell'."
+
             # Verify source/target channels match across streams
             for stream in cf.streams:
                 # check explicit includes

@@ -44,22 +44,17 @@ class TokenizerMasking(Tokenizer):
         self.masker.reset_rng(rng)
         self.rng = rng
 
-    def compute_crops(self, n_local: int, local_frac: float, local_strategy: str = "random"):
+    def make_views_for_sample(self, rdata: IOReaderData):
         """
-        Ask the masker (Cropper) for one global crop and N local crops.
-        Returns (global_spec, [local_specs...]).
+        Produce teacher + student view metadata without any tokenization.
+        Views are spatial (cell-level), so coords/geoinfos/data are sufficient.
         """
-        if hasattr(self.masker, "make_crops"):
-            return self.masker.make_crops(
-                n_local=n_local, local_frac=local_frac, local_strategy=local_strategy
-            )
-        # Fallback: no crops
-        healpix_level = self.healpix_level
-        num = 12 * (4**healpix_level)
-        empty = np.zeros(num, dtype=bool)
-        return (
-            type("CS", (), {"level": healpix_level, "parent_level": 0, "keep_cells": empty}),
-            [],
+        # Masker.make_views does not actually use tokenized_data. Pass None.
+        return self.masker.make_views(
+            None,  # tokenized_data (unused)
+            rdata.coords,
+            rdata.geoinfos,
+            rdata.data,
         )
 
     @contextmanager

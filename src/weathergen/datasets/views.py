@@ -13,7 +13,7 @@ from weathergen.datasets.stream_data import StreamData
 import torch
 
 
-# TODO: SampleMetadata !! Just a dictionary to store a random number for diffusion
+# TODO: call it SampleMetadata !! Just a dictionary to store a random number for diffusion
 # TODO: GetTimestep to get the timestep
 # TODO: GetData: get the streamdata
 # TODO: GetMetaData: then this gets the right rn for the timestep!
@@ -60,6 +60,9 @@ class ViewMetadata:
 class ModelBatch:
     """
     Container for all data and metadata for one training batch.
+
+    - In forecast/masking: model_inputs=[streams_data], targets=[]
+    - In student_teacher: model_inputs=[student_views], targets=[teacher_streams]
     
     Attributes:
         model_inputs: List of student views, each containing StreamData for all streams
@@ -69,18 +72,25 @@ class ModelBatch:
         student_source_cell_lens: List of source cell lengths for each student view
         student_target_coords_idx: List of target coordinate indices for each student view
     """
+    # TODO: for DINO we want two global views per-dataset sample
+    # TODO: we want the global' view in student, perhaps as the first, 
+    # with some metadata saying it is a second global view
+    
     model_inputs: list[list[any]]   # [n_students][n_streams]
     targets: list[list[any]]        # [1][n_streams] (teacher)
     view_metadata: list[ViewMetadata]
     batch_info: Optional[dict] = field(default_factory=dict)
     
     # Offsets for student views (populated when needed for future student-teacher training)
-    # TODO: rename to model_input...source_cell/target_coords...
+    # TODO: rename to model_input...source_cell/target_coords... NOTE: then there is a problem for target
     student_source_cell_lens: Optional[list] = None  # [n_students] each is a tensor
     student_target_coords_idx: Optional[list] = None  # [n_students] each is a list of lists
 
     # TODO: this also needs target_source_cell_lens and target_target_coords_idx for teacher views
     # TODO fix this ridiculous naming
+    # Placeholders for having ModelBatch giving the full (StreamData, source_cell_lens, target_coords_idx) 
+    teacher_source_cell_lens: torch.Tensor | None = None
+    teacher_target_coords_idx: list | None = None
 
     # TODO: add the timestep as an optional int for the model_inputs when we have multiple timesteps for the diffusion model...
     # TODO add the forecast_dt as an optional int ? 
