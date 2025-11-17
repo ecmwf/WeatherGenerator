@@ -60,15 +60,15 @@ def test_model_loading_has_params(parser):
 
 
 @pytest.mark.parametrize("streams", [["ERA5", "FOO"], ["BAR"]])
-def test_inference_analysis_streams_output(inference_parser, streams):
-    arglist = BASIC_ARGLIST + ["--analysis_streams_output", *streams]
+def test_inference_streams_output(inference_parser, streams):
+    arglist = BASIC_ARGLIST + ["--streams_output", *streams]
     args = inference_parser.parse_args(arglist)
 
-    assert args.analysis_streams_output == streams
+    assert args.streams_output == streams
 
 
-def test_inference_analysis_streams_output_empty(inference_parser):
-    arglist = BASIC_ARGLIST + ["--analysis_streams_output", *[]]
+def test_inference_streams_output_empty(inference_parser):
+    arglist = BASIC_ARGLIST + ["--streams_output", *[]]
 
     with pytest.raises(SystemExit):
         inference_parser.parse_args(arglist)
@@ -79,7 +79,7 @@ def test_inference_defaults(inference_parser):
         "start_date",
         "end_date",
         "samples",
-        "analysis_streams_output",
+        "streams_output",
         "mini_epoch",
         "private_config",
     ]

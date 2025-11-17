@@ -59,10 +59,9 @@ def get_inference_parser() -> argparse.ArgumentParser:
         help="Toggle saving of samples from inference. Default True",
     )
     parser.add_argument(
-        "--analysis_streams_output",
+        "--streams_output",
         nargs="+",
-        default=["ERA5"],
-        help="Analysis output streams during inference.",
+        help="Output streams during inference.",
     )
 
     return parser
