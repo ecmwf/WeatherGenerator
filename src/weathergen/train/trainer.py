@@ -8,6 +8,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
 import itertools
 import logging
 import re
@@ -43,14 +44,14 @@ from weathergen.model.attention import (
 )
 from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
-from weathergen.model.model import get_model, Model, ModelParams
+from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase, get_target_and_aux_calculator
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
-from weathergen.utils.utils import get_dtype, get_batch_size
+from weathergen.utils.utils import get_batch_size, get_dtype
 from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
@@ -351,6 +352,8 @@ class Trainer(TrainerBase):
             ema_model=self.ema_model,
             batch_size=get_batch_size(cf, self.world_size_original),
         )
+
+        self.target_and_aux_calculator.to_device(self.device)
 
         # if with_fsdp then parameter count is unreliable
         if is_root() and not cf.with_fsdp and not cf.with_ddp:

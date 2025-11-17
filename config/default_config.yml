@@ -91,9 +91,28 @@ validate_with_ema: True
 ema_ramp_up_ratio: 0.09
 ema_halflife_in_thousands: 1e-3
 
-# training mode: "forecast" or "masking" (masked token modeling)
+# training mode: "forecast" or "masking" (masked token modeling) or "student-teacher"
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "masking"
+training_mode: "forecast"
+training_mode_config: {
+  "losses" : { 
+    # LossLatentSSLStudentTeacher: { 
+    #   "iBOT": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
+    #       "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+    #   "DINO": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
+    #       "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+    #   "JEPA": {'weight': 0.5, "out_dim": 2048, "n_register_tokens": 4} }
+    LossLatentDiffusionForecastEngine: {
+        "MSE": {'weight': 1.0}
+    }
+  },
+  "shared_heads": False,
+  "target_and_aux_calc": "DiffusionLatentTargetEncoder",
+  "teacher_model": {}
+}
+# training_mode_config: {"losses": {LossPhysical: [['mse', 1.0]],}
+#                       }
+validation_mode_config: {"losses": {LossPhysical: [['mse', 1.0]],}}
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)

@@ -613,7 +613,7 @@ class Model(torch.nn.Module):
 
         (streams_data, _, target_coords_idxs) = batch
 
-        tokens, posteriors = self.encode(self, model_params=model_params, batch=batch)
+        tokens, posteriors = self.encode(model_params=model_params, batch=batch)
 
         # roll-out in latent space
         preds_all = []
