@@ -18,8 +18,17 @@
 import dataclasses
 
 import torch
+from torch.nn.functional import silu
+from dataclass import dataclass
+import weathergen.common.config as config
+import numpy as np
+
 
 from weathergen.model.engines import ForecastingEngine
+
+
+
+
 
 
 @dataclasses.dataclass
@@ -53,16 +62,22 @@ class DiffusionForecastEngine(torch.nn.Module):
     def __init__(
         self,
         forecast_engine: ForecastingEngine,
+        noise_channels: int, #TODO: how are the determined – dimension of latent space? batch size?
+        emb_channels: int, #NOTE: might be wise to choose as a function of noise_channels
         sigma_min: float = 0.002,  # Adapt to GenCast?
         sigma_max: float = 80,
         sigma_data: float = 0.5,
         rho: float = 7,
         p_mean: float = -1.2,
         p_std: float = 1.2,
+        noise_encoding: str = 'positional',
     ):
         super().__init__()
         self.net = forecast_engine
         self.preconditioner = Preconditioner()
+        self.map_noise = PositionalEmbedding(num_channels=noise_channels, endpoint=True) if noise_encoding == 'positional' else FourierEmbedding(num_channels=noise_channels) #TODO: Compare with method used in GenCast
+        self.map_layer0 = torch.nn.Linear(noise_channels, emb_channels)
+        self.map_layer1 = torch.nn.Linear(emb_channels, noise_channels)
 
         # Parameters
         self.sigma_min = sigma_min
@@ -111,9 +126,23 @@ class DiffusionForecastEngine(torch.nn.Module):
         c_in = 1 / (sigma**2 + self.sigma_data**2).sqrt()
         c_noise = sigma.log() / 4
 
+        # Embed noise level
+        emb = self.embed_noise(c_noise.unsqueeze(-1))  #TODO: check dimensionality
+
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c)
-        return c_skip * x + c_out * self.net(c_in * x, c_noise)  # Eq. (7) in EDM paper
+        return c_skip * x + c_out * self.net(c_in * x, emb)  # Eq. (7) in EDM paper
+
+    #TODO: May need to be updated from DiT paper code (currently taken from EDM paper code)
+    def embed_noise(self, noise: torch.Tensor) -> torch.Tensor:
+        """
+        Embed noise level using embedding network and MLPs.
+        """
+        emb = self.map_noise(noise)
+        emb = emb.reshape(emb.shape[0], 2, -1).flip(1).reshape(*emb.shape) #TODO: check why this is done in the EBM code 'swap cos/sin'
+        emb = silu(self.map_layer0(emb))
+        emb = silu(self.map_layer1(emb))
+        return emb
 
     def inference(
         self,
@@ -156,7 +185,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
             # Apply 2nd order correction.
             if i < num_steps - 1:
-                denoised = self.net(x_next, t_next)
+                denoised = self.denoise(x=x_next, c=None, sigma=t_next)
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
@@ -170,3 +199,65 @@ class Preconditioner:
 
     def precondition(self, x, c):
         return x
+
+
+#NOTE: this is currently based on EDM, not on DiT
+class PositionalEmbedding(torch.nn.Module):
+    def __init__(self, num_channels, max_positions=10000, endpoint=False):
+        super().__init__()
+        self.num_channels = num_channels
+        self.max_positions = max_positions
+        self.endpoint = endpoint
+
+    def forward(self, x):
+        freqs = torch.arange(start=0, end=self.num_channels//2, dtype=torch.float32, device=x.device)
+        freqs = freqs / (self.num_channels // 2 - (1 if self.endpoint else 0))
+        freqs = (1 / self.max_positions) ** freqs
+        x = x.ger(freqs.to(x.dtype))
+        x = torch.cat([x.cos(), x.sin()], dim=1)
+        return x
+
+# #NOTE: this is currently based on EDM, not on DiT
+class FourierEmbedding(torch.nn.Module):
+    def __init__(self, num_channels, scale=16):
+        super().__init__()
+        self.register_buffer('freqs', torch.randn(num_channels // 2) * scale)
+
+    def forward(self, x):
+        x = x.ger((2 * np.pi * self.freqs).to(x.dtype))
+        x = torch.cat([x.cos(), x.sin()], dim=1)
+        return x
+
+#TODO: Verify if need to add copyright notice.
+#NOTE: This will be imported into attention.py.
+#NOTE: This is currently based on GenCast, not on DiT
+class LinearNormConditioning(torch.nn.Module):
+    """Module for norm conditioning, adapted from GenCast.
+
+    Conditions the normalization of `inputs` by applying a linear layer to the
+    `norm_conditioning` which produces the scale and offset for each channel.
+    """
+
+    def __init__(self, feature_size: int, dtype=torch.bfloat16):
+        super().__init__()
+        self.dtype = dtype
+
+        self.conditional_linear_layer = torch.nn.Linear(
+            in_features=feature_size,
+            out_features=2 * feature_size,
+        )
+        # Optional: initialize weights similar to TruncatedNormal(stddev=1e-8)
+        torch.nn.init.normal_(self.conditional_linear_layer.weight, std=1e-8)
+        torch.nn.init.zeros_(self.conditional_linear_layer.bias)
+
+    def forward(self, inputs, norm_conditioning, dtype = None):
+        # norm_conditioning: [batch, feature_size]
+        # inputs: [batch, ..., feature_size]
+        conditional_scale_offset = self.conditional_linear_layer(norm_conditioning.to(self.dtype))
+        scale_minus_one, offset = torch.chunk(conditional_scale_offset, 2, dim=-1)
+        scale = scale_minus_one + 1.0
+        # Reshape scale and offset for broadcasting if needed
+        while scale.dim() < inputs.dim():
+            scale = scale.unsqueeze(1)
+            offset = offset.unsqueeze(1)
+        return (inputs * scale + offset).to(self.dtype) #TODO: check if to(self.dtype) needed here
