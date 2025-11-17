@@ -830,11 +830,7 @@ class Trainer(TrainerBase):
             [[b.to(self.device) for b in bf] for bf in batch[2]],
         )
 
-<<<<<<< HEAD
     def load_model(self, model, run_id: str, epoch=-1):
-=======
-    def load_model(self, run_id: str, mini_epoch=-1):
->>>>>>> 9c8910ea57d3d836a8f1d634e03948d49d090b07
         """Loads model state from checkpoint and checks for missing and unused keys.
         Args:
             run_id : model_id of the trained model
