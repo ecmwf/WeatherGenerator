@@ -102,68 +102,7 @@ class Trainer(TrainerBase):
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
-<<<<<<< HEAD
-    def init_model_and_shard(self, cf, run_id_contd, epoch_contd, devices):
-=======
-    def inference(self, cf, devices, run_id_trained, mini_epoch):
-        # general initalization
-        self.init(cf, devices)
-
-        cf = self.cf
-        self.device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
-        self.ema_model = None
-
-        # !! modifies config: adds config.streams[i].<stage>_source_channels
-        # and config.streams[i].<stage>_target_channels !!
-        self.dataset_val = MultiStreamDataSampler(
-            cf,
-            cf.start_date_val,
-            cf.end_date_val,
-            cf.batch_size_validation_per_gpu,
-            cf.samples_per_validation,
-            stage=VAL,
-            shuffle=cf.shuffle,
-        )
-
-        # make sure number of loaders does not exceed requested samples
-        loader_num_workers = min(cf.samples_per_validation, cf.loader_num_workers)
-        loader_params = {
-            "batch_size": None,
-            "batch_sampler": None,
-            "shuffle": False,
-            "num_workers": loader_num_workers,
-            "pin_memory": True,
-        }
-        self.data_loader_validation = torch.utils.data.DataLoader(
-            self.dataset_val, **loader_params, sampler=None
-        )
-
-        sources_size = self.dataset_val.get_sources_size()
-        targets_num_channels = self.dataset_val.get_targets_num_channels()
-        targets_coords_size = self.dataset_val.get_targets_coords_size()
-
-        self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-        self.model = self.model.to(self.devices[0])
-        self.model.load(run_id_trained, mini_epoch)
-        logger.info(f"Loaded model {run_id_trained} at mini_epoch {mini_epoch}.")
-        self.model_params = ModelParams(cf).create(cf)
-        self.model_params = self.model_params.to(self.devices[0])
-        logger.info(f"Loaded model id={run_id_trained} at mini_epoch={mini_epoch}.")
-
-        self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
-
-        if is_root():
-            config.save(self.cf, mini_epoch=0)
-
-        logger.info(f"Starting inference with id={self.cf.run_id}.")
-
-        # inference validation set
-        self.validate(mini_epoch=0)
-        logger.info(f"Finished inference run with id: {cf.run_id}")
-
-    def init_model_and_shard(self, cf, devices):
->>>>>>> 9c8910ea57d3d836a8f1d634e03948d49d090b07
+    def init_model_and_shard(self, cf, run_id_contd, mini_epoch_contd, devices):
         sources_size = self.dataset.get_sources_size()
         targets_num_channels = self.dataset.get_targets_num_channels()
         targets_coords_size = self.dataset.get_targets_coords_size()
@@ -273,15 +212,16 @@ class Trainer(TrainerBase):
                     model.reset_parameters()
         else:
             if is_root():
-                logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
-            model = self.load_model(model, run_id_contd, epoch_contd)
+                logger.info(
+                    f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}."
+                )
+            model = self.load_model(model, run_id_contd, mini_epoch_contd)
         model_params.reset_parameters(cf)
         model_params = model_params.to(self.device)
 
         return model, model_params
 
-<<<<<<< HEAD
-    def inference(self, cf, devices, run_id_contd, epoch_contd):
+    def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
         # general initalization
         self.init(cf, devices)
 
@@ -317,7 +257,7 @@ class Trainer(TrainerBase):
         )
 
         self.model, self.model_params = self.init_model_and_shard(
-            cf, run_id_contd, epoch_contd, devices
+            cf, run_id_contd, mini_epoch_contd, devices
         )
 
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
@@ -331,10 +271,7 @@ class Trainer(TrainerBase):
         self.validate(epoch=0)
         logger.info(f"Finished inference run with id: {cf.run_id}")
 
-    def run(self, cf, devices, run_id_contd=None, epoch_contd=None):
-=======
     def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
->>>>>>> 9c8910ea57d3d836a8f1d634e03948d49d090b07
         # general initalization
         self.init(cf, devices)
         cf = self.cf
@@ -376,7 +313,7 @@ class Trainer(TrainerBase):
         )
 
         self.model, self.model_params = self.init_model_and_shard(
-            cf, run_id_contd, epoch_contd, devices
+            cf, run_id_contd, mini_epoch_contd, devices
         )
 
         if cf.compile_model:
@@ -385,10 +322,10 @@ class Trainer(TrainerBase):
         self.validate_with_ema = cf.get("validate_with_ema", False)
         self.ema_model = None
         if self.validate_with_ema:
-            meta_ema_model = self.init_model_and_shard(cf, run_id_contd, epoch_contd, devices)[0]
+            meta_ema = self.init_model_and_shard(cf, run_id_contd, mini_epoch_contd, devices)[0]
             self.ema_model = EMAModel(
                 self.model,
-                meta_ema_model,
+                meta_ema,
                 halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
                 rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
@@ -830,7 +767,7 @@ class Trainer(TrainerBase):
             [[b.to(self.device) for b in bf] for bf in batch[2]],
         )
 
-    def load_model(self, model, run_id: str, epoch=-1):
+    def load_model(self, model, run_id: str, mini_epoch=-1):
         """Loads model state from checkpoint and checks for missing and unused keys.
         Args:
             run_id : model_id of the trained model
