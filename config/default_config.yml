@@ -94,7 +94,7 @@ ema_halflife_in_thousands: 1e-3
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
 training_mode: "masking"
-training_mode_config: {"losses": {LossPhysical: {weight: 0.7, loss_fcts: [['mse', 1.0]]},
+training_mode_config: {"losses": {LossPhysical: {weight: 0.7, loss_fcts: [['mse', 0.8], ['mse', 0.2]]},
                                   LossPhysicalTwo: {weight: 0.3, loss_fcts: [['mse', 1.0]]},
                                   }
                       }

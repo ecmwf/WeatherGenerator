@@ -641,12 +641,22 @@ class Trainer(TrainerBase):
                 )
 
             if bidx == 0:
-                self.loss_unweighted_hist = {k: [] for k in loss_values.loss_terms.keys()}
-                self.stdev_unweighted_hist = {k: [] for k in loss_values.loss_terms.keys()}
+                self.loss_unweighted_hist = {
+                    calc_name: {loss_name: []}
+                    for calc_name, calc_terms in loss_values.loss_terms.items()
+                    for loss_name in calc_terms.losses_all.keys()
+                }
+                self.stdev_unweighted_hist = {
+                    calc_name: {loss_name: []}
+                    for calc_name, calc_terms in loss_values.loss_terms.items()
+                    for loss_name in calc_terms.stddev_all.keys()
+                }
                 self.loss_model_hist = []
-            for name, loss_terms in loss_values.loss_terms.items():
-                self.loss_unweighted_hist[name].append(loss_terms.losses_all)
-                self.stdev_unweighted_hist[name].append(loss_terms.stddev_all)
+            for calc_name, loss_terms in loss_values.loss_terms.items():
+                for loss_name, losses_all in loss_terms.losses_all.items():
+                    self.loss_unweighted_hist[calc_name][loss_name].append(losses_all)
+                for loss_name, stddev_all in loss_terms.stddev_all.items():
+                    self.stdev_unweighted_hist[calc_name][loss_name].append(stddev_all)
             self.loss_model_hist += [loss_values.loss.item()]
 
             perf_gpu, perf_mem = self.get_perf()
@@ -655,12 +665,23 @@ class Trainer(TrainerBase):
 
             # NEED TO FIX LOGGING
             self._log_terminal(bidx, epoch, TRAIN)
-            # if bidx % self.train_log_freq.metrics == 0:
-            #     self._log(TRAIN)
+            if bidx % self.train_log_freq.metrics == 0:
+                self._log(TRAIN)
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
+                self.loss_unweighted_hist = {
+                    calc_name: {loss_name: []}
+                    for calc_name, calc_terms in loss_values.loss_terms.items()
+                    for loss_name in calc_terms.losses_all.keys()
+                }
+                self.stdev_unweighted_hist = {
+                    calc_name: {loss_name: []}
+                    for calc_name, calc_terms in loss_values.loss_terms.items()
+                    for loss_name in calc_terms.stddev_all.keys()
+                }
+                self.loss_model_hist = []
 
             self.cf.istep += 1
 
@@ -750,7 +771,7 @@ class Trainer(TrainerBase):
 
                 # NEED TO FIX LOGGING
                 self._log_terminal(bidx, epoch, VAL)
-                # self._log(VAL)
+                self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
@@ -982,20 +1003,16 @@ class Trainer(TrainerBase):
         # Gather all tensors from all ranks into a list and stack them into one tensor again
         real_loss = torch.cat(all_gather_vlen(real_loss))
 
-        for calc_name in self.loss_unweighted_hist.keys():
+        for calc_name, loss_terms in self.loss_unweighted_hist.items():
             losses_all[calc_name] = {}
+            for loss_name, losses in loss_terms.items():
+                losses = torch.stack(losses).to(torch.float64)
+                losses_all[calc_name][loss_name] = torch.cat(all_gather_vlen(losses))
+        for calc_name, stddev_terms in self.stdev_unweighted_hist.items():
             stddev_all[calc_name] = {}
-            for stream in self.cf.streams:  # Loop over all streams
-                stream_hist = [
-                    losses[stream.name] for losses in self.loss_unweighted_hist[calc_name]
-                ]
-                stream_all = torch.stack(stream_hist).to(torch.float64)
-                losses_all[calc_name][stream.name] = torch.cat(all_gather_vlen(stream_all))
-                stream_hist = [
-                    stddevs[stream.name] for stddevs in self.stdev_unweighted_hist[calc_name]
-                ]
-                stream_all = torch.stack(stream_hist).to(torch.float64)
-                stddev_all[calc_name][stream.name] = torch.cat(all_gather_vlen(stream_all))
+            for stddev_name, stddevs in stddev_terms.items():
+                stddevs = torch.stack(stddevs).to(torch.float64)
+                stddev_all[calc_name][stddev_name] = torch.cat(all_gather_vlen(stddevs))
 
         return real_loss, losses_all, stddev_all
 
@@ -1030,8 +1047,6 @@ class Trainer(TrainerBase):
                     self.perf_mem,
                 )
 
-        self.loss_unweighted_hist, self.loss_model_hist = [], []
-
     def _get_tensor_item(self, tensor):
         """
         When using FSDP2, tensor is a DTensor and we need full_tensor().item() instead of .item(),
@@ -1063,11 +1078,10 @@ class Trainer(TrainerBase):
                     logger.info(
                         f"validation ({self.cf.run_id}) : {epoch:03d} : {avg_loss.nanmean().item()}"
                     )
-                    for calc_name, losses in losses_all.items():
-                        for _, st in enumerate(self.cf.streams):
+                    for _, losses in losses_all.items():
+                        for loss_name, loss in losses.items():
                             logger.info(
-                                f"{calc_name}.{st['name']}"
-                                + f" : {losses[st['name']].nanmean():0.4E} \t",
+                                f"{loss_name}" + f" : {loss.nanmean():0.4E} \t",
                             )
                     logger.info("\n")
 
@@ -1085,11 +1099,10 @@ class Trainer(TrainerBase):
                     pstr += f"s/sec={(print_freq * self.cf.batch_size_per_gpu) / dt:.3f})"
                     logger.info(pstr)
                     logger.info("\t")
-                    for calc_name, losses in losses_all.items():
-                        for _, st in enumerate(self.cf.streams):
+                    for _, losses in losses_all.items():
+                        for loss_name, loss in losses.items():
                             logger.info(
-                                f"{calc_name}.{st['name']}"
-                                + f" : {losses[st['name']].nanmean():0.4E} \t",
+                                f"{loss_name}" + f" : {loss.nanmean():0.4E} \t",
                             )
                     logger.info("\n")
 

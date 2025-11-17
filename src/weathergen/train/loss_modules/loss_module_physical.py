@@ -50,7 +50,7 @@ class LossPhysical(LossModuleBase):
 
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
-            [getattr(losses, name if name != "mse" else "mse_channel_location_weighted"), w]
+            [getattr(losses, name if name != "mse" else "mse_channel_location_weighted"), w, name]
             for name, w in loss_fcts
         ]
 
@@ -195,14 +195,19 @@ class LossPhysical(LossModuleBase):
         # initialize dictionaries for detailed loss tracking and standard deviation statistics
         # create tensor for each stream
         losses_all: dict[str, Tensor] = {
-            st.name: torch.zeros(
-                (len(st[str(self.stage) + "_target_channels"]), len(self.loss_fcts)),
+            f"{self.name}.{st.name}.{loss_fct_name}": torch.zeros(
+                (len(st[str(self.stage) + "_target_channels"])),
                 device=self.device,
             )
             for st in self.cf.streams
+            for _, _, loss_fct_name in self.loss_fcts
         }
         stddev_all: dict[str, Tensor] = {
-            st.name: torch.zeros(len(stat_loss_fcts), device=self.device) for st in self.cf.streams
+            f"{self.name}.{st.name}.{loss_fct_name}": torch.zeros(
+                len(stat_loss_fcts), device=self.device
+            )
+            for st in self.cf.streams
+            for _, _, loss_fct_name in self.loss_fcts
         }
 
         # TODO: iterate over batch dimension
@@ -252,7 +257,7 @@ class LossPhysical(LossModuleBase):
                 # accumulate loss from different loss functions
                 loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
                 ctr_loss_fcts = 0
-                for i_lfct, (loss_fct, loss_fct_weight) in enumerate(self.loss_fcts):
+                for loss_fct, loss_fct_weight, loss_fct_name in self.loss_fcts:
                     # loss for current loss function
                     loss_lfct, loss_lfct_chs = self._loss_per_loss_function(
                         loss_fct,
@@ -262,7 +267,9 @@ class LossPhysical(LossModuleBase):
                         weights_channels,
                         weights_locations,
                     )
-                    losses_all[stream_info.name][:, i_lfct] += spoof_weight * loss_lfct_chs
+                    losses_all[f"{self.name}.{stream_info.name}.{loss_fct_name}"] += (
+                        spoof_weight * loss_lfct_chs
+                    )
 
                     # Add the weighted and normalized loss from this loss function to the total
                     # batch loss
@@ -278,12 +285,16 @@ class LossPhysical(LossModuleBase):
             ctr_streams += 1 if ctr_fsteps > 0 and not stream_is_spoof else 0
 
             # normalize by forecast step
-            losses_all[stream_info.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
-            stddev_all[stream_info.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
+            if ctr_fsteps > 0:
+                for _, _, loss_fct_name in self.loss_fcts:
+                    losses_all[f"{self.name}.{stream_info.name}.{loss_fct_name}"] /= ctr_fsteps
+                    stddev_all[f"{self.name}.{stream_info.name}.{loss_fct_name}"] /= ctr_fsteps
 
             # replace channels without information by nan to exclude from further computations
-            losses_all[stream_info.name][losses_all[stream_info.name] == 0.0] = torch.nan
-            stddev_all[stream_info.name][stddev_all[stream_info.name] == 0.0] = torch.nan
+            for _, _, loss_fct_name in self.loss_fcts:
+                key = f"{self.name}.{stream_info.name}.{loss_fct_name}"
+                losses_all[key][losses_all[key] == 0.0] = torch.nan
+                stddev_all[key][stddev_all[key] == 0.0] = torch.nan
 
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)
@@ -319,7 +330,7 @@ class LossPhysicalTwo(LossModuleBase):
 
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
-            [getattr(losses, name if name != "mse" else "mse_channel_location_weighted"), w]
+            [getattr(losses, name if name != "mse" else "mse_channel_location_weighted"), w, name]
             for name, w in loss_fcts
         ]
 
@@ -464,14 +475,19 @@ class LossPhysicalTwo(LossModuleBase):
         # initialize dictionaries for detailed loss tracking and standard deviation statistics
         # create tensor for each stream
         losses_all: dict[str, Tensor] = {
-            st.name: torch.zeros(
-                (len(st[str(self.stage) + "_target_channels"]), len(self.loss_fcts)),
+            f"{self.name}.{st.name}.{loss_fct_name}": torch.zeros(
+                (len(st[str(self.stage) + "_target_channels"])),
                 device=self.device,
             )
             for st in self.cf.streams
+            for _, _, loss_fct_name in self.loss_fcts
         }
         stddev_all: dict[str, Tensor] = {
-            st.name: torch.zeros(len(stat_loss_fcts), device=self.device) for st in self.cf.streams
+            f"{self.name}.{st.name}.{loss_fct_name}": torch.zeros(
+                len(stat_loss_fcts), device=self.device
+            )
+            for st in self.cf.streams
+            for _, _, loss_fct_name in self.loss_fcts
         }
 
         # TODO: iterate over batch dimension
@@ -521,7 +537,7 @@ class LossPhysicalTwo(LossModuleBase):
                 # accumulate loss from different loss functions
                 loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
                 ctr_loss_fcts = 0
-                for i_lfct, (loss_fct, loss_fct_weight) in enumerate(self.loss_fcts):
+                for loss_fct, loss_fct_weight, loss_fct_name in self.loss_fcts:
                     # loss for current loss function
                     loss_lfct, loss_lfct_chs = self._loss_per_loss_function(
                         loss_fct,
@@ -531,7 +547,9 @@ class LossPhysicalTwo(LossModuleBase):
                         weights_channels,
                         weights_locations,
                     )
-                    losses_all[stream_info.name][:, i_lfct] += spoof_weight * loss_lfct_chs
+                    losses_all[f"{self.name}.{stream_info.name}.{loss_fct_name}"] += (
+                        spoof_weight * loss_lfct_chs
+                    )
 
                     # Add the weighted and normalized loss from this loss function to the total
                     # batch loss
@@ -547,12 +565,16 @@ class LossPhysicalTwo(LossModuleBase):
             ctr_streams += 1 if ctr_fsteps > 0 and not stream_is_spoof else 0
 
             # normalize by forecast step
-            losses_all[stream_info.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
-            stddev_all[stream_info.name] /= ctr_fsteps if ctr_fsteps > 0 else 1.0
+            if ctr_fsteps > 0:
+                for _, _, loss_fct_name in self.loss_fcts:
+                    losses_all[f"{self.name}.{stream_info.name}.{loss_fct_name}"] /= ctr_fsteps
+                    stddev_all[f"{self.name}.{stream_info.name}.{loss_fct_name}"] /= ctr_fsteps
 
             # replace channels without information by nan to exclude from further computations
-            losses_all[stream_info.name][losses_all[stream_info.name] == 0.0] = torch.nan
-            stddev_all[stream_info.name][stddev_all[stream_info.name] == 0.0] = torch.nan
+            for _, _, loss_fct_name in self.loss_fcts:
+                key = f"{self.name}.{stream_info.name}.{loss_fct_name}"
+                losses_all[key][losses_all[key] == 0.0] = torch.nan
+                stddev_all[key][stddev_all[key] == 0.0] = torch.nan
 
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)
