@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
+from weathergen.model.diffusion import LinearNormConditioning
 
 
 class NamedLinear(torch.nn.Module):
@@ -43,6 +44,7 @@ class MLP(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         name: str | None = None,
+        with_noise_conditioning=False,
     ):
         """Constructor"""
 
@@ -68,6 +70,10 @@ class MLP(torch.nn.Module):
                 else AdaLayerNorm(dim_in, dim_aux, norm_eps=norm_eps)
             )
 
+        if with_noise_conditioning:
+            assert self.with_aux is False, "Currently not implemented if aux is used"
+            self.noise_conditioning = LinearNormConditioning(dim_in, dtype=self.dtype)
+
         self.layers.append(torch.nn.Linear(dim_in, dim_hidden))
         self.layers.append(nonlin())
         self.layers.append(torch.nn.Dropout(p=dropout_rate))
@@ -79,10 +85,12 @@ class MLP(torch.nn.Module):
 
         self.layers.append(torch.nn.Linear(dim_hidden, dim_out))
 
-    def forward(self, *args):
-        x, x_in, aux = args[0], args[0], args[-1]
+    #TODO: expanded args, must adjust dependencies
+    def forward(self, x, x_in, aux=None, emb=None):
 
         for i, layer in enumerate(self.layers):
+            if isinstance(layer, LinearNormConditioning):
+                x = layer(x, emb)  # noise embedding
             x = layer(x, aux) if (i == 0 and self.with_aux) else layer(x)
 
         if self.with_residual:

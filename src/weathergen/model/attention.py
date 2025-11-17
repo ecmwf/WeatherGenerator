@@ -14,7 +14,7 @@ from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
-
+from weathergen.model.diffusion import LinearNormConditioning
 
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     def __init__(
@@ -197,6 +197,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        with_noise_conditioning=False, #should only be True for diffusion model
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -242,10 +243,19 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         # compile for efficiency
         self.flex_attention = torch.compile(flex_attention, dynamic=False)
 
-    def forward(self, x, ada_ln_aux=None):
+        if with_noise_conditioning:
+            self.noise_conditioning_q = LinearNormConditioning(dim_embed, dtype=self.dtype)
+
+
+    def forward(self, x, ada_ln_aux=None, emb=None):
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+
+        #NOTE: this is currently based on GenCast, not on DiT
+        if self.noise_conditioning:
+            assert emb is not None, "Need noise embedding if using noise conditioning"
+            x = self.noise_conditioning(x, emb)
 
         # project onto heads
         s = [x.shape[0], x.shape[1], self.num_heads, -1]
@@ -320,11 +330,17 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         self.dtype = attention_dtype
         assert with_flash, "Only flash attention supported at the moment"
 
-    def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
+    def forward(self, x_q, x_kv, emb=None, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
         if self.with_residual:
             x_q_in = x_q
         x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
         x_kv = self.lnorm_in_kv(x_kv)
+
+        #should only apply to diffusion model
+        if self.noise_conditioning:
+            assert emb is not None, "Need noise embedding if using noise conditioning"
+            x_q = self.noise_conditioning_q(x_q, emb)
+            x_kv = self.noise_conditioning_kv(x_kv, emb)
 
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
@@ -487,6 +503,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        with_noise_conditioning=False, #should only be True for diffusion model
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -526,11 +543,21 @@ class MultiSelfAttentionHead(torch.nn.Module):
         else:
             self.att = self.attention
             self.softmax = torch.nn.Softmax(dim=-1)
+            
+        if with_noise_conditioning:
+            self.noise_conditioning = LinearNormConditioning(dim_embed, dtype=self.dtype)
 
-    def forward(self, x, ada_ln_aux=None):
+
+    def forward(self, x, ada_ln_aux=None, emb=None):
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+
+        #NOTE: this is currently based on GenCast, not on DiT
+        if self.noise_conditioning:
+            assert emb is not None, "Need noise embedding if using noise conditioning"
+            x = self.noise_conditioning(x, emb, dtype=self.dtype)
+
 
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
