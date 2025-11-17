@@ -79,7 +79,7 @@ class Trainer(TrainerBase):
 
         self.freeze_modules = cf.get("freeze_modules", "")
 
-        assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
+        assert cf.samples_per_mini_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
         config.validate_forecast_policy_and_steps(cf=cf)
 
@@ -101,7 +101,7 @@ class Trainer(TrainerBase):
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
-    def inference(self, cf, devices, run_id_trained, epoch):
+    def inference(self, cf, devices, run_id_trained, mini_epoch):
         # general initalization
         self.init(cf, devices)
 
@@ -141,21 +141,21 @@ class Trainer(TrainerBase):
 
         self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         self.model = self.model.to(self.devices[0])
-        self.model.load(run_id_trained, epoch)
-        logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
+        self.model.load(run_id_trained, mini_epoch)
+        logger.info(f"Loaded model {run_id_trained} at mini_epoch {mini_epoch}.")
         self.model_params = ModelParams(cf).create(cf)
         self.model_params = self.model_params.to(self.devices[0])
-        logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
+        logger.info(f"Loaded model id={run_id_trained} at mini_epoch={mini_epoch}.")
 
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
         if is_root():
-            config.save(self.cf, epoch=0)
+            config.save(self.cf, mini_epoch=0)
 
         logger.info(f"Starting inference with id={self.cf.run_id}.")
 
         # inference validation set
-        self.validate(epoch=0)
+        self.validate(mini_epoch=0)
         logger.info(f"Finished inference run with id: {cf.run_id}")
 
     def init_model_and_shard(self, cf, devices):
@@ -262,7 +262,7 @@ class Trainer(TrainerBase):
 
         return model, model_params
 
-    def run(self, cf, devices, run_id_contd=None, epoch_contd=None):
+    def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
         self.init(cf, devices)
         cf = self.cf
@@ -276,7 +276,7 @@ class Trainer(TrainerBase):
             cf.start_date,
             cf.end_date,
             cf.batch_size_per_gpu,
-            cf.samples_per_epoch,
+            cf.samples_per_mini_epoch,
             stage=TRAIN,
             shuffle=cf.shuffle,
         )
@@ -310,8 +310,11 @@ class Trainer(TrainerBase):
                 self.model.reset_parameters()
         else:
             if is_root():
-                logger.info(f"Continuing run with id={self.cf.from_run_id} at epoch {epoch_contd}.")
-            self.load_model(self.cf.from_run_id, epoch_contd)
+                logger.info(
+                    f"""Continuing run with id={self.cf.from_run_id} at mini_epoch
+                    {mini_epoch_contd}."""
+                )
+            self.load_model(self.cf.from_run_id, mini_epoch_contd)
             if is_root():
                 logger.info(f"Loaded model id={run_id_contd}.")
         self.model_params.reset_parameters(cf)
@@ -360,7 +363,7 @@ class Trainer(TrainerBase):
 
         # lr is updated after each batch so account for this
         # TODO: conf should be read-only, do not modify the conf in flight
-        cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size_per_gpu)
+        cf.lr_steps = int((len(self.dataset) * cf.num_mini_epochs) / cf.batch_size_per_gpu)
 
         steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
         if is_root():
@@ -409,15 +412,16 @@ class Trainer(TrainerBase):
         self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=self.device)
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.device)
 
-        # recover epoch when continuing run
+        # recover mini_epoch when continuing run
         if self.world_size_original is None:
-            epoch_base = int(self.cf.istep / len(self.data_loader))
+            mini_epoch_base = int(self.cf.istep / len(self.data_loader))
         else:
             len_per_rank = (
                 len(self.dataset) // (self.world_size_original * cf.batch_size_per_gpu)
             ) * cf.batch_size_per_gpu
-            epoch_base = int(
-                self.cf.istep / (min(len_per_rank, cf.samples_per_epoch) * self.world_size_original)
+            mini_epoch_base = int(
+                self.cf.istep
+                / (min(len_per_rank, cf.samples_per_mini_epoch) * self.world_size_original)
             )
 
         # torch.autograd.set_detect_anomaly(True)
@@ -434,18 +438,18 @@ class Trainer(TrainerBase):
         if cf.val_initial:
             self.validate(-1)
 
-        for epoch in range(epoch_base, cf.num_epochs):
-            logger.info(f"Epoch {epoch} of {cf.num_epochs}: train.")
-            self.train(epoch)
+        for mini_epoch in range(mini_epoch_base, cf.num_mini_epochs):
+            logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: train.")
+            self.train(mini_epoch)
 
-            logger.info(f"Epoch {epoch} of {cf.num_epochs}: validate.")
-            self.validate(epoch)
+            logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: validate.")
+            self.validate(mini_epoch)
 
-            logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
-            self.save_model(epoch)
+            logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: save_model.")
+            self.save_model(mini_epoch)
 
         # log final model
-        self.save_model(cf.num_epochs)
+        self.save_model(cf.num_mini_epochs)
 
     ###########################################
     def _prepare_logging(
@@ -573,7 +577,7 @@ class Trainer(TrainerBase):
             targets_lens,
         )
 
-    def train(self, epoch):
+    def train(self, mini_epoch):
         cf = self.cf
         self.model.train()
         # torch.autograd.set_detect_anomaly(True)
@@ -650,7 +654,7 @@ class Trainer(TrainerBase):
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
 
-            self._log_terminal(bidx, epoch, TRAIN)
+            self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
 
@@ -662,7 +666,7 @@ class Trainer(TrainerBase):
 
         self.dataset.advance()
 
-    def validate(self, epoch):
+    def validate(self, mini_epoch):
         cf = self.cf
         self.model.eval()
 
@@ -719,7 +723,7 @@ class Trainer(TrainerBase):
                         sample_idxs = [item.sample_idx for item in streams_data[0]]
                         write_output(
                             self.cf,
-                            epoch,
+                            mini_epoch,
                             bidx,
                             sources,
                             preds_all,
@@ -742,7 +746,7 @@ class Trainer(TrainerBase):
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
-                self._log_terminal(bidx, epoch, VAL)
+                self._log_terminal(bidx, mini_epoch, VAL)
                 self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
@@ -759,16 +763,22 @@ class Trainer(TrainerBase):
             [[b.to(self.device) for b in bf] for bf in batch[2]],
         )
 
-    def load_model(self, run_id: str, epoch=-1):
+    def load_model(self, run_id: str, mini_epoch=-1):
         """Loads model state from checkpoint and checks for missing and unused keys.
         Args:
             run_id : model_id of the trained model
-            epoch : The epoch to load. Default (-1) is the latest epoch
+            mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
         """
 
         path_run = Path(self.cf.model_path) / run_id
-        epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"
-        filename = f"{run_id}_{epoch_id}.chkpt"
+        mini_epoch_id = (
+            f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
+        )
+        filename = f"{run_id}_{mini_epoch_id}.chkpt"
+
+        if not (path_run / filename).exists():
+            mini_epoch_id = f"epoch{mini_epoch:05d}"
+            filename = f"{run_id}_{mini_epoch_id}.chkpt"
 
         params = torch.load(
             path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
@@ -925,10 +935,10 @@ class Trainer(TrainerBase):
         else:
             return {}
 
-    def save_model(self, epoch: int, name=None):
-        # Saving at epoch == max_epoch means that we are saving the latest checkpoint.
-        max_epoch = self.cf.num_epochs
-        assert epoch <= max_epoch, (epoch, max_epoch)
+    def save_model(self, mini_epoch: int, name=None):
+        # Saving at mini_epoch == max_mini_epoch means that we are saving the latest checkpoint.
+        max_mini_epoch = self.cf.num_mini_epochs
+        assert mini_epoch <= max_mini_epoch, (mini_epoch, max_mini_epoch)
         model_state_dict = self._get_full_model_state_dict()
         # optim_state_dict = self._get_full_optimizer_state_dict()
 
@@ -937,7 +947,7 @@ class Trainer(TrainerBase):
                 [
                     self.cf.run_id,
                     "_",
-                    "latest" if epoch == -1 else f"epoch{epoch:05d}",
+                    "latest" if mini_epoch == -1 else f"chkpt{mini_epoch:05d}",
                     ("_" + name) if name is not None else "",
                 ]
             )
@@ -952,7 +962,7 @@ class Trainer(TrainerBase):
                 logger.info(f"Saved model to {file_out}")
 
             # save config
-            config.save(self.cf, epoch)
+            config.save(self.cf, mini_epoch)
 
     def _prepare_losses_for_logging(
         self,
@@ -1038,7 +1048,7 @@ class Trainer(TrainerBase):
         if is_root():
             self.train_logger.log_metrics(stage, grad_norms)
 
-    def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
+    def _log_terminal(self, bidx: int, mini_epoch: int, stage: Stage):
         print_freq = self.train_log_freq.terminal
         if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
@@ -1047,7 +1057,8 @@ class Trainer(TrainerBase):
             if is_root():
                 if stage == VAL:
                     logger.info(
-                        f"validation ({self.cf.run_id}) : {epoch:03d} : {avg_loss.nanmean().item()}"
+                        f"""validation ({self.cf.run_id}) : {mini_epoch:03d} : 
+                        {avg_loss.nanmean().item()}"""
                     )
                     for _, st in enumerate(self.cf.streams):
                         logger.info(
@@ -1061,7 +1072,7 @@ class Trainer(TrainerBase):
                     dt = time.time() - self.t_start
                     len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
                     pstr = (
-                        f"{epoch:03d} : {bidx:05d}/{len_dataset:05d} : "
+                        f"{mini_epoch:03d} : {bidx:05d}/{len_dataset:05d} : "
                         + f"{self.cf.istep:06d} : loss = {avg_loss.nanmean().item():.4E} "
                         + f"(lr={self.lr_scheduler.get_lr():.2E}, "
                     )
