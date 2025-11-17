@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import omegaconf
 import torch
 import torch.nn as nn
 import tqdm
@@ -102,17 +101,73 @@ class Trainer(TrainerBase):
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
-    def init_model_and_shard(self, cf, run_id_contd, epoch_contd, devices):
+    def inference(self, cf, devices, run_id_trained, epoch):
+        # general initalization
+        self.init(cf, devices)
+
+        cf = self.cf
+        self.device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
+        self.ema_model = None
+
+        # !! modifies config: adds config.streams[i].<stage>_source_channels
+        # and config.streams[i].<stage>_target_channels !!
+        self.dataset_val = MultiStreamDataSampler(
+            cf,
+            cf.start_date_val,
+            cf.end_date_val,
+            cf.batch_size_validation_per_gpu,
+            cf.samples_per_validation,
+            stage=VAL,
+            shuffle=cf.shuffle,
+        )
+
+        # make sure number of loaders does not exceed requested samples
+        loader_num_workers = min(cf.samples_per_validation, cf.loader_num_workers)
+        loader_params = {
+            "batch_size": None,
+            "batch_sampler": None,
+            "shuffle": False,
+            "num_workers": loader_num_workers,
+            "pin_memory": True,
+        }
+        self.data_loader_validation = torch.utils.data.DataLoader(
+            self.dataset_val, **loader_params, sampler=None
+        )
+
+        sources_size = self.dataset_val.get_sources_size()
+        targets_num_channels = self.dataset_val.get_targets_num_channels()
+        targets_coords_size = self.dataset_val.get_targets_coords_size()
+
+        self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+        self.model = self.model.to(self.devices[0])
+        self.model.load(run_id_trained, epoch)
+        logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
+        self.model_params = ModelParams(cf).create(cf)
+        self.model_params = self.model_params.to(self.devices[0])
+        logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
+
+        self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
+
+        if is_root():
+            config.save(self.cf, epoch=0)
+
+        logger.info(f"Starting inference with id={self.cf.run_id}.")
+
+        # inference validation set
+        self.validate(epoch=0)
+        logger.info(f"Finished inference run with id: {cf.run_id}")
+
+    def init_model_and_shard(self, cf, devices):
         sources_size = self.dataset.get_sources_size()
         targets_num_channels = self.dataset.get_targets_num_channels()
         targets_coords_size = self.dataset.get_targets_coords_size()
 
-        if cf.with_ddp and cf.with_fsdp:
+        if cf.with_ddp and not cf.with_fsdp:
+            model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+        else:
             with torch.device("meta"):
                 model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-        else:
-            model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-            model = model.to("cuda")
 
         # freeze request model part
         for name, module in model.named_modules():
@@ -125,6 +180,7 @@ class Trainer(TrainerBase):
 
         if cf.with_ddp and not cf.with_fsdp:
             # create DDP model if running without FSDP
+            model = model.to("cuda")
             model = torch.nn.parallel.DistributedDataParallel(
                 model,
                 broadcast_buffers=True,
@@ -204,70 +260,7 @@ class Trainer(TrainerBase):
                 torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
                 torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
-        # complete initalization and load model if inference/continuing a run
-        if run_id_contd is None:
-            if cf.with_ddp and cf.with_fsdp:
-                model.to_empty(device="cuda")
-                if cf.with_fsdp:
-                    model.reset_parameters()
-        else:
-            if is_root():
-                logger.info(f"Continuing run with id={run_id_contd} at epoch {epoch_contd}.")
-            model = self.load_model(model, run_id_contd, epoch_contd)
-        model_params.reset_parameters(cf)
-        model_params = model_params.to(self.device)
-
         return model, model_params
-
-    def inference(self, cf, devices, run_id_contd, epoch_contd):
-        # general initalization
-        self.init(cf, devices)
-
-        cf = self.cf
-        self.device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
-        self.ema_model = None
-
-        # create data loader
-        # only one needed since we only run the validation code path
-        self.dataset = MultiStreamDataSampler(
-            cf,
-            cf.start_date_val,
-            cf.end_date_val,
-            cf.batch_size_validation_per_gpu,
-            cf.samples_per_validation,
-            stage=VAL,
-            shuffle=cf.shuffle,
-        )
-        self.dataset_val = self.dataset
-
-        # make sure number of loaders does not exceed requested samples
-        loader_num_workers = min(cf.samples_per_validation, cf.loader_num_workers)
-        loader_params = {
-            "batch_size": None,
-            "batch_sampler": None,
-            "shuffle": False,
-            "num_workers": loader_num_workers,
-            "pin_memory": True,
-        }
-        self.data_loader_validation = torch.utils.data.DataLoader(
-            self.dataset, **loader_params, sampler=None
-        )
-
-        self.model, self.model_params = self.init_model_and_shard(
-            cf, run_id_contd, epoch_contd, devices
-        )
-
-        self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
-
-        if is_root():
-            config.save(self.cf, epoch=0)
-
-        logger.info(f"Starting inference with id={self.cf.run_id}.")
-
-        # inference validation set
-        self.validate(epoch=0)
-        logger.info(f"Finished inference run with id: {cf.run_id}")
 
     def run(self, cf, devices, run_id_contd=None, epoch_contd=None):
         # general initalization
@@ -278,7 +271,6 @@ class Trainer(TrainerBase):
         self.device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
 
-        # create data loaders
         self.dataset = MultiStreamDataSampler(
             cf,
             cf.start_date,
@@ -310,9 +302,20 @@ class Trainer(TrainerBase):
             self.dataset_val, **loader_params, sampler=None
         )
 
-        self.model, self.model_params = self.init_model_and_shard(
-            cf, run_id_contd, epoch_contd, devices
-        )
+        self.model, self.model_params = self.init_model_and_shard(cf, devices)
+
+        if run_id_contd is None:
+            self.model.to_empty(device="cuda")
+            if cf.with_fsdp:
+                self.model.reset_parameters()
+        else:
+            if is_root():
+                logger.info(f"Continuing run with id={self.cf.from_run_id} at epoch {epoch_contd}.")
+            self.load_model(self.cf.from_run_id, epoch_contd)
+            if is_root():
+                logger.info(f"Loaded model id={run_id_contd}.")
+        self.model_params.reset_parameters(cf)
+        self.model_params = self.model_params.to(self.device)
 
         if cf.compile_model:
             self.model = torch.compile(self.model, dynamic=True)
@@ -320,7 +323,7 @@ class Trainer(TrainerBase):
         self.validate_with_ema = cf.get("validate_with_ema", False)
         self.ema_model = None
         if self.validate_with_ema:
-            meta_ema_model = self.init_model_and_shard(cf, run_id_contd, epoch_contd, devices)[0]
+            meta_ema_model = self.init_model_and_shard(cf, devices)[0]
             self.ema_model = EMAModel(
                 self.model,
                 meta_ema_model,
@@ -492,12 +495,6 @@ class Trainer(TrainerBase):
                 tensors before any filtering.
         """
 
-        # handle case when forecast_steps is a list
-        if type(forecast_steps) is omegaconf.listconfig.ListConfig:
-            forecast_range = np.array(forecast_steps)
-        else:
-            forecast_range = np.arange(forecast_offset, forecast_offset + forecast_steps + 1)
-
         #'''
         # TODO: Remove this function and port functionality to write_validation(), which then
         # extracts preds_all, targets_all,... itself directly from stream_data.
@@ -512,7 +509,7 @@ class Trainer(TrainerBase):
                 torch.cat([t[i].target_tokens[fstep] for t in streams_data])
                 for i in range(len(self.cf.streams))
             ]
-            for fstep in forecast_range
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
         ]
         # TODO: Undo list resorting
         targets_coords_raw = [
@@ -520,7 +517,7 @@ class Trainer(TrainerBase):
                 torch.cat([t[i].target_coords_raw[fstep] for t in streams_data])
                 for i in range(len(self.cf.streams))
             ]
-            for fstep in forecast_range
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
         ]
         # TODO: Undo list resorting
         targets_times_raw = [
@@ -528,7 +525,7 @@ class Trainer(TrainerBase):
                 np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
                 for i in range(len(self.cf.streams))
             ]
-            for fstep in forecast_range
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
         ]
 
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
@@ -543,9 +540,6 @@ class Trainer(TrainerBase):
 
         # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
         for fstep in range(len(targets_rt)):
-            if len(preds[fstep]) == 0:
-                continue
-
             for i_strm, target in enumerate(targets_rt[fstep]):
                 pred = preds[fstep][i_strm]
 
@@ -764,7 +758,7 @@ class Trainer(TrainerBase):
             [[b.to(self.device) for b in bf] for bf in batch[2]],
         )
 
-    def load_model(self, model, run_id: str, epoch=-1):
+    def load_model(self, run_id: str, epoch=-1):
         """Loads model state from checkpoint and checks for missing and unused keys.
         Args:
             run_id : model_id of the trained model
@@ -779,9 +773,19 @@ class Trainer(TrainerBase):
             path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
         )
 
+        # Ensure backward compatibility with old model checkpoints
+        params = self.model.rename_old_state_dict(params)
+
+        model_state_dict = self.model.state_dict()
+        params = {
+            k: v
+            for k, v in params.items()
+            if k in model_state_dict and v.shape == model_state_dict[k].shape
+        }
+
         is_model_sharded = self.cf.with_ddp and self.cf.with_fsdp
         if is_model_sharded:
-            meta_sharded_sd = model.state_dict()
+            meta_sharded_sd = self.model.state_dict()
             maybe_sharded_sd = {}
             for param_name, full_tensor in params.items():
                 sharded_meta_param = meta_sharded_sd.get(param_name)
@@ -790,49 +794,89 @@ class Trainer(TrainerBase):
                     sharded_meta_param.device_mesh,
                     sharded_meta_param.placements,
                 )
-                # maybe_sharded_sd[param_name.replace("module.", "")] = nn.Parameter(sharded_tensor)
-                maybe_sharded_sd[param_name] = nn.Parameter(sharded_tensor)
-            # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
-            mkeys, ukeys = model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
-
-            # new network parts (e.g. for fine-tuning)
-            if mkeys:
-                # Get the unique parent modules for the missing parameters
-                new_modules_to_init = {key.rsplit(".", 1)[0] for key in mkeys}
-
-                # Find the highest-level "root" new modules to avoid redundant initializations
-                root_new_modules = set()
-                for path in sorted(list(new_modules_to_init)):
-                    if not any(path.startswith(root + ".") for root in root_new_modules):
-                        root_new_modules.add(path)
-
-                # Get all modules for quick lookup and initialize the new ones
-                all_modules = dict(model.named_modules())
-                for path in root_new_modules:
-                    if is_root():
-                        logger.info(f"Initializing new module not found in checkpoint: {path}")
-                    module_to_init = all_modules[path]
-                    module_to_init.to_empty(device="cuda")
-                    module_to_init.reset_parameters()
-
+                maybe_sharded_sd[param_name.replace("module.", "")] = nn.Parameter(sharded_tensor)
         else:
-            if not self.cf.with_ddp:
-                params_temp = {}
-                for k in params.keys():
-                    params_temp[k.replace("module.", "")] = params[k]
-                params = params_temp
-            mkeys, ukeys = model.load_state_dict(params, strict=False)
-            model = model.to(self.device)
+            maybe_sharded_sd = {}
+            for k in params.keys():
+                maybe_sharded_sd[k.replace("module.", "")] = params[k]
+        # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
+        mkeys, ukeys = self.model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
 
-        # warn about difference in checkpoint and model
-        if len(mkeys) == 0 and len(ukeys) == 0:
-            logger.info(f"Checkpoint {filename} loaded successfully with all weights matching.")
+        if mkeys:
+            # Get the unique parent modules for the missing parameters
+            new_modules_to_init = {key.rsplit(".", 1)[0] for key in mkeys}
+
+            # Find the highest-level "root" new modules to avoid redundant initializations
+            root_new_modules = set()
+            for path in sorted(list(new_modules_to_init)):
+                if not any(path.startswith(root + ".") for root in root_new_modules):
+                    root_new_modules.add(path)
+
+            # Get all modules for quick lookup and initialize the new ones
+            all_modules = dict(self.model.named_modules())
+            for path in root_new_modules:
+                if is_root():
+                    logger.info(f"Initializing new module not found in checkpoint: {path}")
+                module_to_init = all_modules[path]
+                module_to_init.to_empty(device="cuda")
+                module_to_init.reset_parameters()
+
+        if not is_model_sharded:
+            self.model = self.model.to(self.device)
+
         if len(mkeys) > 0:
             logger.warning(f"Missing keys when loading model: {mkeys}")
+
         if len(ukeys) > 0:
             logger.warning(f"Unused keys when loading model: {mkeys}")
 
-        return model
+    def load_optim(self):
+        """
+        TODO implement
+        """
+        pass
+        # last_optim_checkpoint = (
+        #     f"{self.folder}/{'dcp_api' if self.dcp_api else 'dtensor_api'}"
+        #     f"/{self.last_training_time}/{OPTIM_CHECKPOINT}"
+        # )
+        # full_sd = torch.load(
+        #     last_optim_checkpoint, mmap=True, weights_only=True, map_location="cpu"
+        # )
+        # _init_optim_state(opt)
+        # param_groups = opt.state_dict()["param_groups"]
+        # state = opt.state_dict()["state"]
+
+        # full_param_groups = full_sd["param_groups"]
+        # full_state = full_sd["state"]
+
+        # for param_group, full_param_group in zip(param_groups, full_param_groups):
+        #     for key, value in full_param_group.items():
+        #         if key == PARAMS:
+        #             continue
+        #         param_group[key] = value
+        #     for pid, full_pid in zip(param_group[PARAMS], full_param_group[PARAMS]):
+        #         if pid not in state:
+        #             continue
+        #         param_state = state[pid]
+        #         full_param_state = full_state[full_pid]
+        #         for attr, full_tensor in full_param_state.items():
+        #             sharded_tensor = param_state[attr]
+        #             if isinstance(sharded_tensor, DTensor):
+        #                 # exp_avg is DTensor
+        #                 param_state[attr] = distribute_tensor(
+        #                     full_tensor,
+        #                     sharded_tensor.device_mesh,
+        #                     sharded_tensor.placements,
+        #                 )
+        #             else:
+        #                 # step is plain tensor
+        #                 param_state[attr] = full_tensor
+        # opt.load_state_dict(
+        #     {
+        #         "param_groups": param_groups,
+        #         "state": state,
+        #     }
+        # )
 
     def _get_full_model_state_dict(self):
         maybe_sharded_sd = (
@@ -885,6 +929,7 @@ class Trainer(TrainerBase):
         max_epoch = self.cf.num_epochs
         assert epoch <= max_epoch, (epoch, max_epoch)
         model_state_dict = self._get_full_model_state_dict()
+        # optim_state_dict = self._get_full_optimizer_state_dict()
 
         if is_root():
             filename = "".join(
