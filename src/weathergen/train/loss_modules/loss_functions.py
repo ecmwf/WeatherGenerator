@@ -313,6 +313,12 @@ def masked_student_teacher_patch_softmax(
 
 
 def student_teacher_global_softmax(student_outputs, student_temp, teacher_outputs):
+    """
+    This assumes that student_outputs : list[Tensor[2*batch_size, num_patches, channel_size])
+                 and  teacher_outputs : list[Tensor[2*batch_size, num_patches, channel_size])
+    The 2* is because there is two global views and they are concatenated in the batch dim
+    in DINOv2 as far as I can tell.
+    """
     total_loss = 0
     for s in student_outputs:
         lsm = F.log_softmax(s / student_temp, dim=-1)

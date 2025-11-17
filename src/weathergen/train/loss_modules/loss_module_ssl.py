@@ -113,7 +113,7 @@ def gather_preds_for_loss(name, preds, view_metadata):
         }
     elif name == "DINO":
         # TODO deal with DINO having a local and global component
-        return torch.stack(
+        local2global_dino = torch.stack(
             [
                 p.latent[name]
                 for p, info in zip(preds, view_metadata, strict=False)
@@ -121,6 +121,15 @@ def gather_preds_for_loss(name, preds, view_metadata):
             ],
             dim=0,
         )
+        global2global_dino = torch.stack(
+            [
+                p.latent[name]
+                for p, info in zip(preds, view_metadata, strict=False)
+                if info.strategy == "pure"
+            ],
+            dim=0,
+        )
+        return local2global_dino, global2global_dino
     else:
         raise NotImplementedError(
             f"{name} is not an implemented loss for the LossLatentSSLStudentTeacher"
@@ -128,10 +137,18 @@ def gather_preds_for_loss(name, preds, view_metadata):
 
 
 def gather_targets_for_loss(name, targets, view_metadata):
-    if name == "iBOT" or name == "JEPA" or name == "DINO":
+    if name == "iBOT" or name == "JEPA":
         return torch.stack(
             [p[name] for p, info in zip(targets, view_metadata, strict=False)], dim=0
         )
+    if name == "DINO":
+        local2global_dino = torch.stack(
+            [p[name] for p, info in zip(targets, view_metadata, strict=False)], dim=0
+        )
+        global2global_dino = torch.stack(
+            reversed([p[name] for p, info in zip(targets, view_metadata, strict=False)]), dim=0
+        )
+        return local2global_dino, global2global_dino
     else:
         raise NotImplementedError(
             f"{name} is not an implemented loss for the LossLatentSSLStudentTeacher"

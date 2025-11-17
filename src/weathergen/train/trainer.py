@@ -59,27 +59,6 @@ from weathergen.utils.validation_io import write_output
 logger = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass
-class Model2TargetInfo:
-    """
-    A dataclass to encapsulate the batch structure.
-    """
-
-    local2global: torch.Tensor
-    data_augmentation_info: dict[str, torch.Tensor]
-
-
-@dataclasses.dataclass
-class Batch:
-    """
-    A dataclass to encapsulate the batch structure.
-    """
-
-    model_input: tuple[StreamData, torch.Tensor, torch.Tensor]
-    target_input: tuple[StreamData, torch.Tensor, torch.Tensor]
-    metadata: Model2TargetInfo | None
-
-
 class Trainer(TrainerBase):
     def __init__(self, train_log_freq: Config):
         TrainerBase.__init__(self)
