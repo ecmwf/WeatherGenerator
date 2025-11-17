@@ -21,12 +21,11 @@ More details coming soon. Please open an issue if you are interested in using th
 # How to use the WeatherGenerator project
 
 The model is currently being developed by the WeatherGenerator Consortium. If you want to
-engage, you are encouraged to contact us first.
+engage, you are encouraged to contact us first by opening an issue on Github.
 
 # Development guidelines
 
 The [main branch](https://github.com/ecmwf/WeatherGenerator/tree/main) is the most stable version. If you are running experiments, you should use this branch.
 
 The [develop branch](https://github.com/ecmwf/WeatherGenerator/tree/develop) has the latest
-features, but it is generally less stable for the time being. If you want to contribute
-to the development of algorithms, you should use this branch.
+features. However, it is currently evolving at a fast pace. It should not be expected to have stable code or weight interfaces, or to be backward compatible.
