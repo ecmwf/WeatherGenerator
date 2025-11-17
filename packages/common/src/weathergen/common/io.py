@@ -475,7 +475,7 @@ class OutputBatchData:
     # fstep, stream, redundant dim (size 1)
     targets_lens: list[list[list[int]]]
 
-    # stream name: index into data (only streams in analysis_streams_output)
+    # stream name: index into data (only streams in streams_output)
     streams: dict[str, int]
 
     # stream, channel name
