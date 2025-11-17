@@ -22,6 +22,7 @@ ERA5strato :
     't_29', 't_30', 't_32', 't_33', 't_36', 't_37', 't_40', 't_41', 't_44', 't_45', 't_48', 't_49', 't_51', 't_53', 't_54',
     ]
   loss_weight : 1.
+  frequency : "24:00:00"
   masking_rate : 0.6
   masking_rate_none : 0.05
   token_size : 8

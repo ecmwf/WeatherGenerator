@@ -1,6 +1,14 @@
 train : 
   plot :
-    lnjzhore : 
+    u4dtysia:
       slurm_id: 0
-      description: "Christian's naoj54ch with new code"
-      eval: vgbndhco
+      description: "tropo comparison LN after 4th"
+    v7m5ofcl:
+      slurm_id: 0
+      description: "tropo comparison LN after 2nd"
+    jpyzgvtw : 
+      slurm_id: 0
+      description: "tropo+strato LN after 4th"
+    wp4kfjmy:
+      slurm_id: 0
+      description: "tropo+strato LN after 4th with step hrs 24"

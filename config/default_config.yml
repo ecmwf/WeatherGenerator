@@ -133,11 +133,11 @@ norm_type: "LayerNorm"
 nn_module: "te"
 
 start_date: 197901010000
-end_date: 202012310000
+end_date: 201312310000
 start_date_val: 202101010000
 end_date_val: 202201010000
-len_hrs: 6
-step_hrs: 6
+len_hrs: 24
+step_hrs: 24
 input_window_steps: 1
 
 val_initial: False
