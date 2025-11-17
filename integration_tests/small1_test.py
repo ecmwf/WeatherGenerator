@@ -173,7 +173,7 @@ def assert_train_loss_below_threshold(run_id):
     )
     # Check that the loss does not explode in a single mini_epoch
     # This is meant to be a quick test, not a convergence test
-    target = 1.5
+    target = 0.25
     assert loss_metric < target, (
         f"'stream.ERA5.loss_mse.loss_avg' is {loss_metric}, expected to be below {target}"
     )
