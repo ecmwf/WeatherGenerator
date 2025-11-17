@@ -654,7 +654,7 @@ class Trainer(TrainerBase):
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
 
             # NEED TO FIX LOGGING
-            # self._log_terminal(bidx, epoch, TRAIN)
+            self._log_terminal(bidx, epoch, TRAIN)
             # if bidx % self.train_log_freq.metrics == 0:
             #     self._log(TRAIN)
 
@@ -749,7 +749,7 @@ class Trainer(TrainerBase):
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
                 # NEED TO FIX LOGGING
-                # self._log_terminal(bidx, epoch, VAL)
+                self._log_terminal(bidx, epoch, VAL)
                 # self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
@@ -982,16 +982,20 @@ class Trainer(TrainerBase):
         # Gather all tensors from all ranks into a list and stack them into one tensor again
         real_loss = torch.cat(all_gather_vlen(real_loss))
 
-        for name in self.loss_unweighted_hist.keys():
-            losses_all[name] = {}
-            stddev_all[name] = {}
+        for calc_name in self.loss_unweighted_hist.keys():
+            losses_all[calc_name] = {}
+            stddev_all[calc_name] = {}
             for stream in self.cf.streams:  # Loop over all streams
-                stream_hist = [losses[stream.name] for losses in self.loss_unweighted_hist[name]]
+                stream_hist = [
+                    losses[stream.name] for losses in self.loss_unweighted_hist[calc_name]
+                ]
                 stream_all = torch.stack(stream_hist).to(torch.float64)
-                losses_all[name][stream.name] = torch.cat(all_gather_vlen(stream_all))
-                stream_hist = [stddevs[stream.name] for stddevs in self.stdev_unweighted_hist[name]]
+                losses_all[calc_name][stream.name] = torch.cat(all_gather_vlen(stream_all))
+                stream_hist = [
+                    stddevs[stream.name] for stddevs in self.stdev_unweighted_hist[calc_name]
+                ]
                 stream_all = torch.stack(stream_hist).to(torch.float64)
-                stddev_all[name][stream.name] = torch.cat(all_gather_vlen(stream_all))
+                stddev_all[calc_name][stream.name] = torch.cat(all_gather_vlen(stream_all))
 
         return real_loss, losses_all, stddev_all
 
@@ -1059,11 +1063,12 @@ class Trainer(TrainerBase):
                     logger.info(
                         f"validation ({self.cf.run_id}) : {epoch:03d} : {avg_loss.nanmean().item()}"
                     )
-                    for _, st in enumerate(self.cf.streams):
-                        logger.info(
-                            "{}".format(st["name"])
-                            + f" : {losses_all[st['name']].nanmean():0.4E} \t",
-                        )
+                    for calc_name, losses in losses_all.items():
+                        for _, st in enumerate(self.cf.streams):
+                            logger.info(
+                                f"{calc_name}.{st['name']}"
+                                + f" : {losses[st['name']].nanmean():0.4E} \t",
+                            )
                     logger.info("\n")
 
                 elif stage == TRAIN:
@@ -1080,11 +1085,12 @@ class Trainer(TrainerBase):
                     pstr += f"s/sec={(print_freq * self.cf.batch_size_per_gpu) / dt:.3f})"
                     logger.info(pstr)
                     logger.info("\t")
-                    for _, st in enumerate(self.cf.streams):
-                        logger.info(
-                            "{}".format(st["name"])
-                            + f" : {losses_all[st['name']].nanmean():0.4E} \t",
-                        )
+                    for calc_name, losses in losses_all.items():
+                        for _, st in enumerate(self.cf.streams):
+                            logger.info(
+                                f"{calc_name}.{st['name']}"
+                                + f" : {losses[st['name']].nanmean():0.4E} \t",
+                            )
                     logger.info("\n")
 
             self.t_start = time.time()
