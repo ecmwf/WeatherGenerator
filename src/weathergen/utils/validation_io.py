@@ -19,7 +19,7 @@ _logger = logging.getLogger(__name__)
 
 def write_output(
     cf,
-    epoch,
+    mini_epoch,
     batch_idx,
     sources,
     preds_all,
@@ -74,6 +74,6 @@ def write_output(
         cf.forecast_offset,
     )
 
-    with io.ZarrIO(config.get_path_output(cf, epoch)) as writer:
+    with io.ZarrIO(config.get_path_output(cf, mini_epoch)) as writer:
         for subset in data.items():
             writer.write_zarr(subset)
