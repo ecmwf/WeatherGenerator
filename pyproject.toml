@@ -28,7 +28,7 @@ dependencies = [
  "numexpr>=2.11.0",
  "weathergen-common",
  "weathergen-evaluate",
- "seaborn>=0.13.2",
+ "weathergen-readers-extra",
 ]
 
 
@@ -44,6 +44,7 @@ train_continue = "weathergen.run_train:train_continue"
 inference = "weathergen.run_train:inference"
 evaluate = "weathergen.evaluate.run_evaluation:evaluate"
 plot_train = "weathergen.utils.plot_training:plot_train"
+export = "weathergen.evaluate.export.export_inference:export"
 
 [build-system]
 requires = ["hatchling"]
@@ -62,7 +63,7 @@ dev = [
  "ruff==0.9.7",
  "tensorboard>=2.20.0",
  "pdbpp>=0.11.7",
- "pyrefly==0.33.0",
+ "pyrefly==0.36.0",
 ]
 
 
@@ -214,6 +215,8 @@ explicit = true
 [tool.uv.sources]
 weathergen-common = { workspace = true }
 weathergen-evaluate = { workspace = true }
+weathergen-metrics = { workspace = true }
+weathergen-readers-extra = { workspace = true }
 
 
 flash-attn = [
@@ -245,7 +248,9 @@ log_cli_date_format = "%Y-%m-%d %H:%M:%S"
 
 [tool.uv.workspace]
 members = [
+   "packages/common",
    "packages/evaluate",
-   "packages/common"
+   "packages/metrics",
+   "packages/readers_extra",
 ]
 

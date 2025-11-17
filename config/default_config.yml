@@ -89,6 +89,11 @@ batch_size_validation_per_gpu: 1
 # encoders and decoders that exist per stream have the stream name attached at the end
 freeze_modules: ""
 
+# whether to track the exponential moving average of weights for validation
+validate_with_ema: True
+ema_ramp_up_ratio: 0.09
+ema_halflife_in_thousands: 1e-3
+
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
 training_mode: "forecast"
@@ -124,7 +129,7 @@ lr_final: 0.0
 lr_steps_warmup: 256
 lr_steps_cooldown: 512
 lr_policy_warmup: "cosine"
-lr_policy_decay: "linear"
+lr_policy_decay: "constant"
 lr_policy_cooldown: "linear"
 
 grad_clip: 1.0
@@ -154,7 +159,8 @@ desc: ""
 data_loader_rng_seed: ???
 run_id: ???
 
-# Parameters for logging/printing in the training loop
-train_log:
-  # The period to log metrics (in number of batch steps)
-  log_interval: 20
+# The period to log in the training loop (in number of batch steps)
+train_log_freq:
+  terminal: 10
+  metrics: 20
+  checkpoint: 250

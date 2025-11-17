@@ -36,12 +36,40 @@ case "$1" in
     ;;
   type-check)
     (
-      cd "$SCRIPT_DIR/packages/common" || exit 1
-      uv run --all-packages pyrefly check
-      cd "$SCRIPT_DIR/packages/evaluate" || exit 1
-      uv run --all-packages pyrefly check
+      # The dependencies are rebuilt for each package to ensure that they do not rely on implicit imports.
       cd "$SCRIPT_DIR" || exit 1
-      uv run --all-packages pyrefly check
+
+      # weathergen-common
+      uv sync --project packages/common --no-install-workspace
+      uv pip list
+      uv run --project packages/common --frozen pyrefly check packages/common
+      # Fail for errors on weathergen-common:
+      if [ $? -ne 0 ]; then
+        echo "Type checking failed for weathergen-common."
+        exit 1
+      fi
+
+      # weathergen-metrics
+      uv sync --project packages/metrics --no-install-workspace
+      uv pip list
+      uv run --project packages/metrics --frozen pyrefly check packages/metrics
+      # Fail for errors on weathergen-metrics:
+      if [ $? -ne 0 ]; then
+        echo "Type checking failed for weathergen-metrics."
+        exit 1
+      fi
+
+      # weathergen-evaluate
+      uv sync --project packages/evaluate --no-install-workspace --package weathergen-evaluate 
+      uv pip list
+      uv run --project packages/evaluate --frozen pyrefly check packages/evaluate
+
+      # weathergen (root)
+      # Install the whole workspace. It also needs the extra cpu option for the right version of pytorch.
+      uv sync --all-packages --extra cpu --no-install-workspace
+      uv pip list
+      uv run --all-packages pyrefly check src
+      echo "Type checking completed."
     )
     ;;
   unit-test)
@@ -49,6 +77,12 @@ case "$1" in
       cd "$SCRIPT_DIR" || exit 1
       uv sync --extra cpu 
       uv run --extra cpu pytest src/
+    )
+    ;;
+  toml-check)
+    (
+      cd "$SCRIPT_DIR" || exit 1
+      uv run --no-project python scripts/check_tomls.py
     )
     ;;
   integration-test)
@@ -112,7 +146,7 @@ case "$1" in
     )
     ;;
   *)
-    echo "Usage: $0 {sync|lint|lint-check|type-check|unit-test|integration-test|create-links|create-jupyter-kernel|jupytext-sync}"
+    echo "Usage: $0 {sync|lint|lint-check|type-check|unit-test|toml-check|integration-test|create-links|create-jupyter-kernel|jupytext-sync}"
     exit 1
     ;;
 esac

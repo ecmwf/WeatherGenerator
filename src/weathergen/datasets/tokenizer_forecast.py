@@ -12,6 +12,7 @@ from functools import partial
 import numpy as np
 import torch
 
+from weathergen.common.io import IOReaderData
 from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
     encode_times_source,
@@ -35,12 +36,9 @@ class TokenizerForecast(Tokenizer):
     def batchify_source(
         self,
         stream_info: dict,
-        coords: np.array,
-        geoinfos: np.array,
-        source: np.array,
-        times: np.array,
+        rdata: IOReaderData,
         time_win: tuple,
-        normalizer,  # dataset
+        normalize_coords,
     ):
         token_size = stream_info["token_size"]
         is_diagnostic = stream_info.get("diagnostic", False)
@@ -52,26 +50,24 @@ class TokenizerForecast(Tokenizer):
             token_size=token_size,
             hl=self.hl_source,
             hpy_verts_rots=self.hpy_verts_rots_source[-1],
-            n_coords=normalizer.normalize_coords,
-            n_geoinfos=normalizer.normalize_geoinfos,
-            n_data=normalizer.normalize_source_channels,
+            n_coords=normalize_coords,
             enc_time=encode_times_source,
         )
 
-        source_tokens_cells = torch.tensor([])
-        source_centroids = torch.tensor([])
+        source_tokens_cells = [torch.tensor([])]
+        source_centroids = [torch.tensor([])]
         source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
 
-        if is_diagnostic or source.shape[1] == 0 or len(source) < 2:
+        if is_diagnostic or rdata.data.shape[1] == 0 or len(rdata.data) < 2:
             return (source_tokens_cells, source_tokens_lens, source_centroids)
 
         # TODO: properly set stream_id; don't forget to normalize
         source_tokens_cells = tokenize_window(
             0,
-            coords,
-            geoinfos,
-            source,
-            times,
+            rdata.coords,
+            rdata.geoinfos,
+            rdata.data,
+            rdata.datetimes,
         )
 
         source_tokens_cells = [
@@ -88,12 +84,8 @@ class TokenizerForecast(Tokenizer):
         self,
         stream_info: dict,
         sampling_rate_target: float,
-        coords: np.array,
-        geoinfos: np.array,
-        source: np.array,
-        times: np.array,
+        rdata: IOReaderData,
         time_win: tuple,
-        normalizer,  # dataset
     ):
         target_tokens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
         target_coords = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
@@ -101,18 +93,18 @@ class TokenizerForecast(Tokenizer):
 
         sampling_rate_target = stream_info.get("sampling_rate_target", sampling_rate_target)
         if sampling_rate_target < 1.0:
-            mask = self.rng.uniform(0.0, 1.0, source.shape[0]) < sampling_rate_target
-            coords = coords[mask]
-            geoinfos = geoinfos[mask]
-            source = source[mask]
-            times = times[mask]
+            mask = self.rng.uniform(0.0, 1.0, rdata.data.shape[0]) < sampling_rate_target
+            rdata.coords = rdata.coords[mask]
+            rdata.geoinfos = rdata.geoinfos[mask]
+            rdata.data = rdata.data[mask]
+            rdata.datetimes = rdata.datetimes[mask]
 
         # TODO: currently treated as empty to avoid special case handling
-        if len(source) < 2:
+        if len(rdata.data) < 2:
             return (target_tokens, target_coords, torch.tensor([]), torch.tensor([]))
 
         # compute indices for each cell
-        hpy_idxs_ord_split, _, _, _ = hpy_cell_splits(coords, self.hl_target)
+        hpy_idxs_ord_split, _, _, _ = hpy_cell_splits(rdata.coords, self.hl_target)
 
         # TODO: expose parameter
         with_perm_target = True
@@ -126,15 +118,15 @@ class TokenizerForecast(Tokenizer):
         ll = np.cumsum(np.array([len(a) for a in hpy_idxs_ord_split]))[:-1]
 
         # compute encoding of time
-        times_reordered = times[idxs_ord]
+        times_reordered = rdata.datetimes[idxs_ord]
         times_reordered_enc = encode_times_target(times_reordered, time_win)
 
         # reorder and split all relevant information based on cells
-        target_tokens = np.split(normalizer.normalize_target_channels(source)[idxs_ord], ll)
-        coords_reordered = coords[idxs_ord]
+        target_tokens = np.split(rdata.data[idxs_ord], ll)
+        coords_reordered = rdata.coords[idxs_ord]
         target_coords = np.split(coords_reordered, ll)
         target_coords_raw = np.split(coords_reordered, ll)
-        target_geoinfos = np.split(normalizer.normalize_geoinfos(geoinfos)[idxs_ord], ll)
+        target_geoinfos = np.split(rdata.geoinfos[idxs_ord], ll)
         target_times_raw = np.split(times_reordered, ll)
         target_times = np.split(times_reordered_enc, ll)
 

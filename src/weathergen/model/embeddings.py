@@ -48,7 +48,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         super(StreamEmbedTransformer, self).__init__()
 
         self.name = f"StreamEmbedder_{stream_name}"
-
+        self.mode = mode
         self.num_tokens = num_tokens
         self.token_size = token_size
         self.num_channels = num_channels
@@ -113,9 +113,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                 )
 
             else:
-                assert False
-
-            self.forward = self.forward_channels
+                raise ValueError(f"Unknown unembed mode: {unembed_mode}")
 
         elif mode == "columns":
             assert embed_size_centroids == 0
@@ -130,7 +128,6 @@ class StreamEmbedTransformer(torch.nn.Module):
                 self.num_tokens * ((self.dim_out - embed_size_centroids) // token_size),
             )
             self.ln_final = norm(dim_out, eps=1e-6)
-            self.forward = self.forward_columns
 
             # TODO: factorization when sqrt is not int
             dim1 = int(np.sqrt(dim_out))
@@ -140,7 +137,7 @@ class StreamEmbedTransformer(torch.nn.Module):
             self.unembed2 = torch.nn.Linear(self.token_size, dim1)
 
         else:
-            assert False
+            raise ValueError(f"Unknown mode: {mode}")
 
         self.dropout_final = torch.nn.Dropout(0.1)
         self.embed_centroids = torch.nn.Linear(5, embed_size_centroids)
@@ -164,7 +161,7 @@ class StreamEmbedTransformer(torch.nn.Module):
             ]
             out = torch.stack(out, dim=1).flatten(-2, -1)
         else:
-            assert False
+            raise ValueError(f"Unknown unembed mode: {self.unembed_mode}")
 
         # append centroids
         if self.embed_size_centroids > 0:
@@ -194,6 +191,14 @@ class StreamEmbedTransformer(torch.nn.Module):
         out = self.dropout_final(self.ln_final(out))
 
         return out.to(torch.float16)
+
+    def forward(self, x_in, centroids):
+        if self.mode == "channels":
+            return self.forward_channels(x_in, centroids)
+        elif self.mode == "columns":
+            return self.forward_columns(x_in, centroids)
+        else:
+            raise ValueError(f"Unknown mode {self.mode}")
 
 
 class StreamEmbedLinear(torch.nn.Module):
