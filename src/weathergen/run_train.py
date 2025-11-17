@@ -54,7 +54,7 @@ def inference_from_args(argl: list[str]):
     cf = config.load_config(
         args.private_config,
         args.from_run_id,
-        args.epoch,
+        args.mini_epoch,
         *args.config,
         inference_overwrite,
         cli_overwrite,
@@ -70,8 +70,8 @@ def inference_from_args(argl: list[str]):
 
     cf.run_history += [(args.from_run_id, cf.istep)]
 
-    trainer = Trainer()
-    trainer.inference(cf, devices, args.from_run_id, args.epoch)
+    trainer = Trainer(cf.train_log_freq)
+    trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
 
 
 ####################################################################################################
@@ -113,7 +113,7 @@ def train_continue_from_args(argl: list[str]):
             lr_policy_warmup="cosine",
             lr_policy_decay="linear",
             lr_policy_cooldown="linear",
-            num_epochs=12,  # len(cf.forecast_steps) + 4
+            num_mini_epochs=12,  # len(cf.forecast_steps) + 4
             istep=0,
         )
     else:
@@ -123,7 +123,7 @@ def train_continue_from_args(argl: list[str]):
     cf = config.load_config(
         args.private_config,
         args.from_run_id,
-        args.epoch,
+        args.mini_epoch,
         finetune_overwrite,
         *args.config,
         cli_overwrite,
@@ -138,8 +138,8 @@ def train_continue_from_args(argl: list[str]):
     # track history of run to ensure traceability of results
     cf.run_history += [(args.from_run_id, cf.istep)]
 
-    trainer = Trainer()
-    trainer.run(cf, devices, args.from_run_id, args.epoch)
+    trainer = Trainer(cf.train_log_freq)
+    trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
 
 
 ####################################################################################################
@@ -184,7 +184,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
 
-    trainer = Trainer(checkpoint_freq=250, print_freq=10)
+    trainer = Trainer(cf.train_log_freq)
 
     try:
         trainer.run(cf, devices)

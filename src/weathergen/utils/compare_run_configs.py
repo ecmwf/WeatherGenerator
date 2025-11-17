@@ -218,13 +218,13 @@ def main():
 
         logger.info(f"Loading config for run_id: {run_id} from {path}")
         try:
-            cfg = load_model_config(run_id=run_id, epoch=None, model_path=path)
+            cfg = load_model_config(run_id=run_id, mini_epoch=None, model_path=path)
         except Exception:
             logger.warning(
                 f"Failed to load config for run_id: {run_id} from {path}",
-                "Assuming epoch=0 and retrying.",
+                "Assuming mini_epoch=0 and retrying.",
             )
-            cfg = load_model_config(run_id=run_id, epoch=0, model_path=path)
+            cfg = load_model_config(run_id=run_id, mini_epoch=0, model_path=path)
         actual_run_id = cfg.get("run_id", run_id)
 
         # Process streams and flatten

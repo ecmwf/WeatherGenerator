@@ -11,13 +11,15 @@ import logging
 
 import weathergen.common.config as config
 import weathergen.common.io as io
+from weathergen.common.io import TimeRange
+from weathergen.datasets.data_reader_base import TimeWindowHandler, str_to_datetime64
 
 _logger = logging.getLogger(__name__)
 
 
 def write_output(
     cf,
-    epoch,
+    mini_epoch,
     batch_idx,
     sources,
     preds_all,
@@ -25,6 +27,7 @@ def write_output(
     targets_coords_all,
     targets_times_all,
     targets_lens,
+    sample_idxs,
 ):
     stream_names = [stream.name for stream in cf.streams]
     output_stream_names = cf.analysis_streams_output
@@ -48,8 +51,16 @@ def write_output(
     assert len(stream_names) == len(preds_all[0]), "data does not match number of streams"
     assert len(stream_names) == len(sources[0]), "data does not match number of streams"
 
+    start_date = str_to_datetime64(cf.start_date_val)
+    end_date = str_to_datetime64(cf.end_date_val)
+
+    twh = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
+    source_windows = (twh.window(idx) for idx in sample_idxs)
+    source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
+
     data = io.OutputBatchData(
         sources,
+        source_intervals,
         targets_all,
         preds_all,
         targets_coords_all,
@@ -63,6 +74,6 @@ def write_output(
         cf.forecast_offset,
     )
 
-    with io.ZarrIO(config.get_path_output(cf, epoch)) as writer:
+    with io.ZarrIO(config.get_path_output(cf, mini_epoch)) as writer:
         for subset in data.items():
             writer.write_zarr(subset)

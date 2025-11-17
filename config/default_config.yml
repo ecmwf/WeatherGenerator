@@ -9,7 +9,7 @@ embed_dropout_rate: 0.1
 
 target_cell_local_prediction: True
 
-ae_local_dim_embed: 256
+ae_local_dim_embed: 1024
 ae_local_num_blocks: 0
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
@@ -25,7 +25,7 @@ ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
 ae_global_num_blocks: 4
-ae_global_num_heads: 16
+ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
 # TODO: switching to < 1 triggers triton-related issues.
@@ -37,7 +37,7 @@ ae_global_trailing_layer_norm: False
 
 decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
 pred_adapter_kv: False
-pred_self_attention: True
+pred_self_attention: False
 pred_dyadic_dims: False
 pred_mlp_adaln: True
 
@@ -89,6 +89,11 @@ batch_size_validation_per_gpu: 1
 # encoders and decoders that exist per stream have the stream name attached at the end
 freeze_modules: ""
 
+# whether to track the exponential moving average of weights for validation
+validate_with_ema: True
+ema_ramp_up_ratio: 0.09
+ema_halflife_in_thousands: 1e-3
+
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
 training_mode: "forecast"
@@ -99,7 +104,7 @@ masking_rate: 0.6
 masking_rate_sampling: True
 # sample a subset of all target points, useful e.g. to reduce memory requirements (also can specify per-stream)
 sampling_rate_target: 1.0
-# include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "causal" and "combination"
+# include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "combination"
 masking_strategy: "random"
 # masking_strategy_config is a dictionary of additional parameters for the masking strategy
 # required for "healpix" and "channel" masking strategies
@@ -124,13 +129,14 @@ lr_final: 0.0
 lr_steps_warmup: 256
 lr_steps_cooldown: 512
 lr_policy_warmup: "cosine"
-lr_policy_decay: "linear"
+lr_policy_decay: "constant"
 lr_policy_cooldown: "linear"
 
 grad_clip: 1.0
 weight_decay: 0.1
 norm_type: "LayerNorm"
 nn_module: "te"
+log_grad_norms: False
 
 start_date: 197901010000
 end_date: 201312310000
@@ -153,7 +159,8 @@ desc: ""
 data_loader_rng_seed: ???
 run_id: ???
 
-# Parameters for logging/printing in the training loop
-train_log:
-  # The period to log metrics (in number of batch steps)
-  log_interval: 20
+# The period to log in the training loop (in number of batch steps)
+train_log_freq:
+  terminal: 10
+  metrics: 20
+  checkpoint: 250

@@ -19,6 +19,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import tqdm
+from numpy.typing import NDArray
 from omegaconf import OmegaConf
 from torch import Tensor
 
@@ -32,6 +33,7 @@ from torch.distributed.tensor import DTensor, distribute_tensor
 import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
+from weathergen.datasets.stream_data import StreamData
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -39,6 +41,7 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
+from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
@@ -54,11 +57,10 @@ logger = logging.getLogger(__name__)
 
 
 class Trainer(TrainerBase):
-    def __init__(self, checkpoint_freq=250, print_freq=10):
+    def __init__(self, train_log_freq: Config):
         TrainerBase.__init__(self)
 
-        self.checkpoint_freq = checkpoint_freq
-        self.print_freq = print_freq
+        self.train_log_freq = train_log_freq
 
     def init(self, cf: Config, devices):
         self.cf = OmegaConf.merge(
@@ -77,7 +79,7 @@ class Trainer(TrainerBase):
 
         self.freeze_modules = cf.get("freeze_modules", "")
 
-        assert cf.samples_per_epoch % cf.batch_size_per_gpu == 0
+        assert cf.samples_per_mini_epoch % cf.batch_size_per_gpu == 0
         assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
         config.validate_forecast_policy_and_steps(cf=cf)
 
@@ -89,6 +91,8 @@ class Trainer(TrainerBase):
         # world_size gets overwritten by current setting during init_ddp()
         self.world_size_original = cf.get("world_size", None)
 
+        self.log_grad_norms = cf.get("log_grad_norms", False)
+
         # create output directory
         if is_root():
             config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
@@ -97,13 +101,14 @@ class Trainer(TrainerBase):
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
-    def inference(self, cf, devices, run_id_trained, epoch):
+    def inference(self, cf, devices, run_id_trained, mini_epoch):
         # general initalization
         self.init(cf, devices)
 
         cf = self.cf
         self.device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
+        self.ema_model = None
 
         # !! modifies config: adds config.streams[i].<stage>_source_channels
         # and config.streams[i].<stage>_target_channels !!
@@ -136,24 +141,128 @@ class Trainer(TrainerBase):
 
         self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
         self.model = self.model.to(self.devices[0])
-        self.model.load(run_id_trained, epoch)
-        logger.info(f"Loaded model {run_id_trained} at epoch {epoch}.")
+        self.model.load(run_id_trained, mini_epoch)
+        logger.info(f"Loaded model {run_id_trained} at mini_epoch {mini_epoch}.")
         self.model_params = ModelParams(cf).create(cf)
         self.model_params = self.model_params.to(self.devices[0])
-        logger.info(f"Loaded model id={run_id_trained} at epoch={epoch}.")
+        logger.info(f"Loaded model id={run_id_trained} at mini_epoch={mini_epoch}.")
 
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
         if is_root():
-            config.save(self.cf, epoch=0)
+            config.save(self.cf, mini_epoch=0)
 
         logger.info(f"Starting inference with id={self.cf.run_id}.")
 
         # inference validation set
-        self.validate(epoch=0)
+        self.validate(mini_epoch=0)
         logger.info(f"Finished inference run with id: {cf.run_id}")
 
-    def run(self, cf, devices, run_id_contd=None, epoch_contd=None):
+    def init_model_and_shard(self, cf, devices):
+        sources_size = self.dataset.get_sources_size()
+        targets_num_channels = self.dataset.get_targets_num_channels()
+        targets_coords_size = self.dataset.get_targets_coords_size()
+
+        if cf.with_ddp and not cf.with_fsdp:
+            model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+        else:
+            with torch.device("meta"):
+                model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+
+        # freeze request model part
+        for name, module in model.named_modules():
+            name = module.name if hasattr(module, "name") else name
+            # avoid the whole model element which has name ''
+            if name == "":
+                continue
+            if re.fullmatch(self.freeze_modules, name) is not None:
+                freeze_weights(module)
+
+        if cf.with_ddp and not cf.with_fsdp:
+            # create DDP model if running without FSDP
+            model = model.to("cuda")
+            model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                broadcast_buffers=True,
+                find_unused_parameters=True,
+                gradient_as_bucket_view=True,
+                bucket_cap_mb=512,
+            )
+
+        elif cf.with_ddp and cf.with_fsdp:
+            # with DDP *and() FSDP
+            fsdp_kwargs = {
+                "mp_policy": (
+                    MixedPrecisionPolicy(
+                        param_dtype=self.mixed_precision_dtype,
+                        reduce_dtype=torch.float32,
+                    )
+                    if cf.with_mixed_precision
+                    else None
+                ),
+            }
+            modules_to_shard = (
+                MLP,
+                MultiSelfAttentionHeadLocal,
+                MultiSelfAttentionHead,
+                MultiCrossAttentionHeadVarlen,
+                MultiCrossAttentionHeadVarlenSlicedQ,
+                MultiSelfAttentionHeadVarlen,
+            )
+
+            for module in model.ae_local_engine.ae_local_blocks.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+
+            for module in model.ae_local_global_engine.ae_adapter.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+
+            for module in model.ae_global_engine.ae_global_blocks.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+
+            for module in model.forecast_engine.fe_blocks.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+
+            full_precision_fsdp_kwargs = {
+                "mp_policy": (
+                    MixedPrecisionPolicy(
+                        param_dtype=torch.float32,
+                        reduce_dtype=torch.float32,
+                    )
+                    if cf.with_mixed_precision
+                    else None
+                ),
+            }
+            for module in model.pred_adapter_kv.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **full_precision_fsdp_kwargs)
+
+            for module in model.target_token_engines.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **full_precision_fsdp_kwargs)
+
+        model_params = ModelParams(cf).create(cf)
+
+        if cf.with_ddp and cf.with_fsdp:
+            fully_shard(model)
+            for tensor in itertools.chain(model.parameters(), model.buffers()):
+                assert tensor.device == torch.device("meta")
+
+            # For reasons we do not yet fully understand, when using train continue in some
+            # instances, FSDP2 does not register the forward_channels and forward_columns
+            # functions in the embedding engine as forward functions. Thus, yielding a crash
+            # because the input tensors are not converted to DTensors. This seems to primarily
+            # occur during validation.
+            for embed in model.embed_engine.embeds:
+                torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
+                torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
+
+        return model, model_params
+
+    def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
         self.init(cf, devices)
         cf = self.cf
@@ -167,7 +276,7 @@ class Trainer(TrainerBase):
             cf.start_date,
             cf.end_date,
             cf.batch_size_per_gpu,
-            cf.samples_per_epoch,
+            cf.samples_per_mini_epoch,
             stage=TRAIN,
             shuffle=cf.shuffle,
         )
@@ -193,98 +302,19 @@ class Trainer(TrainerBase):
             self.dataset_val, **loader_params, sampler=None
         )
 
-        sources_size = self.dataset.get_sources_size()
-        targets_num_channels = self.dataset.get_targets_num_channels()
-        targets_coords_size = self.dataset.get_targets_coords_size()
+        self.model, self.model_params = self.init_model_and_shard(cf, devices)
 
-        with torch.device("meta"):
-            self.model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-
-        for name, module in self.model.named_modules():
-            name = module.name if hasattr(module, "name") else name
-            # avoid the whole model element which has name ''
-            if name == "":
-                continue
-            if re.fullmatch(self.freeze_modules, name) is not None:
-                freeze_weights(module)
-
-        if cf.with_ddp and not cf.with_fsdp:
-            self.model = torch.nn.parallel.DistributedDataParallel(
-                self.model,
-                broadcast_buffers=True,
-                find_unused_parameters=True,
-                gradient_as_bucket_view=True,
-                bucket_cap_mb=512,
-            )
-
-        if cf.with_ddp and cf.with_fsdp:
-            fsdp_kwargs = {
-                "mp_policy": MixedPrecisionPolicy(
-                    param_dtype=self.mixed_precision_dtype,
-                    reduce_dtype=torch.float32,
-                )
-                if cf.with_mixed_precision
-                else None,
-            }
-            modules_to_shard = (
-                MLP,
-                MultiSelfAttentionHeadLocal,
-                MultiSelfAttentionHead,
-                MultiCrossAttentionHeadVarlen,
-                MultiCrossAttentionHeadVarlenSlicedQ,
-                MultiSelfAttentionHeadVarlen,
-            )
-            # for module in self.model.embeds.modules():
-            #     if isinstance(module, modules_to_shard):
-            #         fully_shard(module, **fsdp_kwargs)
-
-            for module in self.model.ae_local_blocks.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
-
-            for module in self.model.ae_adapter.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
-
-            for module in self.model.ae_global_blocks.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
-
-            for module in self.model.fe_blocks.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
-
-            full_precision_fsdp_kwargs = {
-                "mp_policy": MixedPrecisionPolicy(
-                    param_dtype=torch.float32,
-                    reduce_dtype=torch.float32,
-                )
-                if cf.with_mixed_precision
-                else None,
-            }
-            for module in self.model.pred_adapter_kv.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **full_precision_fsdp_kwargs)
-
-            for module in self.model.target_token_engines.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **full_precision_fsdp_kwargs)
-
-        self.model_params = ModelParams(cf).create(cf)  # .to(device)
-
-        if cf.with_ddp and cf.with_fsdp:
-            fully_shard(self.model)
-            for tensor in itertools.chain(self.model.parameters(), self.model.buffers()):
-                assert tensor.device == torch.device("meta")
-
-        # load model if specified
         if run_id_contd is None:
             self.model.to_empty(device="cuda")
-            self.model.reset_parameters()
+            if cf.with_fsdp:
+                self.model.reset_parameters()
         else:
             if is_root():
-                logger.info(f"Continuing run with id={self.cf.from_run_id} at epoch {epoch_contd}.")
-            self.load_model(self.cf.from_run_id, epoch_contd)
+                logger.info(
+                    f"""Continuing run with id={self.cf.from_run_id} at mini_epoch
+                    {mini_epoch_contd}."""
+                )
+            self.load_model(self.cf.from_run_id, mini_epoch_contd)
             if is_root():
                 logger.info(f"Loaded model id={run_id_contd}.")
         self.model_params.reset_parameters(cf)
@@ -293,8 +323,20 @@ class Trainer(TrainerBase):
         if cf.compile_model:
             self.model = torch.compile(self.model, dynamic=True)
 
+        self.validate_with_ema = cf.get("validate_with_ema", False)
+        self.ema_model = None
+        if self.validate_with_ema:
+            meta_ema_model = self.init_model_and_shard(cf, devices)[0]
+            self.ema_model = EMAModel(
+                self.model,
+                meta_ema_model,
+                halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
+                rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
+                is_model_sharded=(cf.with_ddp and cf.with_fsdp),
+            )
+
         # if with_fsdp then parameter count is unreliable
-        if (is_root() and not cf.with_fsdp) or not cf.with_ddp:
+        if is_root() and not cf.with_fsdp and not cf.with_ddp:
             self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
@@ -321,7 +363,7 @@ class Trainer(TrainerBase):
 
         # lr is updated after each batch so account for this
         # TODO: conf should be read-only, do not modify the conf in flight
-        cf.lr_steps = int((len(self.dataset) * cf.num_epochs) / cf.batch_size_per_gpu)
+        cf.lr_steps = int((len(self.dataset) * cf.num_mini_epochs) / cf.batch_size_per_gpu)
 
         steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
         if is_root():
@@ -370,15 +412,16 @@ class Trainer(TrainerBase):
         self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=self.device)
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.device)
 
-        # recover epoch when continuing run
+        # recover mini_epoch when continuing run
         if self.world_size_original is None:
-            epoch_base = int(self.cf.istep / len(self.data_loader))
+            mini_epoch_base = int(self.cf.istep / len(self.data_loader))
         else:
             len_per_rank = (
                 len(self.dataset) // (self.world_size_original * cf.batch_size_per_gpu)
             ) * cf.batch_size_per_gpu
-            epoch_base = int(
-                self.cf.istep / (min(len_per_rank, cf.samples_per_epoch) * self.world_size_original)
+            mini_epoch_base = int(
+                self.cf.istep
+                / (min(len_per_rank, cf.samples_per_mini_epoch) * self.world_size_original)
             )
 
         # torch.autograd.set_detect_anomaly(True)
@@ -395,18 +438,18 @@ class Trainer(TrainerBase):
         if cf.val_initial:
             self.validate(-1)
 
-        for epoch in range(epoch_base, cf.num_epochs):
-            logger.info(f"Epoch {epoch} of {cf.num_epochs}: train.")
-            self.train(epoch)
+        for mini_epoch in range(mini_epoch_base, cf.num_mini_epochs):
+            logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: train.")
+            self.train(mini_epoch)
 
-            logger.info(f"Epoch {epoch} of {cf.num_epochs}: validate.")
-            self.validate(epoch)
+            logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: validate.")
+            self.validate(mini_epoch)
 
-            logger.info(f"Epoch {epoch} of {cf.num_epochs}: save_model.")
-            self.save_model(epoch)
+            logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: save_model.")
+            self.save_model(mini_epoch)
 
         # log final model
-        self.save_model(cf.num_epochs)
+        self.save_model(cf.num_mini_epochs)
 
     ###########################################
     def _prepare_logging(
@@ -491,9 +534,13 @@ class Trainer(TrainerBase):
 
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         fsteps = len(targets_rt)
-        preds_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
-        targets_all = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
-        targets_lens = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+        preds_all: list[list[list[NDArray]]] = [
+            [[] for _ in self.cf.streams] for _ in range(fsteps)
+        ]
+        targets_all: list[list[list[NDArray]]] = [
+            [[] for _ in self.cf.streams] for _ in range(fsteps)
+        ]
+        targets_lens: list[list[list[int]]] = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
 
         # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
         for fstep in range(len(targets_rt)):
@@ -515,8 +562,12 @@ class Trainer(TrainerBase):
                 dn_data = self.dataset_val.denormalize_target_channels
 
                 f32 = torch.float32
-                preds_all[fstep][i_strm] += [dn_data(i_strm, pred.to(f32)).detach().cpu()]
-                targets_all[fstep][i_strm] += [dn_data(i_strm, target.to(f32)).detach().cpu()]
+                preds_all[fstep][i_strm] += [
+                    np.asarray(dn_data(i_strm, pred.to(f32)).detach().cpu())
+                ]
+                targets_all[fstep][i_strm] += [
+                    np.asarray(dn_data(i_strm, target.to(f32)).detach().cpu())
+                ]
 
         return (
             preds_all,
@@ -526,11 +577,10 @@ class Trainer(TrainerBase):
             targets_lens,
         )
 
-    def train(self, epoch):
+    def train(self, mini_epoch):
         cf = self.cf
         self.model.train()
         # torch.autograd.set_detect_anomaly(True)
-        log_interval = self.cf.train_log.log_interval
 
         dataset_iter = iter(self.data_loader)
 
@@ -538,6 +588,7 @@ class Trainer(TrainerBase):
 
         # Unweighted loss, real weighted loss, std for losses that need it
         self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
+        self.last_grad_norm = 0.0
 
         # training loop
         self.t_start = time.time()
@@ -569,7 +620,16 @@ class Trainer(TrainerBase):
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=cf.grad_clip)
+            total_norm = torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=cf.grad_clip
+            )
+
+            # log gradient norms
+            if self.log_grad_norms:
+                if bidx % self.train_log_freq.terminal == 0:
+                    self.last_grad_norm = self._get_tensor_item(total_norm)
+                if bidx % self.train_log_freq.metrics == 0:
+                    self._log_instant_grad_norms(TRAIN)
 
             # optimizer step
             self.grad_scaler.step(self.optimizer)
@@ -579,6 +639,13 @@ class Trainer(TrainerBase):
             # update learning rate
             self.lr_scheduler.step()
 
+            # EMA update
+            if self.validate_with_ema:
+                self.ema_model.update(
+                    self.cf.istep * self.world_size_original * self.cf.batch_size_per_gpu,
+                    self.world_size_original * self.cf.batch_size_per_gpu,
+                )
+
             self.loss_unweighted_hist += [loss_values.losses_all]
             self.loss_model_hist += [loss_values.loss.item()]
             self.stdev_unweighted_hist += [loss_values.stddev_all]
@@ -587,19 +654,19 @@ class Trainer(TrainerBase):
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
 
-            self._log_terminal(bidx, epoch, TRAIN)
-            if bidx % log_interval == 0:
+            self._log_terminal(bidx, mini_epoch, TRAIN)
+            if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
 
-            # model checkpoint
-            if bidx % self.checkpoint_freq == 0 and bidx > 0:
+            # save model checkpoint (with designation _latest)
+            if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
 
-            self.cf.istep += cf.batch_size_per_gpu
+            self.cf.istep += 1
 
         self.dataset.advance()
 
-    def validate(self, epoch):
+    def validate(self, mini_epoch):
         cf = self.cf
         self.model.eval()
 
@@ -621,15 +688,21 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        preds, _ = self.model(
+                        model_forward = (
+                            self.model.forward
+                            if self.ema_model is None
+                            else self.ema_model.forward_eval
+                        )
+                        preds, _ = model_forward(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
 
+                    streams_data: list[list[StreamData]] = batch[0]
                     # compute loss and log output
                     if bidx < cf.log_validation:
                         loss_values = self.loss_calculator_val.compute_loss(
                             preds=preds,
-                            streams_data=batch[0],
+                            streams_data=streams_data,
                         )
 
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
@@ -643,12 +716,14 @@ class Trainer(TrainerBase):
                             preds=preds,
                             forecast_offset=cf.forecast_offset,
                             forecast_steps=cf.forecast_steps,
-                            streams_data=batch[0],
+                            streams_data=streams_data,
                         )
-                        sources = [[item.source_raw for item in b] for b in batch[0]]
+                        sources = [[item.source_raw for item in stream] for stream in streams_data]
+                        # sample idx should be the same across streams => select first
+                        sample_idxs = [item.sample_idx for item in streams_data[0]]
                         write_output(
                             self.cf,
-                            epoch,
+                            mini_epoch,
                             bidx,
                             sources,
                             preds_all,
@@ -656,12 +731,13 @@ class Trainer(TrainerBase):
                             targets_coords_all,
                             targets_times_all,
                             targets_lens,
+                            sample_idxs,
                         )
 
                     else:
                         loss_values = self.loss_calculator_val.compute_loss(
                             preds=preds,
-                            streams_data=batch[0],
+                            streams_data=streams_data,
                         )
 
                     self.loss_unweighted_hist += [loss_values.losses_all]
@@ -670,7 +746,7 @@ class Trainer(TrainerBase):
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
-                self._log_terminal(bidx, epoch, VAL)
+                self._log_terminal(bidx, mini_epoch, VAL)
                 self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
@@ -687,20 +763,37 @@ class Trainer(TrainerBase):
             [[b.to(self.device) for b in bf] for bf in batch[2]],
         )
 
-    def load_model(self, run_id: str, epoch=-1):
+    def load_model(self, run_id: str, mini_epoch=-1):
         """Loads model state from checkpoint and checks for missing and unused keys.
         Args:
             run_id : model_id of the trained model
-            epoch : The epoch to load. Default (-1) is the latest epoch
+            mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
         """
 
         path_run = Path(self.cf.model_path) / run_id
-        epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"
-        filename = f"{run_id}_{epoch_id}.chkpt"
+        mini_epoch_id = (
+            f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
+        )
+        filename = f"{run_id}_{mini_epoch_id}.chkpt"
+
+        if not (path_run / filename).exists():
+            mini_epoch_id = f"epoch{mini_epoch:05d}"
+            filename = f"{run_id}_{mini_epoch_id}.chkpt"
 
         params = torch.load(
             path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
         )
+
+        # Ensure backward compatibility with old model checkpoints
+        params = self.model.rename_old_state_dict(params)
+
+        model_state_dict = self.model.state_dict()
+        params = {
+            k: v
+            for k, v in params.items()
+            if k in model_state_dict and v.shape == model_state_dict[k].shape
+        }
+
         is_model_sharded = self.cf.with_ddp and self.cf.with_fsdp
         if is_model_sharded:
             meta_sharded_sd = self.model.state_dict()
@@ -719,6 +812,25 @@ class Trainer(TrainerBase):
                 maybe_sharded_sd[k.replace("module.", "")] = params[k]
         # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
         mkeys, ukeys = self.model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
+
+        if mkeys:
+            # Get the unique parent modules for the missing parameters
+            new_modules_to_init = {key.rsplit(".", 1)[0] for key in mkeys}
+
+            # Find the highest-level "root" new modules to avoid redundant initializations
+            root_new_modules = set()
+            for path in sorted(list(new_modules_to_init)):
+                if not any(path.startswith(root + ".") for root in root_new_modules):
+                    root_new_modules.add(path)
+
+            # Get all modules for quick lookup and initialize the new ones
+            all_modules = dict(self.model.named_modules())
+            for path in root_new_modules:
+                if is_root():
+                    logger.info(f"Initializing new module not found in checkpoint: {path}")
+                module_to_init = all_modules[path]
+                module_to_init.to_empty(device="cuda")
+                module_to_init.reset_parameters()
 
         if not is_model_sharded:
             self.model = self.model.to(self.device)
@@ -778,7 +890,9 @@ class Trainer(TrainerBase):
         # )
 
     def _get_full_model_state_dict(self):
-        maybe_sharded_sd = self.model.state_dict()
+        maybe_sharded_sd = (
+            self.model.state_dict() if self.ema_model is None else self.ema_model.state_dict()
+        )
         if self.cf.with_ddp and self.cf.with_fsdp:
             cpu_state_dict = {}
             for param_name, sharded_param in maybe_sharded_sd.items():
@@ -821,10 +935,10 @@ class Trainer(TrainerBase):
         else:
             return {}
 
-    def save_model(self, epoch: int, name=None):
-        # Saving at epoch == max_epoch means that we are saving the latest checkpoint.
-        max_epoch = self.cf.num_epochs
-        assert epoch <= max_epoch, (epoch, max_epoch)
+    def save_model(self, mini_epoch: int, name=None):
+        # Saving at mini_epoch == max_mini_epoch means that we are saving the latest checkpoint.
+        max_mini_epoch = self.cf.num_mini_epochs
+        assert mini_epoch <= max_mini_epoch, (mini_epoch, max_mini_epoch)
         model_state_dict = self._get_full_model_state_dict()
         # optim_state_dict = self._get_full_optimizer_state_dict()
 
@@ -833,7 +947,7 @@ class Trainer(TrainerBase):
                 [
                     self.cf.run_id,
                     "_",
-                    "latest" if epoch == -1 else f"epoch{epoch:05d}",
+                    "latest" if mini_epoch == -1 else f"chkpt{mini_epoch:05d}",
                     ("_" + name) if name is not None else "",
                 ]
             )
@@ -848,7 +962,7 @@ class Trainer(TrainerBase):
                 logger.info(f"Saved model to {file_out}")
 
             # save config
-            config.save(self.cf, epoch)
+            config.save(self.cf, mini_epoch)
 
     def _prepare_losses_for_logging(
         self,
@@ -914,15 +1028,37 @@ class Trainer(TrainerBase):
 
         self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
-    def _log_terminal(self, bidx: int, epoch: int, stage: Stage):
-        if bidx % self.print_freq == 0 and bidx > 0 or stage == VAL:
+    def _get_tensor_item(self, tensor):
+        """
+        When using FSDP2, tensor is a DTensor and we need full_tensor().item() instead of .item(),
+        see here: https://gist.github.com/Kai-46/a9835ef3f36e76d06afee6c11f388144
+        """
+        return tensor.full_tensor().item() if isinstance(tensor, DTensor) else tensor.item()
+
+    def _log_instant_grad_norms(self, stage: Stage):
+        """
+        Log instantaneous grad norms, we do not average because of the cost and because we want to
+        measure the actual values.
+        """
+        grad_norms = {"grad_norm.total": self.last_grad_norm}
+        for name, param in self.model.named_parameters():
+            if param.grad is not None:
+                grad_norms["grad_norm." + name] = self._get_tensor_item(param.grad.norm())
+
+        if is_root():
+            self.train_logger.log_metrics(stage, grad_norms)
+
+    def _log_terminal(self, bidx: int, mini_epoch: int, stage: Stage):
+        print_freq = self.train_log_freq.terminal
+        if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
             avg_loss, losses_all, _ = self._prepare_losses_for_logging()
 
             if is_root():
                 if stage == VAL:
                     logger.info(
-                        f"validation ({self.cf.run_id}) : {epoch:03d} : {avg_loss.nanmean().item()}"
+                        f"""validation ({self.cf.run_id}) : {mini_epoch:03d} : 
+                        {avg_loss.nanmean().item()}"""
                     )
                     for _, st in enumerate(self.cf.streams):
                         logger.info(
@@ -934,20 +1070,16 @@ class Trainer(TrainerBase):
                 elif stage == TRAIN:
                     # samples per sec
                     dt = time.time() - self.t_start
-                    pstr = "{:03d} : {:05d}/{:05d} : {:06d} : loss = {:.4E} "
-                    pstr += "(lr={:.2E}, s/sec={:.3f})"
                     len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
-                    logger.info(
-                        pstr.format(
-                            epoch,
-                            bidx,
-                            len_dataset,
-                            self.cf.istep,
-                            avg_loss.nanmean().item(),
-                            self.lr_scheduler.get_lr(),
-                            (self.print_freq * self.cf.batch_size_per_gpu) / dt,
-                        ),
+                    pstr = (
+                        f"{mini_epoch:03d} : {bidx:05d}/{len_dataset:05d} : "
+                        + f"{self.cf.istep:06d} : loss = {avg_loss.nanmean().item():.4E} "
+                        + f"(lr={self.lr_scheduler.get_lr():.2E}, "
                     )
+                    if self.log_grad_norms:
+                        pstr += f"gradient norm={self.last_grad_norm:.3f}, "
+                    pstr += f"s/sec={(print_freq * self.cf.batch_size_per_gpu) / dt:.3f})"
+                    logger.info(pstr)
                     logger.info("\t")
                     for _, st in enumerate(self.cf.streams):
                         logger.info(

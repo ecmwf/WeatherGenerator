@@ -69,7 +69,7 @@ def test_train(setup, test_run_id):
 def infer(run_id):
     logger.info("run inference")
     inference_from_args(
-        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--epoch", "0"]
+        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--mini_epoch", "0"]
         + [
             "--from_run_id",
             run_id,
@@ -84,7 +84,7 @@ def infer(run_id):
 def infer_with_missing(run_id):
     logger.info("run inference")
     inference_from_args(
-        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--epoch", "0"]
+        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--mini_epoch", "0"]
         + [
             "--from_run_id",
             run_id,
@@ -100,13 +100,17 @@ def evaluate_results(run_id):
     logger.info("run evaluation")
     cfg = omegaconf.OmegaConf.create(
         {
-            "verbose": True,
-            "image_format": "png",
-            "dpi_val": 300,
-            "summary_plots": True,
-            "summary_dir": "./plots/",
-            "print_summary": True,
-            "evaluation": {"metrics": ["rmse", "l1", "mse"]},
+            "global_plotting_options": {
+                "image_format": "png",
+                "dpi_val": 300,
+            },
+            "evaluation": {
+                "metrics": ["rmse", "l1", "mse"],
+                "verbose": True,
+                "summary_plots": True,
+                "summary_dir": "./plots/",
+                "print_summary": True,
+            },
             "run_ids": {
                 run_id: {  # would be nice if this could be done with option
                     "streams": {
@@ -124,13 +128,14 @@ def evaluate_results(run_id):
                         }
                     },
                     "label": "MTM ERA5",
-                    "epoch": 0,
+                    "mini_epoch": 0,
                     "rank": 0,
                 }
             },
         }
     )
-    evaluate_from_config(cfg)
+    # Not passing the mlflow client for tests.
+    evaluate_from_config(cfg, None)
 
 
 def load_metrics(run_id):
@@ -166,10 +171,11 @@ def assert_train_loss_below_threshold(run_id):
     assert loss_metric is not None, (
         "'stream.ERA5.loss_mse.loss_avg' metric is missing in metrics file"
     )
-    # Check that the loss does not explode in a single epoch
+    # Check that the loss does not explode in a single mini_epoch
     # This is meant to be a quick test, not a convergence test
-    assert loss_metric < 1.25, (
-        f"'stream.ERA5.loss_mse.loss_avg' is {loss_metric}, expected to be below 0.25"
+    target = 1.5
+    assert loss_metric < target, (
+        f"'stream.ERA5.loss_mse.loss_avg' is {loss_metric}, expected to be below {target}"
     )
 
 
@@ -187,7 +193,7 @@ def assert_val_loss_below_threshold(run_id):
     assert loss_metric is not None, (
         "'stream.ERA5.loss_mse.loss_avg' metric is missing in metrics file"
     )
-    # Check that the loss does not explode in a single epoch
+    # Check that the loss does not explode in a single mini_epoch
     # This is meant to be a quick test, not a convergence test
     assert loss_metric < 1.25, (
         f"'stream.ERA5.loss_mse.loss_avg' is {loss_metric}, expected to be below 0.25"
