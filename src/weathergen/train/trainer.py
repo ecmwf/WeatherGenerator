@@ -518,6 +518,14 @@ class Trainer(TrainerBase):
             ]
             for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
         ]
+        # inverse indices
+        idxs_inv_rt = [
+            [
+                torch.cat([t[i].idxs_inv[fstep] for t in streams_data])
+                for i in range(len(self.cf.streams))
+            ]
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
+        ]
 
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
         fsteps = len(targets_rt)
@@ -533,6 +541,7 @@ class Trainer(TrainerBase):
         for fstep in range(len(targets_rt)):
             for i_strm, target in enumerate(targets_rt[fstep]):
                 pred = preds[fstep][i_strm]
+                idxs_inv = idxs_inv_rt[fstep][i_strm]
 
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
                     continue
@@ -547,6 +556,15 @@ class Trainer(TrainerBase):
 
                 targets_lens[fstep][i_strm] += [target.shape[0]]
                 dn_data = self.dataset_val.denormalize_target_channels
+
+                # reorder so that output order of target points matches input when reading
+                # (tokenization and masking changes this order)
+                # TODO: does this work with batch_size > 1
+                if len(idxs_inv) > 0:
+                    pred = pred[:, idxs_inv]
+                    target = target[idxs_inv]
+                    targets_coords_raw[fstep][i_strm] = targets_coords_raw[fstep][i_strm][idxs_inv]
+                    targets_times_raw[fstep][i_strm] = targets_times_raw[fstep][i_strm][idxs_inv]
 
                 f32 = torch.float32
                 preds_all[fstep][i_strm] += [
