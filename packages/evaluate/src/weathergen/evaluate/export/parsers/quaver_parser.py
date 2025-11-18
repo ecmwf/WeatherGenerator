@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from omegaconf import OmegaConf
-
+from fractions import Fraction
 from weathergen.evaluate.export.cf_utils import CfParser
 
 _logger = logging.getLogger(__name__)
@@ -96,6 +96,7 @@ class QuaverParser(CfParser):
                 _logger.info(f"[Worker] Encoding var={var}, level={level}")
 
                 field_data = da_fs.sel(channel=var)
+                field_data = self.scale_data(field_data, var)
                 template_field = self.template_cache.get((var, level), None)
                 if template_field is None:
                     _logger.error(f"Template for var={var}, level={level} not found. Skipping.")
@@ -114,6 +115,32 @@ class QuaverParser(CfParser):
             self.save(sf_fields, "sfc")
 
         _logger.info(f"Saved sample data to {self.output_format} in {self.output_dir}.")
+
+    def scale_data(self, data: xr.DataArray, var_short: str) -> xr.DataArray:
+        """
+        Scale data based on variable configuration.
+        Parameters
+        ----------
+            data : xr.DataArray
+                Input data array.
+            var_short : str
+                Variable name.
+        Returns
+        -------
+            xr.DataArray
+                Scaled data array.
+        """
+        var_config = self.mapping.get(var_short, {})
+        raw = var_config.get("scale_factor", 1.0)
+        parts = raw.split("/")
+        scale_factor = (
+            float(parts[0]) / float(parts[1]) if len(parts) == 2 else float(parts[0])
+        )
+
+        add_offset = var_config.get("add_offset", 0.0)
+
+        scaled_data = data * scale_factor + add_offset
+        return scaled_data
 
     def extract_var_info(self, var: str) -> tuple[str, str, str]:
         """
