@@ -263,12 +263,12 @@ class Trainer(TrainerBase):
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
         if is_root():
-            config.save(self.cf, epoch=0)
+            config.save(self.cf, mini_epoch=0)
 
         logger.info(f"Starting inference with id={self.cf.run_id}.")
 
         # inference validation set
-        self.validate(epoch=0)
+        self.validate(mini_epoch=0)
         logger.info(f"Finished inference run with id: {cf.run_id}")
 
     def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
