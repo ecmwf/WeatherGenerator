@@ -1,54 +1,198 @@
 import logging
 from multiprocessing import Pool
 
+import numpy as np
 import xarray as xr
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
 from weathergen.common.config import get_model_results
 from weathergen.common.io import ZarrIO
-from weathergen.evaluate.export.cf_utils import (
-    add_conventions,
-    add_gaussian_grid_metadata,
-    cf_parser_gaussian_aware,
-)
-from weathergen.evaluate.export.io_utils import get_data_worker, output_filename
-from weathergen.evaluate.export.reshape import reshape_dataset_adaptive
-from weathergen.evaluate.export.regrid import regrid_gaussian_ds
+from weathergen.evaluate.export.parser_factory import CfParserFactory
+from weathergen.evaluate.export.reshape import detect_grid_type
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
 
-def export_model_outputs(
-    run_id: str,
-    samples: list,
-    stream: str,
-    dtype: str,
-    fsteps: list,
-    channels: list,
-    fstep_hours: int,
-    n_processes: list,
-    epoch: int,
-    rank: int,
-    regrid_degree: float,
-    output_dir: str,
-    output_format: str,
-    config: OmegaConf,
-) -> None:
+def get_data_worker(args: tuple) -> xr.DataArray:
+    """
+    Worker function to retrieve data for a single sample and forecast step.
+
+    Parameters
+    ----------
+        args : Tuple containing (sample, fstep, run_id, stream, type).
+
+    Returns
+    -------
+        xarray DataArray for the specified sample and forecast step.
+    """
+    sample, fstep, run_id, stream, dtype, epoch, rank = args
+    fname_zarr = get_model_results(run_id, epoch, rank)
+    with ZarrIO(fname_zarr) as zio:
+        out = zio.get_data(sample, stream, fstep)
+        if dtype == "target":
+            data = out.target
+        elif dtype == "prediction":
+            data = out.prediction
+    return data
+
+
+def get_fsteps(fsteps, fname_zarr: str):
+    """
+    Retrieve available forecast steps from the Zarr store and filter
+    based on requested forecast steps.
+
+    Parameters
+    ----------
+        fsteps : list
+            List of requested forecast steps.
+            If None, retrieves all available forecast steps.
+        fname_zarr : str
+            Path to the Zarr store.
+    Returns
+    -------
+        list[str]
+            List of forecast steps to be used for data retrieval.
+    """
+    with ZarrIO(fname_zarr) as zio:
+        zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
+    return zio_forecast_steps if fsteps is None else sorted([int(fstep) for fstep in fsteps])
+
+
+def get_samples(samples, fname_zarr: str):
+    """
+    Retrieve available samples from the Zarr store
+    and filter based on requested samples.
+    Parameters
+    ----------
+        samples : list
+            List of requested samples. If None, retrieves all available samples.
+        fname_zarr : str
+            Path to the Zarr store.
+    Returns
+    -------
+        list[str]
+            List of samples to be used for data retrieval.
+    """
+    with ZarrIO(fname_zarr) as zio:
+        zio_samples = sorted([int(sample) for sample in zio.samples])
+    samples = (
+        zio_samples
+        if samples is None
+        else sorted([int(sample) for sample in samples if sample in samples])
+    )
+    return samples
+
+
+def get_channels(channels, stream: str, fname_zarr: str) -> list[str]:
+    """
+    Retrieve available channels from the Zarr store and filter based on requested channels.
+    Parameters
+    ----------
+        channels : list
+            List of requested channels. If None, retrieves all available channels.
+        stream : str
+            Stream name to retrieve data for (e.g., 'ERA5').
+        fname_zarr : str
+            Path to the Zarr store.
+    Returns
+    -------
+        list[str]
+            List of channels to be used for data retrieval.
+    """
+    with ZarrIO(fname_zarr) as zio:
+        zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
+        dummy_out = zio.get_data(0, stream, zio_forecast_steps[0])
+        all_channels = dummy_out.target.channels
+
+        if channels is not None:
+            existing_channels = set(all_channels) & set(channels)
+            if existing_channels != set(channels):
+                missing_channels = set(channels) - set(existing_channels)
+                _logger.warning(
+                    "The following requested channels are"
+                    f"not available in the data and will be skipped: {missing_channels}"
+                )
+        return all_channels if channels is None else list(existing_channels)
+
+
+def get_grid_type(data_type, stream: str, fname_zarr: str) -> str:
+    """
+    Determine the grid type of the data (regular or gaussian).
+    Parameters
+    ----------
+        data_type : str
+            Type of data to retrieve ('target' or 'prediction').
+        stream : str
+            Stream name to retrieve data for (e.g., 'ERA5').
+        fname_zarr : str
+            Path to the Zarr store.
+    Returns
+    -------
+        str
+            Grid type ('regular' or 'gaussian').
+    """
+    with ZarrIO(fname_zarr) as zio:
+        zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
+        dummy_out = zio.get_data(0, stream, zio_forecast_steps[0])
+        data = dummy_out.target if data_type == "target" else dummy_out.prediction
+        return detect_grid_type(data.as_xarray().squeeze())
+
+
+# TODO: this will change after restructuring the lead time.
+def get_ref_times(fname_zarr, stream, samples, fstep_hours) -> list[np.datetime64]:
+    """
+    Retrieve reference times for the specified samples from the Zarr store.
+    Parameters
+    ----------
+        fname_zarr : str
+            Path to the Zarr store.
+        stream : str
+            Stream name to retrieve data for (e.g., 'ERA5').
+        samples : list
+            List of samples to process.
+        fstep_hours : np.timedelta64
+            Time difference between forecast steps in hours.
+    Returns
+    -------
+        list[np.datetime64]
+            List of reference times corresponding to the samples.
+    """
+    ref_times = []
+    with ZarrIO(fname_zarr) as zio:
+        zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
+        for sample in samples:
+            data = zio.get_data(sample, stream, zio_forecast_steps[0])
+            data = data.target.as_xarray().squeeze()
+            ref_time = data.valid_time.values[0] - fstep_hours * int(data.forecast_step.values)
+            ref_times.append(ref_time)
+    return ref_times
+
+
+def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     """
     Retrieve data from Zarr store and save one sample to each NetCDF file.
     Using multiprocessing to speed up data retrieval.
 
     Parameters
     ----------
+    data_type: str
+        Type of data to retrieve ('target' or 'prediction').
+    config : OmegaConf
+            Loaded config for cf_parser function.
+
+    kwargs:
+        Additional keyword arguments for the parser.
+
+    NOTE: it contains the following parameters:
         run_id : str
             Run ID to identify the Zarr store.
         samples : list
             Sample to process
         stream : str
             Stream name to retrieve data for (e.g., 'ERA5').
-        dtype : str
+        data_type : str
             Type of data to retrieve ('target' or 'prediction').
         fsteps : list
             List of forecast steps to retrieve. If None, retrieves all available forecast steps.
@@ -66,169 +210,50 @@ def export_model_outputs(
             Directory to save the NetCDF files.
         output_format : str
             Output file format (currently only 'netcdf' supported).
-        config : OmegaConf
-            Loaded config for cf_parser function.
+
     """
-    if dtype not in ["target", "prediction"]:
-        raise ValueError(f"Invalid type: {dtype}. Must be 'target' or 'prediction'.")
+    kwargs = OmegaConf.create(kwargs)
+
+    run_id = kwargs.run_id
+    samples = kwargs.samples
+    fsteps = kwargs.fsteps
+    stream = kwargs.stream
+    channels = kwargs.channels
+    n_processes = kwargs.n_processes
+    epoch = kwargs.epoch
+    rank = kwargs.rank
+    fstep_hours = np.timedelta64(kwargs.fstep_hours, "h")
+
+    if data_type not in ["target", "prediction"]:
+        raise ValueError(f"Invalid type: {data_type}. Must be 'target' or 'prediction'.")
 
     fname_zarr = get_model_results(run_id, epoch, rank)
-    print(f"Using Zarr store: {fname_zarr}")
-    with ZarrIO(fname_zarr) as zio:
-        # zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
-        # zio_samples = sorted([int(sample) for sample in zio.samples])
-        # print(stream)
-        # dummy_out = zio.get_data(zio_samples[0], stream, zio_forecast_steps[0])
-        dummy_out = zio.get_data(0, stream, 1)
-        all_channels = dummy_out.target.channels
-        channels = all_channels if channels is None else channels
+    fsteps = get_fsteps(fsteps, fname_zarr)
+    samples = get_samples(samples, fname_zarr)
+    grid_type = get_grid_type(data_type, stream, fname_zarr)
+    channels = get_channels(channels, stream, fname_zarr)
+    ref_times = get_ref_times(fname_zarr, stream, samples, fstep_hours)
 
-    fsteps = zio_forecast_steps if fsteps is None else sorted([int(fstep) for fstep in fsteps])
+    kwargs["grid_type"] = grid_type
+    kwargs["channels"] = channels
+    kwargs["data_type"] = data_type
 
-    samples = (
-        zio_samples
-        if samples is None
-        else sorted([int(sample) for sample in samples if sample in samples])
-    )
     with Pool(processes=n_processes, maxtasksperchild=5) as pool:
-        for sample_idx in tqdm(samples):
-            da_fs = []
+        parser = CfParserFactory.get_parser(config=config, **kwargs)
+
+        for s_idx, sample in enumerate(tqdm(samples)):
+            ref_time = ref_times[s_idx]
+
             step_tasks = [
-                (sample_idx, fstep, run_id, stream, dtype, epoch, rank) for fstep in fsteps
+                (sample, fstep, run_id, stream, data_type, epoch, rank) for fstep in fsteps
             ]
-            for result in tqdm(
-                pool.imap_unordered(get_data_worker, step_tasks, chunksize=1),
-                total=len(step_tasks),
-                desc=f"Processing {run_id} - stream: {stream} - sample: {sample_idx}",
-            ):
-                if result is not None:
-                    # Select only requested channels
-                    result = result.as_xarray().squeeze()
-                    if set(channels) != set(all_channels):
-                        available_channels = result.channel.values
-                        existing_channels = [ch for ch in channels if ch in available_channels]
-                        if len(existing_channels) < len(channels):
-                            _logger.info(
-                                f"The following channels were not found: "
-                                f"{list(set(channels) - set(existing_channels))}. Skipping them."
-                            )
-                        result = result.sel(channel=existing_channels)
-                    # reshape result - use adaptive function to handle both regular and Gaussian
-                    # grids
-                    result = reshape_dataset_adaptive(result)
-                    da_fs.append(result)
 
-            _logger.info(f"Retrieved {len(da_fs)} forecast steps for type {dtype}.")
-            _logger.info(
-                f"Saving sample {sample_idx} data to {output_format} format in {output_dir}."
+            results_iterator = pool.imap_unordered(get_data_worker, step_tasks, chunksize=1)
+
+            parser.process_sample(
+                results_iterator,
+                ref_time=ref_time,
             )
-
-            out_fname = save_sample_to_netcdf(
-                str(dtype)[:4],
-                da_fs,
-                fstep_hours,
-                run_id,
-                output_dir,
-                output_format,
-                config,
-            )
-
-            if regrid_degree is not None:
-                _logger.info(
-                    f"Regridding sample {sample_idx} data to regular lat/lon grid with "
-                    f"{regrid_degree} degree spacing."
-                )
-                da_fs_regridded = regrid_gaussian_ds(
-                    da_fs,
-                    grid_type='regular_ll',
-                    degree=regrid_degree,
-                )
-                out_fname_regrid = out_fname.split('.nc')[0] + f'_regular{regrid_degree, regrid_degree}.nc'
-                _logger.info(f"Saving regridded data to {out_fname_regrid}.")
-                da_fs_regridded.to_netcdf(out_fname_regrid, mode="w", compute=False)
 
         pool.terminate()
         pool.join()
-
-
-def save_sample_to_netcdf(
-    type_str,
-    array_list,
-    fstep_hours,
-    run_id,
-    output_dir,
-    output_format,
-    config,
-) -> None:
-    """
-    Uses list of pred/target xarray DataArrays to save one sample to a NetCDF file.
-
-    Parameters
-    ----------
-    type_str : str
-        Type of data ('pred' or 'targ') to include in the filename.
-    dict_sample_all_steps : dict
-        Dictionary where keys is sample index and values is a list of xarray DataArrays
-        for all the forecast steps
-    fstep_hours : np.timedelta64
-        Time difference between forecast steps (e.g., 6 hours).
-    run_id : str
-        Run ID to include in the filename.
-    output_dir : str
-        Directory to save the NetCDF files.
-    output_format : str
-        Output file format (currently only 'netcdf' supported).
-    config : OmegaConf
-        Loaded config for cf_parser function.
-    """
-    # find forecast_ref_time
-    frt = array_list[0].valid_time.values[0] - fstep_hours * int(array_list[0].forecast_step.values)
-    out_fname = output_filename(type_str, run_id, output_dir, output_format, frt)
-    # check if file already exists
-    if out_fname.exists():
-        _logger.info(f"File {out_fname} already exists. Skipping.")
-    else:
-        sample_all_steps = xr.concat(
-            array_list,
-            dim="valid_time",
-            data_vars="minimal",
-            coords="different",
-            compat="equals",
-            combine_attrs="drop",
-        ).sortby("valid_time")
-        _logger.info(f"Saving to {out_fname}.")
-        sample_all_steps = sample_all_steps.assign_coords(forecast_ref_time=frt)
-        stream = str(sample_all_steps.coords["stream"].values)
-
-        if "sample" in sample_all_steps.coords:
-            sample_all_steps = sample_all_steps.drop_vars("sample")
-
-        sample_all_steps = cf_parser_gaussian_aware(config, sample_all_steps)
-        # Add Gaussian grid metadata if detected
-        if "ncells" in sample_all_steps.dims:
-            sample_all_steps = add_gaussian_grid_metadata(sample_all_steps)
-            _logger.info("Detected and preserved Gaussian grid structure")
-        # add forecast_period attributes
-        n_hours = fstep_hours.astype("int64")
-        sample_all_steps["forecast_period"] = sample_all_steps["forecast_period"] * n_hours
-        sample_all_steps["forecast_period"].attrs = {
-            "standard_name": "forecast_period",
-            "long_name": "time since forecast_reference_time",
-            "units": "hours",
-        }
-        sample_all_steps = add_conventions(stream, run_id, sample_all_steps)
-        # now drop stream
-        sample_all_steps = sample_all_steps.drop_vars("stream")
-
-        # ensure encoding for time variables is since 1970
-        sample_all_steps.valid_time.encoding["units"] = "hours since 1970-01-01 00:00:00"
-        sample_all_steps.valid_time.encoding["calendar"] = "gregorian"
-        sample_all_steps.forecast_reference_time.encoding["units"] = (
-            "hours since 1970-01-01 00:00:00"
-        )
-        sample_all_steps.forecast_reference_time.encoding["calendar"] = "gregorian"
-
-        # save to netcdf
-        sample_all_steps.to_netcdf(out_fname, mode="w", compute=False)
-        
-        return out_fname

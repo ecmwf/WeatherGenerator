@@ -18,7 +18,6 @@ import logging
 import sys
 from pathlib import Path
 
-import numpy as np
 from omegaconf import OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
@@ -60,8 +59,9 @@ def parse_args(args: list) -> argparse.Namespace:
         type=str,
         choices=["prediction", "target"],
         nargs="+",
+        default=["prediction"],
         help="List of type of data to convert (e.g. prediction target)",
-        required=True,
+        required=False,
     )
 
     parser.add_argument(
@@ -73,8 +73,9 @@ def parse_args(args: list) -> argparse.Namespace:
 
     parser.add_argument(
         "--format",
+        dest="output_format",
         type=str,
-        choices=["netcdf", "grib"],
+        choices=["netcdf", "grib", "quaver"],
         help="Output file format (currently only netcdf supported)",
         required=True,
     )
@@ -142,6 +143,20 @@ def parse_args(args: list) -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--template",
+        type=str,
+        help="Path to GRIB template file",
+        required=False,
+    )
+
+    parser.add_argument(
+        "--expver",
+        type=str,
+        help="Expver to include in the output filename (i.e. 'iuoo')",
+        required=False,
+    )
+
+    parser.add_argument(
         "--regrid-degree",
         type=float,
         default=None,
@@ -171,23 +186,6 @@ def export_from_args(args: list) -> None:
         args : List of command line arguments.
     """
     args = parse_args(sys.argv[1:])
-    run_id = args.run_id
-    data_type = args.type
-    output_dir = args.output_dir
-    output_format = args.format
-    samples = args.samples
-    stream = args.stream
-    fsteps = args.fsteps
-    fstep_hours = np.timedelta64(args.fstep_hours, "h")
-    channels = args.channels
-    n_processes = args.n_processes
-    epoch = args.epoch
-    rank = args.rank
-    regrid_degree = args.regrid_degree
-
-    # Ensure output directory exists
-    out_dir = Path(output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     # Load configuration
     config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2cf.yaml")
@@ -195,25 +193,23 @@ def export_from_args(args: list) -> None:
     # check config loaded correctly
     assert len(config["variables"].keys()) > 0, "Config file not loaded correctly"
 
-    for dtype in data_type:
-        _logger.info(f"Starting processing {dtype} for run ID {run_id}.")
-        export_model_outputs(
-            run_id,
-            samples,
-            stream,
-            dtype,
-            fsteps,
-            channels,
-            fstep_hours,
-            n_processes,
-            epoch,
-            rank,
-            regrid_degree,
-            output_dir,
-            output_format,
-            config,
+    kwargs = vars(args).copy()
+
+    _logger.info(kwargs)
+
+    # Ensure output directory exists
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for dtype in args.type:
+        _logger.info(
+            f"Starting processing {dtype} for run ID {args.run_id}. "
+            f"Detected {args.samples} samples and {args.fsteps} forecast steps."
         )
-        _logger.info(f"Finished processing {dtype} for run ID {run_id}.")
+
+        export_model_outputs(dtype, config, **kwargs)
+
+        _logger.info(f"Finished processing {dtype} for run ID {args.run_id}.")
 
 
 if __name__ == "__main__":
