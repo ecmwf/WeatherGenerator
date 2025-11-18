@@ -123,9 +123,10 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           "same_strategy_per_batch": false
                           }
 
-num_epochs: 32
-samples_per_epoch: 32
-samples_per_validation: 8
+num_mini_epochs: 32
+samples_per_mini_epoch: 4096
+samples_per_validation: 512
+
 shuffle: True
 
 lr_scaling_policy: "sqrt"
@@ -157,7 +158,7 @@ val_initial: False
 
 loader_num_workers: 8
 log_validation: 0
-analysis_streams_output: ["ERA5"]
+streams_output: ["ERA5"]
 
 istep: 0
 run_history: []

@@ -13,7 +13,6 @@ import dataclasses
 import logging
 import math
 import warnings
-from pathlib import Path
 
 import astropy_healpix as hp
 import astropy_healpix.healpy
@@ -558,49 +557,6 @@ class Model(torch.nn.Module):
             new_params[new_k] = v
 
         return new_params
-
-    #########################################
-    def load(self, run_id: str, epoch: str = -1) -> None:
-        """Loads model state from checkpoint and checks for missing and unused keys.
-        Args:
-            run_id : model_id of the trained model
-            epoch : The epoch to load. Default (-1) is the latest epoch
-        """
-
-        path_run = Path(self.cf.model_path) / run_id
-        epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"
-        filename = f"{run_id}_{epoch_id}.chkpt"
-
-        params = torch.load(
-            path_run / filename, map_location=torch.device("cpu"), weights_only=True
-        )
-
-        # Ensure backward compatibility with old model checkpoints
-        params = self.rename_old_state_dict(params)
-
-        params_renamed = {}
-        for k in params.keys():
-            params_renamed[k.replace("module.", "")] = params[k]
-
-        mkeys, ukeys = self.load_state_dict(params_renamed, strict=False)
-        # mkeys, ukeys = self.load_state_dict( params, strict=False)
-
-        if len(mkeys) > 0 and is_root():
-            logger.warning(f"Missing keys when loading model: {mkeys}")
-
-        if len(ukeys) > 0 and is_root():
-            logger.warning(f"Unused keys when loading model: {mkeys}")
-
-    #########################################
-    def forward_jac(self, *args):
-        sources = args[:-1]
-        sources_lens = args[-1]
-        # no-op when satisfied but needed for Jacobian
-        sources_lens = sources_lens.to(torch.int64).cpu()
-
-        preds_all = self.forward(sources, sources_lens)
-
-        return tuple(preds_all[0])
 
     #########################################
     def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
