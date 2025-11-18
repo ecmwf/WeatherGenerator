@@ -78,7 +78,7 @@ def infer_multi_stream(run_id):
             "--run_id",
             run_id,
             "--streams_output",
-            "ERA5", "SurfaceCombined", "NPPATMS", #NOTE trying --analysis_streams_output ERA5 CERRA SEVIRI OPERA -- challenge 2
+            "ERA5", "SurfaceCombined", "NPPATMS",
             "--config",
             f"{WEATHERGEN_HOME}/integration_tests/small_multi_stream.yaml",
         ]
@@ -143,7 +143,7 @@ def evaluate_multi_stream_results(run_id):
                         },
                     },
                     "label": "Multi-Stream Test",
-                    "mini_epoch": 0, #NOTE epoch-->mini_epoch
+                    "mini_epoch": 0,  #NOTE epoch --> mini_epoch
                     "rank": 0,
                 }
             },
