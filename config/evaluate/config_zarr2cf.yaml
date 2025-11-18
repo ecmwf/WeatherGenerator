@@ -31,10 +31,10 @@ variables:
     level_type: pl
   z:
     var: z
-    long: geopotential_height_at_pressure_levels
-    std: geopotential_height
+    long: geopotential_at_pressure_levels
+    std: geopotential
     wg_unit: m**2 s**-2
-    std_unit: m
+    std_unit: m2 s-2
     level_type: pl
   10u:
     var: u10
@@ -131,13 +131,11 @@ dimensions:
     forecast_step:
       wg: forecast_period
       std: forecast_period
+      long: forecast_period_since_reference_time
+      std_unit: hours
     stream:
       wg: stream
       std: stream
     ncells:
       wg: ncells
       std: ncells
-    #TODO maybe absorb stream as an attribute
-    # forecast_step: forecast_step
-    # don't want forecast_step anyway
-

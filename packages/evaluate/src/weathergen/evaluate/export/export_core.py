@@ -222,6 +222,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     n_processes = kwargs.n_processes
     epoch = kwargs.epoch
     rank = kwargs.rank
+    regrid_degree = kwargs.regrid_degree
     fstep_hours = np.timedelta64(kwargs.fstep_hours, "h")
 
     if data_type not in ["target", "prediction"]:
