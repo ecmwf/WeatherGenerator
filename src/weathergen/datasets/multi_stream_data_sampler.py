@@ -314,6 +314,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     def _build_stream_data_source(
         self,
+        mode: str,
         stream_data: StreamData,
         base_idx: TIndex,
         forecast_dt: int,
@@ -371,6 +372,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     def _build_stream_data_target(
         self,
+        mode: str,
         stream_data: StreamData,
         idx: TIndex,
         forecast_dt: int,
@@ -408,6 +410,35 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             stream_data.add_target(fstep, tt_cells, tc, tc_l, tt_c, tt_t, idxs_inv)
 
         return stream_data
+
+    def _get_sample_data(self, mode: str, idx: int, forecast_dt: int):
+        """
+
+        mode : {student, teacher, mtm}
+        """
+
+        streams_data: list[StreamData] = []
+
+        # for all streams
+        for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
+            stream_data = StreamData(
+                idx, forecast_dt + self.forecast_offset, self.num_healpix_cells
+            )
+
+            # collect source data for current stream
+            stream_data = self._build_stream_data_source(
+                mode, stream_data, idx, forecast_dt, stream_info, stream_ds
+            )
+
+            # collect target data for current stream
+            stream_data = self._build_stream_data_target(
+                mode, stream_data, idx, forecast_dt, stream_info, stream_ds
+            )
+
+            # add data for current stream
+            streams_data += [stream_data]
+
+        return streams_data
 
     def _preprocess_model_data(self, batch, forecast_dt):
         # aggregated lens of tokens per cell across input batch samples
@@ -458,28 +489,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if hasattr(self.tokenizer, "masker"):
                     self.tokenizer.masker.set_batch_strategy()
 
-                streams_data: list[StreamData] = []
+                mode = "teacher"
 
                 # tokenizer.generate_masks_for_sample()
-
-                # for all streams
-                for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
-                    stream_data = StreamData(
-                        idx, forecast_dt + self.forecast_offset, self.num_healpix_cells
-                    )
-
-                    # collect source data for current stream
-                    stream_data = self._build_stream_data_source(
-                        stream_data, idx, forecast_dt, stream_info, stream_ds
-                    )
-
-                    # collect target data for current stream
-                    stream_data = self._build_stream_data_target(
-                        stream_data, idx, forecast_dt, stream_info, stream_ds
-                    )
-
-                    # add data for current stream
-                    streams_data += [stream_data]
+                streams_data = self._get_sample_data(mode, idx, forecast_dt)
 
                 # Reset masking strategy for next batch item
                 if hasattr(self.tokenizer, "masker"):
