@@ -12,6 +12,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+*.DS_Store
+
 # C extensions
 *.so
 
@@ -76,6 +78,14 @@ instance/
 
 # Scrapy stuff:
 .scrapy
+
+
+# Jupyter Notebook
+*.ipynb_checkpoints
+# Use the jupytext extension instead.
+*.ipynb
+
+*.zip
 
 # Sphinx documentation
 docs/_build/
@@ -202,7 +212,15 @@ output/
 logs/
 models/
 results/
-
-# uv
-uv.lock
-
+plots/
+models
+results
+playground/
+.config/
+plots
+logs
+outputs
+output
+models
+results
+reports

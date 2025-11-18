@@ -1,4 +1,6 @@
-# (C) Copyright 2024 WeatherGenerator contributors.
+# ruff: noqa: T201
+
+# (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -8,219 +10,160 @@
 # nor does it submit to any jurisdiction.
 
 import os
-import datetime
-import string
-import random
-import pathlib
-import itertools
-import logging
-import json
-import yaml
-import logging
-import code
-
-import numpy as np
-import torch
-# import mlflow
 
 import pynvml
-
+import torch
 import torch.distributed as dist
-import torch.utils.data.distributed
+import torch.multiprocessing
 
-from weathergen.utils.config import Config
-import weathergen.utils.logger
-from weathergen.train.utils import get_run_id, str_to_tensor, tensor_to_str, json_to_dict
+from weathergen.common.config import Config
+from weathergen.train.utils import str_to_tensor, tensor_to_str
+from weathergen.utils.distributed import is_root
+
+PORT = 1345
 
 
-class Trainer_Base() :
+class TrainerBase:
+    def __init__(self):
+        self.device_handles = []
+        self.device_names = []
+        self.cf: Config | None = None
 
-  def __init__( self) :
-    pass
+    @staticmethod
+    def init_torch(use_cuda=True, num_accs_per_task=1, multiprocessing_method="fork"):
+        """
+        Initialize torch, set device and multiprocessing method.
 
-  ###########################################
-  @staticmethod
-  def init_mlflow( cf, rank, run_id_contd = None, run_id_new = False,
-                   project='obs_learn_kas_cell_forecast') :
+        NOTE: If using the Nvidia profiler,
+        the multiprocessing method must be set to "spawn".
+        The default for linux systems is "fork",
+        which prevents traces from being generated with DDP.
+        """
+        torch.set_printoptions(linewidth=120)
 
-    if 0 == rank :
+        # This strategy is required by the nvidia profiles
+        # to properly trace events in worker processes.
+        # This may cause issues with logging. Alternative: "fork"
+        torch.multiprocessing.set_start_method(multiprocessing_method, force=True)
 
-      run_id = cf.run_id
+        torch.backends.cuda.matmul.allow_tf32 = True
 
-      slurm_job_id_node = os.environ.get('SLURM_JOB_ID', '-1')
-      if slurm_job_id_node != '-1' :
-        cf.slurm_job_id = slurm_job_id_node
+        use_cuda = torch.cuda.is_available()
+        if not use_cuda:
+            return torch.device("cpu")
 
-      # check if offline mode is requested through environment variable or in config
-      mlflow_offline_env = os.environ.get('MLFLOW_OFFLINE', '-1')
-      if not hasattr( cf, 'mlflow_offline') :
-        cf.mlflow_offline = True if mlflow_offline_env != '-1' else False
+        local_id_node = os.environ.get("SLURM_LOCALID", "-1")
+        if local_id_node == "-1":
+            devices = ["cuda"]
+        else:
+            devices = [
+                f"cuda:{int(local_id_node) * num_accs_per_task + i}"
+                for i in range(num_accs_per_task)
+            ]
+        torch.cuda.set_device(int(local_id_node) * num_accs_per_task)
 
-      rs_uri = './mlflow/' if cf.mlflow_offline else 'https://mlflow.ecmwf.int/'
-      mlflow.set_tracking_uri( rs_uri)
-      mlflow.set_experiment( project)
+        return devices
 
-      # # we separate the mlflow_id and the run_id/run_name, which is used for all local bookkeeping
-      # ml_id = None if run_id_contd is None or run_id_new else cf.mlflow_id
-      # mlflow_run = mlflow.start_run( run_id=ml_id, run_name=run_id,
-      #                                log_system_metrics=True)
-      # cf.mlflow_id = mlflow_run.info.run_id
+    @staticmethod
+    def init_ddp(cf):
+        """Initializes the distributed environment."""
+        rank = 0
+        local_rank = 0
 
-      # log config (cannot be overwritten so log only at the first start)
-      if run_id_contd is None or run_id_new :
-        mlflow.log_params( cf.__dict__)
-      
-      if run_id_contd is not None and run_id_new :
-        str = f'Continuing run {run_id_contd} at step={cf.istep} as run {run_id}.'
-        logging.getLogger('obslearn').info( str)
-      elif run_id_contd is not None :
-        logging.getLogger('obslearn').info( f'Continuing run {run_id_contd} at step={cf.istep}.')
+        if not dist.is_available():
+            print("Distributed training is not available.")
+            return
 
-  ###########################################
-  @staticmethod
-  def init_torch( use_cuda = True, num_accs_per_task = 1) :
+        # dist.set_debug_level(dist.DebugLevel.DETAIL)
+        world_size = int(os.environ.get("WORLD_SIZE", "-1"))
+        if world_size == -1:
+            # Called using SLURM instead of torchrun
+            world_size = int(os.environ.get("SLURM_NTASKS", "1"))
 
-    torch.set_printoptions( linewidth=120)
+        if not dist.is_initialized() and world_size > 1:
+            # These environment variables are typically set by the launch utility
+            # (e.g., torchrun, Slurm)
+            local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
+            if local_rank == -1:
+                # Called using SLURM instead of torchrun
+                local_rank = int(os.environ.get("SLURM_LOCALID"))
+            rank = int(os.environ.get("RANK", "-1"))
+            if rank == -1:
+                ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
+                rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
+            master_addr = os.environ.get("MASTER_ADDR", "localhost")
+            master_port = os.environ.get("MASTER_PORT", f"{PORT}")  # Default port
 
-    torch.backends.cuda.matmul.allow_tf32 = True
+            if torch.accelerator.is_available():
+                device_type = torch.accelerator.current_accelerator()
+                device = torch.device(f"{device_type}:{local_rank}")
+                torch.accelerator.set_device_index(local_rank)
+                print(f"DDP initialization: device={device}, rank={rank}, world_size={world_size}")
+            else:
+                device = torch.device("cpu")
+                print(f"Running on device {device}")
 
-    use_cuda = torch.cuda.is_available()
-    if not use_cuda :
-      return torch.device( 'cpu')
+            backend = torch.distributed.get_default_backend_for_device(device)
+            torch.distributed.init_process_group(
+                backend=backend,
+                world_size=world_size,
+                device_id=device,
+                rank=rank,
+                init_method=f"tcp://{master_addr}:{master_port}",
+            )
+            print(f"Process group initialized ({backend}).")
 
-    local_id_node = os.environ.get('SLURM_LOCALID', '-1')
-    if local_id_node == '-1' :
-      devices = ['cuda']
-    else :
-      devices = ['cuda:{}'.format(int(local_id_node) * num_accs_per_task + i) 
-                                                                for i in range(num_accs_per_task)]
-    torch.cuda.set_device( int(local_id_node) * num_accs_per_task )
+            if is_root():
+                print("DDP initialized: root.")
+            # Wait for all ranks to reach this point
 
-    return devices 
+            dist.barrier()
+            # communicate run id to all nodes
+            len_run_id = len(cf.run_id)
+            run_id_int = torch.zeros(len_run_id, dtype=torch.int32).to(device)
+            if is_root():
+                print(f"Communicating run_id to all nodes: {cf.run_id}")
+                run_id_int = str_to_tensor(cf.run_id).to(device)
+            dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
+            if not is_root():
+                cf.run_id = tensor_to_str(run_id_int)
+            print(f"rank: {rank} has run_id: {cf.run_id}")
 
-  ###########################################
-  @staticmethod
-  def init_ddp( cf) :
+            # communicate data_loader_rng_seed
+            if hasattr(cf, "data_loader_rng_seed"):
+                if cf.data_loader_rng_seed is not None:
+                    l_seed = torch.tensor(
+                        [cf.data_loader_rng_seed if rank == 0 else 0], dtype=torch.int32
+                    ).cuda()
+                    dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
+                    cf.data_loader_rng_seed = l_seed.item()
 
-    rank = 0
-    num_ranks = 1
+        cf.world_size = world_size
+        cf.rank = rank
+        cf.local_rank = local_rank
+        cf.with_ddp = world_size > 1
 
-    master_node = os.environ.get('MASTER_ADDR', '-1')
-    if '-1' == master_node :
-      cf.with_ddp=False; cf.rank=rank; cf.num_ranks=num_ranks
-      return
+        return cf
 
-    local_rank = int(os.environ.get("SLURM_LOCALID"))
-    ranks_per_node = int( os.environ.get('SLURM_TASKS_PER_NODE', '1')[0] )
-    rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
-    num_ranks = int(os.environ.get("SLURM_NTASKS"))
+    def init_perf_monitoring(self):
+        self.device_handles, self.device_names = [], []
 
-    dist.init_process_group( backend='nccl', init_method='tcp://' + master_node + ':1345',
-                             timeout=datetime.timedelta(seconds=10*8192),
-                             world_size = num_ranks, rank = rank)
+        pynvml.nvmlInit()
+        device_count = pynvml.nvmlDeviceGetCount()
 
-    # communicate run id to all nodes
-    run_id_int = torch.zeros( 8, dtype=torch.int32).cuda()
-    if 0 == rank :
-      run_id_int = str_to_tensor( cf.run_id).cuda()
-    dist.all_reduce( run_id_int, op=torch.distributed.ReduceOp.SUM )
-    cf.run_id = tensor_to_str( run_id_int)
+        for i in range(device_count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+            self.device_names += [pynvml.nvmlDeviceGetName(handle)]
+            self.device_handles += [handle]
 
-    # communicate data_loader_rng_seed
-    if hasattr( cf, 'data_loader_rng_seed') :
-      if cf.data_loader_rng_seed is not None :
-        l_seed = torch.tensor([cf.data_loader_rng_seed if 0==rank else 0], dtype=torch.int32).cuda()
-        dist.all_reduce( l_seed, op=torch.distributed.ReduceOp.SUM )
-        cf.data_loader_rng_seed = l_seed.item()
+    def get_perf(self):
+        perf_gpu, perf_mem = 0.0, 0.0
+        if len(self.device_handles) > 0:
+            for handle in self.device_handles:
+                perf = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                perf_gpu += perf.gpu
+                perf_mem += perf.memory
+            perf_gpu /= len(self.device_handles)
+            perf_mem /= len(self.device_handles)
 
-    cf.rank = rank
-    cf.num_ranks = num_ranks
-    cf.with_ddp = True
-
-    return
-
-  ###########################################
-  @staticmethod
-  def init_streams( cf : Config, run_id_contd ) :
-
-    if not hasattr( cf, 'streams_directory'):
-      return cf
-
-    # use previously specified streams when continuing a run
-    if run_id_contd is not None :
-      return cf
-
-    if not hasattr( cf, 'streams'):
-      cf.streams = [ ]
-    elif not isinstance( cf.streams, list) :
-      cf.streams = [ ]
-
-    # warn if specified dir does not exist
-    if not os.path.isdir( cf.streams_directory) :
-      sd = cf.streams_directory
-      logging.getLogger('obslearn').warning( f'Streams directory {sd} does not exist.')
-
-    # read all reportypes from directory, append to existing ones
-    temp = {}
-    for fh in sorted( pathlib.Path( cf.streams_directory).rglob( '*.yml')) :
-      stream_parsed = yaml.safe_load( fh.read_text())
-      if stream_parsed is not None :
-        temp.update( stream_parsed)
-    for k,v in temp.items() :
-      v['name'] = k
-      cf.streams.append( v)
-
-    # sanity checking (at some point, the dict should be parsed into a class)
-    rts = [ rt['filenames'] for rt in cf.streams]
-    # flatten list
-    rts = list( itertools.chain.from_iterable( rts))
-    if len(rts) != len( list(set( rts))) :
-      logging.getLogger('obslearn').warning( 'Duplicate reportypes specified.')
-
-    cf.num_obs_types = 3
-
-    return cf
-
-  ###########################################
-  def init_perf_monitoring( self) :
-
-    self.device_handles, self.device_names = [], []
-
-    pynvml.nvmlInit()
-    device_count = pynvml.nvmlDeviceGetCount()
-
-    for i in range(device_count):
-      handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-      self.device_names += [ pynvml.nvmlDeviceGetName(handle) ]
-      self.device_handles += [ handle ]
-
-  ###########################################
-  def get_perf( self) :
-
-    perf_gpu, perf_mem = 0.0, 0.0
-    if len(self.device_handles) > 0 :
-      for handle in self.device_handles :
-        perf = pynvml.nvmlDeviceGetUtilizationRates( handle)
-        perf_gpu += perf.gpu
-        perf_mem += perf.memory
-      perf_gpu /= len(self.device_handles)
-      perf_mem /= len(self.device_handles)
-
-    return perf_gpu, perf_mem
-
-  ###########################################
-  def ddp_average( self, val) :
-    if self.cf.with_ddp :
-      dist.all_reduce( val.cuda(), op=torch.distributed.ReduceOp.AVG )
-    return val.cpu()
-
-####################################################################################################
-if __name__ == '__main__' :
-
-  from weathergen.utils.config import Config
-  from weathergen.train.trainer_base import Trainer_Base
-
-  cf = Config()
-  cf.sources_dir = './sources'
-
-  cf = Trainer_Base.init_reportypes( cf)
+        return perf_gpu, perf_mem

@@ -1,0 +1,38 @@
+name: Task / Issue
+description: A task or issue that should take less than a week to complete.
+title: "Task"
+
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the task. It can be a feature, documentation, etc.
+      description: Be specific and provide context.
+      placeholder: "Describe the task here..."
+
+  - type: input
+    id: hedgedoc_url
+    attributes:
+      label: Hedgedoc URL, if you are keeping notes, plots, logs in hedgedoc.
+      description: Paste a link to logs, screenshots, or related resources
+      placeholder: "https://gitlab.jsc.fz-juelich.de/hedgedoc/..."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: area
+    attributes:
+      label: Area
+      description: The general area this task relates to.
+      options:
+        - label: datasets, data readers, data preparation and transfer
+        - label: model
+        - label: science
+        - label: infrastructure and engineering
+        - label: evaluation, export and visualization
+        - label: documentation
+    validations:
+      required: true
+
+
+

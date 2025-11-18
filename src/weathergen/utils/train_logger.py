@@ -1,4 +1,4 @@
-# (C) Copyright 2024 WeatherGenerator contributors.
+# (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,136 +7,450 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import code
-import torch
-import numpy as np
 import datetime
+import json
+import logging
+import math
+import time
+import traceback
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
 
-from weathergen.utils.config import Config
+import numpy as np
+import polars as pl
+from torch import Tensor
+
+import weathergen.common.config as config
+from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
+
+_weathergen_timestamp = "weathergen.timestamp"
+_weathergen_reltime = "weathergen.reltime"
+_weathergen_time = "weathergen.time"
+_performance_gpu = "perf.gpu"
+_performance_memory = "perf.memory"
+
+_logger = logging.getLogger(__name__)
+
+Stage = Literal["train", "val"]
+RunId = str
+
+# All the stages currently implemented:
+TRAIN: Stage = "train"
+VAL: Stage = "val"
 
 
-class TrainLogger :
+@dataclass
+class Metrics:
+    run_id: RunId
+    stage: Stage
+    train: pl.DataFrame
+    val: pl.DataFrame
+    system: pl.DataFrame
 
-  #######################################
-  def __init__( self, cf, path_run) -> None:
+    def by_mode(self, s: str) -> pl.DataFrame:
+        match s:
+            case "train":
+                return self.train
+            case "val":
+                return self.val
+            case "system":
+                return self.system
+            case _:
+                raise ValueError(f"Unknown mode {s}. Use 'train', 'val' or 'system'.")
 
-    self.cf = cf
-    self.path_run = path_run
-    # TODO: add header with col names (loadtxt has an option to skip k header lines)
 
-  #######################################
-  def add_train( self, samples, lr, loss_avg, stddev_avg, perf_gpu=0., perf_mem=0.) -> None :
-    ''' 
-      Log training data
-    '''
+class TrainLogger:
+    #######################################
+    def __init__(self, cf, path_run: Path) -> None:
+        self.cf = cf
+        self.path_run = path_run
 
-    log_vals = [ int(datetime.datetime.now().strftime(  '%Y%m%d%H%M%S')) ]
-    log_vals += [samples]
+    def log_metrics(self, stage: Stage, metrics: dict[str, float]) -> None:
+        """
+        Log metrics to a file.
+        For now, just scalar values are expected. There is no check.
+        """
+        ## Clean all the metrics to convert to float.
+        #  Any other type (numpy etc.) will trigger a serialization error.
+        clean_metrics = {
+            _weathergen_timestamp: time.time_ns() // 1_000_000,
+            _weathergen_time: int(datetime.datetime.now().strftime("%Y%m%d%H%M%S")),
+            "stage": stage,
+        }
+        for key, value in metrics.items():
+            v = float(value)
+            if math.isnan(v) or math.isinf(v):
+                v = str(v)
+            clean_metrics[key] = v
 
-    log_vals += [loss_avg[0].mean()]
-    log_vals += [lr]
+        # TODO: performance: we repeatedly open the file for each call. Better for multiprocessing
+        # but we can probably do better and rely for example on the logging module.
 
-    for i_obs, rt in enumerate( self.cf.streams) :
-      for j,_ in enumerate( self.cf.loss_fcts) :
-        log_vals += [ loss_avg[j,i_obs] ]
-    if len(stddev_avg) > 0 :
-      for i_obs, rt in enumerate( self.cf.streams) :
-        log_vals += [ stddev_avg[i_obs] ]
+        metrics_path = get_train_metrics_path(
+            base_path=Path(self.cf.run_path), run_id=self.cf.run_id
+        )
+        with open(metrics_path, "ab") as f:
+            s = json.dumps(clean_metrics) + "\n"
+            f.write(s.encode("utf-8"))
 
-    with open( self.path_run + self.cf.run_id + '_train_log.txt', 'ab') as f:
-      np.savetxt( f, log_vals)
+    #######################################
+    def add_train(
+        self,
+        samples: int,
+        lr: float,
+        avg_loss: Tensor,
+        losses_all: dict[str, Tensor],
+        stddev_all: dict[str, Tensor],
+        perf_gpu: float = 0.0,
+        perf_mem: float = 0.0,
+    ) -> None:
+        """
+        Log training data
+        """
+        metrics: dict[str, float] = dict(num_samples=samples)
 
-    log_vals = []
-    log_vals += [perf_gpu]
-    log_vals += [perf_mem]
-    with open( self.path_run + self.cf.run_id + '_perf_log.txt', 'ab') as f:
-      np.savetxt( f, log_vals)
+        log_vals: list[float] = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
+        log_vals += [samples]
 
-  #######################################
-  def add_val( self, samples, loss_avg, stddev_avg) -> None :
-    ''' 
-      Log validation data
-    '''
+        metrics["loss_avg_mean"] = avg_loss.nanmean().item()
+        metrics["learning_rate"] = lr
+        metrics["num_samples"] = int(samples)
+        log_vals += [avg_loss.nanmean().item()]
+        log_vals += [lr]
 
-    log_vals = [ int(datetime.datetime.now().strftime(  '%Y%m%d%H%M%S')) ]
-    log_vals += [samples]
+        for st in self.cf.streams:
+            loss = losses_all[st["name"]]
+            stddev = stddev_all[st["name"]]
 
-    for i_obs, rt in enumerate( self.cf.streams) :
-      for j,_ in enumerate( self.cf.loss_fcts) :
-        log_vals += [ loss_avg[j,i_obs] ]
-    if len(stddev_avg) > 0 :
-      for i_obs, rt in enumerate( self.cf.streams) :
-        log_vals += [ stddev_avg[i_obs] ]
+            for j, (lf_name, _) in enumerate(self.cf.loss_fcts):
+                metrics[_key_loss(st["name"], lf_name)] = loss[:, :, j].nanmean().item()
 
-    with open( self.path_run + self.cf.run_id + '_val_log.txt', 'ab') as f:
-      np.savetxt( f, log_vals)
+                for k, ch_n in enumerate(st.train_target_channels):
+                    metrics[_key_loss_chn(st["name"], lf_name, ch_n)] = (
+                        loss[:, k, j].nanmean().item()
+                    )
+                log_vals += [loss[:, :, j].nanmean().item()]
 
-  #######################################
-  @staticmethod
-  def read( run_id, epoch=-1) :
-    '''
-      Read data for run_id
-    '''
+            metrics[_key_stddev(st["name"])] = stddev.nanmean().item()
 
-    cf = Config.load( run_id, epoch)
-    run_id = cf.run_id
+            log_vals += [stddev.nanmean().item()]
 
-    fname_log_train = f'./results/{run_id}/{run_id}_train_log.txt'
-    fname_log_val = f'./results/{run_id}/{run_id}_val_log.txt'
-    fname_perf_val = f'./results/{run_id}/{run_id}_perf_log.txt'
-    fname_config = f'./models/model_{run_id}.json'
+        with open(self.path_run / f"{self.cf.run_id}_train_log.txt", "ab") as f:
+            np.savetxt(f, log_vals)
 
-    # training
+        log_vals = []
+        log_vals += [perf_gpu]
+        log_vals += [perf_mem]
+        metrics[_performance_gpu] = perf_gpu
+        metrics[_performance_memory] = perf_mem
+        self.log_metrics("train", metrics)
+        with open(self.path_run / (self.cf.run_id + "_perf_log.txt"), "ab") as f:
+            np.savetxt(f, log_vals)
 
-    # define cols for training
-    cols_train = ['dtime', 'samples', 'mse', 'lr']
-    for si in cf.streams :
-      for j,lf in enumerate(cf.loss_fcts) :
-        cols_train += [ si['name'].replace(',','').replace('/','_').replace(' ','_') + ', ' + lf[0]]
-    with_stddev = [(True if 'stats' in lf else False) for lf in cf.loss_fcts]
-    if with_stddev :
-      for si in cf.streams : 
-        cols_train += [ si['name'].replace(',','').replace('/','_').replace(' ','_')+', '+ 'stddev']
-    # read training log data
-    try :
-      with open( fname_log_train, 'rb') as f:
-        log_train = np.loadtxt( f, delimiter=',')
-      log_train = log_train.reshape( ( log_train.shape[0]//len(cols_train), len(cols_train) ))
-    except :
-      print( f'Warning: no training data loaded for run_id={run_id}')
-      log_train = np.array([])
+    #######################################
+    def add_val(
+        self, samples: int, losses_all: dict[str, Tensor], stddev_all: dict[str, Tensor]
+    ) -> None:
+        """
+        Log validation data
+        """
 
-    # validation
+        metrics: dict[str, float] = dict(num_samples=int(samples))
 
-    # define cols for validation
-    cols_val = ['dtime', 'samples']
-    for si in cf.streams :
-      for j,lf in enumerate(cf.loss_fcts_val) :
-        cols_val += [ si['name'].replace(',','').replace('/','_').replace(' ','_') + ', ' + lf[0]]
-    with_stddev = [(True if 'stats' in lf else False) for lf in cf.loss_fcts_val]
-    if with_stddev :
-      for si in cf.streams : 
-        cols_val += [ si['name'].replace(',','').replace('/','_').replace(' ','_')+', '+ 'stddev']
-    # read validation log data
-    try :
-      with open( fname_log_val, 'rb') as f:
-        log_val = np.loadtxt( f, delimiter=',')
-      log_val = log_val.reshape( ( log_val.shape[0]//len(cols_val), len(cols_val) ))
-    except :
-      print( f'Warning: no validation data loaded for run_id={run_id}')
-      log_val = np.array([])
+        log_vals: list[float] = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
+        log_vals += [samples]
 
-    # performance
+        for st in self.cf.streams:
+            loss = losses_all[st["name"]]
+            stddev = stddev_all[st["name"]]
+            for j, (lf_name, _) in enumerate(self.cf.loss_fcts_val):
+                metrics[_key_loss(st["name"], lf_name)] = loss[:, :, j].nanmean().item()
+                for k, ch_n in enumerate(st.val_target_channels):
+                    metrics[_key_loss_chn(st["name"], lf_name, ch_n)] = (
+                        loss[:, k, j].nanmean().item()
+                    )
+                log_vals += [loss[:, :, j].nanmean().item()]
 
-    # define cols for performance monitoring
-    cols_perf = ['GPU', 'memory']
-    # read perf log data
-    try :
-      with open( fname_perf_val, 'rb') as f:
-        log_perf = np.loadtxt( f, delimiter=',')
-      log_perf = log_perf.reshape( ( log_perf.shape[0]//len(cols_perf), len(cols_perf) ))
-    except :
-      print( f'Warning: no performance data loaded for run_id={run_id}')
-      log_perf = np.array([])
+            metrics[_key_stddev(st["name"])] = stddev.nanmean().item()
+            log_vals += [stddev.nanmean().item()]
 
-    return ( (cols_train, log_train), (cols_val, log_val), (cols_perf, log_perf) )
+        self.log_metrics("val", metrics)
+        with open(self.path_run / (self.cf.run_id + "_val_log.txt"), "ab") as f:
+            np.savetxt(f, log_vals)
+
+    #######################################
+    @staticmethod
+    def read(run_id: str, model_path: str = None, mini_epoch: int = -1) -> Metrics:
+        """
+        Read data for run_id
+        """
+        # Load config from given model_path if provided, otherwise use path from private config
+        if model_path:
+            cf = config.load_model_config(
+                run_id=run_id, mini_epoch=mini_epoch, model_path=model_path
+            )
+        else:
+            cf = config.load_config(private_home=None, from_run_id=run_id, mini_epoch=mini_epoch)
+        run_id = cf.run_id
+
+        result_dir_base = Path(cf.run_path)
+        result_dir = result_dir_base / run_id
+        fname_log_train = result_dir / f"{run_id}_train_log.txt"
+        fname_log_val = result_dir / f"{run_id}_val_log.txt"
+        fname_perf_val = result_dir / f"{run_id}_perf_log.txt"
+
+        # training
+
+        # define cols for training
+        cols_train = ["dtime", "samples", "mse", "lr"]
+        cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
+        for si in cf.streams:
+            for lf in cf.loss_fcts:
+                cols1 += [_key_loss(si["name"], lf[0])]
+                cols_train += [
+                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
+                ]
+        with_stddev = [("stats" in lf) for lf in cf.loss_fcts]
+        if with_stddev:
+            for si in cf.streams:
+                cols1 += [_key_stddev(si["name"])]
+                cols_train += [
+                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
+                    + ", "
+                    + "stddev"
+                ]
+        # read training log data
+        try:
+            with open(fname_log_train, "rb") as f:
+                log_train = np.loadtxt(f, delimiter=",")
+            log_train = log_train.reshape((log_train.shape[0] // len(cols_train), len(cols_train)))
+        except (
+            TypeError,
+            AttributeError,
+            IndexError,
+            ZeroDivisionError,
+            ValueError,
+        ) as e:
+            _logger.warning(
+                (
+                    f"Warning: no training data loaded for run_id={run_id}",
+                    "Data loading or reshaping failed — "
+                    "possible format, dimension, or logic issue.",
+                    f"Due to specific error: {e}",
+                )
+            )
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            _logger.error(
+                (
+                    f"Error: no training data loaded for run_id={run_id}",
+                    "File system error occurred while handling the log file.",
+                    f"Due to specific error: {e}",
+                )
+            )
+        except Exception:
+            _logger.error(
+                (
+                    f"Error: no training data loaded for run_id={run_id}",
+                    f"Due to exception with trace:\n{traceback.format_exc()}",
+                )
+            )
+            log_train = np.array([])
+
+        log_train_df = read_metrics(cf, run_id, "train", cols1, result_dir_base)
+
+        # validation
+        # define cols for validation
+        cols_val = ["dtime", "samples"]
+        cols2 = [_weathergen_timestamp, "num_samples"]
+        for si in cf.streams:
+            for lf in cf.loss_fcts_val:
+                cols_val += [
+                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
+                ]
+                cols2 += [_key_loss(si["name"], lf[0])]
+        with_stddev = [("stats" in lf) for lf in cf.loss_fcts_val]
+        if with_stddev:
+            for si in cf.streams:
+                cols2 += [_key_stddev(si["name"])]
+                cols_val += [
+                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
+                    + ", "
+                    + "stddev"
+                ]
+        # read validation log data
+        try:
+            with open(fname_log_val, "rb") as f:
+                log_val = np.loadtxt(f, delimiter=",")
+            log_val = log_val.reshape((log_val.shape[0] // len(cols_val), len(cols_val)))
+        except (
+            TypeError,
+            AttributeError,
+            IndexError,
+            ZeroDivisionError,
+            ValueError,
+        ) as e:
+            _logger.warning(
+                (
+                    f"Warning: no validation data loaded for run_id={run_id}",
+                    "Data loading or reshaping failed — "
+                    "possible format, dimension, or logic issue.",
+                    f"Due to specific error: {e}",
+                )
+            )
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            _logger.error(
+                (
+                    f"Error: no validation data loaded for run_id={run_id}",
+                    "File system error occurred while handling the log file.",
+                    f"Due to specific error: {e}",
+                )
+            )
+        except Exception:
+            _logger.error(
+                (
+                    f"Error: no validation data loaded for run_id={run_id}",
+                    f"Due to exception with trace:\n{traceback.format_exc()}",
+                )
+            )
+            log_val = np.array([])
+        metrics_val_df = read_metrics(cf, run_id, "val", cols2, result_dir_base)
+
+        # performance
+        # define cols for performance monitoring
+        cols_perf = ["GPU", "memory"]
+        # read perf log data
+        try:
+            with open(fname_perf_val, "rb") as f:
+                log_perf = np.loadtxt(f, delimiter=",")
+            log_perf = log_perf.reshape((log_perf.shape[0] // len(cols_perf), len(cols_perf)))
+        except (
+            TypeError,
+            AttributeError,
+            IndexError,
+            ZeroDivisionError,
+            ValueError,
+        ) as e:
+            _logger.warning(
+                (
+                    f"Warning: no validation data loaded for run_id={run_id}",
+                    "Data loading or reshaping failed — "
+                    "possible format, dimension, or logic issue.",
+                    f"Due to specific error: {e}",
+                )
+            )
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            _logger.error(
+                (
+                    f"Error: no validation data loaded for run_id={run_id}",
+                    "File system error occurred while handling the log file.",
+                    f"Due to specific error: {e}",
+                )
+            )
+        except Exception:
+            _logger.error(
+                (
+                    f"Error: no validation data loaded for run_id={run_id}",
+                    f"Due to exception with trace:\n{traceback.format_exc()}",
+                )
+            )
+            log_perf = np.array([])
+        metrics_system_df = read_metrics(
+            cf,
+            run_id,
+            None,
+            [_weathergen_timestamp, _performance_gpu, _performance_memory],
+            result_dir_base,
+        )
+
+        return Metrics(run_id, "train", log_train_df, metrics_val_df, metrics_system_df)
+
+
+def read_metrics(
+    cf: config.Config,
+    run_id: RunId | None,
+    stage: Stage | None,
+    cols: list[str] | None,
+    results_path: Path,
+) -> pl.DataFrame:
+    """
+    Read metrics for run_id
+
+    stage: stage to load ("train", "val" or empty). If None, all stages are loaded.
+    cols: list of columns to load. If None, all columns are loaded.
+    run_id: run_id to load. If None, the run_id form the config is used.
+    """
+
+    assert cols is None or cols, "cols must be non empty or None"
+    if run_id is None:
+        run_id = cf.run_id
+    assert run_id, "run_id must be provided"
+
+    metrics_path = get_train_metrics_path(base_path=results_path, run_id=run_id)
+    # TODO: this should be a config option
+    df = read_metrics_file(metrics_path)
+    if stage is not None:
+        df = df.filter(pl.col("stage") == stage)
+    df = df.drop("stage")
+    df = clean_df(df, cols)
+    return df
+
+
+def clean_df(df, columns: list[str] | None):
+    """
+    Selects the required data from the dataframe, and ensures thath all columns are numeric.
+    """
+    # Convert all string columns to float. type == str they contained nan/inf values
+    for k, v in df.schema.items():
+        if v == pl.String:
+            df = df.with_columns(df[k].cast(pl.Float64).alias(k))
+
+    # Convert timestamp column to date
+    df = df.with_columns(
+        pl.from_epoch(df[_weathergen_timestamp], time_unit="ms").alias(_weathergen_timestamp)
+    )
+    df = df.with_columns(
+        (df[_weathergen_timestamp] - df[_weathergen_timestamp].min()).alias(_weathergen_reltime)
+    )
+
+    if columns:
+        columns = list(set(columns))  # remove duplicates
+        # Backwards compatibility of "loss_avg_mean" (old) and "loss_avg_0_mean" (new) metric name
+        if "loss_avg_mean" not in df.columns:
+            idcs = [i for i in range(len(columns)) if columns[i] == "loss_avg_mean"]
+            if len(idcs) > 0:
+                columns[idcs[0]] = "loss_avg_0_mean"
+        df = df.select(columns)
+        # Remove all rows where all columns are null
+        df = df.filter(~pl.all_horizontal(pl.col(c).is_null() for c in columns))
+
+    return df
+
+
+def clean_name(s: str) -> str:
+    """
+    Remove all characters from a string except letters, digits, and underscores.
+
+    Args:
+        s (str): The input string.
+
+    Returns:
+        str: A new string containing only alphanumeric characters and underscores,
+             in the same order and capitalization as they appeared in the input.
+    """
+    return "".join(c for c in s if c.isalnum() or c == "_")
+
+
+def _key_loss(st_name: str, lf_name: str) -> str:
+    st_name = clean_name(st_name)
+    return f"stream.{st_name}.loss_{lf_name}.loss_avg"
+
+
+def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
+    st_name = clean_name(st_name)
+    return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
+
+
+def _key_stddev(st_name: str) -> str:
+    st_name = clean_name(st_name)
+    return f"stream.{st_name}.stddev_avg"

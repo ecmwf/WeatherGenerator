@@ -1,4 +1,4 @@
-# (C) Copyright 2024 WeatherGenerator contributors.
+# (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,602 +7,492 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
+import pathlib
+
 import numpy as np
 import torch
-import math
-import datetime
-from copy import deepcopy
-import logging
-import time
-import code
-import os 
-import yaml
-
-import pandas as pd
-
-from weathergen.datasets.obs_dataset import ObsDataset
-from weathergen.datasets.anemoi_dataset import AnemoiDataset
-from weathergen.datasets.normalizer import DataNormalizer
-from weathergen.datasets.batchifyer import Batchifyer
-from weathergen.datasets.utils import merge_cells
-
-from weathergen.utils.logger import logger
-
-
-class MultiStreamDataSampler( torch.utils.data.IterableDataset):
-
-  ###################################################
-  def __init__(self, data_path, rank, num_ranks, streams, 
-                     start_date, end_date, len_hrs, step_hrs,
-                     batch_size, masking_mode, masking_rate, masking_rate_sampling,
-                     shuffle = True, rng_seed = None, healpix_level = 2,
-                     forecast_delta_hrs = 0, forecast_steps = 1, forecast_policy = None,
-                     samples_per_epoch = None, input_window_steps = 1,
-                     embed_local_coords = False, embed_centroids_local_coords = False,
-                     target_coords_local = False, sampling_rate_target = 1. ):
-    
-    super( MultiStreamDataSampler, self).__init__()
-
-    assert end_date > start_date
-
-    self.mask_value = 0.
-    # obs_id, year, day of year, minute of day
-    self.geoinfo_offset = 6
-
-    self.len_hrs = len_hrs
-    self.step_hrs = step_hrs
-
-    fc_policy_seq = 'sequential'==forecast_policy or 'sequential_random'==forecast_policy
-    assert forecast_steps >= 0 if not fc_policy_seq else True
-    self.forecast_delta_hrs = forecast_delta_hrs if forecast_delta_hrs > 0 else self.len_hrs
-    self.forecast_steps =np.array([forecast_steps] if type(forecast_steps)==int else forecast_steps)
-    self.forecast_policy = forecast_policy
-
-    # end date needs to be adjusted to account for window length
-    format_str = '%Y%m%d%H%M%S'
-    end_dt = datetime.datetime.strptime(str(end_date), format_str)
-    end_dt = end_dt + datetime.timedelta(hours=len_hrs)
-    end_date_padded = end_dt.strftime( format_str)
-
-    self.len = 100000000
-
-    self.obs_datasets_norm, self.obs_datasets_idxs = [], []
-    for i, stream_info in enumerate(streams) :
-
-      self.obs_datasets_norm.append( [])
-      self.obs_datasets_idxs.append( [])
-      
-      for fname in stream_info['filenames'] :
-
-        ds = None
-        if stream_info['type']=='obs' :
-          
-          ds = ObsDataset( data_path + '/' + fname, start_date, end_date_padded, len_hrs, step_hrs, False)
-
-          # skip pre-pended columns before lat,lon
-          do = 0
-          while ds.colnames[do] != 'lat' :
-            do += 1
-
-          # the processing here is not natural but a workaround to various inconsistencies in the
-          # current datasets
-          data_idxs = [i for i,cn in enumerate(ds.selected_colnames[do:]) if 'obsvalue_' == cn[:9]]
-          mask = np.ones( len(ds.selected_colnames[do:]), dtype=np.int32).astype(bool)
-          mask[data_idxs] = False
-          mask[-1] = False if 'healpix' in ds.selected_colnames[-1] else mask[-1]
-          geoinfo_idx = (np.arange( len(ds.selected_colnames[do:]), dtype=np.int64)[mask]).tolist()
-          logger.info( '{} :: {} : {}'.format( stream_info['name'],
-                                              [ds.selected_colnames[do:][i] for i in geoinfo_idx],
-                                              [ds.selected_colnames[do:][i] for i in data_idxs]))
-          stats_offset = 0
-
-        elif stream_info['type']=='anemoi' :
-
-          ds = AnemoiDataset( data_path + '/' + fname, start_date, end_date, len_hrs, step_hrs, False)
-          do = 0
-          geoinfo_idx = [ 0, 1]
-          stats_offset = 2
-          # TODO: avoid hard coding
-          data_idxs = list(np.arange( 2, 82+2))
-
-        else :
-          assert False, 'Unsupported stream type {}.'.format( stream_info['type'])
-
-        fsm = self.forecast_steps[0]
-        self.len = min( self.len, len(ds) - (self.len_hrs * (fsm+1)) // self.step_hrs )
-
-        normalizer = DataNormalizer( stream_info, self.geoinfo_offset, stats_offset, 
-                                    ds, geoinfo_idx, data_idxs, do)
-
-        self.obs_datasets_norm[-1] += [ (ds, normalizer, do) ]
-        self.obs_datasets_idxs[-1] += [ (geoinfo_idx, data_idxs) ]
-
-    # by construction, this is identical for all datasets
-    self.len_native = np.array([len(ds[0]) for dss in self.obs_datasets_norm for ds in dss]).min()
-
-    self.len = min( self.len, self.len if not samples_per_epoch else samples_per_epoch)
-    # adjust len to split loading across all workers
-    len_chunk = ((self.len_native // num_ranks) // batch_size) * batch_size
-    self.len = min( self.len, len_chunk)
-    # ensure it is multiple of batch_size
-    self.len = (self.len // batch_size) * batch_size
-
-    self.rank = rank
-    self.num_ranks = num_ranks
-
-    self.streams = streams
-    self.shuffle = shuffle
-    self.input_window_steps = input_window_steps
-    self.embed_local_coords = embed_local_coords
-    self.embed_centroids_local_coords = embed_centroids_local_coords
-    self.target_coords_local = target_coords_local
-    self.sampling_rate_target = sampling_rate_target
-
-    self.masking_mode = masking_mode
-    self.masking_rate = masking_rate
-    self.masking_rate_sampling = masking_rate_sampling
-
-    self.batch_size = batch_size
-    self.rng = np.random.default_rng( rng_seed)
-
-    self.healpix_level_source = healpix_level
-    self.healpix_level_target = healpix_level
-    self.num_healpix_cells_source = 12 * 4**self.healpix_level_source
-    self.num_healpix_cells_target = 12 * 4**self.healpix_level_target
-
-    self.batchifyer = Batchifyer( healpix_level)
-
-    self.epoch = 0
-
-  ###################################################
-  def advance( self) :
-    '''
-      Advance epoch
-    '''
-    self.epoch += 1
-    # advance since only copies are used for actual loading with parallel loaders
-    self.rng.random()
-
-  ###################################################
-  def get_num_chs( self) :
-    gs = self.geoinfo_offset
-    return [[len(idxs[0])+gs +len(idxs[1]) for idxs in idxs_s] for idxs_s in self.obs_datasets_idxs]
-
-  ###################################################
-  def reset( self):
-
-    fsm = self.forecast_steps[ min( self.epoch, len(self.forecast_steps)-1)]
-    if fsm > 0 :
-      logger.info( f'forecast_steps at epoch={self.epoch} : {fsm}')
-
-    # data
-    if self.shuffle :
-      # native length of datasets, independent of epoch length that has potentially been specified
-      self.perms = self.rng.permutation( self.len_native-(( self.len_hrs * (fsm+1))//self.step_hrs))
-      # self.perms = self.perms[:len(self)]
-    else :
-      self.perms = np.arange( self.len_native)
-    # logging.getLogger('obslearn').info(  f'perms : {self.perms[:10]}')
-
-    # forecast time steps
-    len_dt_samples = len(self) // self.batch_size
-    if self.forecast_policy is None :
-      self.perms_forecast_dt = np.zeros( len_dt_samples, dtype=np.int64)
-    elif self.forecast_policy == 'fixed' or self.forecast_policy == 'sequential' :
-      self.perms_forecast_dt = fsm * np.ones( len_dt_samples, dtype=np.int64)
-    elif self.forecast_policy == 'random' or self.forecast_policy == 'sequential_random'  :
-      # randint high=one-past
-      self.perms_forecast_dt = np.random.randint( low=self.forecast_steps.min(), high=fsm+1,   
-                                                  size=len_dt_samples, dtype=np.int64)
-    else :
-      assert False
-
-  ###################################################
-  def denormalize_data( self, obs_id, data, with_offset=True) :
-    return self.obs_datasets_norm[obs_id][0][1].denormalize_data( data, with_offset)
-
-  ###################################################
-  def denormalize_coords( self, obs_id, coords) :
-    return self.obs_datasets_norm[obs_id][0][1].denormalize_coords( coords)
-
-  ###################################################
-  def get_geoinfo_size( self, obs_id, i_source ) :
-    return len(self.obs_datasets_idxs[obs_id][i_source][0]) + self.geoinfo_offset
-
-  ###################################################
-  def get_geoinfo_sizes( self) :
-    return [self.get_geoinfo_size(i,0) for i,_ in enumerate(self.obs_datasets_idxs)]
-
-  ###################################################
-  def create_grid( self, grid, time_win2): 
-
-    # load specified grid 
-    source2 = np.float32(np.load( f'./assets/{grid}'))
-
-    # generate times 
-    start, end = time_win2
-    delta = np.timedelta64(1, 'h')
-    dates = np.arange(start.astype('datetime64[h]')+delta, end.astype( 'datetime64[h]')+delta,delta)
-
-    # convert to string
-    dates = [str(d.astype('datetime64[ns]')) for d in dates]
-    # TODO: avoid hard coding 40320
-    times2 = np.repeat( dates, 40320)
-
-    return (source2, times2)
-
-  ###################################################
-  def read_anemoi( self, grid_info, times2, source2):
-
-    from anemoi.datasets import open_dataset
-    from earthkit.meteo import thermo
-
-    with open( f'./assets/{grid_info}') as file:
-        grid_info = yaml.safe_load( file)
-
-    start = times2[0][:10] + ' ' + times2[0][11:19]
-    end = times2[-1][:10] + ' ' +  times2[-1][11:19]
-    
-    # open anemoi
-    # TODO: avoid hard coding path
-    path = '/gpfs/scratch/ehpc01/dop/era5/aifs-ea-an-oper-0001-mars-o96-1979-2022-1h-v4.zarr'
-    ds_anemoi = open_dataset( path, start = start, end = end, select = grid_info['colnames'], 
-                              reorder = grid_info['colnames'])
-
-    # reshape to fit grid
-    ds_anemoi = ( np.array(ds_anemoi).transpose(0, 3, 2, 1)).reshape( -1,len(grid_info['colnames']))
-
-    # perform transformation if specified 
-    if 'transformation' in grid_info.keys(): 
-      for transformation in grid_info['transformation'] :
-        exec(transformation)
-
-    # inject era data into grid 
-    source2[:,grid_info['indice_start']:] = ds_anemoi
-
-    return source2 
-
-  ###################################################
-  def __iter__(self):
-
-    iter_start, iter_end = self.worker_workset()
-
-    # create new shuffeling
-    self.reset()
-
-    nhc_target = self.num_healpix_cells_target
-    nhc_source = self.num_healpix_cells_source
-
-    # bidx is used to count the #batches that have been emitted
-    # idx_raw is used to index into the dataset; the decoupling is needed
-    # since there are empty batches 
-    idx_raw = iter_start 
-    for i,bidx in enumerate( range( iter_start, iter_end, self.batch_size)) :
-
-      # targets, targets_coords, targets_idxs = [], [], [],
-      tcs, tcs_lens, target_tokens, source_tokens_cells, source_tokens_lens = [],[],[], [], []
-      target_tokens_lens, sources, source_centroids = [], [], []
-
-      # forecast_dt needs to be constant per batch (amortized through data parallel training)
-      forecast_dt = self.perms_forecast_dt[i]
-
-      # use while loop due to the scattered nature of the data in time and to
-      # ensure batches are not empty
-      ib = 0
-      while len(source_tokens_cells) < self.batch_size :
-
-        idx = self.perms[idx_raw % self.perms.shape[0]]
-        idx_raw += 1
-
-        step_dt = self.len_hrs // self.step_hrs
-        step_forecast_dt = step_dt + (self.forecast_delta_hrs * forecast_dt) // self.step_hrs
-
-        time_win1, time_win2 = ( self.obs_datasets_norm[0][0][0].time_window( idx),
-                                 self.obs_datasets_norm[0][0][0].time_window( idx + step_forecast_dt))
-
-        c_tcs = [[] for _ in range(forecast_dt+1)]
-        c_tcs_lens = [[] for _ in range(forecast_dt+1)] 
-        c_target_tokens = [[] for _ in range(forecast_dt+1)] 
-        c_target_tokens_lens = [[] for _ in range(forecast_dt+1)]
-        c_source_tokens_cells = []; c_source_tokens_lens = []; c_source_centroids = []
-        c_source_raw = []
-
-        for obs_id, (stream_info, stream_dsn, stream_idxs) in enumerate( zip( self.streams,
-                                                                        self.obs_datasets_norm,
-                                                                        self.obs_datasets_idxs)) :
-
-
-          s_tcs = []; s_tcs_lens = []; s_target_tokens = []; s_target_tokens_lens = []
-          s_source_tokens_cells = []; s_source_tokens_lens = []; s_source_centroids = []
-          s_source_raw = []
-
-          token_size = stream_info['token_size']
-          grid = stream_info['gridded_output'] if 'gridded_output' in stream_info else None
-          grid_info = stream_info['gridded_output_info'] if 'gridded_output_info' in stream_info else None
-
-          for i_source, ((ds, normalizer, do), s_idxs) in enumerate( zip(stream_dsn, stream_idxs)) :
-          
-            # source window (of potentially multi-step length)
-            (source1,times1) = ds[idx]
-            for it in range(1,self.input_window_steps) :
-              (source0,times0) = ds[idx - it*step_dt]
-              source1 = np.concatenate( [source0, source1], 0)
-              times1 = np.concatenate( [times0, times1], 0)
-                
-            if source1.shape[0] < token_size :
-              # skip if there are not enough data points
-              tt_cells, tt_lens = torch.tensor([]), torch.zeros([nhc_target],dtype=torch.int32)
-              ss_cells, ss_lens = torch.tensor([]), torch.zeros([nhc_source],dtype=torch.int32)
-              ss_centroids = torch.tensor([])
-              tc, tc_lens = torch.tensor([]), torch.zeros([nhc_target],dtype=torch.int32)
-              source1_raw = torch.tensor([])
-            else :
-
-              oi = ds.properties['obs_id']
-              source1 = self.prepare_window_source( oi, do, normalizer, source1, times1, time_win1, s_idxs)
-
-              # this should only be collected in validation mode
-              source1_raw = normalizer.denormalize_data( source1.clone())
-
-              (ss_cells, ss_lens, ss_centroids) = self.batchifyer.batchify_source( 
-                                                            stream_info, 
-                                                            self.geoinfo_offset, 
-                                                            self.get_geoinfo_size( obs_id,i_source),
-                                                            self.masking_rate,
-                                                            self.masking_rate_sampling, self.rng,
-                                                            source1, times1,
-                                                            normalizer.normalize_coords)
-
-            s_source_raw += [source1_raw]
-            s_source_tokens_lens += [ss_lens]
-            s_source_tokens_cells += [ss_cells]
-            s_source_centroids += [ss_centroids] if len(ss_centroids)>0 else [torch.tensor([])]
-
-          # collect all sources in current stream and add to batch sample list when non-empty
-          if torch.tensor([len(s) for s in s_source_tokens_cells]).sum() > 0  :
-
-            c_source_raw +=[ torch.cat( s_source_raw)]
-
-            # collect by merging entries per cells, preserving cell structure
-            c_source_tokens_cells += [ merge_cells( s_source_tokens_cells, nhc_source) ]
-            c_source_centroids += [ merge_cells( s_source_centroids, nhc_source)]
-            # lens can be stacked and summed
-            c_source_tokens_lens += [torch.stack( s_source_tokens_lens).sum(0)]
-            # remove NaNs
-            c_source_tokens_cells[-1][ torch.isnan( c_source_tokens_cells[-1]) ] = self.mask_value
-            c_source_centroids[-1][ torch.isnan( c_source_centroids[-1]) ] = self.mask_value
-          else :
-            c_source_raw += [torch.tensor([])]
-            c_source_tokens_lens += [torch.zeros([nhc_source])]
-            c_source_tokens_cells += [torch.tensor([])]
-            c_source_centroids += [torch.tensor([])]
-
-          # target
-
-          # collect for all forecast steps
-          for fstep in range( forecast_dt+1) :
-            # collect all streams
-            for i_source, ((ds, normalizer, do), s_idxs) in enumerate( zip(stream_dsn, stream_idxs)) :
-
-              (source2,times2) = ds[idx + step_forecast_dt]
-
-              if grid is not None: 
-
-                (source2,times2) = self.create_grid( grid, time_win2)
-
-                # generate ERA5 data if specified
-                if grid_info is not None:
-                  source2 = self.read_anemoi( grid_info, times2, source2)
-
-              if source2.shape[0] < token_size :
-                # skip if there are not enough data points
-                tt_cells, tt_lens = torch.tensor([]), torch.zeros([nhc_target],dtype=torch.int32)
-                ss_cells, ss_lens = torch.tensor([]), torch.zeros([nhc_source],dtype=torch.int32)
-                ss_centroids = torch.tensor([])
-                tc, tc_lens = torch.tensor([]), torch.zeros([nhc_target],dtype=torch.int32)
-                source1_raw = torch.tensor([])
-              else :
-
-                oi = ds.properties['obs_id']
-                source2 = self.prepare_window_target( oi, do, normalizer, source2, times2, time_win2, s_idxs)
-
-                (tt_cells, tt_lens, tc, tc_lens) = self.batchifyer.batchify_target(
-                                                            stream_info,
-                                                            self.geoinfo_offset,
-                                                            self.get_geoinfo_size( obs_id,i_source),
-                                                            self.sampling_rate_target,
-                                                            self.rng,
-                                                            source2, times2,
-                                                            normalizer.normalize_targets)
-
-              s_target_tokens_lens += [tt_lens] if len(tt_lens)>0 else [torch.tensor([])]
-              s_target_tokens += [tt_cells] if len(tt_cells)>0 else [torch.tensor([])]
-              s_tcs += [tc]; s_tcs_lens += [tc_lens]
-
-            # collect all sources in current stream and add to batch sample list when non-empty
-            if torch.tensor([len(s) for s in s_target_tokens]).sum() > 0 :
-
-              c_tcs[fstep] += [ merge_cells( s_tcs, nhc_target) ]
-              c_target_tokens[fstep] += [ merge_cells( s_target_tokens, nhc_target)]
-              # lens can be stacked and summed
-              c_target_tokens_lens[fstep] += [torch.stack( s_target_tokens_lens).sum(0)]
-              c_tcs_lens[fstep] += [torch.stack( s_tcs_lens).sum(0)]
-              # remove NaNs
-              c_tcs[fstep][-1][ torch.isnan( c_tcs[fstep][-1]) ] = self.mask_value
-
-            else :
-              c_tcs[fstep] += [torch.tensor([])]; c_tcs_lens[fstep] += [torch.tensor([])]
-              c_target_tokens[fstep] += [torch.tensor([])]; c_target_tokens_lens[fstep] += [torch.tensor([])]
-
-        # add batch, ensure sample is not empty
-        s1 = torch.tensor( [stl.sum() for stl in c_source_tokens_lens]).sum()
-        s2 = torch.tensor( [len(t) for f_tcs in c_tcs for t in f_tcs]).sum()
-        if s1 > 0 and s2 > 0 :
-          # source
-          sources += [ c_source_raw ]
-          source_tokens_cells +=[ c_source_tokens_cells ]
-          source_tokens_lens +=[ c_source_tokens_lens ]
-          source_centroids += [ c_source_centroids ]
-          # target
-          tcs += [ c_tcs ]
-          tcs_lens += [ c_tcs_lens ]
-          target_tokens += [ c_target_tokens ]
-          target_tokens_lens += [ c_target_tokens_lens ]
-          ib += 1
-
-      # skip if source is completely empty or nothing to predict (which causes errors in back prop)
-      target_tokens_lens_total = torch.cat([torch.cat( t) for tt in target_tokens_lens for t in tt])
-      if len(source_tokens_lens)==0 or target_tokens_lens_total.sum()==0 :
-        continue
-
-      # precompute for processing in the model (with varlen flash attention)
-      source_cell_lens = torch.stack( [torch.stack( stl_b) if len(stl_b)>0 else torch.tensor([])
-                                                                  for stl_b in source_tokens_lens])
-      source_cell_lens = torch.sum( source_cell_lens, 1).flatten().to(torch.int32)
-      source_cell_lens = torch.cat( [torch.zeros(1, dtype=torch.int32), source_cell_lens])
-
-      source_tokens_lens = torch.from_numpy( np.array( source_tokens_lens)).to(torch.int32)
-
-      # precompute index sets for scatter operation after embed
-      offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
-      offsets = torch.cat( [torch.zeros(1,dtype=torch.int32), offsets_base[:-1] ])
-      offsets_pe = torch.zeros_like( offsets)
-      idxs_embed = []; idxs_embed_pe = []
-      for ib, sb in enumerate(source_tokens_cells) :
-        idxs_embed += [ [] ];  idxs_embed_pe += [ [] ]
-        for itype, s in enumerate( sb) :
-
-          if s.shape[0]==0 :
-            idxs_embed[-1] += [ torch.tensor([]) ]; idxs_embed_pe[-1] += [ torch.tensor([]) ]
-            continue
-
-          idxs = torch.cat( [torch.arange( o, o+l, dtype=torch.int64)
-                                      for o,l in zip(offsets, source_tokens_lens[ib,itype])])
-          idxs_embed[-1] += [ idxs.unsqueeze(1) ]
-          idxs_embed_pe[-1] += [torch.cat( [torch.arange( o, o+l, dtype=torch.int32)
-                                      for o,l in zip(offsets_pe, source_tokens_lens[ib][itype])])]
-          # advance offsets
-          offsets += source_tokens_lens[ib][itype]
-          offsets_pe += source_tokens_lens[ib][itype]
-
-      target_coords_lens = tcs_lens
-
-      # target coords idxs
-      tcs_lens_merged = []; tcs_idxs = []
-      pad = torch.zeros( 1, dtype=torch.int32)
-      for ii in range( len(self.streams)) :
-
-        # generate len lists for varlen attention (per batch list for local, per-cell attention and
-        # global, per-batch-item lists otherwise)
-        if self.target_coords_local :
-          tcs_lens_merged += [ [ torch.cat( [pad, torch.cat( [target_coords_lens[i_b][fstep][ii]
-                                          for i_b in range(len(tcs))]) ]).to(torch.int32)
-                                          for fstep in range( forecast_dt+1)] ]
-        else :
-          tcs_lens_merged += [ torch.cat( [pad, torch.tensor( [len(tcs[i_b][ii])
-                          for i_b in range(len(tcs))])]).to(torch.int32) ]
-
-        # lengths for varlen attention
-        tcs_idxs += [[torch.cat([torch.arange(l) for l in tlm]) for tlm in tcs_lens_merged[-1]]]
-
-      # reorder to have forecast step as first dimension, then batch items
-      def list_transpose( clist) :
-        return [[l[i] for l in clist] for i in range(len(clist[0]))]
-      target_tokens = list_transpose( target_tokens)
-      target_tokens_lens = list_transpose( target_tokens_lens)
-      tcs = list_transpose( tcs)
-      target_coords_lens = list_transpose( target_coords_lens)
-      tcs_lens_merged = list_transpose( tcs_lens_merged)
-      tcs_idxs = list_transpose( tcs_idxs)
-
-      assert len(source_tokens_cells) == self.batch_size
-      yield ( sources, source_tokens_cells, source_tokens_lens, source_centroids, source_cell_lens,
-              [idxs_embed, idxs_embed_pe],
-              target_tokens, target_tokens_lens, tcs, target_coords_lens, [tcs_lens_merged,tcs_idxs],
-              forecast_dt)
-
-  ###################################################
-  def prepare_window_source( self, obs_id, data_offset, normalizer, source, times, time_win, stream_idxs) :
-
-    source = source[:,data_offset:]
-    # permutation to have all geoinfos at the beginning (only apply this if necessary)
-    idxs = np.array(stream_idxs[0] + stream_idxs[1])
-    # if not (idxs == np.arange( idxs.max()+1)).all() :
-    source = source[:,idxs]
-
-    # assemble tensor as fed to the network, combining geoinfo and data
-    fp32 = torch.float32
-    dt = pd.to_datetime( times)
-    dt_win = pd.to_datetime( time_win)
-    dt_delta = dt - dt_win[0]
-    source = torch.cat( ( torch.full([dt.shape[0],1], obs_id, dtype=fp32),
-                          torch.tensor( dt.year, dtype=fp32).unsqueeze(1),
-                          torch.tensor( dt.dayofyear, dtype=fp32).unsqueeze(1),
-                          torch.tensor( dt.hour*60+dt.minute, dtype=fp32).unsqueeze(1),
-                          torch.tensor( dt_delta.seconds, dtype=fp32).unsqueeze(1),
-                          torch.tensor( dt_delta.seconds, dtype=fp32).unsqueeze(1),
-                          torch.from_numpy(source)
-                        ), 1)
-    # normalize data (leave coords so that they can be utilized for task/masking)
-    source = normalizer.normalize_data( source)
-
-    return source
-
-  ###################################################
-  def prepare_window_target( self, obs_id, data_offset, normalizer, source, times, time_win, stream_idxs) :
-
-    source = source[:,data_offset:]
-    # permutation to have all geoinfos at the beginning (only apply this if necessary)
-    idxs = np.array(stream_idxs[0] + stream_idxs[1])
-    # if not (idxs == np.arange( idxs.max()+1)).all() :
-    source = source[:,idxs]
-
-    # assemble tensor as fed to the network, combining geoinfo and data
-    dt = pd.to_datetime( times)
-    dt_win = pd.to_datetime( time_win)
-    # for target only provide local time
-    dt_delta = torch.tensor( (dt - dt_win[0]).seconds, dtype=torch.float32).unsqueeze(1)
-    source = torch.cat( ( torch.full([dt.shape[0],1], obs_id, dtype=torch.float32),
-                          dt_delta,
-                          dt_delta,
-                          dt_delta,
-                          dt_delta,
-                          dt_delta,
-                          torch.from_numpy(source)
-                        ), 1)
-    # normalize data (leave coords so that they can be utilized for task/masking)
-    source = normalizer.normalize_data( source)
-
-    return source
-
-  ###################################################
-  def __len__(self):
-      return self.len
-
-  ###################################################
-  def worker_workset( self) :
-
-    # local_start, local_end = 0, len(self)
-    local_start, local_end = self.rank * self.len, (self.rank+1) * self.len
-
-    worker_info = torch.utils.data.get_worker_info()
-
-    if worker_info is None: 
-
-      assert self.num_ranks == 1
-      iter_start = 0
-      iter_end = len(self)
-
-    else:  
-
-      # split workload
-      per_worker = (local_end - local_start) // worker_info.num_workers
-      iter_start = local_start + worker_info.id * per_worker
-      iter_end = iter_start + per_worker
-      if worker_info.id+1 == worker_info.num_workers :
-        iter_end = local_end
-      logging.getLogger('obslearn').info( f'{self.rank}::{worker_info.id}'
-                          + f' : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})')
-
-    return iter_start, iter_end
 
+from weathergen.common.io import IOReaderData
+from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
+from weathergen.datasets.data_reader_base import (
+    DataReaderBase,
+    TimeWindowHandler,
+    TIndex,
+    str_to_datetime64,
+)
+from weathergen.datasets.data_reader_fesom import DataReaderFesom
+from weathergen.datasets.data_reader_obs import DataReaderObs
+from weathergen.datasets.masking import Masker
+from weathergen.datasets.stream_data import StreamData, spoof
+from weathergen.datasets.tokenizer_forecast import TokenizerForecast
+from weathergen.datasets.tokenizer_masking import TokenizerMasking
+from weathergen.datasets.utils import (
+    compute_idxs_predict,
+    compute_offsets_scatter_embed,
+    compute_source_cell_lens,
+)
+from weathergen.readers_extra.registry import get_extra_reader
+from weathergen.utils.distributed import is_root
+from weathergen.utils.train_logger import Stage
+
+type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
+
+logger = logging.getLogger(__name__)
+
+
+def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
+    """
+    Convert data, coords, and geoinfos to torch tensor
+    """
+    rdata.coords = torch.tensor(rdata.coords)
+    rdata.geoinfos = torch.tensor(rdata.geoinfos)
+    rdata.data = torch.tensor(rdata.data)
+
+    return rdata
+
+
+def collect_datasources(stream_datasets: list, idx: int, type: str) -> IOReaderData:
+    """
+    Utility function to collect all sources / targets from streams list
+    """
+
+    rdatas = []
+
+    for ds in stream_datasets:
+        if type == "source":
+            get_reader_data = ds.get_source
+            normalize_channels = ds.normalize_source_channels
+        elif type == "target":
+            get_reader_data = ds.get_target
+            normalize_channels = ds.normalize_target_channels
+        else:
+            assert False, "invalid value for argument `type`"
+
+        # get source (of potentially multi-step length)
+        rdata = get_reader_data(idx).remove_nan_coords()
+        rdata.data = normalize_channels(rdata.data)
+        rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
+        rdatas += [rdata]
+
+    return IOReaderData.combine(rdatas)
+
+
+class MultiStreamDataSampler(torch.utils.data.IterableDataset):
+    ###################################################
+    def __init__(
+        self,
+        cf,
+        start_date_,
+        end_date_,
+        batch_size,
+        samples_per_mini_epoch,
+        stage: Stage,
+        shuffle=True,
+    ):
+        super(MultiStreamDataSampler, self).__init__()
+
+        start_date = str_to_datetime64(start_date_)
+        end_date = str_to_datetime64(end_date_)
+
+        assert end_date > start_date, (end_date, start_date)
+
+        self.mask_value = 0.0
+        self._stage = stage
+
+        self.len_hrs: int = cf.len_hrs
+        self.step_hrs: int = cf.step_hrs
+        self.time_window_handler = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
+        if is_root():
+            logger.info(
+                f"Time window handler: start={start_date}, end={end_date},"
+                f"len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
+            )
+
+        self.forecast_offset = cf.forecast_offset
+        self.forecast_delta_hrs = (
+            cf.forecast_delta_hrs if cf.forecast_delta_hrs > 0 else self.len_hrs
+        )
+        assert self.forecast_delta_hrs == self.len_hrs, "Only supported option at the moment"
+        self.forecast_steps = np.array(
+            [cf.forecast_steps] if isinstance(cf.forecast_steps, int) else cf.forecast_steps
+        )
+        if cf.forecast_policy is not None:
+            if self.forecast_steps.max() == 0 and is_root():
+                logger.warning("forecast policy is not None but number of forecast steps is 0.")
+        self.forecast_policy = cf.forecast_policy
+
+        self.len = 100000000
+
+        self.streams_datasets: list[list[AnyDataReader]] = []
+        for _, stream_info in enumerate(cf.streams):
+            self.streams_datasets.append([])
+
+            for fname in stream_info["filenames"]:
+                kwargs = {
+                    "tw_handler": self.time_window_handler,
+                    "stream_info": stream_info,
+                }
+                dataset: type[AnyDataReader] | None = None
+                match stream_info["type"]:
+                    case "obs":
+                        dataset = DataReaderObs
+                        datapath = cf.data_path_obs
+                        # kwargs["end"] = end_date_padded # TODO: implement the padding
+                    case "anemoi":
+                        dataset = DataReaderAnemoi
+                        datapath = cf.data_path_anemoi
+                    case "fesom":
+                        dataset = DataReaderFesom
+                        datapath = cf.data_path_fesom
+                    case type_name:
+                        reader_entry = get_extra_reader(type_name, cf)
+                        if reader_entry is not None:
+                            dataset = reader_entry.constructor
+                            datapath = reader_entry.data_path
+                        else:
+                            msg = f"Unsupported stream type {stream_info['type']}"
+                            f"for stream name '{stream_info['name']}'."
+                            raise ValueError(msg)
+
+                datapath = pathlib.Path(datapath)
+                fname = pathlib.Path(fname)
+                # dont check if file exists since zarr stores might be directories
+                if fname.exists():
+                    # check if fname is a valid path to allow for simple overwriting
+                    filename = fname
+                else:
+                    filename = pathlib.Path(datapath) / fname
+
+                    if not filename.exists():  # see above
+                        msg = (
+                            f"Did not find input data for {stream_info['type']} "
+                            f"stream '{stream_info['name']}': {filename}."
+                        )
+                        raise FileNotFoundError(msg)
+
+                ds_type = stream_info["type"]
+                if is_root():
+                    logger.info(
+                        f"Opening dataset with type: {ds_type}"
+                        + f" from stream config {stream_info['name']}.",
+                    )
+                ds = dataset(filename=filename, **kwargs)
+
+                fsm = self.forecast_steps[0]
+                if len(ds) > 0:
+                    self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
+
+                # MODIFIES config !!!
+                stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
+                stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
+                stream_info["target_channel_weights"] = (
+                    ds.target_channel_weights
+                    if ds.target_channel_weights is not None
+                    else [1.0 for _ in ds.target_channels]
+                )
+
+                self.streams_datasets[-1] += [ds]
+
+        index_range = self.time_window_handler.get_index_range()
+        self.len = int(index_range.end - index_range.start)
+        self.len = min(self.len, samples_per_mini_epoch if samples_per_mini_epoch else self.len)
+        # adjust len to split loading across all workers and ensure it is multiple of batch_size
+        len_chunk = ((self.len // cf.world_size) // batch_size) * batch_size
+        self.len = min(self.len, len_chunk)
+        logger.info(f"index_range={index_range}, len={self.len}, len_chunk={len_chunk}")
+
+        self.rank = cf.rank
+        self.world_size = cf.world_size
+
+        self.streams = cf.streams
+        self.shuffle = shuffle
+        # TODO: remove options that are no longer supported
+        self.input_window_steps = cf.input_window_steps
+        self.embed_local_coords = cf.embed_local_coords
+        self.embed_centroids_local_coords = cf.embed_centroids_local_coords
+        self.sampling_rate_target = cf.sampling_rate_target
+
+        self.batch_size = batch_size
+
+        # ensure data_loader_rng_seed is not smaller than loader_num_workers to avoid
+        # issues in per loader rng seed computation
+        self.data_loader_rng_seed = (
+            cf.data_loader_rng_seed
+            if cf.data_loader_rng_seed > cf.loader_num_workers
+            else cf.data_loader_rng_seed * 13
+        )
+
+        self.healpix_level: int = cf.healpix_level
+        self.num_healpix_cells: int = 12 * 4**self.healpix_level
+
+        if cf.training_mode == "forecast":
+            self.tokenizer = TokenizerForecast(cf.healpix_level)
+        elif cf.training_mode == "masking":
+            masker = Masker(cf)
+            self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
+            assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
+            msg = "masked token modeling does not support self.input_window_steps > 1; "
+            msg += "increase window length"
+            assert self.input_window_steps == 1, msg
+        else:
+            assert False, f"Unsupported training mode: {cf.training_mode}"
+
+        self.mini_epoch = 0
+
+    ###################################################
+    def advance(self):
+        """
+        Advance mini_epoch (this is applied to the template for the worker processes)
+        """
+        self.mini_epoch += 1
+
+    ###################################################
+    def get_sources_size(self):
+        return [
+            0
+            if ds[0].get_source_num_channels() == 0
+            else ds[0].get_source_num_channels()
+            + ds[0].get_geoinfo_size()
+            + ds[0].get_coords_size()
+            + self.tokenizer.get_size_time_embedding()
+            for ds in self.streams_datasets
+        ]
+
+    ###################################################
+    def get_sources_num_channels(self):
+        return [ds[0].get_source_num_channels() for ds in self.streams_datasets]
+
+    ###################################################
+    def get_targets_num_channels(self):
+        return [ds[0].get_target_num_channels() for ds in self.streams_datasets]
+
+    ###################################################
+    def get_targets_coords_size(self):
+        # TODO: avoid hard coding magic values
+        # +6 at the end for stram_id and time encoding
+        return [
+            (ds[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6 for ds in self.streams_datasets
+        ]
+
+    ###################################################
+    def reset(self):
+        # initialize the random number generator: self.data_loader_rng_seed is set to a DDP-unique
+        # value in worker_workset()
+        self.rng = np.random.default_rng(self.data_loader_rng_seed)
+
+        fsm = (
+            self.forecast_steps[min(self.mini_epoch, len(self.forecast_steps) - 1)]
+            if self.forecast_policy != "random"
+            else self.forecast_steps.max()
+        )
+        if fsm > 0:
+            logger.info(f"forecast_steps at mini_epoch={self.mini_epoch} : {fsm}")
+
+        # data
+        index_range = self.time_window_handler.get_index_range()
+        idx_end = index_range.end
+        # native length of datasets, independent of mini_epoch length that has potentially been
+        # specified
+        forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
+        idx_end -= forecast_len + self.forecast_offset
+        assert idx_end > 0, "dataset size too small for forecast range"
+        self.perms = np.arange(index_range.start, idx_end)
+        if self.shuffle:
+            self.perms = self.rng.permutation(self.perms)
+
+        # forecast time steps
+        len_dt_samples = len(self) // self.batch_size
+        if self.forecast_policy is None:
+            self.perms_forecast_dt = np.zeros(len_dt_samples, dtype=np.int64)
+        elif self.forecast_policy == "fixed" or self.forecast_policy == "sequential":
+            self.perms_forecast_dt = fsm * np.ones(len_dt_samples, dtype=np.int64)
+        elif self.forecast_policy == "random" or self.forecast_policy == "sequential_random":
+            # randint high=one-past
+            self.perms_forecast_dt = self.rng.integers(
+                low=self.forecast_steps.min(), high=fsm + 1, size=len_dt_samples, dtype=np.int64
+            )
+        else:
+            assert False
+
+        self.tokenizer.reset_rng(self.rng)
+
+    ###################################################
+    def denormalize_source_channels(self, stream_id, data) -> torch.Tensor:
+        # TODO: with multiple ds per stream we need to distinguish these here
+        return self.streams_datasets[stream_id][0].denormalize_source_channels(data)
+
+    ###################################################
+    def denormalize_target_channels(self, stream_id, data) -> torch.Tensor:
+        # TODO: with multiple ds per stream we need to distinguish these here
+        return self.streams_datasets[stream_id][0].denormalize_target_channels(data)
+
+    ###################################################
+    def __iter__(self):
+        """
+        Return one batch of data
+
+        Return : list[list[StreamData]]
+            len : number of batch items
+            len[*] : number of streams
+        """
+        iter_start, iter_end = self.worker_workset()
+        logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={self.len}")
+
+        # create new shuffeling
+        self.reset()
+
+        # bidx is used to count the #batches that have been emitted
+        # idx_raw is used to index into the dataset; the decoupling is needed
+        # since there are empty batches
+        idx_raw = iter_start
+        for i, _bidx in enumerate(range(iter_start, iter_end, self.batch_size)):
+            # forecast_dt needs to be constant per batch (amortized through data parallel training)
+            forecast_dt = self.perms_forecast_dt[i]
+
+            # use while loop due to the scattered nature of the data in time and to
+            # ensure batches are not empty
+            batch = []
+            while len(batch) < self.batch_size:
+                idx: TIndex = self.perms[idx_raw % self.perms.shape[0]]
+                idx_raw += 1
+
+                time_win_source = self.time_window_handler.window(idx)
+
+                # Sample masking strategy once per batch item
+                if hasattr(self.tokenizer, "masker"):
+                    self.tokenizer.masker.set_batch_strategy()
+
+                streams_data: list[StreamData] = []
+
+                # for all streams
+                for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
+                    stream_data = StreamData(
+                        idx, forecast_dt + self.forecast_offset, self.num_healpix_cells
+                    )
+
+                    # collect all targets for current stream
+                    rdata: IOReaderData = collect_datasources(stream_ds, idx, "source")
+
+                    if rdata.is_empty():
+                        # work around for https://github.com/pytorch/pytorch/issues/158719
+                        # create non-empty mean data instead of empty tensor
+                        rdata = spoof(
+                            self.healpix_level,
+                            time_win_source.start,
+                            stream_ds[0].get_geoinfo_size(),
+                            stream_ds[0].mean[stream_ds[0].source_idx],
+                        )
+                        stream_data.source_is_spoof = True
+
+                    # preprocess data for model input
+                    (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
+                        stream_info,
+                        readerdata_to_torch(rdata),
+                        (time_win_source.start, time_win_source.end),
+                        stream_ds[0].normalize_coords,
+                    )
+
+                    # TODO: rdata only be collected in validation mode
+                    stream_data.add_source(rdata, ss_lens, ss_cells, ss_centroids)
+
+                    # target
+
+                    # collect for all forecast steps
+                    for fstep in range(
+                        self.forecast_offset, self.forecast_offset + forecast_dt + 1
+                    ):
+                        step_forecast_dt = idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
+                        time_win_target = self.time_window_handler.window(step_forecast_dt)
+
+                        # collect all targets for current stream
+                        rdata: IOReaderData = collect_datasources(
+                            stream_ds, step_forecast_dt, "target"
+                        )
+
+                        if rdata.is_empty():
+                            # work around for https://github.com/pytorch/pytorch/issues/158719
+                            # create non-empty mean data instead of empty tensor
+                            rdata = spoof(
+                                self.healpix_level,
+                                time_win_target.start,
+                                stream_ds[0].get_geoinfo_size(),
+                                stream_ds[0].mean[stream_ds[0].target_idx],
+                            )
+                            stream_data.target_is_spoof = True
+
+                        # preprocess data for model input
+                        (tt_cells, tc, tt_c, tt_t) = self.tokenizer.batchify_target(
+                            stream_info,
+                            self.sampling_rate_target,
+                            readerdata_to_torch(rdata),
+                            (time_win_target.start, time_win_target.end),
+                        )
+
+                        stream_data.add_target(fstep, tt_cells, tc, tt_c, tt_t)
+
+                    # merge inputs for sources and targets for current stream
+                    streams_data += [stream_data]
+
+                # Reset masking strategy for next batch item
+                if hasattr(self.tokenizer, "masker"):
+                    self.tokenizer.masker.reset_batch_strategy()
+
+                # skip completely empty batch item or when all targets are empty -> no grad
+                if not (all(s.empty() or s.target_empty() for s in streams_data)):
+                    batch += [streams_data]
+
+            # aggregated lens of tokens per cell
+            source_cell_lens = compute_source_cell_lens(batch)
+
+            # compute offsets for scatter computation after embedding
+            batch = compute_offsets_scatter_embed(batch)
+
+            # compute offsets and auxiliary data needed for prediction computation
+            # (info is not per stream so separate data structure)
+            target_coords_idx = compute_idxs_predict(self.forecast_offset + forecast_dt, batch)
+
+            assert len(batch) == self.batch_size
+            yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
+
+    ###################################################
+    def __len__(self):
+        return self.len
+
+    ###################################################
+    def worker_workset(self):
+        local_start, local_end = self.rank * self.len, (self.rank + 1) * self.len
+
+        worker_info = torch.utils.data.get_worker_info()
+
+        if worker_info is None:
+            assert self.world_size == 1, self.world_size
+            iter_start = 0
+            iter_end = len(self)
+
+        else:
+            # ensure the rng seed is fully unique across workers and mini_epochs
+            # the worker processes are generated as bit-wise copy of the "template" (the actual
+            # instance of the present class that is created) whenever __iter__ is started. This
+            # happens for each mini_epoch, for train and validation, and independently for each DDP
+            # worker. After the bit-wise copy, the rng seed needs to be made unique for
+            # DDP workers, loader process, mini_epoch.
+            dist = torch.distributed
+            self.data_loader_rng_seed *= (
+                (((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1)
+                * ((worker_info.id + 1) * 37)
+                * (self.mini_epoch + 13)
+                * 7
+            )
+            # split workload
+            per_worker = (local_end - local_start) // worker_info.num_workers
+            iter_start = local_start + worker_info.id * per_worker
+            iter_end = iter_start + per_worker
+            if worker_info.id + 1 == worker_info.num_workers:
+                iter_end = local_end
+            logger.info(
+                f"{self.rank}::{worker_info.id}"
+                + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
+            )
+
+        return iter_start, iter_end

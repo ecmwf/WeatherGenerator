@@ -1,0 +1,20 @@
+streams_directory: "./config/streams/fesom/"
+
+ae_local_num_queries: 2
+ae_adapter_embed: 128
+ae_local_dim_embed: 1024
+ae_local_num_blocks: 4
+ae_local_num_heads: 16
+
+start_date: 2000-10-10T00:00
+end_date: 2199-12-31T00:00
+start_date_val: 2200-01-01T00:00
+end_date_val: 2209-12-31T00:00
+
+num_epochs: 111
+samples_per_epoch: 64
+samples_per_validation: 16
+shuffle: True
+loader_num_workers: 4
+
+lr_max: 2e-5

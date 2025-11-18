@@ -1,4 +1,6 @@
-# (C) Copyright 2024 WeatherGenerator contributors.
+# ruff: noqa: T201
+# (C) Copyright 2025 WeatherGenerator contributors.
+
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,651 +9,855 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import os
-import numpy as np
+import logging
 import math
-import time
-import code
 import warnings
 
-import torch
-import astropy_healpix.healpy
-
-from torch.nn.attention.flex_attention import flex_attention, create_mask, create_block_mask
 import astropy_healpix as hp
-
+import astropy_healpix.healpy
+import numpy as np
+import torch
+import torch.nn as nn
+from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
-from weathergen.model.stream_embed_transformer import StreamEmbedTransformer
-from weathergen.model.stream_embed_linear import StreamEmbedLinear
-from weathergen.model.ens_prediction_head import EnsPredictionHead
 
-from weathergen.model.attention import ( MultiSelfAttentionHead,
-                                         MultiSelfAttentionHead_Local,
-                                         MultiCrossAttentionHead,
-                                         MultiSelfAttentionHead_Varlen,
-                                         MultiCrossAttentionHead_Varlen,
-                                         MultiCrossAttentionHead_Varlen_SlicedQ)
-from weathergen.model.mlp import MLP
+from weathergen.common.config import Config
+from weathergen.model.engines import (
+    EmbeddingEngine,
+    EnsPredictionHead,
+    ForecastingEngine,
+    GlobalAssimilationEngine,
+    Local2GlobalAssimilationEngine,
+    LocalAssimilationEngine,
+    TargetPredictionEngine,
+    TargetPredictionEngineClassic,
+)
+from weathergen.model.layers import MLP, NamedLinear
+from weathergen.model.parametrised_prob_dist import LatentInterpolator
+from weathergen.model.utils import get_num_parameters
+from weathergen.utils.distributed import is_root
+from weathergen.utils.utils import get_dtype
 
-from weathergen.model.utils import get_num_parameters, freeze_weights
-
-from weathergen.model.positional_encoding import positional_encoding_harmonic
-from weathergen.model.positional_encoding import positional_encoding_harmonic_idx
-from weathergen.model.positional_encoding import positional_encoding_harmonic_global
-
-from weathergen.utils.logger import logger
+logger = logging.getLogger(__name__)
 
 
-class ModelParams( torch.nn.Module) :
+class ModelParams(torch.nn.Module):
+    """Creation of query and embedding parameters of the model."""
 
-  def __init__( self) :
+    def __init__(self, cf) -> None:
+        super(ModelParams, self).__init__()
 
-    super( ModelParams, self).__init__()
+        self.cf = cf
 
-  def create( self, cf) :
+        self.healpix_level = cf.healpix_level
+        self.num_healpix_cells = 12 * 4**cf.healpix_level
+        self.dtype = get_dtype(cf.attention_dtype)
 
-    self.healpix_level = cf.healpix_level
-    self.num_healpix_cells = 12 * 4**cf.healpix_level
-      
-    # positional encodings
+        bs = cf.batch_size_per_gpu
+        nqs = 9
+        s = [bs, self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed]
 
-    dim_embed = cf.ae_local_dim_embed
-    len_token_seq = 1024
-    position = torch.arange( 0, len_token_seq).unsqueeze(1)
-    div = torch.exp(torch.arange( 0, dim_embed, 2) * -(math.log(len_token_seq) / dim_embed))
-    pe_embed = torch.zeros( len_token_seq, dim_embed, dtype=torch.float16)
-    pe_embed[:, 0::2] = torch.sin( position * div[ : pe_embed[:, 0::2].shape[1] ])
-    pe_embed[:, 1::2] = torch.cos( position * div[ : pe_embed[:, 1::2].shape[1] ])
-    self.pe_embed = torch.nn.Parameter( pe_embed, requires_grad=False)
+        ### POSITIONAL EMBEDDINGS ###
+        len_token_seq = 1024
+        self.pe_embed = torch.nn.Parameter(
+            torch.zeros(len_token_seq, cf.ae_local_dim_embed, dtype=self.dtype), requires_grad=False
+        )
 
-    dim_embed = 1024
-    len_token_seq = 8192*4 #900000
-    # print( f'len_token_seq = {len_token_seq}')
-    position = torch.arange( 0, len_token_seq).unsqueeze(1)
-    div = torch.exp(torch.arange( 0, dim_embed, 2) * -(math.log(len_token_seq) / dim_embed))
-    pe_tc_tokens = torch.zeros( len_token_seq, dim_embed, dtype=torch.float16)
-    pe_tc_tokens[:, 0::2] = torch.sin( position * div[ : pe_tc_tokens[:, 0::2].shape[1] ])
-    pe_tc_tokens[:, 1::2] = torch.cos( position * div[ : pe_tc_tokens[:, 1::2].shape[1] ])
-    self.pe_tc_tokens = torch.nn.Parameter( pe_tc_tokens, requires_grad=False)
+        pe = torch.zeros(
+            self.num_healpix_cells,
+            cf.ae_local_num_queries,
+            cf.ae_global_dim_embed,
+            dtype=self.dtype,
+        )
+        self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
-    dim_embed = cf.ae_global_dim_embed
-    pe = torch.zeros( self.num_healpix_cells, cf.ae_local_num_queries, dim_embed, dtype=torch.float16)
-    xs = 2. * np.pi * torch.arange( 0, dim_embed, 2) / dim_embed
-    pe[ ..., 0::2] = 0.5 * torch.sin( torch.outer( 8 * torch.arange( cf.ae_local_num_queries), xs) )
-    pe[ ..., 0::2] += torch.sin( torch.outer( torch.arange( self.num_healpix_cells), xs) ).unsqueeze(1).repeat( (1,cf.ae_local_num_queries,1))
-    pe[ ..., 1::2] = 0.5 * torch.cos( torch.outer( 8 * torch.arange( cf.ae_local_num_queries), xs) )
-    pe[ ..., 1::2] += torch.cos( torch.outer( torch.arange( self.num_healpix_cells), xs) ).unsqueeze(1).repeat( (1,cf.ae_local_num_queries,1))
-    self.pe_global = torch.nn.Parameter( pe, requires_grad=False)
+        ### HEALPIX NEIGHBOURS ###
+        hlc = self.healpix_level
+        with warnings.catch_warnings(action="ignore"):
+            temp = hp.neighbours(
+                np.arange(self.num_healpix_cells), 2**hlc, order="nested"
+            ).transpose()
+        # fix missing nbors with references to self
+        for i, row in enumerate(temp):
+            temp[i][row == -1] = i
+        self.hp_nbours = torch.nn.Parameter(
+            torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32),
+            requires_grad=False,
+        )
+        # self.hp_nbours = torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32)
 
-    # healpix neighborhood structure
+        if cf.target_cell_local_prediction:
+            tokens_lens_value = nqs * s[2]
+        else:
+            tokens_lens_value = nqs * s[1] * s[2]
+        self.tokens_lens = torch.nn.Parameter(
+            tokens_lens_value * torch.ones(bs * s[1] + 1, dtype=torch.int32), requires_grad=False
+        )
+        self.tokens_lens.data[0] = 0
 
-    hlc = self.healpix_level
-    num_healpix_cells = self.num_healpix_cells
-    with warnings.catch_warnings(action="ignore"):
-      temp = hp.neighbours( np.arange(num_healpix_cells), 2**hlc, order='nested').transpose()
-    # fix missing nbors with references to self
-    for i, row in enumerate(temp) :
-      temp[i][row == -1] = i
-    # nbors *and* self
-    nbours = torch.empty( (temp.shape[0], (temp.shape[1]+1) ), dtype=torch.int32)
-    nbours[:,0] = torch.arange( temp.shape[0])
-    nbours[:,1:] = torch.from_numpy(temp)
-    self.hp_nbours = torch.nn.Parameter( nbours, requires_grad=False)
+        self.q_cells_lens = torch.nn.Parameter(
+            torch.ones(self.num_healpix_cells + 1, dtype=torch.int32), requires_grad=False
+        )
+        self.q_cells_lens.data[0] = 0
 
-    # varlen index set for tokens
-    assert cf.batch_size == cf.batch_size_validation
-    bs = cf.batch_size
-    nqs = 9 
-    s = [bs, self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed]
-    pad = torch.zeros( 1, dtype=torch.int32)
-    if cf.target_cell_local_prediction :
-      tokens_lens = torch.cat([pad, nqs*s[2]*torch.ones(bs*s[1], dtype=torch.int32)])
-    else :
-      tokens_lens = torch.cat([pad, nqs*s[1]*s[2]*torch.ones(bs, dtype=torch.int32)])
-    self.tokens_lens = torch.nn.Parameter( tokens_lens, requires_grad=False)
- 
-    # precompute for varlen attention
-    s = (self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed)
-    # q_cells_lens = s[1] * torch.ones( s[0], dtype=torch.int32)
-    q_cells_lens = torch.ones( s[0], dtype=torch.int32)
-    q_cells_lens = torch.cat( [torch.zeros( 1, dtype=torch.int32), q_cells_lens])
-    self.q_cells_lens = torch.nn.Parameter( q_cells_lens, requires_grad=False)
+    def create(self, cf: Config) -> "ModelParams":
+        self.reset_parameters(cf)
+        return self
 
-    return self
+    def reset_parameters(self, cf: Config) -> "ModelParams":
+        """Creates positional embedding for each grid point for each stream used after stream
+        embedding, positional embedding for all stream assimilated cell-level local embedding,
+        initializing queries for local-to-global adapters, HEALPix neighbourhood based parameter
+        initializing for target prediction.
+
+        Sinusoidal positional encoding: Harmonic positional encoding based upon sine and cosine for
+            both per stream after stream embedding and per cell level for local assimilation.
+
+        HEALPix neighbourhood structure: Determine the neighbors for each cell and initialize each
+            with its own cell number as well as the cell numbers of its neighbors. If a cell has
+            fewer than eight neighbors, use its own cell number to fill the remaining slots.
+
+        Query len based parameter creation: Calculate parameters for the calculated token length at
+            each cell after local assimilation.
+
+        Args:
+            cf : Configuration
+        """
+
+        # positional encodings
+
+        dim_embed = cf.ae_local_dim_embed
+        len_token_seq = 1024
+        self.pe_embed.data.fill_(0.0)
+        position = torch.arange(0, len_token_seq, device=self.pe_embed.device).unsqueeze(1)
+        div = torch.exp(
+            torch.arange(0, dim_embed, 2, device=self.pe_embed.device)
+            * -(math.log(len_token_seq) / dim_embed),
+        )
+        self.pe_embed.data[:, 0::2] = torch.sin(position * div[: self.pe_embed[:, 0::2].shape[1]])
+        self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
+
+        dim_embed = cf.ae_global_dim_embed
+        self.pe_global.data.fill_(0.0)
+        xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
+        self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
+            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
+        )
+        self.pe_global.data[..., 0::2] += (
+            torch.sin(
+                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+            )
+            .unsqueeze(1)
+            .repeat((1, cf.ae_local_num_queries, 1))
+        )
+        self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
+            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
+        )
+        self.pe_global.data[..., 1::2] += (
+            torch.cos(
+                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+            )
+            .unsqueeze(1)
+            .repeat((1, cf.ae_local_num_queries, 1))
+        )
+
+        # healpix neighborhood structure
+
+        hlc = self.healpix_level
+        num_healpix_cells = self.num_healpix_cells
+        with warnings.catch_warnings(action="ignore"):
+            temp = hp.neighbours(np.arange(num_healpix_cells), 2**hlc, order="nested").transpose()
+        # fix missing nbors with references to self
+        for i, row in enumerate(temp):
+            temp[i][row == -1] = i
+        # nbors *and* self
+        self.hp_nbours.data[:, 0] = torch.arange(temp.shape[0], device=self.hp_nbours.device)
+        self.hp_nbours.data[:, 1:] = torch.from_numpy(temp).to(self.hp_nbours.device)
+
+        # varlen index set for tokens
+        assert cf.batch_size_per_gpu == cf.batch_size_validation_per_gpu
+        bs = cf.batch_size_per_gpu
+        nqs = 9
+        s = [bs, self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed]
+        if cf.target_cell_local_prediction:
+            tokens_lens_value = nqs * s[2]
+        else:
+            tokens_lens_value = nqs * s[1] * s[2]
+        self.tokens_lens.data.fill_(tokens_lens_value)
+        self.tokens_lens.data[0] = 0
+
+        # precompute for varlen attention
+        self.q_cells_lens.data.fill_(1)
+        self.q_cells_lens.data[0] = 0
+
+        # ensure all params have grad set to False
+
+        return
+
 
 ####################################################################################################
-class Model( torch.nn.Module) :
-
-  #########################################
-  def __init__(self, cf, num_channels, geoinfo_sizes) :
-    '''Constructor'''
- 
-    super( Model, self).__init__()
-
-    self.healpix_level = cf.healpix_level
-    self.num_healpix_cells = 12 * 4**self.healpix_level
-
-    self.cf = cf
-    self.num_channels = num_channels
-    self.geoinfo_sizes = geoinfo_sizes
-
-  #########################################
-  def create( self) :
-
-    cf = self.cf
-
-    # separate embedding networks for differnt observation types
-    self.embeds = torch.nn.ModuleList() 
-    for i, si in enumerate( cf.streams) :
-      if 'diagnostic' in si :
-        if si['diagnostic'] :
-          self.embeds.append( torch.nn.Identity())
-          continue  
-      if si['embed']['net'] == 'transformer' :
-        self.embeds.append( StreamEmbedTransformer( mode=cf.embed_orientation,
-                                                 num_tokens=si['embed']['num_tokens'],
-                                                 token_size=si['token_size'],
-                                                 num_channels=self.num_channels[i][0],
-                                                 dim_embed=si['embed']['dim_embed'],
-                                                 dim_out=cf.ae_local_dim_embed,
-                                                 num_blocks=si['embed']['num_blocks'],
-                                                 num_heads=si['embed']['num_heads'],
-                                                 norm_type=cf.norm_type,
-                                                 embed_size_centroids = cf.embed_size_centroids,
-                                                 unembed_mode = cf.embed_unembed_mode ))
-      elif si['embed']['net'] == 'linear' :
-        self.embeds.append( StreamEmbedLinear( self.num_channels[i][0]*si['token_size'],
-                                                   cf.ae_local_dim_embed) )
-      else : 
-        assert False, 'Unsupported embedding network type'
-
-    # local assimilation engine
-    self.ae_local_blocks = torch.nn.ModuleList()
-    for i in range( cf.ae_local_num_blocks) :
-      self.ae_local_blocks.append( MultiSelfAttentionHead_Varlen( cf.ae_local_dim_embed, 
-                                                           num_heads=cf.ae_local_num_heads, 
-                                                           dropout_rate=cf.ae_local_dropout_rate,
-                                                           with_qk_lnorm=cf.ae_local_with_qk_lnorm,
-                                                           with_flash=cf.with_flash_attention,
-                                                           norm_type=cf.norm_type))
-      self.ae_local_blocks.append( MLP( cf.ae_local_dim_embed, cf.ae_local_dim_embed,
-                                        with_residual=True, dropout_rate=cf.ae_local_dropout_rate,
-                                        norm_type=cf.norm_type ))
-
-    ##############
-    # local -> global assimilation engine adapter
-    self.ae_adapter = torch.nn.ModuleList()
-    self.ae_adapter.append( MultiCrossAttentionHead_Varlen_SlicedQ( cf.ae_global_dim_embed, cf.ae_local_dim_embed,
-                                                      num_slices_q=cf.ae_local_num_queries,
-                                                      dim_head_proj=cf.ae_adapter_embed, 
-                                                      num_heads=cf.ae_adapter_num_heads, 
-                                                      with_residual=cf.ae_adapter_with_residual,
-                                                      with_qk_lnorm=cf.ae_adapter_with_qk_lnorm, 
-                                                      dropout_rate=cf.ae_adapter_dropout_rate,
-                                                      with_flash=cf.with_flash_attention,
-                                                      norm_type=cf.norm_type))
-    self.ae_adapter.append( MLP( cf.ae_global_dim_embed, cf.ae_global_dim_embed,
-                                  with_residual=True, dropout_rate=cf.ae_adapter_dropout_rate,
-                                  norm_type=cf.norm_type ))
-    self.ae_adapter.append( MultiCrossAttentionHead_Varlen_SlicedQ( cf.ae_global_dim_embed, cf.ae_local_dim_embed,
-                                                      num_slices_q=cf.ae_local_num_queries,
-                                                      dim_head_proj=cf.ae_adapter_embed, 
-                                                      num_heads=cf.ae_adapter_num_heads, 
-                                                      with_residual=cf.ae_adapter_with_residual,
-                                                      with_qk_lnorm=cf.ae_adapter_with_qk_lnorm, 
-                                                      dropout_rate=cf.ae_adapter_dropout_rate,
-                                                      with_flash=cf.with_flash_attention,
-                                                      norm_type=cf.norm_type))
-    
-    # learnable queries 
-    if cf.ae_local_queries_per_cell :
-      s = (self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed)
-      q_cells = torch.rand( s, requires_grad=True) / cf.ae_global_dim_embed
-      # add meta data 
-      q_cells[:,:,-8:-6] = (torch.arange( self.num_healpix_cells) / self.num_healpix_cells).unsqueeze(1).unsqueeze(1).repeat( (1,cf.ae_local_num_queries,2))
-      theta, phi = healpy.pix2ang( nside=2**self.healpix_level, ipix=torch.arange( self.num_healpix_cells) )
-      q_cells[:,:,-6:-3] = torch.cos(theta).unsqueeze(1).unsqueeze(1).repeat( (1,cf.ae_local_num_queries,3))
-      q_cells[:,:,-3:] = torch.sin(phi).unsqueeze(1).unsqueeze(1).repeat( (1,cf.ae_local_num_queries,3))
-      q_cells[:,:,-9] = torch.arange( cf.ae_local_num_queries)
-      q_cells[:,:,-10] = torch.arange( cf.ae_local_num_queries)
-    else :
-      s = (1, cf.ae_local_num_queries, cf.ae_global_dim_embed)
-      q_cells = torch.rand( s, requires_grad=True) / cf.ae_global_dim_embed
-    self.q_cells = torch.nn.Parameter( q_cells, requires_grad=True)
-
-    ##############
-    # global assimilation engine
-    global_rate = int( 1 / cf.ae_global_att_dense_rate)
-    self.ae_global_blocks = torch.nn.ModuleList()
-    for i in range( cf.ae_global_num_blocks) :
-      # alternate between local and global attention as controlled by cf.ae_global_att_dense_rate
-      # last block is always global attention
-      # if (i % global_rate == 0 and i>0) or i+1 == cf.ae_global_num_blocks :
-      if i % global_rate == 0 or i+1 == cf.ae_global_num_blocks :
-        self.ae_global_blocks.append( MultiSelfAttentionHead( cf.ae_global_dim_embed,
-                                            num_heads=cf.ae_global_num_heads,
-                                            dropout_rate=cf.ae_global_dropout_rate,
-                                            with_qk_lnorm=cf.ae_global_with_qk_lnorm,
-                                            with_flash=cf.with_flash_attention,
-                                            norm_type=cf.norm_type))
-      else :
-        self.ae_global_blocks.append( MultiSelfAttentionHead_Local( cf.ae_global_dim_embed, 
-                                            num_heads=cf.ae_global_num_heads,
-                                            qkv_len=self.num_healpix_cells*cf.ae_local_num_queries,
-                                            block_factor=cf.ae_global_block_factor,
-                                            dropout_rate=cf.ae_global_dropout_rate,
-                                            with_qk_lnorm=cf.ae_global_with_qk_lnorm,
-                                            with_flash=cf.with_flash_attention,
-                                            norm_type=cf.norm_type))
-      # MLP block
-      self.ae_global_blocks.append( MLP( cf.ae_global_dim_embed, cf.ae_global_dim_embed,
-                                        with_residual=True, dropout_rate=cf.ae_global_dropout_rate,
-                                        hidden_factor=cf.ae_global_mlp_hidden_factor,
-                                        norm_type=cf.norm_type))
-
-    ###############
-    # forecasting engine  
-    
-    global_rate = int( 1 / cf.forecast_att_dense_rate)
-    self.fe_blocks = torch.nn.ModuleList()
-    if cf.forecast_policy is not None :
-      for i in range( cf.fe_num_blocks) :
-        if (i % global_rate == 0 and i>0) or i+1 == cf.ae_global_num_blocks :
-          self.fe_blocks.append( MultiSelfAttentionHead( cf.ae_global_dim_embed, 
-                                                        num_heads=cf.fe_num_heads,
-                                                        dropout_rate=cf.fe_dropout_rate,
-                                                          with_qk_lnorm=cf.fe_with_qk_lnorm,
-                                                          with_flash=cf.with_flash_attention,
-                                                          norm_type=cf.norm_type, dim_aux=1))
-        else :
-          self.fe_blocks.append( MultiSelfAttentionHead_Local( cf.ae_global_dim_embed, 
-                                            num_heads=cf.fe_num_heads,
-                                            qkv_len=self.num_healpix_cells*cf.ae_local_num_queries,
-                                            block_factor=cf.ae_global_block_factor,
-                                            dropout_rate=cf.fe_dropout_rate,
-                                            with_qk_lnorm=cf.fe_with_qk_lnorm,
-                                            with_flash=cf.with_flash_attention,
-                                            norm_type=cf.norm_type, dim_aux=1))
-        self.fe_blocks.append( MLP( cf.ae_global_dim_embed, cf.ae_global_dim_embed,
-                                    with_residual=True, dropout_rate=cf.fe_dropout_rate,
-                                    norm_type=cf.norm_type, dim_aux=1))
-
-    ###############
-
-    # embed coordinates yielding one query token for each target token
-    dropout_rate = 0.1
-    self.embed_target_coords = torch.nn.ModuleList() 
-    self.target_token_engines = torch.nn.ModuleList()
-    self.pred_adapter_kv = torch.nn.ModuleList()
-    self.pred_heads = torch.nn.ModuleList()
-
-    for i_obs, si in enumerate( cf.streams) :
-
-      # extract and setup relevant parameters
-      etc = si['embed_target_coords']
-      tro_type = si['target_readout']['type'] if 'type' in si['target_readout'] else 'token'
-      dim_embed = si['embed_target_coords']['dim_embed']
-      dim_out = max( dim_embed, si['token_size']*(self.num_channels[i_obs][0]-self.geoinfo_sizes[i_obs]))
-      tr = si['target_readout']
-      num_layers = tr['num_layers']
-      tr_mlp_hidden_factor = tr['mlp_hidden_factor'] if 'mlp_hidden_factor' in tr else 2
-      tr_dim_head_proj = tr['dim_head_proj'] if 'dim_head_proj' in tr else None
-      softcap = tr['softcap'] if 'softcap' in tr else 0.
-      n_chs = self.num_channels[i_obs]
-
-      if tro_type == 'obs_value' :
-        # fixed dimension for obs_value type
-        dims_embed = [si['embed_target_coords']['dim_embed'] for _ in range(num_layers+1)]
-      else :
-        if cf.pred_dyadic_dims :
-          coord_dim = self.geoinfo_sizes[i_obs]*si['token_size']
-          dims_embed = torch.tensor([dim_out//2**i for i in range( num_layers-1, -1, -1)] + [dim_out])
-          dims_embed[dims_embed < coord_dim] = dims_embed[ torch.where( dims_embed >= coord_dim)[0][0] ]
-          dims_embed = dims_embed.tolist()
-        else :
-          dims_embed = torch.linspace( dim_embed, dim_out, num_layers+1, dtype=torch.int32).tolist()
-
-      logger.info( '{} :: coord embed: :: {}'.format( si['name'], dims_embed))
-
-      dim_coord_in = ((self.geoinfo_sizes[i_obs]-2)+(5*(3*5))+3*8) * (1 if tro_type == 'obs_value' else si['token_size'])
-      dim_pred = (n_chs[0]-self.geoinfo_sizes[i_obs]) * (1 if tro_type=='obs_value' else si['token_size'])
-
-      # embedding network for coordinates
-      if etc['net'] == 'linear' :
-        self.embed_target_coords.append( torch.nn.Linear( dim_coord_in, dims_embed[0]))
-      elif etc['net'] == 'mlp' :
-        self.embed_target_coords.append( MLP( dim_coord_in, dims_embed[0],
-                                              hidden_factor = 8, with_residual=False,
-                                              dropout_rate=dropout_rate))
-      else :
-        assert False
-
-      # obs-specific adapter for tokens 
-      if cf.pred_adapter_kv :
-        self.pred_adapter_kv.append( MLP( cf.ae_global_dim_embed, cf.ae_global_dim_embed,
-                                          hidden_factor = 2, with_residual=True,
-                                          dropout_rate=dropout_rate, norm_type=cf.norm_type))
-      else :
-        self.pred_adapter_kv.append( torch.nn.Identity())
-
-      # target prediction engines
-      tte = torch.nn.ModuleList()
-      for i in range( num_layers) :
-        tte.append( MultiCrossAttentionHead_Varlen( dims_embed[i], cf.ae_global_dim_embed, 
-                                                    si['target_readout']['num_heads'], 
-                                                    dim_head_proj=tr_dim_head_proj,
-                                                    with_residual=True,
-                                                    with_qk_lnorm=True,
-                                                    dropout_rate=dropout_rate,
-                                                    with_flash=cf.with_flash_attention,
-                                                    norm_type=cf.norm_type, 
-                                                    softcap=softcap,
-                                                    dim_aux=dim_coord_in))
-        if cf.pred_self_attention :
-          tte.append( MultiSelfAttentionHead_Varlen( dims_embed[i], 
-                                                     num_heads=si['target_readout']['num_heads'], 
-                                                     dropout_rate=dropout_rate,
-                                                     with_qk_lnorm=True,
-                                                     with_flash=cf.with_flash_attention,
-                                                     norm_type=cf.norm_type,
-                                                     dim_aux=dim_coord_in))
-        tte.append( MLP( dims_embed[i], dims_embed[i+1], 
-                         with_residual=(True if cf.pred_dyadic_dims or tro_type=='obs_value' else False), 
-                         hidden_factor=tr_mlp_hidden_factor,
-                         dropout_rate=dropout_rate, norm_type=cf.norm_type,
-                         dim_aux = (dim_coord_in if cf.pred_mlp_adaln else None) ))
-      self.target_token_engines.append( tte)
-
-      # ensemble prediction heads to provide probabilistic prediction
-      self.pred_heads.append( EnsPredictionHead( dims_embed[-1], dim_pred,
-                                        si['pred_head']['num_layers'], si['pred_head']['ens_size'],
-                                        norm_type=cf.norm_type))
-
-    return self
-
-  #########################################
-  def freeze_weights_forecast( self):
-    '''Freeze model weights'''
-
-    # freeze everything
-    for p in self.parameters() :
-      p.requires_grad = False
-    self.q_cells.requires_grad = False
-
-    # unfreeze forecast part
-    for p in self.fe_blocks.parameters() :
-      p.requires_grad = True
-
-    return self
-  
-  #########################################
-  def print_num_parameters( self) :
-
-    cf = self.cf
-    num_params_embed = [get_num_parameters( embed) for embed in self.embeds]
-    num_params_total = get_num_parameters( self)
-    num_params_ae_local = get_num_parameters( self.ae_local_blocks)
-    num_params_ae_global = get_num_parameters( self.ae_global_blocks)
-  
-    num_params_q_cells = np.prod(self.q_cells.shape) if self.q_cells.requires_grad else 0
-    num_params_ae_adapater = get_num_parameters( self.ae_adapter)
-
-    num_params_fe = get_num_parameters( self.fe_blocks)
-
-    num_params_pred_adapter = [get_num_parameters( kv) for kv in self.pred_adapter_kv]
-    num_params_embed_tcs = [get_num_parameters( etc) for etc in  self.embed_target_coords]
-    num_params_tte = [get_num_parameters( tte) for tte in self.target_token_engines]
-    num_params_preds = [get_num_parameters(head) for head in self.pred_heads]
-
-    print( '-----------------')
-    print( f'Total number of trainable parameters: {num_params_total:,}')
-    print( 'Number of parameters:')
-    print( '  Embedding networks:')
-    [print('    {} : {:,}'.format(si['name'],np)) for si,np in zip(cf.streams,num_params_embed)]
-    print( f' Local assimilation engine: {num_params_ae_local:,}')
-    print( f' Local-global adapter: {num_params_ae_adapater:,}')
-    print( f' Learnable queries: {num_params_q_cells:,}')
-    print( f' Global assimilation engine: {num_params_ae_global:,}')
-    print( f' Forecast engine: {num_params_fe:,}')
-    print( ' kv-adapter, coordinate embedding, prediction networks and prediction heads:')
-    zps=zip(cf.streams,num_params_pred_adapter,num_params_embed_tcs,num_params_tte,num_params_preds)
-    [print('    {} : {:,} / {:,} / {:,} / {:,}'.format(si['name'],np0,np1,np2,np3)) 
-            for si,np0,np1,np2,np3 in zps]
-    print( '-----------------')
-
-  #########################################
-  def load( self, run_id, epoch = None) :
-
-    path_run = './models/' + run_id + '/'
-    fname = path_run + f'{run_id}'
-    fname += '_epoch{:05d}.chkpt'.format( epoch) if epoch is not None else '_latest.chkpt'
-
-    params = torch.load( fname, map_location=torch.device('cpu'), weights_only=True)
-    params_renamed = {}
-    for k in params.keys() :
-      params_renamed[k.replace( 'module.', '')] = params[k]
-    mkeys, ukeys = self.load_state_dict( params_renamed, strict=False)
-    # mkeys, ukeys = self.load_state_dict( params, strict=False)
-
-    if len(mkeys) > 0 :
-      logger.warning( f'Missing keys when loading model: {mkeys}')
-
-    if len(ukeys) > 0 :
-      logger.warning( f'Unused keys when loading model: {mkeys}')
-
-  #########################################
-  def forward_jac( self, *args) :
-
-    sources = args[:-1]
-    sources_lens = args[-1]
-    # no-op when satisfied but needed for Jacobian
-    sources_lens = sources_lens.to(torch.int64).cpu()
-
-    preds_all = self.forward( sources, sources_lens)
-
-    return tuple(preds_all[0])
-
-  #########################################
-  def forward( self, model_params, source_tokens_cells, source_tokens_lens, source_centroids, source_cell_lens, 
-                     source_idxs_embed, target_coords, target_coords_lens, target_coords_idxs,
-                     num_time_steps) :
-
-    batch_size = self.cf.batch_size if self.training else self.cf.batch_size_validation
-    assert len(source_tokens_cells) == batch_size
-
-    # embed
-    tokens = self.embed_cells( model_params, source_tokens_cells, source_tokens_lens, source_centroids, source_idxs_embed)
-
-    # local assimilation engine and adapter
-    tokens = self.assimilate_local( model_params, tokens, source_cell_lens)
-
-    tokens = self.assimilate_global( model_params, tokens)
-
-    # roll-out in latent space
-    preds_all = []
-    for it in range( num_time_steps ) :
-
-      # prediction
-      preds_all += [ self.predict( model_params, it, tokens, 
-                                   target_coords, target_coords_lens, target_coords_idxs) ]
-
-      tokens = self.forecast( model_params, tokens)
-
-    # prediction for final step
-    preds_all += [ self.predict( model_params, num_time_steps, tokens, 
-                                  target_coords, target_coords_lens, target_coords_idxs) ]
-
-    return preds_all
-
-  #########################################
-  def embed_cells( self, model_params, source_tokens_cells, source_tokens_lens, source_centroids, source_idxs_embed) :
-
-    cat = torch.cat
-
-    offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
-    tokens_all = torch.empty( (int(offsets_base[-1]), self.cf.ae_local_dim_embed), 
-                               dtype=torch.float16, device='cuda')
-
-    for ib, sb in enumerate(source_tokens_cells) :
-      for itype, (s,embed) in enumerate( zip(sb,self.embeds)) :
-        if s.shape[0]>0 :
-          
-          idxs = source_idxs_embed[0][ib][itype]
-          idxs_pe = source_idxs_embed[1][ib][itype]
-          # create full scatter index (there's no broadcasting which is likely highly inefficient)
-          idxs = idxs.repeat( (1,self.cf.ae_local_dim_embed))
-          x_embed = embed( s, source_centroids[ib][itype]).flatten(0,1)
-          # x_embed = torch.cat( [embed( s_c, c_c).flatten(0,1) 
-          #                 for s_c,c_c in zip( torch.split( s, 49152), 
-          #                                     torch.split( source_centroids[ib][itype], 49152))])
-          tokens_all.scatter_( 0, idxs, x_embed + model_params.pe_embed[idxs_pe])
-
-    return tokens_all
-
-  #########################################
-  def assimilate_local( self, model_params, tokens, cell_lens) :
-
-    batch_size = self.cf.batch_size if self.training else self.cf.batch_size_validation
-
-    s = self.q_cells.shape
-    # print( f'{np.prod(np.array(tokens.shape))} :: {np.prod(np.array(s))}' 
-    #        + ':: {np.prod(np.array(tokens.shape))/np.prod(np.array(s))}')
-    # TODO: test if positional encoding is needed here
-    if self.cf.ae_local_queries_per_cell :
-      tokens_global = (self.q_cells + model_params.pe_global).repeat( batch_size, 1, 1)
-    else :
-      tokens_global = self.q_cells.repeat( self.num_healpix_cells, 1, 1) + model_params.pe_global
-    q_cells_lens = torch.cat( [model_params.q_cells_lens[0].unsqueeze(0)] + [model_params.q_cells_lens[1:] 
-                                                                      for _ in range(batch_size)] )
-    
-    # # local assimilation model
-    # for block in self.ae_local_blocks :
-    #   tokens = checkpoint( block, tokens, cell_lens, use_reentrant=False)
-
-    # for block in self.ae_adapter :
-    #   tokens_global = checkpoint( block, tokens_global, tokens, q_cells_lens, cell_lens, use_reentrant=False)
-
-    # work around to bug in flash attention for hl>=5
-
-    cell_lens = cell_lens[1:]
-    clen = self.num_healpix_cells // (2 if self.cf.healpix_level<=5 else 8)
-    tokens_global_all = []
-    zero_pad = torch.zeros( 1, device='cuda', dtype=torch.int32)
-    for i in range( ((cell_lens.shape[0]) // clen)) :
-
-      # make sure we properly catch all elements in last chunk
-      i_end = (i+1)*clen if i < (cell_lens.shape[0] // clen)-1 else cell_lens.shape[0]
-      l0, l1 = (0 if i==0 else cell_lens[:i*clen].cumsum(0)[-1]), cell_lens[:i_end].cumsum(0)[-1]
-
-      tokens_c = tokens[l0:l1]
-      tokens_global_c = tokens_global[ i*clen : i_end ]
-      cell_lens_c = torch.cat( [ zero_pad, cell_lens[ i*clen : i_end ] ])
-      q_cells_lens_c = q_cells_lens[ : cell_lens_c.shape[0] ]
-
-      if l0 == l1 or tokens_c.shape[0]==0:
-        tokens_global_all += [ tokens_global_c ]
-        continue
-
-      for block in self.ae_local_blocks :
-        tokens_c = checkpoint( block, tokens_c, cell_lens_c, use_reentrant=False)
-
-      for block in self.ae_adapter :
-        tokens_global_c = checkpoint( block, tokens_global_c, tokens_c, q_cells_lens_c, cell_lens_c, 
-                                      use_reentrant=False)
-
-      tokens_global_all += [tokens_global_c]
-
-    tokens_global = torch.cat( tokens_global_all)
-
-    # recover batch dimension and build global token list
-    tokens_global = (tokens_global.reshape( [batch_size, self.num_healpix_cells, s[-2], s[-1]]) + model_params.pe_global).flatten(1,2)
-
-    return tokens_global
-
-  #########################################
-  # @torch.compile
-  def assimilate_global( self, model_params, tokens) :
-
-    # global assimilation engine and adapter
-    for block in self.ae_global_blocks :
-      tokens = checkpoint( block, tokens, use_reentrant=False)
-
-    return tokens
-
-  #########################################
-  # @torch.compile
-  def forecast( self, model_params, tokens) :
-
-    for it, block in enumerate(self.fe_blocks) :
-      aux_info = torch.tensor([it], dtype=torch.float32, device='cuda')
-      tokens = checkpoint( block, tokens, aux_info, use_reentrant=False)
-
-    return tokens
-
-  #########################################
-  def predict( self, model_params, fstep, tokens, tcs, target_coords_lens, target_coords_idxs) :
-
-    fp32, i32 = torch.float32, torch.int32
-    batch_size = self.cf.batch_size if self.training else self.cf.batch_size_validation
-
-    s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
-    tokens_stream = (tokens.reshape( s) + model_params.pe_global).flatten(0,1)
-    tokens_stream = tokens_stream[ model_params.hp_nbours.flatten() ].flatten(0,1)
-
-    # pair with tokens from assimilation engine to obtain target tokens
-    preds_tokens = []
-    for ii, (tte, tte_kv) in enumerate( zip( self.target_token_engines, self.pred_adapter_kv)) :
-
-      si = self.cf.streams[ii]
-      tro_type = si['target_readout']['type'] if 'type' in si['target_readout'] else 'token'
-      tc_embed = self.embed_target_coords[ii]
-
-      assert batch_size == 1
-
-      # embed token coords, concatenating along batch dimension (which is taking care of through
-      # the varlen attention)
-      if tro_type == 'obs_value' :  
-        tc_tokens = torch.cat([checkpoint( tc_embed, tcs[fstep][i_b][ii], use_reentrant=False)
-                                                    if len(tcs[fstep][i_b][ii].shape)>1 else tcs[fstep][i_b][ii]
-                                                    for i_b in range(len(tcs[fstep]))])
-      elif tro_type == 'token' :
-        tc_tokens = torch.cat( [checkpoint( tc_embed, tcs[fstep][i_b][ii].transpose(-2,-1).flatten(-2,-1),
-                                                                              use_reentrant=False)
-                                                    if len(tcs[fstep][i_b][ii].shape)>1 else tcs[fstep][i_b][ii]
-                                                    for i_b in range(len(tcs[fstep]))])
-      else :
-        assert False
-
-      if torch.isnan(tc_tokens).any() :
-        nn = si['name']
-        logger.warning( f'Skipping prediction for {nn} because of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.')
-        preds_tokens += [ torch.tensor( [], device=tc_tokens.device) ]
-        continue
-      if tc_tokens.shape[0] == 0 :
-        preds_tokens += [ torch.tensor( [], device=tc_tokens.device) ]
-        continue
-
-      # TODO: how to support tte_kv efficiently, generate 1-ring neighborhoods here or on a per
-      #       stream basis
-      assert type(tte_kv) == torch.nn.Identity
-
-      tcs_lens = target_coords_idxs[0][fstep][ii]
-      # add per-cell positional encoding
-      tc_tokens += model_params.pe_tc_tokens[ target_coords_idxs[1][fstep][ii] , : tc_tokens.shape[1] ]
-
-      # coord information for learnable layer norm
-      tcs_aux = torch.cat( [tcs[fstep][i_b][ii] for i_b in range(len(tcs[0]))])
-
-      # apply prediction engine
-      for ib, block in enumerate(tte) :
-        if self.cf.pred_self_attention and ib % 3 == 1 :
-          tc_tokens = checkpoint( block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
-        else :
-          tc_tokens = checkpoint( block, tc_tokens, tokens_stream,
-                                  tcs_lens, model_params.tokens_lens, tcs_aux,
-                                  use_reentrant=False)
-
-      # final prediction head to map back to physical space
-      preds_tokens += [ checkpoint( self.pred_heads[ii], tc_tokens, use_reentrant=False) ]
-
-    return preds_tokens
+class Model(torch.nn.Module):
+    """WeatherGenerator model architecture
+
+    WeatherGenerator consists of the following components:
+
+    embeds: embedding networks: Stream specific embedding networks.
+
+    ae_local_blocks: Local assimilation engine: transformer based network to combine different input
+        streams per healpix cell.
+
+    ae_adapter: Assimilation engine adapter: Adapter to transform local assimilation engine
+        information to the global assimilation engine.
+
+    ae_global_blocks: Global assimilation engine: Transformer network alternating between local and
+        global attention based upon global attention density rate.
+
+    fe_blocks: Forecasting engine: Transformer network using the output of global attention to
+        advance the latent representation in time.
+
+    embed_target_coords: Embedding networks for coordinates: Initializes embedding networks tailored
+        for metadata embedded target coordinates. The architecture is either a linear layer or a
+        multi-layer perceptron, determined by the configuration of the embedding target coordinate
+        networks.
+
+    pred_adapter_kv: Prediction adapter: Adapter to transform the global assimilation/forecasting
+        engine output to the prediction engine. Uses an MLP if `cf.pred_adapter_kv` is True,
+        otherwise it uses an identity function.
+
+    target_token_engines: Prediction engine: Transformer based prediction network that generates
+        output corresponding to target coordinates.
+
+    pred_heads: Prediction head: Final layers using target token engines output for mapping target
+        coordinates to its physical space.
+    """
+
+    #########################################
+    def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size):
+        """
+        Args:
+            cf : Configuration with model parameters
+            sources_size : List of number of channels for models
+            targets_num_channels : List with size of each output sample for coordinates target
+                embedding
+            targets_coords_size : List with size of each input sample for coordinates target
+                embedding
+        """
+        super(Model, self).__init__()
+
+        self.healpix_level = cf.healpix_level
+        self.num_healpix_cells = 12 * 4**self.healpix_level
+
+        self.cf = cf
+        self.dtype = get_dtype(self.cf.attention_dtype)
+        self.sources_size = sources_size
+        self.targets_num_channels = targets_num_channels
+        self.targets_coords_size = targets_coords_size
+
+    #########################################
+    def create(self) -> "Model":
+        """Create each individual module of the model"""
+        cf = self.cf
+
+        # separate embedding networks for differnt observation types
+        self.embed_engine = EmbeddingEngine(cf, self.sources_size)
+
+        ##############
+        # local assimilation engine
+        self.ae_local_engine = LocalAssimilationEngine(cf)
+
+        if cf.latent_noise_kl_weight > 0.0:
+            self.interpolate_latents = LatentInterpolator(
+                gamma=cf.latent_noise_gamma,
+                dim=cf.ae_local_dim_embed,
+                use_additive_noise=cf.latent_noise_use_additive_noise,
+                deterministic=cf.latent_noise_deterministic_latents,
+            )
+
+        ##############
+        # local -> global assimilation engine adapter
+        self.ae_local_global_engine = Local2GlobalAssimilationEngine(cf)
+
+        ##############
+        # learnable queries
+        if cf.ae_local_queries_per_cell:
+            s = (self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed)
+            q_cells = torch.rand(s, requires_grad=True) / cf.ae_global_dim_embed
+            # add meta data
+            q_cells[:, :, -8:-6] = (
+                (torch.arange(self.num_healpix_cells) / self.num_healpix_cells)
+                .unsqueeze(1)
+                .unsqueeze(1)
+                .repeat((1, cf.ae_local_num_queries, 2))
+            )
+            theta, phi = healpy.pix2ang(
+                nside=2**self.healpix_level, ipix=torch.arange(self.num_healpix_cells)
+            )
+            q_cells[:, :, -6:-3] = (
+                torch.cos(theta).unsqueeze(1).unsqueeze(1).repeat((1, cf.ae_local_num_queries, 3))
+            )
+            q_cells[:, :, -3:] = (
+                torch.sin(phi).unsqueeze(1).unsqueeze(1).repeat((1, cf.ae_local_num_queries, 3))
+            )
+            q_cells[:, :, -9] = torch.arange(cf.ae_local_num_queries)
+            q_cells[:, :, -10] = torch.arange(cf.ae_local_num_queries)
+        else:
+            s = (1, cf.ae_local_num_queries, cf.ae_global_dim_embed)
+            q_cells = torch.rand(s, requires_grad=True) / cf.ae_global_dim_embed
+        self.q_cells = torch.nn.Parameter(q_cells, requires_grad=True)
+
+        ##############
+        # global assimilation engine
+        self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
+
+        ###############
+        # forecasting engine
+        if isinstance(cf.forecast_steps, int):
+            assert not (cf.forecast_steps > 0 and cf.fe_num_blocks == 0), (
+                "Empty forecast engine (fe_num_blocks = 0), but forecast_steps > 0"
+            )
+        else:
+            assert not (min(cf.forecast_steps) > 0 and cf.fe_num_blocks == 0), (
+                "Empty forecast engine (fe_num_blocks = 0), but forecast_steps[i] > 0 for some i"
+            )
+
+        self.forecast_engine = ForecastingEngine(cf, self.num_healpix_cells)
+
+        ###############
+        # embed coordinates yielding one query token for each target token
+        dropout_rate = cf.embed_dropout_rate
+        self.embed_target_coords = torch.nn.ModuleList()
+        self.target_token_engines = torch.nn.ModuleList()
+        self.pred_adapter_kv = torch.nn.ModuleList()
+        self.pred_heads = torch.nn.ModuleList()
+
+        for i_obs, si in enumerate(cf.streams):
+            stream_name = si.get("name", i_obs)
+
+            # extract and setup relevant parameters
+            etc = si["embed_target_coords"]
+            tro_type = si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
+            dim_embed = si["embed_target_coords"]["dim_embed"]
+            dim_out = max(
+                dim_embed,
+                si["token_size"] * self.targets_num_channels[i_obs],
+            )
+            tr = si["target_readout"]
+            num_layers = tr["num_layers"]
+            tr_mlp_hidden_factor = tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
+            tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
+            softcap = tr["softcap"] if "softcap" in tr else 0.0
+
+            if tro_type == "obs_value":
+                # fixed dimension for obs_value type
+                dims_embed = [si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)]
+            else:
+                if cf.pred_dyadic_dims:
+                    coord_dim = self.geoinfo_sizes[i_obs] * si["token_size"]
+                    dims_embed = torch.tensor(
+                        [dim_out // 2**i for i in range(num_layers - 1, -1, -1)] + [dim_out]
+                    )
+                    dims_embed[dims_embed < coord_dim] = dims_embed[
+                        torch.where(dims_embed >= coord_dim)[0][0]
+                    ]
+                    dims_embed = dims_embed.tolist()
+                else:
+                    dims_embed = torch.linspace(
+                        dim_embed, dim_out, num_layers + 1, dtype=torch.int32
+                    ).tolist()
+
+            if is_root():
+                logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
+
+            dim_coord_in = self.targets_coords_size[i_obs]
+
+            # embedding network for coordinates
+            if etc["net"] == "linear":
+                self.embed_target_coords.append(
+                    NamedLinear(
+                        f"embed_target_coords_{stream_name}",
+                        in_features=dim_coord_in,
+                        out_features=dims_embed[0],
+                        bias=False,
+                    )
+                )
+            elif etc["net"] == "mlp":
+                self.embed_target_coords.append(
+                    MLP(
+                        dim_coord_in,
+                        dims_embed[0],
+                        hidden_factor=8,
+                        with_residual=False,
+                        dropout_rate=dropout_rate,
+                        norm_eps=self.cf.mlp_norm_eps,
+                        stream_name=f"embed_target_coords_{stream_name}",
+                    )
+                )
+            else:
+                assert False
+
+            # obs-specific adapter for tokens
+            if cf.pred_adapter_kv:
+                self.pred_adapter_kv.append(
+                    MLP(
+                        cf.ae_global_dim_embed,
+                        cf.ae_global_dim_embed,
+                        hidden_factor=2,
+                        with_residual=True,
+                        dropout_rate=dropout_rate,
+                        norm_type=cf.norm_type,
+                        norm_eps=self.cf.mlp_norm_eps,
+                        stream_name=f"pred_adapter_kv_{stream_name}",
+                    )
+                )
+            else:
+                self.pred_adapter_kv.append(torch.nn.Identity())
+
+            # target prediction engines
+            tte_version = (
+                TargetPredictionEngine
+                if cf.decoder_type != "PerceiverIOCoordConditioning"
+                else TargetPredictionEngineClassic
+            )
+            tte = tte_version(
+                cf,
+                dims_embed,
+                dim_coord_in,
+                tr_dim_head_proj,
+                tr_mlp_hidden_factor,
+                softcap,
+                tro_type,
+                stream_name=stream_name,
+            )
+
+            self.target_token_engines.append(tte)
+
+            # ensemble prediction heads to provide probabilistic prediction
+            final_activation = si["pred_head"].get("final_activation", "Identity")
+            if is_root():
+                logger.debug(
+                    f"{final_activation} activation of prediction head of {si['name']} stream"
+                )
+            self.pred_heads.append(
+                EnsPredictionHead(
+                    dims_embed[-1],
+                    self.targets_num_channels[i_obs],
+                    si["pred_head"]["num_layers"],
+                    si["pred_head"]["ens_size"],
+                    norm_type=cf.norm_type,
+                    final_activation=final_activation,
+                    stream_name=stream_name,
+                )
+            )
+
+        return self
+
+    def reset_parameters(self):
+        def _reset_params(module):
+            if isinstance(module, nn.Linear | nn.LayerNorm):
+                module.reset_parameters()
+            else:
+                pass
+
+        self.apply(_reset_params)
+
+    #########################################
+    def print_num_parameters(self) -> None:
+        """Print number of parameters for entire model and each module used to build the model"""
+
+        cf = self.cf
+        num_params_embed = [get_num_parameters(embed) for embed in self.embed_engine.embeds]
+        num_params_total = get_num_parameters(self)
+        num_params_ae_local = get_num_parameters(self.ae_local_engine.ae_local_blocks)
+        num_params_ae_global = get_num_parameters(self.ae_global_engine.ae_global_blocks)
+
+        num_params_q_cells = np.prod(self.q_cells.shape) if self.q_cells.requires_grad else 0
+        num_params_ae_adapater = get_num_parameters(self.ae_local_global_engine.ae_adapter)
+
+        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
+
+        num_params_pred_adapter = [get_num_parameters(kv) for kv in self.pred_adapter_kv]
+        num_params_embed_tcs = [get_num_parameters(etc) for etc in self.embed_target_coords]
+        num_params_tte = [get_num_parameters(tte) for tte in self.target_token_engines]
+        num_params_preds = [get_num_parameters(head) for head in self.pred_heads]
+
+        print("-----------------")
+        print(f"Total number of trainable parameters: {num_params_total:,}")
+        print("Number of parameters:")
+        print("  Embedding networks:")
+        [
+            print("    {} : {:,}".format(si["name"], np))
+            for si, np in zip(cf.streams, num_params_embed, strict=False)
+        ]
+        print(f" Local assimilation engine: {num_params_ae_local:,}")
+        print(f" Local-global adapter: {num_params_ae_adapater:,}")
+        print(f" Learnable queries: {num_params_q_cells:,}")
+        print(f" Global assimilation engine: {num_params_ae_global:,}")
+        print(f" Forecast engine: {num_params_fe:,}")
+        print(" kv-adapter, coordinate embedding, prediction networks and prediction heads:")
+        zps = zip(
+            cf.streams,
+            num_params_pred_adapter,
+            num_params_embed_tcs,
+            num_params_tte,
+            num_params_preds,
+            strict=False,
+        )
+        [
+            print("    {} : {:,} / {:,} / {:,} / {:,}".format(si["name"], np0, np1, np2, np3))
+            for si, np0, np1, np2, np3 in zps
+        ]
+        print("-----------------")
+
+    #########################################
+    def rename_old_state_dict(self, params: dict) -> dict:
+        """Checks if model from checkpoint is from the old model version and if so renames
+        the parameters accordingly to the new model version.
+
+        Args:
+            params : Dictionary with (old) model parameters from checkpoint
+        Returns:
+            new_params : Dictionary with (renamed) model parameters
+        """
+        params_cleanup = {
+            "embeds": "embed_engine.embeds",  # EmbeddingEngine
+            "ae_local_blocks": "ae_local_engine.ae_local_blocks",  # LocalAssimilationEngine
+            "ae_adapter": "ae_local_global_engine.ae_adapter",  # Local2GlobalAssimilationEngine
+            "ae_global_blocks": "ae_global_engine.ae_global_blocks",  # GlobalAssimilationEngine
+            "fe_blocks": "forecast_engine.fe_blocks",  # ForecastingEngine
+        }
+
+        new_params = {}
+
+        for k, v in params.items():
+            new_k = k
+            prefix = ""
+
+            # Strip "module." (prefix for DataParallel or DistributedDataParallel)
+            if new_k.startswith("module."):
+                prefix = "module."
+                new_k = new_k[len(prefix) :]
+
+            first_w, rest = new_k.split(".", 1) if "." in new_k else (new_k, "")
+            # Only check first word (root level modules) to avoid false matches.
+            if first_w in params_cleanup:
+                new_k = params_cleanup[first_w] + "." + rest
+
+            new_k = prefix + new_k
+            new_params[new_k] = v
+
+        return new_params
+
+    #########################################
+    def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
+        """Performs the forward pass of the model to generate forecasts
+
+        Tokens are processed through the model components, which were defined in the create method.
+        Args:
+            model_params : Query and embedding parameters
+            batch :
+                streams_data : Contains tokenized source data and target data for each dataset and
+                    each stream
+                source_cell_lens : Used to identify range of tokens to use from generated tokens in
+                    cell embedding
+                target_coords_idxs : Indices of target coordinates for each dataset.
+            forecast_offset : Starting index for iteration
+            forecast_steps : Number of forecast steps to calculate from forecast_offset
+        Returns:
+            A list containing all prediction results
+        """
+
+        (streams_data, source_cell_lens, target_coords_idxs) = batch
+
+        # embed
+        tokens = self.embed_cells(model_params, streams_data)
+
+        # local assimilation engine and adapter
+        tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
+
+        tokens = self.assimilate_global(model_params, tokens)
+
+        # roll-out in latent space
+        preds_all = []
+        for fstep in range(forecast_offset, forecast_offset + forecast_steps):
+            # prediction
+            preds_all += [
+                self.predict(
+                    model_params,
+                    fstep,
+                    tokens,
+                    streams_data,
+                    target_coords_idxs,
+                )
+            ]
+
+            if self.training:
+                # Impute noise to the latent state
+                noise_std = self.cf.get("impute_latent_noise_std", 0.0)
+                if noise_std > 0.0:
+                    tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
+
+            tokens = self.forecast(model_params, tokens, fstep)
+
+        # prediction for final step
+        preds_all += [
+            self.predict(
+                model_params,
+                forecast_offset + forecast_steps,
+                tokens,
+                streams_data,
+                target_coords_idxs,
+            )
+        ]
+
+        return preds_all, posteriors
+
+    #########################################
+    def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
+        """Embeds input data for each stream separately and rearranges it to cell-wise order
+        Args:
+            model_params : Query and embedding parameters
+            streams_data : Used to initialize first tokens for pre-processing
+        Returns:
+            Tokens for local assimilation
+        """
+
+        device = next(self.parameters()).device
+        tokens_all = self.embed_engine(streams_data, model_params.pe_embed, self.dtype, device)
+
+        return tokens_all
+
+    #########################################
+    def assimilate_local(
+        self, model_params: ModelParams, tokens: torch.Tensor, cell_lens: torch.Tensor
+    ) -> torch.Tensor:
+        """Processes embedded tokens locally and prepares them for the global assimilation
+        Args:
+            model_params : Query and embedding parameters
+            tokens : Input tokens to be processed by local assimilation
+            cell_lens : Used to identify range of tokens to use from generated tokens in cell
+                embedding
+        Returns:
+            Tokens for global assimilation
+        """
+
+        batch_size = (
+            self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
+        )
+
+        s = self.q_cells.shape
+        # print( f'{np.prod(np.array(tokens.shape))} :: {np.prod(np.array(s))}'
+        #        + ':: {np.prod(np.array(tokens.shape))/np.prod(np.array(s))}')
+        # TODO: test if positional encoding is needed here
+        if self.cf.ae_local_queries_per_cell:
+            tokens_global = (self.q_cells + model_params.pe_global).repeat(batch_size, 1, 1)
+        else:
+            tokens_global = (
+                self.q_cells.repeat(self.num_healpix_cells, 1, 1) + model_params.pe_global
+            )
+        q_cells_lens = torch.cat(
+            [model_params.q_cells_lens[0].unsqueeze(0)]
+            + [model_params.q_cells_lens[1:] for _ in range(batch_size)]
+        )
+
+        # local assimilation model
+        # for block in self.ae_local_blocks:
+        #     tokens = checkpoint(block, tokens, cell_lens, use_reentrant=False)
+
+        # if self.cf.latent_noise_kl_weight > 0.0:
+        #     tokens, posteriors = self.interpolate_latents.interpolate_with_noise(
+        #         tokens, sampling=self.training
+        #     )
+        # else:
+        #     tokens, posteriors = tokens, 0.0
+
+        # for block in self.ae_adapter:
+        #     tokens_global = checkpoint(
+        #         block,
+        #         tokens_global,
+        #         tokens,
+        #         q_cells_lens,
+        #         cell_lens,
+        #         use_reentrant=False,
+        #     )
+
+        # work around to bug in flash attention for hl>=5
+
+        cell_lens = cell_lens[1:]
+        clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
+        tokens_global_all = []
+        posteriors = []
+        zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
+        for i in range((cell_lens.shape[0]) // clen):
+            # make sure we properly catch all elements in last chunk
+            i_end = (i + 1) * clen if i < (cell_lens.shape[0] // clen) - 1 else cell_lens.shape[0]
+            l0, l1 = (
+                (0 if i == 0 else cell_lens[: i * clen].cumsum(0)[-1]),
+                cell_lens[:i_end].cumsum(0)[-1],
+            )
+
+            tokens_c = tokens[l0:l1]
+            tokens_global_c = tokens_global[i * clen : i_end]
+            cell_lens_c = torch.cat([zero_pad, cell_lens[i * clen : i_end]])
+            q_cells_lens_c = q_cells_lens[: cell_lens_c.shape[0]]
+
+            if l0 == l1 or tokens_c.shape[0] == 0:
+                tokens_global_all += [tokens_global_c]
+                continue
+
+            # local assimilation model
+            tokens_c = self.ae_local_engine(tokens_c, cell_lens_c, use_reentrant=False)
+
+            if self.cf.latent_noise_kl_weight > 0.0:
+                tokens_c, posteriors_c = self.interpolate_latents.interpolate_with_noise(
+                    tokens_c, sampling=self.training
+                )
+                posteriors += [posteriors_c]
+            else:
+                tokens_c, posteriors = tokens_c, 0.0
+
+            tokens_global_c = self.ae_local_global_engine(
+                tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant=False
+            )
+
+            tokens_global_all += [tokens_global_c]
+
+        tokens_global = torch.cat(tokens_global_all)
+
+        # recover batch dimension and build global token list
+        tokens_global = (
+            tokens_global.reshape([batch_size, self.num_healpix_cells, s[-2], s[-1]])
+            + model_params.pe_global
+        ).flatten(1, 2)
+
+        return tokens_global, posteriors
+
+    #########################################
+    def assimilate_global(self, model_params: ModelParams, tokens: torch.Tensor) -> torch.Tensor:
+        """Performs transformer based global assimilation in latent space
+        Args:
+            model_params : Query and embedding parameters (never used)
+            tokens : Input tokens to be pre-processed by global assimilation
+        Returns:
+            Latent representation of the model
+        """
+
+        # global assimilation engine and adapter
+        tokens = self.ae_global_engine(tokens, use_reentrant=False)
+
+        return tokens
+
+    #########################################
+    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
+        """Advances latent space representation in time
+
+        Args:
+            model_params : Query and embedding parameters (never used)
+            tokens : Input tokens to be processed by the model.
+            fstep: Current forecast step index (can be used as aux info).
+        Returns:
+            Processed tokens
+        Raises:
+            ValueError: For unexpected arguments in checkpoint method
+        """
+
+        tokens = self.forecast_engine(tokens, fstep)
+
+        return tokens
+
+    #########################################
+    def predict(
+        self,
+        model_params: ModelParams,
+        fstep: int,
+        tokens: torch.Tensor,
+        streams_data,
+        target_coords_idxs,
+    ) -> list[torch.Tensor]:
+        """Predict outputs at the specific target coordinates based on the input weather state and
+        pre-training task and projects the latent space representation back to physical space.
+
+        Args:
+            model_params : Query and embedding parameters
+            fstep : Number of forecast steps
+            tokens : Tokens from global assimilation engine
+            streams_data : Used to initialize target coordinates tokens and index information
+            target_coords_idxs : Indices of target coordinates
+        Returns:
+            Prediction output tokens in physical representation for each target_coords.
+        """
+
+        batch_size = (
+            self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
+        )
+
+        s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
+        tokens_stream = (tokens.reshape(s) + model_params.pe_global).flatten(0, 1)
+        tokens_stream = tokens_stream[model_params.hp_nbours.flatten()].flatten(0, 1)
+
+        # pair with tokens from assimilation engine to obtain target tokens
+        preds_tokens = []
+        for ii, (tte, tte_kv) in enumerate(
+            zip(self.target_token_engines, self.pred_adapter_kv, strict=False)
+        ):
+            si = self.cf.streams[ii]
+            tc_embed = self.embed_target_coords[ii]
+
+            assert batch_size == 1
+
+            ## embed token coords, concatenating along batch dimension
+            # (which is taking care of through the varlen attention)
+            # arguably we should to the mixed precision policy when creating the model in FSDP
+            tc_tokens = torch.cat(
+                [
+                    checkpoint(
+                        tc_embed,
+                        streams_data[i_b][ii].target_coords[fstep],
+                        use_reentrant=False,
+                    )
+                    if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
+                    else streams_data[i_b][ii].target_coords[fstep]
+                    for i_b in range(len(streams_data))
+                ]
+            )
+
+            # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
+            if torch.isnan(tc_tokens).any():
+                nn = si["name"]
+                if is_root():
+                    logger.warning(
+                        (
+                            f"Skipping prediction for {nn} because",
+                            f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
+                        )
+                    )
+                preds_tokens += [torch.tensor([], device=tc_tokens.device)]
+                continue
+
+            # skip empty lengths
+            if tc_tokens.shape[0] == 0:
+                preds_tokens += [torch.tensor([], device=tc_tokens.device)]
+                continue
+
+            # TODO: how to support tte_kv efficiently,
+            #  generate 1-ring neighborhoods here or on a per stream basis
+            assert isinstance(tte_kv, torch.nn.Identity)
+
+            # lens for varlen attention
+            tcs_lens = target_coords_idxs[ii][fstep]
+            # coord information for learnable layer norm
+            tcs_aux = torch.cat(
+                [streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))]
+            )
+
+            tc_tokens = tte(
+                latent=tokens_stream,
+                output=tc_tokens,
+                latent_lens=model_params.tokens_lens,
+                output_lens=tcs_lens,
+                coordinates=tcs_aux,
+            )
+
+            # final prediction head to map back to physical space
+            preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
+
+        return preds_tokens

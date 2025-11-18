@@ -1,4 +1,4 @@
-# (C) Copyright 2024 WeatherGenerator contributors.
+# (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,122 +7,80 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import time
+import logging
 
-import numpy as np
-import torch
+import weathergen.common.config as config
+import weathergen.common.io as io
+from weathergen.common.io import TimeRange
+from weathergen.datasets.data_reader_base import TimeWindowHandler, str_to_datetime64
 
-import zarr
+_logger = logging.getLogger(__name__)
 
 
-def sanitize_stream_str( istr) :
-  return istr.replace( ' ', '_').replace( '-', '_').replace(',','')
+def write_output(
+    cf,
+    mini_epoch,
+    batch_idx,
+    sources,
+    preds_all,
+    targets_all,
+    targets_coords_all,
+    targets_times_all,
+    targets_lens,
+    sample_idxs,
+):
+    stream_names = [stream.name for stream in cf.streams]
+    analysis_streams_output = cf.get( 'analysis_streams_output', None)
+    if cf.streams_output is not None:
+        output_stream_names = cf.streams_output
+    elif analysis_streams_output is not None:  # --- to be removed at some point ---
+        output_stream_names = analysis_streams_output  # --- to be removed at some point ---
+    else:
+        output_stream_names = None
 
-#################################
-def read_validation( cf, epoch, base_path, instruments, forecast_steps, rank=0) :
+    if output_stream_names is None:
+        output_stream_names = stream_names
 
-  streams, columns, data = [], [], []
+    output_streams = {name: stream_names.index(name) for name in output_stream_names}
 
-  fname = base_path + 'validation_epoch{:05d}_rank{:04d}.zarr'.format( epoch, rank)
-  store = zarr.DirectoryStore( fname)
-  ds = zarr.group( store=store)
+    _logger.debug(f"Using output streams: {output_streams} from streams: {stream_names}")
 
-  for ii, stream_info in enumerate( cf.streams) :
-        
-    n = stream_info['name']
-    if len(instruments) :
-      if not np.array( [r in n for r in instruments]).any() :
-        continue
+    target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in cf.streams]
+    source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in cf.streams]
 
-    streams += [ stream_info['name'] ]
-    columns.append( ds[f'{sanitize_stream_str(n)}/0'].attrs['cols'])
-    data += [ [] ]
+    geoinfo_channels = [[] for _ in cf.streams]  # TODO obtain channels
 
-    for fstep in forecast_steps :
-      
-      data[-1] += [ [] ]
-      istr = sanitize_stream_str(n)
-      
-      data[-1][-1].append( ds[f'{istr}/{fstep}/sources'])
-      data[-1][-1].append( ds[f'{istr}/{fstep}/sources_coords'])
-      data[-1][-1].append( ds[f'{istr}/{fstep}/preds'])
-      data[-1][-1].append( ds[f'{istr}/{fstep}/targets'])
-      data[-1][-1].append( ds[f'{istr}/{fstep}/targets_coords'])
-      data[-1][-1].append( ds[f'{istr}/{fstep}/sources_lens'])
-      data[-1][-1].append( ds[f'{istr}/{fstep}/targets_lens'])
-      data[-1][-1].append( ~np.isnan( data[-1][-1][3]) )
+    # assume: is batch size guarnteed and constant:
+    # => calculate global sample indices for this batch by offsetting by sample_start
+    sample_start = batch_idx * cf.batch_size_validation_per_gpu
 
-      data[-1][-1].append( np.mean( data[-1][-1][2], axis=1) )
-      data[-1][-1].append( np.std( data[-1][-1][2], axis=1) )
+    assert len(stream_names) == len(targets_all[0]), "data does not match number of streams"
+    assert len(stream_names) == len(preds_all[0]), "data does not match number of streams"
+    assert len(stream_names) == len(sources[0]), "data does not match number of streams"
 
-  return streams, columns, data
+    start_date = str_to_datetime64(cf.start_date_val)
+    end_date = str_to_datetime64(cf.end_date_val)
 
-#################################
-def write_validation( cf, base_path, rank, epoch, cols,
-                      sources, preds_all, targets_all, 
-                      targets_coords_all, targets_lens, jac = None) :
+    twh = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
+    source_windows = (twh.window(idx) for idx in sample_idxs)
+    source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 
-  if 0==len(cf.analysis_streams_output) :
-    return
+    data = io.OutputBatchData(
+        sources,
+        source_intervals,
+        targets_all,
+        preds_all,
+        targets_coords_all,
+        targets_times_all,
+        targets_lens,
+        output_streams,
+        target_channels,
+        source_channels,
+        geoinfo_channels,
+        sample_start,
+        cf.forecast_offset,
+    )
 
-  fname = base_path + 'validation_epoch{:05d}_rank{:04d}'.format( epoch, rank)
-  fname += '' if jac is None else '_jac'
-  fname += '.zarr'
-
-  store = zarr.DirectoryStore( fname)
-  ds = zarr.group( store=store)
-  
-  for k, si in enumerate( cf.streams) :
-
-    # only store requested streams
-    if not np.array([s in si['name'] for s in cf.analysis_streams_output]).any() :
-      continue
-
-    # skip empty entries (e.g. no channels from the sources are used as targets)
-    if 0 == len(targets_all[k]) or 0 == len(targets_all[k][0]) :
-      continue
-    
-    # TODO: this only saves the first batch
-    source_k = sources[0][k].cpu().detach().numpy()
-    source_lens_k = np.array([source_k.shape[0]])
-    preds_k = torch.cat( preds_all[k], 1).transpose( 1, 0).cpu().detach().numpy()
-    targets_k = torch.cat( targets_all[k], 0).cpu().detach().numpy()
-    targets_coords_k = torch.cat( targets_coords_all[k], 0).cpu().detach().numpy()
-    targets_lens_k = np.array(targets_lens[k], dtype=np.int64)
-
-    fs = cf.forecast_steps
-    fs = fs if type(fs)==int else fs[ min( epoch, len(fs)-1)]
-    rn = si['name'].replace( ' ', '_').replace( '-', '_').replace(',','')
-
-    write_first = False
-    if rn in ds.group_keys() :
-      if f'{fs}' not in ds[rn].group_keys() :
-        write_first = True
-    else :
-      write_first = True
-
-    # TODO: how to avoid this
-    if write_first :
-      ds_source = ds.require_group( f'{rn}/{fs}')
-      cols_obsvalues = [col[:9]=='obsvalue_' for col in cols[k]]
-      ds_source.attrs['cols'] = np.array(cols[k])[cols_obsvalues].tolist()
-      ds_source.create_dataset( 'sources', data=source_k, chunks=(1024, *source_k.shape[1:]))
-      ds_source.create_dataset( 'sources_lens', data=source_lens_k)
-      ds_source.create_dataset( 'preds', data=preds_k, chunks=(1024, *preds_k.shape[1:]))
-      ds_source.create_dataset( 'targets', data=targets_k, chunks=(1024, *targets_k.shape[1:]))
-      ds_source.create_dataset( 'targets_coords', data=targets_coords_k,
-                                                  chunks=(1024, *targets_coords_k.shape[1:]))
-      ds_source.create_dataset( 'targets_lens', data=targets_lens_k)
-    else :
-      rn = rn + f'/{fs}'
-      ds[f'{rn}/sources'].append( source_k)
-      ds[f'{rn}/sources_lens'].append( source_lens_k)
-      ds[f'{rn}/preds'].append( preds_k)
-      ds[f'{rn}/targets'].append( targets_k)
-      ds[f'{rn}/targets_coords'].append( targets_coords_k)
-      ds[f'{rn}/targets_lens'].append( targets_lens_k)
-
-    if jac is not None :
-      ds_source.create_dataset( 'jacobian', data=jac[k])
-
-  store.close()
+    with io.ZarrIO(config.get_path_output(cf, mini_epoch)) as writer:
+        for subset in data.items():
+            writer.write_zarr(subset)

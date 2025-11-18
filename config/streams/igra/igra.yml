@@ -1,0 +1,34 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+IGRA :
+  type : obs
+  filenames : ['igra.zarr']
+  base_datetime : '1750-01-01T00:00:00'
+  loss_weight : 1.0
+  #masking_rate_none : 0.05
+  token_size : 64
+  tokenize_spacetime : True
+  max_num_targets: -1
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 2
+    dim_embed : 256
+    num_blocks : 2
+  embed_target_coords : 
+    net : linear
+    dim_embed : 256
+  target_readout :
+    type : 'obs_value'  # token or obs_value
+    num_layers : 2
+    num_heads : 4
+  pred_head : 
+    ens_size : 1
+    num_layers : 1
