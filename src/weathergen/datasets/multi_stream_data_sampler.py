@@ -425,6 +425,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """
         
         mode : {student, teacher, mtm}
+        idx :
+        forecast_dt :
         TODO: these modes are not being used now.
         """
 
@@ -452,6 +454,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         return streams_data
 
     def _preprocess_model_data(self, batch, forecast_dt):
+        """ """
+
         # aggregated lens of tokens per cell across input batch samples
         source_cell_lens = compute_source_cell_lens(batch, self.num_input_steps)
 
@@ -493,8 +497,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             while len(batch) < self.batch_size:
                 idx: TIndex = self.perms[idx_raw % self.perms.shape[0]]
                 idx_raw += 1
-
-                time_win_source = self.time_window_handler.window(idx)
 
                 # Sample masking strategy once per batch item
                 if hasattr(self.tokenizer, "masker"):
@@ -554,6 +556,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # TODO: link into ModelBatch
             
+            # compute
             batch, source_cell_lens, target_coords_idx = self._preprocess_model_data(
                 batch, forecast_dt
             )
