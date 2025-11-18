@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from omegaconf import OmegaConf
+
 from weathergen.evaluate.export.cf_utils import CfParser
 
 _logger = logging.getLogger(__name__)
@@ -112,7 +113,6 @@ class QuaverParser(CfParser):
             self.save(sf_fields, "sfc")
 
         _logger.info(f"Saved sample data to {self.output_format} in {self.output_dir}.")
-
 
     def extract_var_info(self, var: str) -> tuple[str, str, str]:
         """

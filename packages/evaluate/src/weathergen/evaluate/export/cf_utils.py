@@ -1,7 +1,8 @@
 import logging
 from pathlib import Path
-import xarray as xr
+
 import numpy as np
+import xarray as xr
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -67,9 +68,7 @@ class CfParser:
         var_config = self.mapping.get(var_short, {})
         raw = var_config.get("scale_factor", 1.0)
         parts = raw.split("/")
-        scale_factor = (
-            float(parts[0]) / float(parts[1]) if len(parts) == 2 else float(parts[0])
-        )
+        scale_factor = float(parts[0]) / float(parts[1]) if len(parts) == 2 else float(parts[0])
 
         add_offset = var_config.get("add_offset", 0.0)
 
