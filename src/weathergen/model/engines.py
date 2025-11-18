@@ -302,7 +302,6 @@ class GlobalAssimilationEngine(torch.nn.Module):
             self.ae_global_blocks.append(
                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
             )
-        return self.ae_global_blocks
 
     def forward(self, tokens, use_reentrant):
         for block in self.ae_global_blocks:

@@ -37,7 +37,7 @@ ae_global_trailing_layer_norm: False
 
 decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
 pred_adapter_kv: False
-pred_self_attention: False
+pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
 
