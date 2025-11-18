@@ -889,7 +889,7 @@ class WeatherGenReader(Reader):
         """
         score_path = (
             Path(self.metrics_dir)
-            / f"{self.run_id}_{stream}_{region}_{metric}_epoch{self.epoch:05d}.json"
+            / f"{self.run_id}_{stream}_{region}_{metric}_epoch{self.mini_epoch:05d}.json"
         )
         _logger.debug(f"Looking for: {score_path}")
 
