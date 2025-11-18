@@ -18,23 +18,22 @@ from pathlib import Path
 import mlflow
 from mlflow.client import MlflowClient
 from omegaconf import OmegaConf
-from xarray import DataArray
-
 from weathergen.common.config import _REPO_ROOT
 from weathergen.common.platform_env import get_platform_env
-from weathergen.evaluate.io_reader import CsvReader, WeatherGenReader
-from weathergen.evaluate.plot_utils import collect_channels
-from weathergen.evaluate.utils import (
-    calc_scores_per_stream,
-    metric_list_to_json,
-    plot_data,
-    plot_summary,
-)
 from weathergen.metrics.mlflow_utils import (
     MlFlowUpload,
     get_or_create_mlflow_parent_run,
     log_scores,
     setup_mlflow,
+)
+from xarray import DataArray
+
+from weathergen.evaluate.io_reader import CsvReader, WeatherGenReader
+from weathergen.evaluate.plot_utils import collect_channels
+from weathergen.evaluate.utils import (
+    calc_scores_per_stream,
+    plot_data,
+    plot_summary,
 )
 
 _logger = logging.getLogger(__name__)
@@ -107,6 +106,7 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
 
     # to get a structure like: scores_dict[metric][region][stream][run_id] = plot
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    needs_to_be_computed = defaultdict(lambda: defaultdict(lambda: defaultdict(set)))
 
     for run_id, run in runs.items():
         _logger.info(f"RUN {run_id}: Getting data...")
@@ -138,8 +138,6 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
 
                 for region in regions:
-                    metrics_to_compute = []
-
                     for metric in metrics:
                         metric_data = reader.load_scores(
                             stream,
@@ -148,7 +146,7 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                         )
 
                         if metric_data is None or plot_score_maps:
-                            metrics_to_compute.append(metric)
+                            needs_to_be_computed[run_id][stream][region].add(metric)
                             continue
 
                         available_data = reader.check_availability(
@@ -156,7 +154,7 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                         )
 
                         if not available_data.score_availability:
-                            metrics_to_compute.append(metric)
+                            needs_to_be_computed[run_id][stream][region].add(metric)
                         else:
                             # simply select the chosen eval channels, samples, fsteps here...
                             scores_dict[metric][region][stream][run_id] = metric_data.sel(
@@ -165,23 +163,22 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                                 forecast_step=available_data.fsteps,
                             )
 
-                    if metrics_to_compute:
-                        all_metrics, points_per_sample = calc_scores_per_stream(
-                            reader, stream, region, metrics_to_compute, plot_score_maps
-                        )
+    for run_id, streams in needs_to_be_computed.items():
+        for stream, regions_dict in streams.items():
+            missing_regions = list(regions_dict.keys())
+            missing_metrics = sorted({m for metrics in regions_dict.values() for m in metrics})
 
-                        metric_list_to_json(
-                            reader,
-                            [all_metrics],
-                            [points_per_sample],
-                            [stream],
-                            region,
-                        )
+            if not missing_metrics:
+                continue
 
-                    for metric in metrics_to_compute:
-                        scores_dict[metric][region][stream][run_id] = all_metrics.sel(
-                            {"metric": metric}
-                        )
+            _logger.info(
+                f"RUN {run_id} – stream {stream}: recomputing "
+                f"{len(missing_metrics)} metrics for {len(missing_regions)} region(s)."
+            )
+
+            scores_dict = calc_scores_per_stream(
+                reader, stream, missing_regions, missing_metrics, plot_score_maps
+            )
 
     if mlflow_client:
         # Reorder scores_dict to push to MLFlow per run_id:
