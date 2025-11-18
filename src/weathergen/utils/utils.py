@@ -11,6 +11,7 @@ import torch
 
 from weathergen.common.config import Config
 
+
 def get_dtype(value: str) -> torch.dtype:
     """
     changes the conf value to a torch dtype
@@ -28,4 +29,4 @@ def get_dtype(value: str) -> torch.dtype:
 
 
 def get_batch_size(cf: Config, world_size: int) -> int:
-   return world_size * cf.batch_size_per_gpu
+    return world_size * cf.batch_size_per_gpu
