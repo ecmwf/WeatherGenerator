@@ -12,6 +12,7 @@
 import dataclasses
 import logging
 
+import torch
 from omegaconf import DictConfig
 from torch import Tensor
 
@@ -82,9 +83,9 @@ class LossCalculator:
         targets: dict,
     ):
         loss_terms = {}
-        loss = 0
+        loss = torch.tensor(0.0, requires_grad=True)
         for weight, calculator in self.loss_calculators:
             loss_terms[calculator.name] = calculator.compute_loss(preds=preds, targets=targets)
-            loss += weight * loss_terms[calculator.name].loss
+            loss = loss + weight * loss_terms[calculator.name].loss
 
         return LossTerms(loss=loss, loss_terms=loss_terms)
