@@ -34,15 +34,20 @@ class ViewMetadata:
         rate: Fraction of data kept (e.g., 0.5 = 50% kept); None if fixed count
         parent_view_id: ID of the parent view this is a subset of (None for teacher)
     """
-    
-    loss_type: str # DINO, JEPA... ?
-    strategy: str # "cropping", "masking", "forecasting", "forecasting_diffusion"
-    strategy_config: dict #  rate: 0.5 etc., healpix_level: int etc., overlap: "disjoint" etc.,  
+    # Core identifiers and selection description
     view_id: str
-    parent_view_id: Optional[str] = None  # For students: which teacher they belong to
     keep_mask: np.ndarray          # [num_cells] bool at data level
+    strategy: str                  # e.g. "random", "healpix", "channel"
     
-
+    # Hierarchical/quantitative description of selection
+    healpix_level: Optional[int] = None
+    rate: Optional[float] = None
+    parent_view_id: Optional[str] = None  # For students: which teacher they belong to
+    
+    # Optional extras for future/other training paradigms
+    loss_type: Optional[str] = None            # e.g. DINO, JEPA
+    strategy_config: Optional[dict] = None     # e.g. {rate: 0.5, hl_mask: 3, overlap: "disjoint"}
+    
 
 # TODO: This doesn't handle the masking case, and we probably want it to,
 # where the model_inputs are the correct data for the masked source (and target?). Or target becomes the target?
