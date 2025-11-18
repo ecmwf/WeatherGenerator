@@ -175,7 +175,7 @@ class TrainerBase:
 def get_target_and_aux_calculator(config, model, rng, batch_size, **kwargs):
     target_and_aux_calc = config.training_mode_config.get("target_and_aux_calc", None)
     if target_and_aux_calc is None or target_and_aux_calc == "identity":
-        return IdentityTargetAndAux(model, rng, config)
+        return IdentityTargetAndAux(model, rng, config=config)
     elif target_and_aux_calc == "EMATeacher":
         return EMATeacher(
             model, rng, kwargs["ema_model"], batch_size, **config.training_mode_config

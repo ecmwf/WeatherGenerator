@@ -57,6 +57,7 @@ class LossModuleBase:
         self,
         preds: dict,
         targets: dict,
+        view_metadata
     ) -> LossValues:
         """
         Computes loss given predictions and targets and returns values of LossValues dataclass.

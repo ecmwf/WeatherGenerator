@@ -17,7 +17,6 @@ from omegaconf import DictConfig
 from torch import Tensor
 
 import weathergen.train.loss_modules.loss as loss_fns
-from weathergen.datasets.views import ViewMetadata
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.utils.train_logger import Stage
 
@@ -56,7 +55,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             if name in self.valid_loss_names
         }
 
-    def compute_loss(self, preds: dict, targets: dict, view_metadata: ViewMetadata) -> LossValues:
+    def compute_loss(self, preds: dict, targets: dict, view_metadata) -> LossValues:
         # gradient loss
         loss = torch.tensor(0.0, device=self.device, requires_grad=True)
 

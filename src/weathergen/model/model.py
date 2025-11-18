@@ -466,7 +466,7 @@ class Model(torch.nn.Module):
 
         # Latent heads for losses
         # TODO write the forward function for this, has to wait until other Model PRs are done
-        target_losses = cf["training_mode_config"]["losses"].get("LossLatentSSLStudentTeacher", [])
+        target_losses = cf["training_mode_config"]["losses"].get("LossLatentSSLStudentTeacher", {})
         shared_heads = cf.get("shared_heads", False)
         self.latent_heads = nn.ModuleDict()
         self.norm = nn.LayerNorm(cf.ae_local_dim_embed)

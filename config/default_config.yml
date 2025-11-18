@@ -113,16 +113,16 @@ ema_halflife_in_thousands: 1e-3
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
 training_mode: "student-teacher"
 training_mode_config: {
-  "losses" : { 
-    LossLatentSSLStudentTeacher: { 
-      "iBOT": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
-          "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      "DINO": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
-          "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      "JEPA": {'weight': 0.5, "out_dim": 2048, "n_register_tokens": 4} }
+  "losses" : { LossPhysical: [['mse', 1.0]]
+    # LossLatentSSLStudentTeacher: { 
+    #   "iBOT": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
+    #       "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+    #   "DINO": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
+    #       "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+    #   "JEPA": {'weight': 0.5, "out_dim": 2048, "n_register_tokens": 4} }
   },
-  "shared_heads": False,
-  "target_and_aux_calc": "EMATeacher",
+  # "target_and_aux_calc": "EMATeacher",
+  "target_and_aux_calc": "identity",
   "teacher_model": {}
 }
 # training_mode_config: {"losses": {LossPhysical: [['mse', 1.0]],}

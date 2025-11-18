@@ -153,6 +153,7 @@ class LossPhysical(LossModuleBase):
         self,
         preds: dict,
         targets: dict,
+        view_metadata
     ) -> LossValues:
         """
         Computes the total loss for a given batch of predictions and corresponding
@@ -184,8 +185,8 @@ class LossPhysical(LossModuleBase):
                           of predictions for channels with statistical loss functions, normalized.
         """
 
-        preds = preds.physical
-        streams_data = targets["physical"]
+        preds = preds[0].physical
+        streams_data = targets[0]["physical"]
 
         # gradient loss
         loss = torch.tensor(0.0, device=self.device, requires_grad=True)
