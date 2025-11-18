@@ -17,7 +17,7 @@ from omegaconf import DictConfig
 from torch import Tensor
 
 import weathergen.train.loss_modules.loss_functions as losses
-from weathergen.train.loss_modules.loss import stat_loss_fcts
+from weathergen.train.loss_modules.loss_functions import stat_loss_fcts
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.utils.train_logger import TRAIN, VAL, Stage
 
