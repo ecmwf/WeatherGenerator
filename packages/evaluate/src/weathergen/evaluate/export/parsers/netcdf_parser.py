@@ -47,8 +47,6 @@ class NetcdfParser(CfParser):
 
         super().__init__(config=config, grid_type=self.grid_type)
 
-        # self.mapping = config.get("variables", {})
-
     def process_sample(
         self,
         fstep_iterator_results: iter,
