@@ -120,16 +120,14 @@ class TrainLogger:
         log_vals += [lr]
 
         st = self.cf.streams[0]
-        for _, loss_terms in losses_all.items():
-            for loss_name, losses in loss_terms.items():
-                metrics[f"{loss_name}.loss_avg"] = losses[:, :].nanmean().item()
-                for k, ch_n in enumerate(st.train_target_channels):
-                    metrics[f"{loss_name}.loss_{ch_n}"] = losses[:, k].nanmean().item()
-                log_vals += [losses[:, :].nanmean().item()]
-        for _, stddev_terms in stddev_all.items():
-            for loss_name, stddev in stddev_terms.items():
-                metrics[f"{loss_name}.stddev_avg"] = stddev.nanmean().item()
-                log_vals += [stddev.nanmean().item()]
+        for loss_name, loss_values in losses_all.items():
+            metrics[f"{loss_name}.loss_avg"] = loss_values[:, :].nanmean().item()
+            for k, ch_n in enumerate(st.train_target_channels):
+                metrics[f"{loss_name}.loss_{ch_n}"] = loss_values[:, k].nanmean().item()
+            log_vals += [loss_values[:, :].nanmean().item()]
+        for loss_name, stddev_values in stddev_all.items():
+            metrics[f"{loss_name}.stddev_avg"] = stddev_values.nanmean().item()
+            log_vals += [stddev_values.nanmean().item()]
 
         with open(self.path_run / f"{self.cf.run_id}_train_log.txt", "ab") as f:
             np.savetxt(f, log_vals)
@@ -157,16 +155,14 @@ class TrainLogger:
         log_vals += [samples]
 
         st = self.cf.streams[0]
-        for _, loss_terms in losses_all.items():
-            for loss_name, losses in loss_terms.items():
-                metrics[f"{loss_name}.loss_avg"] = losses[:, :].nanmean().item()
-                for k, ch_n in enumerate(st.train_target_channels):
-                    metrics[f"{loss_name}.loss_{ch_n}"] = losses[:, k].nanmean().item()
-                log_vals += [losses[:, :].nanmean().item()]
-        for _, stddev_terms in stddev_all.items():
-            for loss_name, stddev in stddev_terms.items():
-                metrics[f"{loss_name}.stddev_avg"] = stddev.nanmean().item()
-                log_vals += [stddev.nanmean().item()]
+        for loss_name, loss_values in losses_all.items():
+            metrics[f"{loss_name}.loss_avg"] = loss_values[:, :].nanmean().item()
+            for k, ch_n in enumerate(st.train_target_channels):
+                metrics[f"{loss_name}.loss_{ch_n}"] = loss_values[:, k].nanmean().item()
+            log_vals += [loss_values[:, :].nanmean().item()]
+        for loss_name, stddev_values in stddev_all.items():
+            metrics[f"{loss_name}.stddev_avg"] = stddev_values.nanmean().item()
+            log_vals += [stddev_values.nanmean().item()]
 
         self.log_metrics("val", metrics)
         with open(self.path_run / (self.cf.run_id + "_val_log.txt"), "ab") as f:
