@@ -18,22 +18,22 @@ from pathlib import Path
 import mlflow
 from mlflow.client import MlflowClient
 from omegaconf import OmegaConf
-from weathergen.common.config import _REPO_ROOT
-from weathergen.common.platform_env import get_platform_env
-from weathergen.metrics.mlflow_utils import (
-    MlFlowUpload,
-    get_or_create_mlflow_parent_run,
-    log_scores,
-    setup_mlflow,
-)
 from xarray import DataArray
 
+from weathergen.common.config import _REPO_ROOT
+from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io_reader import CsvReader, WeatherGenReader
 from weathergen.evaluate.plot_utils import collect_channels
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     plot_data,
     plot_summary,
+)
+from weathergen.metrics.mlflow_utils import (
+    MlFlowUpload,
+    get_or_create_mlflow_parent_run,
+    log_scores,
+    setup_mlflow,
 )
 
 _logger = logging.getLogger(__name__)

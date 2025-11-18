@@ -145,7 +145,7 @@ def calc_scores_per_stream(
 
             if region != "global":
                 _logger.debug(
-                    f"Applying bounding box mask for region '{region}' to targets and predictions..."
+                    f"Applying bounding box mask for region '{region}' to targets and predictions."
                 )
                 tars = bbox.apply_mask(tars)
                 preds = bbox.apply_mask(preds)
