@@ -613,7 +613,7 @@ class Model(torch.nn.Module):
         (streams_data, source_cell_lens, target_coords_idxs) = batch
 
         # embed
-        tokens = self.embed_cells(model_params, streams_data)
+        tokens = self.embed_cells(model_params, streams_data, source_cell_lens)
 
         # local assimilation engine and adapter
         tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
@@ -656,7 +656,9 @@ class Model(torch.nn.Module):
         return preds_all, posteriors
 
     #########################################
-    def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
+    def embed_cells(
+        self, model_params: ModelParams, streams_data, source_cell_lens
+    ) -> torch.Tensor:
         """Embeds input data for each stream separately and rearranges it to cell-wise order
         Args:
             model_params : Query and embedding parameters
@@ -666,7 +668,9 @@ class Model(torch.nn.Module):
         """
 
         device = next(self.parameters()).device
-        tokens_all = self.embed_engine(streams_data, model_params.pe_embed, self.dtype, device)
+        tokens_all = self.embed_engine(
+            streams_data, source_cell_lens, model_params.pe_embed, self.dtype, device
+        )
 
         return tokens_all
 
