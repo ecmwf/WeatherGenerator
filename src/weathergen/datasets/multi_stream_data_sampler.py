@@ -34,7 +34,6 @@ from weathergen.datasets.utils import (
 )
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import Stage
-from weathergen.datasets.inputs_metadata import ModelBatch
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 
@@ -100,7 +99,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.mask_value = 0.0
         self._stage = stage
 
-        self.num_input_steps = cf.get( "num_input_steps", 1)
+        self.num_input_steps = cf.get("num_input_steps", 1)
 
         self.len_hrs: int = cf.len_hrs
         self.step_hrs: int = cf.step_hrs
@@ -315,7 +314,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     def _build_stream_data_source(
         self,
-        stream_data : StreamData,
+        stream_data: StreamData,
         base_idx: TIndex,
         forecast_dt: int,
         # view_meta: ViewMetadata,
@@ -325,22 +324,21 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """
         Return one batch of data
         Build a StreamData object for a single view (teacher or student).
-        
+
         Args:
-            stream_data : 
+            stream_data :
             base_idx: Time index for this sample
             forecast_dt: Number of forecast steps
             view_meta: ViewMetadata describing spatial mask
             stream_info: Stream configuration dict
             stream_ds: List of dataset readers for this stream
-            
+
         Returns:
             StreamData with source and targets masked according to view_meta
         """
 
         # iterate overall input steps
-        for step, idx in enumerate( range( base_idx, base_idx-self.num_input_steps, -1)) :
-
+        for step, idx in enumerate(range(base_idx, base_idx - self.num_input_steps, -1)):
             # TODO: check that we are not out of bounds when we go back in time
 
             time_win_source = self.time_window_handler.window(idx)
@@ -360,38 +358,33 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 stream_data.source_is_spoof = True
 
             # preprocess data for model input
-            (ss_cells, ss_lens) = self.tokenizer.batchify_source(
+            (ss_cells, ss_lens, mask_state) = self.tokenizer.batchify_source(
                 stream_info,
                 readerdata_to_torch(rdata),
                 (time_win_source.start, time_win_source.end),
             )
 
             # collect data for stream
-            stream_data.add_source( step, rdata, ss_lens, ss_cells)
+            stream_data.add_source(step, rdata, ss_lens, ss_cells)
 
         return stream_data
 
-    def _build_stream_data_target( 
+    def _build_stream_data_target(
         self,
-        stream_data : StreamData,
+        stream_data: StreamData,
         idx: TIndex,
         forecast_dt: int,
         # view_meta: ViewMetadata,
         stream_info: dict,
         stream_ds: list,
-    ) -> StreamData :
-
+    ) -> StreamData:
         # collect for all forecast steps
-        for fstep in range(
-            self.forecast_offset, self.forecast_offset + forecast_dt + 1
-        ):
+        for fstep in range(self.forecast_offset, self.forecast_offset + forecast_dt + 1):
             step_forecast_dt = idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
             time_win_target = self.time_window_handler.window(step_forecast_dt)
 
             # collect all targets for current stream
-            rdata: IOReaderData = collect_datasources(
-                stream_ds, step_forecast_dt, "target"
-            )
+            rdata: IOReaderData = collect_datasources(stream_ds, step_forecast_dt, "target")
 
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
@@ -416,8 +409,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         return stream_data
 
-    def _preprocess_model_data( self, batch) :
-
+    def _preprocess_model_data(self, batch, forecast_dt):
         # aggregated lens of tokens per cell across input batch samples
         source_cell_lens = compute_source_cell_lens(batch, self.num_input_steps)
 
@@ -428,7 +420,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # (info is not per stream so separate data structure)
         target_coords_idx = compute_idxs_predict(self.forecast_offset + forecast_dt, batch)
 
-    return batch, source_cell_lens, target_coords_idx
+        return batch, source_cell_lens, target_coords_idx
 
     ###################################################
     def __iter__(self):
@@ -472,18 +464,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 # for all streams
                 for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
-                    
                     stream_data = StreamData(
                         idx, forecast_dt + self.forecast_offset, self.num_healpix_cells
                     )
-                    
+
                     # collect source data for current stream
-                    stream_data = self._build_stream_data_source( 
+                    stream_data = self._build_stream_data_source(
                         stream_data, idx, forecast_dt, stream_info, stream_ds
                     )
 
                     # collect target data for current stream
-                    stream_data = self._build_stream_data_target( 
+                    stream_data = self._build_stream_data_target(
                         stream_data, idx, forecast_dt, stream_info, stream_ds
                     )
 
@@ -498,7 +489,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if not (all(s.empty() or s.target_empty() for s in streams_data)):
                     batch += [streams_data]
 
-            batch, source_cell_lens, target_coords_idx = self._preprocess_model_data( batch)
+            batch, source_cell_lens, target_coords_idx = self._preprocess_model_data(
+                batch, forecast_dt
+            )
 
             yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
 

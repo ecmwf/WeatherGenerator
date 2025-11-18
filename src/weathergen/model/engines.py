@@ -80,11 +80,14 @@ class EmbeddingEngine(torch.nn.Module):
                 raise ValueError("Unsupported embedding network type")
 
     def forward(self, streams_data, pe_embed, dtype, device):
+        istep = 0
         source_tokens_lens = torch.stack(
             [
                 torch.stack(
                     [
-                        s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
+                        s.source_tokens_lens[istep]
+                        if len(s.source_tokens_lens[istep]) > 0
+                        else torch.tensor([])
                         for s in stl_b
                     ]
                 )
@@ -100,13 +103,13 @@ class EmbeddingEngine(torch.nn.Module):
         for _, sb in enumerate(streams_data):
             for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
                 if not s.source_empty():
-                    idxs = s.source_idxs_embed.to(device)
-                    idxs_pe = s.source_idxs_embed_pe.to(device)
+                    idxs = s.source_idxs_embed[istep].to(device)
+                    idxs_pe = s.source_idxs_embed_pe[istep].to(device)
 
                     # create full scatter index
                     # (there's no broadcasting which is likely highly inefficient)
                     idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed(s.source_tokens_cells).flatten(0, 1)
+                    x_embed = embed(s.source_tokens_cells[istep]).flatten(0, 1)
                     # there's undocumented limitation in flash_attn that will make embed fail if
                     # #tokens is too large; code below is a work around
                     # x_embed = torch.cat(

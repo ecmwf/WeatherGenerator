@@ -726,7 +726,9 @@ class Model(torch.nn.Module):
 
         # work around to bug in flash attention for hl>=5
 
-        cell_lens = cell_lens[1:]
+        istep = 0
+
+        cell_lens = cell_lens[istep][1:]
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_all = []
         posteriors = []

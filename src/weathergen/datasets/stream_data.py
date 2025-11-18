@@ -67,8 +67,8 @@ class StreamData:
         self.source_raw = []
         # auxiliary data for scatter operation that changes from stream-centric to cell-centric
         # processing after embedding
-        self.source_idxs_embed = torch.tensor([])
-        self.source_idxs_embed_pe = torch.tensor([])
+        self.source_idxs_embed = [torch.tensor([])]
+        self.source_idxs_embed_pe = [torch.tensor([])]
 
     def to_device(self, device: str) -> None:
         """
@@ -84,14 +84,15 @@ class StreamData:
         None
         """
 
-        self.source_tokens_cells = self.source_tokens_cells.to(device, non_blocking=True)
-        self.source_tokens_lens = self.source_tokens_lens.to(device, non_blocking=True)
+        dv = device
+        self.source_tokens_cells = [s.to(dv, non_blocking=True) for s in self.source_tokens_cells]
+        self.source_tokens_lens = [s.to(dv, non_blocking=True) for s in self.source_tokens_lens]
 
-        self.target_coords = [t.to(device, non_blocking=True) for t in self.target_coords]
-        self.target_tokens = [t.to(device, non_blocking=True) for t in self.target_tokens]
+        self.target_coords = [t.to(dv, non_blocking=True) for t in self.target_coords]
+        self.target_tokens = [t.to(dv, non_blocking=True) for t in self.target_tokens]
 
-        self.source_idxs_embed = self.source_idxs_embed.to(device, non_blocking=True)
-        self.source_idxs_embed_pe = self.source_idxs_embed_pe.to(device, non_blocking=True)
+        self.source_idxs_embed = [s.to(dv, non_blocking=True) for s in self.source_idxs_embed]
+        self.source_idxs_embed_pe = [s.to(dv, non_blocking=True) for s in self.source_idxs_embed_pe]
 
         return self
 
@@ -135,7 +136,9 @@ class StreamData:
             np.array([], dtype="datetime64[ns]") for _ in range(self.healpix_cells)
         ]
 
-    def add_source(self, ss_raw: IOReaderData, ss_lens: torch.tensor, ss_cells: list) -> None:
+    def add_source(
+        self, step: int, ss_raw: IOReaderData, ss_lens: torch.tensor, ss_cells: list
+    ) -> None:
         """
         Add data for source for one input.
 
@@ -151,12 +154,13 @@ class StreamData:
         None
         """
 
-        self.source_raw = ss_raw
-        self.source_tokens_lens = ss_lens
-        self.source_tokens_cells = torch.stack(ss_cells)
+        # TODO: use step
+        self.source_raw += [ss_raw]
+        self.source_tokens_lens += [ss_lens]
+        self.source_tokens_cells += [torch.stack(ss_cells)]
 
-        idx = torch.isnan(self.source_tokens_cells)
-        self.source_tokens_cells[idx] = self.mask_value
+        idx = torch.isnan(self.source_tokens_cells[-1])
+        self.source_tokens_cells[-1][idx] = self.mask_value
 
     def add_target(
         self,
@@ -232,7 +236,7 @@ class StreamData:
             True if target is empty for stream, else False
         """
 
-        return self.source_tokens_lens.sum() == 0
+        return torch.tensor([s.sum() for s in self.source_tokens_lens]).sum() == 0
 
     def empty(self):
         """

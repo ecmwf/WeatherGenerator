@@ -266,7 +266,7 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
     return a
 
 
-def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
+def compute_offsets_scatter_embed(batch: StreamData, num_input_steps: int) -> StreamData:
     """
     Compute auxiliary information for scatter operation that changes from stream-centric to
     cell-centric computations
@@ -283,46 +283,52 @@ def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
     """
 
     # collect source_tokens_lens for all stream datas
-    source_tokens_lens = torch.stack(
-        [
-            torch.stack(
-                [
-                    s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
-                    for s in stl_b
-                ]
-            )
-            for stl_b in batch
-        ]
-    )
+    source_tokens_lens = [
+        torch.stack(
+            [
+                torch.stack(
+                    [
+                        s.source_tokens_lens[i]
+                        if len(s.source_tokens_lens[i]) > 0
+                        else torch.tensor([])
+                        for s in stl_b
+                    ]
+                )
+                for stl_b in batch
+            ]
+        )
+        for i in range(num_input_steps)
+    ]
 
     # precompute index sets for scatter operation after embed
-    offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
-    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets_base[:-1]])
-    offsets_pe = torch.zeros_like(offsets)
+    offsets_base = [s.sum(1).sum(0).cumsum(0) for s in source_tokens_lens]
+    offsets = [torch.cat([torch.zeros(1, dtype=torch.int32), o[:-1]]) for o in offsets_base]
+    offsets_pe = [torch.zeros_like(o) for o in offsets]
 
-    for ib, sb in enumerate(batch):
-        for itype, s in enumerate(sb):
-            if not s.source_empty():
-                s.source_idxs_embed = torch.cat(
-                    [
-                        torch.arange(offset, offset + token_len, dtype=torch.int64)
-                        for offset, token_len in zip(
-                            offsets, source_tokens_lens[ib, itype], strict=False
-                        )
-                    ]
-                )
-                s.source_idxs_embed_pe = torch.cat(
-                    [
-                        torch.arange(offset, offset + token_len, dtype=torch.int32)
-                        for offset, token_len in zip(
-                            offsets_pe, source_tokens_lens[ib][itype], strict=False
-                        )
-                    ]
-                )
+    for i_s in range(num_input_steps):
+        for ib, sb in enumerate(batch):  # batch items
+            for itype, s in enumerate(sb):  # streams, i.e. here we have StreamData object
+                if not s.source_empty():
+                    s.source_idxs_embed[i_s] = torch.cat(
+                        [
+                            torch.arange(offset, offset + token_len, dtype=torch.int64)
+                            for offset, token_len in zip(
+                                offsets[i_s], source_tokens_lens[i_s][ib, itype], strict=False
+                            )
+                        ]
+                    )
+                    s.source_idxs_embed_pe[i_s] = torch.cat(
+                        [
+                            torch.arange(offset, offset + token_len, dtype=torch.int32)
+                            for offset, token_len in zip(
+                                offsets_pe[i_s], source_tokens_lens[i_s][ib][itype], strict=False
+                            )
+                        ]
+                    )
 
-            # advance offsets
-            offsets += source_tokens_lens[ib][itype]
-            offsets_pe += source_tokens_lens[ib][itype]
+                # advance offsets
+                offsets[i_s] += source_tokens_lens[i_s][ib][itype]
+                offsets_pe[i_s] += source_tokens_lens[i_s][ib][itype]
 
     return batch
 
@@ -372,14 +378,16 @@ def compute_idxs_predict(forecast_dt: int, batch: StreamData) -> list:
     return tcs_lens_merged
 
 
-def compute_source_cell_lens(batch: StreamData) -> torch.tensor:
+def compute_source_cell_lens(
+    batch: list[list[StreamData]], num_input_steps: int
+) -> list[torch.tensor]:
     """
     Compute auxiliary information for varlen attention for local assimilation
 
     Parameters
     ----------
     batch :
-        StreamData information for current batch
+        StreamData information for current batch for each batch item and each stream
 
     Returns
     -------
@@ -388,18 +396,24 @@ def compute_source_cell_lens(batch: StreamData) -> torch.tensor:
     """
 
     # precompute for processing in the model (with varlen flash attention)
-    source_cell_lens_raw = torch.stack(
-        [
-            torch.stack(
-                [
-                    s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
-                    for s in stl_b
-                ]
-            )
-            for stl_b in batch
-        ]
-    )
-    source_cell_lens = torch.sum(source_cell_lens_raw, 1).flatten().to(torch.int32)
-    source_cell_lens = torch.cat([torch.zeros(1, dtype=torch.int32), source_cell_lens])
+    source_cell_lens_raw = [
+        torch.stack(
+            [
+                torch.stack(
+                    [
+                        s.source_tokens_lens[i]
+                        if len(s.source_tokens_lens[i]) > 0
+                        else torch.tensor([])
+                        for s in stl_b
+                    ]
+                )
+                for stl_b in batch
+            ]
+        )
+        for i in range(num_input_steps)
+    ]
+
+    source_cell_lens = [torch.sum(c, 1).flatten().to(torch.int32) for c in source_cell_lens_raw]
+    source_cell_lens = [torch.cat([torch.zeros(1, dtype=torch.int32), c]) for c in source_cell_lens]
 
     return source_cell_lens
