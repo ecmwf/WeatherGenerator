@@ -108,6 +108,35 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           "same_strategy_per_batch": false
                           }
 
+# Student-teacher configuration (only used when training_mode == "student_teacher")
+training_config:
+  # when this is "masking", we are basically only using the model_input subconfig
+  training_mode: "student_teacher"  # "masking", "student_teacher", "forecast"
+
+  model_input:
+    masking_strategy: "healpix" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
+    rate: 0.5  # Masking rate to use for model input
+    num_views: 4  # if student-teacher, the number of local (student) views to generate
+    masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
+                              "probabilities": [0.34, 0.33, 0.33],
+                              "hl_mask": 0, "mode": "per_cell",
+                              "same_strategy_per_batch": false
+                              }
+  
+  teacher_model_input:
+    strategy: "healpix"  # Strategy for teacher (global) view: "random", "healpix"
+    rate: 0.1  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
+    # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
+    rate_sampling: true  # randomly sample the rate per batch
+    masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
+                              "probabilities": [0.34, 0.33, 0.33],
+                              "hl_mask": 4, "mode": "per_cell",
+                              "same_strategy_per_batch": false
+                              }
+
+
+
+
 num_epochs: 32
 samples_per_epoch: 4096
 samples_per_validation: 512

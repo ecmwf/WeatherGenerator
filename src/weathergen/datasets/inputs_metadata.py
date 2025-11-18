@@ -19,7 +19,7 @@ import torch
 # TODO: GetMetaData: then this gets the right rn for the timestep!
 
 @dataclass
-class SampleMetadata:
+class ViewMetadata:
     """
     Metadata describing how a view was generated.
     
@@ -34,12 +34,14 @@ class SampleMetadata:
         rate: Fraction of data kept (e.g., 0.5 = 50% kept); None if fixed count
         parent_view_id: ID of the parent view this is a subset of (None for teacher)
     """
+    
+    loss_type: str # DINO, JEPA... ?
+    strategy: str # "cropping", "masking", "forecasting", "forecasting_diffusion"
+    strategy_config: dict #  rate: 0.5 etc., healpix_level: int etc., overlap: "disjoint" etc.,  
     view_id: str
-    keep_mask: np.ndarray          # [num_cells] bool at data level
-    strategy: str                  # e.g., "random", "healpix_level_2"
-    healpix_level: Optional[int]
-    rate: Optional[float]
     parent_view_id: Optional[str] = None  # For students: which teacher they belong to
+    keep_mask: np.ndarray          # [num_cells] bool at data level
+    
 
 
 # TODO: This doesn't handle the masking case, and we probably want it to,
@@ -78,7 +80,7 @@ class ModelBatch:
     
     model_inputs: list[list[any]]   # [n_students][n_streams]
     targets: list[list[any]]        # [1][n_streams] (teacher)
-    view_metadata: list[ViewMetadata]
+    view_metadata: dict[str, ViewMetadata] # perhaps dict, teacher_metadata : ViewMetadata, student_metadata: list[ViewMetadata]
     batch_info: Optional[dict] = field(default_factory=dict)
     
     # Offsets for student views (populated when needed for future student-teacher training)
