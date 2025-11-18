@@ -69,15 +69,6 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
-loss_fcts:
-  - 
-    - "mse"
-    - 1.0
-loss_fcts_val:
-  -
-    - "mse"
-    - 1.0
-
 batch_size_per_gpu: 1
 batch_size_validation_per_gpu: 1
 
@@ -124,8 +115,8 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           }
 
 num_mini_epochs: 32
-samples_per_mini_epoch: 4096
-samples_per_validation: 512
+samples_per_mini_epoch: 32
+samples_per_validation: 8
 
 shuffle: True
 
