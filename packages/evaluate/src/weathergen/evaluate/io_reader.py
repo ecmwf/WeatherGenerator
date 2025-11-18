@@ -18,9 +18,9 @@ import omegaconf as oc
 import pandas as pd
 import xarray as xr
 from tqdm import tqdm
-
 from weathergen.common.config import get_shared_wg_path, load_config, load_model_config
 from weathergen.common.io import ZarrIO
+
 from weathergen.evaluate.derived_channels import DeriveChannels
 from weathergen.evaluate.score_utils import to_list
 
@@ -876,7 +876,7 @@ class WeatherGenReader(Reader):
         """
         score_path = (
             Path(self.metrics_dir)
-            / f"{self.run_id}_{stream}_{region}_{metric}_epoch{self.epoch:05d}.json"
+            / f"{self.run_id}_{stream}_{region}_{metric}_epoch{self.mini_epoch:05d}.json"
         )
         _logger.debug(f"Looking for: {score_path}")
 
