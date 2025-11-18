@@ -8,11 +8,11 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-from dataclasses import dataclass, field
 import itertools
 import logging
 import re
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +56,7 @@ from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class ViewMetadata:
     """
@@ -72,7 +73,7 @@ class ViewMetadata:
     """
 
     view_id: str
-    keep_mask: np.ndarray  # [num_cells] bool at data level
+    keep_mask: np.typing.NDArray  # [num_cells] bool at data level
     strategy: str  # e.g., "random", "healpix_level_2"
     healpix_level: int | None
     rate: float | None
@@ -80,17 +81,22 @@ class ViewMetadata:
 
 
 # TODO: This doesn't handle the masking case, and we probably want it to,
-# where the model_inputs are the correct data for the masked source (and target?). Or target becomes the target?
+# where the model_inputs are the correct data for the masked source (and target?). Or target becomes
+# the target?
 # Also should this model batch contain the source_cell_lens and target_coords_idx?
-# Every sample is n different [streams]...each view is a different dictionary corresponding to one model input
+# Every sample is n different [streams]...each view is a different dictionary corresponding to one
+# model input
 # to get epsilon in there...
-# batches is for parallelism, but needs to all be in a tensor... [b, n, dim_embedding]? [b x n, dim_embedding]
+# batches is for parallelism, but needs to all be in a tensor... [b, n, dim_embedding]?
+# [b x n, dim_embedding]
 
 
 # NOTE: this only stores the student source_cell_lens and target_coords_idx,
-# because the teacher ones are already provided separately in (model_batches, source_cell_lens, target_coords_idx, forecast_dt)
+# because the teacher ones are already provided separately in
+# (model_batches, source_cell_lens, target_coords_idx, forecast_dt)
 # ^^^^^^ teacher ones ^^^^^^
-# However, we should probably store them all here for consistency. This needs changes to the model, so not done now.
+# However, we should probably store them all here for consistency. This needs changes to the model,
+# so not done now.
 # The forecast_dt is provided separately?
 
 
@@ -120,7 +126,8 @@ class ModelBatch:
     # TODO: this also needs target_source_cell_lens and target_target_coords_idx for teacher views
     # TODO fix this ridiculous naming
 
-    # TODO: add the timestep as an optional int for the model_inputs when we have multiple timesteps for the diffusion model...
+    # TODO: add the timestep as an optional int for the model_inputs when we have multiple
+    # timesteps for the diffusion model...
     # TODO add the forecast_dt as an optional int ?
 
     def to_device(self, device):
@@ -151,6 +158,7 @@ class ModelBatch:
             ]
 
         return self
+
 
 class Trainer(TrainerBase):
     def __init__(self, train_log_freq: Config):

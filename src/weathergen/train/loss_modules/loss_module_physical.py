@@ -149,12 +149,7 @@ class LossPhysical(LossModuleBase):
 
         return loss_lfct, losses_chs
 
-    def compute_loss(
-        self,
-        preds: dict,
-        targets: dict,
-        view_metadata
-    ) -> LossValues:
+    def compute_loss(self, preds: dict, targets: dict, view_metadata) -> LossValues:
         """
         Computes the total loss for a given batch of predictions and corresponding
         stream data.
@@ -641,7 +636,8 @@ class LossLatent(LossModuleBase):
         ):  # the first entry in tokens_all is the source itself, so skip it
             loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_loss_fcts = 0
-            # if forecast_offset==0, then the timepoints correspond. Otherwise targets don't encode the source timestep, so we don't need to skip
+            # if forecast_offset==0, then the timepoints correspond. Otherwise targets don't encode
+            # the source timestep, so we don't need to skip
             fstep_targs = fstep if self.cf.forecast_offset == 0 else fstep - 1
             for i_lfct, (loss_fct, loss_fct_weight) in enumerate(self.loss_fcts_lat):
                 loss_lfct = self._loss_per_loss_function(

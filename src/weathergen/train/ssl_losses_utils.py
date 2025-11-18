@@ -1,3 +1,5 @@
+# ruff: noqa: N801, N806
+
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -61,7 +63,8 @@ class iBOTPatchTargetProcessing(nn.Module):
         #   as self.center is a float32, everything gets casted to float32 afterwards
         #
         # teacher_patch_tokens = teacher_patch_tokens.float()
-        # return F.softmax((teacher_patch_tokens.sub_(self.center.to(teacher_patch_tokens.dtype))).mul_(1 / teacher_temp), dim=-1)
+        # return F.softmax((teacher_patch_tokens.sub_(self.center.to(
+        #        teacher_patch_tokens.dtype))).mul_(1 / teacher_temp), dim=-1)
 
         return F.softmax((teacher_patch_tokens - self.center) / teacher_temp, dim=-1)
 
@@ -88,7 +91,7 @@ class iBOTPatchTargetProcessing(nn.Module):
             dist.all_reduce(sum_Q)
         Q /= sum_Q
 
-        for it in range(n_iterations):
+        for _it in range(n_iterations):
             # normalize each row: total weight per prototype must be 1/K
             sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
             if dist.is_initialized():
