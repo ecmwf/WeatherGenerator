@@ -12,7 +12,6 @@
 import logging
 import math
 import warnings
-from pathlib import Path
 
 import astropy_healpix as hp
 import astropy_healpix.healpy
@@ -260,11 +259,11 @@ class Model(torch.nn.Module):
         cf = self.cf
 
         # separate embedding networks for differnt observation types
-        self.embeds = EmbeddingEngine(cf, self.sources_size).create()
+        self.embed_engine = EmbeddingEngine(cf, self.sources_size)
 
         ##############
         # local assimilation engine
-        self.ae_local_blocks = LocalAssimilationEngine(cf).create()
+        self.ae_local_engine = LocalAssimilationEngine(cf)
 
         if cf.latent_noise_kl_weight > 0.0:
             self.interpolate_latents = LatentInterpolator(
@@ -276,7 +275,7 @@ class Model(torch.nn.Module):
 
         ##############
         # local -> global assimilation engine adapter
-        self.ae_adapter = Local2GlobalAssimilationEngine(cf).create()
+        self.ae_local_global_engine = Local2GlobalAssimilationEngine(cf)
 
         ##############
         # learnable queries
@@ -308,7 +307,7 @@ class Model(torch.nn.Module):
 
         ##############
         # global assimilation engine
-        self.ae_global_blocks = GlobalAssimilationEngine(cf, self.num_healpix_cells).create()
+        self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
 
         ###############
         # forecasting engine
@@ -321,7 +320,7 @@ class Model(torch.nn.Module):
                 "Empty forecast engine (fe_num_blocks = 0), but forecast_steps[i] > 0 for some i"
             )
 
-        self.fe_blocks = ForecastingEngine(cf, self.num_healpix_cells).create()
+        self.forecast_engine = ForecastingEngine(cf, self.num_healpix_cells)
 
         ###############
         # embed coordinates yielding one query token for each target token
@@ -466,15 +465,15 @@ class Model(torch.nn.Module):
         """Print number of parameters for entire model and each module used to build the model"""
 
         cf = self.cf
-        num_params_embed = [get_num_parameters(embed) for embed in self.embeds]
+        num_params_embed = [get_num_parameters(embed) for embed in self.embed_engine.embeds]
         num_params_total = get_num_parameters(self)
-        num_params_ae_local = get_num_parameters(self.ae_local_blocks)
-        num_params_ae_global = get_num_parameters(self.ae_global_blocks)
+        num_params_ae_local = get_num_parameters(self.ae_local_engine.ae_local_blocks)
+        num_params_ae_global = get_num_parameters(self.ae_global_engine.ae_global_blocks)
 
         num_params_q_cells = np.prod(self.q_cells.shape) if self.q_cells.requires_grad else 0
-        num_params_ae_adapater = get_num_parameters(self.ae_adapter)
+        num_params_ae_adapater = get_num_parameters(self.ae_local_global_engine.ae_adapter)
 
-        num_params_fe = get_num_parameters(self.fe_blocks)
+        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
         num_params_pred_adapter = [get_num_parameters(kv) for kv in self.pred_adapter_kv]
         num_params_embed_tcs = [get_num_parameters(etc) for etc in self.embed_target_coords]
@@ -510,42 +509,43 @@ class Model(torch.nn.Module):
         print("-----------------")
 
     #########################################
-    def load(self, run_id: str, epoch: str = -1) -> None:
-        """Loads model state from checkpoint and checks for missing and unused keys.
+    def rename_old_state_dict(self, params: dict) -> dict:
+        """Checks if model from checkpoint is from the old model version and if so renames
+        the parameters accordingly to the new model version.
+
         Args:
-            run_id : model_id of the trained model
-            epoch : The epoch to load. Default (-1) is the latest epoch
+            params : Dictionary with (old) model parameters from checkpoint
+        Returns:
+            new_params : Dictionary with (renamed) model parameters
         """
+        params_cleanup = {
+            "embeds": "embed_engine.embeds",  # EmbeddingEngine
+            "ae_local_blocks": "ae_local_engine.ae_local_blocks",  # LocalAssimilationEngine
+            "ae_adapter": "ae_local_global_engine.ae_adapter",  # Local2GlobalAssimilationEngine
+            "ae_global_blocks": "ae_global_engine.ae_global_blocks",  # GlobalAssimilationEngine
+            "fe_blocks": "forecast_engine.fe_blocks",  # ForecastingEngine
+        }
 
-        path_run = Path(self.cf.model_path) / run_id
-        epoch_id = f"epoch{epoch:05d}" if epoch != -1 and epoch is not None else "latest"
-        filename = f"{run_id}_{epoch_id}.chkpt"
+        new_params = {}
 
-        params = torch.load(
-            path_run / filename, map_location=torch.device("cpu"), weights_only=True
-        )
-        params_renamed = {}
-        for k in params.keys():
-            params_renamed[k.replace("module.", "")] = params[k]
-        mkeys, ukeys = self.load_state_dict(params_renamed, strict=False)
-        # mkeys, ukeys = self.load_state_dict( params, strict=False)
+        for k, v in params.items():
+            new_k = k
+            prefix = ""
 
-        if len(mkeys) > 0 and is_root():
-            logger.warning(f"Missing keys when loading model: {mkeys}")
+            # Strip "module." (prefix for DataParallel or DistributedDataParallel)
+            if new_k.startswith("module."):
+                prefix = "module."
+                new_k = new_k[len(prefix) :]
 
-        if len(ukeys) > 0 and is_root():
-            logger.warning(f"Unused keys when loading model: {mkeys}")
+            first_w, rest = new_k.split(".", 1) if "." in new_k else (new_k, "")
+            # Only check first word (root level modules) to avoid false matches.
+            if first_w in params_cleanup:
+                new_k = params_cleanup[first_w] + "." + rest
 
-    #########################################
-    def forward_jac(self, *args):
-        sources = args[:-1]
-        sources_lens = args[-1]
-        # no-op when satisfied but needed for Jacobian
-        sources_lens = sources_lens.to(torch.int64).cpu()
+            new_k = prefix + new_k
+            new_params[new_k] = v
 
-        preds_all = self.forward(sources, sources_lens)
-
-        return tuple(preds_all[0])
+        return new_params
 
     #########################################
     def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
@@ -621,47 +621,8 @@ class Model(torch.nn.Module):
             Tokens for local assimilation
         """
 
-        source_tokens_lens = torch.stack(
-            [
-                torch.stack(
-                    [
-                        s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
-                        for s in stl_b
-                    ]
-                )
-                for stl_b in streams_data
-            ]
-        )
-        offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
         device = next(self.parameters()).device
-        tokens_all = torch.empty(
-            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=self.dtype, device=device
-        )
-
-        for _, sb in enumerate(streams_data):
-            for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                if not s.source_empty():
-                    idxs = s.source_idxs_embed.to(device)
-                    idxs_pe = s.source_idxs_embed_pe.to(device)
-
-                    # create full scatter index
-                    # (there's no broadcasting which is likely highly inefficient)
-                    idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
-                    # there's undocumented limitation in flash_attn that will make embed fail if
-                    # #tokens is too large; code below is a work around
-                    # x_embed = torch.cat(
-                    #     [
-                    #         embed(s_c, c_c).flatten(0, 1)
-                    #         for s_c, c_c in zip(
-                    #             torch.split(s.source_tokens_cells, 49152),
-                    #             torch.split(s.source_centroids, 49152),
-                    #         )
-                    #     ]
-                    # )
-
-                    # scatter write to reorder from per stream to per cell ordering
-                    tokens_all.scatter_(0, idxs, x_embed + model_params.pe_embed[idxs_pe])
+        tokens_all = self.embed_engine(streams_data, model_params.pe_embed, self.dtype, device)
 
         return tokens_all
 
@@ -743,8 +704,8 @@ class Model(torch.nn.Module):
                 tokens_global_all += [tokens_global_c]
                 continue
 
-            for block in self.ae_local_blocks:
-                tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=False)
+            # local assimilation model
+            tokens_c = self.ae_local_engine(tokens_c, cell_lens_c, use_reentrant=False)
 
             if self.cf.latent_noise_kl_weight > 0.0:
                 tokens_c, posteriors_c = self.interpolate_latents.interpolate_with_noise(
@@ -754,15 +715,9 @@ class Model(torch.nn.Module):
             else:
                 tokens_c, posteriors = tokens_c, 0.0
 
-            for block in self.ae_adapter:
-                tokens_global_c = checkpoint(
-                    block,
-                    tokens_global_c,
-                    tokens_c,
-                    q_cells_lens_c,
-                    cell_lens_c,
-                    use_reentrant=False,
-                )
+            tokens_global_c = self.ae_local_global_engine(
+                tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant=False
+            )
 
             tokens_global_all += [tokens_global_c]
 
@@ -787,8 +742,7 @@ class Model(torch.nn.Module):
         """
 
         # global assimilation engine and adapter
-        for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=False)
+        tokens = self.ae_global_engine(tokens, use_reentrant=False)
 
         return tokens
 
@@ -806,9 +760,7 @@ class Model(torch.nn.Module):
             ValueError: For unexpected arguments in checkpoint method
         """
 
-        for block in self.fe_blocks:
-            aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
-            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+        tokens = self.forecast_engine(tokens, fstep)
 
         return tokens
 

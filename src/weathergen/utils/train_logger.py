@@ -181,15 +181,17 @@ class TrainLogger:
 
     #######################################
     @staticmethod
-    def read(run_id: str, model_path: str = None, epoch: int = -1) -> Metrics:
+    def read(run_id: str, model_path: str = None, mini_epoch: int = -1) -> Metrics:
         """
         Read data for run_id
         """
         # Load config from given model_path if provided, otherwise use path from private config
         if model_path:
-            cf = config.load_model_config(run_id=run_id, epoch=epoch, model_path=model_path)
+            cf = config.load_model_config(
+                run_id=run_id, mini_epoch=mini_epoch, model_path=model_path
+            )
         else:
-            cf = config.load_config(private_home=None, from_run_id=run_id, epoch=epoch)
+            cf = config.load_config(private_home=None, from_run_id=run_id, mini_epoch=mini_epoch)
         run_id = cf.run_id
 
         result_dir_base = Path(cf.run_path)
@@ -410,7 +412,6 @@ def clean_df(df, columns: list[str] | None):
     df = df.with_columns(
         (df[_weathergen_timestamp] - df[_weathergen_timestamp].min()).alias(_weathergen_reltime)
     )
-    _logger.info(f"schema {df.schema}")
 
     if columns:
         columns = list(set(columns))  # remove duplicates

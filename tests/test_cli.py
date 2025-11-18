@@ -6,7 +6,7 @@ import weathergen.utils.cli as cli
 
 DATE_FORMATS = ["2022-12-01T00:00:00", "20221201", "2022-12-01", "12.01.2022"]
 EXPECTED_DATE_STR = "202212010000"
-MODEL_LOADING_ARGS = ["from_run_id", "epoch", "reuse_run_id"]
+MODEL_LOADING_ARGS = ["from_run_id", "mini_epoch", "reuse_run_id"]
 GENERAL_ARGS = ["config", "private_config", "options", "run_id"]
 MODEL_LOADING_PARSERS = [cli.get_continue_parser(), cli.get_inference_parser()]
 BASIC_ARGLIST = ["--from_run_id", "test123"]
@@ -60,15 +60,15 @@ def test_model_loading_has_params(parser):
 
 
 @pytest.mark.parametrize("streams", [["ERA5", "FOO"], ["BAR"]])
-def test_inference_analysis_streams_output(inference_parser, streams):
-    arglist = BASIC_ARGLIST + ["--analysis_streams_output", *streams]
+def test_inference_streams_output(inference_parser, streams):
+    arglist = BASIC_ARGLIST + ["--streams_output", *streams]
     args = inference_parser.parse_args(arglist)
 
-    assert args.analysis_streams_output == streams
+    assert args.streams_output == streams
 
 
-def test_inference_analysis_streams_output_empty(inference_parser):
-    arglist = BASIC_ARGLIST + ["--analysis_streams_output", *[]]
+def test_inference_streams_output_empty(inference_parser):
+    arglist = BASIC_ARGLIST + ["--streams_output", *[]]
 
     with pytest.raises(SystemExit):
         inference_parser.parse_args(arglist)
@@ -79,8 +79,8 @@ def test_inference_defaults(inference_parser):
         "start_date",
         "end_date",
         "samples",
-        "analysis_streams_output",
-        "epoch",
+        "streams_output",
+        "mini_epoch",
         "private_config",
     ]
     default_values = [inference_parser.get_default(arg) for arg in default_args]
