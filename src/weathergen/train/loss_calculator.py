@@ -14,7 +14,6 @@ import logging
 
 import torch
 from omegaconf import DictConfig
-from torch import Tensor
 
 import weathergen.train.loss_modules as LossModules
 from weathergen.train.loss_modules.loss_module_base import LossValues
@@ -29,8 +28,6 @@ class LossTerms:
     A dataclass which combines the LossValues of all loss modules
     """
 
-    # The primary scalar loss value for optimization.
-    loss: Tensor
     # Dictionary containing the LossValues of each loss module.
     loss_terms: dict[str, LossValues]
 
@@ -88,4 +85,4 @@ class LossCalculator:
             loss_terms[calculator.name] = calculator.compute_loss(preds=preds, targets=targets)
             loss = loss + weight * loss_terms[calculator.name].loss
 
-        return LossTerms(loss=loss, loss_terms=loss_terms)
+        return loss, LossTerms(loss_terms=loss_terms)

@@ -596,17 +596,17 @@ class Trainer(TrainerBase):
             ):
                 output = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
             targets = {"physical": batch[0]}
-            loss_values = self.loss_calculator.compute_loss(
+            loss, loss_values = self.loss_calculator.compute_loss(
                 preds=output,
                 targets=targets,
             )
             if cf.latent_noise_kl_weight > 0.0:
                 kl = torch.cat([posterior.kl() for posterior in output.latent])
-                loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
+                loss += cf.latent_noise_kl_weight * kl.mean()
 
             # backward pass
             self.optimizer.zero_grad()
-            self.grad_scaler.scale(loss_values.loss).backward()
+            self.grad_scaler.scale(loss).backward()
             # loss_values.loss.backward()
 
             # gradient clipping
@@ -654,7 +654,7 @@ class Trainer(TrainerBase):
                     self.loss_unweighted_hist[loss_name].append(losses_all)
                 for loss_name, stddev_all in loss_terms.stddev_all.items():
                     self.stdev_unweighted_hist[loss_name].append(stddev_all)
-            self.loss_model_hist += [loss_values.loss.item()]
+            self.loss_model_hist += [loss.item()]
 
             perf_gpu, perf_mem = self.get_perf()
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
@@ -716,7 +716,7 @@ class Trainer(TrainerBase):
                     targets = {"physical": batch[0]}
 
                     # compute loss
-                    loss_values = self.loss_calculator_val.compute_loss(
+                    loss, loss_values = self.loss_calculator_val.compute_loss(
                         preds=output,
                         targets=targets,
                     )
@@ -769,7 +769,7 @@ class Trainer(TrainerBase):
                             self.loss_unweighted_hist[loss_name].append(losses_all)
                         for loss_name, stddev_all in loss_terms.stddev_all.items():
                             self.stdev_unweighted_hist[loss_name].append(stddev_all)
-                    self.loss_model_hist += [loss_values.loss.item()]
+                    self.loss_model_hist += [loss.item()]
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
