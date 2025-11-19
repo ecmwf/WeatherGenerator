@@ -453,6 +453,52 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         return streams_data
 
+    def _get_student_teacher_sample_data(self, idx: int, forecast_dt: int):
+        """
+        Return one batch of data
+        Build a StreamData object for a single view (teacher or student).
+
+        Args:
+            idx: Time index for this sample
+            forecast_dt: Number of forecast steps
+        """
+
+        teacher_cfg = self.training_cfg.get("teacher_model_input", {})
+        student_cfg = self.training_cfg.get("model_input", {})
+        relationship = student_cfg.get("relationship")
+
+        # use build_views_for_stream utility to create student and teacher masks
+        t_keep_np, s_keeps_np, _meta = build_views_for_stream(
+            self.tokenizer.masker,
+            self.num_healpix_cells,
+            teacher_cfg=teacher_cfg,
+            student_cfg=student_cfg,
+            relationship=relationship,
+        )
+
+        # Convert to torch.bool
+        def to_bool_tensor(arr):
+            if arr is None:
+                return None
+            return torch.from_numpy(np.asarray(arr, dtype=bool)).to(torch.bool)
+
+        t_keep_t = to_bool_tensor(t_keep_np)
+        s_keep_t_list = [to_bool_tensor(m) for m in (s_keeps_np or [])]
+
+        # Teacher view
+        streams_data = self._get_sample_data("teacher", idx, forecast_dt, keep_mask=t_keep_t)
+
+        # Students (build but do not change yielded batch shape yet)
+        # For each student view (set in the config) build separate StreamData
+        student_streams_data = []
+        for s_keep_t in s_keep_t_list:
+            # do not do anything with this, just it is here.
+            student_stream_data = self._get_sample_data("student", idx, forecast_dt, keep_mask=s_keep_t)
+            student_streams_data.append(student_stream_data)
+
+        return streams_data, student_streams_data
+    
+    
     def _preprocess_model_data(self, batch, forecast_dt):
         """ """
 
@@ -505,39 +551,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # TODO: ideally update this student-teacher if-else to a more general
                 # view-based data sampling
                 if self.training_cfg.get("training_mode") == "student_teacher":
-                    # Build teacher + student masks once per batch item
-                    teacher_cfg = self.training_cfg.get("teacher_model_input", {})
-                    student_cfg = self.training_cfg.get("model_input", {})
-                    relationship = student_cfg.get("relationship")
 
-                    # use build_views_for_stream utility to create student and teacher masks
-                    t_keep_np, s_keeps_np, _meta = build_views_for_stream(
-                        self.tokenizer.masker,
-                        self.num_healpix_cells,
-                        teacher_cfg=teacher_cfg,
-                        student_cfg=student_cfg,
-                        relationship=relationship,
-                    )
-
-                    # Convert to torch.bool
-                    def to_bool_tensor(arr):
-                        if arr is None:
-                            return None
-                        return torch.from_numpy(np.asarray(arr, dtype=bool)).to(torch.bool)
-
-                    t_keep_t = to_bool_tensor(t_keep_np)
-                    s_keep_t_list = [to_bool_tensor(m) for m in (s_keeps_np or [])]
-
-                    # Teacher view
-                    streams_data = self._get_sample_data("teacher", idx, forecast_dt, keep_mask=t_keep_t)
-
-                    # Students (build but do not change yielded batch shape yet)
-                    # For each student view (set in the config) build separate StreamData
-                    student_streams_data = []
-                    for s_keep_t in s_keep_t_list:
-                        # do not do anything with this, just it is here.
-                        student_stream_data = self._get_sample_data("student", idx, forecast_dt, keep_mask=s_keep_t)
-                        student_streams_data.append(student_stream_data)
+                    streams_data, student_streams_data = self._get_student_teacher_sample_data(idx, forecast_dt)
 
                     # TODO: to pass around the correct source_cell_lens and target coords
                     # Somehow coming from _preprocess_model_data
