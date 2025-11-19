@@ -143,7 +143,7 @@ def evaluate_multi_stream_results(run_id):
                         },
                     },
                     "label": "Multi-Stream Test",
-                    "mini_epoch": 0,
+                    #"mini_epoch": 0,
                     "rank": 0,
                 }
             },
