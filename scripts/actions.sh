@@ -161,8 +161,7 @@ case "$1" in
     )
     ;;
   *)
-    # Estrai automaticamente tutte le opzioni dal case
-    # echo "Usage: $0 {sync|lint|lint-check|type-check|unit-test|toml-check|integration-test|create-links|create-jupyter-kernel|jupytext-sync}"
+    # Automatically extract all options from the case statement
     options=$(grep -oP '^\s*\K[\w-]+(?=\))' "$0" | tr '\n' '|' | sed 's/|$//')
     echo "Usage: $0 {$options}"
     exit 1
