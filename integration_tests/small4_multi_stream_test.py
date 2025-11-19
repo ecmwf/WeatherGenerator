@@ -178,8 +178,8 @@ def assert_all_stream_losses_below_threshold(run_id):
     # Define streams and their thresholds
     streams = {
         "ERA5": 1.5,
-        "SurfaceCombined": 2.0,
         "NPPATMS": 2.0,
+        "SurfaceCombined": 2.0,
     }
     
     losses = {}
@@ -192,7 +192,8 @@ def assert_all_stream_losses_below_threshold(run_id):
             ),
             None,
         )
-        # logger.info(f"[SN] {stream_name} loss : {loss}") #TODO prova
+        logger.info(f"[SN] {stream_name} loss : {loss}") #TODO delete me
+        logger.info(f"[SN] {stream_name} loss type: {type(loss)}") #TODO delete me
         assert loss is not None, f"'stream.{stream_name}.loss_mse.loss_avg' metric is missing"
         assert loss < threshold, (
             f"{stream_name} train loss is {loss}, expected to be below {threshold}"
