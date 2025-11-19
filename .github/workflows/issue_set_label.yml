@@ -51,6 +51,12 @@ jobs:
               labelsToAdd.add("model");
             }
 
+            // If there is any "data:xxx" label, also add plain "data"
+            const hasDataVariant = currentLabels.some(l => /^data:.+$/i.test(l));
+            if (hasDataVariant) {
+              labelsToAdd.add("data");
+            }
+            
             // Remove any labels that are already present so we don't duplicate
             for (const label of currentLabels) {
               if (labelsToAdd.has(label)) {
