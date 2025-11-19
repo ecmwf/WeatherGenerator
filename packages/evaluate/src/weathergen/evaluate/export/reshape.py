@@ -208,4 +208,9 @@ def regrid_gaussian_ds(ds: xr.Dataset, output_grid_type: str, degree: float, ind
         else:
             #preserve units
             regrid_ds.coords[coord].attrs = ds[coord].attrs
+    # keep global attrs
+        regrid_ds.attrs = ds.attrs
+        #change grid_type
+        regrid_ds.attrs['grid_type'] = output_grid_type
+        regrid_ds.attrs['history'] += f'Regridded from O96 to {degree} degree {output_grid_type} using earthkit'
     return regrid_ds

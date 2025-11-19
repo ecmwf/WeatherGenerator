@@ -90,7 +90,6 @@ class NetcdfParser(CfParser):
                 self.indices = find_lat_lon_ordering(da_fs)
                 print(f"Determined lat/lon ordering indices")
             da_fs = self.regrid(da_fs, self.regrid_degree, self.indices)
-            print(da_fs['valid_time'].attrs)
             da_fs = self.add_time_encoding(da_fs)
             self.save(da_fs, ref_time)
 
@@ -259,8 +258,8 @@ class NetcdfParser(CfParser):
 
         n_hours = self.fstep_hours.astype("int64")
         forecast_period_list = ds["forecast_step"] * n_hours
-        ds = ds.assign_coords(forecast_period=forecast_period_list)
-
+        ds = ds.assign_coords(forecast_step=forecast_period_list)
+        ds.to_netcdf("./test.nc")  # Debug line to check intermediate output
         return ds
 
     def add_attrs(self, ds: xr.Dataset) -> xr.Dataset:
@@ -467,7 +466,7 @@ class NetcdfParser(CfParser):
         )
         ds.attrs["Conventions"] = "CF-1.12"
         # drop stream now it's in title
-        ds.drop_vars("stream")
+        ds = ds.drop_vars("stream")
         return ds
 
     def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64) -> None:
