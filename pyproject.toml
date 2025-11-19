@@ -29,6 +29,7 @@ dependencies = [
  "weathergen-evaluate",
  "weathergen-readers-extra",
  "anemoi-datasets",
+ "eccodes<=2.40",
 ]
 
 
