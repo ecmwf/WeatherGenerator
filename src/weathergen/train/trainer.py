@@ -44,14 +44,14 @@ from weathergen.model.attention import (
 )
 from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
-from weathergen.model.model import Model, ModelParams
+from weathergen.model.model import get_model, Model, ModelParams
 from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase, get_target_and_aux_calculator
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
-from weathergen.utils.utils import get_dtype
+from weathergen.utils.utils import get_dtype, get_batch_size
 from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
@@ -102,17 +102,17 @@ class Trainer(TrainerBase):
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
-    def init_model_and_shard(self, cf, run_id_contd, mini_epoch_contd, devices):
+    def init_model_and_shard(self, cf, run_id_contd, mini_epoch_contd, student_or_teacher, devices):
         sources_size = self.dataset.get_sources_size()
         targets_num_channels = self.dataset.get_targets_num_channels()
         targets_coords_size = self.dataset.get_targets_coords_size()
 
+        model_creation_device = "meta" if cf.with_ddp and cf.with_fsdp else "cuda"
         if cf.with_ddp and cf.with_fsdp:
-            with torch.device("meta"):
-                model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-        else:
-            model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-            model = model.to("cuda")
+            with torch.device(model_creation_device):
+                model = get_model(
+                    student_or_teacher, cf, sources_size, targets_num_channels, targets_coords_size
+                )
 
         # freeze request model part
         for name, module in model.named_modules():
@@ -221,7 +221,7 @@ class Trainer(TrainerBase):
 
         return model, model_params
 
-    def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
+    def inference(self, cf, run_id_contd, mini_epoch_contd, devices):
         # general initalization
         self.init(cf, devices)
 
@@ -313,7 +313,7 @@ class Trainer(TrainerBase):
         )
 
         self.model, self.model_params = self.init_model_and_shard(
-            cf, run_id_contd, mini_epoch_contd, devices
+            cf, run_id_contd, mini_epoch_contd, "student", devices
         )
 
         if cf.compile_model:
@@ -321,18 +321,34 @@ class Trainer(TrainerBase):
 
         self.validate_with_ema = cf.get("validate_with_ema", False)
         self.ema_model = None
+        # validate_with_ema is incompatible with student-teacher
+        self.validate_with_ema = False  # TODO remove for testing only
         if self.validate_with_ema:
-            meta_ema = self.init_model_and_shard(cf, run_id_contd, mini_epoch_contd, devices)[0]
+            meta_ema_model = self.init_model_and_shard(cf, "student", devices)[0]
             self.ema_model = EMAModel(
                 self.model,
-                meta_ema,
+                meta_ema_model,
+                halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
+                rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
+                is_model_sharded=(cf.with_ddp and cf.with_fsdp),
+            )
+        elif cf["training_mode"] == "masking":  # "student-teacher-pretrain":
+            meta_ema_model = self.init_model_and_shard(cf, "teacher", devices)[0]
+            cf["target_and_aux_calc"] = "EMATeacher"
+            self.ema_model = EMAModel(
+                self.model,
+                meta_ema_model,
                 halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
                 rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
 
         self.target_and_aux_calculator = get_target_and_aux_calculator(
-            cf, self.model, None, ema_model=self.ema_model
+            cf,
+            self.model,
+            None,
+            ema_model=self.ema_model,
+            batch_size=get_batch_size(cf, self.world_size_original),
         )
 
         # if with_fsdp then parameter count is unreliable
@@ -608,7 +624,9 @@ class Trainer(TrainerBase):
                 enabled=cf.with_mixed_precision,
             ):
                 output = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
-                targets, aux_outputs = self.target_and_aux_calculator.compute(bidx, batch, self.model)
+                targets, aux_outputs = self.target_and_aux_calculator.compute(
+                    bidx, batch, self.model
+                )
             targets = {"physical": batch[0]}
             loss, loss_values = self.loss_calculator.compute_loss(
                 preds=output,
@@ -651,8 +669,8 @@ class Trainer(TrainerBase):
             # EMA update
             if self.validate_with_ema:
                 self.ema_model.update(
-                    self.cf.istep * self.world_size_original * self.cf.batch_size_per_gpu,
-                    self.world_size_original * self.cf.batch_size_per_gpu,
+                    self.cf.istep * get_batch_size(self.cf, self.world_size_original),
+                    get_batch_size(self.cf, self.world_size_original),
                 )
 
             if bidx == 0:
