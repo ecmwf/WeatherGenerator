@@ -304,7 +304,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # TODO: with multiple ds per stream we need to distinguish these here
         return self.streams_datasets[stream_id][0].denormalize_target_channels(data)
 
-    def _build_stream_data_input(
+    def _build_stream_input_data(
         self,
         mode: str,
         stream_data: StreamData,
@@ -330,6 +330,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             StreamData with source and targets masked according to view_meta
         """
 
+        # source input data
+
         # iterate overall input steps
         for step, idx in enumerate(range(base_idx, base_idx - self.num_input_steps, -1)):
             # TODO: check that we are not out of bounds when we go back in time
@@ -341,10 +343,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             token_data = input_tokens[step]
 
             # TODO:
-            #     stream_data.source_is_spoof = True
+            # stream_data.source_is_spoof = rdata.is_spoof
 
             # preprocess data for model input
-            (source_cells, source_cells_lens, mask_state) = self.tokenizer.batchify_source(
+            (source_cells, source_cells_lens, mask_state) = self.tokenizer.get_source(
                 stream_info,
                 rdata,
                 token_data,
@@ -357,7 +359,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         return stream_data, mask_state
 
-    def _build_stream_data_output(
+    def _build_stream_output_data(
         self,
         mode: str,
         stream_data: StreamData,
@@ -382,20 +384,31 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             rdata = output_data[step]
             token_data = output_tokens[step]
 
-            # TODO:
-            #     stream_data.target_is_spoof = True
+            # stream_data.target_is_spoof = rdata.spoof
 
-            (tt_cells, tt_t, tt_c, tc, tc_l, idxs_inv) = self.tokenizer.batchify_target(
-                stream_info,
-                self.sampling_rate_target,
-                rdata,
-                token_data,
-                (time_win_target.start, time_win_target.end),
-                mask_state,
-            )
-            stream_data.add_target(fstep, tt_cells, tc, tc_l, tt_c, tt_t, idxs_inv)
+            if "target_coords" in mode :
 
-            # TODO: separate target_coords and target_value computation?
+                (tc, tc_l) = self.tokenizer.get_target_coords(
+                    stream_info,
+                    self.sampling_rate_target,
+                    rdata,
+                    token_data,
+                    (time_win_target.start, time_win_target.end),
+                    mask_state,
+                )
+                stream_data.add_target_coords(fstep, tc, tc_l)
+
+            if "target_values" in mode :
+
+                (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
+                    stream_info,
+                    self.sampling_rate_target,
+                    rdata,
+                    token_data,
+                    (time_win_target.start, time_win_target.end),
+                    mask_state,
+                )
+                stream_data.add_target_values(fstep, tt_cells, tt_c, tt_t, idxs_inv)
 
         return stream_data
 
@@ -432,7 +445,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         dt = self.forecast_offset + forecast_dt
         stream_data = StreamData(base_idx, dt, self.num_healpix_cells)
 
-        stream_data, mask_state = self._build_stream_data_input(
+        stream_data, mask_state = self._build_stream_input_data(
             mode,
             stream_data,
             base_idx,
@@ -443,17 +456,20 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         )
 
         # physical space
+        mode_target = ""
         if "physical" in mode:
-            stream_data = self._build_stream_data_output(
-                mode,
-                stream_data,
-                base_idx,
-                stream_info,
-                forecast_dt,
-                output_data,
-                output_tokens,
-                mask_state,
-            )
+            mode_target = "target_coords target_values"
+
+        stream_data = self._build_stream_output_data(
+            mode_target,
+            stream_data,
+            base_idx,
+            stream_info,
+            forecast_dt,
+            output_data,
+            output_tokens,
+            mask_state,
+        )
 
         return stream_data
 
@@ -577,7 +593,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # target_input
             # source_output
             # target_output
-
 
             # add data for current stream
             # streams_data += [( stream_data_source , stream_data_target)]

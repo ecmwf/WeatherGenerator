@@ -73,7 +73,7 @@ class TokenizerMasking(Tokenizer):
 
         return tokens
 
-    def batchify_source(
+    def get_source(
         self,
         stream_info: dict,
         rdata: IOReaderData,
@@ -136,7 +136,7 @@ class TokenizerMasking(Tokenizer):
 
     # batchify_target_for_view now unified into batchify_target via optional mask_state
 
-    def batchify_target(
+    def get_target(
         self,
         stream_info: dict,
         sampling_rate_target: float,
@@ -178,6 +178,99 @@ class TokenizerMasking(Tokenizer):
         # max_num_targets = stream_info.get("max_num_targets", -1)
 
         return (data, datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv)
+
+
+    def get_target_coords(
+        self,
+        stream_info: dict,
+        sampling_rate_target: float,
+        rdata: IOReaderData,
+        token_data,
+        time_win: tuple,
+        mask_state: dict | None = None,
+    ):
+        token_size = stream_info["token_size"]
+
+        # create tokenization index
+        (idxs_cells, idxs_cells_lens) = token_data
+
+        # Apply per-view mask state if provided
+        if mask_state is not None:
+            self.masker.current_strategy = mask_state.get("strategy", self.masker.masking_strategy)
+            self.masker.mask_tokens = mask_state.get("mask_tokens")
+            self.masker.mask_channels = mask_state.get("mask_channels")
+
+        (mask_tokens, mask_channels, idxs_ord_inv) = self.masker.mask_targets_idxs(
+            stream_info, idxs_cells, idxs_cells_lens, rdata
+        )
+
+        # TODO: split up
+        _, _, _, coords_local, coords_per_cell = tokenize_apply_mask_target(
+            self.hl_target,
+            idxs_cells,
+            idxs_cells_lens,
+            mask_tokens,
+            mask_channels,
+            rdata,
+            time_win,
+            self.hpy_verts_rots_target,
+            self.hpy_verts_local_target,
+            self.hpy_nctrs_target,
+            encode_times_target,
+        )
+
+        # TODO, TODO, TODO: max_num_targets
+        # max_num_targets = stream_info.get("max_num_targets", -1)
+
+        return (coords_local, coords_per_cell)
+
+
+    def get_target_values(
+        self,
+        stream_info: dict,
+        sampling_rate_target: float,
+        rdata: IOReaderData,
+        token_data,
+        time_win: tuple,
+        mask_state: dict | None = None,
+    ):
+        token_size = stream_info["token_size"]
+
+        # create tokenization index
+        (idxs_cells, idxs_cells_lens) = token_data
+
+        # Apply per-view mask state if provided
+        if mask_state is not None:
+            self.masker.current_strategy = mask_state.get("strategy", self.masker.masking_strategy)
+            self.masker.mask_tokens = mask_state.get("mask_tokens")
+            self.masker.mask_channels = mask_state.get("mask_channels")
+
+        (mask_tokens, mask_channels, idxs_ord_inv) = self.masker.mask_targets_idxs(
+            stream_info, idxs_cells, idxs_cells_lens, rdata
+        )
+
+        data, datetimes, coords, _, _ = tokenize_apply_mask_target(
+            self.hl_target,
+            idxs_cells,
+            idxs_cells_lens,
+            mask_tokens,
+            mask_channels,
+            rdata,
+            time_win,
+            self.hpy_verts_rots_target,
+            self.hpy_verts_local_target,
+            self.hpy_nctrs_target,
+            encode_times_target,
+        )
+
+        # TODO, TODO, TODO: max_num_targets
+        # max_num_targets = stream_info.get("max_num_targets", -1)
+
+        # TODO: shuffeling
+
+        return (data, datetimes, coords, idxs_ord_inv)
+
+
 
     # ------------------------------------------------------------------
     # Per-stream view construction (teacher + students) for student-teacher

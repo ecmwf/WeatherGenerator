@@ -205,6 +205,80 @@ class StreamData:
         self.target_coords_raw[fstep] = target_coords_raw
         self.idxs_inv[fstep] = idxs_inv
 
+    def add_target_values(
+        self,
+        fstep: int,
+        targets: list,
+        target_coords_raw: torch.tensor,
+        times_raw: torch.tensor,
+        idxs_inv: torch.tensor,
+    ) -> None:
+        """
+        Add data for target for one input.
+
+        Parameters
+        ----------
+        fstep : int
+            forecast step
+        targets : torch.tensor( number of healpix cells )
+            [ torch.tensor( num tokens, channels) ]
+              Target data for loss computation
+        targets_lens : torch.tensor( number of healpix cells)
+            length of targets per cell
+        target_coords : list( number of healpix cells)
+            [ torch.tensor( points per cell, 105) ]
+              target coordinates
+        target_times : list( number of healpix cells)
+            [ torch.tensor( points per cell) ]
+              absolute target times
+        idxs_inv:
+            Indices to reorder targets back to order in input
+
+        Returns
+        -------
+        None
+        """
+
+        self.target_tokens[fstep] = targets
+        self.target_times_raw[fstep] = times_raw
+        self.target_coords_raw[fstep] = target_coords_raw
+        self.idxs_inv[fstep] = idxs_inv
+
+    def add_target_coords(
+        self,
+        fstep: int,
+        target_coords: torch.tensor,
+        target_coords_per_cell: torch.tensor,
+    ) -> None:
+        """
+        Add data for target for one input.
+
+        Parameters
+        ----------
+        fstep : int
+            forecast step
+        targets : torch.tensor( number of healpix cells )
+            [ torch.tensor( num tokens, channels) ]
+              Target data for loss computation
+        targets_lens : torch.tensor( number of healpix cells)
+            length of targets per cell
+        target_coords : list( number of healpix cells)
+            [ torch.tensor( points per cell, 105) ]
+              target coordinates
+        target_times : list( number of healpix cells)
+            [ torch.tensor( points per cell) ]
+              absolute target times
+        idxs_inv:
+            Indices to reorder targets back to order in input
+
+        Returns
+        -------
+        None
+        """
+
+        self.target_coords[fstep] = target_coords
+        self.target_coords_lens[fstep] = target_coords_per_cell
+
     def target_empty(self) -> bool:
         """
         Test if target for stream is empty
