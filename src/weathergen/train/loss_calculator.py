@@ -65,13 +65,15 @@ class LossCalculator:
         calculator_configs = (
             cf.training_mode_config.losses if stage == TRAIN else cf.validation_mode_config.losses
         )
-        calculator_configs = [
-            (getattr(LossModules, Cls), config) for (Cls, config) in calculator_configs.items()
-        ]
 
         self.loss_calculators = [
-            (config.weight, Cls(cf=cf, loss_fcts=config.loss_fcts, stage=stage, device=self.device))
-            for (Cls, config) in calculator_configs
+            (
+                config.pop("weight"),
+                getattr(LossModules, class_name)(
+                    cf=cf, stage=stage, device=self.device, **config
+                ),
+            )
+            for class_name, config in calculator_configs.items()
         ]
 
     def compute_loss(

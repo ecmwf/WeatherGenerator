@@ -211,11 +211,10 @@ class Trainer(TrainerBase):
         targets_coords_size = self.dataset.get_targets_coords_size()
 
         model_creation_device = "meta" if cf.with_ddp and cf.with_fsdp else "cuda"
-        if cf.with_ddp and cf.with_fsdp:
-            with torch.device(model_creation_device):
-                model = get_model(
-                    student_or_teacher, cf, sources_size, targets_num_channels, targets_coords_size
-                )
+        with torch.device(model_creation_device):
+            model = get_model(
+                student_or_teacher, cf, sources_size, targets_num_channels, targets_coords_size
+            )
 
         # freeze request model part
         for name, module in model.named_modules():
@@ -427,7 +426,9 @@ class Trainer(TrainerBase):
         # validate_with_ema is incompatible with student-teacher
         self.validate_with_ema = False  # TODO remove for testing only
         if self.validate_with_ema:
-            meta_ema_model = self.init_model_and_shard(cf, "student", devices)[0]
+            meta_ema_model = self.init_model_and_shard(
+                cf, run_id_contd, mini_epoch_contd, "student", devices
+            )[0]
             self.ema_model = EMAModel(
                 self.model,
                 meta_ema_model,
@@ -436,7 +437,9 @@ class Trainer(TrainerBase):
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
         elif cf["training_mode"] == "student-teacher":
-            meta_ema_model = self.init_model_and_shard(cf, "teacher", devices)[0]
+            meta_ema_model = self.init_model_and_shard(
+                cf, run_id_contd, mini_epoch_contd, "teacher", devices
+            )[0]
             self.ema_model = EMAModel(
                 self.model,
                 meta_ema_model,
@@ -777,7 +780,7 @@ class Trainer(TrainerBase):
                         )
                     )
                 targets, aux = zip(*targets_and_auxs, strict=False)
-            loss_values = self.loss_calculator.compute_loss(
+            loss, loss_values = self.loss_calculator.compute_loss(
                 preds=outputs, targets=targets, view_metadata=batch.view_metadata
             )
             # TODO re-enable this, need to think on how to make it compatible with

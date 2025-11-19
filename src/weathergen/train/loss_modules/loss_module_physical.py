@@ -38,7 +38,7 @@ class LossPhysical(LossModuleBase):
     def __init__(
         self,
         cf: DictConfig,
-        losses: list,
+        loss_fcts: list,
         stage: Stage,
         device: str,
     ):
@@ -50,8 +50,8 @@ class LossPhysical(LossModuleBase):
 
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
-            [getattr(losses, name if name != "mse" else "mse_channel_location_weighted"), w, name]
-            for name, w in losses
+            [getattr(loss_fns, name if name != "mse" else "mse_channel_location_weighted"), w, name]
+            for name, w in loss_fcts
         ]
 
     def _get_weights(self, stream_info):
