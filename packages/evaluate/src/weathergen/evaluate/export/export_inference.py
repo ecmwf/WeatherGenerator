@@ -158,7 +158,7 @@ def parse_args(args: list) -> argparse.Namespace:
 
     parser.add_argument(
         "--regrid-degree",
-        type=float,
+        type=int,
         default=None,
         help="If specified, regrid the data to a regular lat/lon grid with the given degree spacing (e.g., 2.0 for 2.0 degree grid).",
     )

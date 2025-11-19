@@ -131,7 +131,7 @@ dimensions:
     forecast_step:
       wg: forecast_period
       std: forecast_period
-      long: forecast_period_since_reference_time
+      long: time since forecast_reference_time
       std_unit: hours
     stream:
       wg: stream

@@ -3,6 +3,7 @@ import re
 
 import numpy as np
 import xarray as xr
+from earthkit.regrid import interpolate
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -75,22 +76,12 @@ def find_pl(vars: list) -> tuple[dict[str, list[str]], list[int]]:
             var_dict.setdefault(var_name, []).append(var)
         else:
             var_dict.setdefault(var, []).append(var)
-    pl = list(set(pl))
+    pl = sorted(set(pl))
     return var_dict, pl
-
-import pathlib
-import xarray as xr
-import numpy as np
-import logging
-from earthkit.regrid import interpolate
-import os
-
-_logger = logging.getLogger(__name__)
-_logger.setLevel(logging.INFO)
 
 def find_lat_lon_ordering(ds: xr.Dataset) -> list[int]:
     """
-    Find all the the latitude and longitude ordering for the WeatherGenerator data
+    Find all the the latitude and longitude ordering for unparsed WeatherGenerator data
     Ordering from North West to South East.
     Returns the indices required to reorder the data.
 
@@ -109,7 +100,7 @@ def find_lat_lon_ordering(ds: xr.Dataset) -> list[int]:
     indices = [tuples.index(t) for t in ordered_tuples]
     return indices
 
-def regrid_gaussian_ds(data: xr.Dataset, output_grid_type: str, degree: float, indices: list) -> xr.DataArray:
+def regrid_gaussian_da(data: xr.DataArray, output_grid_type: str, degree: float, indices: list) -> xr.DataArray:
     """
     Regrid a single xarray Dataset from O96 grid to regular lat/lon grid.
 
@@ -126,8 +117,9 @@ def regrid_gaussian_ds(data: xr.Dataset, output_grid_type: str, degree: float, i
     """
     #grid_type logic
     if output_grid_type == 'regular_ll':
+        degree = int(degree)
         output_grid_type = [degree, degree]
-        grid_shape = (180 // degree + 1, 360 // degree)
+        grid_shape = (int(180 // degree + 1), int(360 // degree))
     else:
         raise ValueError(f'Unsupported grid_type: {output_grid_type}, supported types are ["regular_ll"]')
         # to be implemented:
@@ -140,28 +132,80 @@ def regrid_gaussian_ds(data: xr.Dataset, output_grid_type: str, degree: float, i
     data['ncells'] = (original_ncells)
 
     # create empty xarray ds for regridded data
-    values = np.empty((data.shape[0], grid_shape[0], grid_shape[1], data.shape[2]))
-    for i in range(data.shape[0]):
-        for j in range(data.shape[2]):
+    # set coords
+    coords = {
+            'valid_time': data['valid_time'].values,
+            'latitude': np.linspace(-90, 90, grid_shape[0]),
+            'longitude': np.linspace(0, 360 - degree, grid_shape[1]),
+        }
+    if data.ndim == 3:
+        values = np.empty((data.shape[0], grid_shape[0], grid_shape[1], data.shape[2]))
+        x = 0
+        coords['pressure'] = data['pressure'].values
+    else:
+        values = np.empty((grid_shape[0], grid_shape[1], data.shape[1]))
+        x = 1
+    for i in range(data.shape[x]):
+        if data.ndim == 3:
+            for j in range(data.shape[2]):
+                data_reg_var = interpolate(
+                    data.values[i,:,j],
+                    {'grid': 'O96'},
+                    {'grid': output_grid_type}
+                    )
+                values[i,:,:,j] = data_reg_var
+        elif data.ndim == 2:
             data_reg_var = interpolate(
-                data.values[i,:,j],
+                data.values[:,i],
                 {'grid': 'O96'},
                 {'grid': output_grid_type}
                 )
-            values[i,:,:,j] = data_reg_var
+            values[:,:,i] = data_reg_var
+        else:        
+            raise ValueError(f'Unsupported data dimension: {data.ndim}, supported dimensions are 2 and 3.')
     dims = list(data.dims)
     pos = dims.index('ncells')
     dims[pos:pos+1] = ['latitude', 'longitude']
     dims = tuple(dims)
+
     regrid_data = xr.DataArray(
         data = values,
         dims = dims,
-        coords = {
-            'valid_time': data['valid_time'].values,
-            'latitude': np.linspace(-90, 90, grid_shape[0]),
-            'longitude': np.linspace(0, 360 - degree, grid_shape[1]),
-        },
+        coords = coords,
         attrs = data.attrs,
         name = data.name
     )
+
     return regrid_data
+
+def regrid_gaussian_ds(ds: xr.Dataset, output_grid_type: str, degree: float, indices: list) -> xr.Dataset:
+    """
+    Regrid an xarray Dataset from Gaussian grid to regular lat/lon grid.
+
+    Parameters
+    ----------
+        indices: list of indices to reorder the data from original to lat/lon ordered.
+        ds : Input xarray Dataset containing the inference data on Gaussian grid.
+        output_grid_type : Type of grid to regrid to (e.g., 'regular_ll').
+        degree : Degree of the regular lat/lon grid (e.g., 2 for 2.0 degree grid)/96 for O96 grid
+
+    Returns
+    -------
+        Regridded xarray Dataset.
+    """
+    regrid_vars = {}
+    regrid_ds = xr.Dataset(regrid_vars, attrs=ds.attrs)
+    for var in ds.data_vars:
+        print(var)
+        if var in ['latitude', 'longitude']:
+            continue
+        regrid_vars[var] = regrid_gaussian_da(ds[var], output_grid_type, degree, indices)
+    regrid_ds = xr.Dataset(regrid_vars)
+    for coord in ds.coords:
+        if coord not in ['latitude', 'longitude']:
+            if 'ncells' not in ds[coord].dims:
+                regrid_ds.coords[coord] = ds[coord]
+        else:
+            #preserve units
+            regrid_ds.coords[coord].attrs = ds[coord].attrs
+    return regrid_ds
