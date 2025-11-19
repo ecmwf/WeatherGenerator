@@ -14,7 +14,7 @@ from weathergen.common.io import IOReaderData
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.view_builder import build_views_for_stream
-from weathergen.datasets.inputs_metadata import ViewMetadata
+from weathergen.datasets.batch import ViewMetadata
 from weathergen.datasets.tokenizer_utils import (
     encode_times_source,
     encode_times_target,

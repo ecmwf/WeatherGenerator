@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Tuple, List
 from weathergen.datasets.masking import Masker
-from weathergen.datasets.inputs_metadata import ViewMetadata
+from weathergen.datasets.batch import ViewMetadata
 
 
 def build_views_for_stream(
