@@ -105,7 +105,7 @@ case "$1" in
     (
       cd "$SCRIPT_DIR" || exit 1
       uv sync --offline --all-packages --extra gpu
-      uv run --offline pytest ./integration_tests/small4_multi_stream_test.py --verbose -s
+      uv run --offline pytest ./integration_tests/small_multi_stream_test.py --verbose -s
     );;
   create-links)
     (
