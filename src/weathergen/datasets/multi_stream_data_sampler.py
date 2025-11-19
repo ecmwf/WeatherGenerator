@@ -41,20 +41,6 @@ type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 logger = logging.getLogger(__name__)
 
 
-def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
-    """
-    Convert data, coords, and geoinfos to torch tensor
-    """
-    if type(rdata.coords) is not torch.Tensor:
-        rdata.coords = torch.tensor(rdata.coords)
-    if type(rdata.geoinfos) is not torch.Tensor:
-        rdata.geoinfos = torch.tensor(rdata.geoinfos)
-    if type(rdata.data) is not torch.Tensor:
-        rdata.data = torch.tensor(rdata.data)
-
-    return rdata
-
-
 def collect_datasources(stream_datasets: list, idx: int, type: str) -> IOReaderData:
     """
     Utility function to collect all sources / targets from streams list
@@ -382,6 +368,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         output_tokens: list,
         mask_state: dict | None = None,
     ) -> StreamData:
+        """
+
+        """
+
         # collect for all forecast steps
         dt = self.forecast_offset + forecast_dt
         for step, fstep in enumerate(range(self.forecast_offset, dt + 1)):
@@ -468,7 +458,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         return stream_data
 
     def _get_data_windows(self, base_idx, forecast_dt, stream_ds):
-        """ """
+        """ 
+        
+        
+        """
 
         # source data: iterate overall input steps
         input_data = []
@@ -538,53 +531,57 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # tokenize windows
             # input_tokens = [ (cells_idx, cells_idx_lens), ... ] of time steps
-            (input_tokens, output_tokens) = self.tokenizer.get_tokens_windows(
-                stream_info, input_data, output_data
-            )
+            input_tokens = self.tokenizer.get_tokens_windows( stream_info, input_data, True)
+            output_tokens = self.tokenizer.get_tokens_windows( stream_info, output_data, False)
 
+            # get/coordinate masks
+            t_keep_t, s_keep_t_list = self._get_student_teacher_masks(idx, forecast_dt)
+
+            # stream_data_target can contain network input
+            # loop over student views
+            stream_data_source = []
+            for mask in s_keep_t_list : 
+                stream_data_source += [ self._build_stream_data(
+                    "physical",
+                    idx,
+                    forecast_dt,
+                    stream_info,
+                    input_data,
+                    output_data,
+                    input_tokens,
+                    output_tokens,
+                    mask,
+                )
+                ]
+
+            # collect source data for current stream
+            # loop over teacher views
+            stream_data_target = []
+            for mask in t_keep_t :
+                stream_data_target += [ self._build_stream_data(
+                    "physical",
+                    idx,
+                    forecast_dt,
+                    stream_info,
+                    input_data,
+                    output_data,
+                    input_tokens,
+                    output_tokens,
+                    t_keep_t[0],
+                )
+                ]
+
+
+            # TODO: build batch
             # source_input
             # target_input
             # source_output
             # target_output
 
-            # get
-            # masks = build_views_for_stream( modes, input_tokens, output_tokens)
-            t_keep_t, s_keep_t_list = self._get_student_teacher_masks(idx, forecast_dt)
-
-            # collect source data for current stream
-            # TODO: list over teacher views
-            stream_data_source = self._build_stream_data(
-                "physical",
-                idx,
-                forecast_dt,
-                stream_info,
-                input_data,
-                output_data,
-                input_tokens,
-                output_tokens,
-                t_keep_t[0],
-            )
-
-            # collect target data for current stream
-            # stream_data_target can contain network input
-            # TODO: list over student views
-            stream_data_target = self._build_stream_data(
-                "student",
-                idx,
-                forecast_dt,
-                stream_info,
-                input_data,
-                output_data,
-                input_tokens,
-                output_tokens,
-                s_keep_t_list[0],
-            )
-
-            # TODO: build batch
 
             # add data for current stream
             # streams_data += [( stream_data_source , stream_data_target)]
-            streams_data += [stream_data_source]
+            streams_data += [stream_data_source[0]]
 
         return streams_data
 

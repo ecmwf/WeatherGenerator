@@ -53,7 +53,7 @@ class TokenizerMasking(Tokenizer):
         self.masker.reset_rng(rng)
         self.rng = rng
 
-    def get_tokens_windows(self, stream_info, input_data, output_data):
+    def get_tokens_windows(self, stream_info, data, pad_tokens):
         """
         Tokenize data (to amortize over the different views that are generated)
 
@@ -64,23 +64,14 @@ class TokenizerMasking(Tokenizer):
         hl = self.healpix_level
         token_size = stream_info["token_size"]
 
-        input_tokens = []
-        for rdata in input_data:
+        tokens = []
+        for rdata in data:
             idxs_cells, idxs_cells_lens = tok(
-                readerdata_to_torch(rdata), token_size, hl, pad_tokens=True
+                readerdata_to_torch(rdata), token_size, hl, pad_tokens
             )
-            input_tokens += [(idxs_cells, idxs_cells_lens)]
+            tokens += [(idxs_cells, idxs_cells_lens)]
 
-        output_tokens = []
-        for rdata in output_data:
-            idxs_cells, idxs_cells_lens = tok(
-                readerdata_to_torch(rdata), token_size, hl, pad_tokens=False
-            )
-            output_tokens += [(idxs_cells, idxs_cells_lens)]
-
-        # TODO: precompute target_coords -> expensive
-
-        return (input_tokens, output_tokens)
+        return tokens
 
     def batchify_source(
         self,
