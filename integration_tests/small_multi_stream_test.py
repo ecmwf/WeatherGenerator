@@ -4,7 +4,7 @@ This test must run on a GPU machine.
 It performs training and inference with multiple data sources including gridded and obs data.
 
 Command:
-uv run pytest ./integration_tests/small4_multi_stream_test.py
+uv run pytest ./integration_tests/small_multi_stream_test.py
 """
 
 import json
@@ -143,7 +143,7 @@ def evaluate_multi_stream_results(run_id):
                         },
                     },
                     "label": "Multi-Stream Test",
-                    #"mini_epoch": 0,
+                    "mini_epoch": 0,
                     "rank": 0,
                 }
             },
