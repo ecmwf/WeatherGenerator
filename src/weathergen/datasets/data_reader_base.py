@@ -524,8 +524,8 @@ class DataReaderBase(metaclass=ABCMeta):
 
         return coords
 
+    @staticmethod
     def _normalize(
-        self,
         data: NDArray[DType],
         idx: list[int],
         mean: dict[int, float],
@@ -552,7 +552,6 @@ class DataReaderBase(metaclass=ABCMeta):
         -------
         Normalized data
         """
-        # assert data.shape[-1] == len(idx), f"incorrect number of {name} channels"
         if data.shape[-1] != len(idx):
             raise ValueError(
                 f"incorrect number of {name} channels: expected {len(idx)}, got {data.shape[-1]}"
@@ -562,8 +561,8 @@ class DataReaderBase(metaclass=ABCMeta):
 
         return data
 
+    @staticmethod
     def _denormalize(
-        self,
         data: NDArray[DType],
         idx: list[int],
         mean: dict[int, float],
@@ -590,7 +589,6 @@ class DataReaderBase(metaclass=ABCMeta):
         -------
         Denormalized data
         """
-        # assert data.shape[-1] == len(idx), f"incorrect number of {name} channels"
         if data.shape[-1] != len(idx):
             raise ValueError(
                 f"incorrect number of {name} channels: expected {len(idx)}, got {data.shape[-1]}"
