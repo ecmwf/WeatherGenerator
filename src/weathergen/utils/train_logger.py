@@ -175,6 +175,14 @@ class TrainLogger:
         for key, result in timing.validate.reset().items():
             metrics |= result.as_metric(key)
 
+        for key, result in timing.reset("validate"):
+            for metric, value in asdict(result).items():
+                metric_name = f"perf.timing.{key}.{metric}"
+                if metric_name in metrics:
+                    metrics[metric_name].append(value)
+                else:
+                    metrics[metric_name] = [value]
+
         self.log_metrics("val", metrics)
         with open(self.path_run / (self.cf.run_id + "_val_log.txt"), "ab") as f:
             np.savetxt(f, log_vals)
