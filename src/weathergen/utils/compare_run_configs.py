@@ -2,6 +2,7 @@
 # /// script
 # dependencies = [
 #   "pandas",
+#   "torch",
 #   "tabulate",
 #   "pyyaml",
 #   "omegaconf",

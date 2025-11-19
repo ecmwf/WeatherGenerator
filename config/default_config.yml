@@ -53,7 +53,7 @@ fe_num_blocks: 8
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_layer_norm_after_blocks: [3]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 impute_latent_noise_std: 0.0  # 1e-4
 
 healpix_level: 4
@@ -139,11 +139,11 @@ nn_module: "te"
 log_grad_norms: False
 
 start_date: 197901010000
-end_date: 202012310000
+end_date: 201312310000
 start_date_val: 202101010000
 end_date_val: 202201010000
-len_hrs: 6
-step_hrs: 6
+len_hrs: 24
+step_hrs: 24
 input_window_steps: 1
 
 val_initial: False

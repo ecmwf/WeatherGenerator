@@ -4,7 +4,8 @@
 # Put '*' to show all parameters, or leave empty to only show changed parameters.
 # Use for example 'ae_global' to show all parameters starting with 'ae_global'.
 run_ids:
-  - [run_id1, /path/to/WeatherGenerator/models/]
-  - [run_id2, /alt/path/to/WeatherGenerator/models/]
+  - [u4dtysia, /p/project1/hclimrep/polz1/code/WeatherGenerator/models]
+  - [v7m5ofcl, /p/project1/hclimrep/polz1/code/WeatherGenerator/models]
+  - [jpyzgvtw, /p/project1/hclimrep/polz1/code/WeatherGenerator/models]
 always_show_patterns:
   - '*'
