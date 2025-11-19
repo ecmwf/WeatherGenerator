@@ -162,3 +162,5 @@ train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
+
+multiprocessing_method: "fork"
