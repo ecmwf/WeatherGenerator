@@ -27,10 +27,6 @@ from weathergen.datasets.icon_dataset import IconDataset
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
-from weathergen.datasets.tokenizer_utils import (
-    tokenize_space,
-    tokenize_spacetime,
-)
 from weathergen.datasets.utils import (
     compute_idxs_predict,
     compute_offsets_scatter_embed,
@@ -327,7 +323,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         mode: str,
         stream_data: StreamData,
         base_idx: TIndex,
-        # view_meta: ViewMetadata,
         stream_info: dict,
         input_data: list,
         input_tokens: list,
@@ -365,7 +360,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # preprocess data for model input
             (source_cells, source_cells_lens, mask_state) = self.tokenizer.batchify_source(
                 stream_info,
-                readerdata_to_torch(rdata),
+                rdata,
                 token_data,
                 (time_win_source.start, time_win_source.end),
                 keep_mask=mask,
@@ -376,17 +371,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         return stream_data, mask_state
 
-    def _build_stream_data_target(
+    def _build_stream_data_output(
         self,
         mode: str,
         stream_data: StreamData,
         idx: TIndex,
-        # view_meta: ViewMetadata,
         stream_info: dict,
         forecast_dt: int,
         output_data: list,
         output_tokens: list,
-        mask: dict | None = None,
+        mask_state: dict | None = None,
     ) -> StreamData:
         # collect for all forecast steps
         dt = self.forecast_offset + forecast_dt
@@ -398,48 +392,20 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             rdata = output_data[step]
             token_data = output_tokens[step]
 
-            # if rdata.is_empty():
-            #     # work around for https://github.com/pytorch/pytorch/issues/158719
-            #     # create non-empty mean data instead of empty tensor
-            #     rdata = spoof(
-            #         self.healpix_level,
-            #         time_win_target.start,
-            #         stream_ds[0].get_geoinfo_size(),
-            #         stream_ds[0].mean[stream_ds[0].target_idx],
-            #     )
-
             # TODO:
             #     stream_data.target_is_spoof = True
 
             (tt_cells, tt_t, tt_c, tc, tc_l, idxs_inv) = self.tokenizer.batchify_target(
                 stream_info,
                 self.sampling_rate_target,
-                readerdata_to_torch(rdata),
+                rdata,
                 token_data,
                 (time_win_target.start, time_win_target.end),
-                mask,
+                mask_state,
             )
             stream_data.add_target(fstep, tt_cells, tc, tc_l, tt_c, tt_t, idxs_inv)
 
-            # # preprocess data for model input
-            # if "input" in mode :
-            #     (tc, tc_l) = self.tokenizer.get_target_coords(
-            #         stream_info,
-            #         self.sampling_rate_target,
-            #         readerdata_to_torch(rdata),
-            #         token_data,
-            #         (time_win_target.start, time_win_target.end),
-            #     )
-            #     stream_data.add_target_coords(fstep, tc, tc_l)
-            # else :
-            #     (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
-            #         stream_info,
-            #         self.sampling_rate_target,
-            #         readerdata_to_torch(rdata),
-            #         token_data,
-            #         (time_win_target.start, time_win_target.end),
-            #     )
-            #     stream_data.add_target_values(fstep, tt_cells, tt_c, tt_t, idxs_inv)
+            # TODO: separate target_coords and target_value computation?
 
         return stream_data
 
@@ -476,18 +442,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         dt = self.forecast_offset + forecast_dt
         stream_data = StreamData(base_idx, dt, self.num_healpix_cells)
 
-        stream_data, _ = self._build_stream_data_input(
+        stream_data, mask_state = self._build_stream_data_input(
             mode,
             stream_data,
             base_idx,
             stream_info,
             input_data,
             input_tokens,
+            mask,
         )
 
         # physical space
         if "physical" in mode:
-            stream_data = self._build_stream_data_target(
+            stream_data = self._build_stream_data_output(
                 mode,
                 stream_data,
                 base_idx,
@@ -495,7 +462,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 forecast_dt,
                 output_data,
                 output_tokens,
-                mask,
+                mask_state,
             )
 
         return stream_data
@@ -513,9 +480,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
+                time_win = self.time_window_handler.window(idx)
                 rdata = spoof(
                     self.healpix_level,
-                    time_win_source.start,
+                    time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     stream_ds[0].mean[stream_ds[0].source_idx],
                 )
@@ -533,9 +501,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
+                time_win = self.time_window_handler.window(idx)
                 rdata = spoof(
                     self.healpix_level,
-                    time_win_source.start,
+                    time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     stream_ds[0].mean[stream_ds[0].source_idx],
                 )
@@ -545,36 +514,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         return (input_data, output_data)
 
-    def _get_tokens_windows(self, stream_info, input_data, output_data):
-        """
-        Tokenize data (to amortize over the different views that are generated)
-
-        """
-
-        # TODO: move to tokenizer
-
-        tok_spacetime = stream_info.get("tokenize_spacetime", False)
-        tok = tokenize_spacetime if tok_spacetime else tokenize_space
-        hl = self.healpix_level
-        token_size = stream_info["token_size"]
-
-        input_tokens = []
-        for rdata in input_data:
-            idxs_cells, idxs_cells_lens = tok(
-                readerdata_to_torch(rdata), token_size, hl, pad_tokens=True
-            )
-            input_tokens += [(idxs_cells, idxs_cells_lens)]
-
-        output_tokens = []
-        for rdata in output_data:
-            idxs_cells, idxs_cells_lens = tok(
-                readerdata_to_torch(rdata), token_size, hl, pad_tokens=False
-            )
-            output_tokens += [(idxs_cells, idxs_cells_lens)]
-
-        # TODO: target_coords are expensive
-
-        return (input_tokens, output_tokens)
 
     def _get_sample(self, mode: str, idx: int, forecast_dt: int):
         """
@@ -592,12 +531,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # for all streams
         for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
+            
             # input_data and output_data is conceptually consecutive but differs
             # in source and target channels; overlap in one window when self.forecast_offset=0
             (input_data, output_data) = self._get_data_windows(idx, forecast_dt, stream_ds)
 
             # tokenize windows
-            (input_tokens, output_tokens) = self._get_tokens_windows(
+            # input_tokens = [ (cells_idx, cells_idx_lens), ... ] of time steps
+            (input_tokens, output_tokens) = self.tokenizer.get_tokens_windows(
                 stream_info, input_data, output_data
             )
 
@@ -611,6 +552,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             t_keep_t, s_keep_t_list = self._get_student_teacher_masks(idx, forecast_dt)
 
             # collect source data for current stream
+            # TODO: list over teacher views
             stream_data_source = self._build_stream_data(
                 "physical",
                 idx,
@@ -620,11 +562,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 output_data,
                 input_tokens,
                 output_tokens,
-                t_keep_t,
+                t_keep_t[0],
             )
 
             # collect target data for current stream
             # stream_data_target can contain network input
+            # TODO: list over student views
             stream_data_target = self._build_stream_data(
                 "student",
                 idx,
@@ -636,6 +579,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 output_tokens,
                 s_keep_t_list[0],
             )
+
+            # TODO: build batch
 
             # add data for current stream
             # streams_data += [( stream_data_source , stream_data_target)]
@@ -672,7 +617,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 return None
             return torch.from_numpy(np.asarray(arr, dtype=bool)).to(torch.bool)
 
-        t_keep_t = to_bool_tensor(t_keep_np)
+        t_keep_t = [to_bool_tensor(t_keep_np)]
         s_keep_t_list = [to_bool_tensor(m) for m in (s_keeps_np or [])]
 
         # # Teacher view

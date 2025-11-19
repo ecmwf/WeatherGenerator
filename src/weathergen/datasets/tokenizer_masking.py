@@ -19,8 +19,24 @@ from weathergen.datasets.tokenizer_utils import (
     encode_times_target,
     tokenize_apply_mask_source,
     tokenize_apply_mask_target,
+    tokenize_space,
+    tokenize_spacetime,
 )
 from weathergen.datasets.view_builder import build_views_for_stream
+
+def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
+    """
+    Convert data, coords, and geoinfos to torch tensor
+    """
+    if type(rdata.coords) is not torch.Tensor:
+        rdata.coords = torch.tensor(rdata.coords)
+    if type(rdata.geoinfos) is not torch.Tensor:
+        rdata.geoinfos = torch.tensor(rdata.geoinfos)
+    if type(rdata.data) is not torch.Tensor:
+        rdata.data = torch.tensor(rdata.data)
+
+    return rdata
+
 
 
 class TokenizerMasking(Tokenizer):
@@ -36,6 +52,35 @@ class TokenizerMasking(Tokenizer):
         """
         self.masker.reset_rng(rng)
         self.rng = rng
+
+    def get_tokens_windows(self, stream_info, input_data, output_data):
+        """
+        Tokenize data (to amortize over the different views that are generated)
+
+        """
+
+        tok_spacetime = stream_info.get("tokenize_spacetime", False)
+        tok = tokenize_spacetime if tok_spacetime else tokenize_space
+        hl = self.healpix_level
+        token_size = stream_info["token_size"]
+
+        input_tokens = []
+        for rdata in input_data:
+            idxs_cells, idxs_cells_lens = tok(
+                readerdata_to_torch(rdata), token_size, hl, pad_tokens=True
+            )
+            input_tokens += [(idxs_cells, idxs_cells_lens)]
+
+        output_tokens = []
+        for rdata in output_data:
+            idxs_cells, idxs_cells_lens = tok(
+                readerdata_to_torch(rdata), token_size, hl, pad_tokens=False
+            )
+            output_tokens += [(idxs_cells, idxs_cells_lens)]
+
+        # TODO: precompute target_coords -> expensive
+
+        return (input_tokens, output_tokens)
 
     def batchify_source(
         self,
@@ -62,8 +107,6 @@ class TokenizerMasking(Tokenizer):
             return (source_tokens_cells, source_tokens_lens, mask_state)
 
         # # create tokenization index
-        # tok = tokenize_spacetime if stream_info.get("tokenize_spacetime", False) else tokenize_space
-        # idxs_cells, idxs_cells_lens = tok(rdata, token_size, self.hl_source, pad_tokens=True)
         (idxs_cells, idxs_cells_lens) = idxs_cells_data
 
         # select strategy from XXX depending on stream and if student or teacher
@@ -97,7 +140,6 @@ class TokenizerMasking(Tokenizer):
             "mask_tokens": mask_tokens,
             "mask_channels": mask_channels,
         }
-        self.mask_state = mask_state
 
         return (source_tokens_cells, source_tokens_lens, mask_state)
 
@@ -115,11 +157,7 @@ class TokenizerMasking(Tokenizer):
         token_size = stream_info["token_size"]
 
         # create tokenization index
-        # tok = tokenize_spacetime if stream_info.get("tokenize_spacetime", False) else tokenize_space
-        # idxs_cells, idxs_cells_lens = tok(rdata, token_size, self.hl_source, pad_tokens=False)
         (idxs_cells, idxs_cells_lens) = token_data
-
-        mask_state = self.mask_state
 
         # Apply per-view mask state if provided
         if mask_state is not None:
