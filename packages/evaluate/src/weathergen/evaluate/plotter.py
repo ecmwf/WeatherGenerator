@@ -2,11 +2,14 @@ import datetime
 import glob
 import logging
 import os
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import cartopy
 import cartopy.crs as ccrs
 import matplotlib as mpl
+
+mpl.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import omegaconf as oc
@@ -181,6 +184,7 @@ class Plotter:
             List of plot names for the saved histograms.
         """
         plot_names = []
+        plot_tasks = []
 
         self.update_data_selection(select)
 
@@ -220,8 +224,27 @@ class Plotter:
             for (valid_time, targ_t), (_, prd_t) in groups:
                 if valid_time is not None:
                     _logger.debug(f"Plotting histogram for {var} at valid_time {valid_time}")
-                name = self.plot_histogram(targ_t, prd_t, hist_output_dir, var, tag=tag)
-                plot_names.append(name)
+
+                # calculate histograms
+                vals = np.concatenate([targ_t, prd_t])
+                bins = np.histogram_bin_edges(vals, bins=50)
+
+                targ_t_counts, _ = np.histogram(targ_t, bins)
+                prd_t_counts, _ = np.histogram(prd_t, bins)
+
+                valid_time = (
+                    targ_t["valid_time"][0]
+                    .values.astype("datetime64[m]")
+                    .astype(datetime.datetime)
+                    .strftime("%Y-%m-%dT%H%M")
+                )
+
+                args = (targ_t_counts, prd_t_counts, bins, hist_output_dir, var, valid_time, tag)
+                plot_tasks.append(args)
+
+        with ProcessPoolExecutor() as executor:
+            futures = [executor.submit(self.plot_histogram, *args) for args in plot_tasks]
+            plot_names = [f.result() for f in futures]
 
         self.clean_data_selection()
 
@@ -229,10 +252,12 @@ class Plotter:
 
     def plot_histogram(
         self,
-        target_data: xr.DataArray,
-        pred_data: xr.DataArray,
+        target_counts: np.typing.NDArray,
+        pred_counts: np.typing.NDArray,
+        bins: np.typing.NDArray,
         hist_output_dir: Path,
         varname: str,
+        valid_time: str,
         tag: str = "",
     ) -> str:
         """
@@ -240,14 +265,16 @@ class Plotter:
 
         Parameters
         ----------
-        target_data: xr.DataArray
-            DataArray containing the target data for the variable.
-        pred_data: xr.DataArray
-            DataArray containing the prediction data for the variable.
+        target_counts: xr.DataArray
+            DataArray containing the target histogram counts for the variable.
+        pred_counts: xr.DataArray
+            DataArray containing the prediction histogram counts for the variable.
         hist_output_dir: Path
             Directory where the histogram will be saved.
         varname: str
             Name of the variable to be plotted.
+        valid_time: str
+            The valid time to add to the plot.
         tag: str
             Any tag you want to add to the plot.
 
@@ -255,14 +282,9 @@ class Plotter:
         -------
             Name of the saved plot file.
         """
-
-        # Get common bin edges
-        vals = np.concatenate([target_data, pred_data])
-        bins = np.histogram_bin_edges(vals, bins=50)
-
         # Plot histograms
-        plt.hist(target_data, bins=bins, alpha=0.7, label="Target")
-        plt.hist(pred_data, bins=bins, alpha=0.7, label="Prediction")
+        plt.stairs(target_counts, bins, fill=True, alpha=0.7, label="Target")
+        plt.stairs(pred_counts, bins, fill=True, alpha=0.7, label="Prediction")
 
         # set labels and title
         plt.xlabel(f"Variable: {varname}")
@@ -272,13 +294,6 @@ class Plotter:
             f"fstep = {self.fstep:03}"
         )
         plt.legend(frameon=False)
-
-        valid_time = (
-            target_data["valid_time"][0]
-            .values.astype("datetime64[m]")
-            .astype(datetime.datetime)
-            .strftime("%Y-%m-%dT%H%M")
-        )
 
         # TODO: make this nicer
         parts = [
@@ -353,6 +368,7 @@ class Plotter:
             os.makedirs(map_output_dir)
 
         plot_names = []
+        plot_tasks = []
         for var in variables:
             select_var = self.select | {"channel": var}
             da = self.select_from_da(data, select_var).compute()
@@ -374,16 +390,19 @@ class Plotter:
 
                 da_t = da_t.dropna(dim="ipoint")
                 assert da_t.size > 0, "Data array must not be empty or contain only NAs"
-
-                name = self.scatter_plot(
+                name = (
                     da_t,
                     map_output_dir,
                     var,
-                    tag=tag,
-                    map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
-                    title=f"{self.stream}, {var} : fstep = {self.fstep:03} ({valid_time})",
+                    tag,
+                    dict(map_kwargs.get(var, {})) | map_kwargs_global,
+                    f"{self.stream}, {var} : fstep = {self.fstep:03} ({valid_time})",
                 )
-                plot_names.append(name)
+                plot_tasks.append(name)
+
+        with ProcessPoolExecutor() as executor:
+            futures = [executor.submit(self.scatter_plot, *args) for args in plot_tasks]
+            plot_names = [f.result() for f in futures]
 
         self.clean_data_selection()
 
