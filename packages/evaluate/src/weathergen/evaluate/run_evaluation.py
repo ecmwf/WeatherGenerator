@@ -18,22 +18,22 @@ from pathlib import Path
 import mlflow
 from mlflow.client import MlflowClient
 from omegaconf import OmegaConf
-from xarray import DataArray
-
 from weathergen.common.config import _REPO_ROOT
 from weathergen.common.platform_env import get_platform_env
+from weathergen.metrics.mlflow_utils import (
+    MlFlowUpload,
+    get_or_create_mlflow_parent_run,
+    log_scores,
+    setup_mlflow,
+)
+from xarray import DataArray
+
 from weathergen.evaluate.io_reader import CsvReader, WeatherGenReader
 from weathergen.evaluate.plot_utils import collect_channels
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
     plot_data,
     plot_summary,
-)
-from weathergen.metrics.mlflow_utils import (
-    MlFlowUpload,
-    get_or_create_mlflow_parent_run,
-    log_scores,
-    setup_mlflow,
 )
 
 _logger = logging.getLogger(__name__)
@@ -163,22 +163,22 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                                 forecast_step=available_data.fsteps,
                             )
 
-    for run_id, streams in needs_to_be_computed.items():
-        for stream, regions_dict in streams.items():
-            missing_regions = list(regions_dict.keys())
-            missing_metrics = sorted({m for metrics in regions_dict.values() for m in metrics})
+        if run_id in needs_to_be_computed:
+            for stream, regions_dict in needs_to_be_computed[run_id].items():
+                missing_regions = list(regions_dict.keys())
+                missing_metrics = sorted({m for metrics in regions_dict.values() for m in metrics})
 
-            if not missing_metrics:
-                continue
+                if not missing_metrics:
+                    continue
 
-            _logger.info(
-                f"RUN {run_id} – stream {stream}: recomputing "
-                f"{len(missing_metrics)} metrics for {len(missing_regions)} region(s)."
-            )
+                _logger.info(
+                    f"RUN {run_id} – stream {stream}: recomputing "
+                    f"{len(missing_metrics)} metrics for {len(missing_regions)} region(s)."
+                )
 
-            scores_dict = calc_scores_per_stream(
-                reader, stream, missing_regions, missing_metrics, plot_score_maps
-            )
+                scores_dict = calc_scores_per_stream(
+                    reader, scores_dict, stream, missing_regions, missing_metrics, plot_score_maps
+                )
 
     if mlflow_client:
         # Reorder scores_dict to push to MLFlow per run_id:

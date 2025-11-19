@@ -9,7 +9,6 @@
 
 import json
 import logging
-from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -51,6 +50,7 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
 
 def calc_scores_per_stream(
     reader: Reader,
+    scores_dict: dict,
     stream: str,
     regions: list,
     metrics: list[str],
@@ -65,6 +65,8 @@ def calc_scores_per_stream(
         Reader object containing all info about a particular run.
     stream :
         Stream name to calculate scores for.
+    scores_dict:
+        Dictionary for scores with structure scores_dict[metric][region][stream][run_id]
     regions :
         List of regions to calculate scores on.
     metrics :
@@ -79,8 +81,6 @@ def calc_scores_per_stream(
     -------
     Dictionary containing scores for each metric and stream.
     """
-
-    scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
 
     _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
     if plot_score_maps:
