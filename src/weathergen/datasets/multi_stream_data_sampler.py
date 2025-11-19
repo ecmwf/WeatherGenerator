@@ -455,13 +455,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             mask,
         )
 
-        # physical space
-        mode_target = ""
-        if "physical" in mode:
-            mode_target = "target_coords target_values"
-
         stream_data = self._build_stream_output_data(
-            mode_target,
+            mode,
             stream_data,
             base_idx,
             stream_info,
@@ -496,7 +491,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     stream_ds[0].get_geoinfo_size(),
                     stream_ds[0].mean[stream_ds[0].source_idx],
                 )
-                # stream_data.source_is_spoof = True
+                # rdata.is_spoof = True
 
             input_data += [rdata]
 
@@ -517,7 +512,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     stream_ds[0].get_geoinfo_size(),
                     stream_ds[0].mean[stream_ds[0].source_idx],
                 )
-                # stream_data.target_is_spoof = True
+                # rdata.is_spoof = True
 
             output_data += [rdata]
 
@@ -558,7 +553,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             stream_data_source = []
             for mask in s_keep_t_list : 
                 stream_data_source += [ self._build_stream_data(
-                    "physical",
+                    "target_coords target_values",
                     idx,
                     forecast_dt,
                     stream_info,
@@ -575,7 +570,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             stream_data_target = []
             for mask in t_keep_t :
                 stream_data_target += [ self._build_stream_data(
-                    "physical",
+                    "target_values",
                     idx,
                     forecast_dt,
                     stream_info,
@@ -586,7 +581,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     t_keep_t[0],
                 )
                 ]
-
 
             # TODO: build batch
             # source_input
