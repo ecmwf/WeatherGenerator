@@ -17,8 +17,6 @@ _logger = logging.getLogger(__name__)
 project_name = "WeatherGenerator"
 project_lifecycle = "dev"
 
-_platform_env = get_platform_env()
-
 
 class MlFlowUpload:
     tracking_uri = "databricks"
@@ -35,13 +33,14 @@ class MlFlowUpload:
         """
         Returns the tags to be set for a run.
         """
+        # Directly calling get_platform_env() here because it may not be available at import time.
         dct = {
             "lifecycle": project_lifecycle,
-            "hpc": _platform_env.get_hpc() or "unknown",
+            "hpc": get_platform_env().get_hpc() or "unknown",
             "run_id": run_id,
             "stage": phase,
             "project": project_name,
-            "uploader": _platform_env.get_hpc_user() or "unknown",
+            "uploader": get_platform_env().get_hpc_user() or "unknown",
             "completion_status": "success",
         }
         if from_run_id:
@@ -139,9 +138,13 @@ def log_scores(
     )
 
 
-def setup_mlflow(private_config: Config) -> MlflowClient:
-    os.environ["DATABRICKS_HOST"] = private_config["mlflow"]["tracking_uri"]
-    os.environ["DATABRICKS_TOKEN"] = private_config["secrets"]["mlflow_token"]
+def setup_mlflow(private_config: Config | None) -> MlflowClient:
+    if private_config is None:
+        assert os.environ.get("DATABRICKS_HOST") is not None, "DATABRICKS_HOST not set"
+        assert os.environ.get("DATABRICKS_TOKEN") is not None, "DATABRICKS_TOKEN not set"
+    else:
+        os.environ["DATABRICKS_HOST"] = private_config["mlflow"]["tracking_uri"]
+        os.environ["DATABRICKS_TOKEN"] = private_config["secrets"]["mlflow_token"]
     mlflow.set_tracking_uri(MlFlowUpload.tracking_uri)
     mlflow.set_registry_uri(MlFlowUpload.registry_uri)
     mlflow_client = mlflow.client.MlflowClient(

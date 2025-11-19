@@ -34,7 +34,7 @@ class TokenizerMasking(Tokenizer):
 
     def reset_rng(self, rng) -> None:
         """
-        Reset rng after epoch to ensure proper randomization
+        Reset rng after mini_epoch to ensure proper randomization
         """
         self.masker.reset_rng(rng)
         self.rng = rng
