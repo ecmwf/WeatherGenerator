@@ -506,7 +506,7 @@ class Plotter:
 
         if "valid_time" in data.coords:
             valid_time = data["valid_time"][0].values
-            if ~np.isnat(valid_time):
+            if not np.isnat(valid_time):
                 valid_time = (
                     valid_time.astype("datetime64[m]")
                     .astype(datetime.datetime)
