@@ -33,6 +33,7 @@ from weathergen.datasets.utils import (
     compute_source_cell_lens,
 )
 from weathergen.datasets.view_builder import build_views_for_stream
+from weathergen.datasets.batch import ModelBatch
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import Stage
 
@@ -536,6 +537,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # get/coordinate masks
         masks_streams = self._get_source_target_masks( idx, forecast_dt)
 
+        # TODO: these params come from config?
+        num_source_samples = 8
+        num_target_samples = 2
+        batch = ModelBatch( self.streams, num_source_samples, num_target_samples)
+
         # for all streams
         for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
             
@@ -554,8 +560,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # collect source data for current stream
             # loop over student views
             stream_data_source = { }
-            for mask in source_masks : 
-                stream_data_source[name] = self._build_stream_data(
+            for sidx, mask in enumerate(source_masks) : 
+                # stream_data_source[name] = self._build_stream_data(
+                sdata = self._build_stream_data(
                     "target_coords target_values",
                     idx,
                     forecast_dt,
@@ -566,11 +573,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     output_tokens,
                     mask,
                 )
+                stream_data_source[name] = sdata
+                batch.add_source_stream( sidx, name, sdata)
 
             # stream_data_target can contain network input
             stream_data_target = {}
-            for mask in target_masks :
-                stream_data_target[name] = self._build_stream_data(
+            for sidx, mask in enumerate(target_masks) :
+                # stream_data_target[name] = self._build_stream_data(
+                sdata = self._build_stream_data(
                     "target_values",
                     idx,
                     forecast_dt,
@@ -581,6 +591,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     output_tokens,
                     mask,
                 )
+                stream_data_target[name] = sdata
+                batch.add_target_stream( sidx, name, sdata)
 
             # TODO: build batch
             # source_input
