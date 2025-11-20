@@ -8,6 +8,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
 import itertools
 import logging
 import re
@@ -48,10 +49,10 @@ from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
-from weathergen.train.trainer_base import TrainerBase
+from weathergen.train.trainer_base import TrainerBase, get_target_and_aux_calculator
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
-from weathergen.utils.utils import get_dtype
+from weathergen.utils.utils import get_batch_size, get_dtype
 from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
@@ -321,6 +322,8 @@ class Trainer(TrainerBase):
 
         self.validate_with_ema = cf.get("validate_with_ema", False)
         self.ema_model = None
+        # validate_with_ema is incompatible with student-teacher
+        self.validate_with_ema = False  # TODO remove for testing only
         if self.validate_with_ema:
             meta_ema = self.init_model_and_shard(cf, run_id_contd, mini_epoch_contd, devices)[0]
             self.ema_model = EMAModel(
@@ -330,6 +333,16 @@ class Trainer(TrainerBase):
                 rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
+
+        self.target_and_aux_calculator = get_target_and_aux_calculator(
+            cf,
+            self.model,
+            None,
+            ema_model=self.ema_model,
+            batch_size=get_batch_size(cf, self.world_size_original),
+        )
+
+        self.target_and_aux_calculator.to_device(self.device)
 
         # if with_fsdp then parameter count is unreliable
         if is_root() and not cf.with_fsdp and not cf.with_ddp:
@@ -609,13 +622,19 @@ class Trainer(TrainerBase):
                 preds, posteriors = self.model(
                     self.model_params, batch, cf.forecast_offset, forecast_steps
                 )
+
+                targets, aux_outputs = self.target_and_aux_calculator.compute(
+                    bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
+                )
             loss_values = self.loss_calculator.compute_loss(
                 preds=preds,
-                streams_data=batch[0],
+                streams_data=batch[0],  # should additionally take targets?
             )
             if cf.latent_noise_kl_weight > 0.0:
                 kl = torch.cat([posterior.kl() for posterior in posteriors])
                 loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
+
+            self.target_and_aux_calculator.update_state_pre_backward(bidx, batch, self.model)
 
             # backward pass
             self.optimizer.zero_grad()
@@ -640,14 +659,16 @@ class Trainer(TrainerBase):
             self.grad_scaler.update()
             # self.optimizer.step()
 
+            self.target_and_aux_calculator.update_state_post_opt_step(bidx, batch, self.model)
+
             # update learning rate
             self.lr_scheduler.step()
 
             # EMA update
             if self.validate_with_ema:
                 self.ema_model.update(
-                    self.cf.istep * self.world_size_original * self.cf.batch_size_per_gpu,
-                    self.world_size_original * self.cf.batch_size_per_gpu,
+                    self.cf.istep * get_batch_size(self.cf, self.world_size_original),
+                    get_batch_size(self.cf, self.world_size_original),
                 )
 
             self.loss_unweighted_hist += [loss_values.losses_all]
