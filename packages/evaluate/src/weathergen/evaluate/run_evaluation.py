@@ -106,7 +106,6 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
 
     # to get a structure like: scores_dict[metric][region][stream][run_id] = plot
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-    needs_to_be_computed = defaultdict(lambda: defaultdict(lambda: defaultdict(set)))
 
     for run_id, run in runs.items():
         _logger.info(f"RUN {run_id}: Getting data...")
@@ -120,6 +119,8 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
             raise ValueError(f"Unknown run type {type} for run {run_id}. Supported: zarr, csv.")
 
         for stream in reader.streams:
+            scores_to_be_computed = defaultdict(set)
+
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
 
             stream_dict = reader.get_stream(stream)
@@ -146,7 +147,7 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                         )
 
                         if metric_data is None or plot_score_maps:
-                            needs_to_be_computed[run_id][stream][region].add(metric)
+                            scores_to_be_computed[region].add(metric)
                             continue
 
                         available_data = reader.check_availability(
@@ -154,7 +155,7 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                         )
 
                         if not available_data.score_availability:
-                            needs_to_be_computed[run_id][stream][region].add(metric)
+                            scores_to_be_computed[region].add(metric)
                         else:
                             # simply select the chosen eval channels, samples, fsteps here...
                             scores_dict[metric][region][stream][run_id] = metric_data.sel(
@@ -163,10 +164,10 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                                 forecast_step=available_data.fsteps,
                             )
 
-        if run_id in needs_to_be_computed:
-            for stream, regions_dict in needs_to_be_computed[run_id].items():
-                missing_regions = list(regions_dict.keys())
-                missing_metrics = sorted({m for metrics in regions_dict.values() for m in metrics})
+                missing_regions = list(scores_to_be_computed.keys())
+                missing_metrics = sorted(
+                    {m for metrics in scores_to_be_computed.values() for m in metrics}
+                )
 
                 if not missing_metrics:
                     continue
@@ -177,7 +178,12 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                 )
 
                 scores_dict = calc_scores_per_stream(
-                    reader, scores_dict, stream, missing_regions, missing_metrics, plot_score_maps
+                    reader,
+                    scores_dict,
+                    stream,
+                    missing_regions,
+                    missing_metrics,
+                    plot_score_maps,
                 )
 
     if mlflow_client:
