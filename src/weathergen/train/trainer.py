@@ -315,20 +315,8 @@ class Trainer(TrainerBase):
 
         self.validate_with_ema = cf.get("validate_with_ema", False)
         self.ema_model = None
-        # validate_with_ema is incompatible with student-teacher
-        self.validate_with_ema = False  # TODO remove for testing only
         if self.validate_with_ema:
             meta_ema_model = self.init_model_and_shard(cf, "student", devices)[0]
-            self.ema_model = EMAModel(
-                self.model,
-                meta_ema_model,
-                halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
-                rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
-                is_model_sharded=(cf.with_ddp and cf.with_fsdp),
-            )
-        elif cf["training_mode"] == "masking":  # "student-teacher-pretrain":
-            meta_ema_model = self.init_model_and_shard(cf, "teacher", devices)[0]
-            cf["target_and_aux_calc"] = "EMATeacher"
             self.ema_model = EMAModel(
                 self.model,
                 meta_ema_model,
