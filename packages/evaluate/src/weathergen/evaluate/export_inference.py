@@ -333,7 +333,8 @@ def output_filename(
     forecast_ref_time: np.datetime64,
 ) -> Path:
     """
-    Generate output filename based on prefix (should refer to type e.g. pred/targ), run_id, sample index, output directory, format and forecast_ref_time.
+    Generate output filename based on prefix (should refer to type e.g. pred/targ),
+    run_id, sample index, output directory, format and forecast_ref_time.
     Parameters
     ----------
         prefix : Prefix for file name (e.g., 'pred' or 'targ').
@@ -489,7 +490,8 @@ def save_sample_to_netcdf(
     type_str : str
         Type of data ('pred' or 'targ') to include in the filename.
     dict_sample_all_steps : dict
-        Dictionary where keys is sample index and values is a list of xarray DataArrays for all the forecast steps
+        Dictionary where keys is sample index and values is a list of xarray DataArrays
+        for all the forecast steps
     fstep_hours : np.timedelta64
         Time difference between forecast steps (e.g., 6 hours).
     run_id : str

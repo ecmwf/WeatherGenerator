@@ -44,7 +44,7 @@ from weathergen.model.attention import (
 )
 from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
-from weathergen.model.model import Model, ModelParams, get_model
+from weathergen.model.model import ModelParams, get_model
 from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
@@ -311,25 +311,9 @@ class Trainer(TrainerBase):
             self.dataset_val, **loader_params, sampler=None
         )
 
-<<<<<<< HEAD
-        self.model, self.model_params = self.init_model_and_shard(cf, "student", devices)
-
-        if run_id_contd is None:
-            self.model.to_empty(device="cuda")
-            self.model.reset_parameters()
-        else:
-            if is_root():
-                logger.info(f"Continuing run with id={self.cf.from_run_id} at epoch {epoch_contd}.")
-            self.load_model(self.cf.from_run_id, epoch_contd)
-            if is_root():
-                logger.info(f"Loaded model id={run_id_contd}.")
-        self.model_params.reset_parameters(cf)
-        self.model_params = self.model_params.to(self.device)
-=======
         self.model, self.model_params = self.init_model_and_shard(
-            cf, run_id_contd, mini_epoch_contd, devices
+            cf, run_id_contd, mini_epoch_contd, "student", devices
         )
->>>>>>> origin/jk/develop/loss_calc_base
 
         if cf.compile_model:
             self.model = torch.compile(self.model, dynamic=True)
@@ -337,14 +321,13 @@ class Trainer(TrainerBase):
         self.validate_with_ema = cf.get("validate_with_ema", False)
         self.ema_model = None
         if self.validate_with_ema:
-<<<<<<< HEAD
-            meta_ema_model = self.init_model_and_shard(cf, "student", devices)[0]
-=======
-            meta_ema = self.init_model_and_shard(cf, run_id_contd, mini_epoch_contd, devices)[0]
->>>>>>> origin/jk/develop/loss_calc_base
+            # validate_with_ema is incompatible with student-teacher
+            meta_ema_model = self.init_model_and_shard(
+                cf, run_id_contd, mini_epoch_contd, "student", devices
+            )[0]
             self.ema_model = EMAModel(
                 self.model,
-                meta_ema,
+                meta_ema_model,
                 halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
                 rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
