@@ -557,14 +557,14 @@ class Trainer(TrainerBase):
                 targets_lens[fstep][i_strm] += [target.shape[0]]
                 dn_data = self.dataset_val.denormalize_target_channels
 
-                # # reorder so that output order of target points matches input when reading
-                # # (tokenization and masking changes this order)
-                # # TODO: does this work with batch_size > 1
-                # if len(idxs_inv) > 0:
-                #     pred = pred[:, idxs_inv]
-                #     target = target[idxs_inv]
-                #     targets_coords_raw[fstep][i_strm] = targets_coords_raw[fstep][i_strm][idxs_inv]
-                #     targets_times_raw[fstep][i_strm] = targets_times_raw[fstep][i_strm][idxs_inv]
+                # reorder so that output order of target points matches input when reading
+                # (tokenization and masking changes this order)
+                # TODO: does this work with batch_size > 1
+                if len(idxs_inv) > 0:
+                    pred = pred[:, idxs_inv]
+                    target = target[idxs_inv]
+                    targets_coords_raw[fstep][i_strm] = targets_coords_raw[fstep][i_strm][idxs_inv]
+                    targets_times_raw[fstep][i_strm] = targets_times_raw[fstep][i_strm][idxs_inv]
 
                 f32 = torch.float32
                 preds_all[fstep][i_strm] += [
