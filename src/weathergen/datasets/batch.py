@@ -81,6 +81,7 @@ class Sample:
         assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
         self.streams_data[stream_name] = stream_data
 
+    # TODO: complete interface, e.g get_stream
 
 class ModelBatch:
     """
