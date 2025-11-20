@@ -6,12 +6,11 @@ Provides clean separation between:
   - View metadata (spatial masks, strategies, relationships)
 """
 
-from dataclasses import dataclass, field
-
-from weathergen.datasets.stream_data import StreamData
+from dataclasses import dataclass
 
 import numpy as np
-import torch
+
+from weathergen.datasets.stream_data import StreamData
 
 # TODO: Add a store for a random number for diffusion
 # TODO: GetTimestep to get the timestep
@@ -38,7 +37,7 @@ class ViewMetadata:
 
     # Core identifiers and selection description
     view_id: str
-    keep_mask: np.ndarray  # [num_cells] bool at data level
+    keep_mask: np.typing.NDArray  # [num_cells] bool at data level
     strategy: str  # e.g. "random", "healpix", "channel"
 
     # Hierarchical/quantitative description of selection
@@ -51,142 +50,126 @@ class ViewMetadata:
     strategy_config: dict | None = None  # e.g. {rate: 0.5, hl_mask: 3, overlap: "disjoint"}
 
 
-# TODO: This doesn't handle the masking case, and we probably want it to,
-# where the model_inputs are the correct data for the masked source (and target?). Or target becomes the target?
-# Also should this model batch contain the source_cell_lens and target_coords_idx?
-# Every sample is n different [streams]...each view is a different dictionary corresponding to one model input
-# to get epsilon in there...
-# batches is for parallelism, but needs to all be in a tensor... [b, n, dim_embedding]? [b x n, dim_embedding]
+class SampleMetaData:
+    # masking strategy
+    masking_strategy: str
+
+    # parameters for masking strategy
+    masking_params: dict
 
 
-# NOTE: this only stores the student source_cell_lens and target_coords_idx,
-# because the teacher ones are already provided separately in (model_batches, source_cell_lens, target_coords_idx, forecast_dt)
-# ^^^^^^ teacher ones ^^^^^^
-# However, we should probably store them all here for consistency. This needs changes to the model, so not done now.
-# The forecast_dt is provided separately?
+class Sample:
+    # keys: stream name, values: SampleMetaData
+    meta_info: dict
 
+    # data for all streams
+    # keys: stream_name, values: StreamData
+    streams_data: dict
 
-class Sample :
-
-    meta_info : dict
-    streams_data : dict
-
-    def __init__( self, streams) :
-
+    def __init__(self, streams: dict) -> None:
         # TODO: can we pass this right away?
         self.meta_info = {}
 
         self.streams_data = {}
-        for stream_info in streams :
+        for stream_info in streams:
             self.streams_data[stream_info["name"]] = None
 
-    def add_stream_data( self, stream_name, stream_data) :
-        assert self.streams_data.get( stream_name, -1) != -1, "stream name does not exist"
+    def add_stream_data(self, stream_name: str, stream_data: StreamData) -> None:
+        """
+        Add data for stream @stream_name to sample
+        """
+        assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
         self.streams_data[stream_name] = stream_data
 
 
 class ModelBatch:
     """
     Container for all data and metadata for one training batch.
-
-
-    Attributes:
-        model_inputs: List of student views, each containing StreamData for all streams
-        targets: List containing teacher view with StreamData for all streams
-        view_metadata: List of ViewMetadata describing each view (teacher + students)
-        batch_info: Optional dict with batch-level info (sample indices, forecast steps, etc.)
-        student_source_cell_lens: List of source cell lengths for each student view
-        student_target_coords_idx: List of target coordinate indices for each student view
     """
 
-    # TODO: for DINO we want two global views per-dataset sample
-    # TODO: we want the global' view in student, perhaps as the first,
-    # with some metadata saying it is a second global view
+    # source samples (for model)
+    source_samples: list[Sample]
 
-    source_samples : list[Sample]
+    # target samples (for TargetAuxCalculator)
+    targt_samples: list[Sample]
 
-    targt_samples : list[Sample]
+    # index of corresponding target (for source samples) or source (for target samples)
+    # these are in 1-to-1 corresponding for classical training modes (MTM, forecasting) but
+    # can be more complex for strategies like student-teacher training
+    source_matching_idx: np.typing.NDArray[np.int32]
+    target_matching_idx: np.typing.NDArray[np.int32]
 
-
-    def __init__( self, streams, num_source_samples, num_target_samples) :
-        """
-
-        """
+    def __init__(self, streams, num_source_samples: int, num_target_samples: int) -> None:
+        """ """
 
         self.source_samples = [Sample(streams) for _ in range(num_source_samples)]
         self.target_samples = [Sample(streams) for _ in range(num_target_samples)]
 
-    def add_source_stream( self, sample_idx : int, stream_name : str, stream_data : StreamData) :
-        """
+        self.source_target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
+        self.target_source_matching_idxs = np.full(num_target_samples, -1, dtype=np.int32)
 
+    def add_source_stream(
+        self,
+        source_sample_idx: int,
+        target_sample_idx: int,
+        stream_name: str,
+        stream_data: StreamData,
+    ) -> None:
         """
-        self.source_samples[sample_idx].add_stream_data( stream_name, stream_data)
-
-    def add_target_stream( self, sample_idx : int, stream_name : str, stream_data : StreamData) :
+        Add data for one stream to sample @source_sample_idx
         """
+        self.source_samples[source_sample_idx].add_stream_data(stream_name, stream_data)
 
+        assert target_sample_idx < len(self.target_samples), "invalid value for target_sample_idx"
+        self.source_target_matching_idxs[source_sample_idx] = target_sample_idx
+
+    def add_target_stream(
+        self,
+        target_sample_idx: int,
+        source_sample_idx: int,
+        stream_name: str,
+        stream_data: StreamData,
+    ) -> None:
         """
-        self.target_samples[sample_idx].add_stream_data( stream_name, stream_data)
-
-    def len_source( self) :
+        Add data for one stream to sample @target_sample_idx
         """
+        self.target_samples[target_sample_idx].add_stream_data(stream_name, stream_data)
 
+        assert source_sample_idx < len(self.source_samples), "invalid value for source_sample_idx"
+        self.target_source_matching_idxs[target_sample_idx] = source_sample_idx
+
+    def len_sources(self) -> int:
+        """
+        Number of source samples
         """
         return len(self.source_samples)
 
-    def len_target( self) :
+    def len_targets(self) -> int:
         """
-
+        Number of target samples
         """
         return len(self.target_samples)
 
+    def get_source_sample(self, idx: int) -> Sample:
+        """
+        Get a source sample
+        """
+        return self.source_samples[idx]
 
-    # model_inputs: list[list[any]]  # [n_students][n_streams]
-    # targets: list[list[any]]  # [1][n_streams] (teacher)
-    # view_metadata: dict[
-    #     str, ViewMetadata
-    # ]  # perhaps dict, teacher_metadata : ViewMetadata, student_metadata: list[ViewMetadata]
-    # batch_info: dict | None = field(default_factory=dict)
+    def get_target_sample(self, idx: int) -> Sample:
+        """
+        Get a target sample
+        """
+        return self.target_samples[idx]
 
+    def get_source_idx_for_target(self, target_idx: int) -> int:
+        """
+        Get index of source sample for a given target sample index
+        """
+        return int(self.source_target_matching_idxs[target_idx])
 
-    # # Offsets for student views (populated when needed for future student-teacher training)
-    # # TODO: rename to model_input...source_cell/target_coords... NOTE: then there is a problem for target
-    # student_source_cell_lens: list | None = None  # [n_students] each is a tensor
-    # student_target_coords_idx: list | None = None  # [n_students] each is a list of lists
-
-    # # TODO fix this ridiculous naming
-    # # Placeholders for having ModelBatch giving the full (StreamData, source_cell_lens, target_coords_idx)
-    # teacher_source_cell_lens: torch.Tensor | None = None
-    # teacher_target_coords_idx: list | None = None
-
-    # # TODO: add the timestep as an optional int for the model_inputs when we have multiple timesteps for the diffusion model...
-    # # TODO add the forecast_dt as an optional int ?
-
-    # def to_device(self, device):
-    #     """Move all StreamData objects to the specified device."""
-    #     for student_view in self.model_inputs:
-    #         for stream_data in student_view:
-    #             stream_data.to_device(device)
-
-    #     for teacher_batch in self.targets:
-    #         for stream_data in teacher_batch:
-    #             stream_data.to_device(device)
-
-    #     # Move student offsets if they exist
-    #     if self.student_source_cell_lens is not None:
-    #         self.student_source_cell_lens = [
-    #             lens.to(device) if isinstance(lens, torch.Tensor) else lens
-    #             for lens in self.student_source_cell_lens
-    #         ]
-
-    #     if self.student_target_coords_idx is not None:
-    #         # This is list[list[list[tensor]]], need to move all tensors
-    #         self.student_target_coords_idx = [
-    #             [
-    #                 [t.to(device) if isinstance(t, torch.Tensor) else t for t in stream]
-    #                 for stream in student_idx
-    #             ]
-    #             for student_idx in self.student_target_coords_idx
-    #         ]
-
-    #     return self
+    def get_target_idx_for_source(self, source_idx: int) -> int:
+        """
+        Get index of target sample for a given source sample index
+        """
+        return int(self.source_target_matching_idxs[source_idx])

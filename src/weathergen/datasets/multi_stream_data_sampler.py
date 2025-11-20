@@ -14,6 +14,7 @@ import numpy as np
 import torch
 
 from weathergen.common.io import IOReaderData
+from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
@@ -33,7 +34,6 @@ from weathergen.datasets.utils import (
     compute_source_cell_lens,
 )
 from weathergen.datasets.view_builder import build_views_for_stream
-from weathergen.datasets.batch import ModelBatch
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import Stage
 
@@ -370,9 +370,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         output_tokens: list,
         mask_state: dict | None = None,
     ) -> StreamData:
-        """
-
-        """
+        """ """
 
         # collect for all forecast steps
         dt = self.forecast_offset + forecast_dt
@@ -386,8 +384,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             stream_data.target_is_spoof = rdata.is_spoof
 
-            if "target_coords" in mode :
-
+            if "target_coords" in mode:
                 (tc, tc_l) = self.tokenizer.get_target_coords(
                     stream_info,
                     self.sampling_rate_target,
@@ -398,8 +395,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 )
                 stream_data.add_target_coords(fstep, tc, tc_l)
 
-            if "target_values" in mode :
-
+            if "target_values" in mode:
                 (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
                     stream_info,
                     self.sampling_rate_target,
@@ -469,15 +465,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         return stream_data
 
     def _get_data_windows(self, base_idx, forecast_dt, stream_ds):
-        """ 
+        """
         Collect all data needed for current stream to potentially amortize costs by
         generating multiple samples
-        
+
         """
 
         # source data: iterate overall input steps
         input_data = []
-        for step, idx in enumerate(range(base_idx - self.num_input_steps, base_idx + 1)):
+        for idx in range(base_idx - self.num_input_steps, base_idx + 1):
             # TODO: check that we are not out of bounds when we go back in time
 
             rdata = collect_datasources(stream_ds, idx, "source")
@@ -519,7 +515,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         return (input_data, output_data)
 
-
     def _get_sample(self, mode: str, idx: int, forecast_dt: int):
         """
 
@@ -531,20 +526,18 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         TODO: these modes are not being used now.
         """
 
-        dt = forecast_dt + self.forecast_offset
         streams_data: list[StreamData] = []
 
         # get/coordinate masks
-        masks_streams = self._get_source_target_masks( idx, forecast_dt)
+        masks_streams = self._get_source_target_masks(idx, forecast_dt)
 
         # TODO: these params come from config?
         num_source_samples = 8
-        num_target_samples = 2
-        batch = ModelBatch( self.streams, num_source_samples, num_target_samples)
+        num_target_samples = 8
+        batch = ModelBatch(self.streams, num_source_samples, num_target_samples)
 
         # for all streams
         for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
-            
             name = stream_info["name"]
             (target_masks, source_masks) = masks_streams[name]
 
@@ -554,13 +547,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
-            input_tokens = self.tokenizer.get_tokens_windows( stream_info, input_data, True)
-            output_tokens = self.tokenizer.get_tokens_windows( stream_info, output_data, False)
+            input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
+            output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
 
             # collect source data for current stream
             # loop over student views
-            stream_data_source = { }
-            for sidx, mask in enumerate(source_masks) : 
+            stream_data_source = {}
+            for sidx, mask in enumerate(source_masks):
                 # stream_data_source[name] = self._build_stream_data(
                 sdata = self._build_stream_data(
                     "target_coords target_values",
@@ -574,11 +567,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     mask,
                 )
                 stream_data_source[name] = sdata
-                batch.add_source_stream( sidx, name, sdata)
+                # TODO: set target sample correctly
+                batch.add_source_stream(sidx, sidx, name, sdata)
 
             # stream_data_target can contain network input
             stream_data_target = {}
-            for sidx, mask in enumerate(target_masks) :
+            for sidx, mask in enumerate(target_masks):
                 # stream_data_target[name] = self._build_stream_data(
                 sdata = self._build_stream_data(
                     "target_values",
@@ -592,7 +586,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     mask,
                 )
                 stream_data_target[name] = sdata
-                batch.add_target_stream( sidx, name, sdata)
+                # TODO: set target sample correctly
+                batch.add_target_stream(sidx, sidx, name, sdata)
 
             # TODO: build batch
             # source_input
@@ -601,7 +596,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # target_output
 
             # add data for current stream
-            streams_data += [v for k,v in stream_data_source.items()]
+            streams_data += [v for k, v in stream_data_source.items()]
 
         return streams_data
 
@@ -616,8 +611,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """
 
         masks = {}
-        for stream_info in self.streams :
-
+        for stream_info in self.streams:
             teacher_cfg = self.training_cfg.get("teacher_model_input", {})
             student_cfg = self.training_cfg.get("model_input", {})
             relationship = student_cfg.get("relationship")
@@ -640,7 +634,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             t_keep_t = [to_bool_tensor(t_keep_np)]
             s_keep_t_list = [to_bool_tensor(m) for m in (s_keeps_np or [])]
 
-            masks[ stream_info["name"] ] = (t_keep_t, s_keep_t_list)
+            masks[stream_info["name"]] = (t_keep_t, s_keep_t_list)
 
         return masks
 
