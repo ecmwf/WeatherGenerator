@@ -27,7 +27,6 @@ from weathergen.evaluate.io_reader import CsvReader, WeatherGenReader
 from weathergen.evaluate.plot_utils import collect_channels
 from weathergen.evaluate.utils import (
     calc_scores_per_stream,
-    metric_list_to_json,
     plot_data,
     plot_summary,
 )
@@ -120,6 +119,8 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
             raise ValueError(f"Unknown run type {type} for run {run_id}. Supported: zarr, csv.")
 
         for stream in reader.streams:
+            scores_to_be_computed = defaultdict(set)
+
             _logger.info(f"RUN {run_id}: Processing stream {stream}...")
 
             stream_dict = reader.get_stream(stream)
@@ -138,8 +139,6 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                 _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
 
                 for region in regions:
-                    metrics_to_compute = []
-
                     for metric in metrics:
                         metric_data = reader.load_scores(
                             stream,
@@ -148,7 +147,7 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                         )
 
                         if metric_data is None or plot_score_maps:
-                            metrics_to_compute.append(metric)
+                            scores_to_be_computed[region].add(metric)
                             continue
 
                         available_data = reader.check_availability(
@@ -156,7 +155,7 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                         )
 
                         if not available_data.score_availability:
-                            metrics_to_compute.append(metric)
+                            scores_to_be_computed[region].add(metric)
                         else:
                             # simply select the chosen eval channels, samples, fsteps here...
                             scores_dict[metric][region][stream][run_id] = metric_data.sel(
@@ -165,23 +164,27 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                                 forecast_step=available_data.fsteps,
                             )
 
-                    if metrics_to_compute:
-                        all_metrics, points_per_sample = calc_scores_per_stream(
-                            reader, stream, region, metrics_to_compute, plot_score_maps
-                        )
+                missing_regions = list(scores_to_be_computed.keys())
+                missing_metrics = sorted(
+                    {m for metrics in scores_to_be_computed.values() for m in metrics}
+                )
 
-                        metric_list_to_json(
-                            reader,
-                            [all_metrics],
-                            [points_per_sample],
-                            [stream],
-                            region,
-                        )
+                if not missing_metrics:
+                    continue
 
-                    for metric in metrics_to_compute:
-                        scores_dict[metric][region][stream][run_id] = all_metrics.sel(
-                            {"metric": metric}
-                        )
+                _logger.info(
+                    f"RUN {run_id} – stream {stream}: recomputing "
+                    f"{len(missing_metrics)} metrics for {len(missing_regions)} region(s)."
+                )
+
+                scores_dict = calc_scores_per_stream(
+                    reader,
+                    scores_dict,
+                    stream,
+                    missing_regions,
+                    missing_metrics,
+                    plot_score_maps,
+                )
 
     if mlflow_client:
         # Reorder scores_dict to push to MLFlow per run_id:
