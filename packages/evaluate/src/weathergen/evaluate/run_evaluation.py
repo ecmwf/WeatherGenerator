@@ -21,6 +21,7 @@ from omegaconf import OmegaConf
 from xarray import DataArray
 
 from weathergen.common.config import _REPO_ROOT
+from weathergen.common.logger import init_loggers
 from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io_reader import CsvReader, WeatherGenReader
 from weathergen.evaluate.plot_utils import collect_channels
@@ -38,6 +39,7 @@ from weathergen.metrics.mlflow_utils import (
 
 _logger = logging.getLogger(__name__)
 
+
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
 _platform_env = get_platform_env()
@@ -50,7 +52,7 @@ def evaluate() -> None:
 
 def evaluate_from_args(argl: list[str]) -> None:
     # configure logging
-    logging.basicConfig(level=logging.INFO)
+    init_loggers()
     parser = argparse.ArgumentParser(description="Fast evaluation of WeatherGenerator runs.")
     parser.add_argument(
         "--config",
@@ -86,8 +88,6 @@ def evaluate_from_args(argl: list[str]) -> None:
 
 
 def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
-    # load configuration
-
     runs = cfg.run_ids
 
     _logger.info(f"Detected {len(runs)} runs")
