@@ -69,15 +69,6 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
-loss_fcts:
-  -
-    - "mse"
-    - 1.0
-loss_fcts_val:
-  -
-    - "mse"
-    - 1.0
-
 batch_size_per_gpu: 1
 batch_size_validation_per_gpu: 1
 
@@ -96,23 +87,24 @@ ema_halflife_in_thousands: 1e-3
 training_mode: "forecast"
 training_mode_config: {
   "losses" : { 
-    # LossLatentSSLStudentTeacher: { 
-    #   "iBOT": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
-    #       "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-    #   "DINO": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
-    #       "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-    #   "JEPA": {'weight': 0.5, "out_dim": 2048, "n_register_tokens": 4} }
-    LossLatentDiffusionForecastEngine: {
-        "MSE": {'weight': 1.0}
+    LossLatentDiffusion: {
+        weight: 1.0, loss_fcts: [['mse', 1.0]]
     }
   },
   "shared_heads": False,
   "target_and_aux_calc": "DiffusionLatentTargetEncoder",
   "teacher_model": {}
 }
-# training_mode_config: {"losses": {LossPhysical: [['mse', 1.0]],}
-#                       }
-validation_mode_config: {"losses": {LossPhysical: [['mse', 1.0]],}}
+validation_mode_config: {
+  "losses" : { 
+    LossLatentDiffusion: {
+        weight: 1.0, loss_fcts: [['mse', 1.0]]
+    }
+  },
+  "shared_heads": False,
+  "target_and_aux_calc": "DiffusionLatentTargetEncoder",
+  "teacher_model": {}
+}
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
@@ -133,8 +125,9 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           }
 
 num_mini_epochs: 32
-samples_per_mini_epoch: 4096
-samples_per_validation: 512
+samples_per_mini_epoch: 32
+samples_per_validation: 8
+
 shuffle: True
 
 lr_scaling_policy: "sqrt"

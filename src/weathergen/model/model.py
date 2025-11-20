@@ -10,6 +10,7 @@
 # nor does it submit to any jurisdiction.
 
 import copy
+import dataclasses
 import logging
 import math
 import warnings
@@ -40,6 +41,16 @@ from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
 
 logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class ModelOutput:
+    """
+    A dataclass to encapsulate the model output and give a clear API.
+    """
+
+    physical: dict[str, torch.Tensor]
+    latent: dict[str, torch.Tensor]
 
 
 class ModelParams(torch.nn.Module):
@@ -604,7 +615,10 @@ class Model(torch.nn.Module):
             )
         ]
 
-        return preds_all, posteriors
+        latents = {}
+        latents["posteriors"] = posteriors
+
+        return ModelOutput(physical=preds_all, latent=latents)
 
     #########################################
     def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
