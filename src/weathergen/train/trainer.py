@@ -646,6 +646,7 @@ class Trainer(TrainerBase):
                     self.world_size_original * self.cf.batch_size_per_gpu,
                 )
 
+            # Collecting loss statistics for later inspection
             if bidx == 0:
                 self.loss_unweighted_hist = {
                     loss_name: []
@@ -761,6 +762,7 @@ class Trainer(TrainerBase):
                             sample_idxs,
                         )
 
+                    # Collecting loss statistics for later inspection
                     if bidx == 0:
                         self.loss_unweighted_hist = {
                             loss_name: []
