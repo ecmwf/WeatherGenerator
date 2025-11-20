@@ -692,7 +692,7 @@ class Model(torch.nn.Module):
         for name, head in self.latent_heads.items():
             latents[name] = head(latent_state)
 
-        return ModelOutput(physical=preds_all, latent=latents)
+        return ModelOutput(physical=preds_all,  latent=latents)
 
     #########################################
     def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:

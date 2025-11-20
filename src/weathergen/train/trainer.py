@@ -423,11 +423,9 @@ class Trainer(TrainerBase):
 
         self.validate_with_ema = cf.get("validate_with_ema", False)
         self.ema_model = None
-        # validate_with_ema is incompatible with student-teacher
-        self.validate_with_ema = False  # TODO remove for testing only
-        if self.validate_with_ema:
+        if cf["training_mode"] == "student-teacher":
             meta_ema_model = self.init_model_and_shard(
-                cf, run_id_contd, mini_epoch_contd, "student", devices
+                cf, run_id_contd, mini_epoch_contd, "teacher", devices
             )[0]
             self.ema_model = EMAModel(
                 self.model,
@@ -436,9 +434,10 @@ class Trainer(TrainerBase):
                 rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
-        elif cf["training_mode"] == "student-teacher":
+        elif self.validate_with_ema:
+            # validate_with_ema is incompatible with student-teacher
             meta_ema_model = self.init_model_and_shard(
-                cf, run_id_contd, mini_epoch_contd, "teacher", devices
+                cf, run_id_contd, mini_epoch_contd, "student", devices
             )[0]
             self.ema_model = EMAModel(
                 self.model,
@@ -724,27 +723,11 @@ class Trainer(TrainerBase):
             forecast_steps = batch[-1]
             batch = self.batch_to_device(batch)
             batch = ModelBatch(
-                model_inputs=[batch, batch],
+                model_inputs=[batch],
                 targets=[batch],
                 view_metadata=[
                     ViewMetadata(
-                        view_id="teacher_global",
-                        keep_mask=None,
-                        strategy="random",
-                        healpix_level=None,
-                        rate=None,
-                        parent_view_id=None,
-                    ),
-                    ViewMetadata(
                         view_id="student_local_0",
-                        keep_mask=None,
-                        strategy="masking",
-                        healpix_level=None,
-                        rate=0.5,
-                        parent_view_id="teacher_global",
-                    ),
-                    ViewMetadata(
-                        view_id="student_local_1",
                         keep_mask=None,
                         strategy="masking",
                         healpix_level=None,
@@ -781,7 +764,7 @@ class Trainer(TrainerBase):
                     )
                 targets, aux = zip(*targets_and_auxs, strict=False)
             loss, loss_values = self.loss_calculator.compute_loss(
-                preds=outputs, targets=targets, view_metadata=batch.view_metadata
+                preds=outputs, targets=targets, view_metadata=None #batch.view_metadata
             )
             # TODO re-enable this, need to think on how to make it compatible with
             # student-teacher training
