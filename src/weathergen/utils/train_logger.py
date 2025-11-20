@@ -143,10 +143,8 @@ class TrainLogger:
         for key, result in timing.reset("train").items():
             for metric, value in asdict(result).items():
                 metric_name = f"perf.timing.{key}.{metric}"
-                if metric_name in metrics:
-                    metrics[metric_name].append(value)
-                else:
-                    metrics[metric_name] = [value]
+                metrics[metric_name] = value
+
         self.log_metrics("train", metrics)
         with open(self.path_run / (self.cf.run_id + "_perf_log.txt"), "ab") as f:
             np.savetxt(f, log_vals)
@@ -179,10 +177,7 @@ class TrainLogger:
         for key, result in timing.reset("validate").items():
             for metric, value in asdict(result).items():
                 metric_name = f"perf.timing.{key}.{metric}"
-                if metric_name in metrics:
-                    metrics[metric_name].append(value)
-                else:
-                    metrics[metric_name] = [value]
+                metrics[metric_name] = value
 
         self.log_metrics("val", metrics)
         with open(self.path_run / (self.cf.run_id + "_val_log.txt"), "ab") as f:
