@@ -147,12 +147,10 @@ def calc_scores_per_stream(
                 _logger.debug(
                     f"Applying bounding box mask for region '{region}' to targets and predictions."
                 )
-                tars = bbox.apply_mask(tars)
-                preds = bbox.apply_mask(preds)
-                if tars_next is not None and preds_next is not None:
-                    tars_next = bbox.apply_mask(tars_next)
-                    preds_next = bbox.apply_mask(preds_next)
-
+            tars, preds, tars_next, preds_next = [
+                bbox.apply_mask(x) if x is not None else None
+                for x in (tars, preds, tars_next, preds_next)
+            ]
             climatology = aligned_clim_data[fstep] if aligned_clim_data else None
             score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
             # Build up computation graphs for all metrics
