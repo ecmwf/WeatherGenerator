@@ -44,7 +44,7 @@ LOGGING_CONFIG = """
             "class": "logging.FileHandler",
             "level": "DEBUG",
             "formatter": "custom",
-            "filename": "log.text",
+            "filename": "log.txt",
             "mode": "w"
         },
         "errorfile": {
