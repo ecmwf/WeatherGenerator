@@ -14,8 +14,8 @@ import xarray as xr
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
-
 from weathergen.common.config import _load_private_conf
+
 from weathergen.evaluate.plot_utils import (
     DefaultMarkerSize,
 )
@@ -921,6 +921,7 @@ class ScoreCards:
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.improvement = plotter_cfg.get("improvement_scale", 0.2)
         self.out_plot_dir = Path(output_basedir) / "score_cards"
+        self.baseline = plotter_cfg.get("baseline")
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
@@ -953,12 +954,19 @@ class ScoreCards:
         n_runs, n_vars = len(runs), len(channels)
         fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_vars))
 
+        if self.baseline:
+            baseline_idx = runs.index(self.baseline)
+            runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
+            data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
+
         baseline = data[0]
         skill_models = []
 
         for run_index in range(1, n_runs):
             skill_model = 0.0
             for var_index, var in enumerate(channels):
+                if var not in data[0].channel.values or var not in data[run_index].channel.values:
+                    continue
                 diff, avg_diff, avg_skill = self.compare_models(
                     data, baseline, run_index, var, metric
                 )
@@ -1233,6 +1241,7 @@ class BarPlots:
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.cmap = plotter_cfg.get("cmap", "bwr")
         self.out_plot_dir = Path(output_basedir) / "bar_plots"
+        self.baseline = plotter_cfg.get("baseline")
         _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
@@ -1272,6 +1281,11 @@ class BarPlots:
             squeeze=False,
         )
         ax = ax.flatten()
+
+        if self.baseline:
+            baseline_idx = runs.index(self.baseline)
+            runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
+            data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
 
         for run_index in range(1, len(runs)):
             ratio_score, channels_per_comparison = self.calc_ratio_per_run_id(
@@ -1403,9 +1417,7 @@ def calculate_average_over_dim(
     ]
 
     if non_zero_dims:
-        _logger.info(
-            f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
-        )
+        _logger.info(f"Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
 
     baseline_score = baseline_var.mean(
         dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True

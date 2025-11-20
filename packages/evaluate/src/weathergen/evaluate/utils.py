@@ -532,6 +532,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         "log_scale": eval_opt.get("log_scale", False),
         "add_grid": eval_opt.get("add_grid", False),
         "plot_ensemble": eval_opt.get("plot_ensemble", False),
+        "baseline": eval_opt.get("baseline", None),
     }
 
     plotter = LinePlots(plot_cfg, summary_dir)
