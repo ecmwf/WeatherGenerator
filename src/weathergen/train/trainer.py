@@ -256,7 +256,7 @@ class Trainer(TrainerBase):
         )
 
         self.model, self.model_params = self.init_model_and_shard(
-            cf, run_id_contd, mini_epoch_contd, devices
+            cf, run_id_contd, mini_epoch_contd, "student", devices
         )
 
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
