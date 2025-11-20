@@ -2,13 +2,21 @@ import dataclasses
 import datetime
 import typing
 
+import numpy as np
+
+NPDT64 = np.datetime64
+NPTDel64 = np.timedelta64
+
+MAX_RECORDS = 200
+
 
 @dataclasses.dataclass
 class Timing:
+    """Statistics in ns."""
     mean: float
     std: float
-    max: float
-    min: float
+    max: int
+    min: int
     n: int
 
     def as_metric(self):
@@ -23,7 +31,7 @@ class Timer:
     name: str
     substeps: dict[str, "Timer"]
     # TODO: use numpy buffers?
-    records: list[datetime.datetime]
+    records: list[NPTDel64]
     _parent: typing.Self | None = None
     _start_time: datetime.datetime | None = None
     _active_substep: typing.Self | None = None
@@ -50,7 +58,7 @@ class Timer:
         self._start_time = start_time
 
     def _stop_recording(self, stop_time: datetime.datetime):
-        self.records.append(stop_time - self._start_time)
+        self.records.append(NPTDel64(stop_time - self._start_time))
 
     def reset(self):
         timings = self.get_result()
@@ -63,18 +71,14 @@ class Timer:
         return timings
 
     def get_result(self):
-        s = sum(self.records)
-        n = len(self.records)
-        try:
-            timing = Timing(
-                s / n,
-                sum((record - s / n) ** 2 for record in self.records) ** 0.5,
-                max(self.records),
-                min(self.records),
-                n,
+        records = np.array(self.records, dtype="datetime64[ns]").astype(np.int64)
+        timing = Timing(
+            records.mean(),
+            records.std(),
+            records.max(),
+            records.min(),
+            records.size,
             )
-        except ZeroDivisionError:
-            timing = None
 
         return {self.name: timing}
 
@@ -83,7 +87,7 @@ class Timer:
 
 
 # TODO test with multiple MPI ranks
-_global_timer = Timer("root", [], [])
+_global_timer = Timer("root", {}, [])
 _timers = {_global_timer.name: _global_timer}
 
 
