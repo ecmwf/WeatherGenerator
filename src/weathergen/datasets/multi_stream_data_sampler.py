@@ -531,15 +531,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # get/coordinate masks
         masks_streams = self._get_source_target_masks(idx, forecast_dt)
 
-        # TODO: these params come from config?
-        num_source_samples = 8
-        num_target_samples = 8
+        # Determine number of views direct from config (teacher & student views)
+        teacher_cfg = self.training_cfg.get("teacher_model_input", {}) if self.training_cfg else {}
+        student_cfg = self.training_cfg.get("model_input", {}) if self.training_cfg else {}
+        num_target_samples = int(teacher_cfg.get("num_views", 1))
+        num_source_samples = int(teacher_cfg.get("num_views", 1)) * int(student_cfg.get("num_views", 1))  # per teacher
+        
         batch = ModelBatch(self.streams, num_source_samples, num_target_samples)
 
         # for all streams
         for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
             name = stream_info["name"]
-            (target_masks, source_masks) = masks_streams[name]
+
+            (target_masks, source_masks, student_to_teacher) = masks_streams[name]
 
             # input_data and output_data is conceptually consecutive but differs
             # in source and target channels; overlap in one window when self.forecast_offset=0
@@ -567,12 +571,21 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     mask,
                 )
                 stream_data_source[name] = sdata
-                # TODO: set target sample correctly
-                batch.add_source_stream(sidx, sidx, name, sdata)
+                # TODO: check this is correct
+                # Map each student (source) to its teacher (target)
+                t_idx = int(student_to_teacher[sidx])
+                batch.add_source_stream(sidx, t_idx, name, sdata)
 
             # stream_data_target can contain network input
             stream_data_target = {}
-            for sidx, mask in enumerate(target_masks):
+            # Not sure if this is the neatest approach...
+            # choose a student per teacher for reverse mapping
+            # pick the first student index that maps to this teacher
+            rep_source_for_teacher = {}
+            for s_idx, t_idx in enumerate(student_to_teacher):
+                rep_source_for_teacher.setdefault(int(t_idx), s_idx)
+
+            for t_idx, mask in enumerate(target_masks):
                 # stream_data_target[name] = self._build_stream_data(
                 sdata = self._build_stream_data(
                     "target_values",
@@ -586,8 +599,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     mask,
                 )
                 stream_data_target[name] = sdata
-                # TODO: set target sample correctly
-                batch.add_target_stream(sidx, sidx, name, sdata)
+                # TODO: check target sample here
+                # Map target to one representative source (not 1:N here)
+                rep_source_idx = int(rep_source_for_teacher.get(t_idx, 0))
+                batch.add_target_stream(t_idx, rep_source_idx, name, sdata)
 
             # TODO: build batch
             # source_input
@@ -616,14 +631,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             student_cfg = self.training_cfg.get("model_input", {})
             relationship = student_cfg.get("relationship")
 
-            # use build_views_for_stream utility to create student and teacher masks
-            t_keep_np, s_keeps_np, _meta = build_views_for_stream(
-                self.tokenizer.masker,
-                self.num_healpix_cells,
-                teacher_cfg=teacher_cfg,
-                student_cfg=student_cfg,
-                relationship=relationship,
-            )
+            # number of teacher views
+            num_teacher_views = int(teacher_cfg.get("num_views", 1))
 
             # Convert to torch.bool
             def to_bool_tensor(arr):
@@ -631,11 +640,34 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     return None
                 return torch.from_numpy(np.asarray(arr, dtype=bool)).to(torch.bool)
 
-            t_keep_t = [to_bool_tensor(t_keep_np)]
-            s_keep_t_list = [to_bool_tensor(m) for m in (s_keeps_np or [])]
+            # renaming here
+            target_masks: list[torch.Tensor] = []
+            source_masks: list[torch.Tensor] = []
+            student_to_teacher: list[int] = []
 
-            masks[stream_info["name"]] = (t_keep_t, s_keep_t_list)
+            # add a loop over num_teacher_views, generate students for each teacher
+            for t_idx in range(num_teacher_views):
+                # Build one teacher and its student views
+                t_keep_np, s_keeps_np, _meta = build_views_for_stream(
+                    self.tokenizer.masker,
+                    self.num_healpix_cells,
+                    teacher_cfg=teacher_cfg,
+                    student_cfg=student_cfg,
+                    relationship=relationship,
+                )
 
+                # append teacher mask
+                t_tensor = to_bool_tensor(t_keep_np)
+                target_masks.append(t_tensor)
+
+                # this teacher's students and mapping
+                for s_np in (s_keeps_np or []):
+                    source_masks.append(to_bool_tensor(s_np))
+                    # append 0, 1, ... depending on which teacher we did
+                    student_to_teacher.append(len(target_masks) - 1)
+
+            masks[stream_info["name"]] = (target_masks, source_masks, student_to_teacher)
+        
         return masks
 
     def _preprocess_model_data(self, batch, forecast_dt):
