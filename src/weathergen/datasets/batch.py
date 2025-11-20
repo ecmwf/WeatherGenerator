@@ -92,7 +92,7 @@ class ModelBatch:
     source_samples: list[Sample]
 
     # target samples (for TargetAuxCalculator)
-    targt_samples: list[Sample]
+    target_samples: list[Sample]
 
     # index of corresponding target (for source samples) or source (for target samples)
     # these are in 1-to-1 corresponding for classical training modes (MTM, forecasting) but
