@@ -41,7 +41,7 @@ class Plotter:
     Contains all basic plotting functions.
     """
 
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, stream: str | None = None):
         """
         Initialize the Plotter class.
 
@@ -57,6 +57,9 @@ class Plotter:
         output_basedir:
             Base directory under which the plots will be saved.
             Expected scheme `<results_base_dir>/<run_id>`.
+        stream:
+            Stream identifier for which the plots will be created.
+            It can also be set later via update_data_selection.
         """
 
         _logger.info(f"Taking cartopy paths from {work_dir}")
@@ -64,6 +67,7 @@ class Plotter:
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
+        self.fps = plotter_cfg.get("fps")
         self.plot_subtimesteps = plotter_cfg.get(
             "plot_subtimesteps", False
         )  # True if plots are created for each valid time separately
@@ -76,7 +80,7 @@ class Plotter:
             os.makedirs(self.out_plot_basedir, exist_ok=True)
 
         self.sample = None
-        self.stream = None
+        self.stream = stream
         self.fstep = None
 
         self.select = {}
@@ -132,13 +136,13 @@ class Plotter:
         da:
             xarray DataArray to select data from.
         selection:
-            Dictionary of selectors where keys are coordinate names and values are the values to select.
+            Dictionary of selectors where keys are coordinate names and values are the values to
+            select.
 
         Returns
         -------
             xarray DataArray with selected data.
         """
-
         for key, value in selection.items():
             if key in da.coords and key not in da.dims:
                 # Coordinate like 'sample' aligned to another dim
@@ -264,7 +268,8 @@ class Plotter:
         plt.xlabel(f"Variable: {varname}")
         plt.ylabel("Frequency")
         plt.title(
-            f"Histogram of Target and Prediction: {self.stream}, {varname} : fstep = {self.fstep:03}"
+            f"Histogram of Target and Prediction: {self.stream}, {varname} : "
+            f"fstep = {self.fstep:03}"
         )
         plt.legend(frameon=False)
 
@@ -322,7 +327,8 @@ class Plotter:
             Additional keyword arguments for the map.
             Known keys are:
                 - marker_size: base size of the marker (default is 1)
-                - scale_marker_size: if True, the marker size will be scaled based on latitude (default is False)
+                - scale_marker_size: if True, the marker size will be scaled based on latitude
+                  (default is False)
                 - marker: marker style (default is 'o')
             Unknown keys will be passed to the scatter plot function.
 
@@ -375,6 +381,7 @@ class Plotter:
                     var,
                     tag=tag,
                     map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
+                    title=f"{self.stream}, {var} : fstep = {self.fstep:03} ({valid_time})",
                 )
                 plot_names.append(name)
 
@@ -389,6 +396,7 @@ class Plotter:
         varname: str,
         tag: str = "",
         map_kwargs: dict | None = None,
+        title: str | None = None,
     ):
         """
         Plot a 2D map for a data array using scatter plot.
@@ -405,6 +413,8 @@ class Plotter:
             Any tag you want to add to the plot
         map_kwargs: dict | None
             Additional keyword arguments for the map.
+        title: str | None
+            Title for the plot.
 
         Returns
         -------
@@ -446,11 +456,9 @@ class Plotter:
         ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
         ax.coastlines()
 
-        valid_time = (
-            data["valid_time"][0]
-            .values.astype("datetime64[m]")
-            .astype(datetime.datetime)
-            .strftime("%Y-%m-%dT%H%M")
+        assert data["lon"].shape == data["lat"].shape == data.shape, (
+            f"Scatter plot:: Data shape do not match. Shapes: "
+            f"lon {data['lon'].shape}, lat {data['lat'].shape}, data {data.shape}."
         )
 
         scatter_plt = ax.scatter(
@@ -467,22 +475,34 @@ class Plotter:
         )
 
         plt.colorbar(scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}")
-        plt.title(f"{self.stream}, {varname} : fstep = {self.fstep:03} ({valid_time})")
+        plt.title(title)
         ax.set_global()
         ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
 
         # TODO: make this nicer
-        parts = [
-            "map",
-            self.run_id,
-            tag,
-            str(self.sample),
-            valid_time,
-            self.stream,
-            varname,
-            "fstep",
-            str(self.fstep).zfill(3),
-        ]
+        parts = ["map", self.run_id, tag]
+
+        if self.sample:
+            parts.append(str(self.sample))
+
+        if "valid_time" in data.coords:
+            valid_time = data["valid_time"][0].values
+            if ~np.isnat(valid_time):
+                valid_time = (
+                    valid_time.astype("datetime64[m]")
+                    .astype(datetime.datetime)
+                    .strftime("%Y-%m-%dT%H%M")
+                )
+
+                parts.append(valid_time)
+
+        if self.stream:
+            parts.append(self.stream)
+
+        parts.append(varname)
+
+        if self.fstep is not None:
+            parts.extend(["fstep", f"{self.fstep:03d}"])
 
         name = "_".join(filter(None, parts))
         fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
@@ -519,6 +539,9 @@ class Plotter:
         self.update_data_selection(select)
         map_output_dir = self.get_map_output_dir(tag)
 
+        # Convert FPS to duration in milliseconds
+        duration_ms = int(1000 / self.fps) if self.fps > 0 else 400
+
         for _, sa in enumerate(samples):
             for _, var in enumerate(variables):
                 _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
@@ -543,14 +566,18 @@ class Plotter:
                     names = glob.glob(fname)
                     image_paths += names
 
-                images = [Image.open(path) for path in image_paths]
-                images[0].save(
-                    f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{var}.gif",
-                    save_all=True,
-                    append_images=images[1:],
-                    duration=500,
-                    loop=0,
-                )
+                if image_paths:
+                    images = [Image.open(path) for path in image_paths]
+                    images[0].save(
+                        f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{var}.gif",
+                        save_all=True,
+                        append_images=images[1:],
+                        duration=duration_ms,
+                        loop=0,
+                    )
+
+                else:
+                    _logger.warning(f"No images found for animation {var} sample {sa}")
 
         return image_paths
 
@@ -611,17 +638,17 @@ class LinePlots:
         -------
             data_list, label_list - lists of data and labels
         """
-        assert type(data) == xr.DataArray or type(data) == list, (
+        assert isinstance(data, xr.DataArray | list), (
             "Compare::plot - Data should be of type xr.DataArray or list"
         )
-        assert type(labels) == str or type(labels) == list, (
+        assert isinstance(labels, str | list), (
             "Compare::plot - Labels should be of type str or list"
         )
 
         # convert to lists
 
-        data_list = [data] if type(data) == xr.DataArray else data
-        label_list = [labels] if type(labels) == str else labels
+        data_list = [data] if isinstance(data, xr.DataArray) else data
+        label_list = [labels] if isinstance(labels, str) else labels
 
         assert len(data_list) == len(label_list), "Compare::plot - Data and Labels do not match"
 
@@ -707,7 +734,80 @@ class LinePlots:
                 )
         else:
             _logger.warning(
-                f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. Skipping ensemble plotting."
+                f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. "
+                "Skipping ensemble plotting."
+            )
+
+    def _plot_ensemble(self, data: xr.DataArray, x_dim: str, label: str) -> None:
+        """
+        Plot ensemble spread for a data array.
+
+        Parameters
+        ----------
+        data: xr.xArray
+            DataArray to be plotted
+        x_dim: str
+            Dimension to be used for the x-axis.
+        label: str
+            Label for the dataset
+        Returns
+        -------
+            None
+        """
+        averaged = data.mean(dim=[dim for dim in data.dims if dim != x_dim], skipna=True).sortby(
+            x_dim
+        )
+
+        lines = plt.plot(
+            averaged[x_dim],
+            averaged.values,
+            label=label,
+            marker="o",
+            linestyle="-",
+        )
+        line = lines[0]
+        color = line.get_color()
+
+        ens = data.mean(
+            dim=[dim for dim in data.dims if dim not in [x_dim, "ens"]], skipna=True
+        ).sortby(x_dim)
+
+        if self.plot_ensemble == "std":
+            std_dev = ens.std(dim="ens", skipna=True).sortby(x_dim)
+            plt.fill_between(
+                averaged[x_dim],
+                (averaged - std_dev).values,
+                (averaged + std_dev).values,
+                label=f"{label} - std dev",
+                color=color,
+                alpha=0.2,
+            )
+
+        elif self.plot_ensemble == "minmax":
+            ens_min = ens.min(dim="ens", skipna=True).sortby(x_dim)
+            ens_max = ens.max(dim="ens", skipna=True).sortby(x_dim)
+
+            plt.fill_between(
+                averaged[x_dim],
+                ens_min.values,
+                ens_max.values,
+                label=f"{label} - min max",
+                color=color,
+                alpha=0.2,
+            )
+
+        elif self.plot_ensemble == "members":
+            for j in range(ens.ens.size):
+                plt.plot(
+                    ens[x_dim],
+                    ens.isel(ens=j).values,
+                    color=color,
+                    alpha=0.2,
+                )
+        else:
+            _logger.warning(
+                f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. "
+                "Skippingensemble plotting."
             )
 
     def plot(
@@ -737,7 +837,6 @@ class LinePlots:
             Name of the dimension to be used for the y-axis.
         print_summary:
             If True, print a summary of the values from the graph.
-
         Returns
         -------
             None
@@ -760,7 +859,8 @@ class LinePlots:
             else:
                 if non_zero_dims:
                     _logger.info(
-                        f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
+                        f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. "
+                        "Averaging..."
                     )
 
                 averaged = data.mean(
@@ -826,10 +926,16 @@ class ScoreCards:
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def plot(
-        self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
+        self,
+        data: list[xr.DataArray],
+        runs: list[str],
+        metric: str,
+        channels: list[str],
+        tag: str,
     ) -> None:
         """
-        Plot score cards comparing performance between run_ids against a baseline over channels of interest.
+        Plot score cards comparing performance between run_ids against a baseline over channels
+        of interest.
 
         Parameters
         ----------
@@ -837,6 +943,8 @@ class ScoreCards:
             List of (xarray) DataArrays with the scores (stream, region and metric specific)
         runs:
             List containing runs (in str format) to be compared (provided in the config)
+        metric:
+            Metric for which we are plotting
         channels:
             List containing channels (in str format) of interest (provided in the config)
         tag:
@@ -851,14 +959,16 @@ class ScoreCards:
         for run_index in range(1, n_runs):
             skill_model = 0.0
             for var_index, var in enumerate(channels):
-                diff, diff_mean, skill = self.compare_models(data, baseline, run_index, var)
-                skill_model += skill.values
+                diff, avg_diff, avg_skill = self.compare_models(
+                    data, baseline, run_index, var, metric
+                )
+                skill_model += avg_skill.values
 
                 # Get symbols based on difference and performance as well as coordinates
                 # for the position of the triangles.
 
                 x, y, alt, color, triangle, size = self.get_plot_symbols(
-                    run_index, var_index, skill, diff_mean
+                    run_index, var_index, avg_skill, avg_diff, metric
                 )
 
                 ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
@@ -939,6 +1049,7 @@ class ScoreCards:
         baseline: xr.DataArray,
         run_index: int,
         var: str,
+        metric: str,
         x_dim="forecast_step",
     ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray]:
         """
@@ -979,85 +1090,114 @@ class ScoreCards:
         baseline_score, model_score = calculate_average_over_dim(x_dim, baseline_var, data_var)
         diff = baseline_score - model_score
 
-        skill = self.get_skill_score(model_score, baseline_score, 0.0)
+        skill = self.get_skill_score(model_score, baseline_score, metric)
         return diff, diff.mean(dim=x_dim), skill.mean(dim=x_dim)
 
     def get_skill_score(
-        self, score_model: xr.DataArray, score_ref: xr.DataArray, score_perf: float
+        self, score_model: xr.DataArray, score_ref: xr.DataArray, metric: str
     ) -> xr.DataArray:
         """
-        Calculation function for calculating skill score between a model and the baseline.
+        Calculate skill score comparing a model against a baseline.
+
+        Skill score is defined as: (model_score - baseline_score) / (perfect_score - baseline_score)
 
         Parameters
         ----------
-        score_model: xr.DataArray
-            The scores of the model that we aim to compare with the baseline.
-
-        score_ref: xr.DataArray
-            The scores of the baseline model.
-
-        score_perf: float
-            The perfect score based on the metric. For example for RMSE is 0.
+        score_model : xr.DataArray
+            The scores of the model being evaluated
+        score_ref : xr.DataArray
+            The scores of the reference/baseline model
+        metric : str
+            The metric name for which to calculate skill score
 
         Returns
-        ----------
-        skill_score: xr.DataArray
-            Skill scores of a model compared with baseline.
-
+        -------
+        xr.DataArray
+            Skill scores comparing model to baseline
         """
-
-        skill_score = (score_model - score_ref) / (score_perf - score_ref)
+        perf_score = self.get_perf_score(metric)
+        skill_score = (score_model - score_ref) / (perf_score - score_ref)
         return skill_score
 
-    def get_plot_symbols(
-        self, run_index: int, var_index: int, skill: xr.DataArray, diff_mean: xr.DataArray
-    ) -> tuple[int, float, str, str, str, xr.DataArray]:
+    def get_perf_score(self, metric: str) -> float:
         """
-        Get the triangle symbols per comparison model with the correct size and color
-        based on score improvement or deterioration.
+        Get the perfect score for a given metric.
+
+        Perfect scores represent ideal performance:
+        - Error metrics: 0 (lower is better)
+        - Skill/score metrics: 1 (higher is better)
+        - PSNR: 100 (higher is better)
 
         Parameters
         ----------
-        run_index: int
-            The order index over the run_ids.
-        var_index: float
-            The order index over the channels.
-        skill: xarray.DataArray
-            The skill of the model
-        diff_mean: xr.DataArray
-            The average difference between the baseline and the model. Determines improvement or
-            deterioration over baseline.
+        metric : str
+            Metric name
 
         Returns
-        ----------
-        x: int
-            x coordinate of the triangle that indicates improvement or deterioration over baseline.
-
-        y: float
-            y coordinate of the triangle that indicates improvement or deterioration over baseline.
-
-        alt: str
-            str that indicates the alternative hypothesis test for Wilcoxon test of significance.
-
-        color: str
-            The color "red" or "blue" that indicates improvement or deterioration over baseline.
-        triangle: str
-            The triangle symbol "^" or "v" that indicates improvement or deterioration over baseline.
-        size: xr.DataArray
-            Size of the triangles in the final plot
+        -------
+        float
+            Perfect score for the specified metric
         """
-        if diff_mean > 0:
-            # A better than B
+        # Metrics where lower values indicate better performance (error metrics)
+        if lower_is_better(metric):
+            return 0.0
+
+        # Metrics where higher values indicate better performance (with specific perfect score)
+        elif metric in ["psnr"]:
+            return 100.0
+
+        # Metrics where higher values indicate better performance (default perfect score)
+        else:
+            return 1.0
+
+    def get_plot_symbols(
+        self,
+        run_index: int,
+        var_index: int,
+        avg_skill: xr.DataArray,
+        avg_diff: xr.DataArray,
+        metric: str,
+    ) -> tuple[int, float, str, str, str, xr.DataArray]:
+        """
+        Determine plot symbol properties based on performance difference.
+
+        Parameters
+        ----------
+        run_index : int
+            Index of the model.
+        var_index : int
+            Index of the variable/channel.
+        avg_skill : xr.DataArray
+            Average skill score of the model.
+        avg_diff : xr.DataArray
+            Average difference between baseline and model.
+        metric : str
+            Metric used for interpretation.
+
+        Returns
+        -------
+        Tuple[int, float, str, str, str, xr.DataArray]
+            x, y coordinates, alternative hypothesis, color, triangle symbol, size.
+        """
+        # Conservative choice
+        alt = "two-sided"
+        modus = "different"
+        color = "gray"
+
+        # Determine if diff_mean indicates improvement
+        is_improvement = (avg_diff > 0 and lower_is_better(metric)) or (
+            avg_diff < 0 and not lower_is_better(metric)
+        )
+
+        if is_improvement:
             alt = "greater"
             modus = "better"
             color = "blue"
-        elif diff_mean < 0:
-            # A worse than B
+        elif not is_improvement and avg_diff != 0:
             alt = "less"
             modus = "worse"
             color = "red"
         else:
-            # Equal performance (conservative fallback)
             alt = "two-sided"
             modus = "different"
 
@@ -1068,7 +1208,7 @@ class ScoreCards:
         # First row is model 1 vs model 0
         y = var_index + 0.5
 
-        size = 200 * (1 - (1 / (1 + abs(skill) / self.improvement)))  # Add base size to all
+        size = 200 * (1 - (1 / (1 + abs(avg_skill) / self.improvement)))  # Add base size to all
 
         return x, y, alt, color, triangle, size
 
@@ -1099,10 +1239,16 @@ class BarPlots:
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def plot(
-        self, data: list[xr.DataArray], runs: list[str], channels: list[str], tag: str
+        self,
+        data: list[xr.DataArray],
+        runs: list[str],
+        metric: str,
+        channels: list[str],
+        tag: str,
     ) -> None:
         """
-        Plot (ratio) bar plots comparing performance between different run_ids over channels of interest.
+        Plot (ratio) bar plots comparing performance between different run_ids over channels of
+        interest.
 
         Parameters
         ----------
@@ -1110,6 +1256,8 @@ class BarPlots:
             List of (xarray) DataArrays with the scores (stream, region and metric specific)
         runs:
             List containing runs (in str format) to be compared (provided in the config)
+        metric:
+            Metric name
         channels:
             List containing channels (in str format) of interest (provided in the config)
         tag:
@@ -1133,7 +1281,7 @@ class BarPlots:
             ax[run_index - 1].barh(
                 np.arange(len(ratio_score)),
                 ratio_score,
-                color=self.colors(ratio_score),
+                color=self.colors(ratio_score, metric),
                 align="center",
                 edgecolor="black",
                 linewidth=0.5,
@@ -1143,7 +1291,8 @@ class BarPlots:
             )
             ax[run_index - 1].invert_yaxis()
             ax[run_index - 1].set_xlabel(
-                f"Relative {data[0].coords['metric'].item().upper()}: Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
+                f"Relative {data[0].coords['metric'].item().upper()}: "
+                f"Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
             )
 
         _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
@@ -1157,7 +1306,11 @@ class BarPlots:
         plt.close(fig)
 
     def calc_ratio_per_run_id(
-        self, data: list[xr.DataArray], channels: list[str], run_index: int, x_dim="channel"
+        self,
+        data: list[xr.DataArray],
+        channels: list[str],
+        run_index: int,
+        x_dim="channel",
     ) -> tuple[np.array, str]:
         """
         This function calculates the ratio per comparison model for each channel.
@@ -1197,22 +1350,27 @@ class BarPlots:
         ratio_score = np.array(ratio_score) - 1
         return ratio_score, channels_per_comparison
 
-    def colors(self, ratio_score: np.array) -> list[tuple]:
+    def colors(self, ratio_score: np.array, metric: str) -> list[tuple]:
         """
-        This function calculates colormaps based on the skill scores. From negative value blue color variations
-        should be given otherwise red color variations should be given.
+        This function calculates colormaps based on the skill scores. From negative value blue
+        color variations should be given otherwise red color variations should be given.
 
         Parameters
         ----------
         ratio_score: np.array
             The (ratio) skill for a specific model
+        metric: str
+            The metric of interest
         Returns
         ----------
         colors: list[tuple]
             The color magnitude (blue to red) of the bars in the plots
         """
         max_val = np.abs(ratio_score).max()
-        cmap = plt.get_cmap("bwr")
+        if lower_is_better(metric):
+            cmap = plt.get_cmap("bwr")
+        else:
+            cmap = plt.get_cmap("bwr_r")
         colors = [cmap(0.5 + v / (2 * max_val)) for v in ratio_score]
         return colors
 
@@ -1221,7 +1379,8 @@ def calculate_average_over_dim(
     x_dim: str, baseline_var: xr.DataArray, data_var: xr.DataArray
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
-    Calculate average over xarray dimensions that are larger than 1. Those might be the forecast-steps or the samples.
+    Calculate average over xarray dimensions that are larger than 1. Those might be the
+    forecast-steps or the samples.
 
     Parameters
     ----------
@@ -1254,3 +1413,8 @@ def calculate_average_over_dim(
     model_score = data_var.mean(dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True)
 
     return baseline_score, model_score
+
+
+def lower_is_better(metric: str) -> bool:
+    # Determine whether lower or higher is better
+    return metric in {"l1", "l2", "mse", "rmse", "vrmse", "bias", "crps", "spread"}

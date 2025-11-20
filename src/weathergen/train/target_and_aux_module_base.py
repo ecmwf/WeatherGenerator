@@ -35,9 +35,7 @@ class IdentityTargetAndAux(TargetAndAuxModuleBase):
         return
 
     def compute(self, istep, batch, *args, **kwargs):
-        # if abstract loss calculator and ModelOutput already exist use
-        # return {"physical" : batch[0]}, None
-        return batch[0], None
+        return {"physical" : batch[0]}, None
 
     def to_device(self, device):
         return

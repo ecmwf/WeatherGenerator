@@ -47,7 +47,7 @@ class EmbeddingEngine(torch.nn.Module):
         for i, si in enumerate(self.cf.streams):
             stream_name = si.get("name", i)
 
-            if "diagnostic" in si and si["diagnostic"]:
+            if si.get("diagnostic", False) or self.sources_size[i] == 0:
                 self.embeds.append(torch.nn.Identity())
                 continue
 
@@ -376,10 +376,11 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-    def forward(self, tokens, use_reentrant):
-        for it, block in enumerate(self.fe_blocks):
-            aux_info = torch.tensor([it], dtype=torch.float32, device="cuda")
-            tokens = checkpoint(block, tokens, aux_info, use_reentrant=use_reentrant)
+    def forward(self, tokens, fstep):
+        aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
+        for block in self.fe_blocks:
+            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+
         return tokens
 
 

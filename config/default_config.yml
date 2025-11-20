@@ -69,15 +69,6 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
-loss_fcts:
-  -
-    - "mse"
-    - 1.0
-loss_fcts_val:
-  -
-    - "mse"
-    - 1.0
-
 batch_size_per_gpu: 1
 batch_size_validation_per_gpu: 1
 
@@ -94,6 +85,16 @@ ema_halflife_in_thousands: 1e-3
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
 training_mode: "masking"
+training_mode_config: {"losses": {LossPhysical: {weight: 0.7, loss_fcts: [['mse', 0.8], ['mae', 0.2]]},
+                                  LossPhysicalTwo: {weight: 0.3, loss_fcts: [['mse', 1.0]]},
+                                  }
+                      }
+# training_mode_config: {"loss": {LossPhysical: [['mse', 0.7]],
+#                                             LossLatent: [['mse', 0.3]],
+#                                             LossStudentTeacher: [{'iBOT': {<options>}, 'JEPA': {options}}],}
+#                       }
+validation_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},}
+                        }
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
@@ -113,9 +114,10 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           "same_strategy_per_batch": false
                           }
 
-num_epochs: 32
-samples_per_epoch: 4096
-samples_per_validation: 512
+num_mini_epochs: 32
+samples_per_mini_epoch: 32
+samples_per_validation: 8
+
 shuffle: True
 
 lr_scaling_policy: "sqrt"
@@ -126,7 +128,7 @@ lr_final: 0.0
 lr_steps_warmup: 512 
 lr_steps_cooldown: 512
 lr_policy_warmup: "cosine"
-lr_policy_decay: "linear"
+lr_policy_decay: "constant"
 lr_policy_cooldown: "linear"
 
 grad_clip: 1.0
@@ -147,7 +149,7 @@ val_initial: False
 
 loader_num_workers: 8
 log_validation: 0
-analysis_streams_output: ["ERA5"]
+streams_output: ["ERA5"]
 
 istep: 0
 run_history: []
