@@ -11,7 +11,6 @@
 import torch
 
 from weathergen.common.io import IOReaderData
-from weathergen.datasets.batch import ViewMetadata
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
@@ -23,6 +22,7 @@ from weathergen.datasets.tokenizer_utils import (
     tokenize_spacetime,
 )
 from weathergen.datasets.view_builder import build_views_for_stream
+
 
 def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
     """
@@ -38,13 +38,10 @@ def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
     return rdata
 
 
-
 class TokenizerMasking(Tokenizer):
     def __init__(self, healpix_level: int, masker: Masker):
         super().__init__(healpix_level)
         self.masker = masker
-        # cache last built view metadata per stream invocation (optional downstream use)
-        self._last_view_metadata: list[ViewMetadata] | None = None
 
     def reset_rng(self, rng) -> None:
         """
@@ -81,9 +78,7 @@ class TokenizerMasking(Tokenizer):
         time_win: tuple,
         keep_mask: torch.Tensor | None = None,
     ):
-        token_size = stream_info["token_size"]
         stream_id = stream_info["stream_id"]
-        assert token_size is not None, "stream did not specify token_size"
         is_diagnostic = stream_info.get("diagnostic", False)
 
         # return empty if there is no data or we are in diagnostic mode
@@ -145,7 +140,7 @@ class TokenizerMasking(Tokenizer):
         time_win: tuple,
         mask_state: dict | None = None,
     ):
-        token_size = stream_info["token_size"]
+        # TODO: remove
 
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
@@ -179,7 +174,6 @@ class TokenizerMasking(Tokenizer):
 
         return (data, datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv)
 
-
     def get_target_coords(
         self,
         stream_info: dict,
@@ -189,8 +183,6 @@ class TokenizerMasking(Tokenizer):
         time_win: tuple,
         mask_state: dict | None = None,
     ):
-        token_size = stream_info["token_size"]
-
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
 
@@ -224,7 +216,6 @@ class TokenizerMasking(Tokenizer):
 
         return (coords_local, coords_per_cell)
 
-
     def get_target_values(
         self,
         stream_info: dict,
@@ -234,8 +225,6 @@ class TokenizerMasking(Tokenizer):
         time_win: tuple,
         mask_state: dict | None = None,
     ):
-        token_size = stream_info["token_size"]
-
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
 
@@ -270,8 +259,6 @@ class TokenizerMasking(Tokenizer):
 
         return (data, datetimes, coords, idxs_ord_inv)
 
-
-
     # ------------------------------------------------------------------
     # Per-stream view construction (teacher + students) for student-teacher
     # ------------------------------------------------------------------
@@ -293,7 +280,8 @@ class TokenizerMasking(Tokenizer):
         time_win : tuple
             (start, end) datetime window.
         training_cfg : dict | None
-            cf.training_config section; if absent or mode != 'student_teacher', fallback to single view.
+            cf.training_config section; if absent or mode != 'student_teacher', fallback to
+            single view.
 
         Returns
         -------
@@ -301,8 +289,6 @@ class TokenizerMasking(Tokenizer):
             (tokens_cells, tokens_lens) for teacher or None when not student_teacher.
         students : list
             List of (tokens_cells, tokens_lens) for each student view (or single masking view).
-        view_metadata : list[ViewMetadata] | None
-            Metadata for teacher + students when in student_teacher mode.
         """
         if training_cfg is None or training_cfg.get("training_mode") != "student_teacher":
             # Standard masking path: single view only (treated as 'student' for uniformity)
