@@ -62,9 +62,9 @@ def test_train_multi_stream(setup, test_run_id):
     infer_multi_stream(test_run_id)
     evaluate_multi_stream_results(test_run_id)
     assert_metrics_file_exists(test_run_id)
-    assert_all_stream_losses_below_threshold(test_run_id)
+    assert_train_losses_below_threshold(test_run_id)
     assert_val_losses_below_threshold(test_run_id)
-    logger.info("end test_train_multi_stream")
+    logger.info("\nend test_train_multi_stream")
 
 
 def infer_multi_stream(run_id):
@@ -171,15 +171,73 @@ def assert_metrics_file_exists(run_id):
     assert metrics is not None, f"Failed to load metrics for run_id: {run_id}"
 
 
+def assert_stream_losses_below_threshold(run_id, stage="train"):
+    """
+    Test that stream losses are below threshold for a given stage.
+    
+    Args:
+        run_id: The run identifier
+        stage: Either "train" or "val"
+    """
+    metrics = load_metrics(run_id)
+
+    # Threshold diversi per train e val
+    thresholds = {
+        "train": {
+            "ERA5": 1.5,
+            "NPPATMS": 1.5,
+            "SurfaceCombined": 1.5,
+        },
+        "val": {
+            "ERA5": 2.0,
+            "NPPATMS": 2.0,
+            "SurfaceCombined": 2.0,
+        },
+    }
+
+    stage_thresholds = thresholds[stage]
+
+    losses = {}
+    for stream_name, threshold in stage_thresholds.items():
+        loss = next(
+            (
+                metric.get(f"stream.{stream_name}.loss_mse.loss_avg")
+                for metric in reversed(metrics)
+                if metric.get("stage") == stage
+            ),
+            None,
+        )
+
+        assert loss is not None, f"'stream.{stream_name}.loss_mse.loss_avg' {stage} metric is missing"
+        assert loss < threshold, (
+            f"{stream_name} {stage} loss is {loss}, expected below {threshold}"
+        )
+
+        losses[stream_name] = loss
+
+    stage_label = "\nTrain" if stage == "train" else "Validation"
+    logger.info(f"{stage_label} losses – " + ", ".join(f"{k}: {v:.4f}" for k, v in losses.items()))
+
+
+def assert_train_losses_below_threshold(run_id):
+    assert_stream_losses_below_threshold(run_id, stage="train")
+
+
+def assert_val_losses_below_threshold(run_id):
+    assert_stream_losses_below_threshold(run_id, stage="val")
+
+
+'''
+
 def assert_all_stream_losses_below_threshold(run_id):
     """Test that all stream losses are below threshold."""
     metrics = load_metrics(run_id)
     
     # Define streams and their thresholds
     streams = {
-        "ERA5": 2.0,
-        "NPPATMS": 2.0,
-        "SurfaceCombined": 2.0,
+        "ERA5": 1.5,
+        "NPPATMS": 1.5,
+        "SurfaceCombined": 1.5,
     }
     
     losses = {}
@@ -207,9 +265,9 @@ def assert_val_losses_below_threshold(run_id):
     
     # Define streams and their validation thresholds
     streams = {
-        "ERA5": 2.0,
-        "NPPATMS": 2.0,
-        "SurfaceCombined": 2.0,
+        "ERA5": 1.5,
+        "NPPATMS": 1.5,
+        "SurfaceCombined": 1.5,
     }
     
     val_losses = {}
@@ -229,7 +287,7 @@ def assert_val_losses_below_threshold(run_id):
         val_losses[stream_name] = val_loss
     
     logger.info(f"Validation losses - " + ", ".join([f"{k}: {v:.4f}" for k, v in val_losses.items()]))
-
+'''
 
 '''
 def assert_val_losses_below_threshold(run_id):
