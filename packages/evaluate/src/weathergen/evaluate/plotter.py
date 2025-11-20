@@ -954,7 +954,7 @@ class ScoreCards:
         n_runs, n_vars = len(runs), len(channels)
         fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_vars))
 
-        if self.baseline:
+        if self.baseline and self.baseline in runs:
             baseline_idx = runs.index(self.baseline)
             runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
             data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
@@ -1282,7 +1282,7 @@ class BarPlots:
         )
         ax = ax.flatten()
 
-        if self.baseline:
+        if self.baseline and self.baseline in runs:
             baseline_idx = runs.index(self.baseline)
             runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
             data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
