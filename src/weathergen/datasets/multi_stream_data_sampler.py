@@ -571,19 +571,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     mask,
                 )
                 stream_data_source[name] = sdata
-                # TODO: check this is correct
+                # TODO: seb check this 
                 # Map each student (source) to its teacher (target)
-                t_idx = int(student_to_teacher[sidx])
+                t_idx = student_to_teacher[sidx]
                 batch.add_source_stream(sidx, t_idx, name, sdata)
 
             # stream_data_target can contain network input
             stream_data_target = {}
-            # Not sure if this is the neatest approach...
-            # choose a student per teacher for reverse mapping
-            # pick the first student index that maps to this teacher
-            rep_source_for_teacher = {}
-            for s_idx, t_idx in enumerate(student_to_teacher):
-                rep_source_for_teacher.setdefault(int(t_idx), s_idx)
 
             for t_idx, mask in enumerate(target_masks):
                 # stream_data_target[name] = self._build_stream_data(
@@ -599,10 +593,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     mask,
                 )
                 stream_data_target[name] = sdata
-                # TODO: check target sample here
-                # Map target to one representative source (not 1:N here)
-                rep_source_idx = int(rep_source_for_teacher.get(t_idx, 0))
-                batch.add_target_stream(t_idx, rep_source_idx, name, sdata)
+                # TODO: seb to check
+                # Map target to all source students
+                student_indices = [s_idx for s_idx, tid in enumerate(student_to_teacher) if tid == t_idx]
+                batch.add_target_stream(t_idx, student_indices, name, sdata)
 
             # TODO: build batch
             # source_input

@@ -107,7 +107,8 @@ class ModelBatch:
         self.target_samples = [Sample(streams) for _ in range(num_target_samples)]
 
         self.source_target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
-        self.target_source_matching_idxs = np.full(num_target_samples, -1, dtype=np.int32)
+        # self.target_source_matching_idxs = np.full(num_target_samples, -1, dtype=np.int32)
+        self.target_source_matching_idxs = [[] for _ in range(num_target_samples)]
 
     def add_source_stream(
         self,
@@ -127,7 +128,7 @@ class ModelBatch:
     def add_target_stream(
         self,
         target_sample_idx: int,
-        source_sample_idx: int,
+        source_sample_idx: int | list[int],
         stream_name: str,
         stream_data: StreamData,
     ) -> None:
@@ -136,7 +137,10 @@ class ModelBatch:
         """
         self.target_samples[target_sample_idx].add_stream_data(stream_name, stream_data)
 
-        assert source_sample_idx < len(self.source_samples), "invalid value for source_sample_idx"
+        if isinstance(source_sample_idx, int):
+            assert source_sample_idx < len(self.source_samples), "invalid value for source_sample_idx"
+        else:
+            assert all(idx < len(self.source_samples) for idx in source_sample_idx), "invalid value for source_sample_idx"
         self.target_source_matching_idxs[target_sample_idx] = source_sample_idx
 
     def len_sources(self) -> int:
