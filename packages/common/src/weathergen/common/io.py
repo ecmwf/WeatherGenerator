@@ -49,7 +49,7 @@ class IOReaderData:
     geoinfos: NDArray[DType]
     data: NDArray[DType]
     datetimes: NDArray[NPDT64]
-    is_spoof: bool=False
+    is_spoof: bool = False
 
     def is_empty(self):
         """
