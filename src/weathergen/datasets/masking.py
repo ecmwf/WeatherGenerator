@@ -141,7 +141,7 @@ class Masker:
         idxs_cells,
         idxs_cells_lens,
         rdata,
-        keep_mask: np.ndarray | None = None,
+        keep_mask: np.typing.NDArray | None = None,
     ) -> (torch.Tensor, torch.Tensor):
         """
 
@@ -162,16 +162,18 @@ class Masker:
         # Otherwise fall back to the configured strategy logic.
         if keep_mask is not None:
             assert len(keep_mask) == len(idxs_cells_lens), (
-                f"keep_mask length {len(keep_mask)} does not match number of cells {len(idxs_cells_lens)}"
+                "keep_mask length does not match number of cells."
             )
             # build token level mask: for each cell replicate the keep flag across its tokens
-            token_level_flags: list[np.ndarray] = []
+            token_level_flags: list[np.typing.NDArray] = []
             for km, lens_cell in zip(keep_mask, idxs_cells_lens, strict=True):
                 num_tokens_cell = len(lens_cell)
                 if num_tokens_cell == 0:
                     continue
                 token_level_flags.append(
-                    np.ones(num_tokens_cell, dtype=bool) if km else np.zeros(num_tokens_cell, dtype=bool)
+                    np.ones(num_tokens_cell, dtype=bool)
+                    if km
+                    else np.zeros(num_tokens_cell, dtype=bool)
                 )
             if token_level_flags:
                 self.mask_tokens = np.concatenate(token_level_flags)
@@ -633,8 +635,8 @@ class Masker:
         strategy: str | None = None,
         rate: float | None = None,
         masking_strategy_config: dict | None = None,
-        constraint_keep_mask: np.ndarray | None = None,
-    ) -> np.ndarray:
+        constraint_keep_mask: np.typing.NDArray | None = None,
+    ) -> np.typing.NDArray:
         """Generate a boolean keep mask at data healpix level (True = keep cell).
 
         Parameters
@@ -668,7 +670,7 @@ class Masker:
 
         assert 0.0 <= keep_rate <= 1.0, f"keep_rate out of bounds: {keep_rate}"
         assert num_cells == self.healpix_num_cells, (
-            f"num_cells={num_cells} inconsistent with configured healpix level ({self.healpix_num_cells})."
+            "num_cells inconsistent with configured healpix level."
         )
 
         if strat not in {"random", "healpix"}:
@@ -682,7 +684,8 @@ class Masker:
             hl_data = self.healpix_level_data
             hl_mask = cfg.get("hl_mask")
             assert hl_mask is not None and hl_mask < hl_data, (
-                "For healpix keep mask generation, cfg['hl_mask'] must be set and < data level.")
+                "For healpix keep mask generation, cfg['hl_mask'] must be set and < data level."
+            )
             num_parent_cells = 12 * (4**hl_mask)
             level_diff = hl_data - hl_mask
             num_children_per_parent = 4**level_diff
