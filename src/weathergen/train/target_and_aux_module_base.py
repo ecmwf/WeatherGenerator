@@ -40,4 +40,4 @@ class IdentityTargetAndAux(TargetAndAuxModuleBase):
         return batch[0], None
 
     def to_device(self, device):
-        return 
+        return
