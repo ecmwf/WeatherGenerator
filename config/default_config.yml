@@ -85,14 +85,9 @@ ema_halflife_in_thousands: 1e-3
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
 training_mode: "masking"
-training_mode_config: {"losses": {LossPhysical: {weight: 0.7, loss_fcts: [['mse', 0.8], ['mae', 0.2]]},
-                                  LossPhysicalTwo: {weight: 0.3, loss_fcts: [['mse', 1.0]]},
+training_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},
                                   }
                       }
-# training_mode_config: {"loss": {LossPhysical: [['mse', 0.7]],
-#                                             LossLatent: [['mse', 0.3]],
-#                                             LossStudentTeacher: [{'iBOT': {<options>}, 'JEPA': {options}}],}
-#                       }
 validation_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},}
                         }
 # masking rate when training mode is "masking"; ignored in foreacast mode
@@ -115,8 +110,8 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           }
 
 num_mini_epochs: 32
-samples_per_mini_epoch: 32
-samples_per_validation: 8
+samples_per_mini_epoch: 4096
+samples_per_validation: 512
 
 shuffle: True
 
