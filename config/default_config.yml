@@ -129,6 +129,7 @@ training_config:
   teacher_model_input:
     strategy: "healpix"  # Strategy for teacher (global) view: "random", "healpix"
     rate: 0.5  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
+    num_views: 2 # number of teacher views to generate
     # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
     rate_sampling: true  # randomly sample the rate per batch
     masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
