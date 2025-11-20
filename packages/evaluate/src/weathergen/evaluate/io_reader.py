@@ -469,7 +469,8 @@ class WeatherGenReader(Reader):
 
         super().__init__(eval_cfg, run_id, private_paths)
 
-        self.mini_epoch = eval_cfg.mini_epoch
+        # TODO: remove backwards compatibility to "epoch" in Feb. 2026
+        self.mini_epoch = getattr(eval_cfg, "mini_epoch", getattr(eval_cfg, "epoch", -1))
         self.rank = eval_cfg.rank
 
         # Load model configuration and set (run-id specific) directories
@@ -889,7 +890,7 @@ class WeatherGenReader(Reader):
         """
         score_path = (
             Path(self.metrics_dir)
-            / f"{self.run_id}_{stream}_{region}_{metric}_epoch{self.epoch:05d}.json"
+            / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
         )
         _logger.debug(f"Looking for: {score_path}")
 
