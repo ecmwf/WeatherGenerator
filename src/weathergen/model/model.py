@@ -612,11 +612,11 @@ class Model(torch.nn.Module):
         if not hasattr(self, "xlim"):
             self.xlim = ax.get_xlim()
             self.ylim = ax.get_ylim()
-        ax.set_xlim(self.xlim)
+        ax.set_xlim(0.2*self.xlim)
         ax.set_ylim(self.ylim)
         ax.set_title(f"Forecast step {fstep}")
         os.makedirs(plot_path, exist_ok=True)
-        fig.savefig(plot_path / f"fstep_{str(fstep).zfill(2)}.png")
+        fig.savefig(plot_path / f"fstep_{str(fstep).zfill(3)}.png")
         plt.close()
 
     #########################################
