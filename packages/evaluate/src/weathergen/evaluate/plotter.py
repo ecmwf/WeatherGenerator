@@ -14,8 +14,8 @@ import xarray as xr
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
-
 from weathergen.common.config import _load_private_conf
+
 from weathergen.evaluate.plot_utils import (
     DefaultMarkerSize,
 )
@@ -951,22 +951,31 @@ class ScoreCards:
         tag:
             Tag to be added to the plot title and filename
         """
-        n_runs, n_vars = len(runs), len(channels)
-        fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_vars))
+        n_runs = len(runs)
 
         if self.baseline and self.baseline in runs:
             baseline_idx = runs.index(self.baseline)
             runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
             data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
 
-        baseline = data[0]
-        skill_models = []
-
+        common_channels = []
         for run_index in range(1, n_runs):
-            skill_model = 0.0
-            for var_index, var in enumerate(channels):
+            for var in channels:
                 if var not in data[0].channel.values or var not in data[run_index].channel.values:
                     continue
+                common_channels.append(var)
+        common_channels = list(set(common_channels))
+        n_vars = len(common_channels)
+
+        fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_vars))
+
+        baseline = data[0]
+        skill_models = []
+        for run_index in range(1, n_runs):
+            skill_model = 0.0
+            for var_index, var in enumerate(common_channels):
+                # if var not in data[0].channel.values or var not in data[run_index].channel.values:
+                #     continue
                 diff, avg_diff, avg_skill = self.compare_models(
                     data, baseline, run_index, var, metric
                 )
@@ -1004,7 +1013,7 @@ class ScoreCards:
         # Set axis labels
         ylabels = [
             f"{var}\n({baseline.coords['metric'].item().upper()}={baseline.sel(channel=var).mean().values.squeeze():.3f})"
-            for var in channels
+            for var in list(set(common_channels))
         ]
         xlabels = [
             f"{model_name}\nSkill: {skill_models[i]:.3f}" for i, model_name in enumerate(runs[1::])
