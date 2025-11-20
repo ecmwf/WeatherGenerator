@@ -584,6 +584,8 @@ class Model(torch.nn.Module):
 
         # roll-out in latent space
         preds_all = []
+        latents = {}
+        latents["preds"] = []
         for fstep in range(forecast_offset, forecast_offset + forecast_steps):
             # prediction
             preds_all += [
@@ -603,6 +605,7 @@ class Model(torch.nn.Module):
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
             tokens = self.forecast(model_params, tokens, fstep)
+            latents["preds"] += [tokens]
 
         # prediction for final step
         preds_all += [
@@ -615,7 +618,6 @@ class Model(torch.nn.Module):
             )
         ]
 
-        latents = {}
         latents["posteriors"] = posteriors
 
         return ModelOutput(physical=preds_all, latent=latents)

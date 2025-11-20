@@ -22,7 +22,7 @@ from weathergen.utils.train_logger import Stage
 _logger = logging.getLogger(__name__)
 
 
-class LossLatent(LossModuleBase):
+class LossLatentDiffusion(LossModuleBase):
     """
     Calculates loss in latent space.
     """
@@ -38,13 +38,17 @@ class LossLatent(LossModuleBase):
         self.cf = cf
         self.stage = stage
         self.device = device
-        self.name = "LossLatent"
+        self.name = "LossLatentDiff"
 
         # Dynamically load loss functions based on configuration and stage
-        self.loss_fcts = [
-            [getattr(losses, name if name != "mse" else "mse_channel_location_weighted"), w]
-            for name, w in loss_fcts
-        ]
+        self.loss_fcts = [[getattr(losses, name), w, name] for name, w in loss_fcts]
+
+    def _get_fstep_weights(self, forecast_steps):
+        timestep_weight_config = self.cf.get("timestep_weight")
+        if timestep_weight_config is None:
+            return [1.0 for _ in range(forecast_steps)]
+        weights_timestep_fct = getattr(losses, timestep_weight_config[0])
+        return weights_timestep_fct(forecast_steps, timestep_weight_config[1])
 
     def _loss_per_loss_function(
         self,
@@ -56,57 +60,60 @@ class LossLatent(LossModuleBase):
         Compute loss for given loss function
         """
 
-        loss_val = loss_fct(target=target, ens=None, mu=pred)
+        loss_val = loss_fct(target=target, mu=pred)
 
         return loss_val
 
     def compute_loss(
         self,
-        preds: list[list[Tensor]],
-        targets: list[list[any]],
+        preds: dict,
+        targets: dict,
     ) -> LossValues:
-        return super().compute_loss(preds, targets)
+        losses_all: dict[str, Tensor] = {
+            f"{self.name}.{loss_fct_name}": torch.zeros(
+                1,
+                device=self.device,
+            )
+            for _, _, loss_fct_name in self.loss_fcts
+        }
 
-        ### FROM KEREM's PR
-        # losses_all: Tensor = torch.zeros(
-        #     len(self.loss_fcts),
-        #     device=self.device,
-        # )
+        preds = preds.latent["preds"]
+        targets = targets["targets"]
+        fsteps = len(targets)
 
-        # loss_fsteps_lat = torch.tensor(0.0, device=self.device, requires_grad=True)
-        # ctr_fsteps_lat = 0
-        # # TODO: KCT, do we need the below per fstep?
-        # for fstep in range(
-        #     1, len(preds)
-        # ):  # the first entry in tokens_all is the source itself, so skip it
-        #     loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
-        #     ctr_loss_fcts = 0
-        #     # if forecast_offset==0, then the timepoints correspond.
-        #     # Otherwise targets don't encode the source timestep, so we don't need to skip
-        #     fstep_targs = fstep if self.cf.forecast_offset == 0 else fstep - 1
-        #     for i_lfct, (loss_fct, loss_fct_weight) in enumerate(self.loss_fcts_lat):
-        #         loss_lfct = self._loss_per_loss_function(
-        #             loss_fct,
-        #             stream_info=None,
-        #             target=targets[fstep_targs],
-        #             pred=preds[fstep],
-        #         )
+        fstep_loss_weights = self._get_fstep_weights(fsteps)
 
-        #         losses_all[i_lfct] += loss_lfct  # TODO: break into fsteps
+        loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
+        ctr_fsteps = 0
+        # TODO: KCT, do we need the below per fstep?
+        for target, pred, fstep_loss_weight in zip(targets, preds, fstep_loss_weights, strict=True):
+            # the first entry in tokens_all is the source itself, so skip it
+            loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
+            ctr_loss_fcts = 0
+            # if forecast_offset==0, then the timepoints correspond.
+            # Otherwise targets don't encode the source timestep, so we don't need to skip
+            for loss_fct, loss_fct_weight, loss_fct_name in self.loss_fcts:
+                loss_lfct = self._loss_per_loss_function(
+                    loss_fct,
+                    target=target,
+                    pred=pred,
+                )
 
-        #         # Add the weighted and normalized loss from this loss function to the total
-        #         # batch loss
-        #         loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct)
-        #         ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
+                losses_all[f"{self.name}.{loss_fct_name}"] += loss_lfct  # TODO: break into fsteps
 
-        #     loss_fsteps_lat = loss_fsteps_lat + (
-        #         loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0
-        #     )
-        #     ctr_fsteps_lat += 1 if ctr_loss_fcts > 0 else 0
+                # Add the weighted and normalized loss from this loss function to the total
+                # batch loss
+                loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct)
+                ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
 
-        # loss = loss_fsteps_lat / (ctr_fsteps_lat if ctr_fsteps_lat > 0 else 1.0)
+            loss_fsteps = loss_fsteps + (
+                loss_fstep * fstep_loss_weight / ctr_loss_fcts if ctr_loss_fcts > 0 else 0
+            )
+            ctr_fsteps += 1 if ctr_loss_fcts > 0 else 0
 
-        # losses_all /= ctr_fsteps_lat if ctr_fsteps_lat > 0 else 1.0
-        # losses_all[losses_all == 0.0] = torch.nan
+        loss = loss_fsteps / (ctr_fsteps if ctr_fsteps > 0 else 1.0)
 
-        # return LossValues(loss=loss, losses_all=losses_all)
+        losses_all /= ctr_fsteps if ctr_fsteps > 0 else 1.0
+        losses_all[losses_all == 0.0] = torch.nan
+
+        return LossValues(loss=loss, losses_all=losses_all, stddev_all={"latent": 0.0})
