@@ -140,7 +140,7 @@ class TrainLogger:
         log_vals += [perf_mem]
         metrics[_performance_gpu] = perf_gpu
         metrics[_performance_memory] = perf_mem
-        for key, result in timing.reset("train"):
+        for key, result in timing.reset("train").items():
             for metric, value in asdict(result).items():
                 metric_name = f"perf.timing.{key}.{metric}"
                 if metric_name in metrics:
@@ -176,7 +176,7 @@ class TrainLogger:
             metrics[f"loss.{loss_name}.stddev_avg"] = stddev_values.nanmean().item()
             log_vals += [stddev_values.nanmean().item()]
 
-        for key, result in timing.reset("validate"):
+        for key, result in timing.reset("validate").items():
             for metric, value in asdict(result).items():
                 metric_name = f"perf.timing.{key}.{metric}"
                 if metric_name in metrics:
