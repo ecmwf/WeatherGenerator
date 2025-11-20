@@ -35,7 +35,7 @@ class IdentityTargetAndAux(TargetAndAuxModuleBase):
         return
 
     def compute(self, istep, batch, *args, **kwargs):
-        return {"physical" : batch[0]}, None
+        return {"physical": batch[0]}, None
 
     def to_device(self, device):
         return
