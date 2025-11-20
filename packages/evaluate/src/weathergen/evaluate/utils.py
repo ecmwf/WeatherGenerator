@@ -435,8 +435,8 @@ def metric_list_to_json(
         Output directory.
     run_id :
         Identifier of the inference run.
-    epoch :
-        Epoch number.
+    mini_epoch :
+        Mini_epoch number.
     """
     assert len(metrics_list) == len(npoints_sample_list) == len(streams), (
         "The lengths of metrics_list, npoints_sample_list, and streams must be the same."
@@ -460,7 +460,7 @@ def metric_list_to_json(
             # Match the expected filename pattern
             save_path = (
                 reader.metrics_dir
-                / f"{reader.run_id}_{stream}_{region}_{metric}_epoch{reader.epoch:05d}.json"
+                / f"{reader.run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
             )
 
             _logger.info(f"Saving results to {save_path}")
@@ -468,8 +468,8 @@ def metric_list_to_json(
                 json.dump(metric_dict, f, indent=4)
 
     _logger.info(
-        f"Saved all results of inference run {reader.run_id} - epoch {reader.epoch:d} successfully "
-        f"to {reader.metrics_dir}."
+        f"Saved all results of inference run {reader.run_id} - mini_epoch {reader.mini_epoch:d} "
+        f"successfully to {reader.metrics_dir}."
     )
 
 

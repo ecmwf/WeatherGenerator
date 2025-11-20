@@ -469,7 +469,8 @@ class WeatherGenReader(Reader):
 
         super().__init__(eval_cfg, run_id, private_paths)
 
-        self.epoch = eval_cfg.epoch
+        # TODO: remove backwards compatibility to "epoch" in Feb. 2026
+        self.mini_epoch = getattr(eval_cfg, "mini_epoch", getattr(eval_cfg, "epoch", -1))
         self.rank = eval_cfg.rank
 
         # Load model configuration and set (run-id specific) directories
@@ -498,9 +499,17 @@ class WeatherGenReader(Reader):
             self.eval_cfg.get("metrics_dir", self.metrics_base_dir / self.run_id / "evaluation")
         )
 
-        self.fname_zarr = self.results_dir.joinpath(
-            f"validation_epoch{self.epoch:05d}_rank{self.rank:04d}.zarr"
+        fname_zarr_new = self.results_dir.joinpath(
+            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
         )
+        fname_zarr_old = self.results_dir.joinpath(
+            f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
+        )
+
+        if fname_zarr_new.exists() or fname_zarr_new.is_dir():
+            self.fname_zarr = fname_zarr_new
+        else:
+            self.fname_zarr = fname_zarr_old
 
         if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
             _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
@@ -522,12 +531,12 @@ class WeatherGenReader(Reader):
             _logger.info(
                 f"Loading config for run {self.run_id} from private paths: {self.private_paths}"
             )
-            config = load_config(self.private_paths, self.run_id, self.epoch)
+            config = load_config(self.private_paths, self.run_id, self.mini_epoch)
         else:
             _logger.info(
                 f"Loading config for run {self.run_id} from model directory: {self.model_base_dir}"
             )
-            config = load_model_config(self.run_id, self.epoch, self.model_base_dir)
+            config = load_model_config(self.run_id, self.mini_epoch, self.model_base_dir)
 
         if type(config) not in [dict, oc.DictConfig]:
             _logger.warning("Model config not found. inference config will be empty.")
@@ -881,7 +890,7 @@ class WeatherGenReader(Reader):
         """
         score_path = (
             Path(self.metrics_dir)
-            / f"{self.run_id}_{stream}_{region}_{metric}_epoch{self.epoch:05d}.json"
+            / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
         )
         _logger.debug(f"Looking for: {score_path}")
 
