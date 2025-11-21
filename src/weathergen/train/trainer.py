@@ -35,6 +35,7 @@ from torch.distributed.tensor import DTensor, distribute_tensor
 import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
+from weathergen.datasets.stream_data import StreamData
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -774,7 +775,9 @@ class Trainer(TrainerBase):
                     )
                 targets, aux = zip(*targets_and_auxs, strict=False)
             loss, loss_values = self.loss_calculator.compute_loss(
-                preds=outputs, targets=targets, view_metadata=None #batch.view_metadata
+                preds=outputs,
+                targets=targets,
+                view_metadata=None,  # batch.view_metadata
             )
             # TODO re-enable this, need to think on how to make it compatible with
             # student-teacher training

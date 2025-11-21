@@ -14,7 +14,6 @@ import dataclasses
 import logging
 import math
 import warnings
-from pathlib import Path
 
 import astropy_healpix as hp
 import astropy_healpix.healpy
@@ -692,7 +691,7 @@ class Model(torch.nn.Module):
         for name, head in self.latent_heads.items():
             latents[name] = head(latent_state)
 
-        return ModelOutput(physical=preds_all,  latent=latents)
+        return ModelOutput(physical=preds_all, latent=latents)
 
     #########################################
     def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
@@ -957,7 +956,7 @@ def get_model(
     if student_or_teacher == "student":
         return Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
     else:
-        if cf["training_mode"] == "student-teacher":  
+        if cf["training_mode"] == "student-teacher":
             teacher_cf = copy.deepcopy(cf)
             for key, val in teacher_cf.training_mode_config["teacher_model"].items():
                 teacher_cf[key] = val
