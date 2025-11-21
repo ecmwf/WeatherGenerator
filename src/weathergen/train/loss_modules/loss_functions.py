@@ -61,7 +61,7 @@ def stats_normalized_erf(target, ens, mu, stddev):
     return torch.mean(d * d)  # + torch.mean( torch.sqrt( stddev) )
 
 
-def mse(target, ens, mu, *kwargs):
+def mse(target, mu, *kwargs):
     return torch.nn.functional.mse_loss(target, mu)
 
 

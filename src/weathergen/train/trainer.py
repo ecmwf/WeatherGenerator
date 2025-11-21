@@ -621,11 +621,8 @@ class Trainer(TrainerBase):
                 targets, aux_outputs = self.target_and_aux_calculator.compute(
                     bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
                 )
-
-            loss, loss_values = self.loss_calculator.compute_loss(
-                preds=output,
-                targets=targets,
-            )
+            targets = {"targets": [targets], "aux_outputs": aux_outputs}
+            loss, loss_values = self.loss_calculator.compute_loss(preds=output, targets=targets)
             if cf.latent_noise_kl_weight > 0.0:
                 kl = torch.cat([posterior.kl() for posterior in output.latent])
                 loss += cf.latent_noise_kl_weight * kl.mean()

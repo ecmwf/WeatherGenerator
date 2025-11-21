@@ -122,8 +122,9 @@ class TrainLogger:
         st = self.cf.streams[0]
         for loss_name, loss_values in losses_all.items():
             metrics[f"loss.{loss_name}.loss_avg"] = loss_values[:, :].nanmean().item()
-            for k, ch_n in enumerate(st.train_target_channels):
-                metrics[f"loss.{loss_name}.{ch_n}"] = loss_values[:, k].nanmean().item()
+            if "Physical" in loss_name:
+                for k, ch_n in enumerate(st.train_target_channels):
+                    metrics[f"loss.{loss_name}.{ch_n}"] = loss_values[:, k].nanmean().item()
             log_vals += [loss_values[:, :].nanmean().item()]
         for loss_name, stddev_values in stddev_all.items():
             metrics[f"loss.{loss_name}.stddev_avg"] = stddev_values.nanmean().item()
@@ -157,8 +158,9 @@ class TrainLogger:
         st = self.cf.streams[0]
         for loss_name, loss_values in losses_all.items():
             metrics[f"loss.{loss_name}.loss_avg"] = loss_values[:, :].nanmean().item()
-            for k, ch_n in enumerate(st.train_target_channels):
-                metrics[f"loss.{loss_name}.{ch_n}"] = loss_values[:, k].nanmean().item()
+            if "Physical" in loss_name:
+                for k, ch_n in enumerate(st.train_target_channels):
+                    metrics[f"loss.{loss_name}.{ch_n}"] = loss_values[:, k].nanmean().item()
             log_vals += [loss_values[:, :].nanmean().item()]
         for loss_name, stddev_values in stddev_all.items():
             metrics[f"loss.{loss_name}.stddev_avg"] = stddev_values.nanmean().item()
