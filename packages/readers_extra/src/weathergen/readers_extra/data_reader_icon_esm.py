@@ -26,9 +26,6 @@ from weathergen.datasets.data_reader_base import (
     check_reader_data,
 )
 
-from dask.diagnostics import ProgressBar
-
-
 _logger = logging.getLogger(__name__)
 
 frequencies = {
@@ -43,6 +40,7 @@ frequencies = {
 
 class DataReaderIconEsm(DataReaderTimestep):
     "Wrapper for ICON data channels"
+
     def __init__(
         self,
         tw_handler: TimeWindowHandler,
@@ -166,7 +164,7 @@ class DataReaderIconEsm(DataReaderTimestep):
 
         # Ensure stats match dataset columns
         assert self.stats_vars == self.colnames, (
-            f"In {stream_info["name"]} stream, channels in normalization file {self.stats_vars} do not match "
+            f"In {stream_info['name']} stream, channels in normalization file {self.stats_vars} do not match "
             f"dataset columns {self.colnames}"
         )
 
@@ -202,11 +200,7 @@ class DataReaderIconEsm(DataReaderTimestep):
                 ch_p1 = ch_parts[1]
                 coords_list = list(self.ds[ch_p0].coords)
                 if ch_p0 not in channels_exclude:
-                    if "plev" in coords_list and ch_parts[1] in self.plev:
-                        new_colnames.append(ch)
-                    elif "depth" in coords_list and ch_parts[1] in self.depth:
-                        new_colnames.append(ch)
-                    elif "lev" in coords_list and ch_parts[1] in self.lev:
+                    if "plev" in coords_list and ch_parts[1] in self.plev or "depth" in coords_list and ch_parts[1] in self.depth or "lev" in coords_list and ch_parts[1] in self.lev:
                         new_colnames.append(ch)
                 else:
                     continue
@@ -308,7 +302,7 @@ class DataReaderIconEsm(DataReaderTimestep):
         channels = np.array(self.colnames)[channels_idx]
 
         start_ts = dtr.start
-        end_ts = dtr.end -  np.timedelta64(1, "h")
+        end_ts = dtr.end - np.timedelta64(1, "h")
         data_arr = []
         try:
             data_per_channel = []
@@ -316,7 +310,7 @@ class DataReaderIconEsm(DataReaderTimestep):
             coords = []
             for ch in channels:
                 ch_parts = ch.split("_")
-                if len(ch_parts) == 2 :
+                if len(ch_parts) == 2:
                     ch_p0 = ch_parts[0]
                     ch_p1 = ch_parts[1]
                     coords_list = list(self.ds[ch_p0].coords)
@@ -333,7 +327,10 @@ class DataReaderIconEsm(DataReaderTimestep):
                         da = self.ds[ch_p0].assign_coords(lev=("lev", lev_all))
                         da = da.sel(lev=ch_p1, time=slice(start_ts, end_ts))
                     else:
-                        print(f"Channel {ch} with part {ch_parts[1]} not found in dataset. Skipping.", flush=True)
+                        print(
+                            f"Channel {ch} with part {ch_parts[1]} not found in dataset. Skipping.",
+                            flush=True,
+                        )
                         continue
                 else:
                     da = self.ds[ch].sel(time=slice(start_ts, end_ts))
@@ -360,7 +357,7 @@ class DataReaderIconEsm(DataReaderTimestep):
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
-        
+
         # Empty geoinfos
         geoinfos = np.zeros((data.shape[0], 0), dtype=np.float32)
 
@@ -371,5 +368,5 @@ class DataReaderIconEsm(DataReaderTimestep):
             datetimes=datetimes,
         )
         check_reader_data(rd, dtr)
-        _logger.info(f"[DATA LOADED]", flush=True)
+        _logger.info("[DATA LOADED]", flush=True)
         return rd
