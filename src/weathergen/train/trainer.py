@@ -23,6 +23,7 @@ import tqdm
 from numpy.typing import NDArray
 from omegaconf import OmegaConf
 from torch import Tensor
+from torch.distributed import device_mesh
 
 # FSDP2
 from torch.distributed.fsdp import (
@@ -135,6 +136,28 @@ class Trainer(TrainerBase):
 
         elif cf.with_ddp and cf.with_fsdp:
             # with DDP *and() FSDP
+
+            if cf.with_hsdp and not cf.with_fsdp:
+                raise ValueError(
+                    "HSDP requires FSDP.\nEnable FSDP (with_fsdp=True) before enabling HSDP."
+                )
+            # Set up FSDP or HSDP.
+            if cf.with_hsdp:
+                num_replica = torch.distributed.get_world_size() // torch.cuda.device_count()
+                assert torch.distributed.get_world_size() % num_replica == 0, (
+                    "world size must be divisible by number of FSDP replicas"
+                )
+                fsdp_shards_per_replica = torch.distributed.get_world_size() // num_replica
+                fsdp_mesh_dims = (num_replica, fsdp_shards_per_replica)
+                mesh_dim_names = ("replicate", "shard")
+            else:
+                fsdp_mesh_dims = (torch.distributed.get_world_size(),)
+                mesh_dim_names = ("replicate",)
+
+            fsdp_mesh = device_mesh.init_device_mesh(
+                "cuda", fsdp_mesh_dims, mesh_dim_names=mesh_dim_names
+            )
+
             fsdp_kwargs = {
                 "mp_policy": (
                     MixedPrecisionPolicy(
@@ -144,6 +167,7 @@ class Trainer(TrainerBase):
                     if cf.with_mixed_precision
                     else None
                 ),
+                "mesh": fsdp_mesh,
             }
             modules_to_shard = (
                 MLP,
@@ -179,6 +203,7 @@ class Trainer(TrainerBase):
                     if cf.with_mixed_precision
                     else None
                 ),
+                "mesh": fsdp_mesh,
             }
             for module in model.pred_adapter_kv.modules():
                 if isinstance(module, modules_to_shard):
@@ -191,7 +216,11 @@ class Trainer(TrainerBase):
         model_params = ModelParams(cf).create(cf)
 
         if cf.with_ddp and cf.with_fsdp:
-            fully_shard(model)
+            model_fsdp_kwargs = {
+                "mesh": fsdp_mesh,
+            }
+
+            fully_shard(model, **model_fsdp_kwargs)
             for tensor in itertools.chain(model.parameters(), model.buffers()):
                 assert tensor.device == torch.device("meta")
 
