@@ -113,7 +113,10 @@ class LossLatentDiffusion(LossModuleBase):
 
         loss = loss_fsteps / (ctr_fsteps if ctr_fsteps > 0 else 1.0)
 
-        losses_all /= ctr_fsteps if ctr_fsteps > 0 else 1.0
-        losses_all[losses_all == 0.0] = torch.nan
+        for _, loss_values in losses_all.items():
+            loss_values /= ctr_fsteps if ctr_fsteps > 0 else 1.0
+            loss_values[loss_values == 0.0] = torch.nan
 
-        return LossValues(loss=loss, losses_all=losses_all, stddev_all={"latent": 0.0})
+        return LossValues(
+            loss=loss, losses_all=losses_all, stddev_all={"latent": torch.tensor(torch.nan)}
+        )
