@@ -22,7 +22,6 @@ from weathergen.datasets.tokenizer_utils import (
     tokenize_space,
     tokenize_spacetime,
 )
-from weathergen.datasets.view_builder import build_views_for_stream
 
 
 def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:

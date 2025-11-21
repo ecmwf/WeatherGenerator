@@ -33,7 +33,6 @@ from weathergen.datasets.utils import (
     compute_offsets_scatter_embed,
     compute_source_cell_lens,
 )
-from weathergen.datasets.view_builder import build_views_for_stream
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import Stage
 
@@ -646,8 +645,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # add a loop over num_teacher_views, generate students for each teacher
             for t_idx in range(num_teacher_views):
                 # Build one teacher and its student views
-                t_keep_np, s_keeps_np, _meta = build_views_for_stream(
-                    self.tokenizer.masker,
+                t_keep_np, s_keeps_np, _meta = self.tokenizer.masker.build_views_for_stream(
                     self.num_healpix_cells,
                     teacher_cfg=teacher_cfg,
                     student_cfg=student_cfg,
