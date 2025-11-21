@@ -86,8 +86,8 @@ class NetcdfParser(CfParser):
             da_fs = self.add_metadata(da_fs)
             if self.indices is None:
                 self.indices = find_lat_lon_ordering(da_fs)
-                _logger.info(f"Determined lat/lon ordering indices")
-            da_fs = self.add_encoding(da_fs)#
+                _logger.info(f"Determined lat/lon ordering indices, saved for reuse.")
+            da_fs = self.add_encoding(da_fs)
             da_fs = self.regrid(da_fs, self.regrid_degree, self.indices)
             self.save(da_fs, ref_time)
 
@@ -184,8 +184,8 @@ class NetcdfParser(CfParser):
         if self.grid_type != "gaussian" or regrid_degree is None:
             return ds
         output_grid_type = 'regular_ll'
-        regrid_data = regrid_gaussian_ds(ds, output_grid_type, regrid_degree, indices)
-        return regrid_data
+        regrid_ds = regrid_gaussian_ds(ds, output_grid_type, regrid_degree, indices)
+        return regrid_ds
 
     def concatenate(
         self,
