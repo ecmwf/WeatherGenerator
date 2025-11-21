@@ -88,6 +88,14 @@ def evaluate() -> None:
 
 
 def evaluate_from_args(argl: list[str]) -> None:
+    """
+    Wrapper of evaluate_from_config. 
+
+    Parameters
+    ----------
+    argl: 
+       List of arguments passed from terminal  
+    """
     # configure logging
     init_loggers()
     parser = argparse.ArgumentParser(description="Fast evaluation of WeatherGenerator runs.")
@@ -124,10 +132,30 @@ def evaluate_from_args(argl: list[str]) -> None:
     evaluate_from_config(OmegaConf.load(config), mlflow_client)
 
 
-def _process_stream(run_id, run, stream, private_paths, global_plotting_opts, regions, metrics, plot_score_maps):
+def _process_stream(run_id: str, run: OmegaConf.Dict, stream: str, private_paths: list[str], global_plotting_opts: dict[str], regions: list[str], metrics: list[str], plot_score_maps: bool):
     """
     Worker function for a single stream of a single run.
     Returns a dictionary with the scores instead of modifying shared dict.
+    Parameters
+    ----------
+
+    run_id:
+        Run identification string.     
+    run:
+        Configuration dictionary for the given run. 
+    stream: 
+        String to be processed
+    private_paths:
+        List of private paths to be used to retrieve directories
+    global_plotting_opts:
+        Dictionary containing all common plotting options
+    regions:
+        List of regions to be processed. 
+    metrics:
+        List of metrics to be processed. 
+    plot_score_maps:
+        Bool to define if the score maps need to be plotted or not. 
+    
     """
     try:
         type_ = run.get("type", "zarr")
@@ -137,11 +165,11 @@ def _process_stream(run_id, run, stream, private_paths, global_plotting_opts, re
         if not stream_dict:
             return run_id, stream, {}
 
-        # ------------------ Parallel plotting ------------------
+        # Parallel plotting 
         if stream_dict.get("plotting"):
             plot_data(reader, stream, global_plotting_opts)
 
-        # ------------------ Serial scoring per stream ------------------
+        # Scoring per stream
         if not stream_dict.get("evaluation"):
             return run_id, stream, {}
 
@@ -155,7 +183,14 @@ def _process_stream(run_id, run, stream, private_paths, global_plotting_opts, re
         _logger.error(f"Error processing {run_id} - {stream}: {e}")
         return run_id, stream, {}
 
-def evaluate_from_config(cfg, mlflow_client=None):
+def evaluate_from_config(cfg: OmegaConf.Dict, mlflow_client=None):
+    """
+    Main function that controls evaluation plotting and scoring. 
+    Parameters
+    ----------
+    cfg:
+        Configuration input stored as an OmegaConf dictionary. 
+    """
     runs = cfg.run_ids
     _logger.info(f"Detected {len(runs)} runs")
     private_paths = cfg.get("private_paths", None)
@@ -165,11 +200,9 @@ def evaluate_from_config(cfg, mlflow_client=None):
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
 
-    # Multiprocessing-safe logging
     listener = setup_main_logger("evaluation.log")
     _logger.info("Started main logging listener")
 
-    # Aggregate scores
     scores_dict = defaultdict(triple_nested_dict)  # metric -> region -> stream -> run
     tasks = []
 
@@ -180,7 +213,6 @@ def evaluate_from_config(cfg, mlflow_client=None):
         for stream in reader.streams:
             tasks.append((run_id, run, stream, private_paths, global_plotting_opts, regions, metrics, plot_score_maps))
 
-    # Execute tasks in parallel
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
 
     with ProcessPoolExecutor() as ex:

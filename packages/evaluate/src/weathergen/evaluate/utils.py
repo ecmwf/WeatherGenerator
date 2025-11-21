@@ -51,10 +51,40 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
 
 def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=False):
     """
-    Calculate scores and return them as a nested dictionary.
-    Does NOT modify scores_dict directly.
+    Calculate scores for a given run and stream using the specified metrics.
+
+    Parameters
+    ----------
+    reader : Reader
+        Reader object containing all info about a particular run.
+    stream :
+        Stream name to calculate scores for.
+    scores_dict:
+        Dictionary for scores with structure scores_dict[metric][region][stream][run_id]
+    regions :
+        List of regions to calculate scores on.
+    metrics :
+        List of metric names to calculate.
+    plot_score_maps :
+        When it is True and the stream is on a regular grid the scores are
+        recomputed as a function of the "ipoint" and plotted on a 2D scatter map.
+        NOTE: the scores are averaged over the "sample" dimension and for most
+        of the metrics this does not give the same results as averaging over
+        the "ipoint" dimension.
+    Returns
+    -------
+    Dictionary containing scores for each metric and stream.
     """
     local_scores = {}  # top-level dict: metric -> region -> stream -> run_id
+
+    _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
+    if plot_score_maps:
+        _logger.info(f"RUN {reader.run_id} - {stream}: Plotting scores is enabled.")
+
+        map_dir = reader.runplot_dir / "plots" / stream / "score_maps"
+        map_dir.mkdir(parents=True, exist_ok=True)
+
+        _logger.info(f"RUN {reader.run_id} - {stream}: Saving plotted scores to {map_dir}")
 
     available_data = reader.check_availability(stream, mode="evaluation")
     fsteps = available_data.fsteps
@@ -97,16 +127,30 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
 
         for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
             if preds.ipoint.size == 0:
+                _logger.warning(
+                    f"No data for stream {stream} at fstep {fstep} in region {region}. Skipping."
+                )
                 continue
 
+            _logger.debug(f"Verifying data for stream {stream}...")
+            
             preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
+
+            if region != "global":
+                _logger.debug(
+                    f"Applying bounding box mask for region '{region}' to targets and predictions."
+                )
+
             tars, preds, tars_next, preds_next = [
                 bbox.apply_mask(x) if x is not None else None
                 for x in (tars, preds, tars_next, preds_next)
             ]
             climatology = aligned_clim_data[fstep] if aligned_clim_data else None
             score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
+            # Build up computation graphs for all metrics
+            _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
 
+            # Add it only if it is not None
             valid_scores = []
             for metric in metrics:
                 score = get_score(score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord)
@@ -117,7 +161,8 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
             if not valid_scores:
                 continue
 
-            combined_metrics = xr.concat(valid_scores, dim="metric").assign_coords(metric=valid_metric_names)
+            combined_metrics = xr.concat(valid_scores, dim="metric")
+            combined_metrics = combined_metrics.assign_coords(metric=valid_metric_names)
             combined_metrics = combined_metrics.compute()
 
             for coord in ["channel", "sample", "ens"]:
