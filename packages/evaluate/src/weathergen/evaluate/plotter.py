@@ -921,6 +921,7 @@ class ScoreCards:
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.improvement = plotter_cfg.get("improvement_scale", 0.2)
         self.out_plot_dir = Path(output_basedir) / "score_cards"
+        self.baseline = plotter_cfg.get("baseline")
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
@@ -950,15 +951,24 @@ class ScoreCards:
         tag:
             Tag to be added to the plot title and filename
         """
-        n_runs, n_vars = len(runs), len(channels)
-        fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_vars))
+        n_runs = len(runs)
+
+        if self.baseline and self.baseline in runs:
+            baseline_idx = runs.index(self.baseline)
+            runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
+            data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
+
+        common_channels, n_common_channels = self.extract_common_channels(data, channels, n_runs)
+
+        fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_common_channels))
 
         baseline = data[0]
         skill_models = []
-
         for run_index in range(1, n_runs):
             skill_model = 0.0
-            for var_index, var in enumerate(channels):
+            for var_index, var in enumerate(common_channels):
+                if var not in data[0].channel.values or var not in data[run_index].channel.values:
+                    continue
                 diff, avg_diff, avg_skill = self.compare_models(
                     data, baseline, run_index, var, metric
                 )
@@ -991,19 +1001,19 @@ class ScoreCards:
                     )
                     ax.add_patch(rect)
 
-            skill_models.append(skill_model / n_vars)
+            skill_models.append(skill_model / n_common_channels)
 
         # Set axis labels
         ylabels = [
             f"{var}\n({baseline.coords['metric'].item().upper()}={baseline.sel(channel=var).mean().values.squeeze():.3f})"
-            for var in channels
+            for var in common_channels
         ]
         xlabels = [
             f"{model_name}\nSkill: {skill_models[i]:.3f}" for i, model_name in enumerate(runs[1::])
         ]
         ax.set_xticks(np.arange(1, n_runs))
         ax.set_xticklabels(xlabels, fontsize=10)
-        ax.set_yticks(np.arange(n_vars) + 0.5)
+        ax.set_yticks(np.arange(n_common_channels) + 0.5)
         ax.set_yticklabels(ylabels, fontsize=10)
         for label in ax.get_yticklabels():
             label.set_horizontalalignment("center")
@@ -1017,7 +1027,7 @@ class ScoreCards:
         for x in np.arange(0.5, n_runs - 1, 1):
             ax.axvline(x, color="gray", linestyle="--", linewidth=0.5, zorder=0, alpha=0.5)
         ax.set_xlim(0.5, n_runs - 0.5)
-        ax.set_ylim(0, n_vars)
+        ax.set_ylim(0, n_common_channels)
 
         legend = [
             Line2D(
@@ -1042,6 +1052,17 @@ class ScoreCards:
             dpi=self.dpi_val,
         )
         plt.close(fig)
+
+    def extract_common_channels(self, data, channels, n_runs):
+        common_channels = []
+        for run_index in range(1, n_runs):
+            for var in channels:
+                if var not in data[0].channel.values or var not in data[run_index].channel.values:
+                    continue
+                common_channels.append(var)
+        common_channels = list(set(common_channels))
+        n_vars = len(common_channels)
+        return common_channels, n_vars
 
     def compare_models(
         self,
@@ -1233,6 +1254,7 @@ class BarPlots:
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.cmap = plotter_cfg.get("cmap", "bwr")
         self.out_plot_dir = Path(output_basedir) / "bar_plots"
+        self.baseline = plotter_cfg.get("baseline")
         _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
@@ -1272,6 +1294,11 @@ class BarPlots:
             squeeze=False,
         )
         ax = ax.flatten()
+
+        if self.baseline and self.baseline in runs:
+            baseline_idx = runs.index(self.baseline)
+            runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
+            data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
 
         for run_index in range(1, len(runs)):
             ratio_score, channels_per_comparison = self.calc_ratio_per_run_id(
@@ -1403,9 +1430,7 @@ def calculate_average_over_dim(
     ]
 
     if non_zero_dims:
-        _logger.info(
-            f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
-        )
+        _logger.info(f"Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
 
     baseline_score = baseline_var.mean(
         dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
