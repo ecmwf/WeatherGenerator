@@ -9,6 +9,10 @@ from omegaconf import OmegaConf
 from weathergen.evaluate.export.cf_utils import CfParser
 from weathergen.evaluate.export.reshape import find_pl, find_lat_lon_ordering, regrid_gaussian_ds
 
+from weathergen.evaluate.export.cf_utils import ncdump
+from netCDF4 import Dataset
+import os
+
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
@@ -82,15 +86,34 @@ class NetcdfParser(CfParser):
         if da_fs:
             da_fs = self.concatenate(da_fs)
             da_fs = self.assign_frt(da_fs, ref_time)
-            print(da_fs['valid_time'].attrs)
             da_fs = self.add_attrs(da_fs)
+            da_fs.to_netcdf("./test.nc")  # Debug line to check intermediate output
+            sfile = Dataset("./test.nc",mode='r', format='NETCDF4')
+            a, b, c = ncdump(sfile)
+            _logger.info(f"ncdump output attrs: {a}, dims: {b}, vars: {c}")
             da_fs = self.add_metadata(da_fs)
-            print(da_fs['valid_time'].attrs)
+            os.remove("./test.nc")  # Clean up debug file
+            da_fs.to_netcdf("./test.nc")  # Debug line to check intermediate output
+            sfile = Dataset("./test.nc",mode='r', format='NETCDF4')
+            a, b, c = ncdump(sfile)
+            _logger.info(f"ncdump output attrs: {a}, dims: {b}, vars: {c}")
             if self.indices is None:
                 self.indices = find_lat_lon_ordering(da_fs)
-                print(f"Determined lat/lon ordering indices")
+                _logger.info(f"Determined lat/lon ordering indices")
+            da_fs = self.add_time_encoding(da_fs)#
+            os.remove("./test.nc")  # Clean up debug file
+            da_fs.to_netcdf("./test.nc")  # Debug line to check intermediate output
+            sfile = Dataset("./test.nc",mode='r', format='NETCDF4')
+            a, b, c = ncdump(sfile)
+            _logger.info(f"ncdump output attrs: {a}, dims: {b}, vars: {c}")
             da_fs = self.regrid(da_fs, self.regrid_degree, self.indices)
-            da_fs = self.add_time_encoding(da_fs)
+            os.remove("./test.nc")  # Clean up debug file
+            da_fs.to_netcdf("./test.nc")  # Debug line to check intermediate output
+            sfile = Dataset("./test.nc",mode='r', format='NETCDF4')
+            a, b, c = ncdump(sfile)
+
+            _logger.info(f"ncdump output attrs: {a}, dims: {b}, vars: {c}")
+
             self.save(da_fs, ref_time)
 
     def get_output_filename(self, forecast_ref_time: np.datetime64) -> Path:
@@ -251,16 +274,19 @@ class NetcdfParser(CfParser):
         -------
             xarray Dataset with assigned forecast reference time coordinate.
         """
-        ds = ds.assign_coords(forecast_reference_time=reference_time)
+        ds= ds.assign_coords(forecast_reference_time = reference_time)
 
         if "sample" in ds.coords:
             ds = ds.drop_vars("sample")
 
         n_hours = self.fstep_hours.astype("int64")
-        forecast_period_list = ds["forecast_step"] * n_hours
-        ds = ds.assign_coords(forecast_step=forecast_period_list)
+        ds['forecast_step'] = ds["forecast_step"] * n_hours
         ds.to_netcdf("./test.nc")  # Debug line to check intermediate output
+        sfile = Dataset("./test.nc",mode='r', format='NETCDF4')
+        a, b, c = ncdump(sfile)
+        _logger.info(f"ncdump output attrs: {a}, dims: {b}, vars: {c}")
         return ds
+
 
     def add_attrs(self, ds: xr.Dataset) -> xr.Dataset:
         """
@@ -297,7 +323,6 @@ class NetcdfParser(CfParser):
         time_encoding = {
             "units": "hours since 1970-01-01 00:00:00",
             "calendar": "gregorian",
-            "dtype": "int32",
         }
 
         if "valid_time" in ds.coords:
@@ -336,7 +361,6 @@ class NetcdfParser(CfParser):
             attributes = {
                 "standard_name": mapped_info.get("std", var_name),
                 "units": mapped_info.get("std_unit", "unknown"),
-                "coordinates": "latitude longitude",
             }
             if "long" in mapped_info:
                 attributes["long_name"] = mapped_info["long"]
@@ -347,6 +371,9 @@ class NetcdfParser(CfParser):
                 attrs=attributes,
                 name=mapped_name,
             )
+            if da.encoding.get('coordinates'):
+                variables[mapped_name].encoding['coordinates'] = da.encoding['coordinates'].replace(' lat ', ' latitude ').replace(' lon ', ' longitude '),
+    
         return variables
  
     def _assign_dim_attrs(

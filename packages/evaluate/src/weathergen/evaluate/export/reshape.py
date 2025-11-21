@@ -100,7 +100,7 @@ def find_lat_lon_ordering(ds: xr.Dataset) -> list[int]:
     indices = [tuples.index(t) for t in ordered_tuples]
     return indices
 
-def regrid_gaussian_da(data: xr.DataArray, output_grid_type: str, degree: float, indices: list) -> xr.DataArray:
+def regrid_gaussian_da(data: xr.DataArray, output_grid_type: str, degree: int, grid_shape: list) -> xr.DataArray:
     """
     Regrid a single xarray Dataset from O96 grid to regular lat/lon grid.
 
@@ -115,21 +115,6 @@ def regrid_gaussian_da(data: xr.DataArray, output_grid_type: str, degree: float,
     -------
         Regridded xarray DataArray.
     """
-    #grid_type logic
-    if output_grid_type == 'regular_ll':
-        degree = int(degree)
-        output_grid_type = [degree, degree]
-        grid_shape = (int(180 // degree + 1), int(360 // degree))
-    else:
-        raise ValueError(f'Unsupported grid_type: {output_grid_type}, supported types are ["regular_ll"]')
-        # to be implemented:
-        grid_type = grid_type + str(degree)
-        grid_shape = None # ????? to be determined
-
-    # reorder everything except ncells
-    original_ncells = data['ncells']
-    data = data.isel(ncells = indices)
-    data['ncells'] = (original_ncells)
 
     # create empty xarray ds for regridded data
     # set coords
@@ -193,13 +178,27 @@ def regrid_gaussian_ds(ds: xr.Dataset, output_grid_type: str, degree: float, ind
     -------
         Regridded xarray Dataset.
     """
+    #grid_type logic
+    if output_grid_type == 'regular_ll':
+        degree = int(degree)
+        output_grid_type = [degree, degree]
+        grid_shape = (int(180 // degree + 1), int(360 // degree))
+    else:
+        raise ValueError(f'Unsupported grid_type: {output_grid_type}, supported types are ["regular_ll"]')
+        # to be implemented:
+        grid_type = grid_type + str(degree)
+        grid_shape = None # ????? to be determined
+
+    # reorder everything except ncells
+    original_ncells = ds['ncells']
+    ds = ds.isel(ncells = indices)
+    ds['ncells'] = (original_ncells)
     regrid_vars = {}
-    regrid_ds = xr.Dataset(regrid_vars, attrs=ds.attrs)
     for var in ds.data_vars:
         print(var)
-        if var in ['latitude', 'longitude']:
-            continue
-        regrid_vars[var] = regrid_gaussian_da(ds[var], output_grid_type, degree, indices)
+        # if var in ['latitude', 'longitude']:
+        #     continue
+        regrid_vars[var] = regrid_gaussian_da(ds[var], output_grid_type, degree, grid_shape)
     regrid_ds = xr.Dataset(regrid_vars)
     for coord in ds.coords:
         if coord not in ['latitude', 'longitude']:
@@ -209,8 +208,8 @@ def regrid_gaussian_ds(ds: xr.Dataset, output_grid_type: str, degree: float, ind
             #preserve units
             regrid_ds.coords[coord].attrs = ds[coord].attrs
     # keep global attrs
-        regrid_ds.attrs = ds.attrs
-        #change grid_type
-        regrid_ds.attrs['grid_type'] = output_grid_type
-        regrid_ds.attrs['history'] += f'Regridded from O96 to {degree} degree {output_grid_type} using earthkit'
+    regrid_ds.attrs = ds.attrs
+    #change grid_type
+    regrid_ds.attrs['grid_type'] = output_grid_type
+    regrid_ds.attrs['history'] += f'Regridded from O96 to {degree} degree {output_grid_type} using earthkit'
     return regrid_ds
