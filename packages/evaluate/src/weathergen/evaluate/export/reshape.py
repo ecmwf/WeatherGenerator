@@ -93,10 +93,8 @@ def find_lat_lon_ordering(ds: xr.Dataset) -> list[int]:
     -------
         indices: list of indices to reorder the data from original to lat/lon ordered.
     """
-    # x = ds['longitude'].values[:,0]
-    # y = ds['latitude'].values[:,0]
-    x = ds['lon'].values[:,0]
-    y = ds['lat'].values[:,0]
+    x = ds['longitude'].values[:,0]
+    y = ds['latitude'].values[:,0]
     tuples = list(zip(x, y))
     ordered_tuples = sorted(tuples, key=lambda t: (-t[1], t[0]))
     indices = [tuples.index(t) for t in ordered_tuples]
@@ -121,16 +119,13 @@ def regrid_gaussian_da(data: xr.DataArray, output_grid_type: str, degree: int, g
     # set coords
     coords = {
             'valid_time': data['valid_time'].values,
-            # 'latitude': np.linspace(90, -90, grid_shape[0]),
-            # 'longitude': np.linspace(0, 360 - degree, grid_shape[1]),
-            'lat': np.linspace(-90, 90, grid_shape[0]),
-            'lon': np.linspace(0, 360 - degree, grid_shape[1]),
+            'latitude': np.linspace(-90, 90, grid_shape[0]),
+            'longitude': np.linspace(0, 360 - degree, grid_shape[1]),
         }
     if data.ndim == 3:
         values = np.empty((data.shape[0], grid_shape[0], grid_shape[1], data.shape[2]))
         x = 0
         coords['pressure'] = data['pressure'].values
-        #coords['pressure_level'] = data['pressure_level'].values
     else:
         values = np.empty((grid_shape[0], grid_shape[1], data.shape[1]))
         x = 1
@@ -154,8 +149,7 @@ def regrid_gaussian_da(data: xr.DataArray, output_grid_type: str, degree: int, g
             raise ValueError(f'Unsupported data dimension: {data.ndim}, supported dimensions are 2 and 3.')
     dims = list(data.dims)
     pos = dims.index('ncells')
-    dims[pos:pos+1] = ['lat', 'lon']
-    #dims[pos:pos+1] = ['latitude', 'longitude']
+    dims[pos:pos+1] = ['latitude', 'longitude']
     dims = tuple(dims)
 
     regrid_data = xr.DataArray(
@@ -201,8 +195,7 @@ def regrid_gaussian_ds(ds: xr.Dataset, output_grid_type: str, degree: float, ind
         regrid_vars[var] = regrid_gaussian_da(ds[var], output_grid_type, degree, grid_shape)
     regrid_ds = xr.Dataset(regrid_vars)
     for coord in ds.coords:
-        #if coord not in ['latitude', 'longitude']:
-        if coord not in ['lat', 'lon']:
+        if coord not in ['latitude', 'longitude']:
             if 'ncells' not in ds[coord].dims:
                 regrid_ds.coords[coord] = ds[coord]
         else:
@@ -212,5 +205,5 @@ def regrid_gaussian_ds(ds: xr.Dataset, output_grid_type: str, degree: float, ind
     regrid_ds.attrs = ds.attrs
     #change grid_type
     regrid_ds.attrs['grid_type'] = "regular_ll"
-    #regrid_ds.attrs['history'] += f' and regridded from O96 to {degree} degree regular lat lon using earthkit'
+    regrid_ds.attrs['history'] += f' and regridded from O96 to {degree} degree regular lat lon using earthkit'
     return regrid_ds
