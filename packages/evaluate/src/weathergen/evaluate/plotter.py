@@ -14,8 +14,8 @@ import xarray as xr
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
-
 from weathergen.common.config import _load_private_conf
+
 from weathergen.evaluate.plot_utils import (
     DefaultMarkerSize,
 )
@@ -984,22 +984,23 @@ class ScoreCards:
                 ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
 
                 # Perform Wilcoxon test
-                stat, p = wilcoxon(diff, alternative=alt)
+                if diff["forecast_step"].item() > 1.0:
+                    stat, p = wilcoxon(diff, alternative=alt)
 
-                # Draw rectangle border for significance
-                if p < 0.05:
-                    lw = 2 if p < 0.01 else 1
-                    rect_color = color
-                    rect = plt.Rectangle(
-                        (x - 0.25, y - 0.25),
-                        0.5,
-                        0.5,
-                        fill=False,
-                        edgecolor=rect_color,
-                        linewidth=lw,
-                        zorder=2,
-                    )
-                    ax.add_patch(rect)
+                    # Draw rectangle border for significance
+                    if p < 0.05:
+                        lw = 2 if p < 0.01 else 1
+                        rect_color = color
+                        rect = plt.Rectangle(
+                            (x - 0.25, y - 0.25),
+                            0.5,
+                            0.5,
+                            fill=False,
+                            edgecolor=rect_color,
+                            linewidth=lw,
+                            zorder=2,
+                        )
+                        ax.add_patch(rect)
 
             skill_models.append(skill_model / n_common_channels)
 
@@ -1304,23 +1305,34 @@ class BarPlots:
             ratio_score, channels_per_comparison = self.calc_ratio_per_run_id(
                 data, channels, run_index
             )
-
-            ax[run_index - 1].barh(
-                np.arange(len(ratio_score)),
-                ratio_score,
-                color=self.colors(ratio_score, metric),
-                align="center",
-                edgecolor="black",
-                linewidth=0.5,
-            )
-            ax[run_index - 1].set_yticks(
-                np.arange(len(ratio_score)), labels=channels_per_comparison
-            )
-            ax[run_index - 1].invert_yaxis()
-            ax[run_index - 1].set_xlabel(
-                f"Relative {data[0].coords['metric'].item().upper()}: "
-                f"Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
-            )
+            if len(ratio_score) > 0:
+                ax[run_index - 1].barh(
+                    np.arange(len(ratio_score)),
+                    ratio_score,
+                    color=self.colors(ratio_score, metric),
+                    align="center",
+                    edgecolor="black",
+                    linewidth=0.5,
+                )
+                ax[run_index - 1].set_yticks(
+                    np.arange(len(ratio_score)), labels=channels_per_comparison
+                )
+                ax[run_index - 1].invert_yaxis()
+                ax[run_index - 1].set_xlabel(
+                    f"Relative {data[0].coords['metric'].item().upper()}: "
+                    f"Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
+                )
+            else:
+                ax[run_index - 1].set_visible(False)  # or annotate as missing
+                # Or show a message:
+                ax[run_index - 1].text(
+                    0.5,
+                    0.5,
+                    "No Data",
+                    ha="center",
+                    va="center",
+                    transform=ax[run_index - 1].transAxes,
+                )
 
         _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
         parts = ["bar_plot_compare", tag] + runs
@@ -1442,4 +1454,4 @@ def calculate_average_over_dim(
 
 def lower_is_better(metric: str) -> bool:
     # Determine whether lower or higher is better
-    return metric in {"l1", "l2", "mse", "rmse", "vrmse", "bias", "crps", "spread"}
+    return metric in {"l1", "l2", "mae", "mse", "rmse", "vrmse", "bias", "crps", "spread"}
