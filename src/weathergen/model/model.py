@@ -24,6 +24,7 @@ from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
+from weathergen.model.diffusion import DiffusionForecastEngine
 from weathergen.model.engines import (
     EmbeddingEngine,
     EnsPredictionHead,
@@ -333,6 +334,7 @@ class Model(torch.nn.Module):
             )
 
         self.forecast_engine = ForecastingEngine(cf, self.num_healpix_cells)
+        self.forecast_engine = DiffusionForecastEngine(forecast_engine=self.forecast_engine)
 
         ###############
         # embed coordinates yielding one query token for each target token
