@@ -10,7 +10,9 @@
 # weathergen-common = { path = "../../../../../packages/common" }
 # weathergen = { path = "../../../../../" }
 # ///
-## Example USAGE: uv run export --run-id grwnhykd --stream ERA5 --output-dir /p/home/jusers/owens1/jureca/WeatherGen/test_output1 --format netcdf --type prediction target --fsteps 1 --samples 1
+## Example USAGE: uv run export --run-id grwnhykd --stream ERA5 --output-dir \
+## /p/home/jusers/owens1/jureca/WeatherGen/test_output1 --format netcdf --type \
+## prediction target --fsteps 1 --samples 1
 import argparse
 import logging
 import re
@@ -402,7 +404,7 @@ def get_data(
         samples : Sample to process
         stream : Stream name to retrieve data for (e.g., 'ERA5').
         type : Type of data to retrieve ('target' or 'prediction').
-        fsteps : List of forecast steps to retrieve. If None, retrieves all available forecast steps.
+        fsteps : List of forecast steps to retrieve. If None, retrieves all available steps.
         channels :List of channels to retrieve. If None, retrieves all available channels.
         n_processes : Number of parallel processes to use for data retrieval.
         ecpoch : Epoch number to identify the Zarr store.
@@ -452,7 +454,7 @@ def get_data(
                                 f"{list(set(channels) - set(existing_channels))}. Skipping them."
                             )
                         result = result.sel(channel=existing_channels)
-                    # reshape result - use adaptive function to handle both regular and Gaussian grids
+                    # reshape result: use adaptive function to handle regular and Gaussian grids
                     result = reshape_dataset_adaptive(result)
                     da_fs.append(result)
 
@@ -597,7 +599,7 @@ def parse_args(args: list) -> argparse.Namespace:
         type=int,
         nargs="+",
         default=None,
-        help="List of forecast steps to retrieve (e.g. 1 2 3). If not provided, retrieves all available forecast steps.",
+        help="List of forecast steps to retrieve (e.g. 1 2 3). If not provided, retrieves all.",
     )
 
     parser.add_argument(
@@ -613,7 +615,7 @@ def parse_args(args: list) -> argparse.Namespace:
         type=str,
         nargs="+",
         default=None,
-        help="List of channels to retrieve (e.g., 'q_500 t_2m'). If not provided, retrieves all available channels.",
+        help="List of channels to retrieve (e.g., 'q_500 t_2m'). If not provided, retrieves all.",
     )
 
     parser.add_argument(
