@@ -7,7 +7,7 @@ import xarray as xr
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-from weathergen.evaluate.export.reshape import find_pl, find_lat_lon_ordering, regrid_gaussian_ds
+from weathergen.evaluate.export.reshape import find_lat_lon_ordering, find_pl, regrid_gaussian_ds
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -86,7 +86,7 @@ class NetcdfParser(CfParser):
             da_fs = self.add_metadata(da_fs)
             if self.indices is None:
                 self.indices = find_lat_lon_ordering(da_fs)
-                _logger.info(f"Determined lat/lon ordering indices, saved for reuse.")
+                _logger.info("Determined lat/lon ordering indices, saved for reuse.")
             da_fs = self.add_encoding(da_fs)
             da_fs = self.regrid(da_fs, self.regrid_degree, self.indices)
             self.save(da_fs, ref_time)
@@ -165,17 +165,14 @@ class NetcdfParser(CfParser):
             reshaped_dataset = reshaped_dataset.rename_vars({"ipoint": "ncells"})
 
         return reshaped_dataset
-    
-    def regrid(self,
-                ds: xr.Dataset,
-                regrid_degree: float, 
-                indices: list) -> xr.Dataset:
+
+    def regrid(self, ds: xr.Dataset, regrid_degree: float, indices: list) -> xr.Dataset:
         """
         Regrid a single xarray Dataset from O96 grid to regular lat/lon grid.
         Parameters
         ----------
             output_grid_type : Type of grid to regrid to (e.g., 'regular_ll').
-            degree : Degree of the regular lat/lon grid (e.g., 2 for 2.0 degree grid)/96 for O96 grid
+            degree : Degree of the regular lat/lon grid
             indices: list of indices to reorder the data from original to lat/lon ordered.
         Returns
         -------
@@ -184,7 +181,7 @@ class NetcdfParser(CfParser):
         if self.grid_type != "gaussian" or regrid_degree is None:
             return ds
         # hardcoded for now as all native grids are O96
-        output_grid_type = 'regular_ll'
+        output_grid_type = "regular_ll"
         regrid_ds = regrid_gaussian_ds(ds, output_grid_type, regrid_degree, indices)
         return regrid_ds
 
@@ -250,15 +247,14 @@ class NetcdfParser(CfParser):
         -------
             xarray Dataset with assigned forecast reference time coordinate.
         """
-        ds= ds.assign_coords(forecast_reference_time = reference_time)
+        ds = ds.assign_coords(forecast_reference_time=reference_time)
 
         if "sample" in ds.coords:
             ds = ds.drop_vars("sample")
 
         n_hours = self.fstep_hours.astype("int64")
-        ds['forecast_step'] = ds["forecast_step"] * n_hours
+        ds["forecast_step"] = ds["forecast_step"] * n_hours
         return ds
-
 
     def add_attrs(self, ds: xr.Dataset) -> xr.Dataset:
         """
@@ -280,7 +276,7 @@ class NetcdfParser(CfParser):
         dataset = xr.merge(variables.values())
         dataset.attrs = ds.attrs
         return dataset
-    
+
     def add_encoding(self, ds: xr.Dataset) -> xr.Dataset:
         """
         Add time encoding to the dataset variables.
@@ -308,7 +304,7 @@ class NetcdfParser(CfParser):
             ds["forecast_period"].encoding.update({"coordinates": "forecast_reference_time"})
 
         return ds
-    
+
     def _attrs_gaussian_grid(self, ds: xr.Dataset) -> xr.Dataset:
         """
         Assign CF-compliant attributes to variables in a Gaussian grid dataset.
@@ -345,7 +341,7 @@ class NetcdfParser(CfParser):
             )
 
         return variables
-    
+
     def _attrs_regular_grid(self, ds: xr.Dataset) -> xr.Dataset:
         """
         Assign CF-compliant attributes to variables in a regular grid dataset.
@@ -384,14 +380,18 @@ class NetcdfParser(CfParser):
                 attrs=attributes,
                 name=mapped_name,
             )
-            if da.encoding.get('coordinates'):
-                variables[mapped_name].encoding['coordinates'] = da.encoding['coordinates'].replace(' lat ', ' latitude ').replace(' lon ', ' longitude '),
-    
+            if da.encoding.get("coordinates"):
+                variables[mapped_name].encoding["coordinates"] = (
+                    da.encoding["coordinates"]
+                    .replace(" lat ", " latitude ")
+                    .replace(" lon ", " longitude "),
+                )
+
         return variables
- 
+
     def _assign_dim_attrs(
         self, ds: xr.Dataset, dim_cfg: dict[str, Any]
-    ) -> tuple[xr.Dataset , dict[str, dict[str, str]]]:
+    ) -> tuple[xr.Dataset, dict[str, dict[str, str]]]:
         """
         Assign CF attributes from given config file.
         Parameters

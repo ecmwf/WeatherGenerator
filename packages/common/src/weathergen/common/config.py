@@ -225,7 +225,7 @@ def load_config(
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
-    
+
     # Ensure the config has mini-epoch notation
     if hasattr(c, "samples_per_epoch"):
         c.samples_per_mini_epoch = c.samples_per_epoch
