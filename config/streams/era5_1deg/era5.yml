@@ -9,8 +9,7 @@
 
 ERA5 :
   type : anemoi
-  # filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
-  filenames : ['aifs-ea-an-oper-0001-mars-o48-1979-2024-6h-v1.zarr']
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
   source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp']
   target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp']
   loss_weight : 1.
