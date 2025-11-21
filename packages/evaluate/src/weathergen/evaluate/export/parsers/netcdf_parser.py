@@ -7,7 +7,7 @@ import xarray as xr
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-from weathergen.evaluate.export.reshape import find_pl, find_lat_lon_ordering, regrid_gaussian_ds
+from weathergen.evaluate.export.reshape import find_pl, find_lat_lon_ordering, regrid_gaussian_ds, regrid_gaussian_da
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -159,14 +159,6 @@ class NetcdfParser(CfParser):
             # rename ipoint to ncells
             reshaped_dataset = reshaped_dataset.rename_dims({"ipoint": "ncells"})
             reshaped_dataset = reshaped_dataset.rename_vars({"ipoint": "ncells"})
-            if self.regrid_degree is not None:
-                if self.indices is None:
-                    self.indices = find_lat_lon_ordering(reshaped_dataset)
-                reshaped_dataset = self.regrid(
-                    reshaped_dataset,
-                    regrid_degree=self.regrid_degree,
-                    indices=self.indices,
-                )
         return reshaped_dataset
     
     def regrid(self,
@@ -326,11 +318,25 @@ class NetcdfParser(CfParser):
         """
         variables = {}
         dims_cfg = self.config.get("dimensions", {})
+
+        if self.regrid_degree is not None:
+            degree = int(self.regrid_degree)
+            output_grid_type = [degree, degree]
+            grid_shape = (int(180 // degree + 1), int(360 // degree))
         ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
+
         for var_name, da in ds.data_vars.items():
+            # regrid first
+            if self.regrid_degree is not None:
+                if self.indices is None:
+                    self.indices = find_lat_lon_ordering(ds)
+                da = da.isel(ncells = self.indices)
+                da = regrid_gaussian_da(
+                    da,
+                    output_grid_type, degree, grid_shape)
             mapped_info = self.mapping.get(var_name, {})
             mapped_name = mapped_info.get("var", var_name)
-
+            
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
 
             attributes = {
@@ -339,9 +345,33 @@ class NetcdfParser(CfParser):
             }
             if "long" in mapped_info:
                 attributes["long_name"] = mapped_info["long"]
+            dims_list = ["pressure", "ncells", "valid_time"]
+            dims = dims_list.copy()
+            if mapped_info.get("level_type") == "sfc":
+                dims.remove("pressure")
+            if self.regrid_degree is not None:
+                pos = dims.index("ncells")
+                dims[pos:pos+1] = ["latitude", "longitude"]
+                for coord, coord_dict in coords.items():
+                    coord_dict = list(coord_dict)
+                    if "ncells" in coord_dict[0]:
+                        pos = coord_dict[0].index("ncells")
+                        coord_dims = list(coord_dict[0])
+                        coord_dims[pos:pos+1] = ["latitude", "longitude"]
+                        coord_dict[0] = coord_dims
+                    coords[coord] = tuple(coord_dict)
+                    # redo coords of lat and long
+                    if coord in ['latitude', 'longitude']:
+                        coords[coord] = (
+                            coord,
+                            np.linspace(-90, 90, grid_shape[0]) if coord == 'latitude' else np.linspace(0, 360 - degree, grid_shape[1]),
+                            coords[coord][2]
+                        )
+                del coords['ncells']
+
             variables[mapped_name] = xr.DataArray(
                 data=da.values,
-                dims=da.dims,
+                dims= dims,
                 coords=coords,
                 attrs=attributes,
                 name=mapped_name,
@@ -447,12 +477,12 @@ class NetcdfParser(CfParser):
         coord_map = self.config.get("coordinates", {}).get(var_cfg.get("level_type"), {})
 
         for coord, new_name in coord_map.items():
-            if coord in ds.coords:
-                coords[new_name] = (
-                    ds.coords[coord].dims,
-                    ds.coords[coord].values,
-                    attrs[new_name],
-                )
+            #if coord in ds.coords:
+            coords[new_name] = (
+                ds.coords[coord].dims,
+                ds.coords[coord].values,
+                attrs[new_name],
+            )
 
         return coords
 

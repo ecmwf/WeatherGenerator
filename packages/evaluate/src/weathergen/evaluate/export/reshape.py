@@ -129,8 +129,8 @@ def regrid_gaussian_da(data: xr.DataArray, output_grid_type: str, degree: int, g
     if data.ndim == 3:
         values = np.empty((data.shape[0], grid_shape[0], grid_shape[1], data.shape[2]))
         x = 0
-        #coords['pressure'] = data['pressure'].values
-        coords['pressure_level'] = data['pressure_level'].values
+        coords['pressure'] = data['pressure'].values
+        #coords['pressure_level'] = data['pressure_level'].values
     else:
         values = np.empty((grid_shape[0], grid_shape[1], data.shape[1]))
         x = 1
