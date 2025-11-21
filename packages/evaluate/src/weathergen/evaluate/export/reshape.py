@@ -116,7 +116,6 @@ def regrid_gaussian_da(data: xr.DataArray, output_grid_type: str, degree: int, g
         Regridded xarray DataArray.
     """
 
-    # create empty xarray ds for regridded data
     # set coords
     coords = {
             'valid_time': data['valid_time'].values,

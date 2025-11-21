@@ -9,10 +9,6 @@ from omegaconf import OmegaConf
 from weathergen.evaluate.export.cf_utils import CfParser
 from weathergen.evaluate.export.reshape import find_pl, find_lat_lon_ordering, regrid_gaussian_ds
 
-from weathergen.evaluate.export.cf_utils import ncdump
-from netCDF4 import Dataset
-import os
-
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
@@ -87,33 +83,12 @@ class NetcdfParser(CfParser):
             da_fs = self.concatenate(da_fs)
             da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
-            da_fs.to_netcdf("./test.nc")  # Debug line to check intermediate output
-            sfile = Dataset("./test.nc",mode='r', format='NETCDF4')
-            a, b, c = ncdump(sfile)
-            _logger.info(f"ncdump output attrs: {a}, dims: {b}, vars: {c}")
             da_fs = self.add_metadata(da_fs)
-            os.remove("./test.nc")  # Clean up debug file
-            da_fs.to_netcdf("./test.nc")  # Debug line to check intermediate output
-            sfile = Dataset("./test.nc",mode='r', format='NETCDF4')
-            a, b, c = ncdump(sfile)
-            _logger.info(f"ncdump output attrs: {a}, dims: {b}, vars: {c}")
             if self.indices is None:
                 self.indices = find_lat_lon_ordering(da_fs)
                 _logger.info(f"Determined lat/lon ordering indices")
             da_fs = self.add_encoding(da_fs)#
-            os.remove("./test.nc")  # Clean up debug file
-            da_fs.to_netcdf("./test.nc")  # Debug line to check intermediate output
-            sfile = Dataset("./test.nc",mode='r', format='NETCDF4')
-            a, b, c = ncdump(sfile)
-            _logger.info(f"ncdump output attrs: {a}, dims: {b}, vars: {c}")
             da_fs = self.regrid(da_fs, self.regrid_degree, self.indices)
-            os.remove("./test.nc")  # Clean up debug file
-            da_fs.to_netcdf("./test.nc")  # Debug line to check intermediate output
-            sfile = Dataset("./test.nc",mode='r', format='NETCDF4')
-            a, b, c = ncdump(sfile)
-
-            _logger.info(f"ncdump output attrs: {a}, dims: {b}, vars: {c}")
-
             self.save(da_fs, ref_time)
 
     def get_output_filename(self, forecast_ref_time: np.datetime64) -> Path:
@@ -281,10 +256,6 @@ class NetcdfParser(CfParser):
 
         n_hours = self.fstep_hours.astype("int64")
         ds['forecast_step'] = ds["forecast_step"] * n_hours
-        ds.to_netcdf("./test.nc")  # Debug line to check intermediate output
-        sfile = Dataset("./test.nc",mode='r', format='NETCDF4')
-        a, b, c = ncdump(sfile)
-        _logger.info(f"ncdump output attrs: {a}, dims: {b}, vars: {c}")
         return ds
 
 
@@ -352,13 +323,9 @@ class NetcdfParser(CfParser):
         variables = {}
         dims_cfg = self.config.get("dimensions", {})
         ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
-        dims_list = ["pressure", "ncells", "valid_time"]
         for var_name, da in ds.data_vars.items():
             mapped_info = self.mapping.get(var_name, {})
             mapped_name = mapped_info.get("var", var_name)
-            dims = dims_list.copy()
-            if mapped_info.get("level_type") == "sfc":
-                dims.remove("pressure")
 
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
 
@@ -370,13 +337,11 @@ class NetcdfParser(CfParser):
                 attributes["long_name"] = mapped_info["long"]
             variables[mapped_name] = xr.DataArray(
                 data=da.values,
-                dims=dims,
-                coords={**coords, "valid_time": ds["valid_time"].values},
+                dims=da.dims,
+                coords=coords,
                 attrs=attributes,
                 name=mapped_name,
             )
-            if da.encoding.get('coordinates'):
-                variables[mapped_name].encoding['coordinates'] = da.encoding['coordinates'].replace(' lat ', ' latitude ').replace(' lon ', ' longitude '),
 
         return variables
     
@@ -425,7 +390,7 @@ class NetcdfParser(CfParser):
  
     def _assign_dim_attrs(
         self, ds: xr.Dataset, dim_cfg: dict[str, Any]
-    ) -> dict[str, dict[str, str]]:
+    ) -> tuple[xr.Dataset , dict[str, dict[str, str]]]:
         """
         Assign CF attributes from given config file.
         Parameters
@@ -438,6 +403,8 @@ class NetcdfParser(CfParser):
         -------
             Dict[str, Dict[str, str]]:
                 Attributes for each dimension.
+            xr.Dataset:
+                Dataset with renamed dimensions.
         """
         ds_attrs = {}
 
