@@ -8,6 +8,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
 import itertools
 import logging
 import re
@@ -48,10 +49,10 @@ from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
-from weathergen.train.trainer_base import TrainerBase
+from weathergen.train.trainer_base import TrainerBase, get_target_and_aux_calculator
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
-from weathergen.utils.utils import get_dtype
+from weathergen.utils.utils import get_batch_size, get_dtype
 from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
@@ -321,6 +322,8 @@ class Trainer(TrainerBase):
 
         self.validate_with_ema = cf.get("validate_with_ema", False)
         self.ema_model = None
+        # validate_with_ema is incompatible with student-teacher
+        self.validate_with_ema = False  # TODO remove for testing only
         if self.validate_with_ema:
             meta_ema = self.init_model_and_shard(cf, run_id_contd, mini_epoch_contd, devices)[0]
             self.ema_model = EMAModel(
@@ -330,6 +333,16 @@ class Trainer(TrainerBase):
                 rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
+
+        self.target_and_aux_calculator = get_target_and_aux_calculator(
+            cf,
+            self.model,
+            None,
+            ema_model=self.ema_model,
+            batch_size=get_batch_size(cf, self.world_size_original),
+        )
+
+        self.target_and_aux_calculator.to_device(self.device)
 
         # if with_fsdp then parameter count is unreliable
         if is_root() and not cf.with_fsdp and not cf.with_ddp:
@@ -591,9 +604,6 @@ class Trainer(TrainerBase):
 
         self.optimizer.zero_grad()
 
-        # Unweighted loss, real weighted loss, std for losses that need it
-        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
-
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
@@ -606,20 +616,25 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                preds, posteriors = self.model(
-                    self.model_params, batch, cf.forecast_offset, forecast_steps
+                output = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
+
+                targets, aux_outputs = self.target_and_aux_calculator.compute(
+                    bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
                 )
-            loss_values = self.loss_calculator.compute_loss(
-                preds=preds,
-                streams_data=batch[0],
+
+            loss, loss_values = self.loss_calculator.compute_loss(
+                preds=output,
+                targets=targets,
             )
             if cf.latent_noise_kl_weight > 0.0:
-                kl = torch.cat([posterior.kl() for posterior in posteriors])
-                loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
+                kl = torch.cat([posterior.kl() for posterior in output.latent])
+                loss += cf.latent_noise_kl_weight * kl.mean()
+
+            self.target_and_aux_calculator.update_state_pre_backward(bidx, batch, self.model)
 
             # backward pass
             self.optimizer.zero_grad()
-            self.grad_scaler.scale(loss_values.loss).backward()
+            self.grad_scaler.scale(loss).backward()
             # loss_values.loss.backward()
 
             # gradient clipping
@@ -640,19 +655,36 @@ class Trainer(TrainerBase):
             self.grad_scaler.update()
             # self.optimizer.step()
 
+            self.target_and_aux_calculator.update_state_post_opt_step(bidx, batch, self.model)
+
             # update learning rate
             self.lr_scheduler.step()
 
             # EMA update
             if self.validate_with_ema:
                 self.ema_model.update(
-                    self.cf.istep * self.world_size_original * self.cf.batch_size_per_gpu,
-                    self.world_size_original * self.cf.batch_size_per_gpu,
+                    self.cf.istep * get_batch_size(self.cf, self.world_size_original),
+                    get_batch_size(self.cf, self.world_size_original),
                 )
 
-            self.loss_unweighted_hist += [loss_values.losses_all]
-            self.loss_model_hist += [loss_values.loss.item()]
-            self.stdev_unweighted_hist += [loss_values.stddev_all]
+            if bidx == 0:
+                self.loss_unweighted_hist = {
+                    loss_name: []
+                    for _, calc_terms in loss_values.loss_terms.items()
+                    for loss_name in calc_terms.losses_all.keys()
+                }
+                self.stdev_unweighted_hist = {
+                    loss_name: []
+                    for _, calc_terms in loss_values.loss_terms.items()
+                    for loss_name in calc_terms.stddev_all.keys()
+                }
+                self.loss_model_hist = []
+            for _, loss_terms in loss_values.loss_terms.items():
+                for loss_name, losses_all in loss_terms.losses_all.items():
+                    self.loss_unweighted_hist[loss_name].append(losses_all)
+                for loss_name, stddev_all in loss_terms.stddev_all.items():
+                    self.stdev_unweighted_hist[loss_name].append(stddev_all)
+            self.loss_model_hist += [loss.item()]
 
             perf_gpu, perf_mem = self.get_perf()
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
@@ -665,6 +697,17 @@ class Trainer(TrainerBase):
             # save model checkpoint (with designation _latest)
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
+                self.loss_unweighted_hist = {
+                    loss_name: []
+                    for _, calc_terms in loss_values.loss_terms.items()
+                    for loss_name in calc_terms.losses_all.keys()
+                }
+                self.stdev_unweighted_hist = {
+                    loss_name: []
+                    for _, calc_terms in loss_values.loss_terms.items()
+                    for loss_name in calc_terms.stddev_all.keys()
+                }
+                self.loss_model_hist = []
 
             self.cf.istep += 1
 
@@ -675,7 +718,6 @@ class Trainer(TrainerBase):
         self.model.eval()
 
         dataset_val_iter = iter(self.data_loader_validation)
-        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
@@ -697,19 +739,21 @@ class Trainer(TrainerBase):
                             if self.ema_model is None
                             else self.ema_model.forward_eval
                         )
-                        preds, _ = model_forward(
+                        output = model_forward(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
 
-                    streams_data: list[list[StreamData]] = batch[0]
-                    # compute loss and log output
-                    if bidx < cf.log_validation:
-                        loss_values = self.loss_calculator_val.compute_loss(
-                            preds=preds,
-                            streams_data=streams_data,
-                        )
+                    targets = {"physical": batch[0]}
 
+                    # compute loss
+                    loss, loss_values = self.loss_calculator_val.compute_loss(
+                        preds=output,
+                        targets=targets,
+                    )
+                    # log output
+                    if bidx < cf.log_validation:
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
+                        streams_data: list[list[StreamData]] = batch[0]
                         (
                             preds_all,
                             targets_all,
@@ -717,7 +761,7 @@ class Trainer(TrainerBase):
                             targets_times_all,
                             targets_lens,
                         ) = self._prepare_logging(
-                            preds=preds,
+                            preds=output,
                             forecast_offset=cf.forecast_offset,
                             forecast_steps=cf.forecast_steps,
                             streams_data=streams_data,
@@ -738,15 +782,24 @@ class Trainer(TrainerBase):
                             sample_idxs,
                         )
 
-                    else:
-                        loss_values = self.loss_calculator_val.compute_loss(
-                            preds=preds,
-                            streams_data=streams_data,
-                        )
-
-                    self.loss_unweighted_hist += [loss_values.losses_all]
-                    self.loss_model_hist += [loss_values.loss.item()]
-                    self.stdev_unweighted_hist += [loss_values.stddev_all]
+                    if bidx == 0:
+                        self.loss_unweighted_hist = {
+                            loss_name: []
+                            for _, calc_terms in loss_values.loss_terms.items()
+                            for loss_name in calc_terms.losses_all.keys()
+                        }
+                        self.stdev_unweighted_hist = {
+                            loss_name: []
+                            for _, calc_terms in loss_values.loss_terms.items()
+                            for loss_name in calc_terms.stddev_all.keys()
+                        }
+                        self.loss_model_hist = []
+                    for _, loss_terms in loss_values.loss_terms.items():
+                        for loss_name, losses_all in loss_terms.losses_all.items():
+                            self.loss_unweighted_hist[loss_name].append(losses_all)
+                        for loss_name, stddev_all in loss_terms.stddev_all.items():
+                            self.stdev_unweighted_hist[loss_name].append(stddev_all)
+                    self.loss_model_hist += [loss.item()]
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
@@ -938,13 +991,12 @@ class Trainer(TrainerBase):
         # Gather all tensors from all ranks into a list and stack them into one tensor again
         real_loss = torch.cat(all_gather_vlen(real_loss))
 
-        for stream in self.cf.streams:  # Loop over all streams
-            stream_hist = [losses_all[stream.name] for losses_all in self.loss_unweighted_hist]
-            stream_all = torch.stack(stream_hist).to(torch.float64)
-            losses_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
-            stream_hist = [stddev_all[stream.name] for stddev_all in self.stdev_unweighted_hist]
-            stream_all = torch.stack(stream_hist).to(torch.float64)
-            stddev_all[stream.name] = torch.cat(all_gather_vlen(stream_all))
+        for loss_name, loss_values in self.loss_unweighted_hist.items():
+            loss_values = torch.stack(loss_values).to(torch.float64)
+            losses_all[loss_name] = torch.cat(all_gather_vlen(loss_values))
+        for stddev_name, stddev_values in self.stdev_unweighted_hist.items():
+            stddev_values = torch.stack(stddev_values).to(torch.float64)
+            stddev_all[stddev_name] = torch.cat(all_gather_vlen(stddev_values))
 
         return real_loss, losses_all, stddev_all
 
@@ -979,8 +1031,6 @@ class Trainer(TrainerBase):
                     self.perf_mem,
                 )
 
-        self.loss_unweighted_hist, self.loss_model_hist, self.stdev_unweighted_hist = [], [], []
-
     def _get_tensor_item(self, tensor):
         """
         When using FSDP2, tensor is a DTensor and we need full_tensor().item() instead of .item(),
@@ -1013,10 +1063,9 @@ class Trainer(TrainerBase):
                         f"""validation ({self.cf.run_id}) : {mini_epoch:03d} : 
                         {avg_loss.nanmean().item()}"""
                     )
-                    for _, st in enumerate(self.cf.streams):
+                    for loss_name, loss_values in losses_all.items():
                         logger.info(
-                            "{}".format(st["name"])
-                            + f" : {losses_all[st['name']].nanmean():0.4E} \t",
+                            f"{loss_name}" + f" : {loss_values.nanmean():0.4E} \t",
                         )
                     logger.info("\n")
 
@@ -1034,10 +1083,9 @@ class Trainer(TrainerBase):
                     pstr += f"s/sec={(print_freq * self.cf.batch_size_per_gpu) / dt:.3f})"
                     logger.info(pstr)
                     logger.info("\t")
-                    for _, st in enumerate(self.cf.streams):
+                    for loss_name, loss_values in losses_all.items():
                         logger.info(
-                            "{}".format(st["name"])
-                            + f" : {losses_all[st['name']].nanmean():0.4E} \t",
+                            f"{loss_name}" + f" : {loss_values.nanmean():0.4E} \t",
                         )
                     logger.info("\n")
 

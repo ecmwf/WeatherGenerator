@@ -69,15 +69,6 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
-loss_fcts:
-  -
-    - "mse"
-    - 1.0
-loss_fcts_val:
-  -
-    - "mse"
-    - 1.0
-
 batch_size_per_gpu: 1
 batch_size_validation_per_gpu: 1
 
@@ -91,9 +82,29 @@ validate_with_ema: True
 ema_ramp_up_ratio: 0.09
 ema_halflife_in_thousands: 1e-3
 
-# training mode: "forecast" or "masking" (masked token modeling)
+# training mode: "forecast" or "masking" (masked token modeling) or "student-teacher"
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "masking"
+training_mode: "forecast"
+training_mode_config: {
+  "losses" : { 
+    LossLatentDiffusion: {
+        weight: 1.0, loss_fcts: [['mse', 1.0]]
+    }
+  },
+  "shared_heads": False,
+  "target_and_aux_calc": "DiffusionLatentTargetEncoder",
+  "teacher_model": {}
+}
+validation_mode_config: {
+  "losses" : { 
+    LossLatentDiffusion: {
+        weight: 1.0, loss_fcts: [['mse', 1.0]]
+    }
+  },
+  "shared_heads": False,
+  "target_and_aux_calc": "DiffusionLatentTargetEncoder",
+  "teacher_model": {}
+}
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
@@ -114,8 +125,9 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           }
 
 num_mini_epochs: 32
-samples_per_mini_epoch: 4096
-samples_per_validation: 512
+samples_per_mini_epoch: 32
+samples_per_validation: 8
+
 shuffle: True
 
 lr_scaling_policy: "sqrt"
