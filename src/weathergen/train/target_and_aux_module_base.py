@@ -21,7 +21,7 @@ class TargetAndAuxModuleBase:
         pass
 
 
-class IdentityTargetAndAux(TargetAndAuxModuleBase):
+class PhysicalTargetAndAux(TargetAndAuxModuleBase):
     def __init__(self, model, rng, **kwargs):
         return
 
