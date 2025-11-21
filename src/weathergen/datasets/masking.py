@@ -139,12 +139,10 @@ class Masker:
 
     def mask_source_idxs(
         self,
-        stream_info,
         idxs_cells,
         idxs_cells_lens,
-        rdata,
         keep_mask: np.typing.NDArray | None = None,
-    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
 
         Return:
@@ -214,11 +212,9 @@ class Masker:
 
     def mask_targets_idxs(
         self,
-        stream_info,
         idxs_cells,
         idxs_cells_lens,
-        rdata,
-    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # mask_source_idxs is
         assert (self.mask_tokens is not None) or (self.mask_tokens is not None)
         idxs_ord_inv = torch.tensor([], dtype=torch.int64)
@@ -634,8 +630,12 @@ class Masker:
         teacher_cfg: dict,
         student_cfg: dict,
         relationship: str = "subset",
-    ) -> Tuple[np.ndarray, List[np.ndarray], List[ViewMetadata]]:
-        """Construct teacher/student keep masks for a stream."""
+    ) -> Tuple[np.typing.NDArray, List[np.typing.NDArray], List[ViewMetadata]]:
+        """
+        Construct teacher/student keep masks for a stream.
+        ViewMetadata likely to be deprecated, 
+        but information can be piped here for now.
+        """
 
         strat_teacher = teacher_cfg.get("strategy", "random")
         rate_teacher = teacher_cfg.get("rate")

@@ -68,7 +68,7 @@ def collect_datasources(stream_datasets: list, idx: int, type: str) -> IOReaderD
 
 
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
-    ###################################################
+
     def __init__(
         self,
         cf,
@@ -220,14 +220,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.epoch = 0
 
-    ###################################################
     def advance(self):
         """
         Advance epoch (this is applied to the template for the worker processes)
         """
         self.epoch += 1
 
-    ###################################################
     def get_sources_size(self):
         return [
             0
@@ -239,15 +237,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             for ds in self.streams_datasets
         ]
 
-    ###################################################
     def get_sources_num_channels(self):
         return [ds[0].get_source_num_channels() for ds in self.streams_datasets]
 
-    ###################################################
     def get_targets_num_channels(self):
         return [ds[0].get_target_num_channels() for ds in self.streams_datasets]
 
-    ###################################################
     def get_targets_coords_size(self):
         # TODO: avoid hard coding magic values
         # +6 at the end for stram_id and time encoding
@@ -255,7 +250,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             (ds[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6 for ds in self.streams_datasets
         ]
 
-    ###################################################
     def reset(self):
         # initialize the random number generator: self.data_loader_rng_seed is set to a DDP-unique
         # value in worker_workset()
@@ -369,7 +363,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         output_tokens: list,
         mask_state: dict | None = None,
     ) -> StreamData:
-        """ """
+        """ 
+        """
 
         # collect for all forecast steps
         dt = self.forecast_offset + forecast_dt
@@ -415,7 +410,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         mode: str,
         base_idx: TIndex,
         forecast_dt: int,
-        # view_meta: ViewMetadata,
         stream_info: dict,
         input_data: list,
         output_data: list,
@@ -428,11 +422,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         Build a StreamData object for a single view (teacher or student).
 
         Args:
-            mode : {student, teacher, physical}
+            mode : 
             stream_data :
             base_idx: Time index for this sample
             forecast_dt: Number of forecast steps
-            view_meta: ViewMetadata describing spatial mask
             stream_info: Stream configuration dict
             stream_ds: List of dataset readers for this stream
 
@@ -531,7 +524,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         streams_data: list[StreamData] = []
 
         # get/coordinate masks
-        masks_streams = self._get_source_target_masks(idx, forecast_dt)
+        masks_streams = self._get_source_target_masks()
 
         # Determine number of views direct from config (teacher & student views)
         teacher_cfg = self.training_cfg.get("teacher_model_input", {}) if self.training_cfg else {}
@@ -612,14 +605,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         return streams_data
 
-    def _get_source_target_masks(self, idx: int, forecast_dt: int):
+    def _get_source_target_masks(self):
         """
-        Return one batch of data
-        Build a StreamData object for a single view (teacher or student).
-
-        Args:
-            idx: Time index for this sample
-            forecast_dt: Number of forecast steps
+        Generate source and target masks for all streams
+        according to the student-teacher configuration
         """
 
         masks = {}
@@ -681,7 +670,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         return batch, source_cell_lens, target_coords_idx
 
-    ###################################################
     def __iter__(self):
         """
         Return one batch of data
@@ -740,11 +728,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
 
-    ###################################################
     def __len__(self):
         return self.len
 
-    ###################################################
     def worker_workset(self):
         local_start, local_end = self.rank * self.len, (self.rank + 1) * self.len
 

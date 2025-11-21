@@ -10,14 +10,15 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from weathergen.common.config import Config
 from weathergen.datasets.stream_data import StreamData
 
 # TODO: Add a store for a random number for diffusion
 # TODO: GetTimestep to get the timestep
-# TODO: GetData: get the streamdata
 # TODO: GetMetaData: then this gets the right rn for the timestep!
 
 
+# NOTE: TO BE DECPRECATED
 @dataclass
 class ViewMetadata:
     """
@@ -29,7 +30,6 @@ class ViewMetadata:
     Attributes:
         view_id: Unique identifier (e.g., "teacher_global", "student_local_0")
         keep_mask: Boolean array [num_healpix_cells] at data level indicating kept cells
-        strategy: Name of selection strategy ("random", "healpix_level_2", etc.)
         healpix_level: HEALPix level for hierarchical selection (None if not applicable)
         rate: Fraction of data kept (e.g., 0.5 = 50% kept); None if fixed count
         parent_view_id: ID of the parent view this is a subset of (None for teacher)
@@ -47,7 +47,7 @@ class ViewMetadata:
 
     # Optional extras for future/other training paradigms
     loss_type: str | None = None  # e.g. DINO, JEPA
-    strategy_config: dict | None = None  # e.g. {rate: 0.5, hl_mask: 3, overlap: "disjoint"}
+    strategy_config: Config | None = None  # e.g. {rate: 0.5, hl_mask: 3, overlap: "disjoint"}
 
 
 class SampleMetaData:
@@ -55,7 +55,7 @@ class SampleMetaData:
     masking_strategy: str
 
     # parameters for masking strategy
-    masking_params: dict
+    masking_params: Config
 
 
 class Sample:
@@ -64,7 +64,7 @@ class Sample:
 
     # data for all streams
     # keys: stream_name, values: StreamData
-    streams_data: dict
+    streams_data: dict[str, StreamData | None]
 
     def __init__(self, streams: dict) -> None:
         # TODO: can we pass this right away?
@@ -97,8 +97,8 @@ class ModelBatch:
     # index of corresponding target (for source samples) or source (for target samples)
     # these are in 1-to-1 corresponding for classical training modes (MTM, forecasting) but
     # can be more complex for strategies like student-teacher training
-    source_matching_idx: np.typing.NDArray[np.int32]
-    target_matching_idx: np.typing.NDArray[np.int32]
+    source_target_matching_idxs: np.typing.NDArray[np.int32]
+    target_source_matching_idxs: np.typing.NDArray[np.int32]
 
     def __init__(self, streams, num_source_samples: int, num_target_samples: int) -> None:
         """ """

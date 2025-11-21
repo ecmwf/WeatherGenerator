@@ -101,11 +101,11 @@ class TokenizerMasking(Tokenizer):
         if keep_mask is not None:
             keep_np = keep_mask.cpu().numpy().astype(bool)
             (mask_tokens, mask_channels) = self.masker.mask_source_idxs(
-                stream_info, idxs_cells, idxs_cells_lens, rdata, keep_mask=keep_np
+                idxs_cells, idxs_cells_lens, keep_mask=keep_np
             )
         else:
             (mask_tokens, mask_channels) = self.masker.mask_source_idxs(
-                stream_info, idxs_cells, idxs_cells_lens, rdata
+                idxs_cells, idxs_cells_lens,
             )
 
         source_tokens_cells, source_tokens_lens = tokenize_apply_mask_source(
@@ -152,7 +152,7 @@ class TokenizerMasking(Tokenizer):
             self.masker.mask_channels = mask_state.get("mask_channels")
 
         (mask_tokens, mask_channels, idxs_ord_inv) = self.masker.mask_targets_idxs(
-            stream_info, idxs_cells, idxs_cells_lens, rdata
+            idxs_cells, idxs_cells_lens,
         )
 
         data, datetimes, coords, coords_local, coords_per_cell = tokenize_apply_mask_target(
@@ -193,7 +193,7 @@ class TokenizerMasking(Tokenizer):
             self.masker.mask_channels = mask_state.get("mask_channels")
 
         (mask_tokens, mask_channels, idxs_ord_inv) = self.masker.mask_targets_idxs(
-            stream_info, idxs_cells, idxs_cells_lens, rdata
+            idxs_cells, idxs_cells_lens,
         )
 
         # TODO: split up
@@ -259,7 +259,7 @@ class TokenizerMasking(Tokenizer):
             self.masker.mask_channels = mask_state.get("mask_channels")
 
         (mask_tokens, mask_channels, idxs_ord_inv) = self.masker.mask_targets_idxs(
-            stream_info, idxs_cells, idxs_cells_lens, rdata
+            idxs_cells, idxs_cells_lens,
         )
 
         data, datetimes, coords, _, _ = tokenize_apply_mask_target(
