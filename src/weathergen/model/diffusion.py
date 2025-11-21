@@ -113,10 +113,6 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c)
-        # return c_skip * x + c_out * self.net(c_in * x, c_noise)  # Eq. (7) in EDM paper
-
-        fstep = 0
-        aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
         return c_skip * x + c_out * self.net(c_in * x, c_noise)  # Eq. (7) in EDM paper
 
     def inference(

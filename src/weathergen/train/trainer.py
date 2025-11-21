@@ -739,8 +739,15 @@ class Trainer(TrainerBase):
                         output = model_forward(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
-
-                    targets = {"physical": batch[0]}
+                        targets, aux_outputs = self.target_and_aux_calculator.compute(
+                            bidx,
+                            batch,
+                            self.model_params,
+                            self.model,
+                            cf.forecast_offset,
+                            forecast_steps,
+                        )
+                    targets = {"targets": [targets], "aux_outputs": aux_outputs}
 
                     # compute loss
                     loss, loss_values = self.loss_calculator_val.compute_loss(
