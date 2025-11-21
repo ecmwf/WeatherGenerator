@@ -14,13 +14,15 @@
 # Original Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # ----------------------------------------------------------------------------
 
+
+import dataclasses
+
 import torch
-from dataclass import dataclass
 
 from weathergen.model.engines import ForecastingEngine
 
 
-@dataclass
+@dataclasses.dataclass
 class BatchData:
     """
     Mock function for the data that will be provided to the diffusion model. Will change.
@@ -70,7 +72,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.p_mean = p_mean
         self.p_std = p_std
 
-    def forward(self, data: BatchData) -> torch.Tensor:
+    def forward(self, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
         """
         Model forward call during training. Unpacks the conditioning c = [x_{t-k}, ..., x_{t}], the
         target y = x_{t+1}, and the random noise eta from the data, computes the diffusion noise
@@ -79,9 +81,13 @@ class DiffusionForecastEngine(torch.nn.Module):
         """
         # Retrieve conditionings [0:-1], target [-1], and noise from data object.
         # TOOD: The data retrieval ignores batch and stream dimension for now (has to be adapted).
-        c = [data.get_input_data(t) for t in range(data.get_sample_len() - 1)]
-        y = data.get_input_data(-1)
-        eta = data.get_input_metadata(-1)
+        # c = [data.get_input_data(t) for t in range(data.get_sample_len() - 1)]
+        # y = data.get_input_data(-1)
+        # eta = data.get_input_metadata(-1)
+
+        c = 1
+        y = tokens
+        eta = torch.randn(1).to(device=tokens.device)
 
         # Compute sigma (noise level) from eta
         # noise = torch.randn(y.shape, device=y.device)  # now eta from MultiStreamDataSampler
@@ -102,11 +108,15 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Compute scaling conditionings
         c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
         c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2).sqrt()
-        c_in = 1 / (sigma**2 + self.sigma_data**2).sqrt
+        c_in = 1 / (sigma**2 + self.sigma_data**2).sqrt()
         c_noise = sigma.log() / 4
 
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c)
+        # return c_skip * x + c_out * self.net(c_in * x, c_noise)  # Eq. (7) in EDM paper
+
+        fstep = 0
+        aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
         return c_skip * x + c_out * self.net(c_in * x, c_noise)  # Eq. (7) in EDM paper
 
     def inference(
