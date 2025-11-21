@@ -10,3 +10,6 @@ multiprocessing_method: "spawn"
 
 len_hrs: 745
 step_hrs: 745
+
+streams_output: ['ICONESMAERmon', 'ICONESMAmon', 'ICONESMEmon', 'ICONESMLImon',
+  'ICONESMLImon', 'ICONESMOmon', 'ICONESMSImon']
