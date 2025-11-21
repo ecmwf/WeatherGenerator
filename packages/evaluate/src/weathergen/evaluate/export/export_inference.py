@@ -156,6 +156,13 @@ def parse_args(args: list) -> argparse.Namespace:
         required=False,
     )
 
+    parser.add_argument(
+        "--regrid-degree",
+        type=int,
+        default=None,
+        help="If specified, regrid the data to a regular lat/lon grid with the given degree",
+    )
+
     args, unknown_args = parser.parse_known_args(args)
     if unknown_args:
         _logger.warning(f"Unknown arguments: {unknown_args}")

@@ -17,6 +17,7 @@ def output_filename(
     output_dir: str,
     output_format: str,
     forecast_ref_time: np.datetime64,
+    regrid_degree: float,
 ) -> Path:
     """
     Generate output filename based on prefix (should refer to type e.g. pred/targ), run_id, sample
@@ -40,6 +41,8 @@ def output_filename(
         )
     file_extension = "nc"
     frt = np.datetime_as_string(forecast_ref_time, unit="h")
+    if regrid_degree is not None:
+        run_id += f"_regular{regrid_degree, regrid_degree}"
     out_fname = Path(output_dir) / f"{prefix}_{frt}_{run_id}.{file_extension}"
     return out_fname
 
