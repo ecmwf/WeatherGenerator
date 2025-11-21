@@ -183,6 +183,7 @@ class NetcdfParser(CfParser):
         """
         if self.grid_type != "gaussian" or regrid_degree is None:
             return ds
+        # hardcoded for now as all native grids are O96
         output_grid_type = 'regular_ll'
         regrid_ds = regrid_gaussian_ds(ds, output_grid_type, regrid_degree, indices)
         return regrid_ds
