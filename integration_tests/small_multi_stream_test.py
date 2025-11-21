@@ -200,16 +200,16 @@ def assert_stream_losses_below_threshold(run_id, stage="train"):
     for stream_name, threshold in stage_thresholds.items():
         loss = next(
             (
-                metric.get(f"stream.{stream_name}.loss_mse.loss_avg")
+                metric.get(f"loss.LossPhysical.{stream_name}.mse.loss_avg")
                 for metric in reversed(metrics)
                 if metric.get("stage") == stage
             ),
             None,
         )
 
-        assert loss is not None, f"'stream.{stream_name}.loss_mse.loss_avg' {stage} metric is missing"
+        assert loss is not None, f"'loss.LossPhysical.{stream_name}.mse.loss_avg' {stage} metric is missing"
         assert loss < threshold, (
-            f"{stream_name} {stage} loss is {loss}, expected below {threshold}"
+            f"'loss.LossPhysical.{stream_name}.mse.loss_avg' {stage} loss is {loss}, expected below {threshold}"
         )
 
         losses[stream_name] = loss
