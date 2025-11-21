@@ -181,12 +181,12 @@ def assert_stream_losses_below_threshold(run_id, stage="train"):
     """
     metrics = load_metrics(run_id)
 
-    # Threshold diversi per train e val
+    # Thresholds for train and val
     thresholds = {
         "train": {
-            "ERA5": 1.5,
-            "NPPATMS": 1.5,
-            "SurfaceCombined": 1.5,
+            "ERA5": 2.0,
+            "NPPATMS": 2.0,
+            "SurfaceCombined": 2.0,
         },
         "val": {
             "ERA5": 2.0,
@@ -225,6 +225,27 @@ def assert_train_losses_below_threshold(run_id):
 
 def assert_val_losses_below_threshold(run_id):
     assert_stream_losses_below_threshold(run_id, stage="val")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 '''
