@@ -88,7 +88,6 @@ def infer_multi_stream(run_id):
 def evaluate_multi_stream_results(run_id):
     """Run evaluation for multiple streams."""
     logger.info("run multi-stream evaluation")
-    #TODO remove and put in a separate config file
     cfg = omegaconf.OmegaConf.create(
         {
             "global_plotting_options": {
@@ -189,9 +188,9 @@ def assert_stream_losses_below_threshold(run_id, stage="train"):
             "SurfaceCombined": 2.0,
         },
         "val": {
-            "ERA5": 2.0,
-            "NPPATMS": 2.0,
-            "SurfaceCombined": 2.0,
+            "ERA5": 1.5,
+            "NPPATMS": 1.5,
+            "SurfaceCombined": 1.5,
         },
     }
 
@@ -226,140 +225,3 @@ def assert_train_losses_below_threshold(run_id):
 def assert_val_losses_below_threshold(run_id):
     assert_stream_losses_below_threshold(run_id, stage="val")
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-'''
-
-def assert_all_stream_losses_below_threshold(run_id):
-    """Test that all stream losses are below threshold."""
-    metrics = load_metrics(run_id)
-    
-    # Define streams and their thresholds
-    streams = {
-        "ERA5": 1.5,
-        "NPPATMS": 1.5,
-        "SurfaceCombined": 1.5,
-    }
-    
-    losses = {}
-    for stream_name, threshold in streams.items():
-        loss = next(
-            (
-                metric.get(f"stream.{stream_name}.loss_mse.loss_avg", None)
-                for metric in reversed(metrics)
-                if metric.get("stage") == "train"
-            ),
-            None,
-        )
-        assert loss is not None, f"'stream.{stream_name}.loss_mse.loss_avg' metric is missing"
-        assert loss < threshold, (
-            f"{stream_name} train loss is {loss}, expected to be below {threshold}"
-        )
-        losses[stream_name] = loss
-    
-    logger.info(f"Train losses - " + ", ".join([f"{k}: {v:.4f}" for k, v in losses.items()]))
-
-
-def assert_val_losses_below_threshold(run_id):
-    """Test that validation losses for all streams are below threshold."""
-    metrics = load_metrics(run_id)
-    
-    # Define streams and their validation thresholds
-    streams = {
-        "ERA5": 1.5,
-        "NPPATMS": 1.5,
-        "SurfaceCombined": 1.5,
-    }
-    
-    val_losses = {}
-    for stream_name, threshold in streams.items():
-        val_loss = next(
-            (
-                metric.get(f"stream.{stream_name}.loss_mse.loss_avg", None)
-                for metric in reversed(metrics)
-                if metric.get("stage") == "val"
-            ),
-            None,
-        )
-        assert val_loss is not None, f"'stream.{stream_name}.loss_mse.loss_avg' validation metric is missing"
-        assert val_loss < threshold, (
-            f"{stream_name} val loss is {val_loss}, expected to be below {threshold}"
-        )
-        val_losses[stream_name] = val_loss
-    
-    logger.info(f"Validation losses - " + ", ".join([f"{k}: {v:.4f}" for k, v in val_losses.items()]))
-'''
-
-'''
-def assert_val_losses_below_threshold(run_id):
-    """Test that validation losses for all streams are below threshold."""
-    metrics = load_metrics(run_id)
-    
-    # Check ERA5 validation loss
-    era5_val_loss = next(
-        (
-            metric.get("stream.ERA5.loss_mse.loss_avg", None)
-            for metric in reversed(metrics)
-            if metric.get("stage") == "val"
-        ),
-        None,
-    )
-    assert era5_val_loss is not None, "'stream.ERA5.loss_mse.loss_avg' validation metric is missing"
-    era5_val_threshold = 1.5
-    assert era5_val_loss < era5_val_threshold, (
-        f"ERA5 val loss is {era5_val_loss}, expected to be below {era5_val_threshold}"
-    )
-    
-    # Check SYNOP validation loss
-    synop_val_loss = next(
-        (
-            metric.get("stream.SurfaceCombined.loss_mse.loss_avg", None)
-            for metric in reversed(metrics)
-            if metric.get("stage") == "val"
-        ),
-        None,
-    )
-    assert synop_val_loss is not None, "'stream.SurfaceCombined.loss_mse.loss_avg' validation metric is missing"
-    synop_val_threshold = 2.0
-    assert synop_val_loss < synop_val_threshold, (
-        f"SYNOP val loss is {synop_val_loss}, expected to be below {synop_val_threshold}"
-    )
-    
-    # Check NPPATMS validation loss
-    npp_atms_val_loss = next(
-        (
-            metric.get("stream.NPPATMS.loss_mse.loss_avg", None)
-            for metric in reversed(metrics)
-            if metric.get("stage") == "val"
-        ),
-        None,
-    )
-    assert npp_atms_val_loss is not None, "'stream.NPPATMS.loss_mse.loss_avg' validation metric is missing"
-    npp_atms_val_threshold = 2.0
-    assert npp_atms_val_loss < npp_atms_val_threshold, (
-        f"NPPATMS val loss is {npp_atms_val_loss}, expected to be below {npp_atms_val_threshold}"
-    )
-    
-    logger.info(f"Validation losses - ERA5: {era5_val_loss:.4f}, SYNOP: {synop_val_loss:.4f}, NPPATMS: {npp_atms_val_loss:.4f}")
-
-'''
