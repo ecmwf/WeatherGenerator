@@ -9,6 +9,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import copy
 import dataclasses
 import logging
 import math
@@ -28,13 +29,15 @@ from weathergen.model.engines import (
     EnsPredictionHead,
     ForecastingEngine,
     GlobalAssimilationEngine,
+    LatentPredictionHead,
+    LatentState,
     Local2GlobalAssimilationEngine,
     LocalAssimilationEngine,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
 from weathergen.model.layers import MLP, NamedLinear
-from weathergen.model.parametrised_prob_dist import LatentInterpolator
+from weathergen.model.parametrised_prob_dist import DiagonalGaussianDistribution, LatentInterpolator
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
@@ -49,7 +52,7 @@ class ModelOutput:
     """
 
     physical: dict[str, torch.Tensor]
-    latent: dict[str, torch.Tensor]
+    latent: dict[str, torch.Tensor | LatentState | DiagonalGaussianDistribution]
 
 
 class ModelParams(torch.nn.Module):
@@ -460,6 +463,55 @@ class Model(torch.nn.Module):
                 )
             )
 
+        # Latent heads for losses
+        # TODO write the forward function for this, has to wait until other Model PRs are done
+        target_losses = cf["training_mode_config"]["losses"].get("LossLatentSSLStudentTeacher", {})
+        # TODO implement later
+        # shared_heads = cf.get("shared_heads", False)
+        self.latent_heads = nn.ModuleDict()
+        self.norm = nn.LayerNorm(cf.ae_local_dim_embed)
+        # if ("iBOT" in target_losses.keys() and "DINO" in target_losses.keys()) and shared_heads:
+        #     assert False, "Not yet implemented and not a priority"
+        #     loss_conf = target_losses["DINO"]
+        #     self.latent_heads["iBOT-and-DINO-head"] = LatentPredictionHead(
+        #         "iBOT-and-DINO-head",
+        #         cf.ae_global_dim_embed,
+        #         loss_conf["out_dim"],
+        #         class_token=True,
+        #         n_register_tokens=loss_conf["n_register_tokens"],
+        #     )
+        # elif (
+        #     "JEPA" in target_losses.keys()
+        #     or "iBOT" in target_losses.keys()
+        #     or "DINO" in target_losses.keys()
+        # ):
+        #     for loss, loss_conf in target_losses.items():
+        #         self.latent_heads[loss] = LatentPredictionHead(
+        #             f"{loss}-head",
+        #             cf.ae_local_dim_embed,
+        #             loss_conf["out_dim"],
+        #             class_token=loss_conf["class_token"],
+        #         )
+        # TODO make these values configurable
+        # TODO make the model indeed have 1+ register_tokens + healpix cell tokens
+        self.class_token_idx = 1
+        self.register_token_idx = 3
+        for loss, loss_conf in target_losses.items():
+            if loss == "iBOT" or loss == "JEPA":
+                self.latent_heads[loss] = LatentPredictionHead(
+                    f"{loss}-head",
+                    cf.ae_local_dim_embed,
+                    loss_conf["out_dim"],
+                    class_token=False,
+                )
+            elif loss == "DINO":
+                self.latent_heads[loss] = LatentPredictionHead(
+                    f"{loss}-head",
+                    cf.ae_local_dim_embed,
+                    loss_conf["out_dim"],
+                    class_token=True,
+                )
+
         return self
 
     def reset_parameters(self):
@@ -622,6 +674,22 @@ class Model(torch.nn.Module):
 
         latents = {}
         latents["posteriors"] = posteriors
+        z_pre_norm = (
+            posteriors.mode()
+            if isinstance(posteriors, DiagonalGaussianDistribution)
+            else posteriors
+        ).unsqueeze(0)  # TODO have a real batch dimension in the model
+
+        z = self.norm(z_pre_norm)
+        latent_state = LatentState(
+            class_token=z[:, : self.class_token_idx],
+            register_tokens=z[:, self.class_token_idx : self.register_token_idx],
+            patch_tokens=z[:, self.register_token_idx :],
+            z_pre_norm=z_pre_norm,
+        )
+        latents["latent_state_pre_heads"] = latent_state
+        for name, head in self.latent_heads.items():
+            latents[name] = head(latent_state)
 
         return ModelOutput(physical=preds_all, latent=latents)
 
@@ -727,7 +795,7 @@ class Model(torch.nn.Module):
                 )
                 posteriors += [posteriors_c]
             else:
-                tokens_c, posteriors = tokens_c, 0.0
+                tokens_c, posteriors = tokens_c, tokens_c
 
             tokens_global_c = self.ae_local_global_engine(
                 tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant=False
@@ -875,3 +943,26 @@ class Model(torch.nn.Module):
             preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
 
         return preds_tokens
+
+
+def get_model(
+    student_or_teacher,
+    cf: Config,
+    sources_size,
+    targets_num_channels,
+    targets_coords_size,
+    **kwargs,
+):
+    if student_or_teacher == "student":
+        return Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+    else:
+        if cf["training_mode"] == "student-teacher":
+            teacher_cf = copy.deepcopy(cf)
+            for key, val in teacher_cf.training_mode_config["teacher_model"].items():
+                teacher_cf[key] = val
+            teacher = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
+            return teacher
+        else:
+            raise NotImplementedError(
+                f"The training mode {cf['training_mode']} is not implemented."
+            )

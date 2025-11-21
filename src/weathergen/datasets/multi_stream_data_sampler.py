@@ -228,7 +228,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         if cf.training_mode == "forecast":
             self.tokenizer = TokenizerForecast(cf.healpix_level)
-        elif cf.training_mode == "masking":
+        elif (
+            cf.training_mode == "masking" or cf.training_mode == "student-teacher"
+        ):  # TODO student-teacher data
             masker = Masker(cf)
             self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
             assert self.forecast_offset == 0, "masked token modeling requires auto-encoder training"
@@ -384,7 +386,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             stream_ds[0].mean[stream_ds[0].source_idx],
                         )
                         stream_data.source_is_spoof = True
-
                     # preprocess data for model input
                     (ss_cells, ss_lens, ss_centroids) = self.tokenizer.batchify_source(
                         stream_info,
@@ -392,7 +393,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         (time_win_source.start, time_win_source.end),
                         stream_ds[0].normalize_coords,
                     )
-
                     # TODO: rdata only be collected in validation mode
                     stream_data.add_source(rdata, ss_lens, ss_cells, ss_centroids)
 

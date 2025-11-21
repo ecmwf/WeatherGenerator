@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import dataclasses
+
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
@@ -732,3 +734,31 @@ class TargetPredictionEngine(nn.Module):
             else output
         )
         return output
+
+
+@dataclasses.dataclass
+class LatentState:
+    """
+    A dataclass to encapsulate the output of latent heads.
+    """
+
+    class_token: torch.Tensor
+    register_tokens: torch.Tensor
+    patch_tokens: torch.Tensor
+    z_pre_norm: torch.Tensor
+
+
+class LatentPredictionHead(nn.Module):
+    def __init__(self, name, in_dim, out_dim, class_token: bool):
+        super().__init__()
+
+        self.name = name
+        self.class_token = class_token
+        # For now this is a Linear Layer TBD what this architecture should be
+        self.layer = nn.Linear(in_dim, out_dim, bias=False)
+
+    def forward(self, x: LatentState):
+        if self.class_token:
+            return self.layer(x.class_token)
+        else:
+            return self.layer(x.patch_tokens)

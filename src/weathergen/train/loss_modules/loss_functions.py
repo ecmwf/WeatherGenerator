@@ -10,6 +10,7 @@
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 stat_loss_fcts = ["stats", "kernel_crps"]  # Names of loss functions that need std computed
 
@@ -186,6 +187,66 @@ def mse_channel_location_weighted(
     return loss, loss_chs
 
 
+def mae(
+    target: torch.Tensor,
+    pred: torch.Tensor,
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+):
+    """
+    Compute weighted MAE loss for one window or step
+
+    The function implements:
+
+    loss = Mean_{channels}( weight_channels * Mean_{data_pts}( (target - pred) * weights_points ))
+
+    Geometrically,
+
+        ------------------------     -
+        |                      |    |  |
+        |                      |    |  |
+        |                      |    |  |
+        |     target - pred    | x  |wp|
+        |                      |    |  |
+        |                      |    |  |
+        |                      |    |  |
+        ------------------------     -
+                    x
+        ------------------------
+        |          wc          |
+        ------------------------
+
+    where wp = weights_points and wc = weights_channels and "x" denotes row/col-wise multiplication.
+
+    The computations are:
+    1. weight the rows of (target - pred) by wp = weights_points
+    2. take the mean over the row
+    3. weight the collapsed cols by wc = weights_channels
+    4. take the mean over the channel-weighted cols
+
+    Params:
+        target : shape ( num_data_points , num_channels )
+        target : shape ( ens_dim , num_data_points , num_channels)
+        weights_channels : shape = (num_channels,)
+        weights_points : shape = (num_data_points)
+
+    Return:
+        loss : weight loss for gradient computation
+        loss_chs : losses per channel with location weighting but no channel weighting
+    """
+
+    mask_nan = ~torch.isnan(target)
+    pred = pred[0] if pred.shape[0] == 0 else pred.mean(0)
+
+    diff2 = torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0)
+    if weights_points is not None:
+        diff2 = (diff2.transpose(1, 0) * weights_points).transpose(1, 0)
+    loss_chs = diff2.mean(0)
+    loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
+
+    return loss, loss_chs
+
+
 def cosine_latitude(stream_data, forecast_offset, fstep, min_value=1e-3, max_value=1.0):
     latitudes_radian = stream_data.target_coords_raw[forecast_offset + fstep][:, 0] * np.pi / 180
     return (max_value - min_value) * np.cos(latitudes_radian) + min_value
@@ -195,3 +256,73 @@ def gamma_decay(forecast_steps, gamma):
     fsteps = np.arange(forecast_steps)
     weights = gamma**fsteps
     return weights * (len(fsteps) / np.sum(weights))
+
+
+def student_teacher_patch_softmax(
+    student_patches, teacher_patches, student_masks_flat, student_temp
+):
+    """
+    Cross-entropy between softmax outputs of the teacher and student networks.
+    student_patches: (B, N, D) tensor
+    teacher_patches: (B, N, D) tensor
+    student_masks_flat: (B, N) tensor
+    student_temp: float
+    """
+    loss = torch.sum(
+        teacher_patches * F.log_softmax(student_patches / student_temp, dim=-1), dim=-1
+    )
+    loss = torch.sum(loss * student_masks_flat.float(), dim=-1) / student_masks_flat.sum(
+        dim=-1
+    ).clamp(min=1.0)
+    return -loss.mean()
+
+
+def softmax(t, s, temp):
+    return torch.sum(t * F.log_softmax(s / temp, dim=-1), dim=-1)
+
+
+def masked_student_teacher_patch_softmax(
+    student_patches_masked,
+    teacher_patches_masked,
+    student_masks_flat,
+    student_temp,
+    n_masked_patches=None,
+    masks_weight=None,
+):
+    """
+    Cross-entropy between softmax outputs of the teacher and student networks.
+    student_patches_masked,
+    teacher_patches_masked,
+    student_masks_flat,
+    student_temp,
+    n_masked_patches=None,
+    masks_weight=None,
+    """
+    # loss = torch.sum(t * F.log_softmax(s / self.student_temp, dim=-1), dim=-1)
+    loss = softmax(teacher_patches_masked, student_patches_masked, student_temp)
+    if masks_weight is None:
+        masks_weight = (
+            (1 / student_masks_flat.sum(-1).clamp(min=1.0))
+            .unsqueeze(-1)
+            .expand_as(student_masks_flat)[student_masks_flat]
+        )
+    if n_masked_patches is not None:
+        loss = loss[:n_masked_patches]
+    loss = loss * masks_weight
+    return -loss.sum() / student_masks_flat.shape[0]
+
+
+def student_teacher_global_softmax(student_outputs, student_temp, teacher_outputs):
+    """
+    This assumes that student_outputs : list[Tensor[2*batch_size, num_patches, channel_size])
+                 and  teacher_outputs : list[Tensor[2*batch_size, num_patches, channel_size])
+    The 2* is because there is two global views and they are concatenated in the batch dim
+    in DINOv2 as far as I can tell.
+    """
+    total_loss = 0
+    for s in student_outputs:
+        lsm = F.log_softmax(s / student_temp, dim=-1)
+        for t in teacher_outputs:
+            loss = torch.sum(t * lsm, dim=-1)
+            total_loss -= loss.mean()
+    return total_loss

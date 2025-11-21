@@ -65,24 +65,27 @@ class LossCalculator:
         calculator_configs = (
             cf.training_mode_config.losses if stage == TRAIN else cf.validation_mode_config.losses
         )
-        calculator_configs = [
-            (getattr(LossModules, Cls), config) for (Cls, config) in calculator_configs.items()
-        ]
 
         self.loss_calculators = [
-            (config.weight, Cls(cf=cf, loss_fcts=config.loss_fcts, stage=stage, device=self.device))
-            for (Cls, config) in calculator_configs
+            (
+                config.pop("weight"),
+                getattr(LossModules, class_name)(cf=cf, stage=stage, device=self.device, **config),
+            )
+            for class_name, config in calculator_configs.items()
         ]
 
     def compute_loss(
         self,
         preds: dict,
         targets: dict,
+        view_metadata,
     ):
         loss_terms = {}
         loss = torch.tensor(0.0, requires_grad=True)
         for weight, calculator in self.loss_calculators:
-            loss_terms[calculator.name] = calculator.compute_loss(preds=preds, targets=targets)
+            loss_terms[calculator.name] = calculator.compute_loss(
+                preds=preds, targets=targets, view_metadata=view_metadata
+            )
             loss = loss + weight * loss_terms[calculator.name].loss
 
         return loss, LossTerms(loss_terms=loss_terms)
