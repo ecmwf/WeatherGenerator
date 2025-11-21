@@ -92,6 +92,12 @@ case "$1" in
       uv run --offline pytest ./integration_tests/small1_test.py --verbose -s
     )
     ;;
+    integration-test-multi)
+    (
+      cd "$SCRIPT_DIR" || exit 1
+      uv sync --offline --all-packages --extra gpu
+      uv run --offline pytest ./integration_tests/small_multi_stream_test.py --verbose -s
+    );;
   create-links)
     (
       cd "$SCRIPT_DIR" || exit 1
@@ -146,7 +152,9 @@ case "$1" in
     )
     ;;
   *)
-    echo "Usage: $0 {sync|lint|lint-check|type-check|unit-test|toml-check|integration-test|create-links|create-jupyter-kernel|jupytext-sync}"
+    # Automatically extract all options from the case statement
+    options=$(grep -oP '^\s*\K[\w-]+(?=\))' "$0" | tr '\n' '|' | sed 's/|$//')
+    echo "Usage: $0 {$options}"
     exit 1
     ;;
 esac
