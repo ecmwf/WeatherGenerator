@@ -119,8 +119,7 @@ class TrainLogger:
         log_vals += [avg_loss.nanmean().item()]
         log_vals += [lr]
 
-        st = self.cf.streams[0]
-        for loss_name, loss_values in losses_all.items():
+        for (loss_name, loss_values), st in zip(losses_all.items(), self.cf.streams, strict=False):
             metrics[f"loss.{loss_name}.loss_avg"] = loss_values[:, :].nanmean().item()
             for k, ch_n in enumerate(st.train_target_channels):
                 metrics[f"loss.{loss_name}.{ch_n}"] = loss_values[:, k].nanmean().item()
