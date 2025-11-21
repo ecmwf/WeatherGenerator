@@ -100,7 +100,7 @@ class NetcdfParser(CfParser):
             if self.indices is None:
                 self.indices = find_lat_lon_ordering(da_fs)
                 _logger.info(f"Determined lat/lon ordering indices")
-            da_fs = self.add_time_encoding(da_fs)#
+            da_fs = self.add_encoding(da_fs)#
             os.remove("./test.nc")  # Clean up debug file
             da_fs.to_netcdf("./test.nc")  # Debug line to check intermediate output
             sfile = Dataset("./test.nc",mode='r', format='NETCDF4')
@@ -309,9 +309,10 @@ class NetcdfParser(CfParser):
         dataset.attrs = ds.attrs
         return dataset
     
-    def add_time_encoding(self, ds: xr.Dataset) -> xr.Dataset:
+    def add_encoding(self, ds: xr.Dataset) -> xr.Dataset:
         """
         Add time encoding to the dataset variables.
+        Add aux coordinates to forecast_period
 
         Parameters
         ----------
@@ -331,6 +332,9 @@ class NetcdfParser(CfParser):
         if "forecast_reference_time" in ds.coords:
             ds["forecast_reference_time"].encoding.update(time_encoding)
 
+        if "forecast_period" in ds.coords:
+            ds["forecast_period"].encoding.update({"coordinates": "forecast_reference_time"})
+
         return ds
     
     def _attrs_gaussian_grid(self, ds: xr.Dataset) -> xr.Dataset:
@@ -349,6 +353,49 @@ class NetcdfParser(CfParser):
         dims_cfg = self.config.get("dimensions", {})
         ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
         dims_list = ["pressure", "ncells", "valid_time"]
+        for var_name, da in ds.data_vars.items():
+            mapped_info = self.mapping.get(var_name, {})
+            mapped_name = mapped_info.get("var", var_name)
+            dims = dims_list.copy()
+            if mapped_info.get("level_type") == "sfc":
+                dims.remove("pressure")
+
+            coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
+
+            attributes = {
+                "standard_name": mapped_info.get("std", var_name),
+                "units": mapped_info.get("std_unit", "unknown"),
+            }
+            if "long" in mapped_info:
+                attributes["long_name"] = mapped_info["long"]
+            variables[mapped_name] = xr.DataArray(
+                data=da.values,
+                dims=dims,
+                coords={**coords, "valid_time": ds["valid_time"].values},
+                attrs=attributes,
+                name=mapped_name,
+            )
+            if da.encoding.get('coordinates'):
+                variables[mapped_name].encoding['coordinates'] = da.encoding['coordinates'].replace(' lat ', ' latitude ').replace(' lon ', ' longitude '),
+
+        return variables
+    
+    def _attrs_regular_grid(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Assign CF-compliant attributes to variables in a regular grid dataset.
+        Parameters
+        ----------
+            ds : xr.Dataset
+                Input dataset.
+        Returns
+        -------
+            xr.Dataset
+                Dataset with CF-compliant variable attributes.
+        """
+        variables = {}
+        dims_cfg = self.config.get("dimensions", {})
+        ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
+        dims_list = ["pressure", "latitude", "longitude", "valid_time"]
         for var_name, da in ds.data_vars.items():
             mapped_info = self.mapping.get(var_name, {})
             mapped_name = mapped_info.get("var", var_name)
