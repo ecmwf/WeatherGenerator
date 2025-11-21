@@ -1,5 +1,13 @@
-from .loss_module_latent import LossLatent
-from .loss_module_physical import LossPhysical, LossPhysicalTwo
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+from .loss_module_physical import LossPhysical
 from .loss_module_ssl import LossLatentSSLStudentTeacher
 
-__all__ = [LossLatent, LossPhysical, LossPhysicalTwo, LossLatentSSLStudentTeacher]
+__all__ = [LossPhysical, LossLatentSSLStudentTeacher]

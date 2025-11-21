@@ -44,7 +44,7 @@ from weathergen.model.attention import (
 )
 from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
-from weathergen.model.model import Model, ModelParams, get_model
+from weathergen.model.model import ModelParams, get_model
 from weathergen.model.utils import freeze_weights
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
@@ -359,7 +359,7 @@ class Trainer(TrainerBase):
         )
 
         self.model, self.model_params = self.init_model_and_shard(
-            cf, run_id_contd, mini_epoch_contd, devices
+            cf, run_id_contd, mini_epoch_contd, "student", devices
         )
 
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
@@ -446,6 +446,16 @@ class Trainer(TrainerBase):
                 rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
+
+        self.target_and_aux_calculator = get_target_and_aux_calculator(
+            cf,
+            self.model,
+            None,
+            ema_model=self.ema_model,
+            batch_size=get_batch_size(cf, self.world_size_original),
+        )
+
+        self.target_and_aux_calculator.to_device(self.device)
 
         self.target_and_aux_calculator = get_target_and_aux_calculator(
             cf,
@@ -672,11 +682,11 @@ class Trainer(TrainerBase):
 
         # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
         for fstep in range(len(targets_rt)):
-            if len(preds[fstep]) == 0:
+            if len(preds.physical[fstep]) == 0:
                 continue
 
             for i_strm, target in enumerate(targets_rt[fstep]):
-                pred = preds[fstep][i_strm]
+                pred = preds.physical[fstep][i_strm]
 
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
                     continue
@@ -776,6 +786,8 @@ class Trainer(TrainerBase):
                 self.cf.istep, batch, self.model
             )
 
+            self.target_and_aux_calculator.update_state_pre_backward(bidx, batch, self.model)
+
             # backward pass
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss).backward()
@@ -811,6 +823,7 @@ class Trainer(TrainerBase):
                     get_batch_size(self.cf, self.world_size_original),
                 )
 
+            # Collecting loss statistics for later inspection
             if bidx == 0:
                 self.loss_unweighted_hist = {
                     loss_name: []
@@ -837,6 +850,17 @@ class Trainer(TrainerBase):
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
+                self.loss_unweighted_hist = {
+                    loss_name: []
+                    for _, calc_terms in loss_values.loss_terms.items()
+                    for loss_name in calc_terms.losses_all.keys()
+                }
+                self.stdev_unweighted_hist = {
+                    loss_name: []
+                    for _, calc_terms in loss_values.loss_terms.items()
+                    for loss_name in calc_terms.stddev_all.keys()
+                }
+                self.loss_model_hist = []
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
@@ -926,6 +950,7 @@ class Trainer(TrainerBase):
                             sample_idxs,
                         )
 
+                    # Collecting loss statistics for later inspection
                     if bidx == 0:
                         self.loss_unweighted_hist = {
                             loss_name: []
@@ -1127,6 +1152,7 @@ class Trainer(TrainerBase):
             stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
                 per-channel standard deviation tensor.
         """
+
         losses_all: dict[str, Tensor] = {}
         stddev_all: dict[str, Tensor] = {}
 
