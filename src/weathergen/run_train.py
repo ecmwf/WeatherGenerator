@@ -71,7 +71,12 @@ def inference_from_args(argl: list[str]):
     cf.run_history += [(args.from_run_id, cf.istep)]
 
     trainer = Trainer(cf.train_log_freq)
-    trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
+    try:
+        trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
+    except Exception:
+        extype, value, tb = sys.exc_info()
+        traceback.print_exc()
+        pdb.post_mortem(tb)
 
 
 ####################################################################################################
