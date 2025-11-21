@@ -298,7 +298,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                     norm_eps=self.cf.mlp_norm_eps,
                 )
             )
-        if getattr(self.cf, "ae_global_trailing_layer_norm", False):
+        if self.cf.get("ae_global_trailing_layer_norm", False):
             self.ae_global_blocks.append(
                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
             )
@@ -371,7 +371,7 @@ class ForecastingEngine(torch.nn.Module):
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
-                if i in getattr(self.cf, "fe_layer_norm_after_blocks", []):
+                if i in self.cf.get("fe_layer_norm_after_blocks", []):
                     self.fe_blocks.append(
                         torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
                     )
