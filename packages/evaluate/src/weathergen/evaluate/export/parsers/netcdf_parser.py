@@ -84,11 +84,7 @@ class NetcdfParser(CfParser):
             da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
             da_fs = self.add_metadata(da_fs)
-            if self.indices is None:
-                self.indices = find_lat_lon_ordering(da_fs)
-                _logger.info(f"Determined lat/lon ordering indices, saved for reuse.")
             da_fs = self.add_encoding(da_fs)
-            da_fs = self.regrid(da_fs, self.regrid_degree, self.indices)
             self.save(da_fs, ref_time)
 
     def get_output_filename(self, forecast_ref_time: np.datetime64) -> Path:
@@ -163,7 +159,14 @@ class NetcdfParser(CfParser):
             # rename ipoint to ncells
             reshaped_dataset = reshaped_dataset.rename_dims({"ipoint": "ncells"})
             reshaped_dataset = reshaped_dataset.rename_vars({"ipoint": "ncells"})
-
+            if self.regrid_degree is not None:
+                if self.indices is None:
+                    self.indices = find_lat_lon_ordering(reshaped_dataset)
+                reshaped_dataset = self.regrid(
+                    reshaped_dataset,
+                    regrid_degree=self.regrid_degree,
+                    indices=self.indices,
+                )
         return reshaped_dataset
     
     def regrid(self,
@@ -444,11 +447,12 @@ class NetcdfParser(CfParser):
         coord_map = self.config.get("coordinates", {}).get(var_cfg.get("level_type"), {})
 
         for coord, new_name in coord_map.items():
-            coords[new_name] = (
-                ds.coords[coord].dims,
-                ds.coords[coord].values,
-                attrs[new_name],
-            )
+            if coord in ds.coords:
+                coords[new_name] = (
+                    ds.coords[coord].dims,
+                    ds.coords[coord].values,
+                    attrs[new_name],
+                )
 
         return coords
 
