@@ -51,6 +51,7 @@ fe_num_blocks: 8
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
+fe_diffusion_model: True
 impute_latent_noise_std: 0.0  # 1e-4
 
 healpix_level: 5
