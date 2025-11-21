@@ -36,6 +36,7 @@ variables:
     wg_unit: m**2 s**-2
     std_unit: m2 s-2
     level_type: pl
+    scale_factor: 1/9.80665
   10u:
     var: u10
     long: u_wind_at_10m
