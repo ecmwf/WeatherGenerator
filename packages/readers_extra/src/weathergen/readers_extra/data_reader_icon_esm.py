@@ -66,7 +66,6 @@ class DataReaderIconEsm(DataReaderTimestep):
         self.ds = xr.open_dataset(mapper, engine="zarr", consolidated=True, chunks={"time": 1})
 
         # get pressure levels
-        # TODO add self.dataset_levels
         self.plev = stream_info["plev"]
         self.depth = stream_info["depth"]
         self.lev = stream_info["lev"]
@@ -316,7 +315,6 @@ class DataReaderIconEsm(DataReaderTimestep):
             datetimes = []
             coords = []
             for ch in channels:
-                # print(f"{ch}", flush=True)
                 ch_parts = ch.split("_")
                 if len(ch_parts) == 2 :
                     ch_p0 = ch_parts[0]
@@ -341,15 +339,6 @@ class DataReaderIconEsm(DataReaderTimestep):
                     da = self.ds[ch].sel(time=slice(start_ts, end_ts))
                 data_arr = da.compute(scheduler="synchronous")
 
-                # else:
-                #     # print(f"print#1 BEFORE da = self.ds[ch].sel(time=slice(start_ts, end_ts))", flush=True)
-                #     # print(f"print#2 AFTER da = self.ds[ch].sel(time=slice(start_ts, end_ts))", flush=True)
-                # # import psutil, os
-                # # proc = psutil.Process(os.getpid())
-                # # print(f"Memory [BEFORE DASK]: {proc.memory_info().rss / 1e9:.2f} GB", flush=True)
-                # # with ProgressBar():
-                # # print(f"Memory [AFTER DASK]: {proc.memory_info().rss / 1e9:.2f} GB", flush=True)
-
                 if not data_per_channel:
                     # datetimes
                     datetimes = np.repeat(data_arr.time.values, self.mesh_size).reshape(-1, 1)
@@ -371,20 +360,14 @@ class DataReaderIconEsm(DataReaderTimestep):
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
-        ## Might be removed later TODO @asma
-        # if data_per_channel[0].shape[0] == 0:
-        #     return ReaderData.empty(
-        #         num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
-        #     )
-        # print(f"{self.stream_info["name"]} timesteps: {data_arr.time.values}", flush=True)
         
         # Empty geoinfos
-        geoinfos = np.zeros((data.shape[0], 0), dtype=data.dtype)
+        geoinfos = np.zeros((data.shape[0], 0), dtype=np.float32)
 
         rd = ReaderData(
-            coords=coords,
+            coords=coords.astype(np.float32),
             geoinfos=geoinfos,
-            data=data,
+            data=data.astype(np.float32),
             datetimes=datetimes,
         )
         check_reader_data(rd, dtr)
