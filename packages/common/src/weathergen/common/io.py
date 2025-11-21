@@ -319,7 +319,7 @@ class ZarrIO:
         self.data_root: zarr.Group | None = None
 
     def __enter__(self) -> typing.Self:
-        self._store = zarr.storage.DirectoryStore(self._store_path)
+        self._store = zarr.storage.LocalStore(self._store_path)
         self.data_root = zarr.group(store=self._store)
 
         return self
@@ -388,14 +388,15 @@ class ZarrIO:
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
         assert is_ndarray(array), f"Expected ndarray but got: {type(array)}"
         if array.size == 0:  # sometimes for geoinfo
-            chunks = None
+            chunks = "auto"
         else:
             chunks = (CHUNK_N_SAMPLES, *array.shape[1:])
         _logger.debug(
             f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
             + "into group: {group}."
         )
-        group.create_dataset(name, data=array, chunks=chunks)
+        group.create_array(name, data=array, chunks=chunks)
+        
 
     @functools.cached_property
     def forecast_offset(self) -> int:
