@@ -31,6 +31,7 @@ class DataReaderObs(DataReaderBase):
 
         self.filename = filename
         self.z = zarr.open(filename, mode="r")
+        _logger.info(f"Opened zarr file: {filename}: keys: {list(self.z)}")
         self.data = self.z["data"]
         self.dt = self.z["dates"]  # datetime only
         self.base_datetime = stream_info.get("base_datetime", "1970-01-01T00:00:00")
@@ -42,6 +43,7 @@ class DataReaderObs(DataReaderBase):
         self.colnames = self.data.attrs["colnames"]
 
         data_colnames = [col for col in self.colnames if "obsvalue" in col]
+        _logger.info(f"Data columns: {data_colnames}")
         data_idx = [i for i, col in enumerate(self.colnames) if "obsvalue" in col]
 
         # determine source / target channels and corresponding idx using include and exclude lists
