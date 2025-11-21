@@ -383,9 +383,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             token_data = output_tokens[step]
 
             stream_data.target_is_spoof = rdata.is_spoof
+            # None, or returned by get_target_coords
+            target_selection = None
 
             if "target_coords" in mode:
-                (tc, tc_l) = self.tokenizer.get_target_coords(
+                (tc, tc_l, target_selection) = self.tokenizer.get_target_coords(
                     stream_info,
                     self.sampling_rate_target,
                     rdata,
@@ -403,6 +405,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     token_data,
                     (time_win_target.start, time_win_target.end),
                     mask_state,
+                    target_selection,
                 )
                 stream_data.add_target_values(fstep, tt_cells, tt_c, tt_t, idxs_inv)
 
@@ -596,6 +599,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # TODO: seb to check
                 # Map target to all source students
                 student_indices = [s_idx for s_idx, tid in enumerate(student_to_teacher) if tid == t_idx]
+                # print("Student indices", student_indices)
                 batch.add_target_stream(t_idx, student_indices, name, sdata)
 
             # TODO: build batch
