@@ -7,6 +7,12 @@ case "$1" in
   sync)
     (
       cd "$SCRIPT_DIR" || exit 1
+      # If we are running on a mac, use the cpu extra
+      if [[ "$(uname)" == "Darwin" ]]; then
+        uv sync --all-packages --extra cpu
+        exit 0
+      fi
+      # Otherwise, use the gpu extra
       uv sync --all-packages --extra gpu
     )
     ;;

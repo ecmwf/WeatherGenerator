@@ -227,7 +227,7 @@ flash-attn = [
 # This version was rebuilt locally on santis and uploaded.
   { url = "https://object-store.os-api.cci1.ecmwf.int/weathergenerator-dev/wheels/flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
   { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiTRUE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
-#  { index = "pytorch-cpu", marker = "sys_platform == 'darwin'"},
+  # There is no official support for flash-attn on macos
 ]
 
 
@@ -238,6 +238,8 @@ torch = [
 # Use the public repo for CPU versions.
   { index = "pytorch-cpu", marker = "sys_platform == 'linux'", extra="cpu"},
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="cpu"},
+  # No acceleration for now.
+  # TODO: explore pytorch + metal backend
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
 ]
 
