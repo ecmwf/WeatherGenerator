@@ -673,10 +673,6 @@ class Trainer(TrainerBase):
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
-
-            # save model checkpoint (with designation _latest)
-            if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
-                self.save_model(-1)
                 self.loss_unweighted_hist = {
                     loss_name: []
                     for _, calc_terms in loss_values.loss_terms.items()
@@ -688,6 +684,10 @@ class Trainer(TrainerBase):
                     for loss_name in calc_terms.stddev_all.keys()
                 }
                 self.loss_model_hist = []
+
+            # save model checkpoint (with designation _latest)
+            if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
+                self.save_model(-1)
 
             self.cf.istep += 1
 
@@ -964,6 +964,7 @@ class Trainer(TrainerBase):
             stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
                 per-channel standard deviation tensor.
         """
+
         losses_all: dict[str, Tensor] = {}
         stddev_all: dict[str, Tensor] = {}
 
