@@ -17,6 +17,8 @@ from torch import Tensor
 from weathergen.common.config import Config
 from weathergen.utils.train_logger import Stage
 
+type StreamName = str
+
 
 @dataclasses.dataclass
 class LossValues:
@@ -30,16 +32,16 @@ class LossValues:
 
     # The primary scalar loss value for optimization.
     loss: Tensor
-    # Dictionaries containing detailed loss values for each stream, channel, and loss function, as
+    # Dictionaries containing loss values for each stream, channel, and loss function, as
     # well as standard deviations when operating with ensembles (e.g., when training with CRPS).
-    losses_all: dict[str, Tensor]
-    stddev_all: dict[str, Tensor]
+    losses_all: dict[StreamName, Tensor]
+    stddev_all: dict[StreamName, Tensor]
 
 
 class LossModuleBase:
     def __init__(self):
         """
-        Base class for loss calculators.
+        Base class for loss modules.
 
         Args:
             cf: The OmegaConf DictConfig object containing model and training configurations.

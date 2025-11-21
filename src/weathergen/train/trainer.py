@@ -558,11 +558,11 @@ class Trainer(TrainerBase):
 
         # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
         for fstep in range(len(targets_rt)):
-            if len(preds[fstep]) == 0:
+            if len(preds.physical[fstep]) == 0:
                 continue
 
             for i_strm, target in enumerate(targets_rt[fstep]):
-                pred = preds[fstep][i_strm]
+                pred = preds.physical[fstep][i_strm]
 
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
                     continue
@@ -665,6 +665,7 @@ class Trainer(TrainerBase):
                     get_batch_size(self.cf, self.world_size_original),
                 )
 
+            # Collecting loss statistics for later inspection
             if bidx == 0:
                 self.loss_unweighted_hist = {
                     loss_name: []
@@ -691,6 +692,17 @@ class Trainer(TrainerBase):
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
+                self.loss_unweighted_hist = {
+                    loss_name: []
+                    for _, calc_terms in loss_values.loss_terms.items()
+                    for loss_name in calc_terms.losses_all.keys()
+                }
+                self.stdev_unweighted_hist = {
+                    loss_name: []
+                    for _, calc_terms in loss_values.loss_terms.items()
+                    for loss_name in calc_terms.stddev_all.keys()
+                }
+                self.loss_model_hist = []
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
@@ -780,6 +792,7 @@ class Trainer(TrainerBase):
                             sample_idxs,
                         )
 
+                    # Collecting loss statistics for later inspection
                     if bidx == 0:
                         self.loss_unweighted_hist = {
                             loss_name: []
@@ -981,6 +994,7 @@ class Trainer(TrainerBase):
             stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
                 per-channel standard deviation tensor.
         """
+
         losses_all: dict[str, Tensor] = {}
         stddev_all: dict[str, Tensor] = {}
 

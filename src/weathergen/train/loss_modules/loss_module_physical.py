@@ -302,4 +302,3 @@ class LossPhysical(LossModuleBase):
 
         # Return all computed loss components encapsulated in a ModelLoss dataclass
         return LossValues(loss=loss, losses_all=losses_all, stddev_all=stddev_all)
-
