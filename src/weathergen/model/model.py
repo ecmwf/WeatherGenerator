@@ -610,9 +610,9 @@ class Model(torch.nn.Module):
         fig, ax = plt.subplots()
         ax.hist(tokens.flatten().to("cpu").numpy(), bins=30)
         if not hasattr(self, "xlim"):
-            self.xlim = ax.get_xlim()
-            self.ylim = ax.get_ylim()
-        ax.set_xlim(0.2*self.xlim)
+            self.xlim = np.array(ax.get_xlim())
+            self.ylim = np.array(ax.get_ylim())
+        ax.set_xlim(0.5 * self.xlim)
         ax.set_ylim(self.ylim)
         ax.set_title(f"Forecast step {fstep}")
         os.makedirs(plot_path, exist_ok=True)
