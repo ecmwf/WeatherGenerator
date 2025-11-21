@@ -185,9 +185,7 @@ def regrid_gaussian_ds(ds: xr.Dataset, output_grid_type: str, degree: float, ind
         grid_shape = (int(180 // degree + 1), int(360 // degree))
     else:
         raise ValueError(f'Unsupported grid_type: {output_grid_type}, supported types are ["regular_ll"]')
-        # to be implemented:
-        grid_type = grid_type + str(degree)
-        grid_shape = None # ????? to be determined
+        # TODO: to be implemented:
 
     # reorder everything except ncells
     original_ncells = ds['ncells']
@@ -195,9 +193,6 @@ def regrid_gaussian_ds(ds: xr.Dataset, output_grid_type: str, degree: float, ind
     ds['ncells'] = (original_ncells)
     regrid_vars = {}
     for var in ds.data_vars:
-        print(var)
-        # if var in ['latitude', 'longitude']:
-        #     continue
         regrid_vars[var] = regrid_gaussian_da(ds[var], output_grid_type, degree, grid_shape)
     regrid_ds = xr.Dataset(regrid_vars)
     for coord in ds.coords:
@@ -205,11 +200,11 @@ def regrid_gaussian_ds(ds: xr.Dataset, output_grid_type: str, degree: float, ind
             if 'ncells' not in ds[coord].dims:
                 regrid_ds.coords[coord] = ds[coord]
         else:
-            #preserve units
+            #preserve CF attributes
             regrid_ds.coords[coord].attrs = ds[coord].attrs
     # keep global attrs
     regrid_ds.attrs = ds.attrs
     #change grid_type
-    regrid_ds.attrs['grid_type'] = output_grid_type
-    regrid_ds.attrs['history'] += f'Regridded from O96 to {degree} degree {output_grid_type} using earthkit'
+    regrid_ds.attrs['grid_type'] = "regular_ll"
+    regrid_ds.attrs['history'] += f' and regridded from O96 to {degree} degree regular lat lon using earthkit'
     return regrid_ds
