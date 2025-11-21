@@ -179,6 +179,14 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
 
             metric_stream.loc[criteria] = combined_metrics
 
+            if is_regular and plot_score_maps:
+                _logger.info(f"Plotting scores on a map {stream} - forecast step: {fstep}...")
+                _plot_score_maps_per_stream(
+                    reader, map_dir, stream, region, score_data, metrics, fstep
+                )
+
+        _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
+
         # Build local dictionary for this region
         for metric in metrics:
             local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[reader.run_id] = metric_stream.sel({"metric": metric})

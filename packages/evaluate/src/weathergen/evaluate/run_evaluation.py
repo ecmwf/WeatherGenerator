@@ -132,7 +132,7 @@ def evaluate_from_args(argl: list[str]) -> None:
     evaluate_from_config(OmegaConf.load(config), mlflow_client)
 
 
-def _process_stream(run_id: str, run: OmegaConf.Dict, stream: str, private_paths: list[str], global_plotting_opts: dict[str], regions: list[str], metrics: list[str], plot_score_maps: bool):
+def _process_stream(run_id: str, run: dict, stream: str, private_paths: list[str], global_plotting_opts: dict[str], regions: list[str], metrics: list[str], plot_score_maps: bool):
     """
     Worker function for a single stream of a single run.
     Returns a dictionary with the scores instead of modifying shared dict.
@@ -183,13 +183,13 @@ def _process_stream(run_id: str, run: OmegaConf.Dict, stream: str, private_paths
         _logger.error(f"Error processing {run_id} - {stream}: {e}")
         return run_id, stream, {}
 
-def evaluate_from_config(cfg: OmegaConf.Dict, mlflow_client=None):
+def evaluate_from_config(cfg: dict, mlflow_client=None):
     """
     Main function that controls evaluation plotting and scoring. 
     Parameters
     ----------
     cfg:
-        Configuration input stored as an OmegaConf dictionary. 
+        Configuration input stored as dictionary. 
     """
     runs = cfg.run_ids
     _logger.info(f"Detected {len(runs)} runs")
