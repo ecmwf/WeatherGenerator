@@ -326,6 +326,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # source input data
 
+        # Fornow, keep only mask state of the final timestep
+        # (correspondsing to base_idx, first of the loop below)
+        # to ensure alignment with the target data for MTM/S-T.
+        final_mask_state = None
+
         # iterate overall input steps
         for step, idx in enumerate(range(base_idx, base_idx - self.num_input_steps, -1)):
             # TODO: check that we are not out of bounds when we go back in time
@@ -333,8 +338,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             time_win_source = self.time_window_handler.window(idx)
 
             # collect all targets for current stream
-            rdata = input_data[step]
-            token_data = input_tokens[step]
+            # do we want this to be ascending or descending in time?
+            rdata = input_data[-(step+1)]
+            token_data = input_tokens[-(step+1)]
 
             stream_data.source_is_spoof = rdata.is_spoof
 
@@ -347,10 +353,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 keep_mask=mask,
             )
 
+            if step == 0:
+                final_mask_state = mask_state
+
             # collect data for stream
             stream_data.add_source(step, rdata, source_cells_lens, source_cells)
 
-        return stream_data, mask_state
+        return stream_data, final_mask_state
 
     def _build_stream_data_output(
         self,
@@ -591,7 +600,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # TODO: seb to check
                 # Map target to all source students
                 student_indices = [s_idx for s_idx, tid in enumerate(student_to_teacher) if tid == t_idx]
-                # print("Student indices", student_indices)
                 batch.add_target_stream(t_idx, student_indices, name, sdata)
 
             # TODO: build batch
