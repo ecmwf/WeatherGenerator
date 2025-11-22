@@ -164,8 +164,8 @@ class DataReaderIconEsm(DataReaderTimestep):
 
         # Ensure stats match dataset columns
         assert self.stats_vars == self.colnames, (
-            f"In {stream_info['name']} stream, channels in normalization file {self.stats_vars} do not match "
-            f"dataset columns {self.colnames}"
+            f"In {stream_info['name']} stream, channels in normalization file {self.stats_vars} "
+            f"do not match dataset columns {self.colnames}"
         )
 
         # === Channel selection ===
@@ -178,14 +178,15 @@ class DataReaderIconEsm(DataReaderTimestep):
         if len(non_positive_stds) != 0:
             bad_vars = [self.colnames[selected_channel_indices[i]] for i in non_positive_stds]
             raise ValueError(
-                f"Abort: Encountered non-positive standard deviations for selected columns {bad_vars}."
+                f"Abort: Encountered non-positive standard deviations for selected columns "
+                f"{bad_vars}."
             )
 
         # === Geo-info channels (currently unused) ===
         self.geoinfo_channels = []
         self.geoinfo_idx = []
 
-    def select(self, ch_type: str) -> tuple[list[str], np.ndarray]:
+    def select(self, ch_type: str) -> tuple[list[str], np.typing.NDArray]:
         """
         Select channels constrained by allowed pressure levels and optional excludes.
         ch_type: "source" or "target" (for *_exclude key in stream_info)
@@ -196,11 +197,15 @@ class DataReaderIconEsm(DataReaderTimestep):
         for ch in self.colnames:
             ch_parts = ch.split("_")
             if len(ch_parts) == 2:
-                ch_p0 = ch_parts[0]
-                ch_p1 = ch_parts[1]
-                coords_list = list(self.ds[ch_p0].coords)
-                if ch_p0 not in channels_exclude:
-                    if "plev" in coords_list and ch_parts[1] in self.plev or "depth" in coords_list and ch_parts[1] in self.depth or "lev" in coords_list and ch_parts[1] in self.lev:
+                ch_base = ch_parts[0]
+                ch_num = ch_parts[1]
+                coords_list = list(self.ds[ch_base].coords)
+                if ch_base not in channels_exclude:
+                    if (
+                        ("plev" in coords_list and ch_num in self.plev) or 
+                        ("depth" in coords_list and ch_num in self.depth) or 
+                        ("lev" in coords_list and ch_num in self.lev)
+                    ):
                         new_colnames.append(ch)
                 else:
                     continue
@@ -311,25 +316,24 @@ class DataReaderIconEsm(DataReaderTimestep):
             for ch in channels:
                 ch_parts = ch.split("_")
                 if len(ch_parts) == 2:
-                    ch_p0 = ch_parts[0]
-                    ch_p1 = ch_parts[1]
-                    coords_list = list(self.ds[ch_p0].coords)
+                    ch_base = ch_parts[0]
+                    ch_num = ch_parts[1]
+                    coords_list = list(self.ds[ch_base].coords)
                     if "plev" in coords_list and ch_parts[1] in self.plev:
-                        plev_all = self.ds[ch_p0]["plev"][0].values
-                        da = self.ds[ch_p0].assign_coords(plev=("plev", plev_all))
-                        da = da.sel(plev=ch_p1, time=slice(start_ts, end_ts))
+                        plev_all = self.ds[ch_base]["plev"][0].values
+                        da = self.ds[ch_base].assign_coords(plev=("plev", plev_all))
+                        da = da.sel(plev=ch_num, time=slice(start_ts, end_ts))
                     elif "depth" in coords_list and ch_parts[1] in self.depth:
-                        depth_all = self.ds[ch_p0]["depth"][0].values
-                        da = self.ds[ch_p0].assign_coords(depth=("depth", depth_all))
-                        da = da.sel(depth=ch_p1, time=slice(start_ts, end_ts))
+                        depth_all = self.ds[ch_base]["depth"][0].values
+                        da = self.ds[ch_base].assign_coords(depth=("depth", depth_all))
+                        da = da.sel(depth=ch_num, time=slice(start_ts, end_ts))
                     elif "lev" in coords_list and ch_parts[1] in self.lev:
-                        lev_all = self.ds[ch_p0]["lev"][0].values
-                        da = self.ds[ch_p0].assign_coords(lev=("lev", lev_all))
-                        da = da.sel(lev=ch_p1, time=slice(start_ts, end_ts))
+                        lev_all = self.ds[ch_base]["lev"][0].values
+                        da = self.ds[ch_base].assign_coords(lev=("lev", lev_all))
+                        da = da.sel(lev=ch_num, time=slice(start_ts, end_ts))
                     else:
-                        print(
-                            f"Channel {ch} with part {ch_parts[1]} not found in dataset. Skipping.",
-                            flush=True,
+                        _logger.warning(
+                            f"Channel {ch} with part {ch_parts[1]} not found in dataset. Skipping."
                         )
                         continue
                 else:
