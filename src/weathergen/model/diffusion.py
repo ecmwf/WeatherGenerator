@@ -16,18 +16,11 @@
 
 
 import dataclasses
-
-import torch
-from torch.nn.functional import silu
-import weathergen.common.config as config
-import numpy as np
 import math
 
+import torch
+
 from weathergen.model.engines import ForecastingEngine
-
-
-
-
 
 
 @dataclasses.dataclass
@@ -61,8 +54,8 @@ class DiffusionForecastEngine(torch.nn.Module):
     def __init__(
         self,
         forecast_engine: ForecastingEngine,
-        frequency_embedding_dim: int = 256,  #TODO: determine suitable dimension
-        embedding_dim: int = 512,  #TODO: determine suitable dimension
+        frequency_embedding_dim: int = 256,  # TODO: determine suitable dimension
+        embedding_dim: int = 512,  # TODO: determine suitable dimension
         sigma_min: float = 0.002,  # Adapt to GenCast?
         sigma_max: float = 80,
         sigma_data: float = 0.5,
@@ -73,7 +66,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         super().__init__()
         self.net = forecast_engine
         self.preconditioner = Preconditioner()
-        self.noise_embedder = NoiseEmbedder(embedding_dim=embedding_dim, frequency_embedding_dim=frequency_embedding_dim)
+        self.noise_embedder = NoiseEmbedder(
+            embedding_dim=embedding_dim, frequency_embedding_dim=frequency_embedding_dim
+        )
 
         # Parameters
         self.sigma_min = sigma_min
@@ -187,15 +182,13 @@ class Preconditioner:
         return x
 
 
-#NOTE: Adapted from DiT codebase:
+# NOTE: Adapted from DiT codebase:
 class NoiseEmbedder(torch.nn.Module):
     """
     Embeds scalar timesteps into vector representations.
     """
-    def __init__(self, 
-                 embedding_dim:int,
-                 frequency_embedding_dim:int,
-                 dtype=torch.bfloat16):
+
+    def __init__(self, embedding_dim: int, frequency_embedding_dim: int, dtype=torch.bfloat16):
         super().__init__()
         self.dtype = dtype
         self.mlp = torch.nn.Sequential(

@@ -13,6 +13,7 @@ import torch.nn as nn
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
 
+
 class NamedLinear(torch.nn.Module):
     def __init__(self, name: str | None = None, **kwargs):
         super(NamedLinear, self).__init__()
@@ -70,7 +71,9 @@ class MLP(torch.nn.Module):
             )
 
         if with_noise_conditioning:
-            self.noise_conditioning = LinearNormConditioning(dim_in) #TODO: chech if should pass some dtype?
+            self.noise_conditioning = LinearNormConditioning(
+                dim_in
+            )  # TODO: chech if should pass some dtype?
 
         self.layers.append(torch.nn.Linear(dim_in, dim_hidden))
         self.layers.append(nonlin())
@@ -83,7 +86,7 @@ class MLP(torch.nn.Module):
 
         self.layers.append(torch.nn.Linear(dim_hidden, dim_out))
 
-    #TODO: expanded args, must check dependencies (previously aux = args[-1])
+    # TODO: expanded args, must check dependencies (previously aux = args[-1])
     def forward(self, *args):
         x, x_in = args[0], args[0]
         if len(args) == 2:
@@ -108,16 +111,16 @@ class MLP(torch.nn.Module):
         return x
 
 
-#TODO: Verify if need to add copyright notice to GenCast/DiT.
-#NOTE: This will be imported into attention.py.
+# TODO: Verify if need to add copyright notice to GenCast/DiT.
+# NOTE: This will be imported into attention.py.
 class LinearNormConditioning(torch.nn.Module):
-    """Module for norm conditioning, adapted from GenCast with the additional gate parameter from DiT.
+    """Module for norm conditioning, adapted from GenCast with additional gate parameter from DiT.
 
     Conditions the normalization of `inputs` by applying a linear layer to the
     `norm_conditioning` which produces the scale and offset for each channel.
     """
 
-    def __init__(self, latent_space_dim: int, noise_emb_dim: int=512, dtype=torch.bfloat16):
+    def __init__(self, latent_space_dim: int, noise_emb_dim: int = 512, dtype=torch.bfloat16):
         super().__init__()
         self.dtype = dtype
 
@@ -130,7 +133,6 @@ class LinearNormConditioning(torch.nn.Module):
         torch.nn.init.zeros_(self.conditional_linear_layer.bias)
 
     def forward(self, inputs, emb):
-
         conditional_scale_offset = self.conditional_linear_layer(emb.to(self.dtype))
         scale_minus_one, offset, gate = torch.chunk(conditional_scale_offset, 3, dim=-1)
         scale = scale_minus_one + 1.0
@@ -139,4 +141,6 @@ class LinearNormConditioning(torch.nn.Module):
         while scale.dim() < inputs.dim():
             scale = scale.unsqueeze(1)
             offset = offset.unsqueeze(1)
-        return (inputs * scale + offset).to(self.dtype), gate  #TODO: check if to(self.dtype) needed here
+        return (inputs * scale + offset).to(
+            self.dtype
+        ), gate  # TODO: check if to(self.dtype) needed here
