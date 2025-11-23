@@ -14,7 +14,8 @@ from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
-from weathergen.model.diffusion import LinearNormConditioning
+from weathergen.model.layers import LinearNormConditioning
+
 
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     def __init__(
@@ -243,18 +244,29 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         # compile for efficiency
         self.flex_attention = torch.compile(flex_attention, dynamic=False)
 
+        self.noise_conditioning = None
         if with_noise_conditioning:
             self.noise_conditioning = LinearNormConditioning(dim_embed, dtype=self.dtype)
 
 
-    def forward(self, x, ada_ln_aux=None, emb=None):
+    def forward(self, *args):
+
+        # NOTE: Hotfix to accomodate TargetPredictionEngineClassic forward pass for both attention block and MLP...
+        x = args[0]
+        if len(args) == 2:
+            ada_ln_aux = args[1]
+        elif len(args) > 2:
+            ada_ln_aux = args[-1]
+            emb = args[1] if self.noise_conditioning else None
+        else:
+            ada_ln_aux = None
+            emb = None
+
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
 
-        #NOTE: this is currently based on GenCast, not on DiT
         if self.noise_conditioning:
-            assert emb is not None, "Need noise embedding if using noise conditioning"
             x, gate = self.noise_conditioning(x, emb)
 
         # project onto heads
@@ -330,7 +342,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         self.dtype = attention_dtype
         assert with_flash, "Only flash attention supported at the moment"
 
-    def forward(self, x_q, x_kv, emb=None, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
+    def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
         if self.with_residual:
             x_q_in = x_q
         x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
@@ -538,19 +550,32 @@ class MultiSelfAttentionHead(torch.nn.Module):
             self.att = self.attention
             self.softmax = torch.nn.Softmax(dim=-1)
             
+        self.noise_conditioning = None
         if with_noise_conditioning:
-            self.noise_conditioning = LinearNormConditioning(dim_embed, dtype=self.dtype)
+             #NOTE: noise_emb_dim currently hard-coded
+            self.noise_conditioning = LinearNormConditioning(latent_space_dim=dim_embed, noise_emb_dim=512, dtype=self.dtype)
 
 
-    def forward(self, x, ada_ln_aux=None, emb=None):
+    def forward(self, *args):
+
+        # NOTE: Hotfix to accomodate TargetPredictionEngineClassic forward pass for both attention block and MLP...
+        x = args[0]
+        if len(args) == 2:
+            ada_ln_aux = args[1]
+        elif len(args) > 2:
+            ada_ln_aux = args[-1]
+            emb = args[1] if self.noise_conditioning else None
+        else:
+            ada_ln_aux = None
+            emb = None
+
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
 
-        #NOTE: this is currently based on GenCast, not on DiT
         if self.noise_conditioning:
             assert emb is not None, "Need noise embedding if using noise conditioning"
-            x, gate = self.noise_conditioning(x, emb, dtype=self.dtype)
+            x, gate = self.noise_conditioning(x, emb)
 
 
         # project onto heads and q,k,v and
@@ -649,3 +674,5 @@ class MultiCrossAttentionHead(torch.nn.Module):
             outs = x_q_in + outs
 
         return outs
+
+

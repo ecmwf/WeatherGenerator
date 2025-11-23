@@ -12,8 +12,6 @@ import torch
 import torch.nn as nn
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
-from weathergen.model.diffusion import LinearNormConditioning
-
 
 class NamedLinear(torch.nn.Module):
     def __init__(self, name: str | None = None, **kwargs):
@@ -57,6 +55,7 @@ class MLP(torch.nn.Module):
 
         self.with_residual = with_residual
         self.with_aux = dim_aux is not None
+        self.with_noise_conditioning = with_noise_conditioning
         dim_hidden = int(dim_in * hidden_factor)
 
         self.layers = torch.nn.ModuleList()
@@ -71,8 +70,7 @@ class MLP(torch.nn.Module):
             )
 
         if with_noise_conditioning:
-            assert self.with_aux is False, "Currently not implemented if aux is used"
-            self.noise_conditioning = LinearNormConditioning(dim_in, dtype=self.dtype)
+            self.noise_conditioning = LinearNormConditioning(dim_in) #TODO: chech if should pass some dtype?
 
         self.layers.append(torch.nn.Linear(dim_in, dim_hidden))
         self.layers.append(nonlin())
@@ -85,13 +83,20 @@ class MLP(torch.nn.Module):
 
         self.layers.append(torch.nn.Linear(dim_hidden, dim_out))
 
-    #TODO: expanded args, must adjust dependencies
-    def forward(self, x, x_in, aux=None, emb=None):
+    #TODO: expanded args, must check dependencies (previously aux = args[-1])
+    def forward(self, *args):
+        x, x_in = args[0], args[0]
+        if len(args) == 2:
+            aux = args[1]
+        elif len(args) > 2:
+            aux = args[-1]
+            emb = args[1] if self.with_noise_conditioning else None
 
         for i, layer in enumerate(self.layers):
             if isinstance(layer, LinearNormConditioning):
                 x = layer(x, emb)  # noise embedding
-            x = layer(x, aux) if (i == 0 and self.with_aux) else layer(x)
+            else:
+                x = layer(x, aux) if (i == 0 and self.with_aux) else layer(x)
 
         if self.with_residual:
             if x.shape[-1] == x_in.shape[-1]:
@@ -101,3 +106,37 @@ class MLP(torch.nn.Module):
                 x = x + x_in.repeat([*[1 for _ in x.shape[:-1]], x.shape[-1] // x_in.shape[-1]])
 
         return x
+
+
+#TODO: Verify if need to add copyright notice to GenCast/DiT.
+#NOTE: This will be imported into attention.py.
+class LinearNormConditioning(torch.nn.Module):
+    """Module for norm conditioning, adapted from GenCast with the additional gate parameter from DiT.
+
+    Conditions the normalization of `inputs` by applying a linear layer to the
+    `norm_conditioning` which produces the scale and offset for each channel.
+    """
+
+    def __init__(self, latent_space_dim: int, noise_emb_dim: int=512, dtype=torch.bfloat16):
+        super().__init__()
+        self.dtype = dtype
+
+        self.conditional_linear_layer = torch.nn.Linear(
+            in_features=noise_emb_dim,
+            out_features=3 * latent_space_dim,
+        )
+        # Optional: initialize weights similar to TruncatedNormal(stddev=1e-8)
+        torch.nn.init.normal_(self.conditional_linear_layer.weight, std=1e-8)
+        torch.nn.init.zeros_(self.conditional_linear_layer.bias)
+
+    def forward(self, inputs, emb):
+
+        conditional_scale_offset = self.conditional_linear_layer(emb.to(self.dtype))
+        scale_minus_one, offset, gate = torch.chunk(conditional_scale_offset, 3, dim=-1)
+        scale = scale_minus_one + 1.0
+
+        # Reshape scale and offset for broadcasting if needed
+        while scale.dim() < inputs.dim():
+            scale = scale.unsqueeze(1)
+            offset = offset.unsqueeze(1)
+        return (inputs * scale + offset).to(self.dtype), gate  #TODO: check if to(self.dtype) needed here

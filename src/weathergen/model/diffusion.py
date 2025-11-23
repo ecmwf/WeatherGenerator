@@ -19,10 +19,9 @@ import dataclasses
 
 import torch
 from torch.nn.functional import silu
-from dataclass import dataclass
 import weathergen.common.config as config
 import numpy as np
-
+import math
 
 from weathergen.model.engines import ForecastingEngine
 
@@ -62,8 +61,8 @@ class DiffusionForecastEngine(torch.nn.Module):
     def __init__(
         self,
         forecast_engine: ForecastingEngine,
-        frequency_embedding_dim: int, #TODO: how are the determined – dimension of latent space? batch size?
-        embedding_dim: int, #NOTE: might be wise to choose as a function of noise_channels
+        frequency_embedding_dim: int = 256,  #TODO: determine suitable dimension
+        embedding_dim: int = 512,  #TODO: determine suitable dimension
         sigma_min: float = 0.002,  # Adapt to GenCast?
         sigma_max: float = 80,
         sigma_data: float = 0.5,
@@ -105,13 +104,13 @@ class DiffusionForecastEngine(torch.nn.Module):
         # noise = torch.randn(y.shape, device=y.device)  # now eta from MultiStreamDataSampler
         sigma = (eta * self.p_std + self.p_mean).exp()
         n = torch.randn_like(y) * sigma
-        return self.denoise(x=y + n, c=c, sigma=sigma)
+        return self.denoise(x=y + n, fstep=fstep, c=c, sigma=sigma)
 
         # Compute loss -- move this to a separate loss calculator
         # weight = (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2  # Table 1
         # loss = weight * ((y_hat - y) ** 2)
 
-    def denoise(self, x: torch.Tensor, c: torch.Tensor, sigma: float) -> torch.Tensor:
+    def denoise(self, x: torch.Tensor, c: torch.Tensor, sigma: float, fstep: int) -> torch.Tensor:
         """
         The actual diffusion step, where the model removes noise from the input x under
         consideration of a conditioning c (e.g., previous time steps) and the current diffusion
@@ -128,11 +127,12 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c)
-        return c_skip * x + c_out * self.net(c_in * x, emb)  # Eq. (7) in EDM paper
+        return c_skip * x + c_out * self.net(c_in * x, fstep=fstep, emb=emb)  # Eq. (7) in EDM paper
 
     def inference(
         self,
         x: torch.Tensor,
+        fstep: int,
         num_steps: int = 30,
     ) -> torch.Tensor:
         # Forward pass of the diffusion model during inference
@@ -165,13 +165,13 @@ class DiffusionForecastEngine(torch.nn.Module):
             t_hat = t_cur
 
             # Euler step.
-            denoised = self.denoise(x=x_hat, c=None, sigma=t_hat)  # c to be discussed
+            denoised = self.denoise(x=x_hat, c=None, sigma=t_hat, fstep=fstep)  # c to be discussed
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 
             # Apply 2nd order correction.
             if i < num_steps - 1:
-                denoised = self.denoise(x=x_next, c=None, sigma=t_next)
+                denoised = self.denoise(x=x_next, c=None, sigma=t_next, fstep=fstep)
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
@@ -192,7 +192,10 @@ class NoiseEmbedder(torch.nn.Module):
     """
     Embeds scalar timesteps into vector representations.
     """
-    def __init__(self, embedding_dim, frequency_embedding_dim=256, dtype=torch.bfloat16):
+    def __init__(self, 
+                 embedding_dim:int,
+                 frequency_embedding_dim:int,
+                 dtype=torch.bfloat16):
         super().__init__()
         self.dtype = dtype
         self.mlp = torch.nn.Sequential(
@@ -213,7 +216,7 @@ class NoiseEmbedder(torch.nn.Module):
         """
         half = self.frequency_embedding_dim // 2
         freqs = torch.exp(
-            -torch.log(max_period) * torch.arange(start=0, end=half, dtype=self.dtype) / half
+            -math.log(max_period) * torch.arange(start=0, end=half, dtype=self.dtype) / half
         ).to(device=t.device)
         args = t[:, None].float() * freqs[None]
         embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
@@ -225,36 +228,3 @@ class NoiseEmbedder(torch.nn.Module):
         t_freq = self.timestep_embedding(t)
         t_emb = self.mlp(t_freq)
         return t_emb
-
-#TODO: Verify if need to add copyright notice to GenCast/DiT.
-#NOTE: This will be imported into attention.py.
-class LinearNormConditioning(torch.nn.Module):
-    """Module for norm conditioning, adapted from GenCast with the additional gate parameter from DiT.
-
-    Conditions the normalization of `inputs` by applying a linear layer to the
-    `norm_conditioning` which produces the scale and offset for each channel.
-    """
-
-    def __init__(self, feature_size: int, dtype=torch.bfloat16):
-        super().__init__()
-        self.dtype = dtype
-
-        self.conditional_linear_layer = torch.nn.Linear(
-            in_features=feature_size,
-            out_features=3 * feature_size,
-        )
-        # Optional: initialize weights similar to TruncatedNormal(stddev=1e-8)
-        torch.nn.init.normal_(self.conditional_linear_layer.weight, std=1e-8)
-        torch.nn.init.zeros_(self.conditional_linear_layer.bias)
-
-    def forward(self, inputs, norm_conditioning):
-        # norm_conditioning: [batch, feature_size]
-        # inputs: [batch, ..., feature_size]
-        conditional_scale_offset = self.conditional_linear_layer(norm_conditioning.to(self.dtype))
-        scale_minus_one, offset, gate = torch.chunk(conditional_scale_offset, 3, dim=-1)
-        scale = scale_minus_one + 1.0
-        # Reshape scale and offset for broadcasting if needed
-        while scale.dim() < inputs.dim():
-            scale = scale.unsqueeze(1)
-            offset = offset.unsqueeze(1)
-        return (inputs * scale + offset).to(self.dtype), gate  #TODO: check if to(self.dtype) needed here

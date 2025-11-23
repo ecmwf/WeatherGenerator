@@ -336,7 +336,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=1,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_noise_conditioning=self.cf.fe_diffusion
+                            with_noise_conditioning=self.cf.fe_diffusion_model
                         )
                     )
                 else:
@@ -353,7 +353,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=1,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_noise_conditioning=self.cf.fe_diffusion
+                            with_noise_conditioning=self.cf.fe_diffusion_model
                         )
                     )
                 # Add MLP block
@@ -366,7 +366,7 @@ class ForecastingEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         dim_aux=1,
                         norm_eps=self.cf.mlp_norm_eps,
-                        with_noise_conditioning=self.cf.fe_diffusion
+                        with_noise_conditioning=self.cf.fe_diffusion_model
                     )
                 )
 
@@ -381,13 +381,13 @@ class ForecastingEngine(torch.nn.Module):
 
     def forward(self, tokens, fstep, emb=None):
         aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
-        if self.cf.fe_diffusion:
+        if self.cf.fe_diffusion_model:
             assert emb is not None, "Noise embedding must be provided for diffusion forecasting engine"
             for block in self.fe_blocks:
                 tokens = checkpoint(block, tokens, emb, aux_info, use_reentrant=False)
         else:
             for block in self.fe_blocks:
-                tokens = checkpoint(block, tokens, use_reentrant=False)
+                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
 
         return tokens
 
