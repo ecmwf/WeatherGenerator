@@ -141,9 +141,7 @@ class TrainLogger:
         metrics[_performance_gpu] = perf_gpu
         metrics[_performance_memory] = perf_mem
         for key, result in timing.reset("train").items():
-            for metric, value in asdict(result).items():
-                metric_name = f"perf.timing.{key}.{metric}"
-                metrics[metric_name] = value
+            metrics |= result.as_metric(key)
 
         self.log_metrics("train", metrics)
         with open(self.path_run / (self.cf.run_id + "_perf_log.txt"), "ab") as f:
@@ -175,9 +173,7 @@ class TrainLogger:
             log_vals += [stddev_values.nanmean().item()]
 
         for key, result in timing.reset("validate").items():
-            for metric, value in asdict(result).items():
-                metric_name = f"perf.timing.{key}.{metric}"
-                metrics[metric_name] = value
+            metrics |= result.as_metric(key)
 
         self.log_metrics("val", metrics)
         with open(self.path_run / (self.cf.run_id + "_val_log.txt"), "ab") as f:

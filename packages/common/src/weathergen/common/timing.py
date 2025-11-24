@@ -23,11 +23,19 @@ class Timing:
     min: int
     n: int
 
-    def as_metric(self):
-        pass
+    def as_metric(self, timer_name: str) -> dict[str, int | float]:
+        return {
+            self.metric_key(timer_name, metric): value
+            for metric, value in dataclasses.asdict(self).items()
+        }
 
-    def metric_key(self, timer_name: str):
-        return f"perf.timing.{timer_name}"
+    @staticmethod
+    def metric_key(timer_name: str, metric_name: str | None) -> str:
+        key = f"perf.timing.{timer_name}"
+        if metric_name is not None:
+            key += f".{metric_name}"
+
+        return key
 
 
 @dataclasses.dataclass
