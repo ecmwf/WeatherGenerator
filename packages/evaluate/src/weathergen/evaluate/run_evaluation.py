@@ -21,7 +21,6 @@ from omegaconf import OmegaConf
 from logging.handlers import QueueHandler, QueueListener
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from collections.abc import Callable, Iterable, Generator
 
 from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
@@ -133,18 +132,18 @@ def evaluate_from_args(argl: list[str]) -> None:
     evaluate_from_config(OmegaConf.load(config), mlflow_client)
 
 def run_parallel(
-    tasks: Iterable[Task],
-    fn: Callable[..., T],
+    tasks: iter,
+    fn: callable,
     parallel: bool = True
-) -> Generator[T, None, None]:
+) -> object:
     """
     Execute a function over a list of argument-tuples either in parallel or serially.
 
     Parameters
     ----------
-    tasks : Iterable[Task]
+    tasks : iterable
         An iterable of argument-tuples. Each tuple is expanded into fn(*args).
-    fn : Callable[..., T]
+    fn : callable
         The function to execute for each task. Must be top-level if parallel=True.
     parallel : bool, optional
         If True, execution uses ProcessPoolExecutor for parallelism.
@@ -152,7 +151,6 @@ def run_parallel(
 
     Returns
     -------
-    Generator[T, None, None]
         A generator yielding fn(*args) results for each task.
 
     Notes
