@@ -9,12 +9,12 @@
 
 import json
 import logging
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 import omegaconf as oc
 import xarray as xr
-from collections import defaultdict
 from tqdm import tqdm
 
 from weathergen.evaluate.clim_utils import get_climatology
@@ -104,7 +104,6 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
     )
     da_preds = output_data.prediction
     da_tars = output_data.target
-    points_per_sample = output_data.points_per_sample
 
     aligned_clim_data = get_climatology(reader, da_tars, stream)
 
@@ -133,7 +132,7 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
                 continue
 
             _logger.debug(f"Verifying data for stream {stream}...")
-            
+
             preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
 
             if region != "global":
@@ -153,11 +152,17 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
             # Add it only if it is not None
             valid_scores = []
             for metric in metrics:
-                score = get_score(score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord)
+                score = get_score(
+                    score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord
+                )
                 if score is not None:
                     valid_scores.append(score)
 
-            valid_metric_names = [metric for metric, score in zip(metrics, valid_scores, strict=False) if score is not None]
+            valid_metric_names = [
+                metric
+                for metric, score in zip(metrics, valid_scores, strict=False)
+                if score is not None
+            ]
             if not valid_scores:
                 continue
 
@@ -189,7 +194,9 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
 
         # Build local dictionary for this region
         for metric in metrics:
-            local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[reader.run_id] = metric_stream.sel({"metric": metric})
+            local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
+                reader.run_id
+            ] = metric_stream.sel({"metric": metric})
 
     return local_scores
 
@@ -649,6 +656,7 @@ def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataA
 def nested_dict():
     """Two-level nested dict factory: dict[key1][key2] = value"""
     return defaultdict(dict)
+
 
 def triple_nested_dict():
     """Three-level nested dict factory: dict[key1][key2][key3] = value"""
