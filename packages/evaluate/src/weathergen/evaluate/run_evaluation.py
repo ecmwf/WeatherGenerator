@@ -21,6 +21,7 @@ from omegaconf import OmegaConf
 from logging.handlers import QueueHandler, QueueListener
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from collections.abc import Callable, Iterable, Generator
 
 from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
@@ -131,6 +132,47 @@ def evaluate_from_args(argl: list[str]) -> None:
 
     evaluate_from_config(OmegaConf.load(config), mlflow_client)
 
+def run_parallel(
+    tasks: Iterable[Task],
+    fn: Callable[..., T],
+    parallel: bool = True
+) -> Generator[T, None, None]:
+    """
+    Execute a function over a list of argument-tuples either in parallel or serially.
+
+    Parameters
+    ----------
+    tasks : Iterable[Task]
+        An iterable of argument-tuples. Each tuple is expanded into fn(*args).
+    fn : Callable[..., T]
+        The function to execute for each task. Must be top-level if parallel=True.
+    parallel : bool, optional
+        If True, execution uses ProcessPoolExecutor for parallelism.
+        If False, tasks run serially in the current process.
+
+    Returns
+    -------
+    Generator[T, None, None]
+        A generator yielding fn(*args) results for each task.
+
+    Notes
+    -----
+    - This helper abstracts out parallel vs non-parallel execution.
+    - When parallel=True, fn and all arguments must be picklable.
+    - Tasks are yielded as soon as they complete (not in input order).
+    """
+    if not parallel:
+        # Serial execution
+        for t in tasks:
+            yield fn(*t)
+        return
+
+    # Parallel execution
+    with ProcessPoolExecutor() as ex:
+        futures = {ex.submit(fn, *t): t for t in tasks}
+        for fut in as_completed(futures):
+            yield fut.result()
+
 
 def _process_stream(run_id: str, run: dict, stream: str, private_paths: list[str], global_plotting_opts: dict[str], regions: list[str], metrics: list[str], plot_score_maps: bool):
     """
@@ -199,6 +241,7 @@ def evaluate_from_config(cfg: dict, mlflow_client=None):
     regions = cfg.evaluation.get("regions", ["global"])
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
+    use_parallel = cfg.evaluation.get("parallel", True)
 
     listener = setup_main_logger("evaluation.log")
     _logger.info("Started main logging listener")
@@ -215,14 +258,11 @@ def evaluate_from_config(cfg: dict, mlflow_client=None):
 
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
 
-    with ProcessPoolExecutor() as ex:
-        futures = {ex.submit(_process_stream, *t): t for t in tasks}
-        for fut in as_completed(futures):
-            run_id, stream, stream_scores = fut.result()
-            for metric, regions_dict in stream_scores.items():
-                for region, streams_dict in regions_dict.items():
-                    for stream, runs_dict in streams_dict.items():
-                        scores_dict[metric][region][stream].update(runs_dict)
+    for run_id, stream, stream_scores in run_parallel(tasks, _process_stream, parallel=use_parallel):
+        for metric, regions_dict in stream_scores.items():
+            for region, streams_dict in regions_dict.items():
+                for stream, runs_dict in streams_dict.items():
+                    scores_dict[metric][region][stream].update(runs_dict)
 
     # MLFlow logging 
     if mlflow_client:
