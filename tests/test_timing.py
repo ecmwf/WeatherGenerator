@@ -81,6 +81,12 @@ def test_record_substeps(substep1: Timer, substep2: Timer):
 
     assert len(substep1.records) == 1 and len(substep2.records) == 0
 
+def test_record_substeps_via_parent(root_timer: Timer, substep1: Timer, substep2: Timer):
+    root_timer.record("foo")
+    root_timer.record("bar")
+    
+    assert len(substep1.records) == 1 and len(substep2.records) == 0
+
 
 def test_get_result_name(lvl_2_timer: Timer):
     result = lvl_2_timer.get_result()

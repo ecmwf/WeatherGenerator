@@ -48,12 +48,16 @@ class Timer:
     _start_time: datetime.datetime | None = None
     _active_substep: typing.Self | None = None
 
-    def record(self):
-        if self._parent is not None:
-            self._parent._set_active_substep(self)
+    def record(self, *labels: str):
+        if len(labels) == 0:
+            if self._parent is not None:
+                self._parent._set_active_substep(self)
+            else:
+                msg = f"Root timer {self.name} should never be used to record"
+                raise ValueError(msg)
         else:
-            msg = f"Root timer {self.name} should never be used to record"
-            raise ValueError(msg)
+            subtimer = _get_timer(self, *labels, create=True)
+            subtimer.record()
 
     def _set_active_substep(self, substep_timer: "Timer"):
         assert substep_timer.name in self.substeps.keys()
