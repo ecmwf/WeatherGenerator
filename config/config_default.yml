@@ -1,6 +1,7 @@
 # streams_directory: "./config/streams/era5_1deg/"
 streams_directory: "./config/streams/era5_nppatms_synop/"
 
+### Model parameters ###
 
 model :
   embedding :
@@ -50,6 +51,11 @@ model :
       mlp_adaln: True
       target_cell_local_prediction: True       # Remove?
 
+  # a regex that needs to fully match the name of the modules you want to freeze
+  # e.g. ".*ERA5" will match any module whose name ends in ERA5\
+  # encoders and decoders that exist per stream have the stream name attached at the end
+  freeze_modules: ""
+
 
 forecast :
     model : deterministic
@@ -58,50 +64,94 @@ forecast :
     dropout_rate: 0.1
     with_qk_lnorm: True
 
+### Learning rate params ###
+
+learning_rate :
+    scaling_policy: "sqrt"
+    start: 1e-6
+    max: 5e-5
+    final_decay: 1e-6
+    final: 0.0
+    steps_warmup: 512 
+    steps_cooldown: 512
+    policy_warmup: "cosine"
+    policy_decay: "constant"
+    policy_cooldown: "linear"
 
 
+### Shared model+training parameters ###
+# TODO: rename
 
-training :
+shared_params :
+    with_mixed_precision: True
+    with_flash_attention: True
+    compile_model: False
+    with_fsdp: True
+    attention_dtype: bf16
+    mlp_norm_eps: 1e-5
+    norm_eps: 1e-4
+    grad_clip: 1.0
+    weight_decay: 0.1
+    norm_type: "LayerNorm"
+    nn_module: "te"
+    log_grad_norms: False
+
+### Latent noising parameters ###
+
+latent_noise :
+    kl_weight : 0.0 # 1e-5
+    gamma : 2.0
+    saturate_encodings : 5 
+    use_additive_noise : False
+    deterministic_latents : True
+
+### Training parameters ###
+
+training_strategy :
   # masking, forecasting, student-teacher
   mode : "student-teacher"
   # 
   source : 
-    strategy : cropping
-      num_samples : 4
-      # will be used with masking is moved under here
-      strategies": ["random", "healpix", "channel"]
-      probabilities: [0.34, 0.33, 0.33]
-      hl_mask: 0, 
-      mode: per_cell
-      same_strategy_per_batch: False,
-      teacher_relationship: subset
-    strategy : masking_strategy_config
-      ... 
-                    
+    - masking_params : 
+        strategy : "healpix"
+        num_samples : 4
+        rate : 0.4
+        hl_mask: 4 
+        same_strategy_per_batch: False
+        teacher_relationship: subset
+       
+    - masking_params : 
+        strategy : "random"
+        num_samples : 4
+        rate : 0.4
+        hl_mask: 4 
+        same_strategy_per_batch: False
+        teacher_relationship: subset
+
+
   # ignored depending on the training mode
+  # invalid syntax
   target :
     target_aux: ema_teacher
-    num_samples : 2
-    masking_params: 
-      strategy :
-        masking_rate : 0.2
-        # will be used with masking is moved under here
-        strategies": ["random", "healpix", "channel"]
-        probabilities: [0.34, 0.33, 0.33]
-        hl_mask: 0, 
-        mode: per_cell
-        same_strategy_per_batch: False,
+    - masking_params : 
+        strategy : "healpix"
+        num_samples : 2
+        rate : 0.8
+        hl_mask: 1 
+        same_strategy_per_batch: False
         teacher_relationship: subset
         loss: DINOLoss, JEPALoss
       strategy : 
         ...
         loss: JEPA
+    
+
 
   loss :
     Dino
 
 
-training :
+training_strategy :
   # masking, forecasting, student-teacher
   mode : "masking"
   # 
@@ -110,25 +160,24 @@ training :
     masking_rate : 0.5
     source_params: 
       # will be used with masking is moved under here
-      strategies": ["random", "healpix", "channel"]
+      masking_strategy: "random"
       probabilities: [0.34, 0.33, 0.33]
-      hl_mask: 0, 
+      hl_mask: 0 
       mode: per_cell
-      same_strategy_per_batch: False,
-      teacher_relationship: subset
+      same_strategy_per_batch: False
                     
   # ignored depending on the training mode
   target :
-    target_aux: physical
+    - target_aux: physical
       loss : physical
-    target_aux: encoder
+    - target_aux: encoder
       loss: latent_mae
-    target_aux: EMATeacher
+    - target_aux: EMATeacher
       prediction_head: DINOv2
       centering: 0.5
       loss: latent_mae
 
-training :
+training_strategy :
   # masking, forecasting, student-teacher
   mode : "forecasting"
   # 
@@ -136,22 +185,54 @@ training :
     num_samples : 4
     source_params: 
       impute_latent_noise_std: 0.
+      forecast_offset : 1
+      forecast_delta_hrs: 0
+      forecast_steps: 0
+      forecast_with_step_conditioning: False
+      impute_latent_noise_std: 0.0  # 1e-4
 
   # ignored depending on the training mode
   target :
-    target_aux: 
+    target_aux: physical
+
+### Data parameters ###
+data :
+    # start_date: 197901010000
+    start_date: 201401010000
+    end_date: 202012310000
+    start_date_val: 202101010000
+    end_date_val: 202201010000
+    len_hrs: 6
+    step_hrs: 6
+    input_window_steps: 1
+    samples_per_epoch: 4096
+    samples_per_validation: 512
+    shuffle: True
+
+### Logging params ###
+train_log_freq:
+  terminal: 10
+  metrics: 20
+  checkpoint: 250
+  log_validation: 0
 
 
+### TODO place these ###
+
+num_epochs: 32
+val_initial: False
+loader_num_workers: 8
+analysis_streams_output: ["ERA5"]
+istep: 0
+run_history: []
+desc: ""
+data_loader_rng_seed: ???
+run_id: ???
 
 
-  losses :
-    DINO :
-      param1 : 0.1
-
-
-
-
-
+########################################################################################################
+# OLD CONFIG BELOW
+#######################################################################################################
 
 model_input:
   masking_strategy: "healpix" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
@@ -174,10 +255,6 @@ teacher_model_input:
                             "hl_mask": 4, "mode": "per_cell",
                             "same_strategy_per_batch": false
                             }
-
-
-
-
 
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
