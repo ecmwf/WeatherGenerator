@@ -24,7 +24,6 @@ from weathergen.datasets.data_reader_base import (
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
-from weathergen.datasets.icon_dataset import IconDataset
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
@@ -33,6 +32,7 @@ from weathergen.datasets.utils import (
     compute_offsets_scatter_embed,
     compute_source_cell_lens,
 )
+from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import Stage
 
@@ -75,7 +75,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         start_date_,
         end_date_,
         batch_size,
-        samples_per_epoch,
+        samples_per_mini_epoch,
         stage: Stage,
         shuffle=True,
     ):
@@ -136,13 +136,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     case "fesom":
                         dataset = DataReaderFesom
                         datapath = cf.data_path_fesom
-                    case "icon":
-                        dataset = IconDataset
-                        datapath = cf.data_path_icon
-                    case _:
-                        msg = f"Unsupported stream type {stream_info['type']}"
-                        f"for stream name '{stream_info['name']}'."
-                        raise ValueError(msg)
+                    case type_name:
+                        reader_entry = get_extra_reader(type_name, cf)
+                        if reader_entry is not None:
+                            dataset = reader_entry.constructor
+                            datapath = reader_entry.data_path
+                        else:
+                            msg = f"Unsupported stream type {stream_info['type']}"
+                            f"for stream name '{stream_info['name']}'."
+                            raise ValueError(msg)
 
                 datapath = pathlib.Path(datapath)
                 fname = pathlib.Path(fname)
@@ -185,7 +187,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         index_range = self.time_window_handler.get_index_range()
         self.len = int(index_range.end - index_range.start)
-        self.len = min(self.len, samples_per_epoch if samples_per_epoch else self.len)
+        self.len = min(self.len, samples_per_mini_epoch if samples_per_mini_epoch else self.len)
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len // cf.world_size) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)
@@ -218,13 +220,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         masker = Masker(cf)
         self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
 
-        self.epoch = 0
+        self.mini_epoch = 0
 
     def advance(self):
         """
-        Advance epoch (this is applied to the template for the worker processes)
+        Advance mini_epoch (this is applied to the template for the worker processes)
         """
-        self.epoch += 1
+        self.mini_epoch += 1
 
     def get_sources_size(self):
         return [
@@ -256,17 +258,18 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.rng = np.random.default_rng(self.data_loader_rng_seed)
 
         fsm = (
-            self.forecast_steps[min(self.epoch, len(self.forecast_steps) - 1)]
+            self.forecast_steps[min(self.mini_epoch, len(self.forecast_steps) - 1)]
             if self.forecast_policy != "random"
             else self.forecast_steps.max()
         )
         if fsm > 0:
-            logger.info(f"forecast_steps at epoch={self.epoch} : {fsm}")
+            logger.info(f"forecast_steps at mini_epoch={self.mini_epoch} : {fsm}")
 
         # data
         index_range = self.time_window_handler.get_index_range()
         idx_end = index_range.end
-        # native length of datasets, independent of epoch length that has potentially been specified
+        # native length of datasets, independent of mini_epoch length that has potentially been
+        # specified
         forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
         idx_end -= forecast_len + self.forecast_offset
         assert idx_end > 0, "dataset size too small for forecast range"
@@ -750,17 +753,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             iter_end = len(self)
 
         else:
-            # ensure the rng seed is fully unique across workers and epochs
+            # ensure the rng seed is fully unique across workers and mini_epochs
             # the worker processes are generated as bit-wise copy of the "template" (the actual
             # instance of the present class that is created) whenever __iter__ is started. This
-            # happens for each epoch, for train and validation, and independently for each DDP
+            # happens for each mini_epoch, for train and validation, and independently for each DDP
             # worker. After the bit-wise copy, the rng seed needs to be made unique for
-            # DDP workers, loader process, epoch.
+            # DDP workers, loader process, mini_epoch.
             dist = torch.distributed
             self.data_loader_rng_seed *= (
                 (((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1)
                 * ((worker_info.id + 1) * 37)
-                * (self.epoch + 13)
+                * (self.mini_epoch + 13)
                 * 7
             )
             # split workload

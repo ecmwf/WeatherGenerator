@@ -95,7 +95,7 @@ class Masker:
 
     def reset_rng(self, rng) -> None:
         """
-        Reset rng after epoch to ensure proper randomization
+        Reset rng after mini_epoch to ensure proper randomization
         """
         self.rng = rng
 

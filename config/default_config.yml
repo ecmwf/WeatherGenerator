@@ -67,15 +67,6 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
-loss_fcts:
-  -
-    - "mse"
-    - 1.0
-loss_fcts_val:
-  -
-    - "mse"
-    - 1.0
-
 batch_size_per_gpu: 1
 batch_size_validation_per_gpu: 1
 
@@ -89,8 +80,14 @@ validate_with_ema: True
 ema_ramp_up_ratio: 0.09
 ema_halflife_in_thousands: 1e-3
 
-# include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "causal" and "combination"
-masking_strategy: "forecast"
+# training mode: "forecast" or "masking" (masked token modeling)
+# for "masking" to train with auto-encoder mode, forecast_offset should be 0
+training_mode: "masking"
+training_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},
+                                  }
+                      }
+validation_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},}
+                        }
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 #
@@ -140,10 +137,10 @@ training_config:
 
 
 
-
-num_epochs: 32
-samples_per_epoch: 4096
+num_mini_epochs: 32
+samples_per_mini_epoch: 4096
 samples_per_validation: 512
+
 shuffle: True
 
 lr_scaling_policy: "sqrt"
@@ -176,7 +173,7 @@ val_initial: False
 
 loader_num_workers: 8
 log_validation: 0
-analysis_streams_output: ["ERA5"]
+streams_output: ["ERA5"]
 
 istep: 0
 run_history: []
