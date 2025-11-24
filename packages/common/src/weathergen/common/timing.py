@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import logging
 import typing
 
 import numpy as np
@@ -9,10 +10,13 @@ NPTDel64 = np.timedelta64
 
 MAX_RECORDS = 200
 
+_logger = logging.getLogger(__name__)
+
 
 @dataclasses.dataclass
 class Timing:
     """Statistics in ns."""
+
     mean: float
     std: float
     max: int
@@ -61,10 +65,12 @@ class Timer:
         self.records.append(NPTDel64(stop_time - self._start_time))
 
     def reset(self):
+        _logger.info(f"resetting timer: {self.name}")
         timings = self.get_result()
         for timer in self.substeps.values():
             timings |= timer.reset()
 
+        self._active_substep = None
         self.substeps = {}
         self.records = []
         self._previous_time = None
@@ -72,13 +78,16 @@ class Timer:
 
     def get_result(self):
         records = np.array(self.records, dtype="datetime64[ns]").astype(np.int64)
-        timing = Timing(
-            records.mean(),
-            records.std(),
-            records.max(),
-            records.min(),
-            records.size,
+        if records.size != 0:
+            timing = Timing(
+                records.mean(),
+                records.std(),
+                records.max(),
+                records.min(),
+                records.size,
             )
+        else:
+            timing = Timing(np.nan, np.nan, np.nan, np.nan, 0)
 
         return {self.name: timing}
 
@@ -88,16 +97,17 @@ class Timer:
 
 # TODO test with multiple MPI ranks
 _global_timer = Timer("root", {}, [])
-_timers = {_global_timer.name: _global_timer}
 
 
 def record(*labels):
-    _get_timer(_global_timer, labels, create=True).record()
+    _logger.debug(f"record timer: {labels}")
+    _get_timer(_global_timer, *labels, create=True).record()
 
 
 def reset(*labels) -> dict[str, Timing]:
+    _logger.debug(f"reset timer: {labels}")
     try:
-        return _get_timer(_global_timer, labels).reset()
+        return _get_timer(_global_timer, *labels).reset()
     except ValueError:
         return {}
 
