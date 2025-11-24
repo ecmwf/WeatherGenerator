@@ -1,6 +1,8 @@
 import pytest
 
-from weathergen.common.timing import Timer, _get_timer
+import numpy as np
+
+from weathergen.common.timing import Timer, Timing, _get_timer
 
 
 @pytest.fixture
@@ -88,22 +90,23 @@ def test_get_result_name(lvl_2_timer: Timer):
 
 def test_get_result_emtpy(lvl_2_timer: Timer):
     result = lvl_2_timer.get_result()
+    expected = Timing(np.nan, np.nan, np.nan, np.nan, 0)
 
     timing = result[lvl_2_timer.name]
-    assert timing is None
+    assert timing == expected
 
 
 def test_get_result_values(lvl_2_timer: Timer):
-    records = [1.0, 1.0, 1.0]
+    records = [np.timedelta64(1, "ns"), np.timedelta64(1, "ns"), np.timedelta64(1, "ns")]
     lvl_2_timer.records = records
 
     timings = lvl_2_timer.get_result()[lvl_2_timer.name]
 
     assert (
-        timings.mean == 1.
-        and timings.std == 0.
-        and timings.max == 1.
-        and timings.min == 1.
+        timings.mean == 1.0
+        and timings.std == 0.0
+        and timings.max == 1
+        and timings.min == 1
         and timings.n == 3
     )
 
