@@ -920,6 +920,7 @@ class Trainer(TrainerBase):
                     loss, loss_values = self.loss_calculator_val.compute_loss(
                         preds=output,
                         targets=targets,
+                        view_metadata=None,
                     )
                     # log output
                     if bidx < cf.log_validation:
