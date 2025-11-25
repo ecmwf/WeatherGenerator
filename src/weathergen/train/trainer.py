@@ -500,6 +500,26 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
+
+            # make existing pipeline work:
+            batch = batch[0]
+
+            ################################################################
+            # SOPH: student teacher access path here:
+            # student_teacher_data = batch[1]
+            # access student views:
+            #all_student_views = student_teacher_data.source_samples
+            #student_sample_1 = student_teacher_data.source_samples[0]
+            #student_sample_1_stream_data = student_teacher_data.source_samples[0].streams_data  # dict, {stream: stream data} of first student view
+            # e.g. target tokens of ERA5 stream of first student view:
+            # target_tokens_of_student_sample_1_ERA5_stream_data = student_teacher_batch.source_samples[0].streams_data["ERA5"].target_tokens
+
+            # access metadata of the student views, this is currently shared, very hacky, to fix.
+            #metadata_student_view = student_teacher_batch.source_samples[0].meta_info
+
+            # You will also need the source_cell_lens, target_coords_idx, these are not being passed through for the views yet.
+            ################################################################
+
             forecast_steps = batch[-1]
             batch = self.batch_to_device(batch)
 

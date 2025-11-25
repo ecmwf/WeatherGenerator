@@ -52,7 +52,7 @@ class ViewMetadata:
 
 class SampleMetaData:
     # masking strategy
-    masking_strategy: str
+    # masking_strategy: str
 
     # parameters for masking strategy
     masking_params: Config
@@ -81,7 +81,20 @@ class Sample:
         assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
         self.streams_data[stream_name] = stream_data
 
+    def add_meta_info(self, stream_name: str, meta_info: SampleMetaData) -> None:
+        """
+        Add metadata for stream @stream_name to sample
+        """
+        self.meta_info[stream_name] = meta_info
+
     # TODO: complete interface, e.g get_stream
+
+    def get_stream_data(self, stream_name: str) -> StreamData:
+        """
+        Get data for stream @stream_name from sample
+        """
+        assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
+        return self.streams_data[stream_name]
 
 class ModelBatch:
     """
@@ -116,11 +129,16 @@ class ModelBatch:
         target_sample_idx: int,
         stream_name: str,
         stream_data: StreamData,
+        source_meta_info: SampleMetaData,
     ) -> None:
         """
         Add data for one stream to sample @source_sample_idx
         """
         self.source_samples[source_sample_idx].add_stream_data(stream_name, stream_data)
+
+        # add the meta_info
+        self.source_samples[source_sample_idx].add_meta_info(stream_name, source_meta_info)
+        
 
         assert target_sample_idx < len(self.target_samples), "invalid value for target_sample_idx"
         self.source_target_matching_idxs[source_sample_idx] = target_sample_idx
@@ -131,11 +149,15 @@ class ModelBatch:
         source_sample_idx: int | list[int],
         stream_name: str,
         stream_data: StreamData,
+        target_meta_info: SampleMetaData,
     ) -> None:
         """
         Add data for one stream to sample @target_sample_idx
         """
         self.target_samples[target_sample_idx].add_stream_data(stream_name, stream_data)
+
+        # add the meta_info -- for target we have different
+        self.target_samples[target_sample_idx].add_meta_info(stream_name, target_meta_info)
 
         if isinstance(source_sample_idx, int):
             assert source_sample_idx < len(self.source_samples), "invalid value for source_sample_idx"

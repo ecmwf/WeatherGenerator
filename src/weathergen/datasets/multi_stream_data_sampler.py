@@ -578,10 +578,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     mask,
                 )
                 stream_data_source[name] = sdata
+
+                # source meta info...
+                # source_meta_info = SampleMetaData(...
+
+                source_meta_info = student_cfg
+
                 # TODO: seb check this 
                 # Map each student (source) to its teacher (target)
                 t_idx = student_to_teacher[sidx]
-                batch.add_source_stream(sidx, t_idx, name, sdata)
+                batch.add_source_stream(sidx, t_idx, name, sdata, source_meta_info)
 
             # stream_data_target can contain network input
             stream_data_target = {}
@@ -600,10 +606,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     mask,
                 )
                 stream_data_target[name] = sdata
+                
+                # get teacher config info
+                teacher_meta_info = teacher_cfg
+
                 # TODO: seb to check
                 # Map target to all source students
                 student_indices = [s_idx for s_idx, tid in enumerate(student_to_teacher) if tid == t_idx]
-                batch.add_target_stream(t_idx, student_indices, name, sdata)
+                batch.add_target_stream(t_idx, student_indices, name, sdata, teacher_meta_info)
+            
+            # import pdb; pdb.set_trace()
 
             # TODO: build batch
             # source_input
@@ -614,7 +626,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # add data for current stream
             streams_data += [v for k, v in stream_data_source.items()]
 
-        return streams_data
+        return streams_data, batch
 
     def _get_source_target_masks(self):
         """
@@ -720,7 +732,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 mode = "student_teacher"
 
-                streams_data = self._get_sample(mode, idx, forecast_dt)
+                streams_data, student_teacher_batch = self._get_sample(mode, idx, forecast_dt)
 
                 # Reset masking strategy for next batch item
                 if hasattr(self.tokenizer, "masker"):
@@ -737,7 +749,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 batch, forecast_dt
             )
 
-            yield (batch, source_cell_lens, target_coords_idx, forecast_dt)
+            import pdb; pdb.set_trace()
+
+            yield (batch, source_cell_lens, target_coords_idx, forecast_dt), student_teacher_batch
 
     def __len__(self):
         return self.len

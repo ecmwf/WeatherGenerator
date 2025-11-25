@@ -345,7 +345,7 @@ validation_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['ms
                         }
 
 # masking
-masking_strategy: "random" # obviously TODO
+masking_strategy: "dog" # obviously TODO
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 #
