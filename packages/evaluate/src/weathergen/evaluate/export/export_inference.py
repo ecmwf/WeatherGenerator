@@ -158,9 +158,18 @@ def parse_args(args: list) -> argparse.Namespace:
 
     parser.add_argument(
         "--regrid-degree",
-        type=int,
+        type=float,
         default=None,
-        help="If specified, regrid the data to a regular lat/lon grid with the given degree",
+        help="If specified, regrid the data to a regular lat/lon grid with the given degree " \
+        "(e.g., 0.25 for 0.25x0.25 degree grid) or O/N Gaussian grid (e.g., 63 for N63 grid).",
+    )
+
+    parser.add_argument(
+        "--regrid-type",
+        type=str,
+        choices=["regular_ll", "O", "N"],
+        default=None,
+        help="Type of grid to regrid to (only used if --regrid-degree is specified)",
     )
 
     args, unknown_args = parser.parse_known_args(args)
@@ -170,6 +179,7 @@ def parse_args(args: list) -> argparse.Namespace:
 
 
 def export() -> None:
+
     """
     Main function to export data from Zarr store to NetCDF files.
     """

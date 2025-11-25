@@ -48,7 +48,6 @@ class NetcdfParser(CfParser):
         super().__init__(config=config, grid_type=self.grid_type)
 
         self.mapping = config.get("variables", {})
-        self.indices = None
 
     def process_sample(
         self,
@@ -85,7 +84,7 @@ class NetcdfParser(CfParser):
             da_fs = self.add_attrs(da_fs)
             da_fs = self.add_metadata(da_fs)
             da_fs = self.add_encoding(da_fs)
-            da_fs = self.regrid(da_fs, self.regrid_degree)
+            da_fs = self.regrid(da_fs)
             self.save(da_fs, ref_time)
 
     def get_output_filename(self, forecast_ref_time: np.datetime64) -> Path:
@@ -163,22 +162,25 @@ class NetcdfParser(CfParser):
 
         return reshaped_dataset
 
-    def regrid(self, ds: xr.Dataset, regrid_degree: float) -> xr.Dataset:
+    def regrid(self, ds: xr.Dataset) -> xr.Dataset:
         """
-        Regrid a single xarray Dataset from O96 grid to regular lat/lon grid.
+        Regrid a single xarray Dataset to specified grid type and degree.
         Parameters
         ----------
             output_grid_type : Type of grid to regrid to (e.g., 'regular_ll').
-            degree : Degree of the regular lat/lon grid
-            indices: list of indices to reorder the data from original to lat/lon ordered.
+            degree : Degree of the grid; for regular grids, this is the lat/lon degree spacing;
+                     for Gaussian grids, this is the N number (e.g., 63 for N63).
         Returns
         -------
             Regridded xarray Dataset.
         """
+        if self.regrid_degree is None or self.regrid_type is None:
+            _logger.info("No regridding specified, skipping regridding step.")
+            return ds
         nc_regridder = Regridder(
             ds,
-            output_grid_type="regular_ll",
-            degree=regrid_degree)
+            output_grid_type=self.regrid_type,
+            degree=self.regrid_degree)
 
         regrid_ds = nc_regridder.regrid_ds()
         return regrid_ds
