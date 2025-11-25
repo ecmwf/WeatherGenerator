@@ -10,9 +10,9 @@
 # weathergen-common = { path = "../../../../../packages/common" }
 # weathergen = { path = "../../../../../" }
 # ///
-## Example USAGE: uv run export --run-id grwnhykd --stream ERA5 \
-## --output-dir /p/home/jusers/owens1/jureca/WeatherGen/test_output1 \
-## --format netcdf --type prediction target --fsteps 1 --samples 1
+## Example USAGE: uv run export --run-id o8b60tgh --stream ERA5 
+# --output-dir ../o8b60tgh --format netcdf 
+# --regrid-degree 0.25 --regrid-type regular_ll
 import argparse
 import logging
 import sys
