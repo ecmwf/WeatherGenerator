@@ -24,7 +24,7 @@ setup_mflow()
 
 st.markdown("""
             
-# Training overview
+# Training overview (incomplete)
  
 Note: num_samples only shows the number of sample per run.
 It does not include chained runs or total steps with finetuning included. 
@@ -33,6 +33,20 @@ It does not include chained runs or total steps with finetuning included.
 runs = latest_runs()
 all_runs_pdf = all_runs()
 
+print("All runs columns:", runs.columns)
+
+
+st.table(
+runs.group_by("params.ae_global_dim_embed").agg(pl.count("run_id")))
+
+ae_global_dim_embed = st.selectbox(
+    "Select ae_global_dim_embed",
+    options=["2048", "1024", "512", "256", "128"],
+    index=2,
+)
+filtered_runs = runs.filter(pl.col("params.ae_global_dim_embed") == ae_global_dim_embed)
+
+st.table(filtered_runs.head(10).select("run_id", "params.ae_global_dim_embed", "metrics.loss_avg_mean"))
 
 accepted_metrics = (
     [
