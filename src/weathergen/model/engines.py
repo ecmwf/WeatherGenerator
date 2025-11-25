@@ -379,14 +379,14 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-    def forward(self, tokens, fstep, emb=None):
+    def forward(self, tokens, fstep, noise_emb=None):
         aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
         if self.cf.fe_diffusion_model:
-            assert emb is not None, (
-                "Noise embedding must be provided for diffusion forecasting engine"
+            assert noise_emb is not None, (
+                "Noise embedding must be provided for diffusion forecast engine"
             )
             for block in self.fe_blocks:
-                tokens = checkpoint(block, tokens, emb, aux_info, use_reentrant=False)
+                tokens = checkpoint(block, tokens, noise_emb, aux_info, use_reentrant=False)
         else:
             for block in self.fe_blocks:
                 tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
