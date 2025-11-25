@@ -151,7 +151,7 @@ def init_model_and_shard(cf, dataset, run_id_contd, mini_epoch_contd, student_or
     # model params
     model_params = ModelParams(cf).create(cf)
     model_params.reset_parameters(cf)
-    model_params = model_params.to("cuda:0")
+    model_params = model_params.to(f"cuda:{cf.local_rank}")
 
     return model, model_params
 
