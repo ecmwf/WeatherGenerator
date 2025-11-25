@@ -76,8 +76,8 @@ class Timer:
     def _stop_recording(self, stop_time: datetime.datetime):
         self.records.append(NPTDel64(stop_time - self._start_time))
 
-    def reset(self):
-        _logger.info(f"resetting timer: {self.name}")
+    def reset(self) -> dict[str, Timing]:
+        _logger.debug(f"resetting timer: {self.name}")
         timings = self.get_result()
         for timer in self.substeps.values():
             timings |= timer.reset()
@@ -105,10 +105,6 @@ class Timer:
 
     def _get_labels(self) -> list[str]:
         return self.name.split(".")[1:]  # exclude "root" prefix
-
-
-# TODO test with multiple MPI ranks
-_global_timer = Timer("root", {}, [])
 
 
 def record(*labels):
@@ -140,3 +136,13 @@ def _get_timer(root_timer, *labels: str, create=False) -> Timer:
                 raise ValueError(msg) from e
 
     return timer
+
+
+# TODO test with multiple MPI ranks
+_global_timer = Timer("root", {}, [])
+
+"""This timer should be used within the training loop."""
+train: Timer = _get_timer(_global_timer, "train", create=True)
+
+"""This timer should be used within the validation loop."""
+validate: Timer = _get_timer(_global_timer, "validate", create=True)
