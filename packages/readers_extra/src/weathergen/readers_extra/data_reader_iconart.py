@@ -310,7 +310,8 @@ class DataReaderIconArt(DataReaderTimestep):
         
         # Load only the needed time steps by slicing at xarray level before converting to numpy
         data = [
-            self.ds[ch_].isel(time=slice(t_idxs_start, t_idxs_end)).values.reshape(-1, 1) for ch_ in channels
+            self.ds[ch_].isel(time=slice(t_idxs_start, t_idxs_end)).values.reshape(-1, 1)
+            for ch_ in channels
         ]
 
         data = np.concatenate(data, axis=1)
