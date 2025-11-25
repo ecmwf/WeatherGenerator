@@ -238,7 +238,7 @@ def mae(
     mask_nan = ~torch.isnan(target)
     pred = pred[0] if pred.shape[0] == 0 else pred.mean(0)
 
-    diff2 = torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0)
+    diff2 = torch.abs(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0))
     if weights_points is not None:
         diff2 = (diff2.transpose(1, 0) * weights_points).transpose(1, 0)
     loss_chs = diff2.mean(0)
