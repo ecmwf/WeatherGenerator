@@ -76,7 +76,8 @@ class Trainer(TrainerBase):
 
         # Get world_size of previous, to be continued run before
         # world_size gets overwritten by current setting during init_ddp()
-        self.world_size_original = cf.get("world_size", None)
+        self.world_size_original = cf.get("world_size_original", cf.get("world_size", None))
+        cf.world_size_original = self.world_size_original
 
         self.log_grad_norms = cf.get("log_grad_norms", False)
 
@@ -88,7 +89,7 @@ class Trainer(TrainerBase):
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
-    def inference(self, cf, run_id_contd, mini_epoch_contd, devices):
+    def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
         # general initalization
         self.init(cf, devices)
 
