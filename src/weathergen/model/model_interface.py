@@ -248,10 +248,10 @@ def get_model(cf: Config, training_mode: TrainingMode, dataset):
     targets_num_channels = dataset.get_targets_num_channels()
     targets_coords_size = dataset.get_targets_coords_size()
 
-    if training_mode == "student_teacher":
+    if training_mode == "masking":
         model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
     else:
-        if cf["training_mode"] == "masking":  # TODO implement mode "student-teacher-pretrain":
+        if cf["training_mode"] == "student-teacher":  # TODO implement mode "student-teacher-pretrain":
             teacher_cf = copy.deepcopy(cf)
             for key, val in teacher_cf["teacher_model"].items():
                 teacher_cf[key] = val
