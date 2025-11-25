@@ -7,7 +7,7 @@ import xarray as xr
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-from weathergen.evaluate.export.reshape import find_lat_lon_ordering, find_pl, regrid_gaussian_ds
+from weathergen.evaluate.export.reshape import Regridder, find_pl
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -84,11 +84,8 @@ class NetcdfParser(CfParser):
             da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
             da_fs = self.add_metadata(da_fs)
-            if self.indices is None:
-                self.indices = find_lat_lon_ordering(da_fs)
-                _logger.info("Determined lat/lon ordering indices, saved for reuse.")
             da_fs = self.add_encoding(da_fs)
-            da_fs = self.regrid(da_fs, self.regrid_degree, self.indices)
+            da_fs = self.regrid(da_fs, self.regrid_degree)
             self.save(da_fs, ref_time)
 
     def get_output_filename(self, forecast_ref_time: np.datetime64) -> Path:
@@ -166,7 +163,7 @@ class NetcdfParser(CfParser):
 
         return reshaped_dataset
 
-    def regrid(self, ds: xr.Dataset, regrid_degree: float, indices: list) -> xr.Dataset:
+    def regrid(self, ds: xr.Dataset, regrid_degree: float) -> xr.Dataset:
         """
         Regrid a single xarray Dataset from O96 grid to regular lat/lon grid.
         Parameters
@@ -178,11 +175,12 @@ class NetcdfParser(CfParser):
         -------
             Regridded xarray Dataset.
         """
-        if self.grid_type != "gaussian" or regrid_degree is None:
-            return ds
-        # hardcoded for now as all native grids are O96
-        output_grid_type = "regular_ll"
-        regrid_ds = regrid_gaussian_ds(ds, output_grid_type, regrid_degree, indices)
+        nc_regridder = Regridder(
+            ds,
+            output_grid_type="regular_ll",
+            degree=regrid_degree)
+
+        regrid_ds = nc_regridder.regrid_ds()
         return regrid_ds
 
     def concatenate(
