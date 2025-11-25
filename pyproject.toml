@@ -28,7 +28,8 @@ dependencies = [
  "anemoi-datasets",
  "weathergen-common",
  "weathergen-evaluate",
- "weathergen-readers-extra"
+ "weathergen-readers-extra",
+ "pyarrow>=22.0.0",
 ]
 
 
