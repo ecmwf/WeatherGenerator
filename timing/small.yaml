@@ -1,0 +1,24 @@
+streams_directory: 'timing/streams'
+
+ae_local_dim_embed: 128
+ae_local_num_blocks: 1
+ae_local_num_heads: 2
+
+ae_adapter_num_heads: 2
+ae_adapter_embed: 16
+
+ae_global_dim_embed: 256
+ae_global_num_blocs: 2
+ae_global_num_heads: 4
+
+len_hrs: 6
+step_hrs: 6
+input_window_steps: 1
+
+forecast_offset : 0
+forecast_delta_hrs: 0
+
+# forecast params
+forecast_steps: 1
+forecast_policy: "fixed"
+fe_num_blocks: 1
