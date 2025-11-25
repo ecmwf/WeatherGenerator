@@ -793,11 +793,22 @@ class Model(torch.nn.Module):
             tokens_global_unmasked_all += [tokens_global_unmasked_c]
             tokens_global_masked_all += [tokens_global_masked_c]
 
-        tokens_global_unmasked = torch.cat(tokens_global_unmasked_all)
-        tokens_global_masked = torch.cat(tokens_global_masked_all).to(tokens_global_unmasked.dtype)
+        tokens_global_unmasked = torch.cat(tokens_global_unmasked_all).contiguous()
+        tokens_global_unmasked = tokens_global_unmasked.reshape(
+            [batch_size, self.num_healpix_cells, s[-2], s[-1]]
+        ).flatten(1, 2)
+
+        tokens_global_masked = (
+            torch.cat(tokens_global_masked_all).to(tokens_global_unmasked.dtype).contiguous()
+        )
+        # TODO reenable
+        # tokens_global_masked = tokens_global_masked.reshape(
+        #     [batch_size, self.num_healpix_cells, s[-2], s[-1]]
+        # ).flatten(1, 2)
 
         # query aggregation engine on the query tokens in unmasked cells
         # (applying this here assumes batch_size=1)
+        print(f"Shape for tokens_global_unmasked {tokens_global_unmasked.shape}")
         tokens_global_unmasked = self.ae_aggregation_engine(
             tokens_global_unmasked, use_reentrant=False
         )
@@ -811,15 +822,17 @@ class Model(torch.nn.Module):
         )
 
         # fill empty tensor using mask for positions of (un)masked tokens
-        tokens_global_all[mask] = tokens_global_unmasked
-        tokens_global_all[~mask] = tokens_global_masked
-        tokens_global = tokens_global_all
+        # tokens_global_all[mask] = tokens_global_unmasked
+        # TODO renable tokens_global_all[~mask] = tokens_global_masked
+        # tokens_global = tokens_global_all
+        tokens_global = tokens_global_unmasked
 
         # recover batch dimension and build global token list
-        tokens_global = (
-            tokens_global.reshape([batch_size, self.num_healpix_cells, s[-2], s[-1]])
-            + model_params.pe_global
-        ).flatten(1, 2)
+        # tokens_global = (
+        #     tokens_global.reshape([batch_size, self.num_healpix_cells, s[-2], s[-1]])
+        #     + model_params.pe_global
+        # ).flatten(1, 2)
+        tokens_global = tokens_global + model_params.pe_global.flatten(1,2)
 
         return tokens_global, posteriors
 
