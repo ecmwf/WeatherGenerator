@@ -33,7 +33,7 @@ from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import get_dtype
+from weathergen.utils.utils import  get_batch_size, get_dtype
 
 logger = logging.getLogger(__name__)
 
@@ -263,7 +263,7 @@ def get_model(cf: Config, training_mode: TrainingMode, dataset):
     return model
 
 
-def get_target_aux_calculator(cf: Config, dataset, model: Model):
+def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
     """
     Create target aux calculator
     """
@@ -275,6 +275,18 @@ def get_target_aux_calculator(cf: Config, dataset, model: Model):
         target_aux = PhysicalTargetAndAux(cf, model)
 
     elif target_and_aux_calc == "EMATeacher":
+
+        # batch_size = get_batch_size( cf, cf.world_size_original)
+
+        meta_ema_model, _ = init_model_and_shard( cf, dataset, None, None, "student", device)
+        self.ema_model = EMAModel(
+            model,
+            meta_ema_model,
+            halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
+            rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
+            is_model_sharded=(cf.with_ddp and cf.with_fsdp),
+        )
+
         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")
 
     else:
