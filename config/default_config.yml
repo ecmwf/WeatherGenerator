@@ -10,7 +10,7 @@ embed_dropout_rate: 0.1
 target_cell_local_prediction: True
 
 ae_local_dim_embed: 1024
-ae_local_num_blocks: 2
+ae_local_num_blocks: 0
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
@@ -53,6 +53,7 @@ fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
 impute_latent_noise_std: 0.0  # 1e-4
+ckpt_encoder_weights: "./models/whkujigw/whkujigw_epoch00063.chkpt"
 
 healpix_level: 5
 
@@ -125,9 +126,9 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           "same_strategy_per_batch": false
                           }
 
-num_mini_epochs: 32
-samples_per_mini_epoch: 32
-samples_per_validation: 8
+num_mini_epochs: 64
+samples_per_mini_epoch: 4096
+samples_per_validation: 512
 
 shuffle: True
 

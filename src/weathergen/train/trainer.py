@@ -217,6 +217,46 @@ class Trainer(TrainerBase):
                     f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}."
                 )
             model = self.load_model(model, run_id_contd, mini_epoch_contd)
+
+        params = torch.load(
+            self.cf.ckpt_encoder_weights,
+            map_location=torch.device("cpu"),
+            mmap=True,
+            weights_only=True,
+        )
+        encoder_modules = [
+            "embed_engine",
+            "ae_local_engine",
+            "ae_local_global_engine",
+            "ae_global_engine",
+        ]
+
+        # Load encoder weights
+        params_temp = {}
+        for name in params.keys():
+            if any(e_module in name for e_module in encoder_modules):
+                params_temp[name] = params[name]
+        params = params_temp
+        mkeys, ukeys = model.load_state_dict(params, strict=False)
+
+        # Freeze encoder weights
+        for name, module in model.named_modules():
+            if any(e_module in name for e_module in encoder_modules):
+                for p in module.parameters():
+                    p.requires_grad = False
+
+        model = model.to(self.device)
+
+        # warn about difference in checkpoint and model
+        if len(mkeys) == 0 and len(ukeys) == 0:
+            logger.info(
+                f"Checkpoint {self.cf.ckpt_encoder_weights} loaded successfully with all weights matching."
+            )
+        if len(mkeys) > 0:
+            logger.warning(f"Missing keys when loading model: {mkeys}")
+        if len(ukeys) > 0:
+            logger.warning(f"Unused keys when loading model: {mkeys}")
+
         model_params.reset_parameters(cf)
         model_params = model_params.to(self.device)
 
@@ -606,9 +646,10 @@ class Trainer(TrainerBase):
 
         # training loop
         self.t_start = time.time()
-        for bidx, batch in enumerate(dataset_iter):
-            forecast_steps = batch[-1]
-            batch = self.batch_to_device(batch)
+        batch_one = next(dataset_iter)
+        for bidx, _ in enumerate(dataset_iter):
+            forecast_steps = batch_one[-1]
+            batch = self.batch_to_device(batch_one)
 
             # evaluate model
             with torch.autocast(
