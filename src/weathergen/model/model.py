@@ -798,9 +798,13 @@ class Model(torch.nn.Module):
 
         # query aggregation engine on the query tokens in unmasked cells
         # (applying this here assumes batch_size=1)
+        # permute to use ae_local_num_queries as the batchsize and no_of_tokens
+        # as seq len for flash attention
+        tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
         tokens_global_unmasked = self.ae_aggregation_engine(
             tokens_global_unmasked, use_reentrant=False
         )
+        tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
 
         # create mask from cell lens
         mask = cell_lens.to(torch.bool)
