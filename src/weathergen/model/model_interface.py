@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import copy
 import itertools
 import logging
 import re
@@ -34,7 +33,7 @@ from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import get_dtype
+from weathergen.utils.utils import apply_overrides_to_dict, get_dtype
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +42,12 @@ logger = logging.getLogger(__name__)
 type TrainingMode = str
 
 
-def init_model_and_shard(cf, dataset, run_id_contd, mini_epoch_contd, student_or_teacher, device):
+def init_model_and_shard(
+    cf, dataset, run_id_contd, mini_epoch_contd, training_mode, overrides, device
+):
     model_creation_device = "meta" if cf.with_ddp and cf.with_fsdp else "cuda"
     with torch.device(model_creation_device):
-        model = get_model(cf, student_or_teacher, dataset)
+        model = get_model(cf, training_mode, dataset, overrides)
 
     freeze_modules = cf.freeze_modules
 
@@ -234,7 +235,7 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     return model
 
 
-def get_model(cf: Config, training_mode: TrainingMode, dataset):
+def get_model(cf: Config, training_mode: TrainingMode, dataset, overrides):
     """
     Create model
 
@@ -248,20 +249,10 @@ def get_model(cf: Config, training_mode: TrainingMode, dataset):
     targets_num_channels = dataset.get_targets_num_channels()
     targets_coords_size = dataset.get_targets_coords_size()
 
-    if training_mode == "masking":
-        model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-    else:
-        if cf["training_mode"] == "student-teacher":  # TODO implement mode "student-teacher-pretrain":
-            teacher_cf = copy.deepcopy(cf)
-            for key, val in teacher_cf["teacher_model"].items():
-                teacher_cf[key] = val
-            model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-        else:
-            raise NotImplementedError(
-                f"The training mode {cf['training_mode']} is not implemented."
-            )
-
-    return model
+    cf_with_overrides = apply_overrides_to_dict(cf, overrides)
+    return Model(
+        cf_with_overrides, sources_size, targets_num_channels, targets_coords_size
+    ).create()
 
 
 def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
