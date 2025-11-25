@@ -2,7 +2,7 @@ from typing import Any
 
 
 class TargetAndAuxModuleBase:
-    def __init__(self, model, rng, **kwargs):
+    def __init__(self, cf, model, **kwargs):
         pass
 
     def reset(self):
@@ -22,7 +22,7 @@ class TargetAndAuxModuleBase:
 
 
 class PhysicalTargetAndAux(TargetAndAuxModuleBase):
-    def __init__(self, model, rng, **kwargs):
+    def __init__(self, cf, model, **kwargs):
         return
 
     def reset(self):

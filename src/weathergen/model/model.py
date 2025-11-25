@@ -9,7 +9,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import copy
 import dataclasses
 import logging
 import math
@@ -876,26 +875,3 @@ class Model(torch.nn.Module):
             preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
 
         return preds_tokens
-
-
-def get_model(
-    student_or_teacher,
-    cf: Config,
-    sources_size,
-    targets_num_channels,
-    targets_coords_size,
-    **kwargs,
-):
-    if student_or_teacher == "student" or student_or_teacher == "teacher":
-        return Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-    else:
-        if cf["training_mode"] == "masking":  # TODO implement mode "student-teacher-pretrain":
-            teacher_cf = copy.deepcopy(cf)
-            for key, val in teacher_cf["teacher_model"].items():
-                teacher_cf[key] = val
-            teacher = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-            return teacher
-        else:
-            raise NotImplementedError(
-                f"The training mode {cf['training_mode']} is not implemented."
-            )
