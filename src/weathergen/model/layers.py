@@ -7,6 +7,20 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+# ----------------------------------------------------------------------------
+# Third-Party Attribution: facebookresearch/DiT (Scalable Diffusion Models with Transformers (DiT))
+# This file incorporates code originally from the 'facebookresearch/DiT' repository, with adaptations.
+#
+# The original code is licensed under CC-BY-NC.
+# ----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------
+# Third-Party Attribution: facebookresearch/DiT (Scalable Diffusion Models with Transformers (DiT))
+# This file incorporates code originally from the 'facebookresearch/DiT' repository, with adaptations.
+#
+# The original code is licensed under CC-BY-NC.
+# ----------------------------------------------------------------------------
+
 
 import torch
 import torch.nn as nn
@@ -111,8 +125,7 @@ class MLP(torch.nn.Module):
         return x
 
 
-# TODO: Verify if need to add copyright notice to GenCast/DiT.
-# NOTE: This will be imported into attention.py.
+# NOTE: Inspired by GenCast/DiT.
 class LinearNormConditioning(torch.nn.Module):
     """Module for norm conditioning, adapted from GenCast with additional gate parameter from DiT.
 

@@ -14,12 +14,17 @@
 # Original Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # ----------------------------------------------------------------------------
 
+# ----------------------------------------------------------------------------
+# Third-Party Attribution: google-deepmind/graphcast (several associated papers)
+# This file incorporates code originally from the 'google-deepmind/graphcast' repository, with adaptations.
+#
+# The original code is licensed under Apache 2.0. Original Copyright 2024 DeepMind Technologies Limited.
+# ----------------------------------------------------------------------------
+
 
 import dataclasses
 import math
-
 import torch
-
 from weathergen.model.engines import ForecastingEngine
 
 
