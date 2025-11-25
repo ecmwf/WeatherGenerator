@@ -488,7 +488,7 @@ class Model(torch.nn.Module):
         num_params_q_cells = np.prod(self.q_cells.shape) if self.q_cells.requires_grad else 0
         num_params_ae_adapater = get_num_parameters(self.ae_local_global_engine.ae_adapter)
 
-        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
+        num_params_fe = get_num_parameters(self.forecast_engine.net.fe_blocks)
 
         num_params_pred_adapter = [get_num_parameters(kv) for kv in self.pred_adapter_kv]
         num_params_embed_tcs = [get_num_parameters(etc) for etc in self.embed_target_coords]

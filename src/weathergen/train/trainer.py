@@ -255,7 +255,7 @@ class Trainer(TrainerBase):
         if len(mkeys) > 0:
             logger.warning(f"Missing keys when loading model: {mkeys}")
         if len(ukeys) > 0:
-            logger.warning(f"Unused keys when loading model: {mkeys}")
+            logger.warning(f"Unused keys when loading model: {ukeys}")
 
         model_params.reset_parameters(cf)
         model_params = model_params.to(self.device)
@@ -937,7 +937,7 @@ class Trainer(TrainerBase):
         if len(mkeys) > 0:
             logger.warning(f"Missing keys when loading model: {mkeys}")
         if len(ukeys) > 0:
-            logger.warning(f"Unused keys when loading model: {mkeys}")
+            logger.warning(f"Unused keys when loading model: {ukeys}")
 
         return model
 
