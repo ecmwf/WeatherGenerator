@@ -107,48 +107,45 @@ latent_noise :
 
 ### Training parameters ###
 
-training_strategy :
-  # masking, forecasting, student-teacher
-  mode : "student-teacher"
-  # 
-  source : 
-    - masking_params : 
-        strategy : "healpix"
-        num_samples : 4
-        rate : 0.4
-        hl_mask: 4 
-        same_strategy_per_batch: False
-        teacher_relationship: subset
-       
-    - masking_params : 
-        strategy : "random"
-        num_samples : 4
-        rate : 0.4
-        hl_mask: 4 
-        same_strategy_per_batch: False
-        teacher_relationship: subset
+#training_strategy :
+#  # masking, forecasting, student-teacher
+#  mode : "student-teacher"
+#  # 
+#  source : 
+#    - masking_params : 
+#        strategy : "healpix"
+#        num_samples : 4
+#        rate : 0.4
+#        hl_mask: 4 
+#        same_strategy_per_batch: False
+#        teacher_relationship: subset
+#       
+#    - masking_params : 
+#        strategy : "random"
+#        num_samples : 4
+#        rate : 0.4
+#        hl_mask: 4 
+#        same_strategy_per_batch: False
+#        teacher_relationship: subset
 
 
   # ignored depending on the training mode
   # invalid syntax
-  target :
-    target_aux: ema_teacher
-    - masking_params : 
-        strategy : "healpix"
-        num_samples : 2
-        rate : 0.8
-        hl_mask: 1 
-        same_strategy_per_batch: False
-        teacher_relationship: subset
-        loss: DINOLoss, JEPALoss
-      strategy : 
-        ...
-        loss: JEPA
-    
-
-
-  loss :
-    Dino
+#  target :
+#    - masking_params : 
+#        target_aux: ema_teacher
+#        strategy : "healpix"
+#        num_samples : 2
+#        rate : 0.8
+#        hl_mask: 1 
+#        same_strategy_per_batch: False
+#        teacher_relationship: subset
+#        loss: DINOLoss, JEPALoss
+#      strategy : 
+#        - loss: JEPA
+        
+#  loss :
+#    DINO
 
 
 training_strategy :
@@ -170,30 +167,30 @@ training_strategy :
   target :
     - target_aux: physical
       loss : physical
-    - target_aux: encoder
-      loss: latent_mae
-    - target_aux: EMATeacher
-      prediction_head: DINOv2
-      centering: 0.5
-      loss: latent_mae
+    #- target_aux: encoder
+    #  loss: latent_mae
+    #- target_aux: EMATeacher
+    # prediction_head: DINOv2
+    #  centering: 0.5
+    #  loss: latent_mae
 
-training_strategy :
-  # masking, forecasting, student-teacher
-  mode : "forecasting"
-  # 
-  source : 
-    num_samples : 4
-    source_params: 
-      impute_latent_noise_std: 0.
-      forecast_offset : 1
-      forecast_delta_hrs: 0
-      forecast_steps: 0
-      forecast_with_step_conditioning: False
-      impute_latent_noise_std: 0.0  # 1e-4
+#training_strategy :
+#  # masking, forecasting, student-teacher
+#  mode : "forecasting"
+#  # 
+#  source : 
+#    num_samples : 4
+#    source_params: 
+#      impute_latent_noise_std: 0.
+#      forecast_offset : 1
+#      forecast_delta_hrs: 0
+#      forecast_steps: 0
+#      forecast_with_step_conditioning: False
+#      impute_latent_noise_std: 0.0  # 1e-4#
 
-  # ignored depending on the training mode
-  target :
-    target_aux: physical
+#  # ignored depending on the training mode
+#  target :
+#    target_aux: physical
 
 ### Data parameters ###
 data :
@@ -210,24 +207,25 @@ data :
     shuffle: True
 
 ### Logging params ###
-train_log_freq:
-  terminal: 10
-  metrics: 20
-  checkpoint: 250
-  log_validation: 0
+#train_log_freq_params:
+#  terminal: 10
+#  metrics: 20
+#  checkpoint: 250
+#  log_validation: 0
 
 
 ### TODO place these ###
 
-num_epochs: 32
-val_initial: False
-loader_num_workers: 8
-analysis_streams_output: ["ERA5"]
-istep: 0
-run_history: []
-desc: ""
-data_loader_rng_seed: ???
-run_id: ???
+misc: 
+  num_epochs: 32
+  val_initial: False
+  loader_num_workers: 8
+  analysis_streams_output: ["ERA5"]
+  run_history: []
+  istep: 0
+  desc: ""
+  data_loader_rng_seed: ???
+  run_id: ???
 
 
 ########################################################################################################
