@@ -146,7 +146,7 @@ def init_model_and_shard(cf, dataset, run_id_contd, mini_epoch_contd, student_or
     else:
         if is_root():
             logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
-        model = load_model( cf, model, device, run_id_contd, mini_epoch_contd)
+        model = load_model(cf, model, device, run_id_contd, mini_epoch_contd)
 
     # model params
     model_params = ModelParams(cf).create(cf)
