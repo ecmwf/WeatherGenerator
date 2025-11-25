@@ -33,6 +33,7 @@ from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.utils.distributed import is_root
+from weathergen.utils.utils import get_dtype
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ type TrainingMode = str
 def init_model_and_shard(cf, dataset, run_id_contd, mini_epoch_contd, student_or_teacher, device):
     model_creation_device = "meta" if cf.with_ddp and cf.with_fsdp else "cuda"
     with torch.device(model_creation_device):
-        model, model_params = get_model(cf, student_or_teacher, dataset)
+        model = get_model(cf, student_or_teacher, dataset)
 
     freeze_modules = cf.freeze_modules
 
@@ -72,7 +73,7 @@ def init_model_and_shard(cf, dataset, run_id_contd, mini_epoch_contd, student_or
         fsdp_kwargs = {
             "mp_policy": (
                 MixedPrecisionPolicy(
-                    param_dtype=cf.mixed_precision_dtype,
+                    param_dtype=get_dtype(cf.mixed_precision_dtype),
                     reduce_dtype=torch.float32,
                 )
                 if cf.with_mixed_precision
@@ -146,8 +147,9 @@ def init_model_and_shard(cf, dataset, run_id_contd, mini_epoch_contd, student_or
         if is_root():
             logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
         model = load_model(model, device, run_id_contd, mini_epoch_contd)
-    
+
     # model params
+    model_params = ModelParams(cf).create(cf)
     model_params.reset_parameters(cf)
     model_params = model_params.to("cuda:0")
 
@@ -245,8 +247,6 @@ def get_model(cf: Config, training_mode: TrainingMode, dataset):
     targets_num_channels = dataset.get_targets_num_channels()
     targets_coords_size = dataset.get_targets_coords_size()
 
-    model_params = ModelParams(cf).create(cf)
-
     if training_mode == "student_teacher":
         model = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
     else:
@@ -260,7 +260,7 @@ def get_model(cf: Config, training_mode: TrainingMode, dataset):
                 f"The training mode {cf['training_mode']} is not implemented."
             )
 
-    return model, model_params
+    return model
 
 
 def get_target_aux_calculator(cf: Config, dataset, model: Model):
