@@ -15,10 +15,10 @@
 # ----------------------------------------------------------------------------
 
 # ----------------------------------------------------------------------------
-# Third-Party Attribution: google-deepmind/graphcast (several associated papers)
-# This file incorporates code originally from the 'google-deepmind/graphcast' repository, with adaptations.
+# Third-Party Attribution: facebookresearch/DiT (Scalable Diffusion Models with Transformers (DiT))
+# This file incorporates code originally from the 'facebookresearch/DiT' repository, with adaptations.
 #
-# The original code is licensed under Apache 2.0. Original Copyright 2024 DeepMind Technologies Limited.
+# The original code is licensed under CC-BY-NC.
 # ----------------------------------------------------------------------------
 
 
