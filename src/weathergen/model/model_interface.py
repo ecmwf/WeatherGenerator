@@ -146,7 +146,7 @@ def init_model_and_shard(cf, dataset, run_id_contd, mini_epoch_contd, student_or
     else:
         if is_root():
             logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
-        model = load_model(model, device, run_id_contd, mini_epoch_contd)
+        model = load_model( cf, model, device, run_id_contd, mini_epoch_contd)
 
     # model params
     model_params = ModelParams(cf).create(cf)
@@ -270,20 +270,6 @@ def get_target_aux_calculator(cf: Config, dataset, model: Model):
 
     target_aux = None
 
-    # if cf.get("validate_with_ema", False):
-    #     # validate_with_ema is incompatible with student-teacher
-    #     meta_ema_model = init_model_and_shard(
-    #         cf, dataset, run_id_contd, mini_epoch_contd, "student", device
-    #     )[0]
-    #     model = EMAModel(
-    #         model,
-    #         meta_ema_model,
-    #         halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
-    #         rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
-    #         is_model_sharded=(cf.with_ddp and cf.with_fsdp),
-    #     )
-
-    #
     target_and_aux_calc = cf.get("target_and_aux_calc", None)
     if target_and_aux_calc is None or target_and_aux_calc == "identity":
         target_aux = PhysicalTargetAndAux(cf, model)
