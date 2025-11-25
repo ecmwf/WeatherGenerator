@@ -8,47 +8,33 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-import itertools
 import logging
-import re
 import time
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 import omegaconf
 import torch
-import torch.nn as nn
 import tqdm
 from numpy.typing import NDArray
 from omegaconf import OmegaConf
 from torch import Tensor
 
 # FSDP2
-from torch.distributed.fsdp import (
-    MixedPrecisionPolicy,
-    fully_shard,
-)
-from torch.distributed.tensor import DTensor, distribute_tensor
+from torch.distributed.tensor import DTensor
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.datasets.stream_data import StreamData
-from weathergen.model.attention import (
-    MultiCrossAttentionHeadVarlen,
-    MultiCrossAttentionHeadVarlenSlicedQ,
-    MultiSelfAttentionHead,
-    MultiSelfAttentionHeadLocal,
-    MultiSelfAttentionHeadVarlen,
-)
 from weathergen.model.ema import EMAModel
-from weathergen.model.layers import MLP
-from weathergen.model.model import ModelParams, get_model
-from weathergen.model.utils import freeze_weights
+from weathergen.model.model_interface import (
+    get_target_aux_calculator,
+    init_model_and_shard,
+)
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
-from weathergen.train.trainer_base import TrainerBase, get_target_and_aux_calculator
+from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.utils import get_batch_size, get_dtype
@@ -102,124 +88,6 @@ class Trainer(TrainerBase):
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
-    def init_model_and_shard(self, cf, run_id_contd, mini_epoch_contd, student_or_teacher, devices):
-        sources_size = self.dataset.get_sources_size()
-        targets_num_channels = self.dataset.get_targets_num_channels()
-        targets_coords_size = self.dataset.get_targets_coords_size()
-
-        model_creation_device = "meta" if cf.with_ddp and cf.with_fsdp else "cuda"
-        with torch.device(model_creation_device):
-            model = get_model(
-                student_or_teacher, cf, sources_size, targets_num_channels, targets_coords_size
-            )
-
-        # freeze request model part
-        for name, module in model.named_modules():
-            name = module.name if hasattr(module, "name") else name
-            # avoid the whole model element which has name ''
-            if name == "":
-                continue
-            if re.fullmatch(self.freeze_modules, name) is not None:
-                freeze_weights(module)
-
-        if cf.with_ddp and not cf.with_fsdp:
-            # create DDP model if running without FSDP
-            model = torch.nn.parallel.DistributedDataParallel(
-                model,
-                broadcast_buffers=True,
-                find_unused_parameters=True,
-                gradient_as_bucket_view=True,
-                bucket_cap_mb=512,
-            )
-
-        elif cf.with_ddp and cf.with_fsdp:
-            # with DDP *and() FSDP
-            fsdp_kwargs = {
-                "mp_policy": (
-                    MixedPrecisionPolicy(
-                        param_dtype=self.mixed_precision_dtype,
-                        reduce_dtype=torch.float32,
-                    )
-                    if cf.with_mixed_precision
-                    else None
-                ),
-            }
-            modules_to_shard = (
-                MLP,
-                MultiSelfAttentionHeadLocal,
-                MultiSelfAttentionHead,
-                MultiCrossAttentionHeadVarlen,
-                MultiCrossAttentionHeadVarlenSlicedQ,
-                MultiSelfAttentionHeadVarlen,
-            )
-
-            for module in model.ae_local_engine.ae_local_blocks.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
-
-            for module in model.ae_local_global_engine.ae_adapter.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
-
-            for module in model.ae_global_engine.ae_global_blocks.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
-
-            for module in model.forecast_engine.fe_blocks.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
-
-            full_precision_fsdp_kwargs = {
-                "mp_policy": (
-                    MixedPrecisionPolicy(
-                        param_dtype=torch.float32,
-                        reduce_dtype=torch.float32,
-                    )
-                    if cf.with_mixed_precision
-                    else None
-                ),
-            }
-            for module in model.pred_adapter_kv.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **full_precision_fsdp_kwargs)
-
-            for module in model.target_token_engines.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **full_precision_fsdp_kwargs)
-
-        model_params = ModelParams(cf).create(cf)
-
-        if cf.with_ddp and cf.with_fsdp:
-            fully_shard(model)
-            for tensor in itertools.chain(model.parameters(), model.buffers()):
-                assert tensor.device == torch.device("meta")
-
-            # For reasons we do not yet fully understand, when using train continue in some
-            # instances, FSDP2 does not register the forward_channels and forward_columns
-            # functions in the embedding engine as forward functions. Thus, yielding a crash
-            # because the input tensors are not converted to DTensors. This seems to primarily
-            # occur during validation.
-            for embed in model.embed_engine.embeds:
-                torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
-                torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
-
-        # complete initalization and load model if inference/continuing a run
-        if run_id_contd is None:
-            if cf.with_ddp and cf.with_fsdp:
-                model.to_empty(device="cuda")
-                if cf.with_fsdp:
-                    model.reset_parameters()
-        else:
-            if is_root():
-                logger.info(
-                    f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}."
-                )
-            model = self.load_model(model, run_id_contd, mini_epoch_contd)
-        model_params.reset_parameters(cf)
-        model_params = model_params.to(self.device)
-
-        return model, model_params
-
     def inference(self, cf, run_id_contd, mini_epoch_contd, devices):
         # general initalization
         self.init(cf, devices)
@@ -255,8 +123,8 @@ class Trainer(TrainerBase):
             self.dataset, **loader_params, sampler=None
         )
 
-        self.model, self.model_params = self.init_model_and_shard(
-            cf, run_id_contd, mini_epoch_contd, "student", devices
+        self.model, self.model_params = init_model_and_shard(
+            cf, self.dataset, run_id_contd, mini_epoch_contd, "student", devices[0]
         )
 
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
@@ -311,8 +179,8 @@ class Trainer(TrainerBase):
             self.dataset_val, **loader_params, sampler=None
         )
 
-        self.model, self.model_params = self.init_model_and_shard(
-            cf, run_id_contd, mini_epoch_contd, "student", devices
+        self.model, self.model_params = init_model_and_shard(
+            cf, self.dataset, run_id_contd, mini_epoch_contd, "student", devices[0]
         )
 
         if cf.compile_model:
@@ -322,8 +190,8 @@ class Trainer(TrainerBase):
         self.ema_model = None
         if self.validate_with_ema:
             # validate_with_ema is incompatible with student-teacher
-            meta_ema_model = self.init_model_and_shard(
-                cf, run_id_contd, mini_epoch_contd, "student", devices
+            meta_ema_model = init_model_and_shard(
+                cf, self.dataset, run_id_contd, mini_epoch_contd, "student", devices[0]
             )[0]
             self.ema_model = EMAModel(
                 self.model,
@@ -333,12 +201,10 @@ class Trainer(TrainerBase):
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
 
-        self.target_and_aux_calculator = get_target_and_aux_calculator(
+        self.target_and_aux_calculator = get_target_aux_calculator(
             cf,
+            self.dataset,
             self.model,
-            None,
-            ema_model=self.ema_model,
-            batch_size=get_batch_size(cf, self.world_size_original),
         )
 
         self.target_and_aux_calculator.to_device(self.device)
@@ -830,82 +696,6 @@ class Trainer(TrainerBase):
             batch[1].to(self.device),
             [[b.to(self.device) for b in bf] for bf in batch[2]],
         )
-
-    def load_model(self, model, run_id: str, mini_epoch=-1):
-        """Loads model state from checkpoint and checks for missing and unused keys.
-        Args:
-            run_id : model_id of the trained model
-            mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
-        """
-
-        path_run = Path(self.cf.model_path) / run_id
-        mini_epoch_id = (
-            f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
-        )
-        filename = f"{run_id}_{mini_epoch_id}.chkpt"
-
-        if not (path_run / filename).exists():
-            mini_epoch_id = f"epoch{mini_epoch:05d}"
-            filename = f"{run_id}_{mini_epoch_id}.chkpt"
-
-        params = torch.load(
-            path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
-        )
-
-        is_model_sharded = self.cf.with_ddp and self.cf.with_fsdp
-        if is_model_sharded:
-            meta_sharded_sd = model.state_dict()
-            maybe_sharded_sd = {}
-            for param_name, full_tensor in params.items():
-                sharded_meta_param = meta_sharded_sd.get(param_name)
-                sharded_tensor = distribute_tensor(
-                    full_tensor,
-                    sharded_meta_param.device_mesh,
-                    sharded_meta_param.placements,
-                )
-                # maybe_sharded_sd[param_name.replace("module.", "")] = nn.Parameter(sharded_tensor)
-                maybe_sharded_sd[param_name] = nn.Parameter(sharded_tensor)
-            # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
-            mkeys, ukeys = model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
-
-            # new network parts (e.g. for fine-tuning)
-            if mkeys:
-                # Get the unique parent modules for the missing parameters
-                new_modules_to_init = {key.rsplit(".", 1)[0] for key in mkeys}
-
-                # Find the highest-level "root" new modules to avoid redundant initializations
-                root_new_modules = set()
-                for path in sorted(list(new_modules_to_init)):
-                    if not any(path.startswith(root + ".") for root in root_new_modules):
-                        root_new_modules.add(path)
-
-                # Get all modules for quick lookup and initialize the new ones
-                all_modules = dict(model.named_modules())
-                for path in root_new_modules:
-                    if is_root():
-                        logger.info(f"Initializing new module not found in checkpoint: {path}")
-                    module_to_init = all_modules[path]
-                    module_to_init.to_empty(device="cuda")
-                    module_to_init.reset_parameters()
-
-        else:
-            if not self.cf.with_ddp:
-                params_temp = {}
-                for k in params.keys():
-                    params_temp[k.replace("module.", "")] = params[k]
-                params = params_temp
-            mkeys, ukeys = model.load_state_dict(params, strict=False)
-            model = model.to(self.device)
-
-        # warn about difference in checkpoint and model
-        if len(mkeys) == 0 and len(ukeys) == 0:
-            logger.info(f"Checkpoint {filename} loaded successfully with all weights matching.")
-        if len(mkeys) > 0:
-            logger.warning(f"Missing keys when loading model: {mkeys}")
-        if len(ukeys) > 0:
-            logger.warning(f"Unused keys when loading model: {mkeys}")
-
-        return model
 
     def _get_full_model_state_dict(self):
         maybe_sharded_sd = (
