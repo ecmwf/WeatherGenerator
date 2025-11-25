@@ -38,14 +38,20 @@ all_runs_stats = (
 
 
 runs_lifecycle_stats = (
+    # Remove metrics and params
     all_runs_pdf.select(~ps.starts_with("metrics"))
     .select(~ps.starts_with("params"))
     .filter(C("tags.run_id").is_not_null())
+    # For each of the run_ids, keep status, time, all stages, hpc
     .group_by("tags.run_id")
     .agg(
         C("status").unique(), C("start_time").min(), C("tags.stage").unique(), C("tags.hpc").first()
     )
     .with_columns(
+        # Filter mlflow status:
+        # FAILED => failed
+        # FINISHED => finished
+        # else => running
         pl.when(C("status").list.contains("FAILED"))
         .then(pl.lit("failed"))
         .otherwise(
@@ -54,6 +60,7 @@ runs_lifecycle_stats = (
             .otherwise(pl.lit("running"))
         )
         .alias("synth_status"),
+        # Has train/val/eval stages
         C("tags.stage").list.contains("train").alias("has_train_stage"),
         C("tags.stage").list.contains("val").alias("has_val_stage"),
         C("tags.stage").list.contains("eval").alias("has_eval_stage"),
@@ -108,6 +115,8 @@ Developers using older versions will show running forever.
 """
 )
 
+_status_colors = {"finished": "green", "failed": "red", "running": "lightblue"}
+
 st.plotly_chart(
     px.bar(
         (
@@ -118,6 +127,7 @@ st.plotly_chart(
         x="week",
         y="tags.run_id",
         color="synth_status",
+        color_discrete_map=_status_colors,
     )
 )
 
@@ -125,22 +135,25 @@ st.plotly_chart(
 st.markdown(
     """
             
-**Fraction uploading training data**
+**Fraction of completed runs uploading training data**
 
 
 """
 )
 
+_present_colors = {True: "green", False: "lightgray"}
+
 st.plotly_chart(
     px.bar(
         (
-            runs_lifecycle_stats.group_by(
-                "week", "synth_status", "tags.hpc", "has_train_stage"
-            ).agg(pl.count("tags.run_id"))
+            runs_lifecycle_stats.filter(pl.col("synth_status") != "running")
+            .group_by("week", "synth_status", "tags.hpc", "has_train_stage")
+            .agg(pl.count("tags.run_id"))
         ).to_pandas(),
         x="week",
         y="tags.run_id",
         color="has_train_stage",
+        color_discrete_map=_present_colors,
     )
 )
 
@@ -165,5 +178,28 @@ st.plotly_chart(
         x="week",
         y="tags.run_id",
         color="has_eval_stage",
+        color_discrete_map=_present_colors,
     )
+)
+
+all_metrics = sorted(all_runs_pdf.select(ps.starts_with("metrics.")).columns)
+
+st.markdown(
+    f"""
+            
+**List of MLFlow metrics by number of runs**
+
+There is a hard limit of 1000 metrics per run in MLFlow.
+
+
+Total number of metrics tracked: {len(all_metrics)}.
+"""
+)
+
+st.dataframe(
+    all_runs_pdf.select(ps.starts_with("metrics."))
+    .select([pl.count(c) for c in all_metrics])
+    .transpose(include_header=True)
+    .sort(by="column_0", descending=True)
+    .to_pandas()
 )

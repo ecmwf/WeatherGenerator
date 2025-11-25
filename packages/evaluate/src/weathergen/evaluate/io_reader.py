@@ -22,7 +22,7 @@ from tqdm import tqdm
 from weathergen.common.config import get_shared_wg_path, load_config, load_model_config
 from weathergen.common.io import ZarrIO
 from weathergen.evaluate.derived_channels import DeriveChannels
-from weathergen.evaluate.score_utils import RegionBoundingBox, to_list
+from weathergen.evaluate.score_utils import to_list
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -469,7 +469,8 @@ class WeatherGenReader(Reader):
 
         super().__init__(eval_cfg, run_id, private_paths)
 
-        self.epoch = eval_cfg.epoch
+        # TODO: remove backwards compatibility to "epoch" in Feb. 2026
+        self.mini_epoch = getattr(eval_cfg, "mini_epoch", getattr(eval_cfg, "epoch", -1))
         self.rank = eval_cfg.rank
 
         # Load model configuration and set (run-id specific) directories
@@ -498,9 +499,17 @@ class WeatherGenReader(Reader):
             self.eval_cfg.get("metrics_dir", self.metrics_base_dir / self.run_id / "evaluation")
         )
 
-        self.fname_zarr = self.results_dir.joinpath(
-            f"validation_epoch{self.epoch:05d}_rank{self.rank:04d}.zarr"
+        fname_zarr_new = self.results_dir.joinpath(
+            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
         )
+        fname_zarr_old = self.results_dir.joinpath(
+            f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
+        )
+
+        if fname_zarr_new.exists() or fname_zarr_new.is_dir():
+            self.fname_zarr = fname_zarr_new
+        else:
+            self.fname_zarr = fname_zarr_old
 
         if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
             _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
@@ -522,12 +531,12 @@ class WeatherGenReader(Reader):
             _logger.info(
                 f"Loading config for run {self.run_id} from private paths: {self.private_paths}"
             )
-            config = load_config(self.private_paths, self.run_id, self.epoch)
+            config = load_config(self.private_paths, self.run_id, self.mini_epoch)
         else:
             _logger.info(
                 f"Loading config for run {self.run_id} from model directory: {self.model_base_dir}"
             )
-            config = load_model_config(self.run_id, self.epoch, self.model_base_dir)
+            config = load_model_config(self.run_id, self.mini_epoch, self.model_base_dir)
 
         if type(config) not in [dict, oc.DictConfig]:
             _logger.warning("Model config not found. inference config will be empty.")
@@ -538,7 +547,6 @@ class WeatherGenReader(Reader):
     def get_data(
         self,
         stream: str,
-        region: str = "global",
         samples: list[int] | None = None,
         fsteps: list[str] | None = None,
         channels: list[str] | None = None,
@@ -557,8 +565,6 @@ class WeatherGenReader(Reader):
             Expected scheme `<results_base_dir>/<run_id>`.
         stream :
             Stream name to retrieve data for.
-        region :
-            Region name to retrieve data for. Possible values: "global", "shem", "nhem", "tropics"
         samples :
             List of sample indices to retrieve. If None, all samples are retrieved.
         fsteps :
@@ -577,8 +583,6 @@ class WeatherGenReader(Reader):
             - points_per_sample: xarray DataArray containing the number of points per sample,
               if `return_counts` is True.
         """
-
-        bbox = RegionBoundingBox.from_region_name(region)
 
         with ZarrIO(self.fname_zarr) as zio:
             stream_cfg = self.get_stream(stream)
@@ -623,14 +627,6 @@ class WeatherGenReader(Reader):
                 for sample in tqdm(samples, desc=f"Processing {self.run_id} - {stream} - {fstep}"):
                     out = zio.get_data(sample, stream, fstep)
                     target, pred = out.target.as_xarray(), out.prediction.as_xarray()
-
-                    if region != "global":
-                        _logger.debug(
-                            f"Applying bounding box mask for region '{region}' to targets "
-                            "and predictions..."
-                        )
-                        target = bbox.apply_mask(target)
-                        pred = bbox.apply_mask(pred)
 
                     npoints = len(target.ipoint)
                     pps.append(npoints)
@@ -680,7 +676,10 @@ class WeatherGenReader(Reader):
                     _logger.debug("Repeating sample coordinate for single-sample case.")
                     for da in (da_tars_fs, da_preds_fs):
                         da.assign_coords(
-                            sample=("ipoint", np.repeat(da.sample.values, da.sizes["ipoint"]))
+                            sample=(
+                                "ipoint",
+                                np.repeat(da.sample.values, da.sizes["ipoint"]),
+                            )
                         )
 
                 if set(channels) != set(all_channels):
@@ -881,7 +880,7 @@ class WeatherGenReader(Reader):
         """
         score_path = (
             Path(self.metrics_dir)
-            / f"{self.run_id}_{stream}_{region}_{metric}_epoch{self.epoch:05d}.json"
+            / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
         )
         _logger.debug(f"Looking for: {score_path}")
 

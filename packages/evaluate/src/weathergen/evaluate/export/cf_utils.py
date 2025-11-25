@@ -1,186 +1,103 @@
 import logging
+from pathlib import Path
 
 import numpy as np
 import xarray as xr
-from omegaconf import OmegaConf
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
 
-def add_gaussian_grid_metadata(ds: xr.Dataset, grid_info: dict | None = None) -> xr.Dataset:
+class CfParser:
     """
-    Add Gaussian grid metadata following CF conventions.
+    Base class for CF parsers.
+    """
+
+    def __init__(self, config, **kwargs):
+        """
+        CF-compliant parser that handles both regular and Gaussian grids.
+        Parameters
+        ----------
+        config : OmegaConf
+            Configuration defining variable mappings and dimension metadata.
+        grid_type : str
+            Type of grid ('regular' or 'gaussian').
+        """
+
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+        self.config = config
+        self.file_extension = _get_file_extension(self.output_format)
+        self.fstep_hours = np.timedelta64(self.fstep_hours, "h")
+        self.mapping = config.get("variables", {})
+
+    def get_output_filename(self) -> Path:
+        """
+        Generate output filename based on run_id and output directory.
+        """
+        return Path(self.output_dir) / f"{self.run_id}.{self.file_extension}"
+
+    def process_sample(self, fstep_iterator_results: iter, ref_time: np.datetime64):
+        """
+        Process results from get_data_worker: reshape, concatenate, add metadata, and save.
+        Parameters
+        ----------
+            fstep_iterator_results : Iterator over results from get_data_worker.
+            ref_time : Forecast reference time for the sample.
+        Returns
+        -------
+            None
+        """
+        pass
+
+    def scale_data(self, data: xr.DataArray, var_short: str) -> xr.DataArray:
+        """
+        Scale data based on variable configuration.
+        Parameters
+        ----------
+            data : xr.DataArray
+                Input data array.
+            var_short : str
+                Variable name.
+        Returns
+        -------
+            xr.DataArray
+                Scaled data array.
+        """
+        var_config = self.mapping.get(var_short, {})
+        raw = var_config.get("scale_factor", 1.0)
+        parts = raw.split("/")
+        scale_factor = float(parts[0]) / float(parts[1]) if len(parts) == 2 else float(parts[0])
+
+        add_offset = var_config.get("add_offset", 0.0)
+
+        scaled_data = data * scale_factor + add_offset
+        return scaled_data
+
+
+##########################################
+
+
+# Helpers
+def _get_file_extension(output_format: str) -> str:
+    """
+    Get file extension based on output format.
 
     Parameters
     ----------
-    ds : xr.Dataset
-        Dataset to add metadata to
-    grid_info : dict, optional
-        Dictionary with grid information:
-        - 'N': Gaussian grid number (e.g., N320)
-        - 'reduced': Whether it's a reduced Gaussian grid
+        output_format : Output file format (currently only 'netcdf' supported).
 
     Returns
     -------
-    xr.Dataset
-        Dataset with added grid metadata
+        File extension as a string.
     """
-    ds = ds.copy()
-    # Add grid mapping information
-    ds.attrs["grid_type"] = "gaussian"
-
-    # If grid info provided, add it
-    if grid_info:
-        ds.attrs["gaussian_grid_number"] = grid_info.get("N", "unknown")
-        ds.attrs["gaussian_grid_type"] = "reduced" if grid_info.get("reduced", False) else "regular"
-
-    return ds
-
-
-def add_conventions(stream: str, run_id: str, ds: xr.Dataset) -> xr.Dataset:
-    """
-    Add CF conventions to the dataset attributes.
-
-    Parameters
-    ----------
-        stream : Stream name to include in the title attribute.
-        run_id : Run ID to include in the title attribute.
-        ds : Input xarray Dataset to add conventions to.
-    Returns
-    -------
-        xarray Dataset with CF conventions added to attributes.
-    """
-    ds = ds.copy()
-    ds.attrs["title"] = f"WeatherGenerator Output for {run_id} using stream {stream}"
-    ds.attrs["institution"] = "WeatherGenerator Project"
-    ds.attrs["source"] = "WeatherGenerator v0.0"
-    ds.attrs["history"] = (
-        "Created using the export_inference.py script on "
-        + np.datetime_as_string(np.datetime64("now"), unit="s")
-    )
-    ds.attrs["Conventions"] = "CF-1.12"
-    return ds
-
-
-def cf_parser_gaussian_aware(config: OmegaConf, ds: xr.Dataset) -> xr.Dataset:
-    """
-    Modified CF parser that handles both regular and Gaussian grids.
-
-    Parameters
-    ----------
-    config : OmegaConf
-        Configuration for CF parsing
-    ds : xr.Dataset
-        Input dataset
-
-    Returns
-    -------
-    xr.Dataset
-        Parsed dataset with appropriate structure for grid type
-    """
-    # Detect if this is a Gaussian grid
-    is_gaussian = "ncells" in ds.dims
-
-    variables = {}
-    mapping = config["variables"]
-
-    # Handle dimensions based on grid type
-    if is_gaussian:
-        # For Gaussian grids, keep ncells and don't try to create lat/lon dimensions
-        for var_name in ds.data_vars:
-            if var_name in ["lat", "lon"]:
-                continue
-
-            variable = ds[var_name]
-
-            if var_name not in mapping:
-                # Variable not in mapping - skip or keep as-is
-                variables[var_name] = variable
-                continue
-
-            dims = list(variable.dims)
-
-            attributes = dict(
-                standard_name=mapping[var_name].get("std", var_name),
-                units=mapping[var_name].get("std_unit", "unknown"),
-                coordinates="lat lon",  # Mark auxiliary coordinates
-            )
-
-            # Get mapped variable name or use original
-            mapped_name = mapping[var_name].get("var", var_name)
-
-            variables[mapped_name] = xr.DataArray(
-                data=variable.values,
-                dims=dims,
-                coords={coord: ds.coords[coord] for coord in variable.coords if coord in ds.coords},
-                attrs=attributes,
-                name=mapped_name,
-            )
-
-        # Preserve lat/lon as coordinate variables with proper attributes
-        if "lat" in ds.coords:
-            ds.coords["lat"].attrs = {
-                "standard_name": "latitude",
-                "long_name": "latitude",
-                "units": "degrees_north",
-            }
-        if "lon" in ds.coords:
-            ds.coords["lon"].attrs = {
-                "standard_name": "longitude",
-                "long_name": "longitude",
-                "units": "degrees_east",
-            }
-
+    if output_format == "netcdf":
+        return "nc"
+    elif output_format == "quaver":
+        return "grib"
     else:
-        # Original logic for regular grids
-        ds_attributes = {}
-        for dim_name, dim_dict in config["dimensions"].items():
-            if dim_name == dim_dict["wg"]:
-                dim_attributes = dict(standard_name=dim_dict.get("std", None))
-                if dim_dict.get("std_unit", None) is not None:
-                    dim_attributes["units"] = dim_dict["std_unit"]
-                ds_attributes[dim_dict["wg"]] = dim_attributes
-                continue
-
-            if dim_name in ds.dims:
-                ds = ds.rename_dims({dim_name: dim_dict["wg"]})
-
-            dim_attributes = dict(standard_name=dim_dict.get("std", None))
-            if "std_unit" in dim_dict and dim_dict["std_unit"] is not None:
-                dim_attributes["units"] = dim_dict["std_unit"]
-            ds_attributes[dim_dict["wg"]] = dim_attributes
-
-        for var_name in ds.data_vars:
-            dims = ["pressure", "valid_time", "latitude", "longitude"]
-            if mapping[var_name]["level_type"] == "sfc":
-                dims.remove("pressure")
-
-            coordinates = {}
-            for coord, new_name in config["coordinates"][mapping[var_name]["level_type"]].items():
-                coordinates |= {
-                    new_name: (
-                        ds.coords[coord].dims,
-                        ds.coords[coord].values,
-                        ds_attributes[new_name],
-                    )
-                }
-
-            variable = ds[var_name]
-            attributes = dict(
-                standard_name=mapping[var_name]["std"],
-                units=mapping[var_name]["std_unit"],
-            )
-
-            variables[mapping[var_name]["var"]] = xr.DataArray(
-                data=variable.values,
-                dims=dims,
-                coords={**coordinates, "valid_time": ds["valid_time"].values},
-                attrs=attributes,
-                name=mapping[var_name]["var"],
-            )
-
-    dataset = xr.merge(variables.values())
-    dataset.attrs = ds.attrs
-
-    return dataset
+        raise ValueError(
+            f"Unsupported output format: {output_format},"
+            "supported formats are ['netcdf', 'DWD', 'quaver']"
+        )

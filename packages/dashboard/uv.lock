@@ -1767,7 +1767,7 @@ requires-dist = [
     { name = "plotly", specifier = "~=6.1.2" },
     { name = "polars", specifier = "~=1.30.0" },
     { name = "requests", specifier = "~=2.32.4" },
-    { name = "streamlit", specifier = ">=1.46.0" },
+    { name = "streamlit", specifier = "~=1.46.0" },
     { name = "streamlit-authenticator", specifier = ">=0.4.2" },
     { name = "watchdog" },
     { name = "weathergen-common", editable = "../common" },

@@ -59,10 +59,9 @@ def get_inference_parser() -> argparse.ArgumentParser:
         help="Toggle saving of samples from inference. Default True",
     )
     parser.add_argument(
-        "--analysis_streams_output",
+        "--streams_output",
         nargs="+",
-        default=["ERA5"],
-        help="Analysis output streams during inference.",
+        help="Output streams during inference.",
     )
 
     return parser
@@ -128,11 +127,11 @@ def _add_model_loading_params(parser: argparse.ArgumentParser):
     )
     parser.add_argument(
         "-e",
-        "--epoch",
+        "--mini_epoch",
         type=int,
         default=-1,
         help=(
-            "Epoch of pretrained WeatherGenerator model used"
+            "Mini_epoch of pretrained WeatherGenerator model used"
             " (Default -1 corresponds to the last checkpoint)."
         ),
     )

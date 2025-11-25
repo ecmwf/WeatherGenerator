@@ -20,8 +20,8 @@ from pathlib import Path
 
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
+from weathergen.common.logger import init_loggers
 from weathergen.train.trainer import Trainer
-from weathergen.utils.logger import init_loggers
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +47,14 @@ def inference_from_args(argl: list[str]):
         end_date_val=args.end_date,
         samples_per_validation=args.samples,
         log_validation=args.samples if args.save_samples else 0,
-        analysis_streams_output=args.analysis_streams_output,
+        streams_output=args.streams_output,
     )
 
     cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_config(
         args.private_config,
         args.from_run_id,
-        args.epoch,
+        args.mini_epoch,
         *args.config,
         inference_overwrite,
         cli_overwrite,
@@ -71,7 +71,12 @@ def inference_from_args(argl: list[str]):
     cf.run_history += [(args.from_run_id, cf.istep)]
 
     trainer = Trainer(cf.train_log_freq)
-    trainer.inference(cf, devices, args.from_run_id, args.epoch)
+    try:
+        trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
+    except Exception:
+        extype, value, tb = sys.exc_info()
+        traceback.print_exc()
+        pdb.post_mortem(tb)
 
 
 ####################################################################################################
@@ -113,7 +118,7 @@ def train_continue_from_args(argl: list[str]):
             lr_policy_warmup="cosine",
             lr_policy_decay="linear",
             lr_policy_cooldown="linear",
-            num_epochs=12,  # len(cf.forecast_steps) + 4
+            num_mini_epochs=12,  # len(cf.forecast_steps) + 4
             istep=0,
         )
     else:
@@ -123,7 +128,7 @@ def train_continue_from_args(argl: list[str]):
     cf = config.load_config(
         args.private_config,
         args.from_run_id,
-        args.epoch,
+        args.mini_epoch,
         finetune_overwrite,
         *args.config,
         cli_overwrite,
@@ -139,7 +144,7 @@ def train_continue_from_args(argl: list[str]):
     cf.run_history += [(args.from_run_id, cf.istep)]
 
     trainer = Trainer(cf.train_log_freq)
-    trainer.run(cf, devices, args.from_run_id, args.epoch)
+    trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
 
 
 ####################################################################################################
