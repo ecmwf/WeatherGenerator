@@ -254,10 +254,47 @@ teacher_model_input:
                             "same_strategy_per_batch": false
                             }
 
+                      
+embed_orientation: "channels"
+embed_unembed_mode: "block"
+embed_dropout_rate: 0.1
+
+target_cell_local_prediction: True
+
+ae_local_dim_embed: 1024
+ae_local_num_blocks: 2
+ae_local_num_heads: 16
+ae_local_dropout_rate: 0.1
+ae_local_with_qk_lnorm: True
+
+ae_local_num_queries: 1
+ae_local_queries_per_cell: False
+ae_adapter_num_heads: 16
+ae_adapter_embed: 128
+ae_adapter_with_qk_lnorm: True
+ae_adapter_with_residual: True
+ae_adapter_dropout_rate: 0.1
+
+ae_global_dim_embed: 2048
+ae_global_num_blocks: 8
+ae_global_num_heads: 32
+ae_global_dropout_rate: 0.1
+ae_global_with_qk_lnorm: True
+# TODO: switching to < 1 triggers triton-related issues.
+# See https://github.com/ecmwf/WeatherGenerator/issues/1050
+ae_global_att_dense_rate: 1.0
+ae_global_block_factor: 64
+ae_global_mlp_hidden_factor: 2
+
+decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
+pred_adapter_kv: False
+pred_self_attention: True
+pred_dyadic_dims: False
+pred_mlp_adaln: True
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-forecast_offset : 1
+forecast_offset : 0
 forecast_delta_hrs: 0
 forecast_steps: 0
 forecast_policy: null
@@ -328,9 +365,9 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
 
 # Student-teacher configuration (only used when training_mode == "student_teacher")
 # TODO: adapt so that the masking or forecast config entry also sits here
-training_config:
+#training_config:
   # when this is "masking", we are basically only using the model_input subconfig
-  training_mode: "student_teacher"  # "masking", "student_teacher", "forecast"
+#  training_mode: "student_teacher"  # "masking", "student_teacher", "forecast"
 
 
 num_epochs: 32
