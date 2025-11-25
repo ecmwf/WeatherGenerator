@@ -21,9 +21,6 @@ analysis_streams_output: ["ERA5"]
 ###   Model   ###
 #################
 embed_orientation: "channels"
-embed_local_coords: True
-embed_centroids_local_coords: False
-embed_size_centroids: 0
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
@@ -78,6 +75,7 @@ forecast_delta_hrs: 0
 forecast_steps: 0
 forecast_policy: null
 forecast_att_dense_rate: 1.0
+forecast_with_step_conditioning: False
 fe_num_blocks: 0
 fe_num_heads: 16
 fe_dropout_rate: 0.1
@@ -126,15 +124,16 @@ training_mode_config: {
   "teacher_model": {}
 }
 validation_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]],}}}
+
+# masking
+masking_strategy: "random" # obviously TODO
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
+#
+sampling_rate_target: 1.0
 # sample the masking rate (with normal distribution centered at masking_rate)
 # note that a sampled masking rate leads to varying requirements
 masking_rate_sampling: True
-# sample a subset of all target points, useful e.g. to reduce memory requirements (also can specify per-stream)
-sampling_rate_target: 1.0
-# include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "causal" and "combination"
-masking_strategy: "random"
 # masking_strategy_config is a dictionary of additional parameters for the masking strategy
 # required for "healpix" and "channel" masking strategies
 # "healpix": requires healpix mask level to be specified with `hl_mask`
@@ -155,6 +154,37 @@ with_fsdp: True
 attention_dtype: bf16
 mlp_norm_eps: 1e-5
 norm_eps: 1e-4
+# Student-teacher configuration (only used when training_mode == "student_teacher")
+# TODO: adapt so that the masking or forecast config entry also sits here
+training_config:
+  # when this is "masking", we are basically only using the model_input subconfig
+  training_mode: "student_teacher"  # "masking", "student_teacher", "forecast"
+
+
+  model_input:
+    masking_strategy: "healpix" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
+    rate: 0.5  # Masking rate to use for model input
+    num_views: 4  # if student-teacher, the number of local (student) views to generate
+    masking_strategy_config: {"strategies": ["random", "healpix", "channel"], # will be used with masking is moved under here
+                              "probabilities": [0.34, 0.33, 0.33],
+                              "hl_mask": 0, "mode": "per_cell",
+                              "same_strategy_per_batch": false
+                              }
+    relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+  
+  teacher_model_input:
+    strategy: "healpix"  # Strategy for teacher (global) view: "random", "healpix"
+    rate: 0.5  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
+    num_views: 2 # number of teacher views to generate
+    # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
+    rate_sampling: true  # randomly sample the rate per batch
+    masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
+                              "probabilities": [0.34, 0.33, 0.33],
+                              "hl_mask": 4, "mode": "per_cell",
+                              "same_strategy_per_batch": false
+                              }
+
+
 
 num_mini_epochs: 32
 samples_per_mini_epoch: 4096
