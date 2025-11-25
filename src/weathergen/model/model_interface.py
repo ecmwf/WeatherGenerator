@@ -28,12 +28,13 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
+from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import  get_batch_size, get_dtype
+from weathergen.utils.utils import get_dtype
 
 logger = logging.getLogger(__name__)
 
@@ -275,11 +276,10 @@ def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
         target_aux = PhysicalTargetAndAux(cf, model)
 
     elif target_and_aux_calc == "EMATeacher":
+        # batch_size = get_batch_size(cf, cf.world_size_original)
 
-        # batch_size = get_batch_size( cf, cf.world_size_original)
-
-        meta_ema_model, _ = init_model_and_shard( cf, dataset, None, None, "student", device)
-        self.ema_model = EMAModel(
+        meta_ema_model, _ = init_model_and_shard(cf, dataset, None, None, "student", device)
+        ema_model = EMAModel(
             model,
             meta_ema_model,
             halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
@@ -287,7 +287,7 @@ def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
             is_model_sharded=(cf.with_ddp and cf.with_fsdp),
         )
 
-        raise NotImplementedError(f"{target_and_aux_calc} is not implemented")
+        raise NotImplementedError(f"{target_and_aux_calc} is not implemented : {type(ema_model)}")
 
     else:
         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")
