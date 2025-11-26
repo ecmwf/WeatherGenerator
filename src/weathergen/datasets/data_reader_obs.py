@@ -140,16 +140,16 @@ class DataReaderObs(DataReaderBase):
         # TODO: generalize this
         t_len = self.time_window_handler.t_window_len
         len_seconds = t_len / np.timedelta64(1, "s")
-        assert (
-            len_seconds % 3600 == 0
-        ), f"t_window_len has to be full hour (currently {self.time_window_handler.t_window_len})"
+        assert len_seconds % 3600 == 0, (
+            f"t_window_len has to be full hour (currently {self.time_window_handler.t_window_len})"
+        )
         len_hrs = int(len_seconds) // 3600
 
         t_step = self.time_window_handler.t_window_step
         step_seconds = t_step / np.timedelta64(1, "s")
-        assert (
-            step_seconds % 3600 == 0
-        ), f"t_window_step has to be full hour (currently {self.time_window_handler.t_window_step})"
+        assert step_seconds % 3600 == 0, (
+            f"t_window_step has to be full hour (currently {self.time_window_handler.t_window_step})"
+        )
         step_hrs = int(step_seconds) // 3600
 
         self.start_dt = self.time_window_handler.t_start.item()

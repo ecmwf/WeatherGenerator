@@ -279,9 +279,9 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     """
 
     assert rdata.coords.ndim == 2, f"coords must be 2D {rdata.coords.shape}"
-    assert (
-        rdata.coords.shape[1] == 2
-    ), f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
+    assert rdata.coords.shape[1] == 2, (
+        f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
+    )
     assert rdata.geoinfos.ndim == 2, f"geoinfos must be 2D, got {rdata.geoinfos.shape}"
     assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
     assert rdata.datetimes.ndim == 1, f"datetimes must be 1D {rdata.datetimes.shape}"
@@ -301,9 +301,9 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
         f"{rdata.datetimes.shape[0]}"
     )
 
-    assert np.logical_and(
-        rdata.datetimes >= dtr.start, rdata.datetimes < dtr.end
-    ).all(), f"datetimes for data points violate window {dtr}."
+    assert np.logical_and(rdata.datetimes >= dtr.start, rdata.datetimes < dtr.end).all(), (
+        f"datetimes for data points violate window {dtr}."
+    )
 
 
 class DataReaderBase(metaclass=ABCMeta):
