@@ -15,4 +15,4 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
     ) -> tuple[Any, Any]:
         with torch.no_grad():
             tokens, posteriors = self.model.encode(model_params=model_params, batch=batch)
-        return tokens, posteriors
+        return {"latent": [tokens]}, posteriors

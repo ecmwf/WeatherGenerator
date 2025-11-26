@@ -86,6 +86,7 @@ ema_halflife_in_thousands: 1e-3
 # training mode: "forecast" or "masking" (masked token modeling) or "student-teacher"
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
 training_mode: "forecast"
+"target_and_aux_calc": "DiffusionLatentTargetEncoder"
 training_mode_config: {
   "losses" : { 
     LossLatentDiffusion: {
@@ -93,7 +94,6 @@ training_mode_config: {
     }
   },
   "shared_heads": False,
-  "target_and_aux_calc": "DiffusionLatentTargetEncoder",
   "teacher_model": {}
 }
 validation_mode_config: {
@@ -103,7 +103,6 @@ validation_mode_config: {
     }
   },
   "shared_heads": False,
-  "target_and_aux_calc": "DiffusionLatentTargetEncoder",
   "teacher_model": {}
 }
 # masking rate when training mode is "masking"; ignored in foreacast mode
@@ -126,8 +125,8 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           }
 
 num_mini_epochs: 32
-samples_per_mini_epoch: 32
-samples_per_validation: 8
+samples_per_mini_epoch: 4096
+samples_per_validation: 512
 
 shuffle: True
 
@@ -174,3 +173,25 @@ train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
+
+
+# Tags for experiment tracking
+# These tags will be logged in MLFlow along with completed runs for train, eval, val
+# The tags are free-form, with the following rules:
+# - tags should be primitive types (strings, numbers, booleans). NO lists or dictionaries
+# - tags should not duplicate existing config entries.
+# - try to reuse existing tags where possible. MLFlow does not like having too many unique tags
+# - do not use long strings in values (less than 20 characters is a good rule of thumb, we may enforce this in the future)
+wgtags:
+  # The name of the organization of the person running the experiment.
+  # This may be autofilled in the future. Expected values are lowercase strings of 
+  # the organizations codenames in https://confluence.ecmwf.int/display/MAEL/Staff+Contact+List
+  # e.g. "ecmwf", "cmcc", "metnor", "jsc", "escience"
+  org: None
+  # The name of the experiment. This is a distinctive codename for the experiment campaign being run.
+  # This is expected to be the primary tag for comparing experiments in MLFlow.
+  # Expected values are lowercase strings with no spaces, just underscores:
+  # Examples: "rollout_ablation_grid"  
+  exp: None
+  # *** Experiment-specific tags ***
+  grid: None

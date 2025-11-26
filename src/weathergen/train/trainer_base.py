@@ -18,7 +18,7 @@ import torch.multiprocessing
 
 from weathergen.common.config import Config
 from weathergen.train.target_and_aux_diffusion import DiffusionLatentTargetEncoder
-from weathergen.train.target_and_aux_module_base import IdentityTargetAndAux
+from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.distributed import is_root
@@ -176,7 +176,7 @@ class TrainerBase:
 def get_target_and_aux_calculator(config, model, rng, batch_size, **kwargs):
     target_and_aux_calc = config.get("training_mode_config", None).get("target_and_aux_calc", None)
     if target_and_aux_calc is None or target_and_aux_calc == "identity":
-        return IdentityTargetAndAux(model, rng, config)
+        return PhysicalTargetAndAux(model, rng, config)
     elif target_and_aux_calc == "EMATeacher":
         return EMATeacher(model, rng, kwargs["ema_model"], batch_size)
     elif target_and_aux_calc == "DiffusionLatentTargetEncoder":

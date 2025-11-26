@@ -78,7 +78,7 @@ class LossLatentDiffusion(LossModuleBase):
         }
 
         preds = preds.latent["preds"]
-        targets = targets["targets"]
+        targets = targets["latent"]
         fsteps = len(targets)
 
         fstep_loss_weights = self._get_fstep_weights(fsteps)
