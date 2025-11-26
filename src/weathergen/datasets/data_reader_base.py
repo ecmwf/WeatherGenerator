@@ -55,8 +55,8 @@ def parse_timedelta(val: str | int | float | np.timedelta64) -> np.timedelta64:
     Integers and floats are interpreted as hours.
     Strings are parsed using pandas.to_timedelta.
     """
-    if isinstance(val, (int, float, np.number)):
-        return np.timedelta64(int(val), "h").astype("timedelta64[ms]")
+    if isinstance(val, int | float | np.number):
+        return np.timedelta64(val, "h").astype("timedelta64[ms]")
     return np.timedelta64(pd.to_timedelta(val)).astype("timedelta64[ms]")
 
 
@@ -279,9 +279,9 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     """
 
     assert rdata.coords.ndim == 2, f"coords must be 2D {rdata.coords.shape}"
-    assert rdata.coords.shape[1] == 2, (
-        f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
-    )
+    assert (
+        rdata.coords.shape[1] == 2
+    ), f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
     assert rdata.geoinfos.ndim == 2, f"geoinfos must be 2D, got {rdata.geoinfos.shape}"
     assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
     assert rdata.datetimes.ndim == 1, f"datetimes must be 1D {rdata.datetimes.shape}"
@@ -301,9 +301,9 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
         f"{rdata.datetimes.shape[0]}"
     )
 
-    assert np.logical_and(rdata.datetimes >= dtr.start, rdata.datetimes < dtr.end).all(), (
-        f"datetimes for data points violate window {dtr}."
-    )
+    assert np.logical_and(
+        rdata.datetimes >= dtr.start, rdata.datetimes < dtr.end
+    ).all(), f"datetimes for data points violate window {dtr}."
 
 
 class DataReaderBase(metaclass=ABCMeta):
