@@ -55,8 +55,6 @@ class QuaverParser(CfParser):
         self.pl_file = ekd.create_target("file", self.get_output_filename("pl"))
         self.sf_file = ekd.create_target("file", self.get_output_filename("sfc"))
 
-        self.mapping = config.get("variables", {})
-
         self.template_cache = self.cache_templates()
 
     def process_sample(
@@ -96,6 +94,7 @@ class QuaverParser(CfParser):
                 _logger.info(f"[Worker] Encoding var={var}, level={level}")
 
                 field_data = da_fs.sel(channel=var)
+                field_data = self.scale_data(field_data, var)
                 template_field = self.template_cache.get((var, level), None)
                 if template_field is None:
                     _logger.error(f"Template for var={var}, level={level} not found. Skipping.")

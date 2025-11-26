@@ -186,6 +186,66 @@ def mse_channel_location_weighted(
     return loss, loss_chs
 
 
+def mae(
+    target: torch.Tensor,
+    pred: torch.Tensor,
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+):
+    """
+    Compute weighted MAE loss for one window or step
+
+    The function implements:
+
+    loss = Mean_{channels}( weight_channels * Mean_{data_pts}( (target - pred) * weights_points ))
+
+    Geometrically,
+
+        ------------------------     -
+        |                      |    |  |
+        |                      |    |  |
+        |                      |    |  |
+        |     target - pred    | x  |wp|
+        |                      |    |  |
+        |                      |    |  |
+        |                      |    |  |
+        ------------------------     -
+                    x
+        ------------------------
+        |          wc          |
+        ------------------------
+
+    where wp = weights_points and wc = weights_channels and "x" denotes row/col-wise multiplication.
+
+    The computations are:
+    1. weight the rows of (target - pred) by wp = weights_points
+    2. take the mean over the row
+    3. weight the collapsed cols by wc = weights_channels
+    4. take the mean over the channel-weighted cols
+
+    Params:
+        target : shape ( num_data_points , num_channels )
+        target : shape ( ens_dim , num_data_points , num_channels)
+        weights_channels : shape = (num_channels,)
+        weights_points : shape = (num_data_points)
+
+    Return:
+        loss : weight loss for gradient computation
+        loss_chs : losses per channel with location weighting but no channel weighting
+    """
+
+    mask_nan = ~torch.isnan(target)
+    pred = pred[0] if pred.shape[0] == 0 else pred.mean(0)
+
+    diff2 = torch.abs(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0))
+    if weights_points is not None:
+        diff2 = (diff2.transpose(1, 0) * weights_points).transpose(1, 0)
+    loss_chs = diff2.mean(0)
+    loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
+
+    return loss, loss_chs
+
+
 def cosine_latitude(stream_data, forecast_offset, fstep, min_value=1e-3, max_value=1.0):
     latitudes_radian = stream_data.target_coords_raw[forecast_offset + fstep][:, 0] * np.pi / 180
     return (max_value - min_value) * np.cos(latitudes_radian) + min_value
