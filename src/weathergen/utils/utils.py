@@ -9,6 +9,8 @@
 
 import torch
 
+from weathergen.common.config import Config
+
 
 def get_dtype(value: str) -> torch.dtype:
     """
@@ -24,3 +26,7 @@ def get_dtype(value: str) -> torch.dtype:
         raise NotImplementedError(
             f"Dtype {value} is not recognized, choose either, bf16, fp16, or fp32"
         )
+
+
+def get_batch_size(cf: Config, world_size: int) -> int:
+    return world_size * cf.batch_size_per_gpu
