@@ -155,6 +155,11 @@ class Trainer(TrainerBase):
                 MultiSelfAttentionHeadVarlen,
             )
 
+            # # Add this debug code before the FSDP sharding
+            # if is_root():
+            #     logger.info(f"forecast_engine attributes: {dir(model.forecast_engine)}")
+            #     logger.info(f"forecast_engine type: {type(model.forecast_engine)}")
+
             for module in model.ae_local_engine.ae_local_blocks.modules():
                 if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)
@@ -167,9 +172,16 @@ class Trainer(TrainerBase):
                 if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)
 
-            for module in model.forecast_engine.fe_blocks.modules():
-                if isinstance(module, modules_to_shard):
-                    fully_shard(module, **fsdp_kwargs)
+            # check if diffusion mode is enabled
+            fe_diffusion_model = getattr(cf, "fe_diffusion_model", False)
+            if fe_diffusion_model:
+                for module in model.forecast_engine.net.fe_blocks.modules():
+                    if isinstance(module, modules_to_shard):
+                        fully_shard(module, **fsdp_kwargs)
+            else:
+                for module in model.forecast_engine.fe_blocks.modules():
+                    if isinstance(module, modules_to_shard):
+                        fully_shard(module, **fsdp_kwargs)
 
             full_precision_fsdp_kwargs = {
                 "mp_policy": (
@@ -428,6 +440,14 @@ class Trainer(TrainerBase):
             len_per_rank = (
                 len(self.dataset) // (self.world_size_original * cf.batch_size_per_gpu)
             ) * cf.batch_size_per_gpu
+            logger.warning(
+                f"Division by zero cause by either one of these:\n"
+                f"len(self.dataset)={len(self.dataset)}, "
+                f"world_size_original={self.world_size_original}, "
+                f"batch_size_per_gpu={cf.batch_size_per_gpu}, "
+                f"len_per_rank={len_per_rank}, "
+                f"samples_per_mini_epoch={cf.samples_per_mini_epoch}, "
+            )
             mini_epoch_base = int(
                 self.cf.istep
                 / (min(len_per_rank, cf.samples_per_mini_epoch) * self.world_size_original)
@@ -621,7 +641,13 @@ class Trainer(TrainerBase):
                 targets, aux_outputs = self.target_and_aux_calculator.compute(
                     bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
                 )
-            targets = {"targets": [targets], "aux_outputs": aux_outputs}
+            # check if diffusion mode is enabled
+            fe_diffusion_model = getattr(cf, "fe_diffusion_model", False)
+            if fe_diffusion_model:
+                targets = {"targets": [targets], "aux_outputs": aux_outputs}
+            else:
+                targets = {"physical": batch[0]}
+
             loss, loss_values = self.loss_calculator.compute_loss(preds=output, targets=targets)
             if cf.latent_noise_kl_weight > 0.0:
                 kl = torch.cat([posterior.kl() for posterior in output.latent])

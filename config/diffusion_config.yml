@@ -1,0 +1,31 @@
+# Changes from original to new config
+forecast_offset: 1  # changed from 0
+forecast_steps: 1   # changed from 0
+forecast_policy: "fixed"  # changed from null
+fe_num_blocks: 8    # changed from 0
+fe_diffusion_model: True  # new parameter added
+
+training_mode: "forecast"  # changed from "masking"
+training_mode_config:
+  losses:
+    LossLatentDiffusion:  # changed from LossPhysical
+      weight: 1.0
+      loss_fcts: [['mse', 1.0]]
+  shared_heads: False  # new parameter
+  target_and_aux_calc: "DiffusionLatentTargetEncoder"  # new parameter
+  teacher_model: {}  # new parameter
+
+validation_mode_config:
+  losses:
+    LossLatentDiffusion:  # changed from LossPhysical
+      weight: 1.0
+      loss_fcts: [['mse', 1.0]]
+  shared_heads: False  # new parameter
+  target_and_aux_calc: "DiffusionLatentTargetEncoder"  # new parameter
+  teacher_model: {}  # new parameter
+
+samples_per_mini_epoch: 32  # changed from 4096
+samples_per_validation: 8   # changed from 512
+
+# Updated comment for training_mode
+# training mode: "forecast" or "masking" (masked token modeling) or "student-teacher"
