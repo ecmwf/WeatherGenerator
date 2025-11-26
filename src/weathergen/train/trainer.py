@@ -128,6 +128,11 @@ class Trainer(TrainerBase):
             cf, self.dataset, run_id_contd, mini_epoch_contd, "student", devices[0]
         )
 
+        self.target_and_aux_calculator = get_target_aux_calculator(
+            cf, self.dataset, self.model, self.device
+        )
+        self.target_and_aux_calculator.to_device(self.device)
+
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
         if is_root():
@@ -624,7 +629,7 @@ class Trainer(TrainerBase):
                             cf.forecast_offset,
                             forecast_steps,
                         )
-                    loss, loss_values = self.loss_calculator.compute_loss(
+                    loss, loss_values = self.loss_calculator_val.compute_loss(
                         preds=output,
                         targets=target_aux_output,
                     )
