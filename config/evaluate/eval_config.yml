@@ -16,7 +16,6 @@
 #      vmax: 40
 
 evaluation:
-  parallel: True
   metrics  : ["rmse", "mae"]
   regions: ["global", "nhem"]
   summary_plots : true
