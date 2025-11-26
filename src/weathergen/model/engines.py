@@ -42,17 +42,19 @@ class EmbeddingEngine(torch.nn.Module):
         super(EmbeddingEngine, self).__init__()
         self.cf = cf
         self.sources_size = sources_size  # KCT:iss130, what is this?
-        self.embeds = torch.nn.ModuleList()
+        self.embeds = torch.nn.ModuleDict()
+        self.stream_names: list[str] = []
 
         for i, si in enumerate(self.cf.streams):
-            stream_name = si.get("name", i)
+            stream_name = str(si.get("name", i))
+            self.stream_names.append(stream_name)
 
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
-                self.embeds.append(torch.nn.Identity())
+                self.embeds[stream_name] = torch.nn.Identity()
                 continue
 
             if si["embed"]["net"] == "transformer":
-                self.embeds.append(
+                self.embeds[stream_name] = (
                     StreamEmbedTransformer(
                         mode=self.cf.embed_orientation,
                         num_tokens=si["embed"]["num_tokens"],
@@ -70,7 +72,7 @@ class EmbeddingEngine(torch.nn.Module):
                     )
                 )
             elif si["embed"]["net"] == "linear":
-                self.embeds.append(
+                self.embeds[stream_name] = (
                     StreamEmbedLinear(
                         self.sources_size[i] * si["token_size"],
                         self.cf.ae_local_dim_embed,
@@ -99,7 +101,8 @@ class EmbeddingEngine(torch.nn.Module):
         )
 
         for _, sb in enumerate(streams_data):
-            for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
+            for stream_name, s in zip(self.stream_names, sb, strict=True):
+                embed = self.embeds[stream_name]
                 if not s.source_empty():
                     idxs = s.source_idxs_embed.to(device)
                     idxs_pe = s.source_idxs_embed_pe.to(device)
