@@ -502,7 +502,7 @@ class Trainer(TrainerBase):
         for bidx, batch in enumerate(dataset_iter):
 
             # make existing pipeline work:
-            batch = batch[0]
+            # batch = batch[0]
 
             ################################################################
             # SOPH: student teacher access path here:
@@ -520,8 +520,8 @@ class Trainer(TrainerBase):
             # You will also need the source_cell_lens, target_coords_idx, these are not being passed through for the views yet.
             ################################################################
 
-            forecast_steps = batch[-1]
-            batch = self.batch_to_device(batch)
+            forecast_steps = batch[0][-1]
+            # batch = self.batch_to_device(batch)
 
             # evaluate model
             with torch.autocast(
@@ -529,25 +529,24 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
+                import pdb; pdb.set_trace()
                 outputs = []
-                for view in batch.model_inputs:
-                    outputs.append(
-                        self.model(self.model_params, view, cf.forecast_offset, forecast_steps)
-                    )
+                for view in batch[1].source_samples:
+                    outputs.append(self.model(
+                        self.model_params, view, cf.forecast_offset, forecast_steps
+                    ))
 
                 targets_and_auxs = []
-                for view in batch.targets:
-                    targets_and_auxs.append(
-                        self.target_and_aux_calculator.compute(
-                            self.cf.istep,
-                            view,
-                            self.model_params,
-                            self.model,
-                            cf.forecast_offset,
-                            forecast_steps,
-                        )
-                    )
-                targets, aux = zip(*targets_and_auxs, strict=False)
+                for view in batch[1].target_samples:
+                    targets_and_auxs.append(self.target_and_aux_calculator.compute(
+                        self.cf.istep,
+                        view,
+                        self.model_params,
+                        self.model,
+                        cf.forecast_offset,
+                        forecast_steps,
+                    ))
+                targets, aux = zip(*targets_and_auxs)
             loss, loss_values = self.loss_calculator.compute_loss(
                 preds=outputs,
                 targets=targets,

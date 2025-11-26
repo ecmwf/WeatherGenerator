@@ -107,72 +107,77 @@ latent_noise :
 
 ### Training parameters ###
 
-#training_strategy :
-#  # masking, forecasting, student-teacher
-#  mode : "student-teacher"
-#  # 
-#  source : 
-#    - masking_params : 
-#        strategy : "healpix"
-#        num_samples : 4
-#        rate : 0.4
-#        hl_mask: 4 
-#        same_strategy_per_batch: False
-#        teacher_relationship: subset
-#       
-#    - masking_params : 
-#        strategy : "random"
-#        num_samples : 4
-#        rate : 0.4
-#        hl_mask: 4 
-#        same_strategy_per_batch: False
-#        teacher_relationship: subset
-
-
-  # ignored depending on the training mode
-  # invalid syntax
-#  target :
-#    - masking_params : 
-#        target_aux: ema_teacher
-#        strategy : "healpix"
-#        num_samples : 2
-#        rate : 0.8
-#        hl_mask: 1 
-#        same_strategy_per_batch: False
-#        teacher_relationship: subset
-#        loss: DINOLoss, JEPALoss
-#      strategy : 
-#        - loss: JEPA
-        
-#  loss :
-#    DINO
-
-
 training_strategy :
   # masking, forecasting, student-teacher
-  mode : "masking"
+  mode : "student-teacher"
   # 
   source : 
-    num_samples : 4
-    masking_rate : 0.5
-    source_params: 
-      # will be used with masking is moved under here
-      masking_strategy: "random"
-      probabilities: [0.34, 0.33, 0.33]
-      hl_mask: 0 
-      mode: per_cell
-      same_strategy_per_batch: False
-                    
-  # ignored depending on the training mode
+    - masking_params : 
+        strategy : "healpix"
+        num_samples : 4
+        rate : 0.4
+        hl_mask: 4 
+        same_strategy_per_batch: False
+        teacher_relationship: subset
+       
+    - masking_params : 
+        strategy : "random"
+        num_samples : 4
+        rate : 0.4
+        hl_mask: 4 
+        same_strategy_per_batch: False
+        teacher_relationship: subset
+
+
+ # ignored depending on the training mode
+ # invalid syntax
   target :
-    - target_aux: physical
-      loss : physical
-    #- target_aux: encoder
-    #  loss: latent_mae
-    #- target_aux: EMATeacher
-    # prediction_head: DINOv2
-    #  centering: 0.5
-    #  loss: latent_mae
+    masking_params : 
+      target_aux: ema_teacher
+      strategy : "healpix"
+      num_samples : 2
+      rate : 0.8
+      hl_mask: 1 
+      same_strategy_per_batch: False
+      teacher_relationship: subset
+      loss: DINOLoss, JEPALoss
+    strategy : 
+      - loss: JEPA
+    losses : { 
+      LossLatentSSLStudentTeacher: { 
+        "iBOT": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
+            "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+        "DINO": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
+            "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+        "JEPA": {'weight': 0.5, "out_dim": 2048, "n_register_tokens": 4} }
+    }
+
+
+# training_strategy :
+#   # masking, forecasting, student-teacher
+#   mode : "masking"
+#   # 
+#   source : 
+#     num_samples : 4
+#     masking_rate : 0.5
+#     source_params: 
+#       # will be used with masking is moved under here
+#       masking_strategy: "random"
+#       probabilities: [0.34, 0.33, 0.33]
+#       hl_mask: 0 
+#       mode: per_cell
+#       same_strategy_per_batch: False
+#                     
+#   # ignored depending on the training mode
+#   target :
+#     - target_aux: physical
+#       loss : physical
+#     #- target_aux: encoder
+#     #  loss: latent_mae
+#     #- target_aux: EMATeacher
+#     # prediction_head: DINOv2
+#     #  centering: 0.5
+#     #  loss: latent_mae
 
 #training_strategy :
 #  # masking, forecasting, student-teacher
