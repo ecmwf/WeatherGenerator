@@ -69,7 +69,7 @@ def test_train(setup, test_run_id):
 def infer(run_id):
     logger.info("run inference")
     inference_from_args(
-        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--epoch", "0"]
+        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--mini_epoch", "0"]
         + [
             "--from_run_id",
             run_id,
@@ -84,7 +84,7 @@ def infer(run_id):
 def infer_with_missing(run_id):
     logger.info("run inference")
     inference_from_args(
-        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--epoch", "0"]
+        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--mini_epoch", "0"]
         + [
             "--from_run_id",
             run_id,
@@ -128,13 +128,14 @@ def evaluate_results(run_id):
                         }
                     },
                     "label": "MTM ERA5",
-                    "epoch": 0,
+                    "mini_epoch": 0,
                     "rank": 0,
                 }
             },
         }
     )
-    evaluate_from_config(cfg)
+    # Not passing the mlflow client for tests.
+    evaluate_from_config(cfg, None)
 
 
 def load_metrics(run_id):
@@ -161,19 +162,20 @@ def assert_train_loss_below_threshold(run_id):
     metrics = load_metrics(run_id)
     loss_metric = next(
         (
-            metric.get("stream.ERA5.loss_mse.loss_avg", None)
+            metric.get("loss.LossPhysical.ERA5.mse.loss_avg", None)
             for metric in reversed(metrics)
             if metric.get("stage") == "train"
         ),
         None,
     )
     assert loss_metric is not None, (
-        "'stream.ERA5.loss_mse.loss_avg' metric is missing in metrics file"
+        "'loss.LossPhysical.ERA5.mse.loss_avg' metric is missing in metrics file"
     )
-    # Check that the loss does not explode in a single epoch
+    # Check that the loss does not explode in a single mini_epoch
     # This is meant to be a quick test, not a convergence test
-    assert loss_metric < 1.25, (
-        f"'stream.ERA5.loss_mse.loss_avg' is {loss_metric}, expected to be below 0.25"
+    target = 0.25
+    assert loss_metric < target, (
+        f"'loss.LossPhysical.ERA5.mse.loss_avg' is {loss_metric}, expected to be below {target}"
     )
 
 
@@ -182,7 +184,7 @@ def assert_val_loss_below_threshold(run_id):
     metrics = load_metrics(run_id)
     loss_metric = next(
         (
-            metric.get("stream.ERA5.loss_mse.loss_avg", None)
+            metric.get("loss.LossPhysical.ERA5.mse.loss_avg", None)
             for metric in reversed(metrics)
             if metric.get("stage") == "val"
         ),
@@ -191,8 +193,8 @@ def assert_val_loss_below_threshold(run_id):
     assert loss_metric is not None, (
         "'stream.ERA5.loss_mse.loss_avg' metric is missing in metrics file"
     )
-    # Check that the loss does not explode in a single epoch
+    # Check that the loss does not explode in a single mini_epoch
     # This is meant to be a quick test, not a convergence test
-    assert loss_metric < 1.25, (
-        f"'stream.ERA5.loss_mse.loss_avg' is {loss_metric}, expected to be below 0.25"
+    assert loss_metric < 0.25, (
+        f"'loss.LossPhysical.ERA5.mse.loss_avg' is {loss_metric}, expected to be below 0.25"
     )

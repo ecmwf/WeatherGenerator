@@ -10,8 +10,9 @@ dependencies = [
     "xhistogram",
     "panel",
     "omegaconf",
-    "weathergen-common",
     "plotly>=6.2.0",
+    "weathergen-common",
+    "weathergen-metrics",
 ]
 
 [dependency-groups]
@@ -19,6 +20,7 @@ dev = [
  "pytest~=8.3.5",
  "pytest-mock>=3.14.1",
  "ruff==0.9.7",
+ "pyrefly==0.36.0",
 ]
 
 [project.scripts]
@@ -27,58 +29,7 @@ export = "weathergen.evaluate.export_inference:export"
 
 # The linting configuration
 [tool.ruff]
-
-# Wide rows
-line-length = 100
-
-[tool.ruff.lint]
-# All disabled until the code is formatted.
-select = [
-    # pycodestyle
-    "E",
-    # Pyflakes
-    "F",
-    # pyupgrade
-    "UP",
-    # flake8-bugbear
-    "B",
-    # flake8-simplify
-    "SIM",
-    # isort
-    "I",
-    # Banned imports
-    "TID",
-    # Naming conventions
-    "N",
-    # print
-    "T201"
-]
-
-# These rules are sensible and should be enabled at a later stage.
-ignore = [
-  # "B006",
-  "B011",
-  "UP008",
-  "SIM117",
-  "SIM118",
-  "SIM102",
-  "SIM401",
-  "E501", # to be removed 
-  "E721",
-  # To ignore, not relevant for us
-  "SIM108", # in case additional norm layer supports are added in future
-  "N817", # we use heavy acronyms, e.g., allowing 'import LongModuleName as LMN' (LMN is accepted)
-  "E731", # overly restrictive and less readable code
-  "N812", # prevents us following the convention for importing torch.nn.functional as F
-]
-
-[tool.ruff.lint.flake8-tidy-imports.banned-api]
-"numpy.ndarray".msg = "Do not use 'ndarray' to describe a numpy array type, it is a function. Use numpy.typing.NDArray or numpy.typing.NDArray[np.float32] for example"
-
-[tool.ruff.format]
-# Use Unix `\n` line endings for all files
-line-ending = "lf"
-
+extend = "../../pyproject.toml"
 
 [tool.pyrefly]
 project-includes = ["src/"]

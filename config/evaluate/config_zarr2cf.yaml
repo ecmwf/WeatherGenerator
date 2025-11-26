@@ -36,6 +36,7 @@ variables:
     wg_unit: m**2 s**-2
     std_unit: m
     level_type: pl
+    scale_factor: 1/9.80665
   10u:
     var: u10
     long: u_wind_at_10m
@@ -98,6 +99,7 @@ coordinates:
         stream: stream
         forecast_step: forecast_period
         forecast_ref_time: forecast_ref_time
+        ncells: ncells
     pl:
         pressure_level: pressure
         valid_time: valid_time
@@ -106,6 +108,8 @@ coordinates:
         stream: stream
         forecast_step: forecast_period
         forecast_ref_time: forecast_ref_time
+        ncells: ncells
+
 dimensions:
     valid_time:
       wg: valid_time
@@ -131,6 +135,9 @@ dimensions:
     stream:
       wg: stream
       std: stream
+    ncells:
+      wg: ncells
+      std: ncells
     #TODO maybe absorb stream as an attribute
     # forecast_step: forecast_step
     # don't want forecast_step anyway

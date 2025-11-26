@@ -123,6 +123,10 @@ class LearningRateScheduler:
             self.decay_factor = self.lr_max_scaled * np.sqrt(n_steps_warmup)
             self.scheduler_decay = None
 
+        elif policy_decay == "constant":
+            self.decay_factor = 0.0
+            self.scheduler_decay = None
+
         else:
             assert False, "Unsupported decay policy for learning rate scheduler"
 
@@ -154,8 +158,8 @@ class LearningRateScheduler:
         self.i_step = 0
         self.lr = self.cur_scheduler.get_last_lr()
 
-        # advance manually to step_contd (last_epoch parameter for schedulers is not working and
-        # this is also more brittle with the different phases)
+        # advance manually to step_contd (last_mini_epoch parameter for schedulers is not working
+        # and this is also more brittle with the different phases)
         # optimizer.step() as required by torch;
         # won't have a material effect since grads are zero at this point
         if self.step_contd > 0:
@@ -173,11 +177,10 @@ class LearningRateScheduler:
         if self.i_step >= (self.n_steps_warmup + self.n_steps_decay + self.n_steps_cooldown):
             return self.lr
 
-        if (
-            self.policy_decay == "sqrt"
-            and self.i_step > self.n_steps_warmup
-            and self.i_step < self.n_steps_warmup + self.n_steps_decay
-        ):
+        end_decay = self.n_steps_warmup + self.n_steps_decay
+        phase_decay = (self.i_step > self.n_steps_warmup) and (self.i_step <= end_decay)
+
+        if self.policy_decay == "sqrt" and phase_decay:
             self.lr = (
                 (self.decay_factor / np.sqrt(self.i_step))
                 if self.i_step > 0
@@ -185,6 +188,13 @@ class LearningRateScheduler:
             )
             for g in self.optimizer.param_groups:
                 g["lr"] = self.lr
+        elif self.policy_decay == "constant" and phase_decay:
+            cur_lr = self.lr
+            self.lr = self.lr_max_scaled
+            # make sure lr_max_scaled rate is used if warm-up end is not lr_max_scaled
+            if cur_lr < self.lr:
+                for g in self.optimizer.param_groups:
+                    g["lr"] = self.lr
         else:
             self.cur_scheduler.step()
             self.lr = self.cur_scheduler.get_last_lr()[0]
@@ -218,8 +228,8 @@ class LearningRateScheduler:
         Use as LearningRateScheduler.plot()
         """
 
-        num_epochs = 42
-        num_samples_per_epoch = 4096
+        num_mini_epochs = 42
+        num_samples_per_mini_epoch = 4096
 
         lr_start = 0.000001
         lr_max = 0.000015
@@ -245,7 +255,7 @@ class LearningRateScheduler:
             lr_final_decay,
             lr_final,
             lr_steps_warmup,
-            num_epochs * num_samples_per_epoch,
+            num_mini_epochs * num_samples_per_mini_epoch,
             lr_steps_cooldown,
             lr_policy_warmup,
             lr_policy_decay,
@@ -254,7 +264,10 @@ class LearningRateScheduler:
         lrs = []
 
         for _ in range(
-            num_epochs * num_samples_per_epoch + lr_steps_warmup + lr_steps_cooldown + 1023
+            num_mini_epochs * num_samples_per_mini_epoch
+            + lr_steps_warmup
+            + lr_steps_cooldown
+            + 1023
         ):
             optimizer.step()
             lrs.append(optimizer.param_groups[0]["lr"])
@@ -279,7 +292,7 @@ class LearningRateScheduler:
             lr_final_decay,
             lr_final,
             lr_steps_warmup,
-            num_epochs * num_samples_per_epoch,
+            num_mini_epochs * num_samples_per_mini_epoch,
             lr_steps_cooldown,
             lr_policy_warmup,
             lr_policy_decay,
@@ -288,7 +301,10 @@ class LearningRateScheduler:
         lrs = []
 
         for _ in range(
-            num_epochs * num_samples_per_epoch + lr_steps_warmup + lr_steps_cooldown + 1023
+            num_mini_epochs * num_samples_per_mini_epoch
+            + lr_steps_warmup
+            + lr_steps_cooldown
+            + 1023
         ):
             optimizer.step()
             lrs.append(optimizer.param_groups[0]["lr"])
