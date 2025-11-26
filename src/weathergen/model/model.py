@@ -562,7 +562,14 @@ class Model(torch.nn.Module):
         return new_params
 
     #########################################
-    def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
+    def forward(
+        self,
+        model_params: ModelParams,
+        batch,
+        forecast_offset: int,
+        forecast_steps: int,
+        encode_only: bool = False,
+    ):
         """Performs the forward pass of the model to generate forecasts
 
         Tokens are processed through the model components, which were defined in the create method.
@@ -583,6 +590,8 @@ class Model(torch.nn.Module):
         (streams_data, _, target_coords_idxs) = batch
 
         tokens, posteriors = self.encode(model_params=model_params, batch=batch)
+        if encode_only:
+            return tokens, posteriors
 
         # roll-out in latent space
         preds_all = []
@@ -590,15 +599,15 @@ class Model(torch.nn.Module):
         latents["preds"] = []
         for fstep in range(forecast_offset, forecast_offset + forecast_steps):
             # prediction
-            preds_all += [
-                self.predict(
-                    model_params,
-                    fstep,
-                    tokens,
-                    streams_data,
-                    target_coords_idxs,
-                )
-            ]
+            # preds_all += [
+            #     self.predict(
+            #         model_params,
+            #         fstep,
+            #         tokens,
+            #         streams_data,
+            #         target_coords_idxs,
+            #     )
+            # ]
 
             if self.training:
                 # Impute noise to the latent state
@@ -610,15 +619,15 @@ class Model(torch.nn.Module):
             latents["preds"] += [tokens]
 
         # prediction for final step
-        preds_all += [
-            self.predict(
-                model_params,
-                forecast_offset + forecast_steps,
-                tokens,
-                streams_data,
-                target_coords_idxs,
-            )
-        ]
+        # preds_all += [
+        #     self.predict(
+        #         model_params,
+        #         forecast_offset + forecast_steps,
+        #         tokens,
+        #         streams_data,
+        #         target_coords_idxs,
+        #     )
+        # ]
 
         latents["posteriors"] = posteriors
 

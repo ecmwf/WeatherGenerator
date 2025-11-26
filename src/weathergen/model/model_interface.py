@@ -106,7 +106,11 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 
-        for module in model.forecast_engine.fe_blocks.modules():
+        if cf.fe_diffusion_model:
+            model_fe_blocks = model.forecast_engine.net.fe_blocks
+        else:
+            model_fe_blocks = model.forecast_engine.fe_blocks
+        for module in model_fe_blocks.modules():
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 

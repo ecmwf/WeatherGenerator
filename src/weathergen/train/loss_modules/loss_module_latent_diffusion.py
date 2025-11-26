@@ -117,5 +117,7 @@ class LossLatentDiffusion(LossModuleBase):
             loss_values[loss_values == 0.0] = torch.nan
 
         return LossValues(
-            loss=loss, losses_all=losses_all, stddev_all={"latent": torch.tensor(torch.nan)}
+            loss=loss,
+            losses_all=losses_all,
+            stddev_all={"latent": torch.tensor(torch.nan).to(self.device)},
         )
