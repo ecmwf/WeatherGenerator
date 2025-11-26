@@ -1,4 +1,6 @@
-from typing import Any
+import dataclasses
+
+import torch
 
 
 @dataclasses.dataclass
