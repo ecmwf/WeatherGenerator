@@ -16,6 +16,7 @@ import torch
 from omegaconf import DictConfig
 
 import weathergen.train.loss_modules as LossModules
+from weathergen.model.model import ModelOutput
 from weathergen.train.loss_modules.loss_module_base import LossValues
 from weathergen.train.target_and_aux_module_base import TargetAuxOutput
 from weathergen.utils.train_logger import TRAIN, Stage
@@ -77,7 +78,7 @@ class LossCalculator:
 
     def compute_loss(
         self,
-        preds: dict,
+        preds: ModelOutput,
         targets: TargetAuxOutput,
     ):
         loss_terms = {}
