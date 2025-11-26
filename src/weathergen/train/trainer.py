@@ -617,14 +617,15 @@ class Trainer(TrainerBase):
                         output = model_forward(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
-
+                        targets, aux_outputs = self.target_and_aux_calculator.compute(
+                            bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
+                        )
                     targets = {"physical": batch[0]}
-
-                    # compute loss
-                    loss, loss_values = self.loss_calculator_val.compute_loss(
+                    loss, loss_values = self.loss_calculator.compute_loss(
                         preds=output,
                         targets=targets,
                     )
+                    
                     # log output
                     if bidx < cf.log_validation:
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
