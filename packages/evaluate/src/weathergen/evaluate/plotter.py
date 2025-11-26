@@ -14,8 +14,8 @@ import xarray as xr
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
-
 from weathergen.common.config import _load_private_conf
+
 from weathergen.evaluate.plot_utils import (
     DefaultMarkerSize,
 )
@@ -476,7 +476,10 @@ class Plotter:
 
         plt.colorbar(scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}")
         plt.title(title)
-        ax.set_global()
+        # ax.set_global()
+        belgium_extent = [49.5, 51.68, 2.4, 6.40]
+        ax.set_extent(belgium_extent, crs=ccrs.PlateCarree())
+
         ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
 
         # TODO: make this nicer

@@ -370,6 +370,10 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         plot_chs = list(np.atleast_1d(tars.channel.values))
         plot_samples = list(np.unique(tars.sample.values))
 
+        bbox = RegionBoundingBox.from_region_name("belgium")
+        tars = bbox.apply_mask(tars)
+        preds = bbox.apply_mask(preds)
+
         for sample in tqdm(plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"):
             data_selection = {
                 "sample": sample,
