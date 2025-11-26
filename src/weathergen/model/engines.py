@@ -336,6 +336,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=1,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
+                            with_noise_conditioning=self.cf.fe_diffusion_model,
                         )
                     )
                 else:
@@ -352,6 +353,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=1,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
+                            with_noise_conditioning=self.cf.fe_diffusion_model,
                         )
                     )
                 # Add MLP block
@@ -364,6 +366,7 @@ class ForecastingEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         dim_aux=1,
                         norm_eps=self.cf.mlp_norm_eps,
+                        with_noise_conditioning=self.cf.fe_diffusion_model,
                     )
                 )
 
@@ -376,10 +379,17 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-    def forward(self, tokens, fstep):
+    def forward(self, tokens, fstep, noise_emb=None):
         aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
-        for block in self.fe_blocks:
-            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+        if self.cf.fe_diffusion_model:
+            assert noise_emb is not None, (
+                "Noise embedding must be provided for diffusion forecast engine"
+            )
+            for block in self.fe_blocks:
+                tokens = checkpoint(block, tokens, noise_emb, aux_info, use_reentrant=False)
+        else:
+            for block in self.fe_blocks:
+                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
 
         return tokens
 
