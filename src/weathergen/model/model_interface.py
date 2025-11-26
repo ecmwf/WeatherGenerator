@@ -1,3 +1,5 @@
+# ruff: noqa: B006
+
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -43,7 +45,7 @@ type TrainingMode = str
 
 
 def init_model_and_shard(
-    cf, dataset, run_id_contd, mini_epoch_contd, training_mode, overrides, device
+    cf, dataset, run_id_contd, mini_epoch_contd, training_mode, device, overrides={}
 ):
     model_creation_device = "meta" if cf.with_ddp and cf.with_fsdp else "cuda"
     with torch.device(model_creation_device):
