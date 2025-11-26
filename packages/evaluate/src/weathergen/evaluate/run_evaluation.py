@@ -215,13 +215,18 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                     parent_run_id=parent_run.info.run_id,
                     nested=True,
                 ) as run:
-                    mlflow.set_tags(MlFlowUpload.run_tags(run_id, phase, from_run_id))
-                    log_scores(
-                        reordered_dict[run_id],
-                        mlflow_client,
-                        run.info.run_id,
-                        channels_set,
-                    )
+try:
+                                            mlflow.set_tags(MlFlowUpload.run_tags(run_id, phase, from_run_id))
+                        log_scores(
+                            reordered_dict[run_id],
+                            mlflow_client,
+                            run.info.run_id,
+                            channels_set,
+                        )
+                except Exception as e:
+                    _logger.error(f"Error logging scores for run {run_id}: {e}")
+                    mlflow.end_run(status="FAILED")
+                    raise
 
     # plot summary
     if scores_dict and cfg.evaluation.get("summary_plots", True):
