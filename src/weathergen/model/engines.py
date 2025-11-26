@@ -54,30 +54,26 @@ class EmbeddingEngine(torch.nn.Module):
                 continue
 
             if si["embed"]["net"] == "transformer":
-                self.embeds[stream_name] = (
-                    StreamEmbedTransformer(
-                        mode=self.cf.embed_orientation,
-                        num_tokens=si["embed"]["num_tokens"],
-                        token_size=si["token_size"],
-                        num_channels=self.sources_size[i],
-                        dim_embed=si["embed"]["dim_embed"],
-                        dim_out=self.cf.ae_local_dim_embed,
-                        num_blocks=si["embed"]["num_blocks"],
-                        num_heads=si["embed"]["num_heads"],
-                        dropout_rate=self.cf.embed_dropout_rate,
-                        norm_type=self.cf.norm_type,
-                        embed_size_centroids=self.cf.embed_size_centroids,
-                        unembed_mode=self.cf.embed_unembed_mode,
-                        stream_name=stream_name,
-                    )
+                self.embeds[stream_name] = StreamEmbedTransformer(
+                    mode=self.cf.embed_orientation,
+                    num_tokens=si["embed"]["num_tokens"],
+                    token_size=si["token_size"],
+                    num_channels=self.sources_size[i],
+                    dim_embed=si["embed"]["dim_embed"],
+                    dim_out=self.cf.ae_local_dim_embed,
+                    num_blocks=si["embed"]["num_blocks"],
+                    num_heads=si["embed"]["num_heads"],
+                    dropout_rate=self.cf.embed_dropout_rate,
+                    norm_type=self.cf.norm_type,
+                    embed_size_centroids=self.cf.embed_size_centroids,
+                    unembed_mode=self.cf.embed_unembed_mode,
+                    stream_name=stream_name,
                 )
             elif si["embed"]["net"] == "linear":
-                self.embeds[stream_name] = (
-                    StreamEmbedLinear(
-                        self.sources_size[i] * si["token_size"],
-                        self.cf.ae_local_dim_embed,
-                        stream_name=stream_name,
-                    )
+                self.embeds[stream_name] = StreamEmbedLinear(
+                    self.sources_size[i] * si["token_size"],
+                    self.cf.ae_local_dim_embed,
+                    stream_name=stream_name,
                 )
             else:
                 raise ValueError("Unsupported embedding network type")

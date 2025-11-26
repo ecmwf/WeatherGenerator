@@ -384,42 +384,36 @@ class Model(torch.nn.Module):
 
             # embedding network for coordinates
             if etc["net"] == "linear":
-                self.embed_target_coords[stream_name] = (
-                    NamedLinear(
-                        f"embed_target_coords_{stream_name}",
-                        in_features=dim_coord_in,
-                        out_features=dims_embed[0],
-                        bias=False,
-                    )
+                self.embed_target_coords[stream_name] = NamedLinear(
+                    f"embed_target_coords_{stream_name}",
+                    in_features=dim_coord_in,
+                    out_features=dims_embed[0],
+                    bias=False,
                 )
             elif etc["net"] == "mlp":
-                self.embed_target_coords[stream_name] = (
-                    MLP(
-                        dim_coord_in,
-                        dims_embed[0],
-                        hidden_factor=8,
-                        with_residual=False,
-                        dropout_rate=dropout_rate,
-                        norm_eps=self.cf.mlp_norm_eps,
-                        stream_name=f"embed_target_coords_{stream_name}",
-                    )
+                self.embed_target_coords[stream_name] = MLP(
+                    dim_coord_in,
+                    dims_embed[0],
+                    hidden_factor=8,
+                    with_residual=False,
+                    dropout_rate=dropout_rate,
+                    norm_eps=self.cf.mlp_norm_eps,
+                    stream_name=f"embed_target_coords_{stream_name}",
                 )
             else:
                 assert False
 
             # obs-specific adapter for tokens
             if cf.pred_adapter_kv:
-                self.pred_adapter_kv[stream_name] = (
-                    MLP(
-                        cf.ae_global_dim_embed,
-                        cf.ae_global_dim_embed,
-                        hidden_factor=2,
-                        with_residual=True,
-                        dropout_rate=dropout_rate,
-                        norm_type=cf.norm_type,
-                        norm_eps=self.cf.mlp_norm_eps,
-                        stream_name=f"pred_adapter_kv_{stream_name}",
-                    )
+                self.pred_adapter_kv[stream_name] = MLP(
+                    cf.ae_global_dim_embed,
+                    cf.ae_global_dim_embed,
+                    hidden_factor=2,
+                    with_residual=True,
+                    dropout_rate=dropout_rate,
+                    norm_type=cf.norm_type,
+                    norm_eps=self.cf.mlp_norm_eps,
+                    stream_name=f"pred_adapter_kv_{stream_name}",
                 )
             else:
                 self.pred_adapter_kv[stream_name] = torch.nn.Identity()
@@ -449,16 +443,14 @@ class Model(torch.nn.Module):
                 logger.debug(
                     f"{final_activation} activation of prediction head of {si['name']} stream"
                 )
-            self.pred_heads[stream_name] = (
-                EnsPredictionHead(
-                    dims_embed[-1],
-                    self.targets_num_channels[i_obs],
-                    si["pred_head"]["num_layers"],
-                    si["pred_head"]["ens_size"],
-                    norm_type=cf.norm_type,
-                    final_activation=final_activation,
-                    stream_name=stream_name,
-                )
+            self.pred_heads[stream_name] = EnsPredictionHead(
+                dims_embed[-1],
+                self.targets_num_channels[i_obs],
+                si["pred_head"]["num_layers"],
+                si["pred_head"]["ens_size"],
+                norm_type=cf.norm_type,
+                final_activation=final_activation,
+                stream_name=stream_name,
             )
 
         return self
@@ -498,9 +490,7 @@ class Model(torch.nn.Module):
         num_params_tte = [
             get_num_parameters(self.target_token_engines[name]) for name in self.stream_names
         ]
-        num_params_preds = [
-            get_num_parameters(self.pred_heads[name]) for name in self.stream_names
-        ]
+        num_params_preds = [get_num_parameters(self.pred_heads[name]) for name in self.stream_names]
 
         print("-----------------")
         print(f"Total number of trainable parameters: {num_params_total:,}")
