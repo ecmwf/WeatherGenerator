@@ -14,7 +14,7 @@ import numpy as np
 import torch
 
 from weathergen.common.io import IOReaderData
-from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.batch import ModelBatch, Sample, SampleMetaData
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
@@ -550,7 +550,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
             name = stream_info["name"]
 
-            (target_masks, source_masks, student_to_teacher) = masks_streams[name]
+            (target_masks, source_masks, student_to_teacher, target_metadata_list, source_metadata_list) = masks_streams[name]
 
             # input_data and output_data is conceptually consecutive but differs
             # in source and target channels; overlap in one window when self.forecast_offset=0
@@ -582,12 +582,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # source meta info...
                 # source_meta_info = SampleMetaData(...
 
-                source_meta_info = student_cfg
+                #print("metadata:", metadata)
+                #print("How many elements in metadata?", len(metadata))
+                #print("current sidx:", sidx)
+
+                source_metadata = source_metadata_list[sidx]  # first is teacher
 
                 # TODO: seb check this 
                 # Map each student (source) to its teacher (target)
                 t_idx = student_to_teacher[sidx]
-                batch.add_source_stream(sidx, t_idx, name, sdata, source_meta_info)
+                batch.add_source_stream(sidx, t_idx, name, sdata, source_metadata)
 
             # stream_data_target can contain network input
             stream_data_target = {}
@@ -608,12 +612,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 stream_data_target[name] = sdata
                 
                 # get teacher config info
-                teacher_meta_info = teacher_cfg
+                target_metadata = target_metadata_list[t_idx]
 
                 # TODO: seb to check
                 # Map target to all source students
                 student_indices = [s_idx for s_idx, tid in enumerate(student_to_teacher) if tid == t_idx]
-                batch.add_target_stream(t_idx, student_indices, name, sdata, teacher_meta_info)
+                batch.add_target_stream(t_idx, student_indices, name, sdata, target_metadata)
             
             # import pdb; pdb.set_trace()
 
@@ -653,11 +657,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             target_masks: list[torch.Tensor] = []
             source_masks: list[torch.Tensor] = []
             student_to_teacher: list[int] = []
+            target_metadata: list[SampleMetaData] = []
+            source_metadata: list[SampleMetaData] = []
 
             # add a loop over num_teacher_views, generate students for each teacher
             for t_idx in range(num_teacher_views):
                 # Build one teacher and its student views
-                t_keep_np, s_keeps_np, _meta = self.tokenizer.masker.build_views_for_stream(
+                t_keep_np, s_keeps_np, metadata = self.tokenizer.masker.build_views_for_stream(
                     self.num_healpix_cells,
                     teacher_cfg=teacher_cfg,
                     student_cfg=student_cfg,
@@ -667,14 +673,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # append teacher mask
                 t_tensor = to_bool_tensor(t_keep_np)
                 target_masks.append(t_tensor)
+                target_metadata.append(metadata[0])  # TODO: first is teacher
 
                 # this teacher's students and mapping
-                for s_np in (s_keeps_np or []):
+                for s_np, metadata in zip(s_keeps_np or [], metadata[1:], strict=True):
                     source_masks.append(to_bool_tensor(s_np))
                     # append 0, 1, ... depending on which teacher we did
+                    source_metadata.append(metadata)
                     student_to_teacher.append(len(target_masks) - 1)
 
-            masks[stream_info["name"]] = (target_masks, source_masks, student_to_teacher)
+            masks[stream_info["name"]] = (target_masks, source_masks, student_to_teacher, target_metadata, source_metadata)
         
         return masks
 
@@ -692,6 +700,21 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         target_coords_idx = compute_idxs_predict(self.forecast_offset + forecast_dt, batch)
 
         return batch, source_cell_lens, target_coords_idx
+
+    def _preprocess_single_view(self, sample: Sample, forecast_dt: int):
+        """ """
+        streams = [sd for sd in sample.streams_data.values() if sd is not None]
+        if not streams:
+            sample.set_preprocessed([], [])
+            return
+        _, scl, tci = self._preprocess_model_data([streams], forecast_dt)
+        sample.set_preprocessed(scl, tci)
+
+    def _preprocess_model_batch_views(self, model_batch: ModelBatch, forecast_dt: int):
+        for sample in model_batch.source_samples:
+            self._preprocess_single_view(sample, forecast_dt)
+        for sample in model_batch.target_samples:
+            self._preprocess_single_view(sample, forecast_dt)
 
     def __iter__(self):
         """
@@ -744,12 +767,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # TODO: link into ModelBatch
 
+            print("Batch size:", len(batch))
+            print("What is batch at this point?", batch)
+
+            # import pdb; pdb.set_trace()
+
             # compute
             batch, source_cell_lens, target_coords_idx = self._preprocess_model_data(
                 batch, forecast_dt
             )
 
-            import pdb; pdb.set_trace()
+            self._preprocess_model_batch_views(student_teacher_batch, forecast_dt)
+
+            # import pdb; pdb.set_trace()
 
             yield (batch, source_cell_lens, target_coords_idx, forecast_dt), student_teacher_batch
 

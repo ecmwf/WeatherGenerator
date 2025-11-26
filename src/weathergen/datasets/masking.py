@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from weathergen.common.config import Config
-from weathergen.datasets.batch import ViewMetadata
+from weathergen.datasets.batch import SampleMetaData
 
 _logger = logging.getLogger(__name__)
 
@@ -630,11 +630,10 @@ class Masker:
         teacher_cfg: dict,
         student_cfg: dict,
         relationship: str = "subset",
-    ) -> Tuple[np.typing.NDArray, List[np.typing.NDArray], List[ViewMetadata]]:
+    ) -> Tuple[np.typing.NDArray, List[np.typing.NDArray], List[SampleMetaData]]:
         """
         Construct teacher/student keep masks for a stream.
-        ViewMetadata likely to be deprecated, 
-        but information can be piped here for now.
+        SampleMetaData is currently just a dict with the masking params used.
         """
 
         strat_teacher = teacher_cfg.get("strategy", "random")
@@ -669,25 +668,15 @@ class Masker:
                 keep = base
             student_keep_masks.append(keep)
 
-        metadata: List[ViewMetadata] = [
-            ViewMetadata(
-                view_id="teacher_global",
-                keep_mask=teacher_keep_mask,
-                strategy=strat_teacher,
-                healpix_level=self.healpix_level_data,
-                rate=rate_teacher,
-                parent_view_id=None,
+        metadata: List[SampleMetaData] = [
+            SampleMetaData(
+                masking_params=teacher_cfg,
             )
         ]
         for idx, mask in enumerate(student_keep_masks):
             metadata.append(
-                ViewMetadata(
-                    view_id=f"student_local_{idx}",
-                    keep_mask=mask,
-                    strategy=strat_student,
-                    healpix_level=self.healpix_level_data,
-                    rate=rate_student,
-                    parent_view_id="teacher_global",
+                SampleMetaData(
+                    masking_params=student_cfg,
                 )
             )
 
