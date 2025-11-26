@@ -7,9 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import copy
+
 import torch
 
 from weathergen.common.config import Config
+
+
+def apply_overrides_to_dict(cf: Config, overrides: dict) -> Config:
+    copied_cf = copy.deepcopy(cf)
+    for key, val in overrides.items():
+        copied_cf[key] = val
+    return copied_cf
 
 
 def get_dtype(value: str) -> torch.dtype:
