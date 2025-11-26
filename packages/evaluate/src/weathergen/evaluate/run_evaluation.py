@@ -14,13 +14,12 @@ import logging
 import multiprocessing as mp
 import sys
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
 
 import mlflow
 from mlflow.client import MlflowClient
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
@@ -41,12 +40,12 @@ from weathergen.metrics.mlflow_utils import (
 )
 
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
-LOG_QUEUE: mp.Queue() = mp.Queue()
+
 _logger = logging.getLogger(__name__)
 _platform_env = get_platform_env()
 
 
-def setup_main_logger(log_file: str | None = None):
+def setup_main_logger(log_file: str | None, log_queue: mp.Queue) -> QueueListener:
     """Set up main process logger with QueueListener
 
     Parameters
@@ -54,15 +53,13 @@ def setup_main_logger(log_file: str | None = None):
         log_file: str
             Name of
     """
-    global LOG_QUEUE
-    LOG_QUEUE = mp.Queue()
 
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(
         logging.Formatter("%(asctime)s [%(processName)s] %(levelname)s: %(message)s")
     )
 
-    handlers = [console_handler]
+    handlers: list[logging.Handler] = [console_handler]
     if log_file:
         file_handler = logging.FileHandler(log_file)
         file_handler.setFormatter(
@@ -70,18 +67,17 @@ def setup_main_logger(log_file: str | None = None):
         )
         handlers.append(file_handler)
 
-    listener = QueueListener(LOG_QUEUE, *handlers)
+    listener = QueueListener(log_queue, *handlers)
     listener.start()
     return listener
 
 
-def setup_worker_logger():
-    """Worker logger uses global LOG_QUEUE"""
-    global LOG_QUEUE
-    qh = QueueHandler(LOG_QUEUE)
+def setup_worker_logger(log_queue: mp.Queue) -> logging.Logger:
+    """"""
+    qh = QueueHandler(log_queue)
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-    logger.handlers = []  # remove other handlers
+    logger.handlers.clear()
     logger.addHandler(qh)
     return logger
 
@@ -90,11 +86,19 @@ def setup_worker_logger():
 
 
 def evaluate() -> None:
+    """entry point for evaluation script."""
     # By default, arguments from the command line are read.
-    evaluate_from_args(sys.argv[1:])
+    log_queue: mp.Queue = mp.Queue()
+    listener = setup_main_logger("evaluation.log", log_queue)
+    try:
+        evaluate_from_args(sys.argv[1:], log_queue)
+    finally:
+        listener.stop()
+        log_queue.close()
+        log_queue.join_thread()
 
 
-def evaluate_from_args(argl: list[str]) -> None:
+def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
     """
     Wrapper of evaluate_from_config.
 
@@ -133,59 +137,31 @@ def evaluate_from_args(argl: list[str]) -> None:
         assert hpc_conf is not None
         private_home = Path(hpc_conf)
         private_cf = OmegaConf.load(private_home)
+        assert isinstance(private_cf, DictConfig)
         mlflow_client = setup_mlflow(private_cf)
         _logger.info(f"MLFlow client set up: {mlflow_client}")
 
-    evaluate_from_config(OmegaConf.load(config), mlflow_client)
+    cf = OmegaConf.load(config)
+    assert isinstance(cf, DictConfig)
+    evaluate_from_config(cf, mlflow_client, log_queue)
 
 
-def run_parallel(tasks: iter, fn: callable, parallel: bool = True) -> object:
-    """
-    Execute a function over a list of argument-tuples either in parallel or serially.
-
-    Parameters
-    ----------
-    tasks : iterable
-        An iterable of argument-tuples. Each tuple is expanded into fn(*args).
-    fn : callable
-        The function to execute for each task. Must be top-level if parallel=True.
-    parallel : bool, optional
-        If True, execution uses ProcessPoolExecutor for parallelism.
-        If False, tasks run serially in the current process.
-
-    Returns
-    -------
-        A generator yielding fn(*args) results for each task.
-
-    Notes
-    -----
-    - This helper abstracts out parallel vs non-parallel execution.
-    - When parallel=True, fn and all arguments must be picklable.
-    - Tasks are yielded as soon as they complete (not in input order).
-    """
-    if not parallel:
-        # Serial execution
-        for t in tasks:
-            yield fn(*t)
-        return
-
-    # Parallel execution
-    with ProcessPoolExecutor() as ex:
-        futures = {ex.submit(fn, *t): t for t in tasks}
-        for fut in as_completed(futures):
-            yield fut.result()
+def _process_stream_wrapper(
+    args: dict[str, object],
+) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
+    return _process_stream(**args)
 
 
 def _process_stream(
     run_id: str,
     run: dict,
     stream: str,
-    private_paths: list[str],
-    global_plotting_opts: dict[str],
+    private_paths: dict[str, str],
+    global_plotting_opts: dict[str, object],
     regions: list[str],
     metrics: list[str],
     plot_score_maps: bool,
-):
+) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
     """
     Worker function for a single stream of a single run.
     Returns a dictionary with the scores instead of modifying shared dict.
@@ -239,7 +215,10 @@ def _process_stream(
         return run_id, stream, {}
 
 
-def evaluate_from_config(cfg: dict, mlflow_client=None):
+# Weird typing error from python: mp.Queue is seen as a method with a "|" operator => this fai
+def evaluate_from_config(
+    cfg: dict, mlflow_client: MlflowClient | None, log_queue: "mp.Queue | None"
+) -> None:
     """
     Main function that controls evaluation plotting and scoring.
     Parameters
@@ -255,10 +234,22 @@ def evaluate_from_config(cfg: dict, mlflow_client=None):
     regions = cfg.evaluation.get("regions", ["global"])
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
-    use_parallel = cfg.evaluation.get("parallel", True)
+    use_parallel = cfg.evaluation.get("num_processes", 0)
+    if use_parallel == "auto":
+        num_processes = mp.cpu_count()
+    elif isinstance(use_parallel, int):
+        if use_parallel > 0:
+            num_processes = min(use_parallel, mp.cpu_count())
+        else:
+            # Using the main process only
+            num_processes = 0
+    else:
+        raise ValueError("parallel option must be 'auto' or an non-negative integer")
 
-    listener = setup_main_logger("evaluation.log")
-    _logger.info("Started main logging listener")
+    if num_processes > 1:
+        _logger.info("Using %d processes for evaluation", num_processes)
+    else:
+        _logger.info("Using main process for evaluation")
 
     scores_dict = defaultdict(triple_nested_dict)  # metric -> region -> stream -> run
     tasks = []
@@ -273,21 +264,35 @@ def evaluate_from_config(cfg: dict, mlflow_client=None):
         )
         for stream in reader.streams:
             tasks.append(
-                (
-                    run_id,
-                    run,
-                    stream,
-                    private_paths,
-                    global_plotting_opts,
-                    regions,
-                    metrics,
-                    plot_score_maps,
-                )
+                {
+                    "run_id": run_id,
+                    "run": run,
+                    "stream": stream,
+                    "private_paths": private_paths,
+                    "global_plotting_opts": global_plotting_opts,
+                    "regions": regions,
+                    "metrics": metrics,
+                    "plot_score_maps": plot_score_maps,
+                }
             )
 
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    if num_processes == 0:
+        if log_queue is not None:
+            setup_worker_logger(log_queue)
+        results = [_process_stream(**task) for task in tasks]
+    else:
+        with mp.Pool(
+            processes=num_processes,
+            initializer=setup_worker_logger,
+            initargs=(log_queue,),
+        ) as pool:
+            results = pool.map(
+                _process_stream_wrapper,
+                tasks,
+            )
 
-    for _, stream, stream_scores in run_parallel(tasks, _process_stream, parallel=use_parallel):
+    for _, stream, stream_scores in results:
         for metric, regions_dict in stream_scores.items():
             for region, streams_dict in regions_dict.items():
                 for stream, runs_dict in streams_dict.items():
@@ -329,10 +334,6 @@ def evaluate_from_config(cfg: dict, mlflow_client=None):
         _logger.info("Started creating summary plots...")
         plot_summary(cfg, scores_dict, summary_dir)
 
-    listener.stop()
-
 
 if __name__ == "__main__":
-    listener = setup_main_logger("evaluation.log")
     evaluate()
-    listener.stop()

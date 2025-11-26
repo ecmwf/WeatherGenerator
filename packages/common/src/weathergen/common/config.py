@@ -90,6 +90,7 @@ def load_model_config(run_id: str, mini_epoch: int | None, model_path: str | Non
             fname,
         )
 
+    raise
     _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
 
     with fname.open() as f:
