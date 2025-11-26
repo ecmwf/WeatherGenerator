@@ -16,7 +16,8 @@
 
 # ----------------------------------------------------------------------------
 # Third-Party Attribution: facebookresearch/DiT (Scalable Diffusion Models with Transformers (DiT))
-# This file incorporates code originally from the 'facebookresearch/DiT' repository, with adaptations.
+# This file incorporates code originally from the 'facebookresearch/DiT' repository,
+# with adaptations.
 #
 # The original code is licensed under CC-BY-NC.
 # ----------------------------------------------------------------------------
@@ -24,7 +25,9 @@
 
 import dataclasses
 import math
+
 import torch
+
 from weathergen.model.engines import ForecastingEngine
 
 
@@ -127,7 +130,9 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c)
-        return c_skip * x + c_out * self.net(c_in * x, fstep=fstep, noise_emb=noise_emb)  # Eq. (7) in EDM paper
+        return c_skip * x + c_out * self.net(
+            c_in * x, fstep=fstep, noise_emb=noise_emb
+        )  # Eq. (7) in EDM paper
 
     def inference(
         self,
@@ -203,7 +208,7 @@ class NoiseEmbedder(torch.nn.Module):
         )
         self.frequency_embedding_dim = frequency_embedding_dim
 
-    def timestep_embedding(self, t: float, max_period: int=10000):
+    def timestep_embedding(self, t: float, max_period: int = 10000):
         """
         Create sinusoidal timestep embeddings.
         :param t: a 1-D Tensor of N indices, one per batch element.

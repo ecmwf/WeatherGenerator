@@ -249,7 +249,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
             self.noise_conditioning = LinearNormConditioning(dim_embed, dtype=self.dtype)
 
     def forward(self, *args):
-        # NOTE: Hotfix to accomodate TargetPredictionEngineClassic forward pass for attn. block, MLP...
+        # NOTE: Hotfix for TargetPredictionEngineClassic forward pass for attn. block, MLP...
         x = args[0]
         if len(args) == 2:
             ada_ln_aux = args[1]
@@ -556,7 +556,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
             )
 
     def forward(self, *args):
-        # NOTE: Hotfix to accomodate TargetPredictionEngineClassic forward pass for attn. block, MLP...
+        # NOTE: Hotfix for TargetPredictionEngineClassic forward pass for attn. block, MLP...
         x = args[0]
         if len(args) == 2:
             ada_ln_aux = args[1]
