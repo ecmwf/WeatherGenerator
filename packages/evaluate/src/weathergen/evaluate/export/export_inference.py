@@ -160,8 +160,8 @@ def parse_args(args: list) -> argparse.Namespace:
         "--regrid-degree",
         type=float,
         default=None,
-        help="If specified, regrid the data to a regular lat/lon grid with the given degree "
-        "(e.g., 0.25 for 0.25x0.25 degree grid) or O/N Gaussian grid (e.g., 63 for N63 grid).",
+        help="""If specified, regrid the data to a regular lat/lon grid with the given degree,
+        (e.g., 0.25 for 0.25x0.25 degree grid) or O/N Gaussian grid (e.g., 63 for N63 grid).""",
     )
 
     parser.add_argument(
