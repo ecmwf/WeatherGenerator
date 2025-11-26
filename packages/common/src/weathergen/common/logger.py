@@ -156,4 +156,4 @@ def init_loggers(run_id=None, logging_config=None):
     if output_dir:
         logging.info(f"Logging set up. Logs are in {output_dir}")
     else:
-        logging.info(f"Logging set up. No log files created.")
+        logging.info("Logging set up. No log files created.")
