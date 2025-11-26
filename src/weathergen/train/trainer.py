@@ -519,8 +519,10 @@ class Trainer(TrainerBase):
 
             # You will also need the source_cell_lens, target_coords_idx, these are not being passed through for the views yet.
             ################################################################
-
+            
             forecast_steps = batch[0][-1]
+            # # make existing pipeline work:
+            # batch = batch[0]
             # batch = self.batch_to_device(batch)
 
             # evaluate model
@@ -531,16 +533,30 @@ class Trainer(TrainerBase):
             ):
                 import pdb; pdb.set_trace()
                 outputs = []
-                for view in batch[1].source_samples:
+                for view in batch[-1].source_samples:
+                    # TODO remove when ModelBatch and Sample get a to_device()
+                    streams_data = [[view.streams_data['ERA5']]]
+                    streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
+                    source_cell_lens = view.source_cell_lens
+                    source_cell_lens = [b.to(self.device) for b in source_cell_lens]
+                    target_coords_idxs = view.target_coords_idx
+                    target_coords_idxs = [[b.to(self.device) for b in bf] for bf in target_coords_idxs]
                     outputs.append(self.model(
-                        self.model_params, view, cf.forecast_offset, forecast_steps
+                        self.model_params, (streams_data, source_cell_lens, target_coords_idxs), cf.forecast_offset, forecast_steps
                     ))
 
                 targets_and_auxs = []
-                for view in batch[1].target_samples:
+                for view in batch[-1].target_samples:
+                    # TODO remove when ModelBatch and Sample get a to_device()
+                    streams_data = [[view.streams_data['ERA5']]]
+                    streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
+                    source_cell_lens = view.source_cell_lens
+                    source_cell_lens = [b.to(self.device) for b in source_cell_lens]
+                    target_coords_idxs = view.target_coords_idx
+                    target_coords_idxs = [[b.to(self.device) for b in bf] for bf in target_coords_idxs]
                     targets_and_auxs.append(self.target_and_aux_calculator.compute(
                         self.cf.istep,
-                        view,
+                        (streams_data, source_cell_lens, target_coords_idxs),
                         self.model_params,
                         self.model,
                         cf.forecast_offset,

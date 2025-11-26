@@ -9,6 +9,7 @@ Provides clean separation between:
 from dataclasses import dataclass
 
 import numpy as np
+import torch
 
 from weathergen.common.config import Config
 from weathergen.datasets.stream_data import StreamData
@@ -50,13 +51,13 @@ class ViewMetadata:
     strategy_config: Config | None = None  # e.g. {rate: 0.5, hl_mask: 3, overlap: "disjoint"}
 
 
+@dataclass
 class SampleMetaData:
     # masking strategy
     # masking_strategy: str
 
     # parameters for masking strategy
-    masking_params: Config
-
+    masking_params: Config | dict
 
 class Sample:
     # keys: stream name, values: SampleMetaData
@@ -66,6 +67,10 @@ class Sample:
     # keys: stream_name, values: StreamData
     streams_data: dict[str, StreamData | None]
 
+    # perhaps this should be a dict too?
+    source_cell_lens: list[torch.Tensor] | None
+    target_coords_idx: list[torch.Tensor] | None
+
     def __init__(self, streams: dict) -> None:
         # TODO: can we pass this right away?
         self.meta_info = {}
@@ -73,6 +78,9 @@ class Sample:
         self.streams_data = {}
         for stream_info in streams:
             self.streams_data[stream_info["name"]] = None
+
+        self.source_cell_lens: list[torch.Tensor] | None = None
+        self.target_coords_idx: list[torch.Tensor] | None = None
 
     def add_stream_data(self, stream_name: str, stream_data: StreamData) -> None:
         """
@@ -86,6 +94,13 @@ class Sample:
         Add metadata for stream @stream_name to sample
         """
         self.meta_info[stream_name] = meta_info
+
+    def set_preprocessed(self, source_cell_lens, target_coords_idx):
+        """
+        Set preprocessed data for sample
+        """
+        self.source_cell_lens = source_cell_lens
+        self.target_coords_idx = target_coords_idx
 
     # TODO: complete interface, e.g get_stream
 
