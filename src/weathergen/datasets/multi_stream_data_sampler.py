@@ -767,8 +767,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # TODO: link into ModelBatch
 
-            print("Batch size:", len(batch))
-            print("What is batch at this point?", batch)
 
             # import pdb; pdb.set_trace()
 

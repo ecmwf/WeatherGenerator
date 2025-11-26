@@ -613,6 +613,8 @@ class Trainer(TrainerBase):
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
 
+            # import pdb; pdb.set_trace()
+
             ################################################################
             # SOPH: student teacher access path here:
             # student_teacher_data = batch[1]
@@ -631,8 +633,6 @@ class Trainer(TrainerBase):
             
             # make existing pipeline work:
             batch = batch[0]
-
-
 
             forecast_steps = batch[-1]
             batch = self.batch_to_device(batch)
