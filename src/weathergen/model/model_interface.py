@@ -157,6 +157,50 @@ def init_model_and_shard(
             logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
         model = load_model(cf, model, device, run_id_contd, mini_epoch_contd)
 
+    # ------------------------------------------------------------------------------------------
+    # LOAD AND FREEZE ENCODER WEIGHTS
+    # ONLY FOR EXPERIMENTATION, TO BE REMOVED
+    params = torch.load(
+        cf.chkpt_encoder_weights,
+        map_location=torch.device("cpu"),
+        mmap=True,
+        weights_only=True,
+    )
+    encoder_modules = [
+        "embed_engine",
+        "ae_local_engine",
+        "ae_local_global_engine",
+        "ae_global_engine",
+    ]
+
+    # Load encoder weights
+    params_temp = {}
+    for name in params.keys():
+        if any(e_module in name for e_module in encoder_modules):
+            if cf.with_ddp:
+                params_temp[f"module.{name}"] = params[name]
+            else:
+                params_temp[name] = params[name]
+    params = params_temp
+    mkeys, ukeys = model.load_state_dict(params, strict=False)
+
+    # Freeze encoder weights
+    for name, module in model.named_modules():
+        if any(e_module in name for e_module in encoder_modules):
+            for p in module.parameters():
+                p.requires_grad = False
+
+    model = model.to(f"cuda:{cf.local_rank}")
+
+    # warn about difference in checkpoint and model
+    if len(mkeys) == 0 and len(ukeys) == 0:
+        logger.info(f"Checkpoint {cf.chkpt_encoder_weights} loaded successfully with all weights.")
+    if len(mkeys) > 0:
+        logger.warning(f"Missing keys when loading model: {mkeys}")
+    if len(ukeys) > 0:
+        logger.warning(f"Unused keys when loading model: {ukeys}")
+    # ------------------------------------------------------------------------------------------
+
     # model params
     model_params = ModelParams(cf).create(cf)
     model_params.reset_parameters(cf)
