@@ -48,7 +48,7 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
         return
 
     def compute(self, istep, batch, *args, **kwargs) -> TargetAuxOutput:
-        return TargetAuxOutput(physical=batch[0])
+        return TargetAuxOutput(physical=batch[0], latent=None, aux_outputs=None)
 
     def to_device(self, device):
         return
