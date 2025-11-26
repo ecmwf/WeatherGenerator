@@ -10,8 +10,8 @@
 # weathergen-common = { path = "../../../../../packages/common" }
 # weathergen = { path = "../../../../../" }
 # ///
-## Example USAGE: uv run export --run-id o8b60tgh --stream ERA5 
-# --output-dir ../o8b60tgh --format netcdf 
+## Example USAGE: uv run export --run-id o8b60tgh --stream ERA5
+# --output-dir ../o8b60tgh --format netcdf
 # --regrid-degree 0.25 --regrid-type regular_ll
 import argparse
 import logging
@@ -160,7 +160,7 @@ def parse_args(args: list) -> argparse.Namespace:
         "--regrid-degree",
         type=float,
         default=None,
-        help="If specified, regrid the data to a regular lat/lon grid with the given degree " \
+        help="If specified, regrid the data to a regular lat/lon grid with the given degree "
         "(e.g., 0.25 for 0.25x0.25 degree grid) or O/N Gaussian grid (e.g., 63 for N63 grid).",
     )
 
@@ -179,7 +179,6 @@ def parse_args(args: list) -> argparse.Namespace:
 
 
 def export() -> None:
-
     """
     Main function to export data from Zarr store to NetCDF files.
     """

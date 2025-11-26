@@ -177,10 +177,7 @@ class NetcdfParser(CfParser):
         if self.regrid_degree is None or self.regrid_type is None:
             _logger.info("No regridding specified, skipping regridding step.")
             return ds
-        nc_regridder = Regridder(
-            ds,
-            output_grid_type=self.regrid_type,
-            degree=self.regrid_degree)
+        nc_regridder = Regridder(ds, output_grid_type=self.regrid_type, degree=self.regrid_degree)
 
         regrid_ds = nc_regridder.regrid_ds()
         return regrid_ds

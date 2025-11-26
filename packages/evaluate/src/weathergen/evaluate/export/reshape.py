@@ -1,10 +1,11 @@
+import contextlib
 import logging
 import re
+from itertools import product
 
 import numpy as np
 import xarray as xr
 from earthkit.regrid import interpolate
-from itertools import product
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -85,6 +86,7 @@ class Regridder:
     """
     Class to handle regridding of xarray Datasets using earthkit regrid options available.
     """
+
     def __init__(self, ds, output_grid_type: str, degree: float):
         self.output_grid_type = output_grid_type
         self.degree = degree
@@ -93,14 +95,9 @@ class Regridder:
 
     def find_lat_lon_ordering(self) -> list[int]:
         """
-        Find all the the latitude and longitude ordering for unparsed WeatherGenerator data
+        Find all the the latitude and longitude ordering for CF-parsed WeatherGenerator data
         Ordering from North West to South East.
         Returns the indices required to reorder the data.
-
-        Parameters
-        ----------
-            ds : Input xarray Dataset containing the inference data,
-
         Returns
         -------
             indices: list of indices to reorder the data from original to lat/lon ordered.
@@ -116,10 +113,6 @@ class Regridder:
     def detect_input_grid_type(self) -> str:
         """
         Detect whether data is on a regular lat/lon grid or Gaussian grid.
-        Parameters
-        ----------
-            data : xr.Dataset
-                input dataset.
         Returns
         -------
             str
@@ -127,17 +120,19 @@ class Regridder:
                 Supported options at the moment: "regular", "gaussian"
         """
         data = self.dataset
-        #check dataset attributes first
+        # check dataset attributes first
         if "grid_type" in data.attrs:
             return data.attrs["grid_type"]
         elif "ncells" in data.dims:
             return "gaussian"
-        elif "latitude" in data.coords and "longitude" in data.coords: # skeptical- check!
+        elif "latitude" in data.coords and "longitude" in data.coords:  # skeptical- check!
             return "regular_ll"
         else:
             raise ValueError("Unable to detect grid type from data attributes or dimensions.")
 
     def define_earthkit_input(self):
+        """
+        Define the input grid type for earthkit regrid based on detected input grid type."""
         ds = self.dataset
         if self.input_grid_type == "gaussian":
             # fix all other indices except ncells
@@ -148,13 +143,13 @@ class Regridder:
             lat_ds = ds["latitude"].values[tuple(selected_indices)]
 
             # find type of Gaussian grid
-            n_lats = len(set(lat_ds))//2
+            n_lats = len(set(lat_ds)) // 2
             ####WHY IS DIVIDING BY 2 NEEDED######
             num_cells = len(ds["ncells"])
-            if num_cells == 4 * n_lats ** 2:
-                return f'N{n_lats}'
+            if num_cells == 4 * n_lats**2:
+                return f"N{n_lats}"
             else:
-                return f'O{n_lats}'
+                return f"O{n_lats}"
             _logger.info(f"Detected Gaussian grid type: {self.earthkit_input}")
         if self.input_grid_type == "regular_ll":
             ## Needs to be tested properly when there are regular grids
@@ -162,7 +157,6 @@ class Regridder:
             n_lats = len(ds["latitude"].shape)
             degree = int(180 / (n_lats - 1))
             return [degree, degree]
-
 
     def define_earthkit_output(self):
         """
@@ -184,21 +178,16 @@ class Regridder:
             return earthkit_output, grid_shape
         else:
             raise ValueError(f"Unsupported output grid type: {self.output_grid_type}")
-        #TODO add other grid types if needed
+        # TODO add other grid types if needed
 
-
-    def gaussian_regular_da(
-        self, data: xr.DataArray
-    ) -> xr.DataArray:
+    def gaussian_regular_da(self, data: xr.DataArray) -> xr.DataArray:
         """
-        Regrid a single xarray Dataset to regular lat/lon grid. 
+        Regrid a single xarray Dataset to regular lat/lon grid.
         Requires a change in number of dimensions (not just size), so handled separately.
 
         Parameters
         ----------
             data : Input xarray DataArray containing the inference data on native grid.
-            degree : Degree of the regular lat/lon grid (e.g., 2 for 2.0 degree grid)/96 for O96 grid
-            grid_shape : Shape of the output grid.
         Returns
         -------
             Regridded xarray DataArray.
@@ -206,19 +195,19 @@ class Regridder:
 
         # set coords
         new_coords = data.coords.copy()
-        new_coords.update({
-            "valid_time": data["valid_time"].values,
-            "latitude": np.linspace(-90, 90, self.grid_shape[0]),
-            "longitude": np.linspace(0, 360 - self.degree, self.grid_shape[1]),
-        })
+        new_coords.update(
+            {
+                "valid_time": data["valid_time"].values,
+                "latitude": np.linspace(-90, 90, self.grid_shape[0]),
+                "longitude": np.linspace(0, 360 - self.degree, self.grid_shape[1]),
+            }
+        )
         new_coords._drop_coords(["ncells"])
 
         # set attrs
         attrs = data.attrs.copy()
-        try:
+        with contextlib.suppress(KeyError):
             del attrs["ncells"]
-        except KeyError:
-            pass
 
         # find new dims and loop through extra dimensions
         original_shape = data.shape
@@ -235,9 +224,7 @@ class Regridder:
         for item in result:
             original_data_slice = data.values[item]
             regridded_slice = interpolate(
-                original_data_slice, 
-                {"grid": self.earthkit_input}, 
-                {"grid": self.earthkit_output}
+                original_data_slice, {"grid": self.earthkit_input}, {"grid": self.earthkit_output}
             )
             # sSet in regridded_values
             new_index = list(item)
@@ -254,12 +241,10 @@ class Regridder:
         )
 
         return regrid_data
-    
-    def regular_gaussian_da(
-        self, data: xr.DataArray
-    ) -> xr.DataArray:  
+
+    def regular_gaussian_da(self, data: xr.DataArray) -> xr.DataArray:
         """
-        Regrid a single xarray Dataset to Gaussian grid. 
+        Regrid a single xarray Dataset to Gaussian grid.
         Requires a change in number of dimensions (not just size), so handled separately.
 
         Parameters
@@ -275,10 +260,12 @@ class Regridder:
 
         # set coords
         new_coords = data.coords.copy()
-        new_coords.update({
-            "ncells": np.arange(self.find_num_cells()),
-            #"valid_time": data["valid_time"].values,
-        })
+        new_coords.update(
+            {
+                "ncells": np.arange(self.find_num_cells()),
+                # "valid_time": data["valid_time"].values,
+            }
+        )
         ####THIS IS GOING TO BE COMPLICATED AS LAT LON SHOULD BE DEFINED BY NCELLS####
         # set attrs
         attrs = data.attrs.copy()
@@ -300,9 +287,7 @@ class Regridder:
         for item in result:
             original_data_slice = data.values[item]
             regridded_slice = interpolate(
-                original_data_slice, 
-                {"grid": self.earthkit_input}, 
-                {"grid": self.earthkit_output}
+                original_data_slice, {"grid": self.earthkit_input}, {"grid": self.earthkit_output}
             )
             # sSet in regridded_values
             new_index = list(item)
@@ -320,9 +305,7 @@ class Regridder:
 
         return regrid_data
 
-    def regular_regular_da(
-        self, data: xr.DataArray
-    ) -> xr.DataArray:
+    def regular_regular_da(self, data: xr.DataArray) -> xr.DataArray:
         _logger.warning("Regridding between different regular grids has not been tested.")
 
         """
@@ -336,11 +319,13 @@ class Regridder:
         """
         # set coords
         new_coords = data.coords.copy()
-        new_coords.update({
-            "valid_time": data["valid_time"].values,
-            "latitude": np.linspace(-90, 90, self.grid_shape[0]),
-            "longitude": np.linspace(0, 360 - self.degree, self.grid_shape[1]),
-        })
+        new_coords.update(
+            {
+                "valid_time": data["valid_time"].values,
+                "latitude": np.linspace(-90, 90, self.grid_shape[0]),
+                "longitude": np.linspace(0, 360 - self.degree, self.grid_shape[1]),
+            }
+        )
 
         # set attrs
         attrs = data.attrs.copy()
@@ -362,22 +347,20 @@ class Regridder:
         for item in result:
             original_data_slice = data.values[item]
             regridded_slice = interpolate(
-                original_data_slice, 
-                {"grid": self.earthkit_input}, 
-                {"grid": self.earthkit_output}
+                original_data_slice, {"grid": self.earthkit_input}, {"grid": self.earthkit_output}
             )
             # sSet in regridded_values
             new_index = list(item)
             new_index[lat_pos] = slice(None)
             new_index[lon_pos] = slice(None)
             regridded_values[tuple(new_index)] = regridded_slice
-        
+
         regrid_data = xr.DataArray(
             data=regridded_values, dims=data.dims, coords=new_coords, attrs=attrs, name=data.name
         )
 
         return regrid_data
-    
+
     def find_num_cells(self) -> int:
         """
         Find number of cells in the (output) Gaussian grid based on N or O number.
@@ -387,21 +370,19 @@ class Regridder:
                 Number of cells in the Gaussian grid.
         """
         if self.earthkit_output[0] == "N":
-            n_lats = int(re.findall(r'\d+', self.earthkit_input)[0])
-            num_cells = 4 * n_lats ** 2
+            n_lats = int(re.findall(r"\d+", self.earthkit_input)[0])
+            num_cells = 4 * n_lats**2
             return num_cells
         elif self.earthkit_output[0] == "O":
-            n_lats = int(re.findall(r'\d+', self.earthkit_input)[0])
+            n_lats = int(re.findall(r"\d+", self.earthkit_input)[0])
             num_cells = 2 * n_lats * (n_lats + 1)
             return num_cells
         else:
             raise ValueError("Input grid type is not Gaussian, cannot find number of cells.")
 
-    def gaussian_gaussian_da(
-        self, data: xr.DataArray
-    ) -> xr.DataArray:
+    def gaussian_gaussian_da(self, data: xr.DataArray) -> xr.DataArray:
         """
-        Regrid a single xarray Dataset to Gaussian grid. 
+        Regrid a single xarray Dataset to Gaussian grid.
         Parameters
         ----------
             data : Input xarray DataArray containing the inference data on native grid.
@@ -412,10 +393,12 @@ class Regridder:
         _logger.warning("Regridding between different Gaussian grids has not been tested.")
         # set coords
         new_coords = data.coords.copy()
-        new_coords.update({
-            "ncells": np.arange(self.grid_shape),
-            #"valid_time": data["valid_time"].values,
-        })
+        new_coords.update(
+            {
+                "ncells": np.arange(self.grid_shape),
+                # "valid_time": data["valid_time"].values,
+            }
+        )
         # set attrs
         attrs = data.attrs.copy()
 
@@ -434,9 +417,7 @@ class Regridder:
         for item in result:
             original_data_slice = data.values[item]
             regridded_slice = interpolate(
-                original_data_slice, 
-                {"grid": self.earthkit_input}, 
-                {"grid": self.earthkit_output}
+                original_data_slice, {"grid": self.earthkit_input}, {"grid": self.earthkit_output}
             )
             # sSet in regridded_values
             new_index = list(item)
@@ -454,12 +435,6 @@ class Regridder:
     ) -> None:
         """
         Prepare data for regridding.
-        Parameters
-        ----------
-            None
-        Returns
-        -------
-            None
         """
         if self.input_grid_type == "gaussian":
             ds = self.dataset
@@ -471,9 +446,7 @@ class Regridder:
         else:
             pass
 
-    def add_attrs(
-        self, regrid_ds: xr.Dataset
-    ) -> xr.Dataset:
+    def add_attrs(self, regrid_ds: xr.Dataset) -> xr.Dataset:
         """
         Preserve original coordinates after regridding.
         Parameters
@@ -497,7 +470,8 @@ class Regridder:
                     regrid_ds.coords[coord].attrs = ds[coord].attrs
         if self.input_grid_type == "regular_ll" and self.output_grid_type == "gaussian":
             raise NotImplementedError(
-                "Preserving coordinates when regridding from regular lat/lon grids to Gaussian grids is not implemented yet."
+                "Preserving coordinates when regridding from regular lat/lon grids "
+                "to Gaussian grids is not implemented yet."
             )
 
         # keep global attrs
@@ -510,18 +484,11 @@ class Regridder:
 
         return regrid_ds
 
-
-    def regrid_ds(self,
+    def regrid_ds(
+        self,
     ) -> xr.Dataset:
         """
-        Regrid an xarray Dataset from Gaussian grid to regular lat/lon grid.
-
-        Parameters
-        ----------
-            ds : Input xarray Dataset containing the inference data on Gaussian grid.
-            output_grid_type : Type of grid to regrid to (e.g., 'regular_ll').
-            degree : Degree of the regular lat/lon grid (e.g., 2 for 2.0 degree grid)/96 for O96 grid
-
+        Regrids an xarray Dataset from native grid to chosen grid.
         Returns
         -------
             Regridded xarray Dataset.
@@ -529,7 +496,7 @@ class Regridder:
         self.input_grid_type = self.detect_input_grid_type()
         self.earthkit_output, self.grid_shape = self.define_earthkit_output()
         self.earthkit_input = self.define_earthkit_input()
-        _logger.info(f'Attempting to regrid from {self.earthkit_input} to {self.earthkit_output}')
+        _logger.info(f"Attempting to regrid from {self.earthkit_input} to {self.earthkit_output}")
         # No regridding needed if both input and output are same degree
         if self.input_grid_type == self.output_grid_type:
             if self.earthkit_input == self.earthkit_output:
@@ -547,15 +514,12 @@ class Regridder:
 
         return regrid_ds
 
-    def regrid_da(
-        self, da: xr.DataArray
-    ) -> xr.DataArray:
+    def regrid_da(self, da: xr.DataArray) -> xr.DataArray:
         """
         Regrid a single xarray DataArray from input grid to output grid.
 
         Parameters
         ----------
-            self : Input xarray Dataset containing the inference data on Gaussian grid.
             da : Input xarray DataArray containing the inference data on native grid.
         Returns
             Regridded xarray DataArray.
@@ -569,7 +533,7 @@ class Regridder:
             regrid_da = self.same_grid_da(da)
         else:
             raise NotImplementedError(
-                f"Regridding from {self.input_grid_type} to {self.output_grid_type} grid is not implemented yet."
+                f"""Regridding from {self.input_grid_type} to {self.output_grid_type} grid 
+                is not implemented yet."""
             )
         return regrid_da
-
