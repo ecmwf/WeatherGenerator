@@ -17,4 +17,7 @@ samples_per_validation: 16
 shuffle: True
 loader_num_workers: 4
 
+len_hrs: "360 min"
+step_hrs: 6.0
+
 lr_max: 2e-5

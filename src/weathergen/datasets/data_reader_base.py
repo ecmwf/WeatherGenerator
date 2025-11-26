@@ -49,6 +49,17 @@ class TimeIndexRange:
     end: TIndex
 
 
+def parse_timedelta(val: str | int | float | np.timedelta64) -> np.timedelta64:
+    """
+    Parse a value into a numpy timedelta64[ms].
+    Integers and floats are interpreted as hours.
+    Strings are parsed using pandas.to_timedelta.
+    """
+    if isinstance(val, (int, float, np.number)):
+        return np.timedelta64(int(val), "h").astype("timedelta64[ms]")
+    return np.timedelta64(pd.to_timedelta(val)).astype("timedelta64[ms]")
+
+
 @dataclass
 class DTRange:
     """
@@ -125,8 +136,8 @@ class TimeWindowHandler:
         self,
         t_start: str | int | NPDT64,
         t_end: str | int | NPDT64,
-        t_window_len_hours: int,
-        t_window_step_hours: int,
+        t_window_len_hours: np.timedelta64,
+        t_window_step_hours: np.timedelta64,
     ):
         """
         Parameters
@@ -143,8 +154,8 @@ class TimeWindowHandler:
         """
         self.t_start: NPDT64 = str_to_datetime64(t_start)
         self.t_end: NPDT64 = str_to_datetime64(t_end)
-        self.t_window_len: NPTDel64 = np.timedelta64(t_window_len_hours, "h")
-        self.t_window_step: NPTDel64 = np.timedelta64(t_window_step_hours, "h")
+        self.t_window_len: NPTDel64 = t_window_len_hours
+        self.t_window_step: NPTDel64 = t_window_step_hours
 
         assert self.t_start < self.t_end, "end datetime has to be in the past of start datetime"
         assert self.t_start > _DT_ZERO, "start datetime has to be >= 1850-01-01T00:00."
@@ -268,9 +279,9 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     """
 
     assert rdata.coords.ndim == 2, f"coords must be 2D {rdata.coords.shape}"
-    assert rdata.coords.shape[1] == 2, (
-        f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
-    )
+    assert (
+        rdata.coords.shape[1] == 2
+    ), f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
     assert rdata.geoinfos.ndim == 2, f"geoinfos must be 2D, got {rdata.geoinfos.shape}"
     assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
     assert rdata.datetimes.ndim == 1, f"datetimes must be 1D {rdata.datetimes.shape}"
@@ -290,9 +301,9 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
         f"{rdata.datetimes.shape[0]}"
     )
 
-    assert np.logical_and(rdata.datetimes >= dtr.start, rdata.datetimes < dtr.end).all(), (
-        f"datetimes for data points violate window {dtr}."
-    )
+    assert np.logical_and(
+        rdata.datetimes >= dtr.start, rdata.datetimes < dtr.end
+    ).all(), f"datetimes for data points violate window {dtr}."
 
 
 class DataReaderBase(metaclass=ABCMeta):
@@ -488,9 +499,11 @@ class DataReaderBase(metaclass=ABCMeta):
         self,
     ) -> list[float] | None:
         target_channel_weights = [
-            self.stream_info["channel_weights"].get(ch, 1.0)
-            if self.stream_info.get("channel_weights", None)
-            else 1.0
+            (
+                self.stream_info["channel_weights"].get(ch, 1.0)
+                if self.stream_info.get("channel_weights", None)
+                else 1.0
+            )
             for ch in self.target_channels
         ]
 
