@@ -22,16 +22,6 @@ runs = latest_runs()
 all_runs_pdf = all_runs()
 
 
-st.markdown(
-    """
-            
-**The number of data sources by run.**
-
-(only includes runs for which evaluation data has been uploaded)
-
-"""
-)
-
 # The name of all the streams metrics
 all_stream_columns = all_runs_pdf.select(ps.starts_with("metrics.stream")).columns
 
@@ -42,34 +32,57 @@ streams_run_ids = (
     )
     .unpivot(
         all_stream_columns,
-        index=["start_time", "tags.run_id", "tags.hpc", "tags.uploader"],
+        index=["start_time", "tags.run_id", "tags.hpc", "tags.uploader", "tags.stage"],
         variable_name="metric",
         value_name="value",
     )
     .filter(pl.col("value").is_not_null())
     .with_columns(pl.col("metric").str.split(".").list.get(2).alias("stream_name"))
     .with_columns(pl.date(C("start_time").dt.year(), C("start_time").dt.month(), 1).alias("month"))
-    .group_by("stream_name", "tags.hpc", "month", "tags.run_id", "start_time", "tags.uploader")
+    .group_by(
+        "stream_name",
+        "tags.hpc",
+        "month",
+        "tags.run_id",
+        "start_time",
+        "tags.uploader",
+        "tags.stage",
+    )
     .agg(pl.count("value"))
     .drop("value")
 )
 
-# The most used streams
+st.markdown(
+    """
+            
+**The number of data sources by run.**
+
+"""
+)
+
+
+st.plotly_chart(
+    px.scatter(
+        streams_run_ids.group_by(
+            "tags.run_id", "tags.hpc", "month", "start_time", "tags.uploader", "tags.stage"
+        )
+        .agg(pl.n_unique("stream_name").alias("num_streams"))
+        .to_pandas(),
+        y="num_streams",
+        x="start_time",
+        color="tags.stage",
+        hover_data=["start_time", "tags.run_id", "tags.hpc", "tags.uploader", "tags.stage"],
+    )
+)
+
+st.markdown("""            
+**The total number of runs by data source.**          
+""")
+
 st.table(
     streams_run_ids.select(["stream_name", "tags.run_id"])
     .group_by("stream_name")
     .agg(pl.count("tags.run_id").alias("num_runs"))
     .sort("num_runs", descending=True)
     .to_pandas()
-)
-
-st.plotly_chart(
-    px.scatter(
-        streams_run_ids.group_by("tags.run_id", "tags.hpc", "month", "start_time", "tags.uploader")
-        .agg(pl.n_unique("stream_name").alias("num_streams"))
-        .to_pandas(),
-        y="num_streams",
-        x="start_time",
-        hover_data=["start_time", "tags.run_id", "tags.hpc", "tags.uploader"],
-    )
 )
