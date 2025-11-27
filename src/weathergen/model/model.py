@@ -9,7 +9,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import copy
 import dataclasses
 import logging
 import math
@@ -494,7 +493,11 @@ class Model(torch.nn.Module):
         num_params_q_cells = np.prod(self.q_cells.shape) if self.q_cells.requires_grad else 0
         num_params_ae_adapater = get_num_parameters(self.ae_local_global_engine.ae_adapter)
 
-        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
+        num_params_fe = get_num_parameters(
+            self.forecast_engine.net.fe_blocks
+            if cf.fe_diffusion_model
+            else self.forecast_engine.fe_blocks
+        )
 
         num_params_pred_adapter = [get_num_parameters(kv) for kv in self.pred_adapter_kv]
         num_params_embed_tcs = [get_num_parameters(etc) for etc in self.embed_target_coords]
@@ -569,7 +572,14 @@ class Model(torch.nn.Module):
         return new_params
 
     #########################################
-    def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
+    def forward(
+        self,
+        model_params: ModelParams,
+        batch,
+        forecast_offset: int,
+        forecast_steps: int,
+        encode_only: bool = False,
+    ):
         """Performs the forward pass of the model to generate forecasts
 
         Tokens are processed through the model components, which were defined in the create method.
@@ -590,6 +600,8 @@ class Model(torch.nn.Module):
         (streams_data, _, target_coords_idxs) = batch
 
         tokens, posteriors = self.encode(model_params=model_params, batch=batch)
+        if encode_only:
+            return tokens, posteriors
 
         # roll-out in latent space
         preds_all = []
@@ -597,15 +609,15 @@ class Model(torch.nn.Module):
         latents["preds"] = []
         for fstep in range(forecast_offset, forecast_offset + forecast_steps):
             # prediction
-            preds_all += [
-                self.predict(
-                    model_params,
-                    fstep,
-                    tokens,
-                    streams_data,
-                    target_coords_idxs,
-                )
-            ]
+            # preds_all += [
+            #     self.predict(
+            #         model_params,
+            #         fstep,
+            #         tokens,
+            #         streams_data,
+            #         target_coords_idxs,
+            #     )
+            # ]
 
             if self.training:
                 # Impute noise to the latent state
@@ -617,15 +629,15 @@ class Model(torch.nn.Module):
             latents["preds"] += [tokens]
 
         # prediction for final step
-        preds_all += [
-            self.predict(
-                model_params,
-                forecast_offset + forecast_steps,
-                tokens,
-                streams_data,
-                target_coords_idxs,
-            )
-        ]
+        # preds_all += [
+        #     self.predict(
+        #         model_params,
+        #         forecast_offset + forecast_steps,
+        #         tokens,
+        #         streams_data,
+        #         target_coords_idxs,
+        #     )
+        # ]
 
         latents["posteriors"] = posteriors
 
@@ -910,26 +922,3 @@ class Model(torch.nn.Module):
             preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
 
         return preds_tokens
-
-
-def get_model(
-    student_or_teacher,
-    cf: Config,
-    sources_size,
-    targets_num_channels,
-    targets_coords_size,
-    **kwargs,
-):
-    if student_or_teacher == "student" or student_or_teacher == "teacher":
-        return Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-    else:
-        if cf["training_mode"] == "masking":  # TODO implement mode "student-teacher-pretrain":
-            teacher_cf = copy.deepcopy(cf)
-            for key, val in teacher_cf["teacher_model"].items():
-                teacher_cf[key] = val
-            teacher = Model(cf, sources_size, targets_num_channels, targets_coords_size).create()
-            return teacher
-        else:
-            raise NotImplementedError(
-                f"The training mode {cf['training_mode']} is not implemented."
-            )

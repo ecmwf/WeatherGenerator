@@ -14,6 +14,14 @@
 # Original Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # ----------------------------------------------------------------------------
 
+# ----------------------------------------------------------------------------
+# Third-Party Attribution: facebookresearch/DiT (Scalable Diffusion Models with Transformers (DiT))
+# This file incorporates code originally from the 'facebookresearch/DiT' repository,
+# with adaptations.
+#
+# The original code is licensed under CC-BY-NC.
+# ----------------------------------------------------------------------------
+
 
 import dataclasses
 import math
@@ -99,7 +107,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         # noise = torch.randn(y.shape, device=y.device)  # now eta from MultiStreamDataSampler
         sigma = (eta * self.p_std + self.p_mean).exp()
         n = torch.randn_like(y) * sigma
-        return self.denoise(x=y + n, fstep=fstep, c=c, sigma=sigma)
+        return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep)
 
         # Compute loss -- move this to a separate loss calculator
         # weight = (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2  # Table 1
@@ -118,11 +126,13 @@ class DiffusionForecastEngine(torch.nn.Module):
         c_noise = sigma.log() / 4
 
         # Embed noise level
-        emb = self.noise_embedder(c_noise)
+        noise_emb = self.noise_embedder(c_noise)
 
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c)
-        return c_skip * x + c_out * self.net(c_in * x, fstep=fstep, emb=emb)  # Eq. (7) in EDM paper
+        return c_skip * x + c_out * self.net(
+            c_in * x, fstep=fstep, noise_emb=noise_emb
+        )  # Eq. (7) in EDM paper
 
     def inference(
         self,
@@ -198,7 +208,7 @@ class NoiseEmbedder(torch.nn.Module):
         )
         self.frequency_embedding_dim = frequency_embedding_dim
 
-    def timestep_embedding(self, t, max_period=10000):
+    def timestep_embedding(self, t: float, max_period: int = 10000):
         """
         Create sinusoidal timestep embeddings.
         :param t: a 1-D Tensor of N indices, one per batch element.
@@ -217,7 +227,7 @@ class NoiseEmbedder(torch.nn.Module):
             embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
         return embedding
 
-    def forward(self, t):
+    def forward(self, t: float):
         t_freq = self.timestep_embedding(t)
         t_emb = self.mlp(t_freq)
         return t_emb

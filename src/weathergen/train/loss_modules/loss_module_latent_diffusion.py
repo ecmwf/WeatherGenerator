@@ -78,7 +78,7 @@ class LossLatentDiffusion(LossModuleBase):
         }
 
         preds = preds.latent["preds"]
-        targets = targets["targets"]
+        targets = targets["latent"]
         fsteps = len(targets)
 
         fstep_loss_weights = self._get_fstep_weights(fsteps)
@@ -117,5 +117,7 @@ class LossLatentDiffusion(LossModuleBase):
             loss_values[loss_values == 0.0] = torch.nan
 
         return LossValues(
-            loss=loss, losses_all=losses_all, stddev_all={"latent": torch.tensor(torch.nan)}
+            loss=loss,
+            losses_all=losses_all,
+            stddev_all={"latent": torch.tensor(torch.nan).to(self.device)},
         )
