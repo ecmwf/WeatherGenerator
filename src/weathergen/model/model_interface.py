@@ -265,7 +265,7 @@ def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
     elif target_and_aux_calc == "EMATeacher":
         # batch_size = get_batch_size(cf, cf.world_size_original)
 
-        meta_ema_model, _ = init_model_and_shard(cf, dataset, None, None, "student", device)
+        meta_ema_model, _ = init_model_and_shard(cf, dataset, None, None, "student-teacher", {}, device)
         ema_model = EMAModel(
             model,
             meta_ema_model,

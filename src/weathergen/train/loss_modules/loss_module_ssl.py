@@ -34,20 +34,12 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
 
     valid_loss_names = set(["DINO", "iBOT", "JEPA"])
 
-    def __init__(
-        self,
-        cf: DictConfig,
-        losses: list,
-        stage: Stage,
-        device: str,
-        **kwargs
-    ):
+    def __init__(self, cf: DictConfig, stage: Stage, device: str, **losses):
         LossModuleBase.__init__(self)
         self.cf = cf
         self.stage = stage
         self.device = device
         self.name = "LossLatentSSLStudentTeacher"
-        self.local_cf = cf["training_mode_config"]["losses"][self.name]
 
         # Dynamically load loss functions based on configuration and stage
         self.losses = {
@@ -56,7 +48,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             # if name in self.valid_loss_names
         }
 
-    def compute_loss(self, preds: dict, targets: dict, view_metadata) -> LossValues:
+    def compute_loss(self, preds: dict, targets: dict, metadata) -> LossValues:
         # gradient loss
         loss = torch.tensor(0.0, device=self.device, requires_grad=True)
 
@@ -64,18 +56,15 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         # create tensor for each stream
         losses_all: dict[str, Tensor] = {loss: 0.0 for loss in self.losses}
 
-        import pdb
+        source_target_matching_idxs, output_info, target_source_matching_idxs, target_info = (
+            metadata
+        )
 
-        pdb.set_trace()
+        import pdb; pdb.set_trace()
+
         for name, (weight, loss_fn) in self.losses.items():
-            preds_for_loss = gather_preds_for_loss(
-                name, preds, [view for view in view_metadata if view.parent_view_id is not None]
-            )
-            targets_for_loss = gather_targets_for_loss(
-                name,
-                targets,
-                [view for view in view_metadata if view.parent_view_id is None],
-            )
+            preds_for_loss = gather_preds_for_loss(name, preds, output_info)
+            targets_for_loss = gather_targets_for_loss(name, targets, target_info)
             loss_value = loss_fn(preds_for_loss, targets_for_loss).mean()
             loss += weight * loss_value
             losses_all[name] = loss_value.item()
@@ -96,19 +85,19 @@ def get_loss_function_ssl(name):
         )
 
 
-def gather_preds_for_loss(name, preds, view_metadata):
+def gather_preds_for_loss(name, preds, metadata):
     if name == "iBOT" or name == "JEPA":
         return {
             "stident_patches_masked": torch.stack(
                 [
                     p.latent[name]
-                    for p, info in zip(preds, view_metadata, strict=False)
-                    if info.strategy == "masking"
+                    for p, info in zip(preds, metadata, strict=False)
+                    # TODO filter for loss if info.strategy == "masking"
                 ],
                 dim=0,
             ),
             "student_masks_flat": torch.stack(
-                [info.keep_mask for info in view_metadata if info.strategy == "masking"], dim=0
+                [info['ERA5'].mask.to("cuda") for info in metadata], dim=0
             ),
         }
     elif name == "DINO":
@@ -116,8 +105,8 @@ def gather_preds_for_loss(name, preds, view_metadata):
         local2global_dino = torch.stack(
             [
                 p.latent[name]
-                for p, info in zip(preds, view_metadata, strict=False)
-                if info.strategy == "cropping"
+                for p, info in zip(preds, metadata, strict=False)
+                # TODO if info.strategy == "cropping"
             ],
             dim=0,
         )
@@ -136,17 +125,17 @@ def gather_preds_for_loss(name, preds, view_metadata):
         )
 
 
-def gather_targets_for_loss(name, targets, view_metadata):
+def gather_targets_for_loss(name, targets, metadata):
     if name == "iBOT" or name == "JEPA":
         return torch.stack(
-            [p[name] for p, info in zip(targets, view_metadata, strict=False)], dim=0
+            [p[name] for p, info in zip(targets, metadata, strict=False)], dim=0
         )
     if name == "DINO":
         local2global_dino = torch.stack(
-            [p[name] for p, info in zip(targets, view_metadata, strict=False)], dim=0
+            [p[name] for p, info in zip(targets, metadata, strict=False)], dim=0
         )
         global2global_dino = torch.stack(
-            reversed([p[name] for p, info in zip(targets, view_metadata, strict=False)]), dim=0
+            reversed([p[name] for p, info in zip(targets, metadata, strict=False)]), dim=0
         )
         return local2global_dino, global2global_dino
     else:

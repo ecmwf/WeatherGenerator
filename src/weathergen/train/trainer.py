@@ -564,7 +564,11 @@ class Trainer(TrainerBase):
             loss, loss_values = self.loss_calculator.compute_loss(
                 preds=outputs,
                 targets=targets,
-                view_metadata=None,  # batch.view_metadata
+                view_metadata=(batch[-1].source2target_matching_idxs,
+                                [sample.meta_info for sample in batch[-1].source_samples],
+                                batch[-1].target2source_matching_idxs,
+                                [sample.meta_info for sample in batch[-1].target_samples]
+                               ),
             )
             # TODO re-enable this, need to think on how to make it compatible with
             # student-teacher training

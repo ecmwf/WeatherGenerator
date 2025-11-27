@@ -86,7 +86,7 @@ class LossCalculator:
         loss = torch.tensor(0.0, requires_grad=True)
         for weight, calculator in self.loss_calculators:
             loss_terms[calculator.name] = calculator.compute_loss(
-                preds=preds, targets=targets, view_metadata=view_metadata
+                preds=preds, targets=targets, metadata=view_metadata
             )
             loss = loss + weight * loss_terms[calculator.name].loss
 
