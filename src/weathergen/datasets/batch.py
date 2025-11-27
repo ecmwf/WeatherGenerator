@@ -18,39 +18,6 @@ from weathergen.datasets.stream_data import StreamData
 # TODO: GetTimestep to get the timestep
 # TODO: GetMetaData: then this gets the right rn for the timestep!
 
-
-# NOTE: TO BE DECPRECATED
-@dataclass
-class ViewMetadata:
-    """
-    Metadata describing how a view was generated.
-
-    This captures the spatial selection (which cells/tokens were kept),
-    the strategy used (random, healpix, etc.), and hierarchical parameters.
-
-    Attributes:
-        view_id: Unique identifier (e.g., "teacher_global", "student_local_0")
-        keep_mask: Boolean array [num_healpix_cells] at data level indicating kept cells
-        healpix_level: HEALPix level for hierarchical selection (None if not applicable)
-        rate: Fraction of data kept (e.g., 0.5 = 50% kept); None if fixed count
-        parent_view_id: ID of the parent view this is a subset of (None for teacher)
-    """
-
-    # Core identifiers and selection description
-    view_id: str
-    keep_mask: np.typing.NDArray  # [num_cells] bool at data level
-    strategy: str  # e.g. "random", "healpix", "channel"
-
-    # Hierarchical/quantitative description of selection
-    healpix_level: int | None = None
-    rate: float | None = None
-    parent_view_id: str | None = None  # For students: which teacher they belong to
-
-    # Optional extras for future/other training paradigms
-    loss_type: str | None = None  # e.g. DINO, JEPA
-    strategy_config: Config | None = None  # e.g. {rate: 0.5, hl_mask: 3, overlap: "disjoint"}
-
-
 @dataclass
 class SampleMetaData:
     # masking strategy
@@ -61,6 +28,8 @@ class SampleMetaData:
 
     mask: torch.Tensor | None = None
 
+    noise_level_rn: float | None = None
+
 class Sample:
     # keys: stream name, values: SampleMetaData
     meta_info: dict
@@ -69,10 +38,11 @@ class Sample:
     # keys: stream_name, values: StreamData
     streams_data: dict[str, StreamData | None]
     forecast_dt: int | None
-    
-    # these two live in ModelBatch as they are flattened!
-    source_cell_lens: list[torch.Tensor] | None
+
+    # TODO:
+    # these two need to live in ModelBatch as they are flattened!
     # this should be a dict also lives in ModelBatch
+    source_cell_lens: list[torch.Tensor] | None
     target_coords_idx: list[torch.Tensor] | None
 
     def __init__(self, streams: dict) -> None:

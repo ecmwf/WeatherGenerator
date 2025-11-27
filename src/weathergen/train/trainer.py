@@ -613,45 +613,93 @@ class Trainer(TrainerBase):
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
 
-            # import pdb; pdb.set_trace()
+            # NOTE: we are still returning legacy batch structure and the new batch together.
 
-            ################################################################
-            # SOPH: student teacher access path here:
-            # student_teacher_data = batch[1]
-            # access student views:
-            #all_student_views = student_teacher_data.source_samples
-            #student_sample_1 = student_teacher_data.source_samples[0]
-            #student_sample_1_stream_data = student_teacher_data.source_samples[0].streams_data  # dict, {stream: stream data} of first student view
-            # e.g. target tokens of ERA5 stream of first student view:
-            # target_tokens_of_student_sample_1_ERA5_stream_data = student_teacher_batch.source_samples[0].streams_data["ERA5"].target_tokens
+            # Julian and Matthias:
+            # here we can access data as follows:
+            # batch[-1] is the new ModelBatch object, see the structure in batch.py
+            # batch[-1].source_samples is a list of Sample objects for the source data, timesteps
+            # batch[-1].target_samples is a list of Sample objects for the target data, timesteps
+            # batch[-1].meta_info is a dictionary with metadata info per sample
+            # batch[-1].meta_info["ERA5"] etc.
+            # here we have the noise_level_rn
+            # batch[-1].source_samples[0].meta_info["ERA5"].noise_level_rn == batch[-1].target_samples[0].meta_info["ERA5"].noise_level_rn
+            # for the same timestep, this needs to be fixed for when we have more source timesteps, and perhaps with bigger batch sizes?
+            # Each Sample object has:
+            # .streams_data: a dictionary of StreamData objects per stream name
+            # .source_cell_lens: list of tensors with lengths of source cells per stream # to be changed to be in ModelBatch
+            # .target_coords_idx: list of tensors with target coordinate indices per stream # to be changed to be in ModelBatch
+   
+            ###### Legacy batch after batch.to_device:
+            # (Pdb++) batch[0]
+            # [[<weathergen.datasets.stream_data.StreamData object at 0x400572104230>]]
+            # (Pdb++) batch[1]
+            # [tensor([0, 1, 1,  ..., 0, 0, 0], device='cuda:0', dtype=torch.int32)]
+            # (Pdb++) batch[2]
+            # [[tensor([0, 0, 0,  ..., 4, 4, 4], device='cuda:0', dtype=torch.int32)]]
 
-            # access metadata of the student views, this is currently shared, very hacky, to fix.
-            #metadata_student_view = student_teacher_batch.source_samples[0].meta_info
+            # TODO: access from new ModelBatch
+            forecast_steps = batch[0][-1]
+            #batch = self.batch_to_device(batch)
 
-            # You will also need the source_cell_lens, target_coords_idx, these are not being passed through for the views yet.
-            ################################################################
-            
-            # make existing pipeline work:
-            batch = batch[0]
+            ### After to_device, then the original is:
 
-            forecast_steps = batch[-1]
-            batch = self.batch_to_device(batch)
-
-            # evaluate model
             with torch.autocast(
                 device_type=f"cuda:{cf.local_rank}",
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                output = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
-            targets = {"physical": batch[0]}
+                outputs = []
+                for view in batch[-1].source_samples:
+                    # TODO remove when ModelBatch and Sample get a to_device()
+                    streams_data = [[view.streams_data['ERA5']]]
+                    streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
+                    source_cell_lens = view.source_cell_lens
+                    source_cell_lens = [b.to(self.device) for b in source_cell_lens]
+                    target_coords_idxs = view.target_coords_idx
+                    target_coords_idxs = [[b.to(self.device) for b in bf] for bf in target_coords_idxs]
+                    outputs.append(self.model(
+                        self.model_params, (streams_data, source_cell_lens, target_coords_idxs), cf.forecast_offset, forecast_steps
+                    ))
+
+                targets_and_auxs = []
+                for view in batch[-1].target_samples:
+                    # TODO remove when ModelBatch and Sample get a to_device()
+                    streams_data = [[view.streams_data['ERA5']]]
+                    streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
+                    source_cell_lens = view.source_cell_lens
+                    source_cell_lens = [b.to(self.device) for b in source_cell_lens]
+                    target_coords_idxs = view.target_coords_idx
+                    target_coords_idxs = [[b.to(self.device) for b in bf] for bf in target_coords_idxs]
+                    targets_and_auxs.append(self.target_and_aux_calculator.compute(
+                        self.cf.istep,
+                        (streams_data, source_cell_lens, target_coords_idxs),
+                        self.model_params,
+                        self.model,
+                        cf.forecast_offset,
+                        forecast_steps,
+                    ))
+                targets, aux = zip(*targets_and_auxs)
             loss, loss_values = self.loss_calculator.compute_loss(
-                preds=output,
+                preds=outputs,
                 targets=targets,
+                view_metadata=(batch[-1].source2target_matching_idxs,
+                                [sample.meta_info for sample in batch[-1].source_samples],
+                                batch[-1].target2source_matching_idxs,
+                                [sample.meta_info for sample in batch[-1].target_samples]
+                               ),
             )
-            if cf.latent_noise_kl_weight > 0.0:
-                kl = torch.cat([posterior.kl() for posterior in output.latent])
-                loss += cf.latent_noise_kl_weight * kl.mean()
+            # TODO re-enable this, need to think on how to make it compatible with
+            # student-teacher training
+            # if cf.latent_noise_kl_weight > 0.0:
+            #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
+            #     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
+
+            self.target_and_aux_calculator.update_state_pre_backward(
+                self.cf.istep, batch, self.model
+            )
+
+            self.target_and_aux_calculator.update_state_pre_backward(bidx, batch, self.model)
 
             # backward pass
             self.optimizer.zero_grad()
