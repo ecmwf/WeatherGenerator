@@ -294,14 +294,6 @@ class Trainer(TrainerBase):
             len_per_rank = (
                 len(self.dataset) // (self.world_size_original * cf.batch_size_per_gpu)
             ) * cf.batch_size_per_gpu
-            logger.warning(
-                f"Division by zero cause by either one of these:\n"
-                f"len(self.dataset)={len(self.dataset)}, "
-                f"world_size_original={self.world_size_original}, "
-                f"batch_size_per_gpu={cf.batch_size_per_gpu}, "
-                f"len_per_rank={len_per_rank}, "
-                f"samples_per_mini_epoch={cf.samples_per_mini_epoch}, "
-            )
             mini_epoch_base = int(
                 self.cf.istep
                 / (min(len_per_rank, cf.samples_per_mini_epoch) * self.world_size_original)
