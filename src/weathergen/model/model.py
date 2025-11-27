@@ -269,9 +269,12 @@ class Model(torch.nn.Module):
         """Create each individual module of the model"""
         cf = self.cf
 
+        # determine stream names once so downstream components use consistent keys
+        self.stream_names = [
+            str(stream_cfg.get("name", idx)) for idx, stream_cfg in enumerate(cf.streams)
+        ]
         # separate embedding networks for differnt observation types
-        self.embed_engine = EmbeddingEngine(cf, self.sources_size)
-        self.stream_names = list(self.embed_engine.stream_names)
+        self.embed_engine = EmbeddingEngine(cf, self.sources_size, self.stream_names)
 
         ##############
         # local assimilation engine

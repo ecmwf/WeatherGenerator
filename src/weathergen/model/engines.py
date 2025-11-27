@@ -32,23 +32,25 @@ from weathergen.utils.utils import get_dtype
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
 
-    def __init__(self, cf: Config, sources_size) -> None:
+    def __init__(self, cf: Config, sources_size, stream_names: list[str]) -> None:
         """
         Initialize the EmbeddingEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
         :param sources_size: List of source sizes for each stream.
+        :param stream_names: Ordered list of stream identifiers aligned with cf.streams.
         """
         super(EmbeddingEngine, self).__init__()
         self.cf = cf
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
-        self.stream_names: list[str] = []
+        self.stream_names = list(stream_names)
 
-        for i, si in enumerate(self.cf.streams):
-            stream_name = str(si.get("name", i))
-            self.stream_names.append(stream_name)
+        assert len(self.stream_names) == len(
+            self.cf.streams
+        ), "stream_names must align with cf.streams"
 
+        for i, (si, stream_name) in enumerate(zip(self.cf.streams, self.stream_names, strict=True)):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
                 self.embeds[stream_name] = torch.nn.Identity()
                 continue
