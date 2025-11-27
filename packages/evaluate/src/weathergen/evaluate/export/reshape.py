@@ -81,7 +81,6 @@ def find_pl(vars: list) -> tuple[dict[str, list[str]], list[int]]:
     pl = sorted(set(pl))
     return var_dict, pl
 
-
 class Regridder:
     """
     Class to handle regridding of xarray Datasets using earthkit regrid options available.
@@ -143,8 +142,7 @@ class Regridder:
             lat_ds = ds["latitude"].values[tuple(selected_indices)]
 
             # find type of Gaussian grid
-            n_lats = len(set(lat_ds)) // 2
-            ####WHY IS DIVIDING BY 2 NEEDED######
+            n_lats = len(set(lat_ds))
             num_cells = len(ds["ncells"])
             if num_cells == 4 * n_lats**2:
                 return f"N{n_lats}"
@@ -173,7 +171,8 @@ class Regridder:
             grid_shape = [int(180 // self.degree + 1), int(360 // self.degree)]
             return earthkit_output, grid_shape
         elif self.output_grid_type in ["N", "O"]:
-            earthkit_output = self.output_grid_type + str(self.degree)
+            earthkit_output = self.output_grid_type + str(int(self.degree))
+            print(earthkit_output)
             grid_shape = self.find_num_cells()
             return earthkit_output, grid_shape
         else:
@@ -369,11 +368,11 @@ class Regridder:
             num_cells : int
                 Number of cells in the Gaussian grid.
         """
-        if self.earthkit_output[0] == "N":
+        if self.output_grid_type[0] == "N":
             n_lats = int(re.findall(r"\d+", self.earthkit_input)[0])
             num_cells = 4 * n_lats**2
             return num_cells
-        elif self.earthkit_output[0] == "O":
+        elif self.output_grid_type[0] == "O":
             n_lats = int(re.findall(r"\d+", self.earthkit_input)[0])
             num_cells = 2 * n_lats * (n_lats + 1)
             return num_cells
@@ -494,8 +493,8 @@ class Regridder:
             Regridded xarray Dataset.
         """
         self.input_grid_type = self.detect_input_grid_type()
-        self.earthkit_output, self.grid_shape = self.define_earthkit_output()
         self.earthkit_input = self.define_earthkit_input()
+        self.earthkit_output, self.grid_shape = self.define_earthkit_output()
         _logger.info(f"Attempting to regrid from {self.earthkit_input} to {self.earthkit_output}")
         # No regridding needed if both input and output are same degree
         if self.input_grid_type == self.output_grid_type:
@@ -533,7 +532,7 @@ class Regridder:
             regrid_da = self.same_grid_da(da)
         else:
             raise NotImplementedError(
-                f"""Regridding from {self.input_grid_type} to {self.output_grid_type} grid 
+                f"""Regridding from {self.earthkit_input} to {self.earthkit_output} grid 
                 is not implemented yet."""
             )
         return regrid_da
