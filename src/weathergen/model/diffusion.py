@@ -28,8 +28,8 @@ import math
 
 import torch
 
-from weathergen.model.engines import ForecastingEngine
 from weathergen.common.config import Config
+from weathergen.model.engines import ForecastingEngine
 
 
 @dataclasses.dataclass
