@@ -270,9 +270,7 @@ class Model(torch.nn.Module):
         cf = self.cf
 
         # determine stream names once so downstream components use consistent keys
-        self.stream_names = [
-            str(stream_cfg.get("name", idx)) for idx, stream_cfg in enumerate(cf.streams)
-        ]
+        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
         # separate embedding networks for differnt observation types
         self.embed_engine = EmbeddingEngine(cf, self.sources_size, self.stream_names)
 
