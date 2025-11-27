@@ -128,6 +128,11 @@ class Trainer(TrainerBase):
             cf, self.dataset, run_id_contd, mini_epoch_contd, "student", devices[0]
         )
 
+        self.target_and_aux_calculator = get_target_aux_calculator(
+            cf, self.dataset, self.model, self.device
+        )
+        self.target_and_aux_calculator.to_device(self.device)
+
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
         if is_root():
@@ -481,13 +486,12 @@ class Trainer(TrainerBase):
                 enabled=cf.with_mixed_precision,
             ):
                 output = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
-                targets, aux_outputs = self.target_and_aux_calculator.compute(
+                target_aux_output = self.target_and_aux_calculator.compute(
                     bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
                 )
-            targets = {"physical": batch[0]}
             loss, loss_values = self.loss_calculator.compute_loss(
                 preds=output,
-                targets=targets,
+                targets=target_aux_output,
             )
             if cf.latent_noise_kl_weight > 0.0:
                 kl = torch.cat([posterior.kl() for posterior in output.latent])
@@ -617,14 +621,19 @@ class Trainer(TrainerBase):
                         output = model_forward(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
-
-                    targets = {"physical": batch[0]}
-
-                    # compute loss
+                        target_aux_output = self.target_and_aux_calculator.compute(
+                            bidx,
+                            batch,
+                            self.model_params,
+                            self.model,
+                            cf.forecast_offset,
+                            forecast_steps,
+                        )
                     loss, loss_values = self.loss_calculator_val.compute_loss(
                         preds=output,
-                        targets=targets,
+                        targets=target_aux_output,
                     )
+
                     # log output
                     if bidx < cf.log_validation:
                         # TODO: Move _prepare_logging into write_validation by passing streams_data

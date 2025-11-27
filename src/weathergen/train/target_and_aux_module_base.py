@@ -1,4 +1,17 @@
-from typing import Any
+import dataclasses
+
+import torch
+
+
+@dataclasses.dataclass
+class TargetAuxOutput:
+    """
+    A dataclass to encapsulate the TargetAndAuxCalculator output and give a clear API.
+    """
+
+    physical: dict[str, torch.Tensor]
+    latent: dict[str, torch.Tensor]
+    aux_outputs: dict[str, torch.Tensor]
 
 
 class TargetAndAuxModuleBase:
@@ -14,7 +27,7 @@ class TargetAndAuxModuleBase:
     def update_state_post_opt_step(self, istep, batch, model, **kwargs) -> None:
         pass
 
-    def compute(self, *args, **kwargs) -> tuple[Any, Any]:
+    def compute(self, *args, **kwargs) -> TargetAuxOutput:
         pass
 
     def to_device(self, device):
@@ -34,8 +47,8 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
     def update_state_post_opt_step(self, istep, batch, model, **kwargs):
         return
 
-    def compute(self, istep, batch, *args, **kwargs):
-        return {"physical": batch[0]}, None
+    def compute(self, istep, batch, *args, **kwargs) -> TargetAuxOutput:
+        return TargetAuxOutput(physical=batch[0], latent=None, aux_outputs=None)
 
     def to_device(self, device):
         return
