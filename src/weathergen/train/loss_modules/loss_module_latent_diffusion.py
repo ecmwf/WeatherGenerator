@@ -40,8 +40,17 @@ class LossLatentDiffusion(LossModuleBase):
         self.device = device
         self.name = "LossLatentDiff"
 
+        self.sigma_data = self.cf.sigma_data
+        self.rho = self.cf.rho
+        self.p_mean = self.cf.p_mean
+        self.p_std = self.cf.p_std
+
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [[getattr(losses, name), w, name] for name, w in loss_fcts]
+
+    def _get_noise_weight(self, eta):
+        sigma = (eta * self.p_std + self.p_mean).exp()
+        return (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
 
     def _get_fstep_weights(self, forecast_steps):
         timestep_weight_config = self.cf.get("timestep_weight")
@@ -55,12 +64,13 @@ class LossLatentDiffusion(LossModuleBase):
         loss_fct,
         target: torch.Tensor,
         pred: torch.Tensor,
+        noise_weight: torch.Tensor = 1.0,
     ):
         """
         Compute loss for given loss function
         """
 
-        loss_val = loss_fct(target=target, mu=pred)
+        loss_val = noise_weight * loss_fct(target=target, mu=pred)
 
         return loss_val
 
@@ -81,6 +91,8 @@ class LossLatentDiffusion(LossModuleBase):
         targets = targets["latent"]
         fsteps = len(targets)
 
+        eta = torch.randn(1)
+        noise_weight = self._get_noise_weight(eta).to(device=preds[0].device)
         fstep_loss_weights = self._get_fstep_weights(fsteps)
 
         loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
@@ -96,6 +108,7 @@ class LossLatentDiffusion(LossModuleBase):
                     loss_fct,
                     target=target,
                     pred=pred,
+                    noise_weight=noise_weight,
                 )
 
                 losses_all[f"{self.name}.{loss_fct_name}"] += loss_lfct  # TODO: break into fsteps

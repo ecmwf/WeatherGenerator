@@ -53,7 +53,18 @@ fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
 impute_latent_noise_std: 0.0  # 1e-4
+# Diffusion related parameters
+frequency_embedding_dim: 256
+embedding_dim: 512
+sigma_min: 0.002
+sigma_max: 50000
+sigma_data: 0.5
+rho: 7
+p_mean: -1.2
+p_std: 1.2
+# Encoder weights
 chkpt_encoder_weights: "./models/whkujigw/whkujigw_epoch00063.chkpt"
+
 
 
 healpix_level: 5
