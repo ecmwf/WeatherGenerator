@@ -29,6 +29,7 @@ import math
 import torch
 
 from weathergen.model.engines import ForecastingEngine
+from weathergen.common.config import Config
 
 
 @dataclasses.dataclass
@@ -61,6 +62,8 @@ class DiffusionForecastEngine(torch.nn.Module):
 
     def __init__(
         self,
+        cf: Config,
+        num_healpix_cells: int,
         forecast_engine: ForecastingEngine,
         frequency_embedding_dim: int = 256,  # TODO: determine suitable dimension
         embedding_dim: int = 512,  # TODO: determine suitable dimension
@@ -72,6 +75,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         p_std: float = 1.2,
     ):
         super().__init__()
+        self.cf = cf
+        self.num_healpix_cells = num_healpix_cells
         self.net = forecast_engine
         self.preconditioner = Preconditioner()
         self.noise_embedder = NoiseEmbedder(
@@ -136,15 +141,17 @@ class DiffusionForecastEngine(torch.nn.Module):
 
     def inference(
         self,
-        x: torch.Tensor,
         fstep: int,
         num_steps: int = 30,
     ) -> torch.Tensor:
         # Forward pass of the diffusion model during inference
         # https://github.com/NVlabs/edm/blob/main/generate.py
 
+        # Sample noise (assuming single batch element for now)
+        x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
+
         # Time step discretization.
-        step_indices = torch.arange(num_steps, dtype=torch.float64, device=x.device)
+        step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
         t_steps = (
             self.sigma_max ** (1 / self.rho)
             + step_indices
