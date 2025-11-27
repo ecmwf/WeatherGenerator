@@ -1,0 +1,55 @@
+# (C) Copyright 2024 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+ICONESMOmon :
+  type : iconesm
+  filenames : ['historical_r1i1p1f1_Omon.json']
+  source_exclude: ['sos', 'sossq', 'tos', 'tossq', 'mlotstmax'] # because duplicate from Oday + mlotstmax because std = 0
+  target_exclude: ['sos', 'sossq', 'tos', 'tossq', 'mlotstmax'] # because duplicate from Oday + mlotstmax because std = 0
+  channels: ['evs', 'friver', 'hfds', 'hflso', 'hfsso', 
+    'mlotst', 'mlotstmax', 'mlotstmin', 'mlotstsq', 'pso', 'rlntds', 'rsntds', 'so', 
+    'sos', 'sossq', 'tauuo', 'tauvo', 'thetao', 'tos', 'tossq', 'uo',
+     'vo', 'wfo', 'wfonocorr', 'zos', 'zossq']
+
+  # ['evs', 'friver', 'hfds', 'hflso', 'hfsso', 'mlotst', 'mlotstmax', 
+  #           'mlotstmin', 'mlotstsq', 'pso', 'rlntds', 'rsntds', 'so', 'sos',  
+  #           'sossq', 'tauuo', 'tauvo', 'thetao', 'time_bnds', 'tos', 'tosga', 'tossq', 
+  #           'uo', 'vo', 'wfo', 'wfonocorr', 'zos', 'zossq'
+  # ]
+  plev : []
+  depth: []
+  lev : ['6.0', '17.0', '27.0']
+  # lev : ['6.0', '17.0', '27.0', '37.0', '47.0', '57.0', '67.0', '77.0', '87.0', '97.0', '107.5', '119.0',
+  #  '131.5', '145.0', '159.5', '175.0', '191.5', '209.0', '228.0', '249.0', '272.0', '297.0', '324.0', '353.0', 
+  #  '384.0', '417.5', '454.0', '493.5', '536.5', '583.5', '634.5', '690.0', '750.0', '814.0', '882.5', '955.5', '1033.0', 
+  #  '1115.5', '1203.5', '1297.5', '1398.0', '1505.5', '1620.0', '1741.5', '1870.0', '2005.0', '2146.5', '2295.0', '2451.0', 
+  #  '2614.5', '2785.5', '2964.0', '3149.0', '3340.5', '3538.5', '3743.0', '3953.5', '4169.5', '4391.0', '4618.0', '4850.5', 
+  #  '5088.5', '5334.0', '5589.0']
+  loss_weight : 1.
+  diagnostic : False
+  masking_rate : 0.6
+  masking_rate_none : 0.05
+  token_size : 8
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 8
+    dim_embed : 256
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 256
+  target_readout :
+    type : 'obs_value'  # token or obs_value
+    num_layers : 2
+    num_heads : 4
+    # sampling_rate : 0.2
+  pred_head :
+    ens_size : 1
+    num_layers : 1

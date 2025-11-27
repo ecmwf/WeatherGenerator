@@ -163,6 +163,7 @@ train_log_freq:
   metrics: 20
   checkpoint: 250
 
+multiprocessing_method: "fork"
 
 # Tags for experiment tracking
 # These tags will be logged in MLFlow along with completed runs for train, eval, val
