@@ -488,7 +488,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # Check if workload is divisible by number of workers
             workload = local_end - local_start
             assert workload % worker_info.num_workers == 0, (
-                f"Workload {workload} is not divisible by number of workers {worker_info.num_workers}"
+                f"Workload {workload} is not divisible by number of workers "
+                f"{worker_info.num_workers}"
             )
             
             # split workload
