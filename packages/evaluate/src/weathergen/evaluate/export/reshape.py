@@ -81,6 +81,7 @@ def find_pl(vars: list) -> tuple[dict[str, list[str]], list[int]]:
     pl = sorted(set(pl))
     return var_dict, pl
 
+
 class Regridder:
     """
     Class to handle regridding of xarray Datasets using earthkit regrid options available.
@@ -142,7 +143,7 @@ class Regridder:
             lat_ds = ds["latitude"].values[tuple(selected_indices)]
 
             # find type of Gaussian grid
-            n_lats = len(set(lat_ds))
+            n_lats = len(set(lat_ds)) // 2  ## UNEXPECTED LOGIC
             num_cells = len(ds["ncells"])
             if num_cells == 4 * n_lats**2:
                 return f"N{n_lats}"
@@ -172,7 +173,6 @@ class Regridder:
             return earthkit_output, grid_shape
         elif self.output_grid_type in ["N", "O"]:
             earthkit_output = self.output_grid_type + str(int(self.degree))
-            print(earthkit_output)
             grid_shape = self.find_num_cells()
             return earthkit_output, grid_shape
         else:
@@ -535,4 +535,4 @@ class Regridder:
                 f"""Regridding from {self.earthkit_input} to {self.earthkit_output} grid 
                 is not implemented yet."""
             )
-        return regrid_da
+        return regrid_d
