@@ -46,9 +46,9 @@ class EmbeddingEngine(torch.nn.Module):
         self.embeds = torch.nn.ModuleDict()
         self.stream_names = list(stream_names)
 
-        assert len(self.stream_names) == len(
-            self.cf.streams
-        ), "stream_names must align with cf.streams"
+        assert len(self.stream_names) == len(self.cf.streams), (
+            "stream_names must align with cf.streams"
+        )
 
         for i, (si, stream_name) in enumerate(zip(self.cf.streams, self.stream_names, strict=True)):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
