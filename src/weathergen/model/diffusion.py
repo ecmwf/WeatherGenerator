@@ -83,7 +83,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.p_mean = self.cf.p_mean
         self.p_std = self.cf.p_std
 
-    def forward(self, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
+    def forward(self, tokens: torch.Tensor, fstep: int, metadata: dict) -> torch.Tensor:
         """
         Model forward call during training. Unpacks the conditioning c = [x_{t-k}, ..., x_{t}], the
         target y = x_{t+1}, and the random noise eta from the data, computes the diffusion noise
@@ -98,7 +98,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         c = 1
         y = tokens
-        eta = torch.randn(1).to(device=tokens.device)
+        eta = metadata.noise_level_rn.to(device=tokens.device)
 
         # Compute sigma (noise level) from eta
         # noise = torch.randn(y.shape, device=y.device)  # now eta from MultiStreamDataSampler
