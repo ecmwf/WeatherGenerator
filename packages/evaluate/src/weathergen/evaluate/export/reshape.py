@@ -535,4 +535,4 @@ class Regridder:
                 f"""Regridding from {self.earthkit_input} to {self.earthkit_output} grid 
                 is not implemented yet."""
             )
-        return regrid_d
+        return regrid_da
