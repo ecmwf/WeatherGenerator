@@ -121,26 +121,12 @@ class DataReaderCams(DataReaderTimestep):
         )
 
         # === Channel selection ===
-
-        # Source channels and levels
         source_channels = stream_info.get("source")
-        if source_channels:
-            self.source_channels, self.source_idx = self.select(source_channels)
-        else:
-            self.source_channels = self.colnames
-            self.source_idx = self.cols_idx
-        # self.source_levels = self.get_levels(self.source_channels)
-
-        # Target channels and levels
         target_channels = stream_info.get("target")
-        if target_channels:
-            self.target_channels, self.target_idx = self.select(target_channels)
-        else:
-            self.target_channels = self.colnames
-            self.target_idx = self.cols_idx
-        # self.target_levels = self.get_levels(self.target_channels)
 
-        
+        self.source_channels, self.source_idx = self.select("source", source_channels)
+        self.target_channels, self.target_idx = self.select("target", target_channels)
+
 
         # Ensure all selected channels have valid standard deviations
         selected_channel_indices = list(set(self.source_idx).union(set(self.target_idx)))
@@ -155,24 +141,26 @@ class DataReaderCams(DataReaderTimestep):
         self.geoinfo_idx = []
 
 
-    def select(self, ch_filters: list[str]) -> (np.array, list[str]):
-        """
-        Allow user to specify which columns they want to access.
-        Get functions only returned for these specified columns.
-        Parameters
-        ----------
-        ch_filters: list[str]
-            list of patterns to access
-        Returns
-        -------
-        selected_colnames: np.array,
-            Selected columns according to the patterns specified in ch_filters
-        selected_cols_idx
-            respective index of these patterns in the data array
-        """
-        mask = [np.array([f in c for f in ch_filters]).any() for c in self.colnames]
 
-        selected_cols_idx = self.cols_idx[np.where(mask)[0]]
+    def select(self, ch_type: str, ch_list: list[str]) -> tuple[list[str], np.typing.NDArray]:
+        """
+        Select channels constrained by allowed pressure levels and optional excludes.
+        ch_type: "source" or "target" (for *_exclude key in stream_info)
+        """
+        channels_exclude = self.stream_info.get(f"{ch_type}_exclude", [])
+
+        new_colnames: list[str] = []
+        ch_list_loop = ch_list if ch_list else self.colnames
+        for ch in ch_list_loop:
+            if ch not in channels_exclude:
+                ch_parts = ch.split("_")
+                # Only include channels that are either surface variables or valid pressure 
+                # level variables
+                if len(ch_parts) != 2 or ch_parts[1] in self.levels:
+                    new_colnames.append(ch)
+
+        mask = [c in new_colnames for c in self.colnames]
+        selected_cols_idx = self.cols_idx[np.where(mask)]
         selected_colnames = [self.colnames[int(i)] for i in np.where(mask)[0]]
 
         return selected_colnames, selected_cols_idx
