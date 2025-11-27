@@ -59,6 +59,8 @@ class SampleMetaData:
     # parameters for masking strategy
     masking_params: Config | dict
 
+    mask: torch.Tensor | None = None
+
 class Sample:
     # keys: stream name, values: SampleMetaData
     meta_info: dict
@@ -66,9 +68,11 @@ class Sample:
     # data for all streams
     # keys: stream_name, values: StreamData
     streams_data: dict[str, StreamData | None]
-
-    # perhaps this should be a dict too?
+    forecast_dt: int | None
+    
+    # these two live in ModelBatch as they are flattened!
     source_cell_lens: list[torch.Tensor] | None
+    # this should be a dict also lives in ModelBatch
     target_coords_idx: list[torch.Tensor] | None
 
     def __init__(self, streams: dict) -> None:
@@ -81,6 +85,8 @@ class Sample:
 
         self.source_cell_lens: list[torch.Tensor] | None = None
         self.target_coords_idx: list[torch.Tensor] | None = None
+
+        self.forecast_dt: int | None = None
 
     def add_stream_data(self, stream_name: str, stream_data: StreamData) -> None:
         """
@@ -101,6 +107,12 @@ class Sample:
         """
         self.source_cell_lens = source_cell_lens
         self.target_coords_idx = target_coords_idx
+
+    def set_forecast_dt(self, forecast_dt: int) -> None:
+        """
+        Set forecast_dt for sample
+        """
+        self.forecast_dt = forecast_dt
 
     # TODO: complete interface, e.g get_stream
 
@@ -125,8 +137,8 @@ class ModelBatch:
     # index of corresponding target (for source samples) or source (for target samples)
     # these are in 1-to-1 corresponding for classical training modes (MTM, forecasting) but
     # can be more complex for strategies like student-teacher training
-    source_target_matching_idxs: np.typing.NDArray[np.int32]
-    target_source_matching_idxs: np.typing.NDArray[np.int32]
+    source2target_matching_idxs: np.typing.NDArray[np.int32]
+    target2source_matching_idxs: np.typing.NDArray[np.int32]
 
     def __init__(self, streams, num_source_samples: int, num_target_samples: int) -> None:
         """ """
@@ -134,9 +146,9 @@ class ModelBatch:
         self.source_samples = [Sample(streams) for _ in range(num_source_samples)]
         self.target_samples = [Sample(streams) for _ in range(num_target_samples)]
 
-        self.source_target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
+        self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         # self.target_source_matching_idxs = np.full(num_target_samples, -1, dtype=np.int32)
-        self.target_source_matching_idxs = [[] for _ in range(num_target_samples)]
+        self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
 
     def add_source_stream(
         self,
@@ -156,7 +168,7 @@ class ModelBatch:
         
 
         assert target_sample_idx < len(self.target_samples), "invalid value for target_sample_idx"
-        self.source_target_matching_idxs[source_sample_idx] = target_sample_idx
+        self.source2target_matching_idxs[source_sample_idx] = target_sample_idx
 
     def add_target_stream(
         self,
@@ -178,7 +190,7 @@ class ModelBatch:
             assert source_sample_idx < len(self.source_samples), "invalid value for source_sample_idx"
         else:
             assert all(idx < len(self.source_samples) for idx in source_sample_idx), "invalid value for source_sample_idx"
-        self.target_source_matching_idxs[target_sample_idx] = source_sample_idx
+        self.target2source_matching_idxs[target_sample_idx] = source_sample_idx
 
     def len_sources(self) -> int:
         """
@@ -208,10 +220,10 @@ class ModelBatch:
         """
         Get index of source sample for a given target sample index
         """
-        return int(self.source_target_matching_idxs[target_idx])
+        return int(self.target2source_matching_idxs[target_idx])
 
     def get_target_idx_for_source(self, source_idx: int) -> int:
         """
         Get index of target sample for a given source sample index
         """
-        return int(self.source_target_matching_idxs[source_idx])
+        return int(self.source2target_matching_idxs[source_idx])

@@ -501,8 +501,6 @@ class Trainer(TrainerBase):
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
 
-            # make existing pipeline work:
-            # batch = batch[0]
 
             ################################################################
             # SOPH: student teacher access path here:
