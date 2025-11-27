@@ -627,7 +627,6 @@ class Model(torch.nn.Module):
         Returns:
             A list containing all prediction results
         """
-        import pdb; pdb.set_trace()
         (streams_data, source_cell_lens, target_coords_idxs) = batch
 
         # embed

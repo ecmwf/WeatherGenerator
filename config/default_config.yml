@@ -343,9 +343,14 @@ ema_halflife_in_thousands: 1e-3
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
 training_mode: "masking"
-training_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},
-                                  }
-                      }
+training_mode_config: {"losses": {LossLatentSSLStudentTeacher: {
+        "weight": 1.0,
+        "iBOT": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
+            "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+        "DINO": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
+            "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+        "JEPA": {'weight': 0.5, "out_dim": 2048, "n_register_tokens": 4} }
+    }}
 validation_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},}
                         }
 

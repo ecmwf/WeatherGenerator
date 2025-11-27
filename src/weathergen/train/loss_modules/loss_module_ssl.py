@@ -40,6 +40,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         losses: list,
         stage: Stage,
         device: str,
+        **kwargs
     ):
         LossModuleBase.__init__(self)
         self.cf = cf
@@ -50,9 +51,9 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
 
         # Dynamically load loss functions based on configuration and stage
         self.losses = {
-            name: (self.local_cf[name]["weight"], get_loss_function_ssl(name))
-            for name in losses
-            if name in self.valid_loss_names
+            name: (local_conf["weight"], get_loss_function_ssl(name))
+            for name, local_conf in losses.items()
+            # if name in self.valid_loss_names
         }
 
     def compute_loss(self, preds: dict, targets: dict, view_metadata) -> LossValues:

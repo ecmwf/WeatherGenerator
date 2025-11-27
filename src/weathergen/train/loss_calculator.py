@@ -69,7 +69,9 @@ class LossCalculator:
         self.loss_calculators = [
             (
                 config.pop("weight"),
-                getattr(LossModules, class_name)(cf=cf, stage=stage, device=self.device, **config),
+                getattr(LossModules, class_name)(
+                    cf=cf, stage=stage, device=self.device, **config
+                ),
             )
             for class_name, config in calculator_configs.items()
         ]
