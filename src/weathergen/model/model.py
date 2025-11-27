@@ -742,7 +742,6 @@ class Model(torch.nn.Module):
         cell_lens = cell_lens[1:]
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_unmasked_all = []
-        tokens_global_masked_all = []
         posteriors = []
         zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
         for i in range((cell_lens.shape[0]) // clen):
@@ -772,13 +771,11 @@ class Model(torch.nn.Module):
             # create mask for global tokens, without first element (used for padding)
             mask_c = cell_lens_c[1:].to(torch.bool)
             tokens_global_unmasked_c = tokens_global_c[mask_c]
-            tokens_global_masked_c = tokens_global_c[~mask_c]
             q_cells_lens_unmasked_c = torch.cat([zero_pad, q_cells_lens_c[1:][mask_c]])
             cell_lens_unmasked_c = torch.cat([zero_pad, cell_lens_c[1:][mask_c]])
 
             if l0 == l1 or tokens_c.shape[0] == 0:
                 tokens_global_unmasked_all += [tokens_global_unmasked_c]
-                tokens_global_masked_all += [tokens_global_masked_c]
                 continue
 
             # local to global adapter engine
@@ -791,10 +788,8 @@ class Model(torch.nn.Module):
             )
 
             tokens_global_unmasked_all += [tokens_global_unmasked_c]
-            tokens_global_masked_all += [tokens_global_masked_c]
 
         tokens_global_unmasked = torch.cat(tokens_global_unmasked_all)
-        tokens_global_masked = torch.cat(tokens_global_masked_all).to(tokens_global_unmasked.dtype)
 
         # query aggregation engine on the query tokens in unmasked cells
         # (applying this here assumes batch_size=1)
@@ -809,15 +804,8 @@ class Model(torch.nn.Module):
         # create mask from cell lens
         mask = cell_lens.to(torch.bool)
 
-        # create empty tensor to fill with (un)masked tokens
-        tokens_global_all = torch.empty(
-            (mask.size(0), s[-2], s[-1]), dtype=tokens_global_unmasked.dtype, device=tokens.device
-        )
-
-        # fill empty tensor using mask for positions of (un)masked tokens
-        tokens_global_all[mask] = tokens_global_unmasked
-        tokens_global_all[~mask] = tokens_global_masked
-        tokens_global = tokens_global_all
+        # fill empty tensor using mask for positions of unmasked tokens
+        tokens_global[mask] = tokens_global_unmasked
 
         # recover batch dimension and build global token list
         tokens_global = (
