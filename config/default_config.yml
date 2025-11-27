@@ -145,11 +145,11 @@ training_strategy :
       - loss: JEPA
     losses : { 
       LossLatentSSLStudentTeacher: { 
-        "iBOT": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
+        "iBOT": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 65536, "n_register_tokens": 4,"teacher_temp": 0.1,
             "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-        "DINO": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
+        "DINO": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 65536, "n_register_tokens": 4, "teacher_temp": 0.1,
             "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-        "JEPA": {'weight': 0.5, "out_dim": 2048, "n_register_tokens": 4} }
+        "JEPA": {'weight': 0.5, "loss_extra_args": {}, "out_dim": 2048, "n_register_tokens": 4} }
     }
 
 
@@ -240,7 +240,7 @@ misc:
 model_input:
   masking_strategy: "healpix" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
   rate: 0.5  # Masking rate to use for model input
-  num_views: 4  # if student-teacher, the number of local (student) views to generate
+  num_views: 1  # if student-teacher, the number of local (student) views to generate
   masking_strategy_config: {"strategies": ["random", "healpix", "channel"], # will be used with masking is moved under here
                             "probabilities": [0.34, 0.33, 0.33],
                             "hl_mask": 0, "mode": "per_cell",
@@ -346,11 +346,11 @@ training_mode: "masking"
 target_and_aux_calc: "EMATeacher"
 training_mode_config: {"losses": {LossLatentSSLStudentTeacher: {
         "weight": 1.0,
-        "iBOT": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
+        "iBOT": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 65536, "n_register_tokens": 4,"teacher_temp": 0.1,
             "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-        "DINO": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
+        "DINO": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 65536, "n_register_tokens": 4, "teacher_temp": 0.1,
             "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-        "JEPA": {'weight': 0.5, "out_dim": 2048, "n_register_tokens": 4} }
+        "JEPA": {'weight': 0.5, "loss_extra_args": {}, "out_dim": 2048, "n_register_tokens": 4} }
     }}
 validation_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},}
                         }

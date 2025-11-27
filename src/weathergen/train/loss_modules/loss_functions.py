@@ -304,11 +304,11 @@ def masked_student_teacher_patch_softmax(
         masks_weight = (
             (1 / student_masks_flat.sum(-1).clamp(min=1.0))
             .unsqueeze(-1)
-            .expand_as(student_masks_flat)[student_masks_flat]
+            .expand_as(student_masks_flat)# [student_masks_flat]
         )
     if n_masked_patches is not None:
         loss = loss[:n_masked_patches]
-    loss = loss * masks_weight
+    loss = loss * student_masks_flat * masks_weight
     return -loss.sum() / student_masks_flat.shape[0]
 
 

@@ -529,7 +529,6 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                import pdb; pdb.set_trace()
                 outputs = []
                 for view in batch[-1].source_samples:
                     # TODO remove when ModelBatch and Sample get a to_device()

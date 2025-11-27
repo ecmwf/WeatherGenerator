@@ -43,7 +43,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
 
         # Dynamically load loss functions based on configuration and stage
         self.losses = {
-            name: (local_conf["weight"], get_loss_function_ssl(name))
+            name: (local_conf["weight"], get_loss_function_ssl(name), local_conf["loss_extra_args"])
             for name, local_conf in losses.items()
             # if name in self.valid_loss_names
         }
@@ -62,10 +62,10 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
 
         import pdb; pdb.set_trace()
 
-        for name, (weight, loss_fn) in self.losses.items():
+        for name, (weight, loss_fn, extra_args) in self.losses.items():
             preds_for_loss = gather_preds_for_loss(name, preds, output_info)
             targets_for_loss = gather_targets_for_loss(name, targets, target_info)
-            loss_value = loss_fn(preds_for_loss, targets_for_loss).mean()
+            loss_value = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
             loss += weight * loss_value
             losses_all[name] = loss_value.item()
 
@@ -87,18 +87,23 @@ def get_loss_function_ssl(name):
 
 def gather_preds_for_loss(name, preds, metadata):
     if name == "iBOT" or name == "JEPA":
+        """
+        Important this assumes that there is 1 masked version for each global view
+        ie. student_patches_masked.shape[0] == teacher_patches_masked.shape[0]
+        """
         return {
-            "stident_patches_masked": torch.stack(
+            "student_patches_masked": torch.stack(
                 [
                     p.latent[name]
                     for p, info in zip(preds, metadata, strict=False)
                     # TODO filter for loss if info.strategy == "masking"
                 ],
                 dim=0,
-            ),
+                )[:2],
+            # TODO remove the [:, :2049]
             "student_masks_flat": torch.stack(
-                [info['ERA5'].mask.to("cuda") for info in metadata], dim=0
-            ),
+                [info['ERA5'].mask.to("cuda")[:2049] for info in metadata], dim=0
+                ).unsqueeze(1)[:2],
         }
     elif name == "DINO":
         # TODO deal with DINO having a local and global component
@@ -127,9 +132,9 @@ def gather_preds_for_loss(name, preds, metadata):
 
 def gather_targets_for_loss(name, targets, metadata):
     if name == "iBOT" or name == "JEPA":
-        return torch.stack(
+        return {"teacher_patches_masked": torch.stack(
             [p[name] for p, info in zip(targets, metadata, strict=False)], dim=0
-        )
+        )}
     if name == "DINO":
         local2global_dino = torch.stack(
             [p[name] for p, info in zip(targets, metadata, strict=False)], dim=0

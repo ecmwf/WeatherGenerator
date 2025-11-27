@@ -11,7 +11,7 @@ from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase
 
 
 class EMATeacher(TargetAndAuxModuleBase):
-    def __init__(self, model, rng, ema_model, batch_size, **kwargs):
+    def __init__(self, model, ema_model, batch_size, **kwargs):
         # One of the issues is that the teacher model may have a different architecture
         # to the student, e.g. JEPA. So we need quite a flexible way to instantiate the
         # the teacher. Because of the device sharding etc that requires quite a bit of
@@ -67,7 +67,7 @@ def get_target_postprocessing(target_losses: list[str], **kwargs):
             return_dict[loss_name] = iBOTPatchTargetProcessing(
                 patch_out_dim=conf["out_dim"],
                 center_momentum=conf["center_momentum"],
-                student_temp=conf["student_temp"],
+                student_temp=conf["loss_extra_args"]["student_temp"],
                 teacher_temp=conf["teacher_temp"],
                 teacher_style=conf["teacher_style"],
             )
@@ -75,7 +75,7 @@ def get_target_postprocessing(target_losses: list[str], **kwargs):
             return_dict[loss_name] = DINOTargetProcessing(
                 out_dim=conf["out_dim"],
                 center_momentum=conf["center_momentum"],
-                student_temp=conf["student_temp"],
+                student_temp=conf["loss_extra_args"]["student_temp"],
                 teacher_style=conf["teacher_style"],
             )
         elif loss_name == "JEPA":
