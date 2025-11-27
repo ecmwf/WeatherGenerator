@@ -11,14 +11,16 @@ import io
 import json
 import logging
 import os
+import random
+import string
 import subprocess
 from pathlib import Path
 
 import yaml
+import yaml.constructor
+import yaml.scanner
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
-
-from weathergen.train.utils import get_run_id
 
 _REPO_ROOT = Path(
     __file__
@@ -29,6 +31,12 @@ _logger = logging.getLogger(__name__)
 
 
 Config = DictConfig
+
+
+def get_run_id():
+    s1 = string.ascii_lowercase
+    s2 = string.ascii_lowercase + string.digits
+    return "".join(random.sample(s1, 1)) + "".join(random.sample(s2, 7))
 
 
 def format_cf(config: Config) -> str:
@@ -46,23 +54,23 @@ def format_cf(config: Config) -> str:
     return stream.getvalue()
 
 
-def save(config: Config, epoch: int | None):
+def save(config: Config, mini_epoch: int | None):
     """Save current config into the current runs model directory."""
     path_models = Path(config.model_path)
     # save in directory with model files
     dirname = path_models / config.run_id
     dirname.mkdir(exist_ok=True, parents=True)
 
-    fname = dirname / _get_model_config_file_name(config.run_id, epoch)
+    fname = _get_model_config_file_write_name(path_models, config.run_id, mini_epoch)
 
     json_str = json.dumps(OmegaConf.to_container(config))
     with fname.open("w") as f:
         f.write(json_str)
 
 
-def load_model_config(run_id: str, epoch: int | None, model_path: str | None) -> Config:
+def load_model_config(run_id: str, mini_epoch: int | None, model_path: str | None) -> Config:
     """
-    Load a configuration file from a given run_id and epoch.
+    Load a configuration file from a given run_id and mini_epoch.
     If run_id is a full path, loads it from the full path.
     """
     if Path(run_id).exists():  # load from the full path if a full path is provided
@@ -75,40 +83,66 @@ def load_model_config(run_id: str, epoch: int | None, model_path: str | None) ->
             model_path = _get_config_attribute(
                 config=pconf, attribute_name="model_path", fallback="models"
             )
-        model_path = Path(model_path)
-        fname = model_path / run_id / _get_model_config_file_name(run_id, epoch)
+        path = Path(model_path)
+        fname = _get_model_config_file_read_name(path, run_id, mini_epoch)
         assert fname.exists(), (
-            "The fallback path to the model does not exist. Please provide a `model_path`."
+            "The fallback path to the model does not exist. Please provide a `model_path`.",
+            fname,
         )
 
-    _logger.info(f"Loading config from specified run_id and epoch: {fname}")
+    _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
 
     with fname.open() as f:
         json_str = f.read()
 
     config = OmegaConf.create(json.loads(json_str))
 
-    return _check_logging(config)
+    return _apply_fixes(config)
 
 
-def _get_model_config_file_name(run_id: str, epoch: int | None):
-    if epoch is None:
-        epoch_str = ""
-    elif epoch == -1:
-        epoch_str = "_latest"
+def _get_model_config_file_write_name(path: Path, run_id: str, mini_epoch: int | None):
+    if mini_epoch is None:
+        mini_epoch_str = ""
+    elif mini_epoch == -1:
+        mini_epoch_str = "_latest"
     else:
-        epoch_str = f"_epoch{epoch:05d}"
-    return f"model_{run_id}{epoch_str}.json"
+        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
+
+    return path / run_id / f"model_{run_id}{mini_epoch_str}.json"
 
 
-def get_model_results(run_id: str, epoch: int, rank: int) -> Path:
+def _get_model_config_file_read_name(path: Path, run_id: str, mini_epoch: int | None):
+    if mini_epoch is None:
+        mini_epoch_str = ""
+    elif mini_epoch == -1:
+        mini_epoch_str = "_latest"
+    elif (path / run_id / f"model_{run_id}_epoch{mini_epoch:05d}.json").exists():
+        mini_epoch_str = f"_epoch{mini_epoch:05d}"
+    else:
+        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
+
+    return path / run_id / f"model_{run_id}{mini_epoch_str}.json"
+
+
+def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     """
-    Get the path to the model results zarr store from a given run_id and epoch.
+    Get the path to the model results zarr store from a given run_id and mini_epoch.
     """
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
-    zarr_path = run_results / f"validation_epoch{epoch:05d}_rank{rank:04d}.zarr"
-    if not zarr_path.exists() or not zarr_path.is_dir():
-        raise FileNotFoundError(f"Zarr file {zarr_path} does not exist or is not a directory.")
+
+    zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.zarr"
+    zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.zarr"
+
+    if zarr_path_new.exists() or zarr_path_new.is_dir():
+        zarr_path = zarr_path_new
+    elif zarr_path_old.exists() or zarr_path_old.is_dir():
+        zarr_path = zarr_path_old
+    else:
+        raise FileNotFoundError(
+            f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
+            f"exist or is not a directory."
+        )
+
     return zarr_path
 
 
@@ -141,7 +175,7 @@ def _check_logging(config: Config) -> Config:
 def load_config(
     private_home: Path | None,
     from_run_id: str | None,
-    epoch: int | None,
+    mini_epoch: int | None,
     *overwrites: Path | dict | Config,
 ) -> Config:
     """
@@ -152,7 +186,7 @@ def load_config(
         private_home: Configuration file containing platform dependent information and secretes
         from_run_id: Run id of the pretrained WeatherGenerator model
         to continue training or inference
-        epoch: epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        mini_epoch: mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
         *overwrites: Additional overwrites from different sources
 
     Note: The order of precendence for merging the final config is in ascending order:
@@ -182,12 +216,22 @@ def load_config(
     if from_run_id is None:
         base_config = _load_default_conf()
     else:
-        base_config = load_model_config(from_run_id, epoch, private_config.get("model_path", None))
+        base_config = load_model_config(
+            from_run_id, mini_epoch, private_config.get("model_path", None)
+        )
         from_run_id = base_config.run_id
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
     # use OmegaConf.unsafe_merge if too slow
-    return OmegaConf.merge(base_config, private_config, *overwrite_configs)
+    c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
+    assert isinstance(c, Config)
+
+    # Ensure the config has mini-epoch notation
+    if hasattr(c, "samples_per_epoch"):
+        c.samples_per_mini_epoch = c.samples_per_epoch
+        c.num_mini_epochs = c.num_epochs
+
+    return c
 
 
 def _load_streams_in_config(config: Config) -> Config:
@@ -278,6 +322,7 @@ def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
             msg = f"Cannot build config from overwrite: {overwrite}, with type {type(overwrite)}"
             raise ValueError(msg)
 
+    assert isinstance(overwrite_config, DictConfig)
     return overwrite_config
 
 
@@ -332,12 +377,15 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     if "secrets" in private_cf:
         del private_cf["secrets"]
 
+    assert isinstance(private_cf, DictConfig)
     return private_cf
 
 
 def _load_default_conf() -> Config:
     """Deserialize default configuration."""
-    return OmegaConf.load(_DEFAULT_CONFIG_PTH)
+    c = OmegaConf.load(_DEFAULT_CONFIG_PTH)
+    assert isinstance(c, Config)
+    return c
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
@@ -441,9 +489,9 @@ def get_path_model(config: Config) -> Path:
     return Path(config.model_path) / config.run_id
 
 
-def get_path_output(config: Config, epoch: int) -> Path:
+def get_path_output(config: Config, mini_epoch: int) -> Path:
     base_path = get_path_run(config)
-    fname = f"validation_epoch{epoch:05d}_rank{config.rank:04d}.zarr"
+    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.zarr"
 
     return base_path / fname
 
@@ -508,7 +556,7 @@ def validate_forecast_policy_and_steps(cf: OmegaConf):
     valid_forecast_policies = (
         "Valid values for 'forecast_policy' are, e.g., 'fixed' when using constant "
         "forecast steps throughout the training, or 'sequential' when varying the forecast "
-        "steps over epochs, such as, e.g., 'forecast_steps: [2, 2, 4, 4]'. "
+        "steps over mini_epochs, such as, e.g., 'forecast_steps: [2, 2, 4, 4]'. "
     )
     valid_forecast_steps = (
         "'forecast_steps' must be a positive integer or a non-empty list of positive integers. "

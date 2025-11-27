@@ -21,16 +21,18 @@ evaluation:
   summary_plots : true
   summary_dir: "./plots/"
   plot_ensemble: "members" #supported: false, "std", "minmax", "members"
+  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
   print_summary: false #print out score values on screen. it can be verbose
   log_scale: false
   add_grid: false
   score_cards: false
+  num_processes: 0  #options: int, "auto", 0 means no parallelism (default)
 
 run_ids :
   ar40mckx:
     label: "pretrained model ar40mckx"
     results_base_dir : "./results/"
-    epoch: 0
+    mini_epoch: 0
     rank: 0
     streams:
       ERA5:
@@ -61,7 +63,7 @@ run_ids :
   c8g5katp:
     label: "2 steps window"
     results_base_dir : "./results/"
-    epoch: 0
+    mini_epoch: 0
     rank: 0
     streams:
       ERA5:

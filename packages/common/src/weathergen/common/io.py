@@ -13,9 +13,7 @@ import itertools
 import logging
 import pathlib
 import typing
-from copy import deepcopy
 
-import astropy_healpix as hp
 import dask.array as da
 import numpy as np
 import xarray as xr
@@ -27,9 +25,65 @@ from numpy.typing import NDArray
 CHUNK_N_SAMPLES = 16392
 type DType = np.float32
 type NPDT64 = datetime64
+type ArrayType = zarr.Array | np.NDArray[DType]
 
 
 _logger = logging.getLogger(__name__)
+
+
+def is_ndarray(obj: typing.Any) -> bool:
+    """Check if object is an ndarray (wraps the linter warning)."""
+    return isinstance(obj, (np.ndarray))  # noqa: TID251
+
+
+class TimeRange:
+    """
+    Holds information about a time interval used in forecasting.
+
+    Time interval is left-closed, right-open. TimeRange can be instatiated from
+    numpy datetime64 objects or strings as outputed by TimeRange.as_dict.
+    Both will be converted to datetime64 with nanosecond precision.
+
+    Attrs:
+        start: Start of the time range in nanoseconds.
+        end: End of the time range in nanoseconds
+    """
+
+    def __init__(self, start: NPDT64 | str, end: NPDT64 | str):
+        # ensure consistent type => convert serialized strings
+        self.start = np.datetime64(start, "ns")
+        self.end = np.datetime64(end, "ns")
+
+        assert self.start < self.end
+
+    def as_dict(self) -> dict[str, str]:
+        """
+        Convert instance to a JSON-serializable dict.
+
+        will convert datetime objects as "YYYY-MM-DDThh:mm:s.sssssssss"
+
+        Returns:
+            JSON-serializable dict, wher datetime objects were converted to strings.
+        """
+        return {
+            "start": str(self.start),
+            "end": str(self.end),
+        }
+
+    def forecast_interval(self, forecast_dt_hours: int, fstep: int) -> "TimeRange":
+        """
+        Infer the interval cosidered at forecast step `fstep`.
+
+        Args:
+            forecast_dt_hours: number of hours the source TimeRange is shifted per forecast step.
+            fstep: current forecast step.
+
+        Returns:
+            New TimeRange shifted TimeRange.
+        """
+        assert forecast_dt_hours > 0 and fstep >= 0
+        offset = np.timedelta64(forecast_dt_hours * fstep, "h")
+        return TimeRange(self.start + offset, self.end + offset)
 
 
 @dataclasses.dataclass
@@ -47,17 +101,23 @@ class IOReaderData:
     data: NDArray[DType]
     datetimes: NDArray[NPDT64]
 
+    def is_empty(self):
+        """
+        Test if data object is empty
+        """
+        return len(self.data) == 0
+
     @classmethod
     def create(cls, other: typing.Any) -> "IOReaderData":
         """
-        create an instance from data_reader_base.ReaderData instance.
+        Create an instance from data_reader_base.ReaderData instance.
 
         other should be such an instance.
         """
-        coords = other.coords
-        geoinfos = other.geoinfos
-        data = other.data
-        datetimes = other.datetimes
+        coords = np.asarray(other.coords)
+        geoinfos = np.asarray(other.geoinfos)
+        data = np.asarray(other.data)
+        datetimes = np.asarray(other.datetimes)
 
         n_datapoints = len(data)
 
@@ -68,43 +128,32 @@ class IOReaderData:
         return cls(**dataclasses.asdict(other))
 
     @classmethod
-    def spoof(
-        cls, other: typing.Any, nchannels, datetime, geoinfo_size, mean_of_data
-    ) -> typing.Self:
+    def combine(cls, others: list["IOReaderData"]) -> "IOReaderData":
         """
-        Spoof an instance from data_reader_base.ReaderData instance.
-        other should be such an instance.
+        Create an instance from data_reader_base.ReaderData instance by combining mulitple ones.
+
+        others is list of ReaderData instances.
         """
+        assert len(others) > 0, len(others)
 
-        hl = 5
-        dx = 0.5
-        dy = 0.5
-        other_copy = deepcopy(other)
-        num_healpix_cells = 12 * 4**hl
-        lons, lats = hp.healpix_to_lonlat(
-            np.arange(0, num_healpix_cells), 2**hl, dx=dx, dy=dy, order="nested"
-        )
-        other_copy.coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
-        other_copy.geoinfos = np.zeros((other_copy.coords.shape[0], geoinfo_size), dtype=np.float32)
+        other = others[0]
+        coords = np.zeros((0, other.coords.shape[1]), dtype=other.coords.dtype)
+        geoinfos = np.zeros((0, other.geoinfos.shape[1]), dtype=other.geoinfos.dtype)
+        data = np.zeros((0, other.data.shape[1]), dtype=other.data.dtype)
+        datetimes = np.array([], dtype=other.datetimes.dtype)
 
-        other_copy.data = np.expand_dims(mean_of_data.astype(np.float32), axis=0).repeat(
-            other_copy.coords.shape[0], axis=0
-        )
-        other_copy.datetimes = np.array(datetime).repeat(other_copy.coords.shape[0])
+        for other in others:
+            n_datapoints = len(other.data)
+            assert other.coords.shape == (n_datapoints, 2), "number of datapoints do not match"
+            assert other.geoinfos.shape[0] == n_datapoints, "number of datapoints do not match"
+            assert other.datetimes.shape[0] == n_datapoints, "number of datapoints do not match"
 
-        n_datapoints = len(other_copy.data)
+            coords = np.concatenate([coords, other.coords])
+            geoinfos = np.concatenate([geoinfos, other.geoinfos])
+            data = np.concatenate([data, other.data])
+            datetimes = np.concatenate([datetimes, other.datetimes])
 
-        assert other_copy.coords.shape == (n_datapoints, 2), (
-            "number of datapoints do not match data"
-        )
-        assert other_copy.geoinfos.shape[0] == n_datapoints, (
-            "number of datapoints do not match data"
-        )
-        assert other_copy.datetimes.shape[0] == n_datapoints, (
-            "number of datapoints do not match data"
-        )
-
-        return cls(**dataclasses.asdict(other_copy))
+        return cls(coords, geoinfos, data, datetimes)
 
 
 @dataclasses.dataclass
@@ -116,16 +165,30 @@ class ItemKey:
     stream: str
 
     @property
-    def path(self):
+    def path(self) -> str:
         """Unique path within a hierarchy for one output item."""
         return f"{self.sample}/{self.stream}/{self.forecast_step}"
 
     @property
-    def with_source(self):
+    def with_source(self) -> bool:
         """Decide if output item should contain source dataset."""
-        # TODO: is this valid for the adjusted (offsetted) forecast steps?
-        # => if config.forecast_offset > 0 source will be never written
         return self.forecast_step == 0
+
+    def with_target(self, forecast_offset: typing.Literal[0, 1]) -> bool:
+        """Decide if output item should contain target and predictions."""
+        assert forecast_offset in (0, 1)
+        return (not self.with_source) or (forecast_offset == 0)
+
+    @staticmethod
+    def _infer_forecast_offset(datasets: dict[str, typing.Any]) -> int:
+        """
+        Infer forecast offset by the (non)presence of targets at fstep 0.
+
+        Args:
+            datasets: Datasets found in a fstep 0 OutputItem.
+        """
+        # forecast offset=1 should produce no targets at fstep 0
+        return 0 if "target" in datasets else 1
 
 
 @dataclasses.dataclass
@@ -134,24 +197,43 @@ class OutputDataset:
 
     name: str
     item_key: ItemKey
+    source_interval: TimeRange
 
     # (datapoints, channels, ens)
-    data: zarr.Array  # wrong type => array like
+    data: ArrayType  # wrong type => array like
 
     # (datapoints,)
-    times: zarr.Array
+    times: ArrayType
 
     # (datapoints, 2)
-    coords: zarr.Array
+    coords: ArrayType
 
     # (datapoints, geoinfos) geoinfos are stream dependent => 0 for most gridded data
-    geoinfo: zarr.Array
+    geoinfo: ArrayType
 
     channels: list[str]
     geoinfo_channels: list[str]
 
+    @classmethod
+    def create(
+        cls, name: str, key: ItemKey, arrays: dict[str, ArrayType], attrs: dict[str, typing.Any]
+    ):
+        """
+        Create Output dataset from dictonaries.
+
+        Args:
+            name: Name of dataset (target/prediction/source)
+            item_key: ItemKey to associated with the parent OutputItem.
+            arrays: Data and Coordinate arrays.
+            attrs: Additional metadata.
+        """
+        assert "source_interval" in attrs, "missing expected attribute 'source_interval'"
+
+        source_interval = TimeRange(**attrs.pop("source_interval"))
+        return cls(name, key, source_interval, **arrays, **attrs)
+
     @functools.cached_property
-    def arrays(self) -> dict[str, zarr.Array]:
+    def arrays(self) -> dict[str, ArrayType]:
         """Iterate over the arrays and their names."""
         return {
             "data": self.data,
@@ -164,7 +246,7 @@ class OutputDataset:
     def datapoints(self) -> NDArray[np.int_]:
         return np.arange(self.data.shape[0])
 
-    def as_xarray(self, chunk_nsamples=CHUNK_N_SAMPLES) -> xr.Dataset:
+    def as_xarray(self, chunk_nsamples=CHUNK_N_SAMPLES) -> xr.DataArray:
         """Convert raw dask arrays into chunked dask-aware xarray dataset."""
         chunks = (chunk_nsamples, *self.data.shape[1:])
 
@@ -175,33 +257,33 @@ class OutputDataset:
         additional_dims = (0, 1, 2) if len(data.shape) == 3 else (0, 1, 2, 5)
         expanded_data = da.expand_dims(data, axis=additional_dims)
         coords = da.from_zarr(self.coords).compute()
-        times = da.from_zarr(self.times).compute()
+        times = da.from_zarr(self.times).compute().astype("datetime64[ns]")
         geoinfo = da.from_zarr(self.geoinfo).compute()
         geoinfo = {name: ("ipoint", geoinfo[:, i]) for i, name in enumerate(self.geoinfo_channels)}
         # TODO: make sample, stream, forecast_step DataArray attribute, test how it
         # interacts with concatenating
-        return xr.DataArray(
-            expanded_data,
-            dims=["sample", "stream", "forecast_step", "ipoint", "channel", "ens"],
-            coords={
-                "sample": [self.item_key.sample],
-                "stream": [self.item_key.stream],
-                "forecast_step": [self.item_key.forecast_step],
-                "ipoint": self.datapoints,
-                "channel": self.channels,  # TODO: make sure channel names align with data
-                "valid_time": ("ipoint", times.astype("datetime64[ns]")),
-                "lat": ("ipoint", coords[..., 0]),
-                "lon": ("ipoint", coords[..., 1]),
-                **geoinfo,
-            },
-            name=self.name,
-        )
+        dims = ["sample", "stream", "forecast_step", "ipoint", "channel", "ens"]
+        ds_coords = {
+            "sample": [self.item_key.sample],
+            "source_interval_start": ("sample", [self.source_interval.start]),
+            "source_interval_end": ("sample", [self.source_interval.end]),
+            "stream": [self.item_key.stream],
+            "forecast_step": [self.item_key.forecast_step],
+            "ipoint": self.datapoints,
+            "channel": self.channels,  # TODO: make sure channel names align with data
+            "valid_time": ("ipoint", times),
+            "lat": ("ipoint", coords[..., 0]),
+            "lon": ("ipoint", coords[..., 1]),
+            **geoinfo,
+        }
+        return xr.DataArray(expanded_data, dims=dims, coords=ds_coords, name=self.name)
 
 
 class OutputItem:
     def __init__(
         self,
         key: ItemKey,
+        forecast_offset=int | None,
         target: OutputDataset | None = None,
         prediction: OutputDataset | None = None,
         source: OutputDataset | None = None,
@@ -212,14 +294,21 @@ class OutputItem:
         self.prediction = prediction
         self.source = source
 
-        self.datasets = [self.target, self.prediction]
+        self.datasets = []
 
         if self.key.with_source:
-            if self.source:
-                self.datasets.append(self.source)
-            else:
-                msg = f"Missing source dataset for item: {self.key.path}"
-                raise ValueError(msg)
+            self._append_dataset(self.source, "source")
+
+        if self.key.with_target(forecast_offset):
+            self._append_dataset(self.target, "target")
+            self._append_dataset(self.prediction, "prediction")
+
+    def _append_dataset(self, dataset: OutputDataset | None, name: str) -> None:
+        if dataset:
+            self.datasets.append(dataset)
+        else:
+            msg = f"Missing {name} dataset for item: {self.key.path}"
+            raise ValueError(msg)
 
 
 class ZarrIO:
@@ -227,7 +316,7 @@ class ZarrIO:
 
     def __init__(self, store_path: pathlib.Path):
         self._store_path = store_path
-        self.data_root = None
+        self.data_root: zarr.Group | None = None
 
     def __enter__(self) -> typing.Self:
         self._store = zarr.storage.DirectoryStore(self._store_path)
@@ -242,7 +331,8 @@ class ZarrIO:
         """Write one output item to the zarr store."""
         group = self._get_group(item.key, create=True)
         for dataset in item.datasets:
-            self._write_dataset(group, dataset)
+            if dataset is not None:
+                self._write_dataset(group, dataset)
 
     def get_data(self, sample: int, stream: str, forecast_step: int) -> OutputItem:
         """Get datasets for the output item matching the arguments."""
@@ -252,14 +342,18 @@ class ZarrIO:
 
     def load_zarr(self, key: ItemKey) -> OutputItem:
         """Get datasets for a output item."""
+        datasets = self._get_datasets(key)
+
+        return OutputItem(key=key, forecast_offset=self.forecast_offset, **datasets)
+
+    def _get_datasets(self, key: ItemKey):
         group = self._get_group(key)
-        datasets = {
-            name: OutputDataset(name, key, **dict(dataset.arrays()), **dataset.attrs)
+        return {
+            name: OutputDataset.create(
+                name, key, dict(dataset.arrays()), dict(dataset.attrs).copy()
+            )
             for name, dataset in group.groups()
         }
-        datasets["key"] = key
-
-        return OutputItem(**datasets)
 
     def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
@@ -285,12 +379,14 @@ class ZarrIO:
     def _write_metadata(self, dataset_group: zarr.Group, dataset: OutputDataset):
         dataset_group.attrs["channels"] = dataset.channels
         dataset_group.attrs["geoinfo_channels"] = dataset.geoinfo_channels
+        dataset_group.attrs["source_interval"] = dataset.source_interval.as_dict()
 
     def _write_arrays(self, dataset_group: zarr.Group, dataset: OutputDataset):
         for array_name, array in dataset.arrays.items():  # suffix is eg. data or coords
             self._create_dataset(dataset_group, array_name, array)
 
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
+        assert is_ndarray(array), f"Expected ndarray but got: {type(array)}"
         if array.size == 0:  # sometimes for geoinfo
             chunks = None
         else:
@@ -300,6 +396,23 @@ class ZarrIO:
             + "into group: {group}."
         )
         group.create_dataset(name, data=array, chunks=chunks)
+
+    @functools.cached_property
+    def forecast_offset(self) -> int:
+        fstep0_datasets = self._get_datasets(self.example_key)
+        return ItemKey._infer_forecast_offset(fstep0_datasets)
+
+    @functools.cached_property
+    def example_key(self) -> ItemKey:
+        try:
+            sample, example_sample = next(self.data_root.groups())
+            stream, example_stream = next(example_sample.groups())
+            fstep = 0
+        except StopIteration as e:
+            msg = f"Data store at: {self._store_path} is empty."
+            raise FileNotFoundError(msg) from e
+
+        return ItemKey(sample, fstep, stream)
 
     @functools.cached_property
     def samples(self) -> list[int]:
@@ -319,7 +432,12 @@ class ZarrIO:
         # assume stream/samples/forecast_steps are orthogonal
         _, example_sample = next(self.data_root.groups())
         _, example_stream = next(example_sample.groups())
-        return list(example_stream.group_keys())
+
+        all_steps = list(example_stream.group_keys())
+        if self.forecast_offset == 1:
+            return all_steps[1:]  # exclude fstep with no targets/preds
+        else:
+            return all_steps
 
 
 @dataclasses.dataclass
@@ -339,6 +457,9 @@ class OutputBatchData:
     # => datapoints is accross all datasets per stream
     sources: list[list[IOReaderData]]
 
+    # sample
+    source_intervals: list[TimeRange]
+
     # fstep, stream, redundant dim (size 1), tensor(sample x datapoint, channel)
     targets: list[list[list]]
 
@@ -354,7 +475,7 @@ class OutputBatchData:
     # fstep, stream, redundant dim (size 1)
     targets_lens: list[list[list[int]]]
 
-    # stream name: index into data (only streams in analysis_streams_output)
+    # stream name: index into data (only streams in streams_output)
     streams: dict[str, int]
 
     # stream, channel name
@@ -368,12 +489,16 @@ class OutputBatchData:
     @functools.cached_property
     def samples(self):
         """Continous indices of all samples accross all batches."""
+
+        # TODO associate samples with the sampel idx used for the time window
         return np.arange(len(self.sources)) + self.sample_start
 
     @functools.cached_property
     def forecast_steps(self):
         """Indices of all forecast steps adjusted by the forecast offset"""
-        return np.arange(len(self.targets)) + self.forecast_offset
+        # forecast offset should be either 1 for forecasting or 0 for MTM
+        assert self.forecast_offset in (0, 1)
+        return np.arange(len(self.targets) + self.forecast_offset)
 
     def items(self) -> typing.Generator[OutputItem, None, None]:
         """Iterate over possible output items"""
@@ -388,34 +513,64 @@ class OutputBatchData:
         _logger.debug(f"extracting subset: {key}")
         offset_key = self._offset_key(key)
         stream_idx = self.streams[key.stream]
-        datapoints = self._get_datapoints_per_sample(offset_key, stream_idx)
 
+        source_interval = self.source_intervals[offset_key.sample]
         _logger.debug(
             f"forecast_step: {key.forecast_step} = {offset_key.forecast_step} (rel_step) + "
             + f"{self.forecast_offset} (forecast_offset)"
         )
         _logger.debug(f"stream: {key.stream} with index: {stream_idx}")
 
+        assert self.forecast_offset in (0, 1)
+        if key.with_source:
+            source_dataset = self._extract_sources(
+                offset_key.sample, stream_idx, key, source_interval
+            )
+        else:
+            source_dataset = None
+
+        if key.with_target(self.forecast_offset):
+            target_dataset, prediction_dataset = self._extract_targets_predictions(
+                stream_idx, offset_key, key, source_interval
+            )
+        else:
+            target_dataset, prediction_dataset = (None, None)
+
+        return OutputItem(
+            key=key,
+            forecast_offset=self.forecast_offset,
+            source=source_dataset,
+            target=target_dataset,
+            prediction=prediction_dataset,
+        )
+
+    def _offset_key(self, key: ItemKey):
+        """
+        Correct indices in key to be useable for data extraction.
+
+        `key` contains indices that are adjusted to have better output semantics.
+        To be useable in extraction these have to be adjusted to bridge the differences
+        compared to the semantics of the data.
+            - `sample` is adjusted from a global continous index to a per batch index
+            - `forecast_step` is adjusted from including `forecast_offset` to indexing
+               the data (always starts at 0)
+        """
+        return ItemKey(
+            key.sample - self.sample_start, key.forecast_step - self.forecast_offset, key.stream
+        )
+
+    def _extract_targets_predictions(self, stream_idx, offset_key, key, source_interval):
+        datapoints = self._get_datapoints_per_sample(offset_key, stream_idx)
+        data_coords = self._extract_coordinates(stream_idx, offset_key, datapoints)
+
         if (datapoints.stop - datapoints.start) == 0:
             target_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
             preds_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
         else:
-            target_data = (
-                self.targets[offset_key.forecast_step][stream_idx][0][datapoints]
-                .cpu()
-                .detach()
-                .numpy()
-            )
-            preds_data = (
-                self.predictions[offset_key.forecast_step][stream_idx][0]
-                .transpose(1, 0)
-                .transpose(1, 2)[datapoints]
-                .cpu()
-                .detach()
-                .numpy()
-            )
-
-        data_coords = self._extract_coordinates(stream_idx, offset_key, datapoints)
+            target_data = self.targets[offset_key.forecast_step][stream_idx][0][datapoints]
+            preds_data = self.predictions[offset_key.forecast_step][stream_idx][0].transpose(
+                1, 2, 0
+            )[datapoints]
 
         assert len(data_coords.channels) == target_data.shape[1], (
             "Number of channel names does not align with target data."
@@ -424,19 +579,22 @@ class OutputBatchData:
             "Number of channel names does not align with prediction data."
         )
 
-        if key.with_source:
-            source_dataset = self._extract_sources(offset_key.sample, stream_idx, key)
-        else:
-            source_dataset = None
-
-        return OutputItem(
-            key=key,
-            source=source_dataset,
-            target=OutputDataset("target", key, target_data, **dataclasses.asdict(data_coords)),
-            prediction=OutputDataset(
-                "prediction", key, preds_data, **dataclasses.asdict(data_coords)
-            ),
+        target_dataset = OutputDataset(
+            "target",
+            key,
+            source_interval,
+            target_data,
+            **dataclasses.asdict(data_coords),
         )
+        prediction_dataset = OutputDataset(
+            "prediction",
+            key,
+            source_interval,
+            preds_data,
+            **dataclasses.asdict(data_coords),
+        )
+
+        return target_dataset, prediction_dataset
 
     def _get_datapoints_per_sample(self, offset_key, stream_idx):
         lens = self.targets_lens[offset_key.forecast_step][stream_idx]
@@ -455,21 +613,6 @@ class OutputBatchData:
         )
 
         return slice(start, start + n_samples)
-
-    def _offset_key(self, key: ItemKey):
-        """
-        Correct indices in key to be useable for data extraction.
-
-        `key` contains indices that are adjusted to have better output semantics.
-        To be useable in extraction these have to be adjusted to bridge the differences
-        compared to the semantics of the data.
-            - `sample` is adjusted from a global continous index to a per batch index
-            - `forecast_step` is adjusted from including `forecast_offset` to indexing
-               the data (always starts at 0)
-        """
-        return ItemKey(
-            key.sample - self.sample_start, key.forecast_step - self.forecast_offset, key.stream
-        )
 
     def _extract_coordinates(self, stream_idx, offset_key, datapoints) -> DataCoordinates:
         _coords = self.targets_coords[offset_key.forecast_step][stream_idx][datapoints].numpy()
@@ -494,11 +637,13 @@ class OutputBatchData:
 
         return DataCoordinates(times, coords, geoinfo, channels, geoinfo_channels)
 
-    def _extract_sources(self, sample, stream_idx, key):
+    def _extract_sources(
+        self, sample: int, stream_idx: int, key: ItemKey, source_interval: TimeRange
+    ) -> OutputDataset:
         channels = self.source_channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
 
-        source = self.sources[sample][stream_idx]
+        source: IOReaderData = self.sources[sample][stream_idx]
 
         assert source.data.shape[1] == len(channels), (
             "Number of source channel names does not align with source data"
@@ -507,10 +652,11 @@ class OutputBatchData:
         source_dataset = OutputDataset(
             "source",
             key,
-            source.data,
-            source.datetimes,
-            source.coords,
-            source.geoinfos,
+            source_interval,
+            np.asarray(source.data),
+            np.asarray(source.datetimes),
+            np.asarray(source.coords),
+            np.asarray(source.geoinfos),
             channels,
             geoinfo_channels,
         )
