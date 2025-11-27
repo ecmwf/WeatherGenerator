@@ -396,7 +396,6 @@ class ZarrIO:
             + "into group: {group}."
         )
         group.create_array(name, data=array, chunks=chunks)
-        
 
     @functools.cached_property
     def forecast_offset(self) -> int:
