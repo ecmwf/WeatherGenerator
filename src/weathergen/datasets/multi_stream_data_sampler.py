@@ -577,6 +577,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     output_tokens,
                     mask,
                 )
+
                 stream_data_source[name] = sdata
 
                 # source meta info...
@@ -588,10 +589,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 source_metadata = source_metadata_list[sidx]  # first is teacher
 
+                # also want to add the mask to the metadata
+                source_metadata.mask = mask
+
                 # TODO: seb check this 
                 # Map each student (source) to its teacher (target)
                 t_idx = student_to_teacher[sidx]
                 batch.add_source_stream(sidx, t_idx, name, sdata, source_metadata)
+                batch.source_samples[sidx].set_forecast_dt(forecast_dt)
+
 
             # stream_data_target can contain network input
             stream_data_target = {}
@@ -614,13 +620,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # get teacher config info
                 target_metadata = target_metadata_list[t_idx]
 
+                # also want to add the mask to the metadata
+                target_metadata.mask = mask
+
                 # TODO: seb to check
                 # Map target to all source students
                 student_indices = [s_idx for s_idx, tid in enumerate(student_to_teacher) if tid == t_idx]
                 batch.add_target_stream(t_idx, student_indices, name, sdata, target_metadata)
+                batch.target_samples[t_idx].set_forecast_dt(forecast_dt)
             
-            # import pdb; pdb.set_trace()
-
             # TODO: build batch
             # source_input
             # target_input
@@ -697,6 +705,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # compute offsets and auxiliary data needed for prediction computation
         # (info is not per stream so separate data structure)
+        
+        ##### target_coords_idx we probably don't need for the targets #####
         target_coords_idx = compute_idxs_predict(self.forecast_offset + forecast_dt, batch)
 
         return batch, source_cell_lens, target_coords_idx
