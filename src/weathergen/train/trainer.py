@@ -63,7 +63,31 @@ class Trainer(TrainerBase):
 
         self.train_log_freq = train_log_freq
 
+        self.data_loader = None
+        self.data_loader_validation = None
+        self.dataset = None
+        self.dataset_val = None
+        self.device = None
+        self.device_type = None
+        self.ema_model = None
+        self.grad_scaler = None
+        self.last_grad_norm = None
+        self.loss_calculator = None
+        self.loss_calculator_val = None
+        self.loss_model_hist = None
+        self.loss_unweighted_hist = None
+        self.lr_scheduler = None
+        self.model = None
+        self.model_params = None
+        self.optimizer = None
+        self.perf_gpu = None
+        self.perf_mem = None
+        self.stdev_unweighted_hist = None
+        self.t_start = None
+        self.validate_with_ema = None
+
     def init(self, cf: Config, devices):
+        # pylint: disable=attribute-defined-outside-init
         self.cf = OmegaConf.merge(
             OmegaConf.create(
                 {
