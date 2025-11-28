@@ -169,7 +169,7 @@ input_window_steps: 1
 
 val_initial: False
 
-loader_num_workers: 0
+loader_num_workers: 8
 log_validation: 0
 streams_output: ["ERA5"]
 
