@@ -140,22 +140,16 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
 # TODO: adapt so that the masking or forecast config entry also sits here
 training_config:
   # when this is "masking", we are basically only using the model_input subconfig
-  training_mode: "masking"  # "masking", "student_teacher", "forecast"
+  training_mode: "diffusion_forecast"  # "masking", "student_teacher", "forecast"
 
   model_input:
-    masking_strategy: "healpix" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
-    rate: 0.4  # Masking rate to use for model input
-    num_views: 1  # if student-teacher, the number of local (student) views to generate
-    hl_mask : 4  # healpix level to use for healpix masking strategy
-    relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-  
+    num_input_steps: 1 # fake, read from standard cd.num_input_steps, default 1 # NOTE: only 1 works for now
+    loss: "LatentDiffusionLoss" # place holder
+
   teacher_model_input:
-    strategy: "healpix"  # Strategy for teacher (global) view: "random", "healpix"
-    rate: 0.4  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
-    num_views: 1 # number of teacher views to generate
-    hl_mask : 0 # healpix level to use for healpix masking strategy
-    # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
-    rate_sampling: true  # randomly sample the rate per batch
+    forecast_offset: 0 # fake, still read from usual place
+    num_forecast_steps: 1 # fake, still read from usual place
+    loss: "LatentDiffusionLoss" # placeholder
 
 
 
