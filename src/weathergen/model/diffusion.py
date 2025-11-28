@@ -23,38 +23,12 @@
 # ----------------------------------------------------------------------------
 
 
-import dataclasses
 import math
 
 import torch
 
 from weathergen.common.config import Config
 from weathergen.model.engines import ForecastingEngine
-
-
-@dataclasses.dataclass
-class BatchData:
-    """
-    Mock function for the data that will be provided to the diffusion model. Will change.
-    """
-
-    model_samples: dict
-    target_samples: dict
-
-    def get_sample_len(self):
-        return len(list(self.model_samples.keys()))
-
-    def get_input_data(self, t: int):
-        return self.model_samples[t]["data"]
-
-    def get_input_metadata(self, t: int):
-        return self.model_samples[t]["metadata"]
-
-    def get_target_data(self, t: int):
-        return self.target_samples[t]["data"]
-
-    def get_target_metadata(self, t: int):
-        return self.target_samples[t]["metadata"]
 
 
 class DiffusionForecastEngine(torch.nn.Module):
@@ -96,14 +70,17 @@ class DiffusionForecastEngine(torch.nn.Module):
         # y = data.get_input_data(-1)
         # eta = data.get_input_metadata(-1)
 
-        c = 1
+        c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
         y = tokens
-        eta = metadata.noise_level_rn.to(device=tokens.device)
+        eta = torch.tensor([metadata.noise_level_rn], device=tokens.device)
+        # eta = torch.randn(1).to(device=tokens.device)
+        # eta = torch.tensor([metadata.noise_level_rn]).to(device=tokens.device)
 
         # Compute sigma (noise level) from eta
         # noise = torch.randn(y.shape, device=y.device)  # now eta from MultiStreamDataSampler
         sigma = (eta * self.p_std + self.p_mean).exp()
         n = torch.randn_like(y) * sigma
+
         return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep)
 
         # Compute loss -- move this to a separate loss calculator

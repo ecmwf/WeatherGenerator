@@ -118,7 +118,7 @@ validation_mode_config: {
   "teacher_model": {}
 }
 # masking
-masking_strategy: "dog" # obviously TODO
+masking_strategy: "random" # obviously TODO
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 #

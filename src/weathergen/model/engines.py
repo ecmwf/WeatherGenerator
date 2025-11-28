@@ -342,7 +342,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            dim_aux=(1 if cf.forecast_with_step_conditioning else 0),
+                            dim_aux=(1 if cf.forecast_with_step_conditioning else None),
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_noise_conditioning=self.cf.fe_diffusion_model,
@@ -359,7 +359,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            dim_aux=(1 if cf.forecast_with_step_conditioning else 0),
+                            dim_aux=(1 if cf.forecast_with_step_conditioning else None),
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_noise_conditioning=self.cf.fe_diffusion_model,
@@ -373,15 +373,11 @@ class ForecastingEngine(torch.nn.Module):
                         with_residual=True,
                         dropout_rate=self.cf.fe_dropout_rate,
                         norm_type=self.cf.norm_type,
-                        dim_aux=1,
+                        dim_aux=(1 if cf.forecast_with_step_conditioning else None),
                         norm_eps=self.cf.mlp_norm_eps,
                         with_noise_conditioning=self.cf.fe_diffusion_model,
                     )
                 )
-
-            self.fe_blocks.append(
-                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
-            )
 
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
@@ -399,7 +395,8 @@ class ForecastingEngine(torch.nn.Module):
             tokens_in = tokens
 
         # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
-        aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
+        # aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
+        aux_info = None
         if self.cf.fe_diffusion_model:
             assert noise_emb is not None, (
                 "Noise embedding must be provided for diffusion forecast engine"

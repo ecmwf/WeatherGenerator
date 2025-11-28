@@ -2,7 +2,7 @@ from typing import Any
 
 import torch
 
-from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase
+from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase, TargetAuxOutput
 
 
 class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
@@ -13,6 +13,7 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
     def compute(
         self, bidx, batch, model_params, model, forecast_offset, forecast_steps
     ) -> tuple[Any, Any]:
+        (_, _, _, metadata) = batch
         with torch.no_grad():
             tokens, posteriors = self.model(
                 model_params=model_params,
@@ -21,4 +22,6 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
                 forecast_steps=None,
                 encode_only=True,
             )
-        return {"latent": [tokens]}, posteriors
+        return TargetAuxOutput(
+            physical=None, latent=[tokens], aux_outputs={"noise_level_rn": metadata.noise_level_rn}
+        )

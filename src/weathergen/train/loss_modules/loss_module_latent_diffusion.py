@@ -87,17 +87,19 @@ class LossLatentDiffusion(LossModuleBase):
             for _, _, loss_fct_name in self.loss_fcts
         }
 
-        preds = preds.latent["preds"]
-        targets = targets["latent"]
-        fsteps = len(targets)
+        pred_tokens_all = preds.latent["preds"]
+        target_tokens_all = targets.latent
+        eta = torch.tensor([targets.aux_outputs["noise_level_rn"]], device=self.device)
+        fsteps = len(target_tokens_all)
 
-        eta = torch.randn(1)
-        noise_weight = self._get_noise_weight(eta).to(device=preds[0].device)
+        noise_weight = self._get_noise_weight(eta)
         fstep_loss_weights = self._get_fstep_weights(fsteps)
 
         loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
         ctr_fsteps = 0
-        for target, pred, fstep_loss_weight in zip(targets, preds, fstep_loss_weights, strict=True):
+        for target_tokens, pred_tokens, fstep_loss_weight in zip(
+            target_tokens_all, pred_tokens_all, fstep_loss_weights, strict=True
+        ):
             # the first entry in tokens_all is the source itself, so skip it
             loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_loss_fcts = 0
@@ -106,8 +108,8 @@ class LossLatentDiffusion(LossModuleBase):
             for loss_fct, loss_fct_weight, loss_fct_name in self.loss_fcts:
                 loss_lfct = self._loss_per_loss_function(
                     loss_fct,
-                    target=target,
-                    pred=pred,
+                    target=target_tokens,
+                    pred=pred_tokens,
                     noise_weight=noise_weight,
                 )
 
