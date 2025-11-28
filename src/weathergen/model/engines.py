@@ -89,7 +89,8 @@ class EmbeddingEngine(torch.nn.Module):
             for ob in offsets_base
         ]
 
-        # iterate over all forecast steps and
+        # TODO: handling of input steps should be done using encoder
+        # iterate over all input steps and streams
         for istep in range(num_step_input):
             # TODO: what is this list dimension??? Where should the istep index be???
             for _, sb in enumerate(streams_data):
@@ -98,11 +99,11 @@ class EmbeddingEngine(torch.nn.Module):
                     embed = self.embeds[stream_name]
 
                     # skip empty stream
-                    if not s_data.source_empty():
+                    if s_data.source_empty():
                         continue
 
-                    idxs = s_data.source_idxs_embed.to(device)
-                    idxs_pe = s_data.source_idxs_embed_pe.to(device)
+                    idxs = s_data.source_idxs_embed[istep].to(device)
+                    idxs_pe = s_data.source_idxs_embed_pe[istep].to(device)
 
                     # create full scatter index
                     # (there's no broadcasting which is likely highly inefficient)
