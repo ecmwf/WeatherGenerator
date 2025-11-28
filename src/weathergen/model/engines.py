@@ -94,13 +94,12 @@ class EmbeddingEngine(torch.nn.Module):
             # TODO: what is this list dimension??? Where should the istep index be???
             for _, sb in enumerate(streams_data):
                 for stream_name, s_data in zip(self.stream_names, sb, strict=True):
-                    
                     # embedding network
                     embed = self.embeds[stream_name]
-                    
+
                     # skip empty stream
                     if not s_data.source_empty():
-                        continue 
+                        continue
 
                     idxs = s_data.source_idxs_embed.to(device)
                     idxs_pe = s_data.source_idxs_embed_pe.to(device)
