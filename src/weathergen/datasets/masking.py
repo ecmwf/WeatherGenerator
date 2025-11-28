@@ -1,9 +1,11 @@
 import logging
+from typing import List, Tuple
 
 import numpy as np
 import torch
 
 from weathergen.common.config import Config
+from weathergen.datasets.batch import SampleMetaData
 
 _logger = logging.getLogger(__name__)
 
@@ -93,7 +95,7 @@ class Masker:
 
     def reset_rng(self, rng) -> None:
         """
-        Reset rng after epoch to ensure proper randomization
+        Reset rng after mini_epoch to ensure proper randomization
         """
         self.rng = rng
 
@@ -137,12 +139,10 @@ class Masker:
 
     def mask_source_idxs(
         self,
-        stream_info,
         idxs_cells,
         idxs_cells_lens,
-        rdata,
         keep_mask: np.typing.NDArray | None = None,
-    ) -> (torch.Tensor, torch.Tensor):
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
 
         Return:
@@ -212,11 +212,9 @@ class Masker:
 
     def mask_targets_idxs(
         self,
-        stream_info,
         idxs_cells,
         idxs_cells_lens,
-        rdata,
-    ) -> (torch.Tensor, torch.Tensor):
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # mask_source_idxs is
         assert (self.mask_tokens is not None) or (self.mask_tokens is not None)
         idxs_ord_inv = torch.tensor([], dtype=torch.int64)
@@ -625,6 +623,64 @@ class Masker:
         ]
 
         return full_mask
+
+    def build_views_for_stream(
+        self,
+        num_cells: int,
+        teacher_cfg: dict,
+        student_cfg: dict,
+        relationship: str = "subset",
+    ) -> Tuple[np.typing.NDArray, List[np.typing.NDArray], List[SampleMetaData]]:
+        """
+        Construct teacher/student keep masks for a stream.
+        SampleMetaData is currently just a dict with the masking params used.
+        """
+
+        strat_teacher = teacher_cfg.get("strategy", "random")
+        rate_teacher = teacher_cfg.get("rate")
+        t_cfg_extra = teacher_cfg.get("masking_strategy_config")
+
+        teacher_keep_mask = self.generate_cell_keep_mask(
+            num_cells=num_cells,
+            strategy=strat_teacher,
+            rate=rate_teacher,
+            masking_strategy_config=t_cfg_extra,
+        )
+
+        num_views = student_cfg.get("num_views", 1)
+        strat_student = student_cfg.get("masking_strategy", student_cfg.get("strategy", "random"))
+        rate_student = student_cfg.get("rate")
+        s_cfg_extra = student_cfg.get("masking_strategy_config")
+
+        student_keep_masks: List[np.ndarray] = []
+        for _ in range(num_views):
+            base = self.generate_cell_keep_mask(
+                num_cells=num_cells,
+                strategy=strat_student,
+                rate=rate_student,
+                masking_strategy_config=s_cfg_extra,
+            )
+            if relationship == "subset":
+                keep = base & teacher_keep_mask
+            elif relationship == "disjoint":
+                keep = base & (~teacher_keep_mask)
+            else:
+                keep = base
+            student_keep_masks.append(keep)
+
+        metadata: List[SampleMetaData] = [
+            SampleMetaData(
+                masking_params=teacher_cfg,
+            )
+        ]
+        for idx, mask in enumerate(student_keep_masks):
+            metadata.append(
+                SampleMetaData(
+                    masking_params=student_cfg,
+                )
+            )
+
+        return teacher_keep_mask, student_keep_masks, metadata
 
     # ---------------------------------------------------------------------
     # Cell-level keep mask generation (teacher/student view selection)

@@ -137,7 +137,7 @@ class StreamData:
         ]
 
     def add_source(
-        self, step: int, ss_raw: IOReaderData, ss_lens: torch.tensor, ss_cells: list
+        self, step: int, ss_raw: IOReaderData, ss_lens: torch.Tensor, ss_cells: list
     ) -> None:
         """
         Add data for source for one input.
@@ -145,9 +145,9 @@ class StreamData:
         Parameters
         ----------
         ss_raw : IOReaderData( dataclass containing coords, geoinfos, data, and datetimes )
-        ss_lens : torch.tensor( number of healpix cells )
+        ss_lens : torch.Tensor( number of healpix cells )
         ss_cells : list( number of healpix cells )
-            [ torch.tensor( tokens per cell, token size, number of channels) ]
+            [ torch.Tensor( tokens per cell, token size, number of channels) ]
 
         Returns
         -------
@@ -166,11 +166,11 @@ class StreamData:
         self,
         fstep: int,
         targets: list,
-        target_coords: torch.tensor,
-        target_coords_per_cell: torch.tensor,
-        target_coords_raw: torch.tensor,
-        times_raw: torch.tensor,
-        idxs_inv: torch.tensor,
+        target_coords: torch.Tensor,
+        target_coords_per_cell: torch.Tensor,
+        target_coords_raw: torch.Tensor,
+        times_raw: torch.Tensor,
+        idxs_inv: torch.Tensor,
     ) -> None:
         """
         Add data for target for one input.
@@ -209,9 +209,9 @@ class StreamData:
         self,
         fstep: int,
         targets: list,
-        target_coords_raw: torch.tensor,
-        times_raw: torch.tensor,
-        idxs_inv: torch.tensor,
+        target_coords_raw: torch.Tensor,
+        times_raw: torch.Tensor,
+        idxs_inv: torch.Tensor,
     ) -> None:
         """
         Add data for target for one input.
@@ -247,8 +247,8 @@ class StreamData:
     def add_target_coords(
         self,
         fstep: int,
-        target_coords: torch.tensor,
-        target_coords_per_cell: torch.tensor,
+        target_coords: torch.Tensor,
+        target_coords_per_cell: torch.Tensor,
     ) -> None:
         """
         Add data for target for one input.

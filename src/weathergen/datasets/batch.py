@@ -9,54 +9,26 @@ Provides clean separation between:
 from dataclasses import dataclass
 
 import numpy as np
+import torch
 
+from weathergen.common.config import Config
 from weathergen.datasets.stream_data import StreamData
 
 # TODO: Add a store for a random number for diffusion
 # TODO: GetTimestep to get the timestep
-# TODO: GetData: get the streamdata
 # TODO: GetMetaData: then this gets the right rn for the timestep!
 
-
 @dataclass
-class ViewMetadata:
-    """
-    Metadata describing how a view was generated.
-
-    This captures the spatial selection (which cells/tokens were kept),
-    the strategy used (random, healpix, etc.), and hierarchical parameters.
-
-    Attributes:
-        view_id: Unique identifier (e.g., "teacher_global", "student_local_0")
-        keep_mask: Boolean array [num_healpix_cells] at data level indicating kept cells
-        strategy: Name of selection strategy ("random", "healpix_level_2", etc.)
-        healpix_level: HEALPix level for hierarchical selection (None if not applicable)
-        rate: Fraction of data kept (e.g., 0.5 = 50% kept); None if fixed count
-        parent_view_id: ID of the parent view this is a subset of (None for teacher)
-    """
-
-    # Core identifiers and selection description
-    view_id: str
-    keep_mask: np.typing.NDArray  # [num_cells] bool at data level
-    strategy: str  # e.g. "random", "healpix", "channel"
-
-    # Hierarchical/quantitative description of selection
-    healpix_level: int | None = None
-    rate: float | None = None
-    parent_view_id: str | None = None  # For students: which teacher they belong to
-
-    # Optional extras for future/other training paradigms
-    loss_type: str | None = None  # e.g. DINO, JEPA
-    strategy_config: dict | None = None  # e.g. {rate: 0.5, hl_mask: 3, overlap: "disjoint"}
-
-
 class SampleMetaData:
     # masking strategy
-    masking_strategy: str
+    # masking_strategy: str
 
     # parameters for masking strategy
-    masking_params: dict
+    masking_params: Config | dict
 
+    mask: torch.Tensor | None = None
+
+    noise_level_rn: float | None = None
 
 class Sample:
     # keys: stream name, values: SampleMetaData
@@ -64,7 +36,14 @@ class Sample:
 
     # data for all streams
     # keys: stream_name, values: StreamData
-    streams_data: dict
+    streams_data: dict[str, StreamData | None]
+    forecast_dt: int | None
+
+    # TODO:
+    # these two need to live in ModelBatch as they are flattened!
+    # this should be a dict also lives in ModelBatch
+    source_cell_lens: list[torch.Tensor] | None
+    target_coords_idx: list[torch.Tensor] | None
 
     def __init__(self, streams: dict) -> None:
         # TODO: can we pass this right away?
@@ -74,6 +53,11 @@ class Sample:
         for stream_info in streams:
             self.streams_data[stream_info["name"]] = None
 
+        self.source_cell_lens: list[torch.Tensor] | None = None
+        self.target_coords_idx: list[torch.Tensor] | None = None
+
+        self.forecast_dt: int | None = None
+
     def add_stream_data(self, stream_name: str, stream_data: StreamData) -> None:
         """
         Add data for stream @stream_name to sample
@@ -81,7 +65,33 @@ class Sample:
         assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
         self.streams_data[stream_name] = stream_data
 
+    def add_meta_info(self, stream_name: str, meta_info: SampleMetaData) -> None:
+        """
+        Add metadata for stream @stream_name to sample
+        """
+        self.meta_info[stream_name] = meta_info
+
+    def set_preprocessed(self, source_cell_lens, target_coords_idx):
+        """
+        Set preprocessed data for sample
+        """
+        self.source_cell_lens = source_cell_lens
+        self.target_coords_idx = target_coords_idx
+
+    def set_forecast_dt(self, forecast_dt: int) -> None:
+        """
+        Set forecast_dt for sample
+        """
+        self.forecast_dt = forecast_dt
+
     # TODO: complete interface, e.g get_stream
+
+    def get_stream_data(self, stream_name: str) -> StreamData:
+        """
+        Get data for stream @stream_name from sample
+        """
+        assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
+        return self.streams_data[stream_name]
 
 class ModelBatch:
     """
@@ -97,8 +107,8 @@ class ModelBatch:
     # index of corresponding target (for source samples) or source (for target samples)
     # these are in 1-to-1 corresponding for classical training modes (MTM, forecasting) but
     # can be more complex for strategies like student-teacher training
-    source_matching_idx: np.typing.NDArray[np.int32]
-    target_matching_idx: np.typing.NDArray[np.int32]
+    source2target_matching_idxs: np.typing.NDArray[np.int32]
+    target2source_matching_idxs: np.typing.NDArray[np.int32]
 
     def __init__(self, streams, num_source_samples: int, num_target_samples: int) -> None:
         """ """
@@ -106,8 +116,9 @@ class ModelBatch:
         self.source_samples = [Sample(streams) for _ in range(num_source_samples)]
         self.target_samples = [Sample(streams) for _ in range(num_target_samples)]
 
-        self.source_target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
-        self.target_source_matching_idxs = np.full(num_target_samples, -1, dtype=np.int32)
+        self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
+        # self.target_source_matching_idxs = np.full(num_target_samples, -1, dtype=np.int32)
+        self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
 
     def add_source_stream(
         self,
@@ -115,29 +126,41 @@ class ModelBatch:
         target_sample_idx: int,
         stream_name: str,
         stream_data: StreamData,
+        source_meta_info: SampleMetaData,
     ) -> None:
         """
         Add data for one stream to sample @source_sample_idx
         """
         self.source_samples[source_sample_idx].add_stream_data(stream_name, stream_data)
 
+        # add the meta_info
+        self.source_samples[source_sample_idx].add_meta_info(stream_name, source_meta_info)
+        
+
         assert target_sample_idx < len(self.target_samples), "invalid value for target_sample_idx"
-        self.source_target_matching_idxs[source_sample_idx] = target_sample_idx
+        self.source2target_matching_idxs[source_sample_idx] = target_sample_idx
 
     def add_target_stream(
         self,
         target_sample_idx: int,
-        source_sample_idx: int,
+        source_sample_idx: int | list[int],
         stream_name: str,
         stream_data: StreamData,
+        target_meta_info: SampleMetaData,
     ) -> None:
         """
         Add data for one stream to sample @target_sample_idx
         """
         self.target_samples[target_sample_idx].add_stream_data(stream_name, stream_data)
 
-        assert source_sample_idx < len(self.source_samples), "invalid value for source_sample_idx"
-        self.target_source_matching_idxs[target_sample_idx] = source_sample_idx
+        # add the meta_info -- for target we have different
+        self.target_samples[target_sample_idx].add_meta_info(stream_name, target_meta_info)
+
+        if isinstance(source_sample_idx, int):
+            assert source_sample_idx < len(self.source_samples), "invalid value for source_sample_idx"
+        else:
+            assert all(idx < len(self.source_samples) for idx in source_sample_idx), "invalid value for source_sample_idx"
+        self.target2source_matching_idxs[target_sample_idx] = source_sample_idx
 
     def len_sources(self) -> int:
         """
@@ -167,10 +190,10 @@ class ModelBatch:
         """
         Get index of source sample for a given target sample index
         """
-        return int(self.source_target_matching_idxs[target_idx])
+        return int(self.target2source_matching_idxs[target_idx])
 
     def get_target_idx_for_source(self, source_idx: int) -> int:
         """
         Get index of target sample for a given source sample index
         """
-        return int(self.source_target_matching_idxs[source_idx])
+        return int(self.source2target_matching_idxs[source_idx])

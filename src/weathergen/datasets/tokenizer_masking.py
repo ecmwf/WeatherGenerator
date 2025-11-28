@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import numpy as np
 import torch
 
 from weathergen.common.io import IOReaderData
@@ -21,7 +22,6 @@ from weathergen.datasets.tokenizer_utils import (
     tokenize_space,
     tokenize_spacetime,
 )
-from weathergen.datasets.view_builder import build_views_for_stream
 
 
 def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
@@ -45,7 +45,7 @@ class TokenizerMasking(Tokenizer):
 
     def reset_rng(self, rng) -> None:
         """
-        Reset rng after epoch to ensure proper randomization
+        Reset rng after mini_epoch to ensure proper randomization
         """
         self.masker.reset_rng(rng)
         self.rng = rng
@@ -101,11 +101,11 @@ class TokenizerMasking(Tokenizer):
         if keep_mask is not None:
             keep_np = keep_mask.cpu().numpy().astype(bool)
             (mask_tokens, mask_channels) = self.masker.mask_source_idxs(
-                stream_info, idxs_cells, idxs_cells_lens, rdata, keep_mask=keep_np
+                idxs_cells, idxs_cells_lens, keep_mask=keep_np
             )
         else:
             (mask_tokens, mask_channels) = self.masker.mask_source_idxs(
-                stream_info, idxs_cells, idxs_cells_lens, rdata
+                idxs_cells, idxs_cells_lens,
             )
 
         source_tokens_cells, source_tokens_lens = tokenize_apply_mask_source(
@@ -152,7 +152,7 @@ class TokenizerMasking(Tokenizer):
             self.masker.mask_channels = mask_state.get("mask_channels")
 
         (mask_tokens, mask_channels, idxs_ord_inv) = self.masker.mask_targets_idxs(
-            stream_info, idxs_cells, idxs_cells_lens, rdata
+            idxs_cells, idxs_cells_lens,
         )
 
         data, datetimes, coords, coords_local, coords_per_cell = tokenize_apply_mask_target(
@@ -193,7 +193,7 @@ class TokenizerMasking(Tokenizer):
             self.masker.mask_channels = mask_state.get("mask_channels")
 
         (mask_tokens, mask_channels, idxs_ord_inv) = self.masker.mask_targets_idxs(
-            stream_info, idxs_cells, idxs_cells_lens, rdata
+            idxs_cells, idxs_cells_lens,
         )
 
         # TODO: split up
@@ -211,10 +211,33 @@ class TokenizerMasking(Tokenizer):
             encode_times_target,
         )
 
-        # TODO, TODO, TODO: max_num_targets
-        # max_num_targets = stream_info.get("max_num_targets", -1)
+        selection = self._select_target_subset(stream_info, coords_local.shape[0])
 
-        return (coords_local, coords_per_cell)
+        if selection is not None and coords_local.numel() > 0:
+            # use nice index_select method
+            coords_local = coords_local.index_select(0, selection.to(coords_local.device))
+
+        # coords_per_cell is trickier
+        if selection is not None and coords_per_cell.numel() > 0:
+            total_points = int(coords_per_cell.sum().item())
+            if total_points == 0:
+                coords_per_cell = torch.zeros_like(coords_per_cell)
+            else:
+                cell_ids = torch.repeat_interleave(
+                    torch.arange(coords_per_cell.shape[0], dtype=torch.long),
+                    coords_per_cell.to(torch.long),
+                )
+                if cell_ids.numel() == 0:
+                    coords_per_cell = torch.zeros_like(coords_per_cell)
+                else:
+                    new_counts = torch.bincount(
+                        cell_ids[selection.to(cell_ids.device)],
+                        minlength=coords_per_cell.shape[0],
+                    )
+                    coords_per_cell = new_counts.to(dtype=coords_per_cell.dtype)
+
+        # pass the selection back for use in get_target_values
+        return (coords_local, coords_per_cell, selection)
 
     def get_target_values(
         self,
@@ -224,6 +247,7 @@ class TokenizerMasking(Tokenizer):
         token_data,
         time_win: tuple,
         mask_state: dict | None = None,
+        selection: torch.Tensor | None = None,
     ):
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
@@ -235,7 +259,7 @@ class TokenizerMasking(Tokenizer):
             self.masker.mask_channels = mask_state.get("mask_channels")
 
         (mask_tokens, mask_channels, idxs_ord_inv) = self.masker.mask_targets_idxs(
-            stream_info, idxs_cells, idxs_cells_lens, rdata
+            idxs_cells, idxs_cells_lens,
         )
 
         data, datetimes, coords, _, _ = tokenize_apply_mask_target(
@@ -252,77 +276,43 @@ class TokenizerMasking(Tokenizer):
             encode_times_target,
         )
 
-        # TODO, TODO, TODO: max_num_targets
-        # max_num_targets = stream_info.get("max_num_targets", -1)
+        if selection is None:
+            selection = self._select_target_subset(stream_info, data.shape[0])
 
-        # TODO: shuffeling
+        if selection is not None and data.numel() > 0:
+            device_sel = selection.to(data.device)
+            data = data.index_select(0, device_sel)
+            coords = coords.index_select(0, device_sel)
+            if idxs_ord_inv.numel() > 0:
+                idxs_ord_inv = idxs_ord_inv.index_select(0, device_sel)
 
+            # datetimes is numpy here
+            np_sel = selection.cpu().numpy()
+            datetimes = datetimes[np_sel]
+
+        # TODO: shuffling
+
+        # selection not passed on, we call get_target_coords first
         return (data, datetimes, coords, idxs_ord_inv)
 
-    # ------------------------------------------------------------------
-    # Per-stream view construction (teacher + students) for student-teacher
-    # ------------------------------------------------------------------
-    def build_stream_views(
+    def _select_target_subset(
         self,
         stream_info: dict,
-        rdata: IOReaderData,
-        time_win: tuple,
-        training_cfg: dict | None = None,
-    ):
-        """Construct teacher and student views for a single stream.
+        num_points: int,
+    ) -> torch.Tensor | None:
+        max_num_targets = stream_info.get("max_num_targets", -1)
 
-        Parameters
-        ----------
-        stream_info : dict
-            Stream configuration dictionary.
-        rdata : IOReaderData
-            Combined reader data for this stream.
-        time_win : tuple
-            (start, end) datetime window.
-        training_cfg : dict | None
-            cf.training_config section; if absent or mode != 'student_teacher', fallback to
-            single view.
+        if max_num_targets is None or max_num_targets <= 0 or num_points <= max_num_targets:
+            return None
 
-        Returns
-        -------
-        teacher : tuple | None
-            (tokens_cells, tokens_lens) for teacher or None when not student_teacher.
-        students : list
-            List of (tokens_cells, tokens_lens) for each student view (or single masking view).
-        """
-        if training_cfg is None or training_cfg.get("training_mode") != "student_teacher":
-            # Standard masking path: single view only (treated as 'student' for uniformity)
-            scells, slens, _mask_state = self.batchify_source(stream_info, rdata, time_win)
-            self._last_view_metadata = None
-            return None, [(scells, slens, _mask_state)], None
+        rng = getattr(self, "rng", None)
+        if rng is None:
+            rng = np.random.default_rng()
+            self.rng = rng
 
-        teacher_cfg = training_cfg.get("teacher_model_input", {})
-        student_cfg = training_cfg.get("model_input", {})
-        relationship = student_cfg.get("relationship", "subset")
+        selected = np.sort(rng.choice(num_points, max_num_targets, replace=False))
 
-        num_cells = self.num_healpix_cells_source
-        teacher_keep_mask, student_keep_masks, view_meta = build_views_for_stream(
-            self.masker, num_cells, teacher_cfg, student_cfg, relationship
-        )
-
-        # Convert keep masks to torch tensors for downstream masking override
-        teacher_keep_mask_t = torch.from_numpy(teacher_keep_mask)
-        student_keep_masks_t = [torch.from_numpy(m) for m in student_keep_masks]
-
-        # Teacher tokens
-        t_cells, t_lens, t_mask_state = self.batchify_source(
-            stream_info, rdata, time_win, keep_mask=teacher_keep_mask_t
-        )
-        # Student tokens
-        student_tokens = [
-            self.batchify_source(stream_info, rdata, time_win, keep_mask=km)
-            for km in student_keep_masks_t
-        ]
-        # add mask_state inside each tuple
-        student_tokens = [(cells, lens, mstate) for (cells, lens, mstate) in student_tokens]
-
-        self._last_view_metadata = view_meta
-        return (t_cells, t_lens, t_mask_state), student_tokens, view_meta
+        return torch.from_numpy(selected).to(torch.long)
 
     def sample_tensors_uniform_vectorized(
         self, tensor_list: list, lengths: list, max_total_points: int
