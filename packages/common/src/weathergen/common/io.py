@@ -20,6 +20,7 @@ import xarray as xr
 import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
+from zarr.storage import LocalStore
 
 # experimental value, should be inferred more intelligently
 CHUNK_N_SAMPLES = 16392
@@ -319,7 +320,7 @@ class ZarrIO:
         self.data_root: zarr.Group | None = None
 
     def __enter__(self) -> typing.Self:
-        self._store = zarr.storage.LocalStore(self._store_path)
+        self._store = LocalStore(self._store_path)
         self.data_root = zarr.group(store=self._store)
 
         return self
@@ -355,9 +356,9 @@ class ZarrIO:
             for name, dataset in group.groups()
         }
 
-    def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Group:
+    def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Array | zarr.Group | None:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
-        group: zarr.Group | None
+        group: zarr.Array | zarr.Group | None
         if create:
             group = self.data_root.create_group(item.path)
         else:
