@@ -337,7 +337,7 @@ class Model(torch.nn.Module):
         self.forecast_engine = ForecastingEngine(cf, self.num_healpix_cells)
         if cf.fe_diffusion_model:
             self.forecast_engine = DiffusionForecastEngine(
-                forecast_engine=self.forecast_engine, cf=cf
+                cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
             )
 
         ###############

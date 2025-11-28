@@ -36,11 +36,14 @@ class DiffusionForecastEngine(torch.nn.Module):
 
     def __init__(
         self,
+        cf: Config,
+        num_healpix_cells: int,
         forecast_engine: ForecastingEngine,
         cf: Config,
     ):
         super().__init__()
         self.cf = cf
+        self.num_healpix_cells = num_healpix_cells
         self.net = forecast_engine
         self.preconditioner = Preconditioner()
         self.frequency_embedding_dim = self.cf.frequency_embedding_dim
@@ -110,15 +113,17 @@ class DiffusionForecastEngine(torch.nn.Module):
 
     def inference(
         self,
-        x: torch.Tensor,
         fstep: int,
         num_steps: int = 30,
     ) -> torch.Tensor:
         # Forward pass of the diffusion model during inference
         # https://github.com/NVlabs/edm/blob/main/generate.py
 
+        # Sample noise (assuming single batch element for now)
+        x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
+
         # Time step discretization.
-        step_indices = torch.arange(num_steps, dtype=torch.float64, device=x.device)
+        step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
         t_steps = (
             self.sigma_max ** (1 / self.rho)
             + step_indices
