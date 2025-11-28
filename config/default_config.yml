@@ -1,9 +1,6 @@
 streams_directory: "./config/streams/era5_1deg/"
 
 embed_orientation: "channels"
-embed_local_coords: True
-embed_centroids_local_coords: False
-embed_size_centroids: 0
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
@@ -48,12 +45,24 @@ forecast_steps: 1
 forecast_policy: "fixed"
 forecast_att_dense_rate: 1.0
 fe_num_blocks: 8
+forecast_with_step_conditioning: False
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
 impute_latent_noise_std: 0.0  # 1e-4
+# Diffusion related parameters
+frequency_embedding_dim: 256
+embedding_dim: 512
+sigma_min: 0.002
+sigma_max: 50000
+sigma_data: 0.5
+rho: 7
+p_mean: -1.2
+p_std: 1.2
+# Encoder weights
 chkpt_encoder_weights: "./models/whkujigw/whkujigw_epoch00063.chkpt"
+
 
 
 healpix_level: 5
@@ -63,6 +72,7 @@ with_flash_attention: True
 compile_model: False
 with_fsdp: False
 attention_dtype: bf16
+mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
 norm_eps: 1e-4
 
@@ -107,15 +117,15 @@ validation_mode_config: {
   "shared_heads": False,
   "teacher_model": {}
 }
+# masking
+masking_strategy: "random" # obviously TODO
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
+#
+sampling_rate_target: 1.0
 # sample the masking rate (with normal distribution centered at masking_rate)
 # note that a sampled masking rate leads to varying requirements
 masking_rate_sampling: True
-# sample a subset of all target points, useful e.g. to reduce memory requirements (also can specify per-stream)
-sampling_rate_target: 1.0
-# include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "causal" and "combination"
-masking_strategy: "random"
 # masking_strategy_config is a dictionary of additional parameters for the masking strategy
 # required for "healpix" and "channel" masking strategies
 # "healpix": requires healpix mask level to be specified with `hl_mask`
@@ -126,12 +136,28 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           "same_strategy_per_batch": false
                           }
 
+# Student-teacher configuration (only used when training_mode == "student_teacher")
+# TODO: adapt so that the masking or forecast config entry also sits here
+training_config:
+  # when this is "masking", we are basically only using the model_input subconfig
+  training_mode: "diffusion_forecast"  # "masking", "student_teacher", "forecast"
+
+  model_input:
+    num_input_steps: 1 # fake, read from standard cd.num_input_steps, default 1 # NOTE: only 1 works for now
+    loss: "LatentDiffusionLoss" # place holder
+
+  teacher_model_input:
+    forecast_offset: 0 # fake, still read from usual place
+    num_forecast_steps: 1 # fake, still read from usual place
+    loss: "LatentDiffusionLoss" # placeholder
+
+
+
 num_mini_epochs: 32
 samples_per_mini_epoch: 4096
 samples_per_validation: 512
 
 shuffle: True
-mixed_precision_dtype: bf16
 
 lr_scaling_policy: "sqrt"
 lr_start: 1e-6
@@ -150,7 +176,8 @@ norm_type: "LayerNorm"
 nn_module: "te"
 log_grad_norms: False
 
-start_date: 197901010000
+# start_date: 197901010000
+start_date: 201401010000
 end_date: 202012310000
 start_date_val: 202101010000
 end_date_val: 202201010000

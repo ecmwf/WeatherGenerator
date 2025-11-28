@@ -32,82 +32,83 @@ from weathergen.utils.utils import get_dtype
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
 
-    def __init__(self, cf: Config, sources_size) -> None:
+    def __init__(self, cf: Config, sources_size, stream_names: list[str]) -> None:
         """
         Initialize the EmbeddingEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
         :param sources_size: List of source sizes for each stream.
+        :param stream_names: Ordered list of stream identifiers aligned with cf.streams.
         """
         super(EmbeddingEngine, self).__init__()
         self.cf = cf
         self.sources_size = sources_size  # KCT:iss130, what is this?
-        self.embeds = torch.nn.ModuleList()
+        self.embeds = torch.nn.ModuleDict()
+        self.stream_names = list(stream_names)
 
-        for i, si in enumerate(self.cf.streams):
-            stream_name = si.get("name", i)
+        assert len(self.stream_names) == len(self.cf.streams), (
+            "stream_names must align with cf.streams"
+        )
 
+        for i, (si, stream_name) in enumerate(zip(self.cf.streams, self.stream_names, strict=True)):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
-                self.embeds.append(torch.nn.Identity())
+                self.embeds[stream_name] = torch.nn.Identity()
                 continue
 
             if si["embed"]["net"] == "transformer":
-                self.embeds.append(
-                    StreamEmbedTransformer(
-                        mode=self.cf.embed_orientation,
-                        num_tokens=si["embed"]["num_tokens"],
-                        token_size=si["token_size"],
-                        num_channels=self.sources_size[i],
-                        dim_embed=si["embed"]["dim_embed"],
-                        dim_out=self.cf.ae_local_dim_embed,
-                        num_blocks=si["embed"]["num_blocks"],
-                        num_heads=si["embed"]["num_heads"],
-                        dropout_rate=self.cf.embed_dropout_rate,
-                        norm_type=self.cf.norm_type,
-                        embed_size_centroids=self.cf.embed_size_centroids,
-                        unembed_mode=self.cf.embed_unembed_mode,
-                        stream_name=stream_name,
-                    )
+                self.embeds[stream_name] = StreamEmbedTransformer(
+                    mode=self.cf.embed_orientation,
+                    num_tokens=si["embed"]["num_tokens"],
+                    token_size=si["token_size"],
+                    num_channels=self.sources_size[i],
+                    dim_embed=si["embed"]["dim_embed"],
+                    dim_out=self.cf.ae_local_dim_embed,
+                    num_blocks=si["embed"]["num_blocks"],
+                    num_heads=si["embed"]["num_heads"],
+                    dropout_rate=self.cf.embed_dropout_rate,
+                    norm_type=self.cf.norm_type,
+                    unembed_mode=self.cf.embed_unembed_mode,
+                    stream_name=stream_name,
                 )
             elif si["embed"]["net"] == "linear":
-                self.embeds.append(
-                    StreamEmbedLinear(
-                        self.sources_size[i] * si["token_size"],
-                        self.cf.ae_local_dim_embed,
-                        stream_name=stream_name,
-                    )
+                self.embeds[stream_name] = StreamEmbedLinear(
+                    self.sources_size[i] * si["token_size"],
+                    self.cf.ae_local_dim_embed,
+                    stream_name=stream_name,
                 )
             else:
                 raise ValueError("Unsupported embedding network type")
 
-    def forward(self, streams_data, pe_embed, dtype, device):
-        source_tokens_lens = torch.stack(
-            [
-                torch.stack(
-                    [
-                        s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
-                        for s in stl_b
-                    ]
-                )
-                for stl_b in streams_data
-            ]
-        )
-        offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
+    def forward(self, streams_data, source_cell_lens, pe_embed, dtype, device):
+        num_step_input = len(source_cell_lens)
 
-        tokens_all = torch.empty(
-            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=dtype, device=device
-        )
+        offsets_base = [torch.cumsum(s[1:], 0) for s in source_cell_lens]
 
-        for _, sb in enumerate(streams_data):
-            for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                if not s.source_empty():
-                    idxs = s.source_idxs_embed.to(device)
-                    idxs_pe = s.source_idxs_embed_pe.to(device)
+        tokens_all = [
+            torch.empty((int(ob[-1]), self.cf.ae_local_dim_embed), dtype=dtype, device=device)
+            for ob in offsets_base
+        ]
+
+        # TODO: handling of input steps should be done using encoder
+        # iterate over all input steps and streams
+        for istep in range(num_step_input):
+            # TODO: what is this list dimension??? Where should the istep index be???
+            for _, sb in enumerate(streams_data):
+                for stream_name, s_data in zip(self.stream_names, sb, strict=True):
+                    # embedding network
+                    embed = self.embeds[stream_name]
+
+                    # skip empty stream
+                    if s_data.source_empty():
+                        continue
+
+                    idxs = s_data.source_idxs_embed[istep].to(device)
+                    idxs_pe = s_data.source_idxs_embed_pe[istep].to(device)
 
                     # create full scatter index
                     # (there's no broadcasting which is likely highly inefficient)
                     idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
+                    x_embed = embed(s_data.source_tokens_cells[istep]).flatten(0, 1)
                     # there's undocumented limitation in flash_attn that will make embed fail if
                     # #tokens is too large; code below is a work around
                     # x_embed = torch.cat(
@@ -121,8 +122,9 @@ class EmbeddingEngine(torch.nn.Module):
                     # )
 
                     # scatter write to reorder from per stream to per cell ordering
-                    tokens_all.scatter_(0, idxs, x_embed + pe_embed[idxs_pe])
-        return tokens_all
+                    tokens_all[istep].scatter_(0, idxs, x_embed + pe_embed[idxs_pe])
+
+        return tokens_all[0]
 
 
 class LocalAssimilationEngine(torch.nn.Module):
@@ -197,32 +199,35 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 attention_dtype=get_dtype(self.cf.attention_dtype),
             )
         )
-        self.ae_adapter.append(
-            MLP(
-                self.cf.ae_global_dim_embed,
-                self.cf.ae_global_dim_embed,
-                with_residual=True,
-                dropout_rate=self.cf.ae_adapter_dropout_rate,
-                norm_type=self.cf.norm_type,
-                norm_eps=self.cf.mlp_norm_eps,
+
+        ae_adapter_num_blocks = cf.get("ae_adapter_num_blocks", 2)
+        for _ in range(ae_adapter_num_blocks - 1):
+            self.ae_adapter.append(
+                MLP(
+                    self.cf.ae_global_dim_embed,
+                    self.cf.ae_global_dim_embed,
+                    with_residual=True,
+                    dropout_rate=self.cf.ae_adapter_dropout_rate,
+                    norm_type=self.cf.norm_type,
+                    norm_eps=self.cf.mlp_norm_eps,
+                )
             )
-        )
-        self.ae_adapter.append(
-            MultiCrossAttentionHeadVarlenSlicedQ(
-                self.cf.ae_global_dim_embed,
-                self.cf.ae_local_dim_embed,
-                num_slices_q=self.cf.ae_local_num_queries,
-                dim_head_proj=self.cf.ae_adapter_embed,
-                num_heads=self.cf.ae_adapter_num_heads,
-                with_residual=self.cf.ae_adapter_with_residual,
-                with_qk_lnorm=self.cf.ae_adapter_with_qk_lnorm,
-                dropout_rate=self.cf.ae_adapter_dropout_rate,
-                with_flash=self.cf.with_flash_attention,
-                norm_type=self.cf.norm_type,
-                norm_eps=self.cf.norm_eps,
-                attention_dtype=get_dtype(self.cf.attention_dtype),
+            self.ae_adapter.append(
+                MultiCrossAttentionHeadVarlenSlicedQ(
+                    self.cf.ae_global_dim_embed,
+                    self.cf.ae_local_dim_embed,
+                    num_slices_q=self.cf.ae_local_num_queries,
+                    dim_head_proj=self.cf.ae_adapter_embed,
+                    num_heads=self.cf.ae_adapter_num_heads,
+                    with_residual=self.cf.ae_adapter_with_residual,
+                    with_qk_lnorm=self.cf.ae_adapter_with_qk_lnorm,
+                    dropout_rate=self.cf.ae_adapter_dropout_rate,
+                    with_flash=self.cf.with_flash_attention,
+                    norm_type=self.cf.norm_type,
+                    norm_eps=self.cf.norm_eps,
+                    attention_dtype=get_dtype(self.cf.attention_dtype),
+                )
             )
-        )
 
     def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant):
         for block in self.ae_adapter:
@@ -299,6 +304,10 @@ class GlobalAssimilationEngine(torch.nn.Module):
                 )
             )
 
+        self.ae_global_blocks.append(
+            torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+        )
+
     def forward(self, tokens, use_reentrant):
         for block in self.ae_global_blocks:
             tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
@@ -333,7 +342,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            dim_aux=1,
+                            dim_aux=(1 if cf.forecast_with_step_conditioning else None),
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_noise_conditioning=self.cf.fe_diffusion_model,
@@ -350,7 +359,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            dim_aux=1,
+                            dim_aux=(1 if cf.forecast_with_step_conditioning else None),
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_noise_conditioning=self.cf.fe_diffusion_model,
@@ -364,7 +373,7 @@ class ForecastingEngine(torch.nn.Module):
                         with_residual=True,
                         dropout_rate=self.cf.fe_dropout_rate,
                         norm_type=self.cf.norm_type,
-                        dim_aux=1,
+                        dim_aux=(1 if cf.forecast_with_step_conditioning else None),
                         norm_eps=self.cf.mlp_norm_eps,
                         with_noise_conditioning=self.cf.fe_diffusion_model,
                     )
@@ -380,7 +389,14 @@ class ForecastingEngine(torch.nn.Module):
             block.apply(init_weights_final)
 
     def forward(self, tokens, fstep, noise_emb=None):
-        aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
+        # predict residual to last time step if requested
+        forecast_residual = self.cf.get("forecast_residual", False)
+        if forecast_residual:
+            tokens_in = tokens
+
+        # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
+        # aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
+        aux_info = None
         if self.cf.fe_diffusion_model:
             assert noise_emb is not None, (
                 "Noise embedding must be provided for diffusion forecast engine"
@@ -391,7 +407,7 @@ class ForecastingEngine(torch.nn.Module):
             for block in self.fe_blocks:
                 tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
 
-        return tokens
+        return tokens if not forecast_residual else (tokens_in + tokens)
 
 
 class EnsPredictionHead(torch.nn.Module):

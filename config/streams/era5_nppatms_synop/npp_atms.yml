@@ -9,6 +9,7 @@
 
 NPPATMS :
   type : obs
+  stream_id : 1
   filenames : ['observations-ea-ofb-0001-2012-2023-npp-atms-radiances-v2.zarr']
   loss_weight : 1.0
   token_size : 32

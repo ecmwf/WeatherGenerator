@@ -270,8 +270,10 @@ class Model(torch.nn.Module):
         """Create each individual module of the model"""
         cf = self.cf
 
+        # determine stream names once so downstream components use consistent keys
+        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
         # separate embedding networks for differnt observation types
-        self.embed_engine = EmbeddingEngine(cf, self.sources_size)
+        self.embed_engine = EmbeddingEngine(cf, self.sources_size, self.stream_names)
 
         ##############
         # local assimilation engine
@@ -341,13 +343,13 @@ class Model(torch.nn.Module):
         ###############
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
-        self.embed_target_coords = torch.nn.ModuleList()
-        self.target_token_engines = torch.nn.ModuleList()
-        self.pred_adapter_kv = torch.nn.ModuleList()
-        self.pred_heads = torch.nn.ModuleList()
+        self.embed_target_coords = torch.nn.ModuleDict()
+        self.target_token_engines = torch.nn.ModuleDict()
+        self.pred_adapter_kv = torch.nn.ModuleDict()
+        self.pred_heads = torch.nn.ModuleDict()
 
         for i_obs, si in enumerate(cf.streams):
-            stream_name = si.get("name", i_obs)
+            stream_name = self.stream_names[i_obs]
 
             # extract and setup relevant parameters
             etc = si["embed_target_coords"]
@@ -388,45 +390,39 @@ class Model(torch.nn.Module):
 
             # embedding network for coordinates
             if etc["net"] == "linear":
-                self.embed_target_coords.append(
-                    NamedLinear(
-                        f"embed_target_coords_{stream_name}",
-                        in_features=dim_coord_in,
-                        out_features=dims_embed[0],
-                        bias=False,
-                    )
+                self.embed_target_coords[stream_name] = NamedLinear(
+                    f"embed_target_coords_{stream_name}",
+                    in_features=dim_coord_in,
+                    out_features=dims_embed[0],
+                    bias=False,
                 )
             elif etc["net"] == "mlp":
-                self.embed_target_coords.append(
-                    MLP(
-                        dim_coord_in,
-                        dims_embed[0],
-                        hidden_factor=8,
-                        with_residual=False,
-                        dropout_rate=dropout_rate,
-                        norm_eps=self.cf.mlp_norm_eps,
-                        stream_name=f"embed_target_coords_{stream_name}",
-                    )
+                self.embed_target_coords[stream_name] = MLP(
+                    dim_coord_in,
+                    dims_embed[0],
+                    hidden_factor=8,
+                    with_residual=False,
+                    dropout_rate=dropout_rate,
+                    norm_eps=self.cf.mlp_norm_eps,
+                    stream_name=f"embed_target_coords_{stream_name}",
                 )
             else:
                 assert False
 
             # obs-specific adapter for tokens
             if cf.pred_adapter_kv:
-                self.pred_adapter_kv.append(
-                    MLP(
-                        cf.ae_global_dim_embed,
-                        cf.ae_global_dim_embed,
-                        hidden_factor=2,
-                        with_residual=True,
-                        dropout_rate=dropout_rate,
-                        norm_type=cf.norm_type,
-                        norm_eps=self.cf.mlp_norm_eps,
-                        stream_name=f"pred_adapter_kv_{stream_name}",
-                    )
+                self.pred_adapter_kv[stream_name] = MLP(
+                    cf.ae_global_dim_embed,
+                    cf.ae_global_dim_embed,
+                    hidden_factor=2,
+                    with_residual=True,
+                    dropout_rate=dropout_rate,
+                    norm_type=cf.norm_type,
+                    norm_eps=self.cf.mlp_norm_eps,
+                    stream_name=f"pred_adapter_kv_{stream_name}",
                 )
             else:
-                self.pred_adapter_kv.append(torch.nn.Identity())
+                self.pred_adapter_kv[stream_name] = torch.nn.Identity()
 
             # target prediction engines
             tte_version = (
@@ -445,7 +441,7 @@ class Model(torch.nn.Module):
                 stream_name=stream_name,
             )
 
-            self.target_token_engines.append(tte)
+            self.target_token_engines[stream_name] = tte
 
             # ensemble prediction heads to provide probabilistic prediction
             final_activation = si["pred_head"].get("final_activation", "Identity")
@@ -453,16 +449,14 @@ class Model(torch.nn.Module):
                 logger.debug(
                     f"{final_activation} activation of prediction head of {si['name']} stream"
                 )
-            self.pred_heads.append(
-                EnsPredictionHead(
-                    dims_embed[-1],
-                    self.targets_num_channels[i_obs],
-                    si["pred_head"]["num_layers"],
-                    si["pred_head"]["ens_size"],
-                    norm_type=cf.norm_type,
-                    final_activation=final_activation,
-                    stream_name=stream_name,
-                )
+            self.pred_heads[stream_name] = EnsPredictionHead(
+                dims_embed[-1],
+                self.targets_num_channels[i_obs],
+                si["pred_head"]["num_layers"],
+                si["pred_head"]["ens_size"],
+                norm_type=cf.norm_type,
+                final_activation=final_activation,
+                stream_name=stream_name,
             )
 
         return self
@@ -481,7 +475,9 @@ class Model(torch.nn.Module):
         """Print number of parameters for entire model and each module used to build the model"""
 
         cf = self.cf
-        num_params_embed = [get_num_parameters(embed) for embed in self.embed_engine.embeds]
+        num_params_embed = [
+            get_num_parameters(self.embed_engine.embeds[name]) for name in self.stream_names
+        ]
         num_params_total = get_num_parameters(self)
         num_params_ae_local = get_num_parameters(self.ae_local_engine.ae_local_blocks)
         num_params_ae_global = get_num_parameters(self.ae_global_engine.ae_global_blocks)
@@ -495,10 +491,16 @@ class Model(torch.nn.Module):
             else self.forecast_engine.fe_blocks
         )
 
-        num_params_pred_adapter = [get_num_parameters(kv) for kv in self.pred_adapter_kv]
-        num_params_embed_tcs = [get_num_parameters(etc) for etc in self.embed_target_coords]
-        num_params_tte = [get_num_parameters(tte) for tte in self.target_token_engines]
-        num_params_preds = [get_num_parameters(head) for head in self.pred_heads]
+        num_params_pred_adapter = [
+            get_num_parameters(self.pred_adapter_kv[name]) for name in self.stream_names
+        ]
+        num_params_embed_tcs = [
+            get_num_parameters(self.embed_target_coords[name]) for name in self.stream_names
+        ]
+        num_params_tte = [
+            get_num_parameters(self.target_token_engines[name]) for name in self.stream_names
+        ]
+        num_params_preds = [get_num_parameters(self.pred_heads[name]) for name in self.stream_names]
 
         print("-----------------")
         print(f"Total number of trainable parameters: {num_params_total:,}")
@@ -593,7 +595,7 @@ class Model(torch.nn.Module):
             A list containing all prediction results
         """
 
-        (streams_data, _, target_coords_idxs) = batch
+        (streams_data, _, target_coords_idxs, metadata) = batch
 
         tokens, posteriors = self.encode(model_params=model_params, batch=batch)
         if encode_only:
@@ -621,7 +623,7 @@ class Model(torch.nn.Module):
                 if noise_std > 0.0:
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
-            tokens = self.forecast(model_params, tokens, fstep)
+            tokens = self.forecast(model_params, tokens, fstep, metadata)
             latents["preds"] += [tokens]
 
         # prediction for final step
@@ -640,7 +642,9 @@ class Model(torch.nn.Module):
         return ModelOutput(physical=preds_all, latent=latents)
 
     #########################################
-    def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
+    def embed_cells(
+        self, model_params: ModelParams, streams_data, source_cell_lens
+    ) -> torch.Tensor:
         """Embeds input data for each stream separately and rearranges it to cell-wise order
         Args:
             model_params : Query and embedding parameters
@@ -650,7 +654,9 @@ class Model(torch.nn.Module):
         """
 
         device = next(self.parameters()).device
-        tokens_all = self.embed_engine(streams_data, model_params.pe_embed, self.dtype, device)
+        tokens_all = self.embed_engine(
+            streams_data, source_cell_lens, model_params.pe_embed, self.dtype, device
+        )
 
         return tokens_all
 
@@ -710,7 +716,9 @@ class Model(torch.nn.Module):
 
         # work around to bug in flash attention for hl>=5
 
-        cell_lens = cell_lens[1:]
+        istep = 0
+
+        cell_lens = cell_lens[istep][1:]
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_all = []
         posteriors = []
@@ -791,10 +799,10 @@ class Model(torch.nn.Module):
             Latent representation of the model
         """
 
-        (streams_data, source_cell_lens, _) = batch
+        (streams_data, source_cell_lens, _, _) = batch
 
         # embed
-        tokens = self.embed_cells(model_params, streams_data)
+        tokens = self.embed_cells(model_params, streams_data, source_cell_lens)
 
         # local assimilation engine and adapter
         tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
@@ -804,7 +812,9 @@ class Model(torch.nn.Module):
         return tokens, posteriors
 
     #########################################
-    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
+    def forecast(
+        self, model_params: ModelParams, tokens: torch.Tensor, fstep: int, metadata: dict
+    ) -> torch.Tensor:
         """Advances latent space representation in time
 
         Args:
@@ -817,7 +827,7 @@ class Model(torch.nn.Module):
             ValueError: For unexpected arguments in checkpoint method
         """
 
-        tokens = self.forecast_engine(tokens, fstep)
+        tokens = self.forecast_engine(tokens, fstep, metadata)
 
         return tokens
 
@@ -853,11 +863,11 @@ class Model(torch.nn.Module):
 
         # pair with tokens from assimilation engine to obtain target tokens
         preds_tokens = []
-        for ii, (tte, tte_kv) in enumerate(
-            zip(self.target_token_engines, self.pred_adapter_kv, strict=False)
-        ):
-            si = self.cf.streams[ii]
-            tc_embed = self.embed_target_coords[ii]
+        for idx, stream_name in enumerate(self.stream_names):
+            si = self.cf.streams[idx]
+            tte = self.target_token_engines[stream_name]
+            tte_kv = self.pred_adapter_kv[stream_name]
+            tc_embed = self.embed_target_coords[stream_name]
 
             assert batch_size == 1
 
@@ -868,11 +878,11 @@ class Model(torch.nn.Module):
                 [
                     checkpoint(
                         tc_embed,
-                        streams_data[i_b][ii].target_coords[fstep],
+                        streams_data[i_b][idx].target_coords[fstep],
                         use_reentrant=False,
                     )
-                    if len(streams_data[i_b][ii].target_coords[fstep].shape) > 1
-                    else streams_data[i_b][ii].target_coords[fstep]
+                    if len(streams_data[i_b][idx].target_coords[fstep].shape) > 1
+                    else streams_data[i_b][idx].target_coords[fstep]
                     for i_b in range(len(streams_data))
                 ]
             )
@@ -900,10 +910,10 @@ class Model(torch.nn.Module):
             assert isinstance(tte_kv, torch.nn.Identity)
 
             # lens for varlen attention
-            tcs_lens = target_coords_idxs[ii][fstep]
+            tcs_lens = target_coords_idxs[idx][fstep]
             # coord information for learnable layer norm
             tcs_aux = torch.cat(
-                [streams_data[i_b][ii].target_coords[fstep] for i_b in range(len(streams_data))]
+                [streams_data[i_b][idx].target_coords[fstep] for i_b in range(len(streams_data))]
             )
 
             tc_tokens = tte(
@@ -915,6 +925,8 @@ class Model(torch.nn.Module):
             )
 
             # final prediction head to map back to physical space
-            preds_tokens += [checkpoint(self.pred_heads[ii], tc_tokens, use_reentrant=False)]
+            preds_tokens += [
+                checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
+            ]
 
         return preds_tokens

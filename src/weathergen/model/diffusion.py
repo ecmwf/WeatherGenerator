@@ -23,38 +23,12 @@
 # ----------------------------------------------------------------------------
 
 
-import dataclasses
 import math
 
 import torch
 
 from weathergen.common.config import Config
 from weathergen.model.engines import ForecastingEngine
-
-
-@dataclasses.dataclass
-class BatchData:
-    """
-    Mock function for the data that will be provided to the diffusion model. Will change.
-    """
-
-    model_samples: dict
-    target_samples: dict
-
-    def get_sample_len(self):
-        return len(list(self.model_samples.keys()))
-
-    def get_input_data(self, t: int):
-        return self.model_samples[t]["data"]
-
-    def get_input_metadata(self, t: int):
-        return self.model_samples[t]["metadata"]
-
-    def get_target_data(self, t: int):
-        return self.target_samples[t]["data"]
-
-    def get_target_metadata(self, t: int):
-        return self.target_samples[t]["metadata"]
 
 
 class DiffusionForecastEngine(torch.nn.Module):
@@ -65,33 +39,28 @@ class DiffusionForecastEngine(torch.nn.Module):
         cf: Config,
         num_healpix_cells: int,
         forecast_engine: ForecastingEngine,
-        frequency_embedding_dim: int = 256,  # TODO: determine suitable dimension
-        embedding_dim: int = 512,  # TODO: determine suitable dimension
-        sigma_min: float = 0.002,  # Adapt to GenCast?
-        sigma_max: float = 80,
-        sigma_data: float = 0.5,
-        rho: float = 7,
-        p_mean: float = -1.2,
-        p_std: float = 1.2,
+        cf: Config,
     ):
         super().__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
         self.net = forecast_engine
         self.preconditioner = Preconditioner()
+        self.frequency_embedding_dim = self.cf.frequency_embedding_dim
+        self.embedding_dim = self.cf.embedding_dim
         self.noise_embedder = NoiseEmbedder(
-            embedding_dim=embedding_dim, frequency_embedding_dim=frequency_embedding_dim
+            embedding_dim=self.embedding_dim, frequency_embedding_dim=self.frequency_embedding_dim
         )
 
         # Parameters
-        self.sigma_min = sigma_min
-        self.sigma_max = sigma_max
-        self.sigma_data = sigma_data
-        self.rho = rho
-        self.p_mean = p_mean
-        self.p_std = p_std
+        self.sigma_min = self.cf.sigma_min
+        self.sigma_max = self.cf.sigma_max
+        self.sigma_data = self.cf.sigma_data
+        self.rho = self.cf.rho
+        self.p_mean = self.cf.p_mean
+        self.p_std = self.cf.p_std
 
-    def forward(self, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
+    def forward(self, tokens: torch.Tensor, fstep: int, metadata: dict) -> torch.Tensor:
         """
         Model forward call during training. Unpacks the conditioning c = [x_{t-k}, ..., x_{t}], the
         target y = x_{t+1}, and the random noise eta from the data, computes the diffusion noise
@@ -104,14 +73,17 @@ class DiffusionForecastEngine(torch.nn.Module):
         # y = data.get_input_data(-1)
         # eta = data.get_input_metadata(-1)
 
-        c = 1
+        c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
         y = tokens
-        eta = torch.randn(1).to(device=tokens.device)
+        eta = torch.tensor([metadata.noise_level_rn], device=tokens.device)
+        # eta = torch.randn(1).to(device=tokens.device)
+        # eta = torch.tensor([metadata.noise_level_rn]).to(device=tokens.device)
 
         # Compute sigma (noise level) from eta
         # noise = torch.randn(y.shape, device=y.device)  # now eta from MultiStreamDataSampler
         sigma = (eta * self.p_std + self.p_mean).exp()
         n = torch.randn_like(y) * sigma
+
         return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep)
 
         # Compute loss -- move this to a separate loss calculator
