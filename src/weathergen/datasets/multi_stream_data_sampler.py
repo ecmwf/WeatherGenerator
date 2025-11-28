@@ -766,9 +766,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         elif mode == "diffusion_forecast":
             streams_data: list[StreamData] = []
 
-            # get/coordinate masks
-            masks_streams = self._get_source_target_masks()
-
             # Determine number of views direct from config (teacher & student views)
             teacher_cfg = (
                 self.training_cfg.get("teacher_model_input", {}) if self.training_cfg else {}
