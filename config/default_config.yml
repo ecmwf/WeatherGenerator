@@ -60,10 +60,8 @@ sigma_data: 0.5
 rho: 7
 p_mean: -1.2
 p_std: 1.2
-# Encoder weights
-chkpt_encoder_weights: "./models/whkujigw/whkujigw_epoch00063.chkpt"
-
-
+# Encoder weights (set to null to not load a pretrained encoder)
+chkpt_encoder_weights: "./models/whkujigw/whkujigw_latest.chkpt"
 
 healpix_level: 5
 
@@ -151,8 +149,6 @@ training_config:
     num_forecast_steps: 1 # fake, still read from usual place
     loss: "LatentDiffusionLoss" # placeholder
 
-
-
 num_mini_epochs: 32
 samples_per_mini_epoch: 4096
 samples_per_validation: 512
@@ -203,7 +199,6 @@ train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
-
 
 # Tags for experiment tracking
 # These tags will be logged in MLFlow along with completed runs for train, eval, val

@@ -34,13 +34,7 @@ from weathergen.model.engines import ForecastingEngine
 class DiffusionForecastEngine(torch.nn.Module):
     # Adopted from https://github.com/NVlabs/edm/blob/main/training/loss.py#L72
 
-    def __init__(
-        self,
-        cf: Config,
-        num_healpix_cells: int,
-        forecast_engine: ForecastingEngine,
-        cf: Config,
-    ):
+    def __init__(self, cf: Config, num_healpix_cells: int, forecast_engine: ForecastingEngine):
         super().__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
