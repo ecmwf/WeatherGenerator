@@ -859,8 +859,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # add data for current stream
                 streams_data += [v for k, v in stream_data_source.items()]
 
-            else:
-                assert False, "Mode not implemented"
+        else:
+            assert False, "Mode not implemented"
 
         return streams_data, batch
 
