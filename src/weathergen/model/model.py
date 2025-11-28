@@ -597,7 +597,7 @@ class Model(torch.nn.Module):
             A list containing all prediction results
         """
 
-        (streams_data, _, target_coords_idxs) = batch
+        (streams_data, _, target_coords_idxs, metadata) = batch
 
         tokens, posteriors = self.encode(model_params=model_params, batch=batch)
         if encode_only:
@@ -625,7 +625,7 @@ class Model(torch.nn.Module):
                 if noise_std > 0.0:
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
-            tokens = self.forecast(model_params, tokens, fstep)
+            tokens = self.forecast(model_params, tokens, fstep, metadata)
             latents["preds"] += [tokens]
 
         # prediction for final step
@@ -644,7 +644,9 @@ class Model(torch.nn.Module):
         return ModelOutput(physical=preds_all, latent=latents)
 
     #########################################
-    def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
+    def embed_cells(
+        self, model_params: ModelParams, streams_data, source_cell_lens
+    ) -> torch.Tensor:
         """Embeds input data for each stream separately and rearranges it to cell-wise order
         Args:
             model_params : Query and embedding parameters
@@ -654,7 +656,9 @@ class Model(torch.nn.Module):
         """
 
         device = next(self.parameters()).device
-        tokens_all = self.embed_engine(streams_data, model_params.pe_embed, self.dtype, device)
+        tokens_all = self.embed_engine(
+            streams_data, source_cell_lens, model_params.pe_embed, self.dtype, device
+        )
 
         return tokens_all
 
@@ -714,7 +718,9 @@ class Model(torch.nn.Module):
 
         # work around to bug in flash attention for hl>=5
 
-        cell_lens = cell_lens[1:]
+        istep = 0
+
+        cell_lens = cell_lens[istep][1:]
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_all = []
         posteriors = []
@@ -795,10 +801,10 @@ class Model(torch.nn.Module):
             Latent representation of the model
         """
 
-        (streams_data, source_cell_lens, _) = batch
+        (streams_data, source_cell_lens, _, _) = batch
 
         # embed
-        tokens = self.embed_cells(model_params, streams_data)
+        tokens = self.embed_cells(model_params, streams_data, source_cell_lens)
 
         # local assimilation engine and adapter
         tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
@@ -808,7 +814,9 @@ class Model(torch.nn.Module):
         return tokens, posteriors
 
     #########################################
-    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
+    def forecast(
+        self, model_params: ModelParams, tokens: torch.Tensor, fstep: int, metadata: dict
+    ) -> torch.Tensor:
         """Advances latent space representation in time
 
         Args:
@@ -821,7 +829,7 @@ class Model(torch.nn.Module):
             ValueError: For unexpected arguments in checkpoint method
         """
 
-        tokens = self.forecast_engine(tokens, fstep)
+        tokens = self.forecast_engine(tokens, fstep, metadata)
 
         return tokens
 

@@ -1,9 +1,11 @@
 import logging
+from typing import List, Tuple
 
 import numpy as np
 import torch
 
 from weathergen.common.config import Config
+from weathergen.datasets.batch import SampleMetaData
 
 _logger = logging.getLogger(__name__)
 
@@ -53,10 +55,6 @@ class Masker:
 
         # number of healpix cells
         self.healpix_num_cells = 12 * (4**self.healpix_level_data)
-
-        # Initialize the mask, set to None initially,
-        # until it is generated in mask_source.
-        self.perm_sel: list[np.typing.NDArray] = None
 
         # Per-batch strategy tracking
         self.same_strategy_per_batch = self.masking_strategy_config.get(
@@ -138,6 +136,109 @@ class Masker:
         else:
             # Non-combination strategy, return as is
             return self.masking_strategy
+
+    def mask_source_idxs(
+        self,
+        idxs_cells,
+        idxs_cells_lens,
+        keep_mask: np.typing.NDArray | None = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+
+        Return:
+            torch.Tensor[bool] of length num_tokens that determines masking for each token
+        """
+
+        self.mask_tokens, self.mask_channels = None, None
+
+        num_tokens = torch.tensor([len(t) for t in idxs_cells_lens]).sum().item()
+
+        # If there are no tokens, return empty lists.
+        if num_tokens == 0:
+            return (self.mask_tokens, self.mask_channels)
+
+        # If an explicit keep_mask is provided we bypass strategy selection and directly
+        # construct the token-level mask from it. keep_mask expresses cells to KEEP (True=keep).
+        # Otherwise fall back to the configured strategy logic.
+        if keep_mask is not None:
+            assert len(keep_mask) == len(idxs_cells_lens), (
+                "keep_mask length does not match number of cells."
+            )
+            # build token level mask: for each cell replicate the keep flag across its tokens
+            token_level_flags: list[np.typing.NDArray] = []
+            for km, lens_cell in zip(keep_mask, idxs_cells_lens, strict=True):
+                num_tokens_cell = len(lens_cell)
+                if num_tokens_cell == 0:
+                    continue
+                token_level_flags.append(
+                    np.ones(num_tokens_cell, dtype=bool)
+                    if km
+                    else np.zeros(num_tokens_cell, dtype=bool)
+                )
+            if token_level_flags:
+                self.mask_tokens = np.concatenate(token_level_flags)
+            else:
+                self.mask_tokens = np.array([], dtype=bool)
+            return (self.mask_tokens, self.mask_channels)
+
+        # clean strategy selection
+        self.current_strategy = self._select_strategy()
+
+        # Set the masking rate.
+        rate = self._get_sampling_rate()
+
+        if self.current_strategy == "random":
+            self.mask_tokens = self.rng.uniform(0, 1, num_tokens) < rate
+
+        elif self.current_strategy == "forecast":
+            self.mask_tokens = np.ones(num_tokens, dtype=np.bool)
+
+        elif self.current_strategy == "healpix":
+            # TODO: currently only for fixed level
+            num_cells = len(idxs_cells_lens)
+            mask_cells = self.rng.uniform(0, 1, num_cells) < rate
+            # translate cell mask to token mask, replicating using number of tokens per cell
+            self.mask_tokens = [
+                (torch.ones(2, dtype=torch.bool) * (1 if m else 0)).to(torch.bool)
+                for idxs_cell, m in zip(idxs_cells_lens, mask_cells, strict=False)
+            ]
+        elif self.current_strategy == "cropping" or self.current_strategy == "causal":
+            pass
+
+        else:
+            assert False, f"Unsupported masking strategy: {self.current_strategy}."
+
+        return (self.mask_tokens, self.mask_channels)
+
+    def mask_targets_idxs(
+        self,
+        idxs_cells,
+        idxs_cells_lens,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # mask_source_idxs is
+        assert (self.mask_tokens is not None) or (self.mask_tokens is not None)
+        idxs_ord_inv = torch.tensor([], dtype=torch.int64)
+
+        # TODO: better handling of if statement
+        if self.current_strategy == "forecast":
+            num_tokens = torch.tensor([len(t) for t in idxs_cells_lens]).sum().item()
+            self.mask_tokens = np.ones(num_tokens, dtype=np.bool)
+
+            # inverse map for reordering to output data points in same order as input
+            idxs_ord = torch.cat([t for tt in idxs_cells for t in tt])
+            idxs_ord_inv = torch.argsort(idxs_ord)
+
+        else:
+            # masking strategies: target is complement of source
+            # TODO: ensure/enforce that forecast_offset==0
+            if self.mask_tokens is not None:
+                self.mask_tokens = ~self.mask_tokens
+            if self.mask_channels is not None:
+                self.mask_channels = ~self.mask_channels
+
+        # TODO: self.mask_tokens seems brittle in terms of naming
+
+        return (self.mask_tokens, self.mask_channels, idxs_ord_inv)
 
     def mask_source(
         self,
@@ -522,3 +623,144 @@ class Masker:
         ]
 
         return full_mask
+
+    def build_views_for_stream(
+        self,
+        num_cells: int,
+        teacher_cfg: dict,
+        student_cfg: dict,
+        relationship: str = "subset",
+    ) -> Tuple[np.typing.NDArray, List[np.typing.NDArray], List[SampleMetaData]]:
+        """
+        Construct teacher/student keep masks for a stream.
+        SampleMetaData is currently just a dict with the masking params used.
+        """
+
+        strat_teacher = teacher_cfg.get("strategy", "random")
+        rate_teacher = teacher_cfg.get("rate")
+        t_cfg_extra = teacher_cfg.get("masking_strategy_config")
+
+        teacher_keep_mask = self.generate_cell_keep_mask(
+            num_cells=num_cells,
+            strategy=strat_teacher,
+            rate=rate_teacher,
+            masking_strategy_config=t_cfg_extra,
+        )
+
+        num_views = student_cfg.get("num_views", 1)
+        strat_student = student_cfg.get("masking_strategy", student_cfg.get("strategy", "random"))
+        rate_student = student_cfg.get("rate")
+        s_cfg_extra = student_cfg.get("masking_strategy_config")
+
+        student_keep_masks: List[np.ndarray] = []
+        for _ in range(num_views):
+            base = self.generate_cell_keep_mask(
+                num_cells=num_cells,
+                strategy=strat_student,
+                rate=rate_student,
+                masking_strategy_config=s_cfg_extra,
+            )
+            if relationship == "subset":
+                keep = base & teacher_keep_mask
+            elif relationship == "disjoint":
+                keep = base & (~teacher_keep_mask)
+            else:
+                keep = base
+            student_keep_masks.append(keep)
+
+        metadata: List[SampleMetaData] = [
+            SampleMetaData(
+                masking_params=teacher_cfg,
+            )
+        ]
+        for idx, mask in enumerate(student_keep_masks):
+            metadata.append(
+                SampleMetaData(
+                    masking_params=student_cfg,
+                )
+            )
+
+        return teacher_keep_mask, student_keep_masks, metadata
+
+    # ---------------------------------------------------------------------
+    # Cell-level keep mask generation (teacher/student view selection)
+    # ---------------------------------------------------------------------
+    def generate_cell_keep_mask(
+        self,
+        num_cells: int,
+        strategy: str | None = None,
+        rate: float | None = None,
+        masking_strategy_config: dict | None = None,
+        constraint_keep_mask: np.typing.NDArray | None = None,
+    ) -> np.typing.NDArray:
+        """Generate a boolean keep mask at data healpix level (True = keep cell).
+
+        Parameters
+        ----------
+        num_cells : int
+            Number of cells at data level (should equal 12 * 4**healpix_level).
+        strategy : str | None
+            Cell selection strategy: currently supports 'random' and 'healpix'. Uses
+            instance default if None.
+        rate : float | None
+            Fraction of parent cells (healpix) or data cells (random) to keep. Falls back
+            to instance masking_rate if None.
+        masking_strategy_config : dict | None
+            Optional override of strategy config (e.g., {'hl_mask': 3}).
+        constraint_keep_mask : np.ndarray | None
+            Optional boolean mask of allowed cells (True = allowed). Selection will be
+            limited to these cells. For subset/disjoint relationships.
+
+        Returns
+        -------
+        np.ndarray
+            Boolean array of shape [num_cells] where True indicates the cell is kept.
+        """
+        strat = strategy or self.masking_strategy
+        cfg = masking_strategy_config or self.masking_strategy_config
+        keep_rate = rate if rate is not None else self.masking_rate
+
+        # sample rate if requested (only if explicit rate not provided)
+        if rate is None and self.masking_rate_sampling:
+            keep_rate = self._get_sampling_rate()
+
+        assert 0.0 <= keep_rate <= 1.0, f"keep_rate out of bounds: {keep_rate}"
+        assert num_cells == self.healpix_num_cells, (
+            "num_cells inconsistent with configured healpix level."
+        )
+
+        if strat not in {"random", "healpix"}:
+            raise NotImplementedError(
+                f"Cell selection strategy '{strat}' not supported for keep mask generation."
+            )
+
+        if strat == "random":
+            base_mask = self.rng.uniform(0, 1, num_cells) < keep_rate
+        else:  # healpix hierarchical selection
+            hl_data = self.healpix_level_data
+            hl_mask = cfg.get("hl_mask")
+            assert hl_mask is not None and hl_mask < hl_data, (
+                "For healpix keep mask generation, cfg['hl_mask'] must be set and < data level."
+            )
+            num_parent_cells = 12 * (4**hl_mask)
+            level_diff = hl_data - hl_mask
+            num_children_per_parent = 4**level_diff
+            # number of parents to KEEP
+            num_parents_to_keep = int(np.round(keep_rate * num_parent_cells))
+            if num_parents_to_keep == 0:
+                base_mask = np.zeros(num_cells, dtype=bool)
+            else:
+                parent_ids = self.rng.choice(num_parent_cells, num_parents_to_keep, replace=False)
+                child_offsets = np.arange(num_children_per_parent)
+                child_indices = (
+                    parent_ids[:, None] * num_children_per_parent + child_offsets
+                ).reshape(-1)
+                base_mask = np.zeros(num_cells, dtype=bool)
+                base_mask[child_indices] = True
+
+        # apply constraint if provided (only keep those cells within allowed)
+        if constraint_keep_mask is not None:
+            assert constraint_keep_mask.shape[0] == num_cells, "constraint_keep_mask wrong shape"
+            base_mask = base_mask & constraint_keep_mask
+
+        return base_mask
