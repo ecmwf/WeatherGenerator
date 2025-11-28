@@ -319,9 +319,9 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
         "fps": global_plotting_opts.get("fps", 2),
+        "regions": global_plotting_opts.get("regions", ["global"]),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
     }
-
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
 
     available_data = reader.check_availability(stream, mode="plotting")
@@ -369,10 +369,6 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         plot_chs = list(np.atleast_1d(tars.channel.values))
         plot_samples = list(np.unique(tars.sample.values))
-
-        bbox = RegionBoundingBox.from_region_name("belgium")
-        tars = bbox.apply_mask(tars)
-        preds = bbox.apply_mask(preds)
 
         for sample in tqdm(plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"):
             data_selection = {
