@@ -85,6 +85,36 @@ st.plotly_chart(
 st.markdown(
     """
             
+**Training runs by organization**
+
+Note: some runs may not have org tags.
+
+"""
+)
+
+
+st.plotly_chart(
+    px.bar(
+        all_runs_pdf.filter(C("tags.stage").eq("train"))
+        .with_columns(
+            pl.date(C("start_time").dt.year(), C("start_time").dt.month(), 1).alias("month")
+        )
+        .select(["month", C("params.wgtags.org").fill_null("unknown"), "tags.run_id"])
+        .filter(C("tags.run_id").is_not_null())
+        .group_by("params.wgtags.org", "month")
+        .agg(pl.count("tags.run_id"))
+        .to_pandas(),
+        y="tags.run_id",
+        x="month",
+        color="params.wgtags.org",
+        # hover_data=["start_time", "tags.uploader"],
+    )
+)
+
+
+st.markdown(
+    """
+            
 **The number of GPUs by run.**
 
 (only includes runs for which evaluation data has been uploaded)
@@ -104,6 +134,7 @@ st.plotly_chart(
         log_y=True,
     )
 )
+
 
 st.markdown(
     """
