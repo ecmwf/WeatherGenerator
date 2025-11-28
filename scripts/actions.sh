@@ -33,7 +33,7 @@ case "$1" in
        ruff check  --target-version py312  \
        src/ scripts/ packages/ \
         && \
-      uv run --no-project --with "pylint==4.0.1" \
+      uv run --no-project --with "pylint==4.0.3" \
        pylint src/ packages/
     )
     ;;
