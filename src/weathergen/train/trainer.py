@@ -70,6 +70,7 @@ class Trainer(TrainerBase):
         self.perf_mem = None
         self.stdev_unweighted_hist = None
         self.t_start = None
+        self.target_and_aux_calculator = None
         self.validate_with_ema = None
 
     def init(self, cf: Config, devices):

@@ -263,17 +263,18 @@ class Model(torch.nn.Module):
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
-        self.embed_engine = None
+        self.ae_global_engine = None
         self.ae_local_engine = None
         self.ae_local_global_engine = None
-        self.ae_global_engine = None
-        self.interpolate_latents = None
-        self.q_cells = None
-        self.forecast_engine = None
+        self.embed_engine = None
         self.embed_target_coords = None
-        self.target_token_engines = None
+        self.forecast_engine = None
+        self.interpolate_latents = None
         self.pred_adapter_kv = None
         self.pred_heads = None
+        self.q_cells = None
+        self.stream_names = None
+        self.target_token_engines = None
 
     #########################################
     def create(self) -> "Model":
