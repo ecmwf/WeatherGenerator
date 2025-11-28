@@ -608,10 +608,6 @@ class Trainer(TrainerBase):
                 self.cf.istep, batch, self.model
             )
 
-            self.target_and_aux_calculator.update_state_pre_backward(bidx, batch, self.model)
-
-            self.target_and_aux_calculator.update_state_pre_backward(bidx, batch, self.model)
-
             # backward pass
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss).backward()
