@@ -18,6 +18,7 @@ from weathergen.datasets.stream_data import StreamData
 # TODO: GetTimestep to get the timestep
 # TODO: GetMetaData: then this gets the right rn for the timestep!
 
+
 @dataclass
 class SampleMetaData:
     # masking strategy
@@ -29,6 +30,7 @@ class SampleMetaData:
     mask: torch.Tensor | None = None
 
     noise_level_rn: float | None = None
+
 
 class Sample:
     # keys: stream name, values: SampleMetaData
@@ -93,6 +95,7 @@ class Sample:
         assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
         return self.streams_data[stream_name]
 
+
 class ModelBatch:
     """
     Container for all data and metadata for one training batch.
@@ -135,7 +138,6 @@ class ModelBatch:
 
         # add the meta_info
         self.source_samples[source_sample_idx].add_meta_info(stream_name, source_meta_info)
-        
 
         assert target_sample_idx < len(self.target_samples), "invalid value for target_sample_idx"
         self.source2target_matching_idxs[source_sample_idx] = target_sample_idx
@@ -157,9 +159,13 @@ class ModelBatch:
         self.target_samples[target_sample_idx].add_meta_info(stream_name, target_meta_info)
 
         if isinstance(source_sample_idx, int):
-            assert source_sample_idx < len(self.source_samples), "invalid value for source_sample_idx"
+            assert source_sample_idx < len(self.source_samples), (
+                "invalid value for source_sample_idx"
+            )
         else:
-            assert all(idx < len(self.source_samples) for idx in source_sample_idx), "invalid value for source_sample_idx"
+            assert all(idx < len(self.source_samples) for idx in source_sample_idx), (
+                "invalid value for source_sample_idx"
+            )
         self.target2source_matching_idxs[target_sample_idx] = source_sample_idx
 
     def len_sources(self) -> int:

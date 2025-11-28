@@ -142,7 +142,7 @@ def init_model_and_shard(
         # functions in the embedding engine as forward functions. Thus, yielding a crash
         # because the input tensors are not converted to DTensors. This seems to primarily
         # occur during validation.
-        for embed in model.embed_engine.embeds:
+        for embed in model.embed_engine.embeds.values():
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
@@ -313,8 +313,8 @@ def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
 
     target_aux = None
 
-    target_and_aux_calc = cf.get("target_and_aux_calc", None)
-    if target_and_aux_calc is None or target_and_aux_calc == "identity":
+    target_and_aux_calc = cf.get("target_and_aux_calc", "physical")
+    if target_and_aux_calc == "physical":
         target_aux = PhysicalTargetAndAux(cf, model)
     elif target_and_aux_calc == "DiffusionLatentTargetEncoder":
         return DiffusionLatentTargetEncoder(model)
