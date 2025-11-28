@@ -358,7 +358,6 @@ class ZarrIO:
 
     def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Array | zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
-        group: zarr.Array | zarr.Group | None
         if create:
             group = self.data_root.create_group(item.path)
         else:
