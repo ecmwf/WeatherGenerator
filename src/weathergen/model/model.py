@@ -805,7 +805,7 @@ class Model(torch.nn.Module):
         mask = cell_lens.to(torch.bool)
 
         # fill empty tensor using mask for positions of unmasked tokens
-        tokens_global[mask] = tokens_global_unmasked
+        tokens_global[mask] = tokens_global_unmasked.to(tokens_global.dtype)
 
         # recover batch dimension and build global token list
         tokens_global = (
