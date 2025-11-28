@@ -162,7 +162,6 @@ samples_per_mini_epoch: 4096
 samples_per_validation: 512
 
 shuffle: True
-mixed_precision_dtype: bf16
 
 lr_scaling_policy: "sqrt"
 lr_start: 1e-6
