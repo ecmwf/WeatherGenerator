@@ -26,6 +26,7 @@ evaluation:
   log_scale: false
   add_grid: false
   score_cards: false
+  num_processes: 0  #options: int, "auto", 0 means no parallelism (default)
 
 run_ids :
   ar40mckx:
