@@ -494,7 +494,6 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
-
             # NOTE: we are still returning legacy batch structure and the new batch together.
 
             # Julian and Matthias:
@@ -505,13 +504,17 @@ class Trainer(TrainerBase):
             # batch[-1].meta_info is a dictionary with metadata info per sample
             # batch[-1].meta_info["ERA5"] etc.
             # here we have the noise_level_rn
-            # batch[-1].source_samples[0].meta_info["ERA5"].noise_level_rn == batch[-1].target_samples[0].meta_info["ERA5"].noise_level_rn
-            # for the same timestep, this needs to be fixed for when we have more source timesteps, and perhaps with bigger batch sizes?
+            # batch[-1].source_samples[0].meta_info["ERA5"].noise_level_rn 
+            # == batch[-1].target_samples[0].meta_info["ERA5"].noise_level_rn
+            # for the same timestep, this needs to be fixed for when we have more source timesteps, 
+            # and perhaps with bigger batch sizes?
             # Each Sample object has:
             # .streams_data: a dictionary of StreamData objects per stream name
-            # .source_cell_lens: list of tensors with lengths of source cells per stream # to be changed to be in ModelBatch
-            # .target_coords_idx: list of tensors with target coordinate indices per stream # to be changed to be in ModelBatch
-   
+            # .source_cell_lens: list of tensors with lengths of source cells per stream # to be 
+            # changed to be in ModelBatch
+            # .target_coords_idx: list of tensors with target coordinate indices per stream # to
+            # be changed to be in ModelBatch
+
             ###### Legacy batch after batch.to_device:
             # (Pdb++) batch[0]
             # [[<weathergen.datasets.stream_data.StreamData object at 0x400572104230>]]
@@ -522,7 +525,7 @@ class Trainer(TrainerBase):
 
             # TODO: access from new ModelBatch
             forecast_steps = batch[0][-1]
-            #batch = self.batch_to_device(batch)
+            # batch = self.batch_to_device(batch)
 
             ### After to_device, then the original is:
 
@@ -534,33 +537,44 @@ class Trainer(TrainerBase):
                 outputs = []
                 for view in batch[-1].source_samples:
                     # TODO remove when ModelBatch and Sample get a to_device()
-                    streams_data = [[view.streams_data['ERA5']]]
+                    streams_data = [[view.streams_data["ERA5"]]]
                     streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
                     source_cell_lens = view.source_cell_lens
                     source_cell_lens = [b.to(self.device) for b in source_cell_lens]
                     target_coords_idxs = view.target_coords_idx
-                    target_coords_idxs = [[b.to(self.device) for b in bf] for bf in target_coords_idxs]
-                    outputs.append(self.model(
-                        self.model_params, (streams_data, source_cell_lens, target_coords_idxs), cf.forecast_offset, forecast_steps
-                    ))
+                    target_coords_idxs = [
+                        [b.to(self.device) for b in bf] for bf in target_coords_idxs
+                    ]
+                    outputs.append(
+                        self.model(
+                            self.model_params,
+                            (streams_data, source_cell_lens, target_coords_idxs),
+                            cf.forecast_offset,
+                            forecast_steps,
+                        )
+                    )
 
                 targets_and_auxs = []
                 for view in batch[-1].target_samples:
                     # TODO remove when ModelBatch and Sample get a to_device()
-                    streams_data = [[view.streams_data['ERA5']]]
+                    streams_data = [[view.streams_data["ERA5"]]]
                     streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
                     source_cell_lens = view.source_cell_lens
                     source_cell_lens = [b.to(self.device) for b in source_cell_lens]
                     target_coords_idxs = view.target_coords_idx
-                    target_coords_idxs = [[b.to(self.device) for b in bf] for bf in target_coords_idxs]
-                    targets_and_auxs.append(self.target_and_aux_calculator.compute(
-                        self.cf.istep,
-                        (streams_data, source_cell_lens, target_coords_idxs),
-                        self.model_params,
-                        self.model,
-                        cf.forecast_offset,
-                        forecast_steps,
-                    ))
+                    target_coords_idxs = [
+                        [b.to(self.device) for b in bf] for bf in target_coords_idxs
+                    ]
+                    targets_and_auxs.append(
+                        self.target_and_aux_calculator.compute(
+                            self.cf.istep,
+                            (streams_data, source_cell_lens, target_coords_idxs),
+                            self.model_params,
+                            self.model,
+                            cf.forecast_offset,
+                            forecast_steps,
+                        )
+                    )
                 # targets, aux = zip(*targets_and_auxs)
             loss, loss_values = self.loss_calculator.compute_loss(
                 preds=outputs[0],
@@ -582,7 +596,6 @@ class Trainer(TrainerBase):
             #     preds=output,
             #     targets=target_aux_output,
             # )
-
 
             # TODO re-enable this, need to think on how to make it compatible with
             # TODO: CL, this should become a regular loss term
