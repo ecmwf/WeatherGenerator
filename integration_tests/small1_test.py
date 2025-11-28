@@ -12,7 +12,6 @@ import logging
 import os
 import shutil
 from pathlib import Path
-import multiprocessing as mp
 import omegaconf
 import pytest
 
@@ -135,8 +134,7 @@ def evaluate_results(run_id):
         }
     )
     # Not passing the mlflow client for tests.
-    log_queue: mp.Queue = mp.Queue()
-    evaluate_from_config(cfg, None, log_queue )
+    evaluate_from_config(cfg, None, None )
 
 
 def load_metrics(run_id):
