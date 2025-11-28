@@ -468,7 +468,7 @@ class Model(torch.nn.Module):
         # TODO implement later
         # shared_heads = cf.get("shared_heads", False)
         self.latent_heads = nn.ModuleDict()
-        self.norm = nn.LayerNorm(cf.ae_local_dim_embed)
+        self.norm = nn.LayerNorm(cf.ae_global_dim_embed)
         # if ("iBOT" in target_losses.keys() and "DINO" in target_losses.keys()) and shared_heads:
         #     assert False, "Not yet implemented and not a priority"
         #     loss_conf = target_losses["DINO"]
@@ -499,14 +499,14 @@ class Model(torch.nn.Module):
             if loss == "iBOT" or loss == "JEPA":
                 self.latent_heads[loss] = LatentPredictionHead(
                     f"{loss}-head",
-                    cf.ae_local_dim_embed,
+                    cf.ae_global_dim_embed,
                     loss_conf["out_dim"],
                     class_token=False,
                 )
             elif loss == "DINO":
                 self.latent_heads[loss] = LatentPredictionHead(
                     f"{loss}-head",
-                    cf.ae_local_dim_embed,
+                    cf.ae_global_dim_embed,
                     loss_conf["out_dim"],
                     class_token=True,
                 )

@@ -258,22 +258,19 @@ def gamma_decay(forecast_steps, gamma):
     return weights * (len(fsteps) / np.sum(weights))
 
 
-def student_teacher_patch_softmax(
-    student_patches, teacher_patches, student_masks_flat, student_temp
+def student_teacher_softmax(
+    student_patches, teacher_patches, student_temp
 ):
     """
     Cross-entropy between softmax outputs of the teacher and student networks.
     student_patches: (B, N, D) tensor
     teacher_patches: (B, N, D) tensor
-    student_masks_flat: (B, N) tensor
     student_temp: float
     """
     loss = torch.sum(
         teacher_patches * F.log_softmax(student_patches / student_temp, dim=-1), dim=-1
     )
-    loss = torch.sum(loss * student_masks_flat.float(), dim=-1) / student_masks_flat.sum(
-        dim=-1
-    ).clamp(min=1.0)
+    loss = torch.mean(loss, dim=-1) 
     return -loss.mean()
 
 
@@ -284,7 +281,7 @@ def softmax(t, s, temp):
 def masked_student_teacher_patch_softmax(
     student_patches_masked,
     teacher_patches_masked,
-    student_masks_flat,
+    student_masks,
     student_temp,
     n_masked_patches=None,
     masks_weight=None,
@@ -302,20 +299,20 @@ def masked_student_teacher_patch_softmax(
     loss = softmax(teacher_patches_masked, student_patches_masked, student_temp)
     if masks_weight is None:
         masks_weight = (
-            (1 / student_masks_flat.sum(-1).clamp(min=1.0))
+            (1 / student_masks.sum(-1).clamp(min=1.0))
             .unsqueeze(-1)
-            .expand_as(student_masks_flat)# [student_masks_flat]
+            .expand_as(student_masks)# [student_masks_flat]
         )
-    if n_masked_patches is not None:
-        loss = loss[:n_masked_patches]
-    loss = loss * student_masks_flat * masks_weight
-    return -loss.sum() / student_masks_flat.shape[0]
+    # if n_masked_patches is not None:
+    #     loss = loss[:n_masked_patches]
+    loss = loss * student_masks* masks_weight
+    return -loss.sum() / student_masks.shape[0]
 
 
-def student_teacher_global_softmax(student_outputs, student_temp, teacher_outputs):
+def student_teacher_global_softmax(student_outputs, teacher_outputs, student_temp):
     """
-    This assumes that student_outputs : list[Tensor[2*batch_size, num_patches, channel_size])
-                 and  teacher_outputs : list[Tensor[2*batch_size, num_patches, channel_size])
+    This assumes that student_outputs : list[Tensor[2*batch_size, num_class_tokens, channel_size])
+                 and  teacher_outputs : list[Tensor[2*batch_size, num_class_tokens, channel_size])
     The 2* is because there is two global views and they are concatenated in the batch dim
     in DINOv2 as far as I can tell.
     """

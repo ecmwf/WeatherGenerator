@@ -54,31 +54,71 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
 
         # initialize dictionaries for detailed loss tracking and standard deviation statistics
         # create tensor for each stream
-        losses_all: dict[str, Tensor] = {loss: 0.0 for loss in self.losses}
+        # losses_all: dict[str, Tensor] = {loss: 0.0 for loss in self.losses}
 
         source_target_matching_idxs, output_info, target_source_matching_idxs, target_info = (
             metadata
         )
 
-        import pdb; pdb.set_trace()
-
         for name, (weight, loss_fn, extra_args) in self.losses.items():
             preds_for_loss = gather_preds_for_loss(name, preds, output_info)
             targets_for_loss = gather_targets_for_loss(name, targets, target_info)
             loss_value = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
-            loss += weight * loss_value
-            losses_all[name] = loss_value.item()
+            loss = loss + (weight * loss_value)
+            # losses_all[name] = loss_value.item()
 
-        return loss
+        return LossValues(loss=loss, losses_all={}, stddev_all={})
+
+
+def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked):
+    masks_weight = (
+        (1 / student_masks.sum(-1).clamp(min=1.0))
+        .unsqueeze(-1)
+        .expand_as(student_masks)  # [student_masks_flat]
+    )
+    loss = F.l1_loss(student_patches_masked, teacher_patches_masked)
+    loss = loss * student_masks * masks_weight
+    return loss.sum() / student_masks.shape[0]
+
+
+def ibot_loss(
+    student_patches_masked,
+    student_masks,
+    teacher_patches_masked,
+    student_class_masked,
+    teacher_class_masked,
+    student_temp,
+):
+    loss = loss_fns.masked_student_teacher_patch_softmax(
+        student_patches_masked, teacher_patches_masked, student_masks, student_temp
+    ) + loss_fns.student_teacher_softmax(
+        student_class_masked, teacher_class_masked, student_temp
+    )
+    return loss / 2
+
+
+def dino_loss(
+    local2global_dino_student,
+    local2global_dino_teacher,
+    global2global_dino_student,
+    global2global_dino_teacher,
+    student_temp,
+):
+    loss = loss_fns.student_teacher_global_softmax(
+        local2global_dino_student, local2global_dino_teacher, student_temp
+    ) + loss_fns.student_teacher_softmax(
+        global2global_dino_student, global2global_dino_teacher, student_temp
+    )
+    return loss / 2
 
 
 def get_loss_function_ssl(name):
     if name == "iBOT":
-        return loss_fns.masked_student_teacher_patch_softmax
+        return ibot_loss
     elif name == "DINO":
-        return loss_fns.student_teacher_global_softmax
+        return dino_loss
     elif name == "JEPA":
-        return F.l1_loss
+        return jepa_loss
     else:
         raise NotImplementedError(
             f"{name} is not an implemented loss for the LossLatentSSLStudentTeacher"
@@ -86,7 +126,7 @@ def get_loss_function_ssl(name):
 
 
 def gather_preds_for_loss(name, preds, metadata):
-    if name == "iBOT" or name == "JEPA":
+    if name == "JEPA":
         """
         Important this assumes that there is 1 masked version for each global view
         ie. student_patches_masked.shape[0] == teacher_patches_masked.shape[0]
@@ -99,31 +139,60 @@ def gather_preds_for_loss(name, preds, metadata):
                     # TODO filter for loss if info.strategy == "masking"
                 ],
                 dim=0,
-                )[:2],
+            )[:2],
             # TODO remove the [:, :2049]
-            "student_masks_flat": torch.stack(
-                [info['ERA5'].mask.to("cuda")[:2049] for info in metadata], dim=0
-                ).unsqueeze(1)[:2],
+            "student_masks": torch.stack(
+                [info["ERA5"].mask.to("cuda")[:2049] for info in metadata], dim=0
+            ).unsqueeze(1)[:2],
+        }
+    elif name == "iBOT":
+        """
+        Important this assumes that there is 1 masked version for each global view
+        ie. student_patches_masked.shape[0] == teacher_patches_masked.shape[0]
+
+        Note the class token of iBOT is still missing
+        """
+        return {
+            "student_patches_masked": torch.stack(
+                [
+                    p.latent[name]
+                    for p, info in zip(preds, metadata, strict=False)
+                    # TODO filter for loss if info.strategy == "masking"
+                ],
+                dim=0,
+            )[:2],
+            # TODO remove the [:, :2049]
+            "student_masks": torch.stack(
+                [info["ERA5"].mask.to("cuda")[:2049] for info in metadata], dim=0
+            ).unsqueeze(1)[:2],
+            "student_class_masked": torch.stack(
+                [
+                    p.latent[name]
+                    for p, info in zip(preds, metadata, strict=False)
+                    # TODO filter for loss if info.strategy == "masking"
+                ],
+                dim=0,
+            )[:2, :, :2],
         }
     elif name == "DINO":
-        # TODO deal with DINO having a local and global component
-        local2global_dino = torch.stack(
-            [
-                p.latent[name]
-                for p, info in zip(preds, metadata, strict=False)
-                # TODO if info.strategy == "cropping"
-            ],
-            dim=0,
-        )
-        global2global_dino = torch.stack(
-            [
-                p.latent[name]
-                for p, info in zip(preds, view_metadata, strict=False)
-                if info.strategy == "pure"
-            ],
-            dim=0,
-        )
-        return local2global_dino, global2global_dino
+        return {
+            "local2global_dino_student": torch.stack(
+                [
+                    p.latent[name]
+                    for p, info in zip(preds, metadata, strict=False)
+                    # TODO if info.strategy == "cropping"
+                ],
+                dim=0,
+            )[2:],
+            "global2global_dino_student": torch.stack(
+                [
+                    p.latent[name]
+                    for p, info in zip(preds, metadata, strict=False)
+                    # if info.strategy == "pure"
+                ],
+                dim=0,
+            )[:2],
+        }
     else:
         raise NotImplementedError(
             f"{name} is not an implemented loss for the LossLatentSSLStudentTeacher"
@@ -131,18 +200,61 @@ def gather_preds_for_loss(name, preds, metadata):
 
 
 def gather_targets_for_loss(name, targets, metadata):
-    if name == "iBOT" or name == "JEPA":
-        return {"teacher_patches_masked": torch.stack(
-            [p[name] for p, info in zip(targets, metadata, strict=False)], dim=0
-        )}
-    if name == "DINO":
-        local2global_dino = torch.stack(
-            [p[name] for p, info in zip(targets, metadata, strict=False)], dim=0
-        )
-        global2global_dino = torch.stack(
-            reversed([p[name] for p, info in zip(targets, metadata, strict=False)]), dim=0
-        )
-        return local2global_dino, global2global_dino
+    if name == "JEPA":
+        """
+        Important this assumes that there is 1 masked version for each global view
+        ie. student_patches_masked.shape[0] == teacher_patches_masked.shape[0]
+        """
+        return {
+            "teacher_patches_masked": torch.stack(
+                [
+                    p[name]
+                    for p, info in zip(targets, metadata, strict=False)
+                    # TODO filter for loss if info.strategy == "masking"
+                ],
+                dim=0,
+            )[:2],
+        }
+    elif name == "iBOT":
+        """
+        Important this assumes that there is 1 masked version for each global view
+        ie. student_patches_masked.shape[0] == teacher_patches_masked.shape[0]
+
+        Note the class token of iBOT is still missing
+        """
+        return {
+            "teacher_patches_masked": torch.stack(
+                [
+                    p[name]
+                    for p, info in zip(targets, metadata, strict=False)
+                    # TODO filter for loss if info.strategy == "masking"
+                ],
+                dim=0,
+            )[:2],
+            # TODO remove the [:, :2049]
+            "teacher_class_masked": torch.stack(
+                [
+                    p[name]
+                    for p, info in zip(targets, metadata, strict=False)
+                    # TODO filter for loss if info.strategy == "masking"
+                ],
+                dim=0,
+            )[:2, :, :2],
+        }
+    elif name == "DINO":
+        return {
+            "local2global_dino_teacher": torch.stack(
+                [
+                    p[name]
+                    for p, info in zip(targets, metadata, strict=False)
+                    # TODO if info.strategy == "cropping"
+                ],
+                dim=0,
+            )[:2],
+            "global2global_dino_teacher": torch.stack(
+                list(reversed([p[name] for p, info in zip(targets, metadata, strict=False)])), dim=0
+            )[:2]
+        }
     else:
         raise NotImplementedError(
             f"{name} is not an implemented loss for the LossLatentSSLStudentTeacher"

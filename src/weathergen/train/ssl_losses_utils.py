@@ -255,5 +255,5 @@ class JEPATargetProcessing(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, *args):
-        return args
+    def forward(self, z):
+        return z
