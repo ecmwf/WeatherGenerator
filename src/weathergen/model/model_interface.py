@@ -264,8 +264,8 @@ def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
 
     target_aux = None
 
-    target_and_aux_calc = cf.get("target_and_aux_calc", None)
-    if target_and_aux_calc is None or target_and_aux_calc == "identity":
+    target_and_aux_calc = cf.get("target_and_aux_calc", "physical")
+    if target_and_aux_calc == "physical":
         target_aux = PhysicalTargetAndAux(cf, model)
 
     elif target_and_aux_calc == "EMATeacher":
