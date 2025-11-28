@@ -13,10 +13,6 @@ dependencies = [
     "plotly>=6.2.0",
     "weathergen-common",
     "weathergen-metrics",
-    "eccodes==2.44.0", 
-    "eccodeslib==2.44.0.7", 
-    "eckitlib==1.32.3.7", 
-    "earthkit-data==0.18.2"
 ]
 
 [dependency-groups]
