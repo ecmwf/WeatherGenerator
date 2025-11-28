@@ -532,7 +532,123 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         TODO: these modes are not being used now.
         """
 
-        if mode == "masking" or mode == "student_teacher":
+        if mode == "masking":
+            streams_data: list[StreamData] = []
+
+            # get/coordinate masks
+            masks_streams = self._get_source_target_masks()
+
+            # Determine number of views direct from config (teacher & student views)
+            teacher_cfg = (
+                self.training_cfg.get("teacher_model_input", {}) if self.training_cfg else {}
+            )
+            student_cfg = self.training_cfg.get("model_input", {}) if self.training_cfg else {}
+            num_target_samples = int(teacher_cfg.get("num_views", 1))
+            num_source_samples = int(teacher_cfg.get("num_views", 1)) * int(
+                student_cfg.get("num_views", 1)
+            )  # per teacher
+
+            batch = ModelBatch(self.streams, num_source_samples, num_target_samples)
+
+            # for all streams
+            for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
+                name = stream_info["name"]
+
+                # TODO: data class for this or something similar
+                (
+                    target_masks,
+                    source_masks,
+                    student_to_teacher,
+                    target_metadata_list,
+                    source_metadata_list,
+                ) = masks_streams[name]
+
+                # input_data and output_data is conceptually consecutive but differs
+                # in source and target channels; overlap in one window when self.forecast_offset=0
+                (input_data, output_data) = self._get_data_windows(idx, forecast_dt, stream_ds)
+
+                # tokenize windows
+                # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
+                input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
+                output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
+
+                # collect source data for current stream
+                # loop over student views
+                stream_data_source = {}
+                for sidx, mask in enumerate(source_masks):
+                    # stream_data_source[name] = self._build_stream_data(
+                    sdata = self._build_stream_data(
+                        "target_coords target_values",
+                        idx,
+                        forecast_dt,
+                        stream_info,
+                        input_data,
+                        output_data,
+                        input_tokens,
+                        output_tokens,
+                        mask,
+                    )
+
+                    stream_data_source[name] = sdata
+
+                    # source meta info...
+                    # source_meta_info = SampleMetaData(...
+
+                    source_metadata = source_metadata_list[sidx]  # first is teacher
+
+                    # also want to add the mask to the metadata
+                    source_metadata.mask = mask
+
+                    # TODO: seb check this
+                    # Map each student (source) to its teacher (target)
+                    t_idx = student_to_teacher[sidx]
+                    batch.add_source_stream(sidx, t_idx, name, sdata, source_metadata)
+                    # num_input_steps?
+                    batch.source_samples[sidx].set_forecast_dt(forecast_dt)
+
+                # stream_data_target can contain network input
+                stream_data_target = {}
+
+                for t_idx, mask in enumerate(source_masks):
+                    # stream_data_target[name] = self._build_stream_data(
+                    sdata = self._build_stream_data(
+                        "target_values",
+                        idx,
+                        forecast_dt,
+                        stream_info,
+                        input_data,
+                        output_data,
+                        input_tokens,
+                        output_tokens,
+                        mask,
+                    )
+                    stream_data_target[name] = sdata
+
+                    # get teacher config info
+                    target_metadata = target_metadata_list[t_idx]
+
+                    # also want to add the mask to the metadata
+                    target_metadata.mask = mask
+
+                    # TODO: seb to check
+                    # Map target to all source students
+                    student_indices = [
+                        s_idx for s_idx, tid in enumerate(student_to_teacher) if tid == t_idx
+                    ]
+                    batch.add_target_stream(t_idx, student_indices, name, sdata, target_metadata)
+                    batch.target_samples[t_idx].set_forecast_dt(forecast_dt)
+
+                # TODO: build batch
+                # source_input
+                # target_input
+                # source_output
+                # target_output
+
+                # TOOD: remove
+                # add data for current stream
+                streams_data += [v for k, v in stream_data_source.items()]
+
+        elif mode == "student_teacher":
             streams_data: list[StreamData] = []
 
             # get/coordinate masks
