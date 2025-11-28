@@ -504,13 +504,13 @@ class Trainer(TrainerBase):
             # batch[-1].meta_info is a dictionary with metadata info per sample
             # batch[-1].meta_info["ERA5"] etc.
             # here we have the noise_level_rn
-            # batch[-1].source_samples[0].meta_info["ERA5"].noise_level_rn 
+            # batch[-1].source_samples[0].meta_info["ERA5"].noise_level_rn
             # == batch[-1].target_samples[0].meta_info["ERA5"].noise_level_rn
-            # for the same timestep, this needs to be fixed for when we have more source timesteps, 
+            # for the same timestep, this needs to be fixed for when we have more source timesteps,
             # and perhaps with bigger batch sizes?
             # Each Sample object has:
             # .streams_data: a dictionary of StreamData objects per stream name
-            # .source_cell_lens: list of tensors with lengths of source cells per stream # to be 
+            # .source_cell_lens: list of tensors with lengths of source cells per stream # to be
             # changed to be in ModelBatch
             # .target_coords_idx: list of tensors with target coordinate indices per stream # to
             # be changed to be in ModelBatch
