@@ -146,7 +146,7 @@ class TimeWindowHandler:
         self.t_window_len: NPTDel64 = np.timedelta64(t_window_len_hours, "h")
         self.t_window_step: NPTDel64 = np.timedelta64(t_window_step_hours, "h")
 
-        assert self.t_start <= self.t_end, "end datetime has to be in the past of start datetime"
+        assert self.t_start < self.t_end, "end datetime has to be in the past of start datetime"
         assert self.t_start > _DT_ZERO, "start datetime has to be >= 1850-01-01T00:00."
 
     def get_index_range(self) -> TimeIndexRange:

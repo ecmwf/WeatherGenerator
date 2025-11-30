@@ -821,7 +821,7 @@ class Trainer(TrainerBase):
         self.device = torch.device(f"{self.device_type}:{self.cf.local_rank}")
         # forecast_steps is dropped here from the batch
         for i, b in enumerate(batch[0]):
-            print(f'{i}th b before to_device: {b}')
+            print(f"{i}th b before to_device: {b}")
         return (
             [[d.to_device(self.device) for d in db] for db in batch[0]],
             [b.to(self.device) for b in batch[1]],

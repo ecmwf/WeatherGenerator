@@ -83,7 +83,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         start_date = str_to_datetime64(start_date_)
         end_date = str_to_datetime64(end_date_)
 
-        assert end_date >= start_date, (end_date, start_date)
+        assert end_date > start_date, (end_date, start_date)
 
         self.mask_value = 0.0
         self._stage = stage
@@ -256,8 +256,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # value in worker_workset()
         self.rng = np.random.default_rng(self.data_loader_rng_seed)
 
-        print(self.forecast_steps)
-
         fsm = (
             self.forecast_steps[min(self.mini_epoch, len(self.forecast_steps) - 1)]
             if self.forecast_policy != "random"
@@ -271,19 +269,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         idx_end = index_range.end
         # native length of datasets, independent of mini_epoch length that has potentially been
         # specified
-        print(f'idx range end is {idx_end}')
-        print(f'len hrs is {self.len_hrs}, step hrs is {self.step_hrs}, fsm is {fsm}')
-        forecast_len = (self.len_hrs * (fsm)) // self.step_hrs #NOTE: why was it fsm +1?
-        print(f'forecast len is {forecast_len}')
+        print(f"idx range end is {idx_end}")
+        print(f"len hrs is {self.len_hrs}, step hrs is {self.step_hrs}, fsm is {fsm}")
+        forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs  # NOTE: why is it fsm +1?
+        print(f"forecast len is {forecast_len}")
         idx_end -= forecast_len + self.forecast_offset
-        print(f'adjusted idx_end is {idx_end}')
-        
+        print(f"adjusted idx_end is {idx_end}")
+
         assert idx_end > 0, "dataset size too small for forecast range"
         self.perms = np.arange(index_range.start, idx_end)
         if self.shuffle:
             self.perms = self.rng.permutation(self.perms)
-        
-        print(f'Perms are: {self.perms}')
+
+        print(f"Perms are: {self.perms}")
 
         # forecast time steps
         len_dt_samples = len(self) // self.batch_size
