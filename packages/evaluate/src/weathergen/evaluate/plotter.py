@@ -357,12 +357,14 @@ class Plotter:
         for region in self.regions:
             if region != "global":
                 bbox = RegionBoundingBox.from_region_name(region)
-                data = bbox.apply_mask(data)
+                self.data = bbox.apply_mask(data)
+            else:
+                self.data = data
 
             plot_names = []
             for var in variables:
                 select_var = self.select | {"channel": var}
-                da = self.select_from_da(data, select_var).compute()
+                da = self.select_from_da(self.data, select_var).compute()
 
                 if self.plot_subtimesteps:
                     ntimes_unique = len(np.unique(da.valid_time))
@@ -402,7 +404,7 @@ class Plotter:
         data: xr.DataArray,
         map_output_dir: Path,
         varname: str,
-        regionname: str,
+        regionname: str | None,
         tag: str = "",
         map_kwargs: dict | None = None,
         title: str | None = None,
