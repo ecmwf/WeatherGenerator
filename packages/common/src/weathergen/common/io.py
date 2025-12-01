@@ -20,6 +20,7 @@ import xarray as xr
 import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
+from zarr.storage import LocalStore
 
 # experimental value, should be inferred more intelligently
 CHUNK_N_SAMPLES = 16392
@@ -319,7 +320,7 @@ class ZarrIO:
         self.data_root: zarr.Group | None = None
 
     def __enter__(self) -> typing.Self:
-        self._store = zarr.storage.DirectoryStore(self._store_path)
+        self._store = LocalStore(self._store_path)
         self.data_root = zarr.group(store=self._store)
 
         return self
@@ -355,9 +356,8 @@ class ZarrIO:
             for name, dataset in group.groups()
         }
 
-    def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Group:
+    def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Array | zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
-        group: zarr.Group | None
         if create:
             group = self.data_root.create_group(item.path)
         else:
@@ -388,14 +388,14 @@ class ZarrIO:
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
         assert is_ndarray(array), f"Expected ndarray but got: {type(array)}"
         if array.size == 0:  # sometimes for geoinfo
-            chunks = None
+            chunks = "auto"
         else:
             chunks = (CHUNK_N_SAMPLES, *array.shape[1:])
         _logger.debug(
             f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
             + "into group: {group}."
         )
-        group.create_dataset(name, data=array, chunks=chunks)
+        group.create_array(name, data=array, chunks=chunks)
 
     @functools.cached_property
     def forecast_offset(self) -> int:
