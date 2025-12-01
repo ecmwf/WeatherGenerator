@@ -128,6 +128,11 @@ class Trainer(TrainerBase):
             cf, self.dataset, run_id_contd, mini_epoch_contd, "student", devices[0]
         )
 
+        self.target_and_aux_calculator = get_target_aux_calculator(
+            cf, self.dataset, self.model, self.device
+        )
+        self.target_and_aux_calculator.to_device(self.device)
+
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
         if is_root():
@@ -454,14 +459,14 @@ class Trainer(TrainerBase):
                 targets_lens[fstep][i_strm] += [target.shape[0]]
                 dn_data = self.dataset_val.denormalize_target_channels
 
-                # # reorder so that output order of target points matches input when reading
-                # # (tokenization and masking changes this order)
-                # # TODO: does this work with batch_size > 1
-                # if len(idxs_inv) > 0:
-                #     pred = pred[:, idxs_inv]
-                #     target = target[idxs_inv]
-                #     targets_coords_raw[fstep][i_strm] = targets_coords_raw[fstep][i_strm][idxs_inv]
-                #     targets_times_raw[fstep][i_strm] = targets_times_raw[fstep][i_strm][idxs_inv]
+                # reorder so that output order of target points matches input when reading
+                # (tokenization and masking changes this order)
+                # TODO: does this work with batch_size > 1
+                if len(idxs_inv) > 0:
+                    pred = pred[:, idxs_inv]
+                    target = target[idxs_inv]
+                    targets_coords_raw[fstep][i_strm] = targets_coords_raw[fstep][i_strm][idxs_inv]
+                    targets_times_raw[fstep][i_strm] = targets_times_raw[fstep][i_strm][idxs_inv]
 
                 f32 = torch.float32
                 preds_all[fstep][i_strm] += [
@@ -501,12 +506,16 @@ class Trainer(TrainerBase):
             # batch[-1].meta_info is a dictionary with metadata info per sample
             # batch[-1].meta_info["ERA5"] etc.
             # here we have the noise_level_rn
-            # batch[-1].source_samples[0].meta_info["ERA5"].noise_level_rn == batch[-1].target_samples[0].meta_info["ERA5"].noise_level_rn
-            # for the same timestep, this needs to be fixed for when we have more source timesteps, and perhaps with bigger batch sizes?
+            # batch[-1].source_samples[0].meta_info["ERA5"].noise_level_rn
+            # == batch[-1].target_samples[0].meta_info["ERA5"].noise_level_rn
+            # for the same timestep, this needs to be fixed for when we have more source timesteps,
+            # and perhaps with bigger batch sizes?
             # Each Sample object has:
             # .streams_data: a dictionary of StreamData objects per stream name
-            # .source_cell_lens: list of tensors with lengths of source cells per stream # to be changed to be in ModelBatch
-            # .target_coords_idx: list of tensors with target coordinate indices per stream # to be changed to be in ModelBatch
+            # .source_cell_lens: list of tensors with lengths of source cells per stream # to be
+            # changed to be in ModelBatch
+            # .target_coords_idx: list of tensors with target coordinate indices per stream # to
+            # be changed to be in ModelBatch
 
             ###### Legacy batch after batch.to_device:
             # (Pdb++) batch[0]
@@ -578,19 +587,30 @@ class Trainer(TrainerBase):
                             forecast_steps,
                         )
                     )
-                targets, aux = zip(*targets_and_auxs, strict=False)
-
+                # targets, aux = zip(*targets_and_auxs)
             loss, loss_values = self.loss_calculator.compute_loss(
-                preds=outputs,
-                targets=targets,
-                view_metadata=(
-                    batch[-1].source2target_matching_idxs,
-                    [sample.meta_info for sample in batch[-1].source_samples],
-                    batch[-1].target2source_matching_idxs,
-                    [sample.meta_info for sample in batch[-1].target_samples],
-                ),
+                preds=outputs[0],
+                targets=targets_and_auxs[0],
+                # TOOD: view_metadata has to be part of targets and/or preds
+                # view_metadata=(batch[-1].source2target_matching_idxs,
+                #                 [sample.meta_info for sample in batch[-1].source_samples],
+                #                 batch[-1].target2source_matching_idxs,
+                #                 [sample.meta_info for sample in batch[-1].target_samples]
+                #                ),
             )
+
+            # OLD
+            #     output = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
+            #     target_aux_output = self.target_and_aux_calculator.compute(
+            #         bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
+            #     )
+            # loss, loss_values = self.loss_calculator.compute_loss(
+            #     preds=output,
+            #     targets=target_aux_output,
+            # )
+
             # TODO re-enable this, need to think on how to make it compatible with
+            # TODO: CL, this should become a regular loss term
             # student-teacher training
             # if cf.latent_noise_kl_weight > 0.0:
             #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
@@ -599,10 +619,6 @@ class Trainer(TrainerBase):
             self.target_and_aux_calculator.update_state_pre_backward(
                 self.cf.istep, batch, self.model
             )
-
-            self.target_and_aux_calculator.update_state_pre_backward(bidx, batch, self.model)
-
-            self.target_and_aux_calculator.update_state_pre_backward(bidx, batch, self.model)
 
             # backward pass
             self.optimizer.zero_grad()
@@ -726,8 +742,7 @@ class Trainer(TrainerBase):
                         output = model_forward(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
-
-                        targets, aux_outputs = self.target_and_aux_calculator.compute(
+                        target_aux_output = self.target_and_aux_calculator.compute(
                             bidx,
                             batch,
                             self.model_params,
@@ -735,12 +750,11 @@ class Trainer(TrainerBase):
                             cf.forecast_offset,
                             forecast_steps,
                         )
-
-                    # compute loss
                     loss, loss_values = self.loss_calculator_val.compute_loss(
                         preds=output,
-                        targets=targets,
+                        targets=target_aux_output,
                     )
+
                     # log output
                     if bidx < cf.log_validation:
                         # TODO: Move _prepare_logging into write_validation by passing streams_data

@@ -142,7 +142,7 @@ def init_model_and_shard(
         # functions in the embedding engine as forward functions. Thus, yielding a crash
         # because the input tensors are not converted to DTensors. This seems to primarily
         # occur during validation.
-        for embed in model.embed_engine.embeds:
+        for embed in model.embed_engine.embeds.values():
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
@@ -160,45 +160,48 @@ def init_model_and_shard(
     # ------------------------------------------------------------------------------------------
     # LOAD AND FREEZE ENCODER WEIGHTS
     # ONLY FOR EXPERIMENTATION, TO BE REMOVED
-    params = torch.load(
-        cf.chkpt_encoder_weights,
-        map_location=torch.device("cpu"),
-        mmap=True,
-        weights_only=True,
-    )
-    encoder_modules = [
-        "embed_engine",
-        "ae_local_engine",
-        "ae_local_global_engine",
-        "ae_global_engine",
-    ]
+    if cf.chkpt_encoder_weights:
+        params = torch.load(
+            cf.chkpt_encoder_weights,
+            map_location=torch.device("cpu"),
+            mmap=True,
+            weights_only=True,
+        )
+        encoder_modules = [
+            "embed_engine",
+            "ae_local_engine",
+            "ae_local_global_engine",
+            "ae_global_engine",
+        ]
 
-    # Load encoder weights
-    params_temp = {}
-    for name in params.keys():
-        if any(e_module in name for e_module in encoder_modules):
-            if cf.with_ddp:
-                params_temp[f"module.{name}"] = params[name]
-            else:
-                params_temp[name] = params[name]
-    params = params_temp
-    mkeys, ukeys = model.load_state_dict(params, strict=False)
+        # Load encoder weights
+        params_temp = {}
+        for name in params.keys():
+            if any(e_module in name for e_module in encoder_modules):
+                if cf.with_ddp:
+                    params_temp[f"module.{name}"] = params[name]
+                else:
+                    params_temp[name] = params[name]
+        params = params_temp
+        mkeys, ukeys = model.load_state_dict(params, strict=False)
 
-    # Freeze encoder weights
-    for name, module in model.named_modules():
-        if any(e_module in name for e_module in encoder_modules):
-            for p in module.parameters():
-                p.requires_grad = False
+        # Freeze encoder weights
+        for name, module in model.named_modules():
+            if any(e_module in name for e_module in encoder_modules):
+                for p in module.parameters():
+                    p.requires_grad = False
 
-    model = model.to(f"cuda:{cf.local_rank}")
+        model = model.to(f"cuda:{cf.local_rank}")
 
-    # warn about difference in checkpoint and model
-    if len(mkeys) == 0 and len(ukeys) == 0:
-        logger.info(f"Checkpoint {cf.chkpt_encoder_weights} loaded successfully with all weights.")
-    if len(mkeys) > 0:
-        logger.warning(f"Missing keys when loading model: {mkeys}")
-    if len(ukeys) > 0:
-        logger.warning(f"Unused keys when loading model: {ukeys}")
+        # warn about difference in checkpoint and model
+        if len(mkeys) == 0 and len(ukeys) == 0:
+            logger.info(
+                f"Checkpoint {cf.chkpt_encoder_weights} loaded successfully with all weights."
+            )
+        if len(mkeys) > 0:
+            logger.warning(f"Missing keys when loading model: {mkeys}")
+        if len(ukeys) > 0:
+            logger.warning(f"Unused keys when loading model: {ukeys}")
     # ------------------------------------------------------------------------------------------
 
     # model params
@@ -313,8 +316,8 @@ def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
 
     target_aux = None
 
-    target_and_aux_calc = cf.get("target_and_aux_calc", None)
-    if target_and_aux_calc is None or target_and_aux_calc == "identity":
+    target_and_aux_calc = cf.get("target_and_aux_calc", "physical")
+    if target_and_aux_calc == "physical":
         target_aux = PhysicalTargetAndAux(cf, model)
     elif target_and_aux_calc == "DiffusionLatentTargetEncoder":
         return DiffusionLatentTargetEncoder(model)

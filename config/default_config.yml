@@ -60,10 +60,8 @@ sigma_data: 0.5
 rho: 7
 p_mean: -1.2
 p_std: 1.2
-# Encoder weights
-chkpt_encoder_weights: "./models/whkujigw/whkujigw_epoch00063.chkpt"
-
-
+# Encoder weights (set to null to not load a pretrained encoder)
+chkpt_encoder_weights: "./models/whkujigw/whkujigw_latest.chkpt"
 
 healpix_level: 5
 
@@ -72,6 +70,7 @@ with_flash_attention: True
 compile_model: False
 with_fsdp: False
 attention_dtype: bf16
+mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
 norm_eps: 1e-4
 
@@ -116,6 +115,8 @@ validation_mode_config: {
   "shared_heads": False,
   "teacher_model": {}
 }
+# masking
+masking_strategy: "random" # obviously TODO
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 #
@@ -137,32 +138,22 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
 # TODO: adapt so that the masking or forecast config entry also sits here
 training_config:
   # when this is "masking", we are basically only using the model_input subconfig
-  training_mode: "student_teacher"  # "masking", "student_teacher", "forecast"
-
+  training_mode: "diffusion_forecast"  # "masking", "student_teacher", "forecast"
 
   model_input:
-    masking_strategy: "healpix" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
-    rate: 0.4  # Masking rate to use for model input
-    num_views: 4  # if student-teacher, the number of local (student) views to generate
-    hl_mask : 4  # healpix level to use for healpix masking strategy
-    relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-  
+    num_input_steps: 1 # fake, read from standard cd.num_input_steps, default 1 # NOTE: only 1 works for now
+    loss: "LatentDiffusionLoss" # place holder
+
   teacher_model_input:
-    strategy: "healpix"  # Strategy for teacher (global) view: "random", "healpix"
-    rate: 0.8  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
-    num_views: 2 # number of teacher views to generate
-    hl_mask : 0 # healpix level to use for healpix masking strategy
-    # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
-    rate_sampling: true  # randomly sample the rate per batch
-
-
+    forecast_offset: 0 # fake, still read from usual place
+    num_forecast_steps: 1 # fake, still read from usual place
+    loss: "LatentDiffusionLoss" # placeholder
 
 num_mini_epochs: 32
 samples_per_mini_epoch: 4096
 samples_per_validation: 512
 
 shuffle: True
-mixed_precision_dtype: bf16
 
 lr_scaling_policy: "sqrt"
 lr_start: 1e-6
@@ -192,7 +183,7 @@ input_window_steps: 1
 
 val_initial: False
 
-loader_num_workers: 0
+loader_num_workers: 8
 log_validation: 0
 streams_output: ["ERA5"]
 
@@ -208,7 +199,6 @@ train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
-
 
 # Tags for experiment tracking
 # These tags will be logged in MLFlow along with completed runs for train, eval, val
@@ -230,4 +220,3 @@ wgtags:
   exp: None
   # *** Experiment-specific tags ***
   grid: None
-

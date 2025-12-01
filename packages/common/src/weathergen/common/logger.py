@@ -153,4 +153,7 @@ def init_loggers(run_id=None, logging_config=None):
     # make sure the parent directory exists
     logging.config.dictConfig(logging_config)
 
-    logging.info(f"Logging set up. Logs are in {output_dir}")
+    if output_dir:
+        logging.info(f"Logging set up. Logs are in {output_dir}")
+    else:
+        logging.info("Logging set up. No log files created.")

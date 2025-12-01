@@ -1,5 +1,4 @@
 import logging
-from typing import List, Tuple
 
 import numpy as np
 import torch
@@ -142,7 +141,7 @@ class Masker:
         idxs_cells,
         idxs_cells_lens,
         keep_mask: np.typing.NDArray | None = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
 
         Return:
@@ -214,7 +213,7 @@ class Masker:
         self,
         idxs_cells,
         idxs_cells_lens,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # mask_source_idxs is
         assert (self.mask_tokens is not None) or (self.mask_tokens is not None)
         idxs_ord_inv = torch.tensor([], dtype=torch.int64)
@@ -630,7 +629,7 @@ class Masker:
         teacher_cfg: dict,
         student_cfg: dict,
         relationship: str = "subset",
-    ) -> Tuple[np.typing.NDArray, List[np.typing.NDArray], List[SampleMetaData]]:
+    ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
         """
         Construct teacher/student keep masks for a stream.
         SampleMetaData is currently just a dict with the masking params used.
@@ -652,7 +651,7 @@ class Masker:
         rate_student = student_cfg.get("rate")
         s_cfg_extra = student_cfg.get("masking_strategy_config")
 
-        student_keep_masks: List[np.ndarray] = []
+        student_keep_masks: list[np.typing.NDArray] = []
         for _ in range(num_views):
             base = self.generate_cell_keep_mask(
                 num_cells=num_cells,
@@ -668,12 +667,12 @@ class Masker:
                 keep = base
             student_keep_masks.append(keep)
 
-        metadata: List[SampleMetaData] = [
+        metadata: list[SampleMetaData] = [
             SampleMetaData(
                 masking_params=teacher_cfg,
             )
         ]
-        for idx, mask in enumerate(student_keep_masks):
+        for _, _ in enumerate(student_keep_masks):
             metadata.append(
                 SampleMetaData(
                     masking_params=student_cfg,
