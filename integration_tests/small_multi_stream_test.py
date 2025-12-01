@@ -148,7 +148,7 @@ def evaluate_multi_stream_results(run_id):
             },
         }
     )
-    evaluate_from_config(cfg, None)
+    evaluate_from_config(cfg, None, None)
 
 
 def load_metrics(run_id):
