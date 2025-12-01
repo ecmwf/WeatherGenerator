@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
+
 import omegaconf
 import pytest
 
@@ -134,7 +135,7 @@ def evaluate_results(run_id):
         }
     )
     # Not passing the mlflow client for tests.
-    evaluate_from_config(cfg, None, None )
+    evaluate_from_config(cfg, None)
 
 
 def load_metrics(run_id):
