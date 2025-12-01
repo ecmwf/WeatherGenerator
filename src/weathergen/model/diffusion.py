@@ -28,6 +28,7 @@ import math
 
 import torch
 
+from weathergen.common.config import Config
 from weathergen.model.engines import ForecastingEngine
 
 
@@ -62,31 +63,27 @@ class DiffusionForecastEngine(torch.nn.Module):
     def __init__(
         self,
         forecast_engine: ForecastingEngine,
-        frequency_embedding_dim: int = 256,  # TODO: determine suitable dimension
-        embedding_dim: int = 512,  # TODO: determine suitable dimension
-        sigma_min: float = 0.002,  # Adapt to GenCast?
-        sigma_max: float = 80,
-        sigma_data: float = 0.5,
-        rho: float = 7,
-        p_mean: float = -1.2,
-        p_std: float = 1.2,
+        cf: Config,
     ):
         super().__init__()
+        self.cf = cf
         self.net = forecast_engine
         self.preconditioner = Preconditioner()
+        self.frequency_embedding_dim = self.cf.frequency_embedding_dim
+        self.embedding_dim = self.cf.embedding_dim
         self.noise_embedder = NoiseEmbedder(
-            embedding_dim=embedding_dim, frequency_embedding_dim=frequency_embedding_dim
+            embedding_dim=self.embedding_dim, frequency_embedding_dim=self.frequency_embedding_dim
         )
 
         # Parameters
-        self.sigma_min = sigma_min
-        self.sigma_max = sigma_max
-        self.sigma_data = sigma_data
-        self.rho = rho
-        self.p_mean = p_mean
-        self.p_std = p_std
+        self.sigma_min = self.cf.sigma_min
+        self.sigma_max = self.cf.sigma_max
+        self.sigma_data = self.cf.sigma_data
+        self.rho = self.cf.rho
+        self.p_mean = self.cf.p_mean
+        self.p_std = self.cf.p_std
 
-    def forward(self, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
+    def forward(self, tokens: torch.Tensor, fstep: int, metadata: dict) -> torch.Tensor:
         """
         Model forward call during training. Unpacks the conditioning c = [x_{t-k}, ..., x_{t}], the
         target y = x_{t+1}, and the random noise eta from the data, computes the diffusion noise
@@ -101,7 +98,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         c = 1
         y = tokens
-        eta = torch.randn(1).to(device=tokens.device)
+        eta = metadata.noise_level_rn.to(device=tokens.device)
 
         # Compute sigma (noise level) from eta
         # noise = torch.randn(y.shape, device=y.device)  # now eta from MultiStreamDataSampler
