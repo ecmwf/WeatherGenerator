@@ -30,6 +30,7 @@ from weathergen.model.engines import (
     GlobalAssimilationEngine,
     Local2GlobalAssimilationEngine,
     LocalAssimilationEngine,
+    QueryAggregationEngine,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
@@ -220,6 +221,10 @@ class Model(torch.nn.Module):
     ae_adapter: Assimilation engine adapter: Adapter to transform local assimilation engine
         information to the global assimilation engine.
 
+    ae_aggregation_blocks: Query aggregation engine: after the learnable queries are created per
+        non-masked healpix cell, this engine combines information from all non-masked cells by
+        using dense attention layers.
+
     ae_global_blocks: Global assimilation engine: Transformer network alternating between local and
         global attention based upon global attention density rate.
 
@@ -317,6 +322,10 @@ class Model(torch.nn.Module):
             s = (1, cf.ae_local_num_queries, cf.ae_global_dim_embed)
             q_cells = torch.rand(s, requires_grad=True) / cf.ae_global_dim_embed
         self.q_cells = torch.nn.Parameter(q_cells, requires_grad=True)
+
+        ##############
+        # query aggregation engine
+        self.ae_aggregation_engine = QueryAggregationEngine(cf, self.num_healpix_cells)
 
         ##############
         # global assimilation engine
@@ -479,6 +488,9 @@ class Model(torch.nn.Module):
 
         num_params_q_cells = np.prod(self.q_cells.shape) if self.q_cells.requires_grad else 0
         num_params_ae_adapater = get_num_parameters(self.ae_local_global_engine.ae_adapter)
+        num_params_ae_aggregation = get_num_parameters(
+            self.ae_aggregation_engine.ae_aggregation_blocks
+        )
 
         num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
@@ -504,6 +516,7 @@ class Model(torch.nn.Module):
         print(f" Local assimilation engine: {num_params_ae_local:,}")
         print(f" Local-global adapter: {num_params_ae_adapater:,}")
         print(f" Learnable queries: {num_params_q_cells:,}")
+        print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")
         print(f" Forecast engine: {num_params_fe:,}")
         print(" kv-adapter, coordinate embedding, prediction networks and prediction heads:")
@@ -700,7 +713,7 @@ class Model(torch.nn.Module):
 
         cell_lens = cell_lens[1:]
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
-        tokens_global_all = []
+        tokens_global_unmasked_all = []
         posteriors = []
         zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
         for i in range((cell_lens.shape[0]) // clen):
@@ -716,10 +729,6 @@ class Model(torch.nn.Module):
             cell_lens_c = torch.cat([zero_pad, cell_lens[i * clen : i_end]])
             q_cells_lens_c = q_cells_lens[: cell_lens_c.shape[0]]
 
-            if l0 == l1 or tokens_c.shape[0] == 0:
-                tokens_global_all += [tokens_global_c]
-                continue
-
             # local assimilation model
             tokens_c = self.ae_local_engine(tokens_c, cell_lens_c, use_reentrant=False)
 
@@ -731,13 +740,44 @@ class Model(torch.nn.Module):
             else:
                 tokens_c, posteriors = tokens_c, 0.0
 
-            tokens_global_c = self.ae_local_global_engine(
-                tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant=False
+            # create mask for global tokens, without first element (used for padding)
+            mask_c = cell_lens_c[1:].to(torch.bool)
+            tokens_global_unmasked_c = tokens_global_c[mask_c]
+            q_cells_lens_unmasked_c = torch.cat([zero_pad, q_cells_lens_c[1:][mask_c]])
+            cell_lens_unmasked_c = torch.cat([zero_pad, cell_lens_c[1:][mask_c]])
+
+            if l0 == l1 or tokens_c.shape[0] == 0:
+                tokens_global_unmasked_all += [tokens_global_unmasked_c]
+                continue
+
+            # local to global adapter engine
+            tokens_global_unmasked_c = self.ae_local_global_engine(
+                tokens_c,
+                tokens_global_unmasked_c,
+                q_cells_lens_unmasked_c,
+                cell_lens_unmasked_c,
+                use_reentrant=False,
             )
 
-            tokens_global_all += [tokens_global_c]
+            tokens_global_unmasked_all += [tokens_global_unmasked_c]
 
-        tokens_global = torch.cat(tokens_global_all)
+        tokens_global_unmasked = torch.cat(tokens_global_unmasked_all)
+
+        # query aggregation engine on the query tokens in unmasked cells
+        # (applying this here assumes batch_size=1)
+        # permute to use ae_local_num_queries as the batchsize and no_of_tokens
+        # as seq len for flash attention
+        tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
+        tokens_global_unmasked = self.ae_aggregation_engine(
+            tokens_global_unmasked, use_reentrant=False
+        )
+        tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
+
+        # create mask from cell lens
+        mask = cell_lens.to(torch.bool)
+
+        # fill empty tensor using mask for positions of unmasked tokens
+        tokens_global[mask] = tokens_global_unmasked.to(tokens_global.dtype)
 
         # recover batch dimension and build global token list
         tokens_global = (
@@ -807,7 +847,7 @@ class Model(torch.nn.Module):
         )
 
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
-        tokens_stream = (tokens.reshape(s) + model_params.pe_global).flatten(0, 1)
+        tokens_stream = tokens.reshape(s).flatten(0, 1)
         tokens_stream = tokens_stream[model_params.hp_nbours.flatten()].flatten(0, 1)
 
         # pair with tokens from assimilation engine to obtain target tokens
