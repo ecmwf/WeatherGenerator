@@ -333,7 +333,7 @@ class Model(torch.nn.Module):
             )
 
         # check if diffusion mode is enabled
-        fe_diffusion_model = getattr(cf, "fe_diffusion_model", False)
+        fe_diffusion_model = cf.get("fe_diffusion_model", False)
         if fe_diffusion_model:
             self.forecast_engine = DiffusionForecastEngine(
                     forecast_engine=ForecastingEngine(cf, self.num_healpix_cells)
