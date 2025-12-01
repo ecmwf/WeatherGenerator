@@ -117,6 +117,10 @@ def init_random_2d_freqs(dim: int, num_heads: int, theta: float = 10.0, rotate: 
 def compute_mixed_cis(freqs: torch.Tensor, t_x: torch.Tensor, t_y: torch.Tensor, num_heads: int):
     N = t_x.shape[0]
     depth = freqs.shape[1]
+    # ensure float32 math even if inputs are bf16, otherwise will raise error when using multi gpu
+    freqs = freqs.float()
+    t_x = t_x.float()
+    t_y = t_y.float()
     # No float 16 for this range
     with torch.cuda.amp.autocast(enabled=False):
         freqs_x = (t_x.unsqueeze(-1) @ freqs[0].unsqueeze(-2)).view(depth, N, num_heads, -1).permute(0, 2, 1, 3)
