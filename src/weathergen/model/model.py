@@ -268,6 +268,7 @@ class Model(torch.nn.Module):
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
+        self.ae_aggregation_engine = None
         self.ae_global_engine = None
         self.ae_local_engine = None
         self.ae_local_global_engine = None
