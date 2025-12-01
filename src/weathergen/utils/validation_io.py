@@ -12,7 +12,11 @@ import logging
 import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange
-from weathergen.datasets.data_reader_base import TimeWindowHandler, str_to_datetime64
+from weathergen.datasets.data_reader_base import (
+    TimeWindowHandler,
+    str_to_datetime64,
+    parse_timedelta,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -61,7 +65,12 @@ def write_output(
     start_date = str_to_datetime64(cf.start_date_val)
     end_date = str_to_datetime64(cf.end_date_val)
 
-    twh = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
+    twh = TimeWindowHandler(
+        start_date,
+        end_date,
+        parse_timedelta(cf.time_window_len),
+        parse_timedelta(cf.time_window_step),
+    )
     source_windows = (twh.window(idx) for idx in sample_idxs)
     source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 
