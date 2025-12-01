@@ -14,8 +14,8 @@ import weathergen.common.io as io
 from weathergen.common.io import TimeRange
 from weathergen.datasets.data_reader_base import (
     TimeWindowHandler,
-    str_to_datetime64,
     parse_timedelta,
+    str_to_datetime64,
 )
 
 _logger = logging.getLogger(__name__)
