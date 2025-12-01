@@ -101,21 +101,21 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.mask_value = 0.0
         self._stage = stage
 
-        self.len_timedelta: np.timedelta64 = parse_timedelta(cf.len_hrs)
-        self.step_timedelta: np.timedelta64 = parse_timedelta(cf.step_hrs)
+        self.len_timedelta: np.timedelta64 = parse_timedelta(cf.time_window_len)
+        self.step_timedelta: np.timedelta64 = parse_timedelta(cf.time_window_step)
         self.time_window_handler = TimeWindowHandler(
             start_date, end_date, self.len_timedelta, self.step_timedelta
         )
         if is_root():
             logger.info(
                 f"Time window handler: start={start_date}, end={end_date},"
-                f"len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
+                f"len_hrs={cf.time_window_len}, step_hrs={cf.time_window_step}"
             )
 
         self.forecast_offset = cf.forecast_offset
 
         # Handle forecast_delta_hrs which might be int (hours) or string (timedelta)
-        f_delta_dt = parse_timedelta(cf.forecast_delta_hrs)
+        f_delta_dt = parse_timedelta(cf.forecast_delta)
 
         if f_delta_dt > np.timedelta64(0, "ms"):
             self.forecast_delta_dt = f_delta_dt

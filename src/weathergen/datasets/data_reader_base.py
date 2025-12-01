@@ -56,7 +56,7 @@ def parse_timedelta(val: str | int | float | np.timedelta64) -> np.timedelta64:
     Strings are parsed using pandas.to_timedelta.
     """
     if isinstance(val, int | float | np.number):
-        return np.timedelta64(val, "h").astype("timedelta64[ms]")
+        return np.timedelta64(pd.to_timedelta(val, unit="h")).astype("timedelta64[ms]")
     return np.timedelta64(pd.to_timedelta(val)).astype("timedelta64[ms]")
 
 
