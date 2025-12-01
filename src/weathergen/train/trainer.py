@@ -535,20 +535,12 @@ class Trainer(TrainerBase):
                 enabled=cf.with_mixed_precision,
             ):
                 outputs = []
+                batch[-1].to_device(self.device)
                 for view in batch[-1].source_samples:
-                    # TODO remove when ModelBatch and Sample get a to_device()
-                    streams_data = [[view.streams_data["ERA5"]]]
-                    streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
-                    source_cell_lens = view.source_cell_lens
-                    source_cell_lens = [b.to(self.device) for b in source_cell_lens]
-                    target_coords_idxs = view.target_coords_idx
-                    target_coords_idxs = [
-                        [b.to(self.device) for b in bf] for bf in target_coords_idxs
-                    ]
                     outputs.append(
                         self.model(
                             self.model_params,
-                            (streams_data, source_cell_lens, target_coords_idxs),
+                            (view.streams_data, view.source_cell_lens, view.target_coords_idx),
                             cf.forecast_offset,
                             forecast_steps,
                         )
@@ -556,19 +548,10 @@ class Trainer(TrainerBase):
 
                 targets_and_auxs = []
                 for view in batch[-1].target_samples:
-                    # TODO remove when ModelBatch and Sample get a to_device()
-                    streams_data = [[view.streams_data["ERA5"]]]
-                    streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
-                    source_cell_lens = view.source_cell_lens
-                    source_cell_lens = [b.to(self.device) for b in source_cell_lens]
-                    target_coords_idxs = view.target_coords_idx
-                    target_coords_idxs = [
-                        [b.to(self.device) for b in bf] for bf in target_coords_idxs
-                    ]
                     targets_and_auxs.append(
                         self.target_and_aux_calculator.compute(
                             self.cf.istep,
-                            (streams_data, source_cell_lens, target_coords_idxs),
+                            (view.streams_data, view.source_cell_lens, view.target_coords_idx),
                             self.model_params,
                             self.model,
                             cf.forecast_offset,

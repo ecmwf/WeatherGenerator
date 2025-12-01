@@ -578,7 +578,6 @@ class Model(torch.nn.Module):
         Returns:
             A list containing all prediction results
         """
-
         (streams_data, source_cell_lens, target_coords_idxs) = batch
 
         # embed
@@ -818,8 +817,7 @@ class Model(torch.nn.Module):
 
         # pair with tokens from assimilation engine to obtain target tokens
         preds_tokens = []
-        for idx, stream_name in enumerate(self.stream_names):
-            si = self.cf.streams[idx]
+        for stream_name, data in streams_data.items():
             tte = self.target_token_engines[stream_name]
             tte_kv = self.pred_adapter_kv[stream_name]
             tc_embed = self.embed_target_coords[stream_name]
@@ -833,18 +831,15 @@ class Model(torch.nn.Module):
                 [
                     checkpoint(
                         tc_embed,
-                        streams_data[i_b][idx].target_coords[fstep],
+                        data.target_coords[fstep],
                         use_reentrant=False,
                     )
-                    if len(streams_data[i_b][idx].target_coords[fstep].shape) > 1
-                    else streams_data[i_b][idx].target_coords[fstep]
-                    for i_b in range(len(streams_data))
                 ]
             )
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
-                nn = si["name"]
+                nn = stream_name
                 if is_root():
                     logger.warning(
                         (
@@ -865,10 +860,10 @@ class Model(torch.nn.Module):
             assert isinstance(tte_kv, torch.nn.Identity)
 
             # lens for varlen attention
-            tcs_lens = target_coords_idxs[idx][fstep]
+            tcs_lens = target_coords_idxs[fstep]
             # coord information for learnable layer norm
             tcs_aux = torch.cat(
-                [streams_data[i_b][idx].target_coords[fstep] for i_b in range(len(streams_data))]
+                [data.target_coords[fstep]]
             )
 
             tc_tokens = tte(

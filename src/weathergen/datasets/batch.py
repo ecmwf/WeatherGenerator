@@ -34,7 +34,7 @@ class SampleMetaData:
 
 class Sample:
     # keys: stream name, values: SampleMetaData
-    meta_info: dict
+    meta_info: dict[str| SampleMetaData]
 
     # data for all streams
     # keys: stream_name, values: StreamData
@@ -45,6 +45,7 @@ class Sample:
     # these two need to live in ModelBatch as they are flattened!
     # this should be a dict also lives in ModelBatch
     source_cell_lens: list[torch.Tensor] | None
+    # TODO why is this a list of lists in practice, but the type says list of tensors?
     target_coords_idx: list[torch.Tensor] | None
 
     def __init__(self, streams: dict) -> None:
@@ -59,6 +60,20 @@ class Sample:
         self.target_coords_idx: list[torch.Tensor] | None = None
 
         self.forecast_dt: int | None = None
+
+    def to_device(self, device) -> None:
+        if self.source_cell_lens is not None:
+            self.source_cell_lens = [t.to(device) for t in self.source_cell_lens]
+
+        if self.target_coords_idx is not None:
+            self.target_coords_idx = [t.to(device) for ls in self.target_coords_idx for t in ls]
+
+        for key in self.meta_info.keys():
+            self.meta_info[key].mask = self.meta_info[key].mask.to(device)
+
+        for key, val in self.streams_data.items():
+            if val is not None:
+                self.streams_data[key] = val.to_device(device)
 
     def add_stream_data(self, stream_name: str, stream_data: StreamData) -> None:
         """
@@ -110,6 +125,7 @@ class ModelBatch:
     # index of corresponding target (for source samples) or source (for target samples)
     # these are in 1-to-1 corresponding for classical training modes (MTM, forecasting) but
     # can be more complex for strategies like student-teacher training
+    # TODO @CL and @SHickman can we make these tensors?
     source2target_matching_idxs: np.typing.NDArray[np.int32]
     target2source_matching_idxs: np.typing.NDArray[np.int32]
 
@@ -122,6 +138,13 @@ class ModelBatch:
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         # self.target_source_matching_idxs = np.full(num_target_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
+
+    def to_device(self, device):
+        for sample in self.source_samples:
+            sample.to_device(device)
+
+        for sample in self.target_samples:
+            sample.to_device(device)
 
     def add_source_stream(
         self,
