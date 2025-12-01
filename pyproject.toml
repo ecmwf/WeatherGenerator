@@ -25,11 +25,10 @@ dependencies = [
  "dask~=2025.5.1",
  "hatchling",
  "numexpr>=2.11.0",
+ "anemoi-datasets",
  "weathergen-common",
  "weathergen-evaluate",
- "weathergen-readers-extra",
- "anemoi-datasets",
- "eccodes<=2.40",
+ "weathergen-readers-extra"
 ]
 
 
