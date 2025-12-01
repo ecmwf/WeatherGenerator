@@ -23,6 +23,7 @@ from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
+from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.engines import (
     EmbeddingEngine,
     EnsPredictionHead,
@@ -75,13 +76,9 @@ class ModelParams(torch.nn.Module):
             torch.zeros(len_token_seq, cf.ae_local_dim_embed, dtype=self.dtype), requires_grad=False
         )
 
-        pe = torch.zeros(
-            self.num_healpix_cells,
-            cf.ae_local_num_queries,
-            cf.ae_global_dim_embed,
-            dtype=self.dtype,
+        self.query_coords = torch.nn.Parameter(
+            torch.zeros(self.num_healpix_cells, 2, dtype=torch.float32), requires_grad=False
         )
-        self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
         ### HEALPIX NEIGHBOURS ###
         hlc = self.healpix_level
@@ -149,29 +146,9 @@ class ModelParams(torch.nn.Module):
         self.pe_embed.data[:, 0::2] = torch.sin(position * div[: self.pe_embed[:, 0::2].shape[1]])
         self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
 
-        dim_embed = cf.ae_global_dim_embed
-        self.pe_global.data.fill_(0.0)
-        xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
-        self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
-            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
-        )
-        self.pe_global.data[..., 0::2] += (
-            torch.sin(
-                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
-            )
-            .unsqueeze(1)
-            .repeat((1, cf.ae_local_num_queries, 1))
-        )
-        self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
-            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
-        )
-        self.pe_global.data[..., 1::2] += (
-            torch.cos(
-                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
-            )
-            .unsqueeze(1)
-            .repeat((1, cf.ae_local_num_queries, 1))
-        )
+        verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
+        coords = r3tos2(verts.to(self.query_coords.device)).to(self.query_coords.dtype)
+        self.query_coords.data.copy_(coords)
 
         # healpix neighborhood structure
 
@@ -598,9 +575,11 @@ class Model(torch.nn.Module):
         tokens = self.embed_cells(model_params, streams_data)
 
         # local assimilation engine and adapter
-        tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
+        tokens, coords_tokens, posteriors = self.assimilate_local(
+            model_params, tokens, source_cell_lens
+        )
 
-        tokens = self.assimilate_global(model_params, tokens)
+        tokens = self.assimilate_global(model_params, tokens, coords_tokens)
 
         # roll-out in latent space
         preds_all = []
@@ -622,7 +601,7 @@ class Model(torch.nn.Module):
                 if noise_std > 0.0:
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
-            tokens = self.forecast(model_params, tokens, fstep)
+            tokens = self.forecast(model_params, tokens, coords_tokens, fstep)
 
         # prediction for final step
         preds_all += [
@@ -666,7 +645,7 @@ class Model(torch.nn.Module):
             cell_lens : Used to identify range of tokens to use from generated tokens in cell
                 embedding
         Returns:
-            Tokens for global assimilation
+            Tuple of (global tokens, per-token coordinates, posterior stats)
         """
 
         batch_size = (
@@ -674,15 +653,15 @@ class Model(torch.nn.Module):
         )
 
         s = self.q_cells.shape
-        # print( f'{np.prod(np.array(tokens.shape))} :: {np.prod(np.array(s))}'
-        #        + ':: {np.prod(np.array(tokens.shape))/np.prod(np.array(s))}')
-        # TODO: test if positional encoding is needed here
+        coords_cells = model_params.query_coords.to(tokens.device)
+        coords_base = coords_cells.unsqueeze(1).repeat(1, self.cf.ae_local_num_queries, 1)
+        coords_seq_full = coords_base.unsqueeze(0).repeat(batch_size, 1, 1, 1)
+        coords_global = coords_seq_full.reshape(-1, self.cf.ae_local_num_queries, 2)
         if self.cf.ae_local_queries_per_cell:
-            tokens_global = (self.q_cells + model_params.pe_global).repeat(batch_size, 1, 1)
+            tokens_global = self.q_cells
         else:
-            tokens_global = (
-                self.q_cells.repeat(self.num_healpix_cells, 1, 1) + model_params.pe_global
-            )
+            tokens_global = self.q_cells.repeat(self.num_healpix_cells, 1, 1)
+        tokens_global = tokens_global.repeat(batch_size, 1, 1)
         q_cells_lens = torch.cat(
             [model_params.q_cells_lens[0].unsqueeze(0)]
             + [model_params.q_cells_lens[1:] for _ in range(batch_size)]
@@ -714,6 +693,7 @@ class Model(torch.nn.Module):
         cell_lens = cell_lens[1:]
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_unmasked_all = []
+        coords_global_unmasked_all = []
         posteriors = []
         zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
         for i in range((cell_lens.shape[0]) // clen):
@@ -726,6 +706,7 @@ class Model(torch.nn.Module):
 
             tokens_c = tokens[l0:l1]
             tokens_global_c = tokens_global[i * clen : i_end]
+            coords_cells_c = coords_global[i * clen : i_end]
             cell_lens_c = torch.cat([zero_pad, cell_lens[i * clen : i_end]])
             q_cells_lens_c = q_cells_lens[: cell_lens_c.shape[0]]
 
@@ -743,11 +724,13 @@ class Model(torch.nn.Module):
             # create mask for global tokens, without first element (used for padding)
             mask_c = cell_lens_c[1:].to(torch.bool)
             tokens_global_unmasked_c = tokens_global_c[mask_c]
+            coords_global_unmasked_c = coords_cells_c[mask_c]
             q_cells_lens_unmasked_c = torch.cat([zero_pad, q_cells_lens_c[1:][mask_c]])
             cell_lens_unmasked_c = torch.cat([zero_pad, cell_lens_c[1:][mask_c]])
 
             if l0 == l1 or tokens_c.shape[0] == 0:
                 tokens_global_unmasked_all += [tokens_global_unmasked_c]
+                coords_global_unmasked_all += [coords_global_unmasked_c]
                 continue
 
             # local to global adapter engine
@@ -760,16 +743,19 @@ class Model(torch.nn.Module):
             )
 
             tokens_global_unmasked_all += [tokens_global_unmasked_c]
+            coords_global_unmasked_all += [coords_global_unmasked_c]
 
         tokens_global_unmasked = torch.cat(tokens_global_unmasked_all)
+        coords_global_unmasked = torch.cat(coords_global_unmasked_all)
 
         # query aggregation engine on the query tokens in unmasked cells
         # (applying this here assumes batch_size=1)
         # permute to use ae_local_num_queries as the batchsize and no_of_tokens
         # as seq len for flash attention
         tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
+        coords_global_unmasked = torch.permute(coords_global_unmasked, [1, 0, 2])
         tokens_global_unmasked = self.ae_aggregation_engine(
-            tokens_global_unmasked, use_reentrant=False
+            tokens_global_unmasked, coords_global_unmasked, use_reentrant=False
         )
         tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
 
@@ -780,35 +766,44 @@ class Model(torch.nn.Module):
         tokens_global[mask] = tokens_global_unmasked.to(tokens_global.dtype)
 
         # recover batch dimension and build global token list
-        tokens_global = (
-            tokens_global.reshape([batch_size, self.num_healpix_cells, s[-2], s[-1]])
-            + model_params.pe_global
-        ).flatten(1, 2)
+        tokens_global = tokens_global.reshape([batch_size, self.num_healpix_cells, s[-2], s[-1]])
+        tokens_global = tokens_global.flatten(1, 2)
+        coords_flat = coords_seq_full.flatten(1, 2)
 
-        return tokens_global, posteriors
+        return tokens_global, coords_flat, posteriors
 
     #########################################
-    def assimilate_global(self, model_params: ModelParams, tokens: torch.Tensor) -> torch.Tensor:
+    def assimilate_global(
+        self, model_params: ModelParams, tokens: torch.Tensor, coords: torch.Tensor
+    ) -> torch.Tensor:
         """Performs transformer based global assimilation in latent space
         Args:
             model_params : Query and embedding parameters (never used)
             tokens : Input tokens to be pre-processed by global assimilation
+            coords : Lat/lon coordinates associated with the query tokens
         Returns:
             Latent representation of the model
         """
 
         # global assimilation engine and adapter
-        tokens = self.ae_global_engine(tokens, use_reentrant=False)
+        tokens = self.ae_global_engine(tokens, coords, use_reentrant=False)
 
         return tokens
 
     #########################################
-    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
+    def forecast(
+        self,
+        model_params: ModelParams,
+        tokens: torch.Tensor,
+        coords: torch.Tensor,
+        fstep: int,
+    ) -> torch.Tensor:
         """Advances latent space representation in time
 
         Args:
             model_params : Query and embedding parameters (never used)
             tokens : Input tokens to be processed by the model.
+            coords : Lat/lon coordinates associated with the query tokens.
             fstep: Current forecast step index (can be used as aux info).
         Returns:
             Processed tokens
@@ -816,7 +811,7 @@ class Model(torch.nn.Module):
             ValueError: For unexpected arguments in checkpoint method
         """
 
-        tokens = self.forecast_engine(tokens, fstep)
+        tokens = self.forecast_engine(tokens, coords, fstep)
 
         return tokens
 

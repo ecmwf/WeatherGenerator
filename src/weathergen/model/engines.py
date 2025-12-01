@@ -225,7 +225,9 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
             )
         )
 
-    def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant):
+    def forward(
+        self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant
+    ):
         for block in self.ae_adapter:
             tokens_global_c = checkpoint(
                 block,
@@ -273,6 +275,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_rope=True,
                     )
                 )
             else:
@@ -288,6 +291,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_rope=True,
                     )
                 )
             # MLP block
@@ -303,9 +307,22 @@ class QueryAggregationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens, use_reentrant):
+    def forward(self, tokens, coords, use_reentrant):
         for block in self.ae_aggregation_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+            if isinstance(block, MultiSelfAttentionHead):
+                tokens = checkpoint(
+                    lambda x, blk=block, c=coords: blk(x, rope_coords=c),
+                    tokens,
+                    use_reentrant=use_reentrant,
+                )
+            elif isinstance(block, MultiSelfAttentionHeadLocal):
+                tokens = checkpoint(
+                    lambda x, blk=block, c=coords: blk(x, rope_coords=c),
+                    tokens,
+                    use_reentrant=use_reentrant,
+                )
+            else:
+                tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
         return tokens
 
 
@@ -341,6 +358,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_rope=True,
                     )
                 )
             else:
@@ -356,6 +374,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_rope=True,
                     )
                 )
             # MLP block
@@ -371,9 +390,22 @@ class GlobalAssimilationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens, use_reentrant):
+    def forward(self, tokens, coords, use_reentrant):
         for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+            if isinstance(block, MultiSelfAttentionHead):
+                tokens = checkpoint(
+                    lambda x, blk=block, c=coords: blk(x, rope_coords=c),
+                    tokens,
+                    use_reentrant=use_reentrant,
+                )
+            elif isinstance(block, MultiSelfAttentionHeadLocal):
+                tokens = checkpoint(
+                    lambda x, blk=block, c=coords: blk(x, rope_coords=c),
+                    tokens,
+                    use_reentrant=use_reentrant,
+                )
+            else:
+                tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
         return tokens
 
 
@@ -448,10 +480,20 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-    def forward(self, tokens, fstep):
-        aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
+    def forward(self, tokens, coords, fstep):
+        aux_info = torch.tensor([fstep], dtype=torch.float32, device=tokens.device)
         for block in self.fe_blocks:
-            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+            if isinstance(block, MultiSelfAttentionHead) or isinstance(
+                block, MultiSelfAttentionHeadLocal
+            ):
+                tokens = checkpoint(
+                    lambda x, aux, blk=block, c=coords: blk(x, aux, rope_coords=c),
+                    tokens,
+                    aux_info,
+                    use_reentrant=False,
+                )
+            else:
+                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
 
         return tokens
 
