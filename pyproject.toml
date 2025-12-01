@@ -12,8 +12,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
  'numpy~=2.2',
  'astropy_healpix~=1.1.2',
- 'zarr~=2.17',
- 'anemoi-datasets~=0.5.16',
+ 'zarr~=3.1.3',
  'pandas~=2.2',
  'pynvml',
  'tqdm',
@@ -32,7 +31,8 @@ dependencies = [
  "eccodes==2.44.0", 
  "eccodeslib==2.44.0.7", 
  "eckitlib==1.32.3.7", 
- "earthkit-data==0.18.2"
+ "earthkit-data==0.18.2",
+ "anemoi-datasets",
 ]
 
 
@@ -242,6 +242,7 @@ torch = [
 # Use the public repo for CPU versions.
   { index = "pytorch-cpu", marker = "sys_platform == 'linux'", extra="cpu"},
 ]
+anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", branch = "feature/zarr3" }
 
 [tool.pytest.ini_options]
 log_cli = true
