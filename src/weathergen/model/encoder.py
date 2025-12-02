@@ -36,7 +36,7 @@ from weathergen.model.engines import (
     GlobalAssimilationEngine,
     )
 
-from weathergen.model.model import ModelParams
+# from weathergen.model.model import ModelParams
 from weathergen.model.layers import MLP
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
@@ -125,18 +125,18 @@ class EncoderModule(torch.nn.Module):
     def forward(self, model_params, streams_data, source_cell_lens):
         
         # embed
-        tokens = self.embed_cells(model_params, streams_data)
+        tokens = self.embed_cells(model_params, streams_data, source_cell_lens)
 
         # local assimilation engine and adapter
         tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
 
-        tokens = self.assimilate_global(model_params, tokens)
+        tokens = self.assimilate_global(tokens)
 
         return tokens, posteriors
 
     #########################################
     def embed_cells(
-        self, model_params: ModelParams, streams_data, source_cell_lens
+        self, model_params, streams_data, source_cell_lens
     ) -> torch.Tensor:
         """Embeds input data for each stream separately and rearranges it to cell-wise order
         Args:
@@ -155,7 +155,7 @@ class EncoderModule(torch.nn.Module):
 
     #########################################
     def assimilate_local(
-        self, model_params: ModelParams, tokens: torch.Tensor, cell_lens: torch.Tensor
+        self, model_params, tokens: torch.Tensor, cell_lens: torch.Tensor
     ) -> torch.Tensor:
         """Processes embedded tokens locally and prepares them for the global assimilation
         Args:
