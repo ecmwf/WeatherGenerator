@@ -536,22 +536,22 @@ class Trainer(TrainerBase):
             ):
                 outputs = []
                 batch[-1].to_device(self.device)
-                for view in batch[-1].source_samples:
+                for sample in batch[-1].source_samples:
                     outputs.append(
                         self.model(
                             self.model_params,
-                            (view.streams_data, view.source_cell_lens, view.target_coords_idx),
+                            (sample.streams_data, sample.source_cell_lens, sample.target_coords_idx),
                             cf.forecast_offset,
                             forecast_steps,
                         )
                     )
 
                 targets_and_auxs = []
-                for view in batch[-1].target_samples:
+                for sample in batch[-1].target_samples:
                     targets_and_auxs.append(
                         self.target_and_aux_calculator.compute(
                             self.cf.istep,
-                            (view.streams_data, view.source_cell_lens, view.target_coords_idx),
+                            (sample.streams_data, sample.source_cell_lens, sample.target_coords_idx),
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
@@ -696,8 +696,9 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    forecast_steps = batch[-1]
-                    batch = self.batch_to_device(batch)
+                    forecast_steps = batch[0][-1]
+                    batch = batch[-1]
+                    batch.to_device(self.device)
 
                     # evaluate model
                     with torch.autocast(
@@ -710,12 +711,16 @@ class Trainer(TrainerBase):
                             if self.ema_model is None
                             else self.ema_model.forward_eval
                         )
+                        sample = batch.source_samples[0]
                         output = model_forward(
-                            self.model_params, batch, cf.forecast_offset, forecast_steps
+                            self.model_params, 
+                            (sample.streams_data, sample.source_cell_lens, sample.target_coords_idx),
+                            cf.forecast_offset, forecast_steps
                         )
+                        sample = batch.target_samples[0]
                         target_aux_output = self.target_and_aux_calculator.compute(
                             bidx,
-                            batch,
+                            (sample.streams_data, sample.source_cell_lens, sample.target_coords_idx),
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
