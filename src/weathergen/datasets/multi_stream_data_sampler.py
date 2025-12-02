@@ -113,6 +113,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.forecast_policy = cf.forecast_policy
 
         self.len = 100000000
+        self.samples_per_mini_epoch = samples_per_mini_epoch
+        self.repeat_data = cf.get("repeat_data", False)
 
         self.streams_datasets: list[list[AnyDataReader]] = []
         for _, stream_info in enumerate(cf.streams):
@@ -186,7 +188,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         index_range = self.time_window_handler.get_index_range()
         self.len = int(index_range.end - index_range.start)
-        self.len = min(self.len, samples_per_mini_epoch if samples_per_mini_epoch else self.len)
+        if not self.repeat_data:
+            self.len = min(self.len, samples_per_mini_epoch if samples_per_mini_epoch else self.len)
+        else:
+            assert samples_per_mini_epoch, "must specify samples_per_mini_epoch if repeat_data"
+            self.len = samples_per_mini_epoch
+
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len // cf.world_size) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)
@@ -269,19 +276,18 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         idx_end = index_range.end
         # native length of datasets, independent of mini_epoch length that has potentially been
         # specified
-        print(f"idx range end is {idx_end}")
-        print(f"len hrs is {self.len_hrs}, step hrs is {self.step_hrs}, fsm is {fsm}")
-        forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs  # NOTE: why is it fsm +1?
-        print(f"forecast len is {forecast_len}")
+        forecast_len = (self.len_hrs * (fsm)) // self.step_hrs  # NOTE: why was it fsm +1?
         idx_end -= forecast_len + self.forecast_offset
-        print(f"adjusted idx_end is {idx_end}")
 
         assert idx_end > 0, "dataset size too small for forecast range"
         self.perms = np.arange(index_range.start, idx_end)
+        if self.repeat_data:
+            assert self.samples_per_mini_epoch == self.len, "length of sampler was set different from samples_per_mini_epoch –- aborting to avoid unintended effects"
+            assert self.len % len(self.perms) == 0, "length of permutations is not a multiple of length of available data –- aborting to avoid unintended effects"
+            self.perms = np.tile(self.perms, self.len // len(self.perms)) #TODO: maybe use samples_per_mini_epoch?
+
         if self.shuffle:
             self.perms = self.rng.permutation(self.perms)
-
-        print(f"Perms are: {self.perms}")
 
         # forecast time steps
         len_dt_samples = len(self) // self.batch_size
