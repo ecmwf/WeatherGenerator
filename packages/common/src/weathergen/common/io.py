@@ -318,6 +318,7 @@ class ZarrIO:
     def __init__(self, store_path: pathlib.Path):
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
+        self._store: LocalStore | None = None
 
     def __enter__(self) -> typing.Self:
         self._store = LocalStore(self._store_path)
@@ -326,7 +327,8 @@ class ZarrIO:
         return self
 
     def __exit__(self, exc_type, exc_value, exc_tb):
-        self._store.close()
+        if self._store is not None:
+            self._store.close()
 
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""

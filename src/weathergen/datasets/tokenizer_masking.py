@@ -31,6 +31,8 @@ class TokenizerMasking(Tokenizer):
     def __init__(self, healpix_level: int, masker: Masker):
         super().__init__(healpix_level)
         self.masker = masker
+        self.rng = None
+        self.token_size = None
 
     def reset_rng(self, rng) -> None:
         """

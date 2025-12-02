@@ -49,7 +49,31 @@ class Trainer(TrainerBase):
 
         self.train_log_freq = train_log_freq
 
+        self.data_loader: torch.utils.data.DataLoader | None = None
+        self.data_loader_validation: torch.utils.data.DataLoader | None = None
+        self.dataset: MultiStreamDataSampler | None = None
+        self.dataset_val: MultiStreamDataSampler | None = None
+        self.device: torch.device = None
+        self.ema_model = None
+        self.grad_scaler: torch.amp.GradScaler | None = None
+        self.last_grad_norm = None
+        self.loss_calculator: LossCalculator | None = None
+        self.loss_calculator_val: LossCalculator | None = None
+        self.loss_model_hist = []
+        self.loss_unweighted_hist: dict = {}
+        self.lr_scheduler: LearningRateScheduler | None = None
+        self.model = None
+        self.model_params = None
+        self.optimizer: torch.optim.Optimizer | None = None
+        self.perf_gpu = None
+        self.perf_mem = None
+        self.stdev_unweighted_hist: dict = {}
+        self.t_start: float = 0
+        self.target_and_aux_calculator = None
+        self.validate_with_ema: bool = False
+
     def init(self, cf: Config, devices):
+        # pylint: disable=attribute-defined-outside-init
         self.cf = OmegaConf.merge(
             OmegaConf.create(
                 {
@@ -94,8 +118,8 @@ class Trainer(TrainerBase):
         self.init(cf, devices)
 
         cf = self.cf
-        self.device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
+        device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{device_type}:{cf.local_rank}")
         self.ema_model = None
 
         # create data loader
@@ -149,9 +173,8 @@ class Trainer(TrainerBase):
         self.init(cf, devices)
         cf = self.cf
 
-        # TODO: do not define new members outside of the init!!
-        self.device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
+        device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{device_type}:{cf.local_rank}")
 
         # create data loaders
         self.dataset = MultiStreamDataSampler(
@@ -695,9 +718,8 @@ class Trainer(TrainerBase):
         self.dataset_val.advance()
 
     def batch_to_device(self, batch):
-        # TODO: do not define new members outside of the init!!
-        self.device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{self.device_type}:{self.cf.local_rank}")
+        device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{device_type}:{self.cf.local_rank}")
         # forecast_steps is dropped here from the batch
         return (
             [[d.to_device(self.device) for d in db] for db in batch[0]],
