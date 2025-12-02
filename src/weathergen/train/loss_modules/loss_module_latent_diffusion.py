@@ -97,9 +97,7 @@ class LossLatentDiffusion(LossModuleBase):
 
         loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
         ctr_fsteps = 0
-        print(
-            f"lengths are: target_tokens_all: {len(target_tokens_all)}, pred_tokens_all: {len(pred_tokens_all)}, fstep_loss_weights: {len(fstep_loss_weights)}"
-        )
+
         for target_tokens, pred_tokens, fstep_loss_weight in zip(
             target_tokens_all, pred_tokens_all, fstep_loss_weights, strict=True
         ):
