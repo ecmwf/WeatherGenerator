@@ -54,6 +54,7 @@ class Masker:
     """
 
     def __init__(self, cf: Config):
+        self.rng = None
         self.masking_rate = cf.masking_rate
         self.masking_strategy = cf.masking_strategy
         self.current_strategy = cf.masking_strategy  # Current strategy in use
@@ -61,6 +62,9 @@ class Masker:
         # masking_strategy_config is a dictionary that can hold any additional parameters
         self.healpix_level_data = cf.healpix_level
         self.masking_strategy_config = cf.get("masking_strategy_config", {})
+        self.perm_sel = None
+        self.mask_tokens = None
+        self.mask_channels = None
 
         self.mask_value = 0.0
         self.dim_time_enc = 6
