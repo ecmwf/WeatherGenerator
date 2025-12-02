@@ -93,6 +93,11 @@ class Regridder:
         self.dataset = ds
         self.indices = self.find_lat_lon_ordering()  # to store lat/lon ordering indices
 
+        self.earthkit_input: str = ""
+        self.earthkit_output: str = ""
+        self.grid_shape: tuple[int] = []
+        self.input_grid_type: str = ""
+
     def find_lat_lon_ordering(self) -> list[int]:
         """
         Find all the the latitude and longitude ordering for CF-parsed WeatherGenerator data

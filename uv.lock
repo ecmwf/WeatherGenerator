@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = "==3.12.*"
 resolution-markers = [
     "platform_machine == 'aarch64' and sys_platform == 'linux'",
@@ -142,18 +142,12 @@ wheels = [
 ]
 
 [[package]]
-name = "asciitree"
-version = "0.3.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/2d/6a/885bc91484e1aa8f618f6f0228d76d0e67000b0fdd6090673b777e311913/asciitree-0.3.3.tar.gz", hash = "sha256:4aa4b9b649f85e3fcb343363d97564aa1fb62e249677f2e18a96765145cc0f6e", size = 3951, upload-time = "2016-09-05T19:10:42.681Z" }
-
-[[package]]
 name = "astroid"
-version = "4.0.1"
+version = "4.0.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a7/d1/6eee8726a863f28ff50d26c5eacb1a590f96ccbb273ce0a8c047ffb10f5a/astroid-4.0.1.tar.gz", hash = "sha256:0d778ec0def05b935e198412e62f9bcca8b3b5c39fdbe50b0ba074005e477aab", size = 405414, upload-time = "2025-10-11T15:15:42.6Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b7/22/97df040e15d964e592d3a180598ace67e91b7c559d8298bdb3c949dc6e42/astroid-4.0.2.tar.gz", hash = "sha256:ac8fb7ca1c08eb9afec91ccc23edbd8ac73bb22cbdd7da1d488d9fb8d6579070", size = 405714, upload-time = "2025-11-09T21:21:18.373Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/47/f4/034361a9cbd9284ef40c8ad107955ede4efae29cbc17a059f63f6569c06a/astroid-4.0.1-py3-none-any.whl", hash = "sha256:37ab2f107d14dc173412327febf6c78d39590fdafcb44868f03b6c03452e3db0", size = 276268, upload-time = "2025-10-11T15:15:40.585Z" },
+    { url = "https://files.pythonhosted.org/packages/93/ac/a85b4bfb4cf53221513e27f33cc37ad158fce02ac291d18bee6b49ab477d/astroid-4.0.2-py3-none-any.whl", hash = "sha256:d7546c00a12efc32650b19a2bb66a153883185d3179ab0d4868086f807338b9b", size = 276354, upload-time = "2025-11-09T21:21:16.54Z" },
 ]
 
 [[package]]
@@ -571,7 +565,7 @@ wheels = [
 
 [[package]]
 name = "earthkit-data"
-version = "0.18.0"
+version = "0.18.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cfgrib", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
@@ -594,9 +588,9 @@ dependencies = [
     { name = "tqdm", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "xarray", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c1/d0/0208abe30005d6073b18f7bb19eba703407c2ec1aa81f978d514d525790a/earthkit_data-0.18.0.tar.gz", hash = "sha256:dff18c616f4f817a74ac9a1588267409707e8774f253336ac15c821b4505a1cf", size = 5553184, upload-time = "2025-11-12T10:11:44.184Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c5/a4/a78a78258093ea85f11bf2b5b90274403f0c88fe82c2b53070f4ab0d4bdb/earthkit_data-0.18.2.tar.gz", hash = "sha256:fbbb9ade7898b872456913af70dea2f680734cd414747dd368739804794670df", size = 5554363, upload-time = "2025-11-18T19:35:09.109Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bc/99/2672ba5c6e457e9d83fdfa5ea0848c8a5ed2747ba311f98f4d8e2304ed23/earthkit_data-0.18.0-py3-none-any.whl", hash = "sha256:fc61ffbe829cc1538cde1b9e6562031e25e9c8df75213b418fc30234b929fb78", size = 389538, upload-time = "2025-11-12T10:11:42.284Z" },
+    { url = "https://files.pythonhosted.org/packages/57/cb/d6d435c7ce7782fa3c7aaf260f779cab80f6944c13a1546a0a3aed797b69/earthkit_data-0.18.2-py3-none-any.whl", hash = "sha256:0c61b5f61c7decb921ff3543f9c73b4988b6f2c88d6e8b68ee1ee34bee9d3573", size = 389574, upload-time = "2025-11-18T19:35:07.334Z" },
 ]
 
 [[package]]
@@ -640,21 +634,45 @@ wheels = [
 
 [[package]]
 name = "eccodes"
-version = "2.40.0"
+version = "2.44.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "cffi", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
+    { name = "eccodeslib", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "findlibs", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "numpy", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cd/d7/588c558512359382eef169d444281a46d385cb21f9c672a4aeed6b20f78d/eccodes-2.40.0.tar.gz", hash = "sha256:47eb68869c2510fe63c26490d25065fc88521ec92a431facc12033340c449032", size = 2267613, upload-time = "2025-02-11T14:05:44.977Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1a/2a/9242d0a83de707ed401906a34bfe1d9a3af616abf498580ef73a6e8cebd5/eccodes-2.44.0.tar.gz", hash = "sha256:8aba9316749349e64db7d075100bff8e24a892814e3529132ec97b6d787eb8f4", size = 2310714, upload-time = "2025-10-03T14:02:37.462Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f6/75/26ecc31b88ece99295dd7d5ed73870ab31bb1e27a71d41c312702ed85c04/eccodes-2.40.0-cp312-cp312-macosx_13_0_arm64.whl", hash = "sha256:4ed9c11b5bf335872e265e094aa64f45888a0fde3b62c670ac832deba8b0d317", size = 6539794, upload-time = "2025-02-11T13:52:55.22Z" },
-    { url = "https://files.pythonhosted.org/packages/fb/2a/dafcb6240652d356c0e2e0691a0e69733cdf8738f97ef804197474e8598b/eccodes-2.40.0-cp312-cp312-macosx_13_0_x86_64.whl", hash = "sha256:49ac38aac6437244779b3b78d2156804f48336edbd9b5789c4b03c39ff39f515", size = 6638887, upload-time = "2025-02-11T13:58:17.818Z" },
-    { url = "https://files.pythonhosted.org/packages/06/39/1d22469705e596823c1ed18f8f33c9ae958f30cbf95b2add51d5571b5d5e/eccodes-2.40.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:590286ac150e0a3ffc18c7cc59162c9a02245bf5f3097bc4582084d56126e370", size = 7403664, upload-time = "2025-02-11T13:51:57.121Z" },
-    { url = "https://files.pythonhosted.org/packages/42/07/f174bbd973224786f03b53cdf1691de6d957c3631946f32d17616ae2e197/eccodes-2.40.0-cp312-cp312-win_amd64.whl", hash = "sha256:80fd3a5737a8f1aeb9036db83fca08f82fe10532b0b9fbc8a6bc099b4401ec23", size = 6208888, upload-time = "2025-02-11T13:51:26.314Z" },
-    { url = "https://files.pythonhosted.org/packages/a4/9c/2000b4a14efb5060e57226e103f7275d52bc00e162f634906eb20423f8a1/eccodes-2.40.0-py3-none-any.whl", hash = "sha256:3033b1023f1a2e875d30a17ad06f6119003d682687b7ea4b7484adc58e16c20c", size = 43556, upload-time = "2025-02-11T14:05:42.814Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/a8/4d3b00f09440b269da208831b450a77e150ecfd1ac3981ca83d984ede4bd/eccodes-2.44.0-cp312-cp312-win_amd64.whl", hash = "sha256:20864247343bf88df88eafbf811fa90c290c45ed32d24f046238bd0f1684e16e", size = 7247248, upload-time = "2025-10-03T14:02:05.837Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/b8/9d15cea1f63fb2e1e14fda4160c355e6187e69b71b848c05faaae08b2e6c/eccodes-2.44.0-py3-none-any.whl", hash = "sha256:c3f11041bde7c3f53767c5bbed608c43695f257c09c58bb4de24bcd9cdae4e3a", size = 83465, upload-time = "2025-10-03T14:02:36.181Z" },
+]
+
+[[package]]
+name = "eccodeslib"
+version = "2.44.0.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "eckitlib", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
+    { name = "fckitlib", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/61/21/555e76b8dfa2ac050df8e638e9b91c6e671c3e2ba0abc2213e8df84d1e5c/eccodeslib-2.44.0.7-cp312-cp312-macosx_13_0_arm64.whl", hash = "sha256:f28cebbfae6594ed393214f59b828b55238bdd2c61e4f533e96098c2e19bb47f", size = 8926805, upload-time = "2025-11-25T11:59:59.543Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/b8/e50cfc8588a85f31568ef02f6913b42d44e36c476cd1aaf61f2489e6749b/eccodeslib-2.44.0.7-cp312-cp312-macosx_13_0_x86_64.whl", hash = "sha256:e191ce8d33fce4c796fe6ffb57652e0faa19e61b3ae8e9d0adacb50fc824d77b", size = 8723732, upload-time = "2025-11-25T11:59:18.999Z" },
+    { url = "https://files.pythonhosted.org/packages/55/7f/a81915d7693e8d46df61b44d5bbc1717c8b41deaf3084831b369191ee24c/eccodeslib-2.44.0.7-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:c1730012671b8c6a70001fc9f6fa4a557ca8d0888c2f76eae81ab6f978190cad", size = 20983542, upload-time = "2025-11-25T12:01:17.72Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/ae/a8f0fc3468e7d0e3cbcf7d2d51d55c53a785f7e3440f9b4546a0994b29b9/eccodeslib-2.44.0.7-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:61774756ea652e3bcea436e8bd6dcbbd3e044f0a41b39d748e110fada48ffdbe", size = 20853439, upload-time = "2025-11-25T12:04:15.242Z" },
+]
+
+[[package]]
+name = "eckitlib"
+version = "1.32.3.7"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9f/02/55468294aa6fb836d1a4d3d18459fad467e2f622df980e59181da2ed80a4/eckitlib-1.32.3.7-cp312-cp312-macosx_13_0_arm64.whl", hash = "sha256:2344c7250b28f3cad2110ee6703c2a58714ed2d012c66fc6b38edb39eb567cd7", size = 2925833, upload-time = "2025-11-25T12:00:05.094Z" },
+    { url = "https://files.pythonhosted.org/packages/91/19/33ba5777745f1f237ee6a549fb585afc6dde6f51672ea269d0285237214e/eckitlib-1.32.3.7-cp312-cp312-macosx_13_0_x86_64.whl", hash = "sha256:3964fee0a5cf828886957d87d053d42f29081f4d8b0f3b9f78fcc4a2401f6335", size = 3028987, upload-time = "2025-11-25T11:59:25.777Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/42/51dbb879c0e4b3a70dfa3463c24c41aca5097a2cddc68accacd1f7b572e8/eckitlib-1.32.3.7-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:de323af51b6560b22de2fb0ec4ad98c5f318975688526d04351b13428ad72de6", size = 43683895, upload-time = "2025-11-25T12:01:26.934Z" },
+    { url = "https://files.pythonhosted.org/packages/40/88/2e751d24663b15a50e8aec49332020cb5e3c1305e6dc229e8cf396f92809/eckitlib-1.32.3.7-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:3825984742c687db0feed540c8ba4bb26472859711e78c560711eba3fe6d12cf", size = 44585482, upload-time = "2025-11-25T12:04:28.06Z" },
 ]
 
 [[package]]
@@ -729,6 +747,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/8b/50/4b769ce1ac4071a1ef6d86b1a3fb56cdc3a37615e8c5519e1af96cdac366/fastjsonschema-2.21.1.tar.gz", hash = "sha256:794d4f0a58f848961ba16af7b9c85a3e88cd360df008c59aac6fc5ae9323b5d4", size = 373939, upload-time = "2024-12-02T10:55:15.133Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/90/2b/0817a2b257fe88725c25589d89aec060581aabf668707a8d03b2e9e0cb2a/fastjsonschema-2.21.1-py3-none-any.whl", hash = "sha256:c9e5b7e908310918cf494a434eeb31384dd84a98b57a30bcb1f535015b554667", size = 23924, upload-time = "2024-12-02T10:55:07.599Z" },
+]
+
+[[package]]
+name = "fckitlib"
+version = "0.14.1.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "eckitlib", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6a/07/921d9adf99b4cb0983f4327f32e76718e88e1fbc78eb253e6a33ce1004e4/fckitlib-0.14.1.7-cp312-cp312-macosx_13_0_arm64.whl", hash = "sha256:cd3213c33656e6bb7652cbbf4dac7b466d294f42188ef0f4c7f69aab124c006e", size = 411476, upload-time = "2025-11-25T12:00:07.712Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/e8/3339b155d2486a3710bf59274259bee846325b7bad5aaa269565e2b76838/fckitlib-0.14.1.7-cp312-cp312-macosx_13_0_x86_64.whl", hash = "sha256:073c97897e032e51ff64028fe4602e50a8092c40563d147f06641f0f7b4f8f23", size = 417158, upload-time = "2025-11-25T11:59:29.004Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/46/06c9fd28b580a8fc59f7a889a7710fdd4afe6f029325ac908d687bdbc3eb/fckitlib-0.14.1.7-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:6af3c23fa3aecf8dc45d7dc610ed542b807ae81e73f2e164c74e90ebbcc0252e", size = 1342966, upload-time = "2025-11-25T12:01:31.618Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/8f/d85d55b3582e168a0221a71b2f54c28b02b1d7ce78b37926cc6019da7945/fckitlib-0.14.1.7-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:d70bea78e3248780b4b49fce4683ebbf9419e2b5cfd9a9fdd9512ead8627aa3d", size = 12761273, upload-time = "2025-11-25T12:04:35.044Z" },
 ]
 
 [[package]]
@@ -1046,7 +1078,7 @@ name = "jinja2"
 version = "3.1.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "markupsafe", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
+    { name = "markupsafe", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/df/bf/f7da0350254c0ed7c72f3e33cef02e048281fec7ecec5f032d4aac52226b/jinja2-3.1.6.tar.gz", hash = "sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d", size = 245115, upload-time = "2025-03-05T20:05:02.478Z" }
 wheels = [
@@ -2100,7 +2132,7 @@ wheels = [
 
 [[package]]
 name = "pylint"
-version = "4.0.1"
+version = "4.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "astroid", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
@@ -2110,9 +2142,9 @@ dependencies = [
     { name = "platformdirs", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "tomlkit", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8c/3e/fa6b9d708486502b96ec2cd87d9266168dac8d7391a14a89738b88ae6379/pylint-4.0.1.tar.gz", hash = "sha256:06db6a1fda3cedbd7aee58f09d241e40e5f14b382fd035ed97be320f11728a84", size = 1568430, upload-time = "2025-10-15T05:40:55.071Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dd/9c/0500020a5446031220f487ca0c762713c6f3ddad7231b811aaf1d473f6aa/pylint-4.0.3.tar.gz", hash = "sha256:a427fe76e0e5355e9fb9b604fd106c419cafb395886ba7f3cebebb03f30e081d", size = 1570368, upload-time = "2025-11-13T15:54:41.394Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/69/ee/59269b7559a1d500acdba8722b995df2aa2946a71cbeeee07648256e9dae/pylint-4.0.1-py3-none-any.whl", hash = "sha256:6077ac21d01b7361eae6ed0f38d9024c02732fdc635d9e154d4fe6063af8ac56", size = 535937, upload-time = "2025-10-15T05:40:53.052Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/01/b8acd4087102c774d432a6663bac4857405c64771445c0a3110828bc5c88/pylint-4.0.3-py3-none-any.whl", hash = "sha256:896d09afb0e78bbf2e030cd1f3d8dc92771a51f7e46828cbc3948a89cd03433a", size = 536199, upload-time = "2025-11-13T15:54:39.734Z" },
 ]
 
 [[package]]
@@ -2878,7 +2910,6 @@ dependencies = [
     { name = "anemoi-datasets", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "astropy-healpix", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "dask", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
-    { name = "eccodes", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "hatchling", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "matplotlib", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "numexpr", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
@@ -2926,7 +2957,6 @@ requires-dist = [
     { name = "anemoi-datasets", git = "https://github.com/ecmwf/anemoi-datasets?branch=feature%2Fzarr3" },
     { name = "astropy-healpix", specifier = "~=1.1.2" },
     { name = "dask", specifier = "~=2025.5.1" },
-    { name = "eccodes", specifier = "<=2.40" },
     { name = "flash-attn", marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'gpu'", url = "https://object-store.os-api.cci1.ecmwf.int/weathergenerator-dev/wheels/flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl" },
     { name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'gpu'", url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" },
     { name = "flash-attn", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'gpu') or (sys_platform != 'linux' and extra == 'gpu')" },
@@ -3014,6 +3044,10 @@ version = "0.1.0"
 source = { editable = "packages/evaluate" }
 dependencies = [
     { name = "cartopy", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
+    { name = "earthkit-data", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
+    { name = "eccodes", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
+    { name = "eccodeslib", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
+    { name = "eckitlib", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "omegaconf", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "panel", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
     { name = "plotly", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-10-weathergen-cpu' and extra == 'extra-10-weathergen-gpu')" },
@@ -3034,6 +3068,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cartopy", specifier = ">=0.24.1" },
+    { name = "earthkit-data", specifier = "==0.18.2" },
+    { name = "eccodes", specifier = "==2.44.0" },
+    { name = "eccodeslib", specifier = "==2.44.0.7" },
+    { name = "eckitlib", specifier = "==1.32.3.7" },
     { name = "omegaconf" },
     { name = "panel" },
     { name = "plotly", specifier = ">=6.2.0" },
