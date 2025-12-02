@@ -63,6 +63,7 @@ dev = [
  "ruff==0.9.7",
  "tensorboard>=2.20.0",
  "pdbpp>=0.11.7",
+ "pylint==4.0.3",
  "pyrefly==0.36.0",
 ]
 
@@ -144,7 +145,14 @@ ignore = [
 # Use Unix `\n` line endings for all files
 line-ending = "lf"
 
+# Some useful warnings are not yet in ruff
 
+[tool.pylint.main]
+ignore = ["tests"]
+
+[tool.pylint.messages_control]
+disable = ["all"]
+enable = ["W0201"]
 
 
 [tool.uv]

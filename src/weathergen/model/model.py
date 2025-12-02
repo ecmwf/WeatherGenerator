@@ -269,6 +269,20 @@ class Model(torch.nn.Module):
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
 
+        self.ae_aggregation_engine: QueryAggregationEngine | None = None
+        self.ae_global_engine: GlobalAssimilationEngine | None = None
+        self.ae_local_engine: LocalAssimilationEngine | None = None
+        self.ae_local_global_engine: Local2GlobalAssimilationEngine | None = None
+        self.embed_engine: EmbeddingEngine | None = None
+        self.embed_target_coords = None
+        self.forecast_engine: ForecastingEngine | None = None
+        self.interpolate_latents: LatentInterpolator | None = None
+        self.pred_adapter_kv = None
+        self.pred_heads = None
+        self.q_cells: torch.Tensor | None = None
+        self.stream_names: list[str] = None
+        self.target_token_engines = None
+
     #########################################
     def create(self) -> "Model":
         """Create each individual module of the model"""
