@@ -137,9 +137,9 @@ def _strip_interpolation(conf: Config) -> Config:
             val = conf[key]
 
         # Convert unsupported types (timedelta/datetime) to strings
-        if isinstance(val, (np.timedelta64, pd.Timedelta)):
+        if isinstance(val, np.timedelta64 | pd.Timedelta):
             val = timedelta_to_str(val)
-        elif isinstance(val, (np.datetime64, pd.Timestamp)):
+        elif isinstance(val, np.datetime64 | pd.Timestamp):
             val = str(val)
 
         stripped[key] = val
@@ -589,9 +589,9 @@ def _get_config_attribute(config: Config, attribute_name: str, fallback: str) ->
     fallback is specified."""
     attribute = OmegaConf.select(config, attribute_name)
     fallback_root = OmegaConf.select(config, "path_shared_working_dir")
-    assert (
-        attribute is not None or fallback_root is not None
-    ), f"Must specify `{attribute_name}` in config if `path_shared_working_dir` is None in config"
+    assert attribute is not None or fallback_root is not None, (
+        f"Must specify `{attribute_name}` in config if `path_shared_working_dir` is None in config"
+    )
     attribute = attribute if attribute else fallback_root + fallback
     return attribute
 
@@ -687,6 +687,6 @@ def validate_forecast_policy_and_steps(cf: OmegaConf):
             cf.forecast_policy and all(step >= 0 for step in cf.forecast_steps)
             if any(n > 0 for n in cf.forecast_steps)
             else True
-        ), (provide_forecast_policy + valid_forecast_policies + valid_forecast_steps)
+        ), provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
     else:
         raise TypeError(valid_forecast_steps)

@@ -17,6 +17,7 @@ from anemoi.datasets.data import MissingDateError
 from anemoi.datasets.data.dataset import Dataset
 from numpy.typing import NDArray
 
+from weathergen.common.config import parse_timedelta
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
     ReaderData,
@@ -24,7 +25,6 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
     check_reader_data,
 )
-from weathergen.common.config import parse_timedelta
 
 _logger = logging.getLogger(__name__)
 
