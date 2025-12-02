@@ -107,8 +107,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         )
         if is_root():
             logger.info(
-                f"Time window handler: start={start_date}, end={end_date},"
-                f"time_window_len={timedelta_to_str(cf.time_window_len)} time_window_step={timedelta_to_str(cf.time_window_step)}"
+                f"Time window handler: start={start_date}, end={end_date}, "
+                f"time_window_len={timedelta_to_str(cf.time_window_len)} "
+                f"time_window_step={timedelta_to_str(cf.time_window_step)}"
             )
 
         self.forecast_offset = cf.forecast_offset
