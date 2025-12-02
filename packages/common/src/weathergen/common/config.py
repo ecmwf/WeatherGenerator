@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import datetime
 import io
 import json
 import logging
@@ -16,6 +17,8 @@ import string
 import subprocess
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import yaml
 import yaml.constructor
 import yaml.scanner
@@ -27,10 +30,121 @@ _REPO_ROOT = Path(
 ).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
 
+_DATETIME_TYPE_NAME = "datetime"  # Names for custom resolvers used in Omegaconf
+_TIMEDELTA_TYPE_NAME = "timedelta"
+
+
 _logger = logging.getLogger(__name__)
 
 
 Config = DictConfig
+
+
+def parse_timedelta(val: str | int | float | np.timedelta64) -> np.timedelta64:
+    """
+    Parse a value into a numpy timedelta64[ms].
+    Integers and floats are interpreted as hours.
+    Strings are parsed using pandas.to_timedelta.
+    """
+    if isinstance(val, int | float | np.number):
+        return np.timedelta64(pd.to_timedelta(val, unit="s")).astype("timedelta64[ms]")
+    return np.timedelta64(pd.to_timedelta(val)).astype("timedelta64[ms]")
+
+
+def timedelta_to_str(val: np.timedelta64 | pd.Timedelta) -> str:
+    """
+    Put timedelta into string in format HH:MM:SS
+    """
+    dt = pd.to_timedelta(val)
+    total_seconds = int(dt.total_seconds())
+
+    # Calculate HH:MM:SS
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    # Format string (e.g., "06:00:00" or "24:00:00")
+    return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+
+def str_to_datetime64(s: str | int | np.timedelta64) -> np.timedelta64:
+    """
+    Convert a string to a numpy datetime64 object.
+    """
+    if isinstance(s, np.datetime64):
+        return s
+    s_str = str(s)
+
+    supported_formats = [
+        "%Y%m%d%H%M%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+    ]
+
+    for fmt in supported_formats:
+        try:
+            dt_obj = datetime.datetime.strptime(s_str, fmt)
+            return np.datetime64(dt_obj)
+        except ValueError:
+            pass
+
+    raise ValueError(f"Unable to parse the date string '{s}'. Original string might be invalid.")
+
+
+OmegaConf.register_new_resolver(_TIMEDELTA_TYPE_NAME, parse_timedelta)
+OmegaConf.register_new_resolver(_DATETIME_TYPE_NAME, str_to_datetime64)
+
+
+def _add_interpolation(conf: Config) -> Config:
+    conf = conf.copy()
+    delta_keys = ["time_window_step", "time_window_len", "forecast_delta"]
+    time_keys = ["start_date", "end_date", "start_date_val", "end_date_val"]
+
+    for key in delta_keys:
+        if key in conf:
+            raw_key = f"_{key}"
+            # Create an alias using interpolation syntax "${_keyname}"
+            # This stores a string instead of the resolved timedelta object.
+            conf[raw_key] = f"${{{key}}}"
+            conf[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{conf[key]}}}"
+
+    for key in time_keys:
+        if key in conf:
+            raw_key = f"_{key}"
+            conf[raw_key] = f"${{{key}}}"
+            conf[key] = f"${{{_DATETIME_TYPE_NAME}:{conf[key]}}}"
+
+    return conf
+
+
+def _strip_interpolation(conf: Config) -> Config:
+    stripped = OmegaConf.create()
+    for key in list(conf.keys()):
+        if key.startswith("_"):
+            # Skip hidden/backup keys
+            continue
+        elif OmegaConf.is_interpolation(conf, key):
+            raw_key = f"_{key}"
+            if raw_key in conf:
+                # Retrieve the value from the backup key (resolves interpolation)
+                val = conf[raw_key]
+            else:
+                # Fallback to the original key
+                val = conf[key]
+        else:
+            # Standard key retrieval
+            val = conf[key]
+
+        # Convert unsupported types (timedelta/datetime) to strings
+        if isinstance(val, (np.timedelta64, pd.Timedelta)):
+            val = timedelta_to_str(val)
+        elif isinstance(val, (np.datetime64, pd.Timestamp)):
+            val = str(val)
+
+        stripped[key] = val
+
+    return stripped
 
 
 def get_run_id():
@@ -41,7 +155,8 @@ def get_run_id():
 
 def format_cf(config: Config) -> str:
     stream = io.StringIO()
-    for key, value in config.items():
+    clean_cf = _strip_interpolation(config)
+    for key, value in clean_cf.items():
         match key:
             case "streams":
                 for rt in value:
@@ -63,7 +178,7 @@ def save(config: Config, mini_epoch: int | None):
 
     fname = _get_model_config_file_write_name(path_models, config.run_id, mini_epoch)
 
-    json_str = json.dumps(OmegaConf.to_container(config))
+    json_str = json.dumps(OmegaConf.to_container(_strip_interpolation(config)))
     with fname.open("w") as f:
         f.write(json_str)
 
@@ -96,6 +211,7 @@ def load_model_config(run_id: str, mini_epoch: int | None, model_path: str | Non
         json_str = f.read()
 
     config = OmegaConf.create(json.loads(json_str))
+    config = _add_interpolation(config)
 
     return _apply_fixes(config)
 
@@ -225,6 +341,7 @@ def load_config(
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
+    c = _add_interpolation(c)
 
     # Ensure the config has mini-epoch notation
     if hasattr(c, "samples_per_epoch"):
@@ -472,9 +589,9 @@ def _get_config_attribute(config: Config, attribute_name: str, fallback: str) ->
     fallback is specified."""
     attribute = OmegaConf.select(config, attribute_name)
     fallback_root = OmegaConf.select(config, "path_shared_working_dir")
-    assert attribute is not None or fallback_root is not None, (
-        f"Must specify `{attribute_name}` in config if `path_shared_working_dir` is None in config"
-    )
+    assert (
+        attribute is not None or fallback_root is not None
+    ), f"Must specify `{attribute_name}` in config if `path_shared_working_dir` is None in config"
     attribute = attribute if attribute else fallback_root + fallback
     return attribute
 
@@ -570,6 +687,6 @@ def validate_forecast_policy_and_steps(cf: OmegaConf):
             cf.forecast_policy and all(step >= 0 for step in cf.forecast_steps)
             if any(n > 0 for n in cf.forecast_steps)
             else True
-        ), provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
+        ), (provide_forecast_policy + valid_forecast_policies + valid_forecast_steps)
     else:
         raise TypeError(valid_forecast_steps)
