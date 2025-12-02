@@ -341,7 +341,7 @@ class DataReaderBase(metaclass=ABCMeta):
         """
         Initialize
         """
-
+        # pylint: disable=attribute-defined-outside-init
         self.source_channels = []
         self.target_channels = []
         self.geoinfo_channels = []
