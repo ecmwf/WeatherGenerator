@@ -3,39 +3,40 @@
 variables:
   q:
     var: q
-    long: specific_humidity_on_pressure_level
+    long: specific_humidity_at_pressure_levels
     std: specific_humidity
     wg_unit: kg kg**-1
     std_unit: kg kg-1
     level_type: pl
   t:
     var: t
-    long: temperature_on_pressure_levels
+    long: temperature_at_pressure_levels
     std: air_temperature
     wg_unit: K
     std_unit: K
     level_type: pl
   u:
     var: u
-    long: u_wind_on_pressure_levels
+    long: u_wind_at_pressure_levels
     std: x_wind
     wg_unit: m s**-1
     std_unit: m s-1
     level_type: pl
   v:
     var: v
-    long: v_wind_on_pressure_levels
+    long: v_wind_at_pressure_levels
     std: y_wind
     wg_unit: m s**-1
     std_unit: m s-1
     level_type: pl
   z:
     var: z
-    long: geopotential_height_on_pressure_levels
-    std: geopotential_height
+    long: geopotential_at_pressure_levels
+    std: geopotential
     wg_unit: m**2 s**-2
-    std_unit: m
+    std_unit: m2 s-2
     level_type: pl
+    scale_factor: 1/9.80665
   10u:
     var: u10
     long: u_wind_at_10m
@@ -52,14 +53,14 @@ variables:
     level_type: sfc
   2d:
     var: d2m
-    long: 2m_dewpoint_temperature
+    long: dew_point_temperature_at_screen_level
     std: dew_point_temperature
     wg_unit: K
     std_unit: K
     level_type: sfc
   2t:
     var: t2m
-    long: 2m_temperature
+    long: temperature_at_screen_level
     std: air_temperature
     #near-surface (usually, 2 meter) : https://pcmdi.llnl.gov/mips/cmip3/variableList.html
     wg_unit: K
@@ -97,7 +98,7 @@ coordinates:
         lon: longitude
         stream: stream
         forecast_step: forecast_period
-        forecast_ref_time: forecast_ref_time
+        forecast_reference_time: forecast_reference_time
         ncells: ncells
     pl:
         pressure_level: pressure
@@ -106,7 +107,7 @@ coordinates:
         lon: longitude
         stream: stream
         forecast_step: forecast_period
-        forecast_ref_time: forecast_ref_time
+        forecast_reference_time: forecast_reference_time
         ncells: ncells
 
 dimensions:
@@ -121,23 +122,21 @@ dimensions:
       wg: longitude
       std: longitude
       std_unit: degrees_east
-    pressure_level: 
+    pressure_level:
       wg: pressure
-      std: air_pressure
+      std: pressure
       std_unit: hPa
-    forecast_ref_time: 
-      wg: forecast_ref_time
-      std: forecast_ref_time
+    forecast_reference_time: 
+      wg: forecast_reference_time
+      std: forecast_reference_time
     forecast_step:
       wg: forecast_period
       std: forecast_period
+      long: time since forecast_reference_time
+      std_unit: hours
     stream:
       wg: stream
       std: stream
     ncells:
       wg: ncells
       std: ncells
-    #TODO maybe absorb stream as an attribute
-    # forecast_step: forecast_step
-    # don't want forecast_step anyway
-

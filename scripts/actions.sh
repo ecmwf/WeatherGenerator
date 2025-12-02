@@ -37,7 +37,10 @@ case "$1" in
         && \
       uv run --no-project --with "ruff==0.12.2" \
        ruff check  --target-version py312  \
-       src/ scripts/ packages/
+       src/ scripts/ packages/ \
+        && \
+      uv run --no-project --with "pylint==4.0.3" \
+       pylint src/ packages/
     )
     ;;
   type-check)
