@@ -16,11 +16,17 @@ class Masker:
     Attributes:
         masking_rate (float): The base rate at which tokens are masked.
         masking_strategy (str): The strategy used for masking (e.g., "random",
-        "block", "healpix", "channel").
+        "block", "healpix", "channel", "causal", "temporal_crop").
         current_strategy (str): The current strategy in use, relevant
                                 when using "combination" strategy.
+
+    Supported Masking Strategies:
         "random" - random masking of tokens at the level of the data
+
         "block" - masking out large blocks of tokens in 1D, without spatial meaning
+
+        "forecast" - all tokens go to target (none kept in source)
+
         "healpix" - masking at the level of HEALPix cells, where all child cells
                     of a parent cell at a specific HEALpix level are masked
                     if the parent is masked.
@@ -28,15 +34,43 @@ class Masker:
                     e.g. masking_strategy_config = {"hl_mask": 1}
                     with hl_mask the level for masking that we want to apply
                     e.g. level 1 very large cells masked
+
+        "spatial" - spatial masking at cell level using generate_cell_keep_mask.
+                    Same spatial mask applied to all timesteps.
+                    Config options:
+                    - cell_strategy: "random" or "healpix" (default: "random")
+                    - hl_mask: required if cell_strategy="healpix"
+                    e.g. masking_strategy_config = {"cell_strategy": "healpix", "hl_mask": 3}
+
+        "spatiotemporal" - spatio-temporal masking with different spatial mask per timestep.
+                           Each timestep gets independently sampled spatial mask.
+                           Config options:
+                           - cell_strategy: "random" or "healpix" (default: "random")
+                           - hl_mask: required if cell_strategy="healpix"
+                           e.g. masking_strategy_config = {"cell_strategy": "healpix", "hl_mask": 3}
+
         "channel" - masking data channels, where channels of the data are masked
                     can be done per-cell (each cell has different channels masked)
                     or globally (all have the same channels masked).
                     e.g. masking_strategy_config = {"mode": "per_cell"} or
                     {"mode": "global"}
+
         "causal" - masking the latest timesteps in each token, according to the masking rate.
+                   Source gets early timesteps, target gets late timesteps.
+                   Useful for autoregressive/causal modeling.
+                   No additional config required.
+
+        "temporal_crop" - keeps a specific temporal portion of the data based on crop_direction.
+                          Source gets the selected portion, target gets the complement.
+                          Required config:
+                          - crop_direction: "start", "end", or "middle"
+                          - masking_rate is used to determine fraction to keep in source
+                          e.g. masking_strategy_config = {"crop_direction": "end"}
+                          with masking_rate=0.3 keeps the last 30% of timesteps in source
+
         masking_rate_sampling (bool): Whether to sample the masking rate from a distribution.
         masking_strategy_config (dict): Configuration for the masking strategy, can include
-                                        additional parameters like "hl_mask", etc.
+                                        additional parameters like "hl_mask", "crop_direction", etc.
                                         specific to the masking strategy. See above.
     """
 
@@ -96,6 +130,28 @@ class Masker:
                     "Source and target channels not identical. Required for masking_mode=channel"
                 )
 
+        if self.current_strategy == "temporal_crop":
+            # Ensure that crop_direction is specified
+            crop_direction = self.masking_strategy_config.get("crop_direction")
+            assert crop_direction in ["start", "end", "middle"], (
+                "temporal_crop strategy requires 'crop_direction' in masking_strategy_config "
+                "with value 'start', 'end', or 'middle'."
+            )
+
+        if self.current_strategy in ["spatial", "spatiotemporal"]:
+            # Validate spatial/spatiotemporal strategy config
+            cell_strategy = self.masking_strategy_config.get("cell_strategy", "random")
+            assert cell_strategy in ["random", "healpix"], (
+                f"{self.current_strategy} strategy requires 'cell_strategy' to be 'random' or 'healpix', "
+                f"got '{cell_strategy}'"
+            )
+            if cell_strategy == "healpix":
+                hl_mask = self.masking_strategy_config.get("hl_mask")
+                assert hl_mask is not None and hl_mask < self.healpix_level_data, (
+                    f"{self.current_strategy} with cell_strategy='healpix' requires 'hl_mask' "
+                    f"in masking_strategy_config and hl_mask < data level {self.healpix_level_data}"
+                )
+
     def reset_rng(self, rng) -> None:
         """
         Reset rng after mini_epoch to ensure proper randomization
@@ -147,9 +203,20 @@ class Masker:
         keep_mask: np.typing.NDArray | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
+        Generate masks for source data at the index level.
+
+        This method generates boolean masks that determine which tokens/channels
+        should be kept in the source (True = KEEP, False = MASK).
+
+        Args:
+            idxs_cells: List of lists of token indices per cell
+            idxs_cells_lens: List of lists of token lengths per cell
+            keep_mask: Optional cell-level keep mask (True = keep cell)
 
         Return:
-            torch.Tensor[bool] of length num_tokens that determines masking for each token
+            Tuple of (mask_tokens, mask_channels):
+                - mask_tokens: np.ndarray[bool] of length num_tokens (True = KEEP in source)
+                - mask_channels: np.ndarray[bool] or None for channel masking
         """
 
         self.mask_tokens, self.mask_channels = None, None
@@ -190,26 +257,135 @@ class Masker:
         # Set the masking rate.
         rate = self._get_sampling_rate()
 
+        if rate == 0.0:
+            _logger.warning(
+                "masking_rate is 0. This will result in empty target. The sample will be skipped. "
+                + "If this occurs repeatedly the masking settings likely need to be revised."
+            )
+
+        # Handle the special case where all tokens are masked (kept in source)
+        if rate == 1.0:
+            self.mask_tokens = np.ones(num_tokens, dtype=bool)
+            return (self.mask_tokens, self.mask_channels)
+
+        # Implementation of different masking strategies
+        # Mask semantics: True = KEEP in source (unmasked), False = MASK (goes to target)
+
         if self.current_strategy == "random":
-            self.mask_tokens = self.rng.uniform(0, 1, num_tokens) < rate
+            # Random masking: randomly select tokens to mask
+            # True = KEEP in source, False = mask (for target)
+            self.mask_tokens = self.rng.uniform(0, 1, num_tokens) >= rate
+
+        elif self.current_strategy == "block":
+            # Block masking: mask a contiguous block of tokens
+            self.mask_tokens = np.ones(num_tokens, dtype=bool)  # Start with all kept
+            block_size = int(np.round(rate * num_tokens))
+            if block_size > 0 and num_tokens > 0:
+                start_index = self.rng.integers(0, max(1, num_tokens - block_size + 1))
+                self.mask_tokens[start_index : start_index + block_size] = False
 
         elif self.current_strategy == "forecast":
-            self.mask_tokens = np.ones(num_tokens, dtype=np.bool)
+            # Forecast: all tokens go to target (none kept in source)
+            self.mask_tokens = np.zeros(num_tokens, dtype=bool)
 
         elif self.current_strategy == "healpix":
-            # TODO: currently only for fixed level
-            num_cells = len(idxs_cells_lens)
-            mask_cells = self.rng.uniform(0, 1, num_cells) < rate
-            # translate cell mask to token mask, replicating using number of tokens per cell
-            self.mask_tokens = [
-                (torch.ones(2, dtype=torch.bool) * (1 if m else 0)).to(torch.bool)
-                for idxs_cell, m in zip(idxs_cells_lens, mask_cells, strict=False)
-            ]
-        elif self.current_strategy == "cropping" or self.current_strategy == "causal":
-            pass
+            # HEALPix hierarchical masking at cell level
+            token_lens = [len(t) for t in idxs_cells_lens]
+            self.mask_tokens = self._generate_healpix_mask_idxs(token_lens, rate)
+
+        elif self.current_strategy == "channel":
+            # Channel masking: mask entire channels rather than tokens
+            # For idx-based approach, we still keep all tokens but set mask_channels
+            # Note: This is handled differently - all tokens are kept, channels are masked
+            self.mask_tokens = np.ones(num_tokens, dtype=bool)
+            # Channel masking is applied at the tokenization level, not here
+            # We just mark that this is channel masking for downstream processing
+            _logger.warning("Channel masking in idx-based approach needs special handling in tokenization")
+
+        elif self.current_strategy == "causal":
+            # Causal masking: mask the LATEST timesteps in each cell
+            # Source gets early timesteps, target gets late timesteps
+            self.mask_tokens = self._generate_causal_mask_idxs(idxs_cells_lens, rate)
+
+        elif self.current_strategy == "temporal_crop":
+            # Temporal cropping: keep timesteps based on crop_direction
+            crop_direction = self.masking_strategy_config.get("crop_direction", "end")
+            temporal_config = {"crop_direction": crop_direction, "rate": 1.0 - rate}
+
+            # _generate_temporal_crop_mask_idxs returns True = KEEP
+            # rate here is fraction to MASK, so we invert it for the function
+            self.mask_tokens = self._generate_temporal_crop_mask_idxs(
+                idxs_cells_lens, temporal_config
+            )
+
+        elif self.current_strategy == "spatial":
+            # Spatial masking: same spatial mask for all timesteps
+            cell_strategy = self.masking_strategy_config.get("cell_strategy", "random")
+
+            # Generate cell-level keep mask using generate_cell_keep_mask
+            # Note: rate here is fraction to KEEP in source (inverted from masking_rate semantics)
+            keep_rate = 1.0 - rate
+            cell_keep_mask = self.generate_cell_keep_mask(
+                num_cells=self.healpix_num_cells,
+                strategy=cell_strategy,
+                rate=keep_rate,
+                masking_strategy_config=self.masking_strategy_config,
+            )
+
+            # Convert cell-level mask to token-level mask by replicating across tokens
+            token_level_flags: list[np.typing.NDArray] = []
+            for cell_kept, lens_cell in zip(cell_keep_mask, idxs_cells_lens, strict=True):
+                num_tokens_cell = len(lens_cell)
+                if num_tokens_cell == 0:
+                    continue
+                # True = KEEP in source (cell is kept)
+                token_level_flags.append(
+                    np.ones(num_tokens_cell, dtype=bool)
+                    if cell_kept
+                    else np.zeros(num_tokens_cell, dtype=bool)
+                )
+
+            if token_level_flags:
+                self.mask_tokens = np.concatenate(token_level_flags)
+            else:
+                self.mask_tokens = np.array([], dtype=bool)
+
+        elif self.current_strategy == "spatiotemporal":
+            # Spatiotemporal masking: different spatial mask per timestep
+            # Each timestep gets an independently generated spatial mask
+            cell_strategy = self.masking_strategy_config.get("cell_strategy", "random")
+            keep_rate = 1.0 - rate
+
+            # Build token-level mask where each token gets its own spatial mask
+            token_level_flags: list[np.typing.NDArray] = []
+            for cell_idx, lens_cell in enumerate(idxs_cells_lens):
+                num_tokens_cell = len(lens_cell)
+                if num_tokens_cell == 0:
+                    continue
+
+                # Generate independent spatial mask for each timestep in this cell
+                cell_token_masks = []
+                for _ in range(num_tokens_cell):
+                    # Generate new spatial mask across all cells
+                    cell_keep_mask = self.generate_cell_keep_mask(
+                        num_cells=self.healpix_num_cells,
+                        strategy=cell_strategy,
+                        rate=keep_rate,
+                        masking_strategy_config=self.masking_strategy_config,
+                    )
+                    # Extract the keep/mask decision for this specific cell
+                    cell_token_masks.append(cell_keep_mask[cell_idx])
+
+                # Convert to boolean array: one mask value per token in this cell
+                token_level_flags.append(np.array(cell_token_masks, dtype=bool))
+
+            if token_level_flags:
+                self.mask_tokens = np.concatenate(token_level_flags)
+            else:
+                self.mask_tokens = np.array([], dtype=bool)
 
         else:
-            assert False, f"Unsupported masking strategy: {self.current_strategy}."
+            raise ValueError(f"Unsupported masking strategy: {self.current_strategy}.")
 
         return (self.mask_tokens, self.mask_channels)
 
@@ -218,221 +394,47 @@ class Masker:
         idxs_cells,
         idxs_cells_lens,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # mask_source_idxs is
-        assert (self.mask_tokens is not None) or (self.mask_tokens is not None)
+        """
+        Generate masks for target data at the index level.
+
+        This method uses the masks generated by mask_source_idxs and inverts them
+        (except for forecast strategy) to determine which tokens should be in the target.
+
+        Args:
+            idxs_cells: List of lists of token indices per cell
+            idxs_cells_lens: List of lists of token lengths per cell
+
+        Returns:
+            Tuple of (mask_tokens, mask_channels, idxs_ord_inv):
+                - mask_tokens: np.ndarray[bool] (True = INCLUDE in target)
+                - mask_channels: np.ndarray[bool] or None for channel masking
+                - idxs_ord_inv: torch.Tensor for reordering (only for forecast strategy)
+        """
+        # mask_source_idxs must be called first
+        assert self.mask_tokens is not None or self.mask_channels is not None, (
+            "mask_source_idxs must be called before mask_targets_idxs"
+        )
+
         idxs_ord_inv = torch.tensor([], dtype=torch.int64)
 
-        # TODO: better handling of if statement
         if self.current_strategy == "forecast":
+            # Forecast strategy: all tokens go to target
             num_tokens = torch.tensor([len(t) for t in idxs_cells_lens]).sum().item()
-            self.mask_tokens = np.ones(num_tokens, dtype=np.bool)
+            self.mask_tokens = np.ones(num_tokens, dtype=bool)
 
-            # inverse map for reordering to output data points in same order as input
+            # Create inverse map for reordering to output data points in same order as input
             idxs_ord = torch.cat([t for tt in idxs_cells for t in tt])
             idxs_ord_inv = torch.argsort(idxs_ord)
 
         else:
-            # masking strategies: target is complement of source
-            # TODO: ensure/enforce that forecast_offset==0
+            # For all other masking strategies: target is complement of source
+            # Source had True = KEEP, so target has True = was MASKED (now INCLUDE in target)
             if self.mask_tokens is not None:
                 self.mask_tokens = ~self.mask_tokens
             if self.mask_channels is not None:
                 self.mask_channels = ~self.mask_channels
 
-        # TODO: self.mask_tokens seems brittle in terms of naming
-
         return (self.mask_tokens, self.mask_channels, idxs_ord_inv)
-
-    def mask_source(
-        self,
-        tokenized_data: list[torch.Tensor],
-        coords: torch.Tensor,
-        geoinfos: torch.Tensor,
-        source: torch.Tensor,
-    ) -> list[torch.Tensor]:
-        """
-        Receives tokenized data, generates a mask, and returns the source data (unmasked)
-        and the permutation selection mask (perm_sel) to be used for the target.
-
-        Args:
-            tokenized_data (list[torch.Tensor]): A list of tensors, where each tensor
-                                                 represents the tokens for a cell.
-
-        Returns:
-            list[torch.Tensor]: The unmasked tokens (model input).
-        """
-
-        token_lens = [len(t) for t in tokenized_data]
-        num_tokens = sum(token_lens)
-
-        # If there are no tokens, return empty lists.
-        if num_tokens == 0:
-            return tokenized_data
-
-        # Clean strategy selection
-        self.current_strategy = self._select_strategy()
-
-        # Set the masking rate.
-        rate = self._get_sampling_rate()
-
-        if rate == 0.0:
-            _logger.warning(
-                "masking_rate is 0. This will result in empty target. The sample will be skipped. "
-                + "If this occurs repeatedtly the masking settings likely need to be revised."
-            )
-
-        # Handle the special case where all tokens are masked
-        if rate == 1.0:
-            token_lens = [len(t) for t in tokenized_data]
-            self.perm_sel = [np.ones(tl, dtype=bool) for tl in token_lens]
-            source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
-            return source_data
-
-        # Implementation of different masking strategies.
-        # Generate a flat boolean mask for random, block, or healpix masking at cell level.
-        # Generate a 3D mask to apply to each cell for channel masking.
-
-        if self.current_strategy == "random":
-            flat_mask = self.rng.uniform(0, 1, num_tokens) < rate
-
-        elif self.current_strategy == "block":
-            flat_mask = np.zeros(num_tokens, dtype=bool)
-            block_size = int(np.round(rate * num_tokens))
-            if block_size > 0 and num_tokens > 0:
-                start_index = self.rng.integers(0, max(1, num_tokens - block_size + 1))
-                flat_mask[start_index : start_index + block_size] = True
-
-        elif self.current_strategy == "healpix":
-            flat_mask = self._generate_healpix_mask(token_lens, rate)
-
-        elif self.current_strategy == "channel":
-            mask = self._generate_channel_mask(tokenized_data, rate, coords, geoinfos, source)
-
-        elif self.current_strategy == "causal":
-            mask = self._generate_causal_mask(tokenized_data, rate, coords, geoinfos, source)
-
-        else:
-            assert False, f"Unknown masking strategy: {self.current_strategy}"
-
-        # apply mask
-
-        # if masking_strategy is channel, we need to handle the masking differently,
-        # since p is not 1D Boolean for the list of cells, but 3D to mask the channels in each cell.
-        if self.current_strategy == "channel":
-            self.perm_sel = mask
-            # In the source_data we will set the channels that are masked to 0.0.
-            source_data = []
-            for data, p in zip(tokenized_data, self.perm_sel, strict=True):
-                if len(data) > 0:
-                    data[p] = self.mask_value
-                    source_data.append(data)
-                else:
-                    source_data.append(data)
-
-        elif self.current_strategy == "causal":
-            # Only select unmasked timesteps
-            self.perm_sel = mask
-            source_data = []
-            for data, p in zip(tokenized_data, self.perm_sel, strict=True):
-                source_data.append(data[~p] if len(data) > 0 else data)
-
-        else:
-            # Split the flat mask to match the structure of the tokenized data (list of lists)
-            # This will be perm_sel, as a class attribute, used to mask the target data.
-            split_indices = np.cumsum(token_lens)[:-1]
-            self.perm_sel = np.split(flat_mask, split_indices)
-
-            # Apply the mask to get the source data (where mask is False)
-            source_data = [data[~p] for data, p in zip(tokenized_data, self.perm_sel, strict=True)]
-
-        return source_data
-
-    def mask_target(
-        self,
-        target_tokenized_data: list[list[torch.Tensor]],
-        coords: torch.Tensor,
-        geoinfos: torch.Tensor,
-        source: torch.Tensor,
-    ) -> list[torch.Tensor]:
-        """
-        Applies the permutation selection mask to
-        the tokenized data to create the target data.
-        Handles cases where a cell has no target
-        tokens by returning an empty tensor of the correct shape.
-
-        Args:
-            target_tokens_cells (list[list[torch.Tensor]]): List of lists of tensors for each cell.
-            coords (torch.Tensor): Coordinates tensor, used to determine feature dimension.
-            geoinfos (torch.Tensor): Geoinfos tensor, used to determine feature dimension.
-            source (torch.Tensor): Source tensor, used to determine feature dimension.
-
-        Returns:
-            list[torch.Tensor]: The target data with masked tokens, one tensor per cell.
-        """
-
-        # check that self.perm_sel is set, and not None with an assert statement
-        assert self.perm_sel is not None, "Masker.perm_sel must be set before calling mask_target."
-
-        # Pre-calculate the total feature dimension of a token to create
-        # correctly shaped empty tensors.
-
-        feature_dim = self.dim_time_enc + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
-
-        processed_target_tokens = []
-
-        # process all tokens used for embedding
-        for cc, pp in zip(target_tokenized_data, self.perm_sel, strict=True):
-            if len(cc) == 0:  # Skip if there's no target data
-                pass
-
-            if self.current_strategy == "channel":
-                # If masking strategy is channel, handle target tokens differently.
-                # We don't have Booleans per cell, instead per channel per cell,
-                # we set the unmasked channels to NaN so not in loss.
-                selected_tensors = []
-                for c, p in zip(cc, pp, strict=True):
-                    # slightly complicated as the first dimension of c varies with data in the cell.
-                    # do not mask the first 8 channels,
-                    # and set unmasked channels to nan
-                    c[:, (self.dim_time_enc + coords.shape[-1] + geoinfos.shape[-1]) :][
-                        :, ~p[0, (self.dim_time_enc + coords.shape[-1] + geoinfos.shape[-1]) :]
-                    ] = torch.nan
-                    selected_tensors.append(c)
-
-            elif self.current_strategy == "causal":
-                # select only the target times where mask is True
-                if len(cc) == len(pp):
-                    selected_tensors = [c for i, c in enumerate(cc) if pp[i]]
-                elif len(pp) == 0:
-                    selected_tensors = cc
-                else:  # If length of target and mask doesn't match, create new mask
-                    ratio = np.sum(pp) / len(pp)  # Ratio of masked tokens in source
-                    indx = max(1, int(ratio * len(cc)))  # Get the same for target
-                    selected_tensors = cc[-indx:]
-
-            elif self.current_strategy == "healpix":
-                selected_tensors = (
-                    cc if len(pp) > 0 and pp[0] else []
-                )  # All tokens inside healpix cell have the same mask
-
-            elif self.current_strategy == "random":
-                # For random masking, we simply select the tensors where the mask is True.
-                # When there's no mask it's assumed to be False. This is done via strict=False
-                selected_tensors = [c for c, p in zip(cc, pp, strict=False) if p]
-            else:
-                raise NotImplementedError(
-                    f"Masking strategy {self.current_strategy} is not supported."
-                )
-
-            # Append the selected tensors to the processed_target_tokens list.
-            if selected_tensors:
-                processed_target_tokens.append(torch.cat(selected_tensors))
-            else:
-                processed_target_tokens.append(
-                    torch.empty(0, feature_dim, dtype=coords.dtype, device=coords.device)
-                )
-
-        return processed_target_tokens
 
     def _get_sampling_rate(self):
         """
@@ -451,9 +453,9 @@ class Masker:
 
         return rate
 
-    def _generate_healpix_mask(self, token_lens: list[int], rate: float) -> np.typing.NDArray:
+    def _generate_healpix_mask_idxs(self, token_lens: list[int], rate: float) -> np.typing.NDArray:
         """
-        Generates a token-level mask based on hierarchical HEALPix cell selection.
+        Generates a token-level mask based on hierarchical HEALPix cell selection (idx-based version).
 
         This method identifies parent cells at a lower resolution (hl_mask) and
         masks all the child cells (and their corresponding tokens) at the data
@@ -464,7 +466,7 @@ class Masker:
             rate (float): The desired masking rate, applied to the parent cells.
 
         Returns:
-            np.ndarray: A flat boolean array (the token-level mask).
+            np.ndarray: A flat boolean array (True = KEEP in source, False = MASK for target).
         """
 
         # hl_mask should be provided in masking_strategy_config
@@ -480,13 +482,11 @@ class Masker:
         level_diff = hl_data - hl_mask
         num_children_per_parent = 4**level_diff
 
-        rate = self._get_sampling_rate()
-
         # Choose parent cells to mask based on the specified rate.
         num_parents_to_mask = int(np.round(rate * num_parent_cells))
 
         if num_parents_to_mask == 0:
-            return np.zeros(sum(token_lens), dtype=bool)
+            return np.ones(sum(token_lens), dtype=bool)  # All kept in source
 
         # Select parent cells to mask
         parent_ids_to_mask = self.rng.choice(num_parent_cells, num_parents_to_mask, replace=False)
@@ -496,9 +496,12 @@ class Masker:
         child_offsets = np.arange(num_children_per_parent)
         child_indices = (parent_ids[:, None] * num_children_per_parent + child_offsets).reshape(-1)
 
-        # set mask list for children
+        # set mask list for children (True = MASK, then we'll invert)
         cell_mask = np.zeros(self.healpix_num_cells, dtype=bool)
         cell_mask[child_indices] = True
+
+        # Invert so True = KEEP in source, False = MASK for target
+        cell_mask = ~cell_mask
 
         # Make the cell-level mask flat and apply it to the token lengths.
         # np.repeat repeats each element of `cell_mask` a number of times specified by `token_lens`.
@@ -506,99 +509,30 @@ class Masker:
 
         return flat_mask
 
-    def _generate_channel_mask(
+    def _generate_causal_mask_idxs(
         self,
-        tokenized_data: list[torch.Tensor],
+        idxs_cells_lens: list[list[int]],
         rate: float,
-        coords: torch.Tensor,
-        geoinfos: torch.Tensor,
-        source: torch.Tensor,
-    ) -> list[np.typing.NDArray]:
+    ) -> np.typing.NDArray:
         """
-        Generates a channel mask for each cell, handling completely empty tensors.
-        This method is robust against cells represented as 1D tensors of shape [0].
+        Generates a causal mask at the index level, masking the latest times
+        in each cell according to the masking rate.
 
         Args:
-            tokenized_data (list[torch.Tensor]): A list of tensors. Most will have a shape of
-                                                (dim, num_tokens, num_channels), but some may
-                                            be empty with a shape of (0,), no data in cell
-            rate (float): The desired masking rate for channels.
-            coords (torch.Tensor): The coordinates tensor.
-            geoinfos (torch.Tensor): The geoinfos tensor.
+            idxs_cells_lens: List of lists of token lengths per cell
+            rate: Fraction of timesteps to MASK (goes to target)
 
         Returns:
-            list[np.ndarray]: A list of boolean masks. Each mask corresponds to a tensor
-                            in tokenized_data.
+            np.ndarray: Boolean mask where True = KEEP in source, False = MASK for target
         """
-
-        if not tokenized_data:
-            return []
-
-        # masking rate sampling, to be refactored as shared between methods
-        rate = self._get_sampling_rate()
-
-        # isolate the number of actual data channels. 6 refers to time.
-        num_channels = self.dim_time_enc + coords.shape[-1] + geoinfos.shape[-1] + source.shape[-1]
-        assert num_channels > 0, "For channel masking, number of channels has to be nonzero."
-        num_fixed_channels = self.dim_time_enc + coords.shape[-1] + geoinfos.shape[-1]
-        num_data_channels = source.shape[-1]
-        mask_count = int(num_data_channels * rate)
-
-        # cat all tokens for efficient processing, split at the end again
-        # masks are generated simulatneously for all cells
-
-        tokenized_data_lens = [len(t) for t in tokenized_data]
-        tokenized_data_merged = torch.cat(tokenized_data)
-
-        num_tokens = tokenized_data_merged.shape[0]
-        token_size = tokenized_data_merged.shape[1]
-
-        if self.masking_strategy_config.get("mode") == "global":
-            # generate global mask
-            channel_mask = np.zeros(num_channels, dtype=bool)
-            m = num_fixed_channels + self.rng.choice(num_data_channels, mask_count, replace=False)
-            channel_mask[m] = True
-
-            full_mask = np.zeros_like(tokenized_data_merged).astype(np.bool)
-            full_mask[:, :] = channel_mask
-
-        else:  # different mask per cell
-            # generate all False mask but with swapped token_size and num_tokens dims so that
-            # the masking is constant per token
-            channel_mask = np.zeros((token_size, num_tokens, num_channels), dtype=bool)
-            # apply masking
-            nc = (num_tokens, num_data_channels)
-            channel_mask[:, :, num_fixed_channels:] = self.rng.uniform(0, 1, nc) < rate
-            # recover correct shape, i.e. swap token_size and num_tokens
-            full_mask = channel_mask.transpose([1, 0, 2])
-
-        # split across cells again
-        full_mask = np.split(full_mask, np.cumsum(tokenized_data_lens[:-1]))
-
-        return full_mask
-
-    def _generate_causal_mask(
-        self,
-        tokenized_data: list[torch.Tensor],
-        rate: float,
-        coords: torch.Tensor,
-        geoinfos: torch.Tensor,
-        source: torch.Tensor,
-    ) -> list[np.typing.NDArray]:
-        """
-        Generates a causal mask, masking the latest times
-        in each tokenized_data according to the masking rate.
-        """
-        if not tokenized_data:
-            return []
-
-        rate = self._get_sampling_rate()
+        if not idxs_cells_lens:
+            return np.array([], dtype=bool)
 
         # Extract all lengths at once
-        token_lens = np.array([len(token_data) for token_data in tokenized_data])
+        token_lens = np.array([len(lens_cell) for lens_cell in idxs_cells_lens])
 
         if len(token_lens) == 0:
-            return []
+            return np.array([], dtype=bool)
 
         # Calculate start indices for masking
         # astype(int) performs floor operation by truncation
@@ -610,22 +544,85 @@ class Masker:
         start_mask_indices = np.where(mask_valid, start_mask_indices, token_lens)
 
         # Create masks with list comprehension
-        # Needed to handle variable lengths
-        full_mask = [
-            (
-                np.concatenate(
-                    [
-                        np.zeros(start_idx, dtype=bool),
-                        np.ones(max(0, token_len - start_idx), dtype=bool),
-                    ]
-                )
-                if token_len > 1
-                else (np.zeros(1, dtype=bool) if token_len == 1 else np.array([], dtype=bool))
-            )
-            for token_len, start_idx in zip(token_lens, start_mask_indices, strict=False)
-        ]
+        # True = KEEP in source, False = MASK for target
+        full_mask = []
+        for token_len, start_idx in zip(token_lens, start_mask_indices, strict=True):
+            if token_len > 1:
+                # Keep early timesteps, mask late ones
+                mask = np.concatenate([
+                    np.ones(start_idx, dtype=bool),
+                    np.zeros(max(0, token_len - start_idx), dtype=bool),
+                ])
+            elif token_len == 1:
+                mask = np.ones(1, dtype=bool)  # Keep single timestep
+            else:
+                mask = np.array([], dtype=bool)
+            full_mask.append(mask)
 
-        return full_mask
+        return np.concatenate(full_mask) if full_mask else np.array([], dtype=bool)
+
+    def _generate_temporal_crop_mask_idxs(
+        self,
+        idxs_cells_lens: list[list[int]],
+        temporal_config: dict,
+    ) -> np.typing.NDArray:
+        """
+        Generates a temporal cropping mask at the index level that KEEPS selected timesteps.
+
+        Args:
+            idxs_cells_lens: List of lists of token lengths per cell
+            temporal_config: Dict with 'crop_direction' ("start", "end", "middle")
+                             and 'rate' (fraction of timesteps to KEEP)
+
+        Returns:
+            np.ndarray: Boolean mask where True = KEEP in source, False = MASK for target
+        """
+        if not idxs_cells_lens:
+            return np.array([], dtype=bool)
+
+        crop_direction = temporal_config.get("crop_direction", "end")
+        rate = temporal_config.get("rate", 0.5)
+
+        assert crop_direction in {"start", "end", "middle"}, (
+            f"crop_direction must be 'start', 'end', or 'middle', got {crop_direction}"
+        )
+
+        # Extract all lengths at once
+        token_lens = np.array([len(lens_cell) for lens_cell in idxs_cells_lens])
+
+        if len(token_lens) == 0:
+            return np.array([], dtype=bool)
+
+        # Calculate how many timesteps to keep per cell
+        num_to_keep = np.maximum(1, (rate * token_lens).astype(int))
+
+        # Create masks based on crop direction
+        full_mask = []
+        for token_len, n_keep in zip(token_lens, num_to_keep, strict=True):
+            if token_len == 0:
+                full_mask.append(np.array([], dtype=bool))
+                continue
+
+            # Ensure we don't try to keep more than we have
+            n_keep = min(n_keep, token_len)
+
+            # Create mask based on direction (True = KEEP in source)
+            mask = np.zeros(token_len, dtype=bool)
+
+            if crop_direction == "start":
+                # Keep first n_keep timesteps in source
+                mask[:n_keep] = True
+            elif crop_direction == "end":
+                # Keep last n_keep timesteps in source
+                mask[-n_keep:] = True
+            else:  # middle
+                # Keep middle n_keep timesteps in source
+                start_idx = (token_len - n_keep) // 2
+                mask[start_idx : start_idx + n_keep] = True
+
+            full_mask.append(mask)
+
+        return np.concatenate(full_mask) if full_mask else np.array([], dtype=bool)
 
     def build_views_for_stream(
         self,
