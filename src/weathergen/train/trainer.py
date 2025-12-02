@@ -440,7 +440,7 @@ class Trainer(TrainerBase):
                 continue
 
             for i_strm, target in enumerate(targets_rt[fstep]):
-                pred = preds[fstep][i_strm]
+                pred = preds.physical[fstep][i_strm]
                 idxs_inv = idxs_inv_rt[fstep][i_strm]
 
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
@@ -697,6 +697,7 @@ class Trainer(TrainerBase):
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
                     forecast_steps = batch[0][-1]
+                    old_batch = batch[0]
                     batch = batch[-1]
                     batch.to_device(self.device)
 
@@ -734,7 +735,10 @@ class Trainer(TrainerBase):
                     # log output
                     if bidx < cf.log_validation:
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
-                        streams_data: list[list[StreamData]] = batch[0]
+                        # TODO right now we hardcode ERA5 which obviously is bad, but not sure how this
+                        # logging function is supposed to change
+                        streams_data: list[list[StreamData]] = old_batch[0] 
+                        import pdb; pdb.set_trace()
                         (
                             preds_all,
                             targets_all,
@@ -754,7 +758,7 @@ class Trainer(TrainerBase):
                             self.cf,
                             mini_epoch,
                             bidx,
-                            sources,
+                            sources[0],
                             preds_all,
                             targets_all,
                             targets_coords_all,
