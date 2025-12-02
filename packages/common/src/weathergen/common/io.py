@@ -318,7 +318,7 @@ class ZarrIO:
     def __init__(self, store_path: pathlib.Path):
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
-        self._store: zarr.storage.LocalStore | None = None
+        self._store: LocalStore | None = None
 
     def __enter__(self) -> typing.Self:
         self._store = LocalStore(self._store_path)
