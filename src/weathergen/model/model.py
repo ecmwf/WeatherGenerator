@@ -860,7 +860,7 @@ class Model(torch.nn.Module):
         )
 
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
-        tokens_stream = (tokens.reshape(s) + model_params.pe_global).flatten(0, 1)
+        tokens_stream = tokens.reshape(s).flatten(0, 1)
         tokens_stream = tokens_stream[model_params.hp_nbours.flatten()].flatten(0, 1)
 
         # pair with tokens from assimilation engine to obtain target tokens
