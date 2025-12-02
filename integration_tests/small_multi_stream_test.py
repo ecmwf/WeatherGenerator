@@ -62,8 +62,8 @@ def test_train_multi_stream(setup, test_run_id):
     infer_multi_stream(test_run_id)
     evaluate_multi_stream_results(test_run_id)
     assert_metrics_file_exists(test_run_id)
-    assert_train_losses_below_threshold(test_run_id)
-    assert_val_losses_below_threshold(test_run_id)
+    assert_stream_losses_below_threshold(test_run_id, stage="train")
+    assert_stream_losses_below_threshold(test_run_id, stage="val")
     logger.info("\nend test_train_multi_stream")
 
 
@@ -154,7 +154,7 @@ def evaluate_multi_stream_results(run_id):
 def load_metrics(run_id):
     """Helper function to load metrics"""
     file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results", run_id=run_id)
-    if not os.path.exists(file_path):
+    if not file_path.is_file():
         raise FileNotFoundError(f"Metrics file not found for run_id: {run_id}")
     with open(file_path) as f:
         json_str = f.readlines()
@@ -164,7 +164,7 @@ def load_metrics(run_id):
 def assert_metrics_file_exists(run_id):
     """Test that the metrics file exists and can be loaded."""
     file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results", run_id=run_id)
-    assert os.path.exists(file_path), f"Metrics file does not exist for run_id: {run_id}"
+    assert file_path.is_file(), f"Metrics file does not exist for run_id: {run_id}"
     metrics = load_metrics(run_id)
     logger.info(f"Loaded metrics for run_id: {run_id}: {metrics}")
     assert metrics is not None, f"Failed to load metrics for run_id: {run_id}"
@@ -216,12 +216,3 @@ def assert_stream_losses_below_threshold(run_id, stage="train"):
 
     stage_label = "\nTrain" if stage == "train" else "Validation"
     logger.info(f"{stage_label} losses – " + ", ".join(f"{k}: {v:.4f}" for k, v in losses.items()))
-
-
-def assert_train_losses_below_threshold(run_id):
-    assert_stream_losses_below_threshold(run_id, stage="train")
-
-
-def assert_val_losses_below_threshold(run_id):
-    assert_stream_losses_below_threshold(run_id, stage="val")
-
