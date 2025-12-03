@@ -410,8 +410,6 @@ class Model(torch.nn.Module):
                 stream_name=stream_name,
             )
 
-        self.print_num_parameters()
-
         return self
     
     
