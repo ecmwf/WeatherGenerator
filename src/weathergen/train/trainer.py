@@ -563,7 +563,11 @@ class Trainer(TrainerBase):
                     outputs.append(
                         self.model(
                             self.model_params,
-                            (sample.streams_data, sample.source_cell_lens, sample.target_coords_idx),
+                            (
+                                sample.streams_data,
+                                sample.source_cell_lens,
+                                sample.target_coords_idx,
+                            ),
                             cf.forecast_offset,
                             forecast_steps,
                         )
@@ -574,7 +578,11 @@ class Trainer(TrainerBase):
                     targets_and_auxs.append(
                         self.target_and_aux_calculator.compute(
                             self.cf.istep,
-                            (sample.streams_data, sample.source_cell_lens, sample.target_coords_idx),
+                            (
+                                sample.streams_data,
+                                sample.source_cell_lens,
+                                sample.target_coords_idx,
+                            ),
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
@@ -737,14 +745,23 @@ class Trainer(TrainerBase):
                         )
                         sample = batch.source_samples[0]
                         output = model_forward(
-                            self.model_params, 
-                            (sample.streams_data, sample.source_cell_lens, sample.target_coords_idx),
-                            cf.forecast_offset, forecast_steps
+                            self.model_params,
+                            (
+                                sample.streams_data,
+                                sample.source_cell_lens,
+                                sample.target_coords_idx,
+                            ),
+                            cf.forecast_offset,
+                            forecast_steps,
                         )
                         sample = batch.target_samples[0]
                         target_aux_output = self.target_and_aux_calculator.compute(
                             bidx,
-                            (sample.streams_data, sample.source_cell_lens, sample.target_coords_idx),
+                            (
+                                sample.streams_data,
+                                sample.source_cell_lens,
+                                sample.target_coords_idx,
+                            ),
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
@@ -758,10 +775,12 @@ class Trainer(TrainerBase):
                     # log output
                     if bidx < cf.log_validation:
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
-                        # TODO right now we hardcode ERA5 which obviously is bad, but not sure how this
-                        # logging function is supposed to change
-                        streams_data: list[list[StreamData]] = old_batch[0] 
-                        import pdb; pdb.set_trace()
+                        # TODO right now we hardcode ERA5 which obviously is bad, but not sure
+                        # how this logging function is supposed to change
+                        streams_data: list[list[StreamData]] = old_batch[0]
+                        import pdb
+
+                        pdb.set_trace()
                         (
                             preds_all,
                             targets_all,
