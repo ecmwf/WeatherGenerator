@@ -598,8 +598,8 @@ class Model(torch.nn.Module):
         (streams_data, _, target_coords_idxs, metadata) = batch
 
         tokens, posteriors = self.encode(model_params=model_params, batch=batch)
-        
-        #TODO: Check here that the tokens are always the same when overfitting to a single sample
+
+        # TODO: Check here that the tokens are always the same when overfitting to a single sample
 
         if encode_only:
             return tokens, posteriors

@@ -496,7 +496,7 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
 
-        #TODO: Remove after overfitting experiments
+        # TODO: Remove after overfitting experiments
         cur_source_sample = None
         cur_target_sample = None
 
@@ -546,10 +546,12 @@ class Trainer(TrainerBase):
                     # TODO remove when ModelBatch and Sample get a to_device()
                     streams_data = [[view.streams_data["ERA5"]]]
 
-                    #TODO: Remove after overfitting experiments
+                    # TODO: Remove after overfitting experiments
                     new_sample = streams_data[0][0].source_tokens_cells[0]
                     if cur_source_sample is not None:
-                        assert torch.equal(cur_source_sample, new_sample), "Different source samples in batch, aborting."
+                        assert torch.equal(cur_source_sample, new_sample), (
+                            "Different source samples in batch, aborting."
+                        )
                     cur_source_sample = new_sample
 
                     streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
@@ -579,10 +581,12 @@ class Trainer(TrainerBase):
                     streams_data = [[view.streams_data["ERA5"]]]
                     streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
 
-                    #TODO: Remove after overfitting experiments
+                    # TODO: Remove after overfitting experiments
                     new_sample = streams_data[0][0].target_tokens[0]
                     if cur_target_sample is not None:
-                        assert torch.equal(cur_target_sample, new_sample), "Different target tokens in batch, aborting."
+                        assert torch.equal(cur_target_sample, new_sample), (
+                            "Different target tokens in batch, aborting."
+                        )
                     cur_target_sample = new_sample
 
                     source_cell_lens = view.source_cell_lens
