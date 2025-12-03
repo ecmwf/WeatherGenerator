@@ -152,10 +152,10 @@ training_config:
     loss: "LatentDiffusionLoss" # placeholder
 
 num_mini_epochs: 32
-samples_per_mini_epoch: 10
-samples_per_validation: 10
+samples_per_mini_epoch: 4096
+samples_per_validation: 512
 
-shuffle: False
+shuffle: True
 
 lr_scaling_policy: "sqrt"
 lr_start: 1e-6
