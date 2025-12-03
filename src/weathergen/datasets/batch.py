@@ -29,7 +29,7 @@ class SampleMetaData:
 
 class Sample:
     # keys: stream name, values: SampleMetaData
-    meta_info: dict[str| SampleMetaData]
+    meta_info: dict[str | SampleMetaData]
 
     # data for all streams
     # keys: stream_name, values: StreamData
@@ -64,7 +64,9 @@ class Sample:
             self.target_coords_idx = [t.to(device) for ls in self.target_coords_idx for t in ls]
 
         for key in self.meta_info.keys():
-            self.meta_info[key].mask = self.meta_info[key].mask.to(device)
+            self.meta_info[key].mask = (
+                self.meta_info[key].mask.to(device) if self.meta_info[key].mask else None
+            )
 
         for key, val in self.streams_data.items():
             if val is not None:
