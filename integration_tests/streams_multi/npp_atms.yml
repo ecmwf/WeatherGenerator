@@ -1,0 +1,34 @@
+# # (C) Copyright 2024 WeatherGenerator contributors.
+# #
+# # This software is licensed under the terms of the Apache Licence Version 2.0
+# # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# #
+# # In applying this licence, ECMWF does not waive the privileges and immunities
+# # granted to it by virtue of its status as an intergovernmental organisation
+# # nor does it submit to any jurisdiction.
+
+NPPATMS :
+  type : obs
+  filenames : ['observations-ea-ofb-0001-2012-2023-npp-atms-radiances-v2.zarr']
+  source: ["obsvalue_rawbt_1", "obsvalue_rawbt_2", "obsvalue_rawbt_3", "obsvalue_rawbt_4", "obsvalue_rawbt_5"]
+  target: ["obsvalue_rawbt_1", "obsvalue_rawbt_2", "obsvalue_rawbt_3"]
+  diagnostic : False
+  loss_weight : 1.0
+  token_size : 32
+  max_num_targets: -1
+  embed :
+    net : transformer
+    num_tokens : 1
+    num_heads : 2
+    dim_embed : 8
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 8
+  target_readout :
+    type : 'obs_value'
+    num_layers : 2
+    num_heads : 2
+  pred_head :
+    ens_size : 1
+    num_layers : 1
