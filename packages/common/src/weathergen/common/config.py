@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datetime
 import io
 import json
 import logging
@@ -72,24 +71,10 @@ def str_to_datetime64(s: str | int | np.datetime64) -> np.datetime64:
     """
     if isinstance(s, np.datetime64):
         return s
-    s_str = str(s)
 
-    supported_formats = [
-        "%Y%m%d%H%M%S",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d %H:%M",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M",
-    ]
-
-    for fmt in supported_formats:
-        try:
-            dt_obj = datetime.datetime.strptime(s_str, fmt)
-            return np.datetime64(dt_obj)
-        except ValueError:
-            pass
-
-    raise ValueError(f"Unable to parse the date string '{s}'. Original string might be invalid.")
+    # Convert to string to handle YAML integers (e.g. 20001010000000)
+    s = str(s)
+    return pd.to_datetime(s).to_datetime64()
 
 
 OmegaConf.register_new_resolver(_TIMEDELTA_TYPE_NAME, parse_timedelta)
@@ -140,7 +125,9 @@ def _strip_interpolation(conf: Config) -> Config:
         if isinstance(val, np.timedelta64 | pd.Timedelta):
             val = timedelta_to_str(val)
         elif isinstance(val, np.datetime64 | pd.Timestamp):
-            val = str(val)
+            dt = pd.to_datetime(val)
+            # Format: Standard ISO without microseconds
+            val = dt.strftime("%Y-%m-%dT%H:%M:%S")
 
         stripped[key] = val
 
