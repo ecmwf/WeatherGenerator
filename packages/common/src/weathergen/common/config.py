@@ -66,7 +66,7 @@ def timedelta_to_str(val: np.timedelta64 | pd.Timedelta) -> str:
     return f"{hours:02}:{minutes:02}:{seconds:02}"
 
 
-def str_to_datetime64(s: str | int | np.timedelta64) -> np.timedelta64:
+def str_to_datetime64(s: str | int | np.datetime64) -> np.datetime64:
     """
     Convert a string to a numpy datetime64 object.
     """
