@@ -560,8 +560,9 @@ class Trainer(TrainerBase):
                 outputs = []
                 for view in batch[-1].source_samples:
                     # TODO remove when ModelBatch and Sample get a to_device()
-                    streams_data = [[view.streams_data["ERA5"]]]
-                    streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
+                    streams_data = [
+                        [v.to_device(self.device) for k, v in view.streams_data.items()]
+                    ]
                     source_cell_lens = view.source_cell_lens
                     source_cell_lens = [b.to(self.device) for b in source_cell_lens]
                     target_coords_idxs = view.target_coords_idx
@@ -580,8 +581,9 @@ class Trainer(TrainerBase):
                 targets_and_auxs = []
                 for view in batch[-1].target_samples:
                     # TODO remove when ModelBatch and Sample get a to_device()
-                    streams_data = [[view.streams_data["ERA5"]]]
-                    streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
+                    streams_data = [
+                        [v.to_device(self.device) for k, v in view.streams_data.items()]
+                    ]
                     source_cell_lens = view.source_cell_lens
                     source_cell_lens = [b.to(self.device) for b in source_cell_lens]
                     target_coords_idxs = view.target_coords_idx

@@ -641,7 +641,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # add data for current stream
                 streams_data += [v for k, v in stream_data_source.items()]
 
-
         elif mode == "diffusion_forecast":
             streams_data: list[StreamData] = []
 
