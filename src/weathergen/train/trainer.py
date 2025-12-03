@@ -515,40 +515,6 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
-            # NOTE: we are still returning legacy batch structure and the new batch together.
-
-            # Julian and Matthias:
-            # here we can access data as follows:
-            # batch[-1] is the new ModelBatch object, see the structure in batch.py
-            # batch[-1].source_samples is a list of Sample objects for the source data, timesteps
-            # batch[-1].target_samples is a list of Sample objects for the target data, timesteps
-            # batch[-1].meta_info is a dictionary with metadata info per sample
-            # batch[-1].meta_info["ERA5"] etc.
-            # here we have the noise_level_rn
-            # batch[-1].source_samples[0].meta_info["ERA5"].noise_level_rn
-            # == batch[-1].target_samples[0].meta_info["ERA5"].noise_level_rn
-            # for the same timestep, this needs to be fixed for when we have more source timesteps,
-            # and perhaps with bigger batch sizes?
-            # Each Sample object has:
-            # .streams_data: a dictionary of StreamData objects per stream name
-            # .source_cell_lens: list of tensors with lengths of source cells per stream # to be
-            # changed to be in ModelBatch
-            # .target_coords_idx: list of tensors with target coordinate indices per stream # to
-            # be changed to be in ModelBatch
-
-            ###### Legacy batch after batch.to_device:
-            # (Pdb++) batch[0]
-            # [[<weathergen.datasets.stream_data.StreamData object at 0x400572104230>]]
-            # (Pdb++) batch[1]
-            # [tensor([0, 1, 1,  ..., 0, 0, 0], device='cuda:0', dtype=torch.int32)]
-            # (Pdb++) batch[2]
-            # [[tensor([0, 0, 0,  ..., 4, 4, 4], device='cuda:0', dtype=torch.int32)]]
-
-            # TODO: access from new ModelBatch
-            forecast_steps = batch.get_forecast_dt()
-            # batch = self.batch_to_device(batch)
-
-            ### After to_device, then the original is:
             batch.to_device(self.device)
 
             with torch.autocast(
@@ -567,7 +533,7 @@ class Trainer(TrainerBase):
                                 sample.target_coords_idx,
                             ),
                             cf.forecast_offset,
-                            forecast_steps,
+                            batch.get_forecast_dt(),
                         )
                     )
 
@@ -584,7 +550,7 @@ class Trainer(TrainerBase):
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
-                            forecast_steps,
+                            batch.get_forecast_dt(),
                         )
                     )
                 # targets, aux = zip(*targets_and_auxs)
@@ -598,16 +564,6 @@ class Trainer(TrainerBase):
                 #                 [sample.meta_info for sample in batch[-1].target_samples]
                 #                ),
             )
-
-            # OLD
-            #     output = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
-            #     target_aux_output = self.target_and_aux_calculator.compute(
-            #         bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
-            #     )
-            # loss, loss_values = self.loss_calculator.compute_loss(
-            #     preds=output,
-            #     targets=target_aux_output,
-            # )
 
             # TODO re-enable this, need to think on how to make it compatible with
             # TODO: CL, this should become a regular loss term
