@@ -258,9 +258,7 @@ def gamma_decay(forecast_steps, gamma):
     return weights * (len(fsteps) / np.sum(weights))
 
 
-def student_teacher_softmax(
-    student_patches, teacher_patches, student_temp
-):
+def student_teacher_softmax(student_patches, teacher_patches, student_temp):
     """
     Cross-entropy between softmax outputs of the teacher and student networks.
     student_patches: (B, N, D) tensor
@@ -270,7 +268,7 @@ def student_teacher_softmax(
     loss = torch.sum(
         teacher_patches * F.log_softmax(student_patches / student_temp, dim=-1), dim=-1
     )
-    loss = torch.mean(loss, dim=-1) 
+    loss = torch.mean(loss, dim=-1)
     return -loss.mean()
 
 
@@ -301,11 +299,11 @@ def masked_student_teacher_patch_softmax(
         masks_weight = (
             (1 / student_masks.sum(-1).clamp(min=1.0))
             .unsqueeze(-1)
-            .expand_as(student_masks)# [student_masks_flat]
+            .expand_as(student_masks)  # [student_masks_flat]
         )
     # if n_masked_patches is not None:
     #     loss = loss[:n_masked_patches]
-    loss = loss * student_masks* masks_weight
+    loss = loss * student_masks * masks_weight
     return -loss.sum() / student_masks.shape[0]
 
 

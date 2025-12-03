@@ -14,7 +14,6 @@ import logging
 import torch
 import torch.nn.functional as F
 from omegaconf import DictConfig
-from torch import Tensor
 
 import weathergen.train.loss_modules.loss_functions as loss_fns
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
@@ -91,9 +90,7 @@ def ibot_loss(
 ):
     loss = loss_fns.masked_student_teacher_patch_softmax(
         student_patches_masked, teacher_patches_masked, student_masks, student_temp
-    ) + loss_fns.student_teacher_softmax(
-        student_class_masked, teacher_class_masked, student_temp
-    )
+    ) + loss_fns.student_teacher_softmax(student_class_masked, teacher_class_masked, student_temp)
     return loss / 2
 
 
@@ -253,7 +250,7 @@ def gather_targets_for_loss(name, targets, metadata):
             )[:2],
             "global2global_dino_teacher": torch.stack(
                 list(reversed([p[name] for p, info in zip(targets, metadata, strict=False)])), dim=0
-            )[:2]
+            )[:2],
         }
     else:
         raise NotImplementedError(

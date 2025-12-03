@@ -6,10 +6,13 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
 import copy
+
 import torch
 
 from weathergen.common.config import Config
+
 
 def apply_overrides_to_dict(cf: Config, overrides: dict) -> Config:
     copied_cf = copy.deepcopy(cf)

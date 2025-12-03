@@ -1,3 +1,5 @@
+# ruff: noqa: B006
+
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -7,7 +9,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import copy
 import itertools
 import logging
 import re
@@ -32,10 +33,10 @@ from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
-from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import get_dtype, apply_overrides_to_dict, get_batch_size
+from weathergen.utils.utils import apply_overrides_to_dict, get_batch_size, get_dtype
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,9 @@ logger = logging.getLogger(__name__)
 type TrainingMode = str
 
 
-def init_model_and_shard(cf, dataset, run_id_contd, mini_epoch_contd, training_mode, overrides, device):
+def init_model_and_shard(
+    cf, dataset, run_id_contd, mini_epoch_contd, training_mode, device, overrides={}
+):
     model_creation_device = "meta" if cf.with_ddp and cf.with_fsdp else "cuda"
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
@@ -135,7 +138,7 @@ def init_model_and_shard(cf, dataset, run_id_contd, mini_epoch_contd, training_m
         # functions in the embedding engine as forward functions. Thus, yielding a crash
         # because the input tensors are not converted to DTensors. This seems to primarily
         # occur during validation.
-        for embed in model.embed_engine.embeds:
+        for embed in model.embed_engine.embeds.values():
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
@@ -250,7 +253,10 @@ def get_model(cf: Config, training_mode: TrainingMode, dataset, overrides):
     targets_coords_size = dataset.get_targets_coords_size()
 
     cf_with_overrides = apply_overrides_to_dict(cf, overrides)
-    return Model(cf_with_overrides, sources_size, targets_num_channels, targets_coords_size).create()
+    return Model(
+        cf_with_overrides, sources_size, targets_num_channels, targets_coords_size
+    ).create()
+
 
 def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
     """
@@ -259,14 +265,14 @@ def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
 
     target_aux = None
 
-    target_and_aux_calc = cf.get("target_and_aux_calc", None)
-    if target_and_aux_calc is None or target_and_aux_calc == "identity":
+    target_and_aux_calc = cf.get("target_and_aux_calc", "physical")
+    if target_and_aux_calc == "physical":
         target_aux = PhysicalTargetAndAux(cf, model)
 
     elif target_and_aux_calc == "EMATeacher":
         # batch_size = get_batch_size(cf, cf.world_size_original)
 
-        meta_ema_model, _ = init_model_and_shard(cf, dataset, None, None, "student-teacher", {}, device)
+        meta_ema_model, _ = init_model_and_shard(cf, dataset, None, None, "student", device)
         ema_model = EMAModel(
             model,
             meta_ema_model,
@@ -275,20 +281,10 @@ def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
             is_model_sharded=(cf.with_ddp and cf.with_fsdp),
         )
 
-        target_aux = EMATeacher(model, ema_model, get_batch_size(cf, cf.world_size_original), **cf.training_mode_config)
+        target_aux = EMATeacher(
+            model, ema_model, get_batch_size(cf, cf.world_size_original), **cf.training_mode_config
+        )
     else:
         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")
 
     return target_aux
-
-# # should be moved to its own file so as to prevent cyclical imports
-# def get_target_and_aux_calculator(config, model, rng, batch_size, **kwargs):
-#     target_and_aux_calc = config.training_mode_config.get("target_and_aux_calc", None)
-#     if target_and_aux_calc is None or target_and_aux_calc == "identity":
-#         return IdentityTargetAndAux(model, rng, config=config)
-#     elif target_and_aux_calc == "EMATeacher":
-#         return EMATeacher(
-#             model, rng, kwargs["ema_model"], batch_size, **config.training_mode_config
-#         )
-#     else:
-#         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")

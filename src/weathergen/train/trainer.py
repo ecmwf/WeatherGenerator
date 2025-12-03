@@ -49,7 +49,31 @@ class Trainer(TrainerBase):
 
         self.train_log_freq = train_log_freq
 
+        self.data_loader: torch.utils.data.DataLoader | None = None
+        self.data_loader_validation: torch.utils.data.DataLoader | None = None
+        self.dataset: MultiStreamDataSampler | None = None
+        self.dataset_val: MultiStreamDataSampler | None = None
+        self.device: torch.device = None
+        self.ema_model = None
+        self.grad_scaler: torch.amp.GradScaler | None = None
+        self.last_grad_norm = None
+        self.loss_calculator: LossCalculator | None = None
+        self.loss_calculator_val: LossCalculator | None = None
+        self.loss_model_hist = []
+        self.loss_unweighted_hist: dict = {}
+        self.lr_scheduler: LearningRateScheduler | None = None
+        self.model = None
+        self.model_params = None
+        self.optimizer: torch.optim.Optimizer | None = None
+        self.perf_gpu = None
+        self.perf_mem = None
+        self.stdev_unweighted_hist: dict = {}
+        self.t_start: float = 0
+        self.target_and_aux_calculator = None
+        self.validate_with_ema: bool = False
+
     def init(self, cf: Config, devices):
+        # pylint: disable=attribute-defined-outside-init
         self.cf = OmegaConf.merge(
             OmegaConf.create(
                 {
@@ -94,8 +118,8 @@ class Trainer(TrainerBase):
         self.init(cf, devices)
 
         cf = self.cf
-        self.device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
+        device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{device_type}:{cf.local_rank}")
         self.ema_model = None
 
         # create data loader
@@ -125,8 +149,13 @@ class Trainer(TrainerBase):
         )
 
         self.model, self.model_params = init_model_and_shard(
-            cf, self.dataset, run_id_contd, mini_epoch_contd, cf.training_strategy.mode, {}, devices[0]
+            cf, self.dataset, run_id_contd, mini_epoch_contd, cf.training_strategy.mode, devices[0]
         )
+
+        self.target_and_aux_calculator = get_target_aux_calculator(
+            cf, self.dataset, self.model, self.device
+        )
+        self.target_and_aux_calculator.to_device(self.device)
 
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
 
@@ -144,9 +173,8 @@ class Trainer(TrainerBase):
         self.init(cf, devices)
         cf = self.cf
 
-        # TODO: do not define new members outside of the init!!
-        self.device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
+        device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{device_type}:{cf.local_rank}")
 
         # create data loaders
         self.dataset = MultiStreamDataSampler(
@@ -181,7 +209,7 @@ class Trainer(TrainerBase):
         )
 
         self.model, self.model_params = init_model_and_shard(
-            cf, self.dataset, run_id_contd, mini_epoch_contd, cf.training_strategy.mode, {}, devices[0]
+            cf, self.dataset, run_id_contd, mini_epoch_contd, cf.training_strategy.mode, devices[0]
         )
 
         if cf.compile_model:
@@ -191,7 +219,13 @@ class Trainer(TrainerBase):
         self.ema_model = None
         if cf["training_mode"] == "student-teacher":
             meta_ema_model = self.init_model_and_shard(
-                cf, run_id_contd, mini_epoch_contd, cf.training_strategy.mode, cf.target.teacher_cf, devices
+                cf,
+                run_id_contd,
+                mini_epoch_contd,
+                cf.training_strategy.mode,
+                cf.target.teacher_cf,
+                devices[0],
+                {},
             )[0]
             self.ema_model = EMAModel(
                 self.model,
@@ -203,7 +237,13 @@ class Trainer(TrainerBase):
         elif self.validate_with_ema:
             # validate_with_ema is incompatible with student-teacher
             meta_ema_model = init_model_and_shard(
-                cf, self.dataset, run_id_contd, mini_epoch_contd, cf.training_strategy.mode, {}, devices[0]
+                cf,
+                self.dataset,
+                run_id_contd,
+                mini_epoch_contd,
+                cf.training_strategy.mode,
+                devices[0],
+                {},
             )[0]
             self.ema_model = EMAModel(
                 self.model,
@@ -212,6 +252,12 @@ class Trainer(TrainerBase):
                 rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
+
+        self.target_and_aux_calculator = get_target_aux_calculator(
+            cf, self.dataset, self.model, self.device
+        )
+
+        self.target_and_aux_calculator.to_device(self.device)
 
         self.target_and_aux_calculator = get_target_aux_calculator(
             cf, self.dataset, self.model, self.device
@@ -463,14 +509,14 @@ class Trainer(TrainerBase):
                 targets_lens[fstep][i_strm] += [target.shape[0]]
                 dn_data = self.dataset_val.denormalize_target_channels
 
-                # # reorder so that output order of target points matches input when reading
-                # # (tokenization and masking changes this order)
-                # # TODO: does this work with batch_size > 1
-                # if len(idxs_inv) > 0:
-                #     pred = pred[:, idxs_inv]
-                #     target = target[idxs_inv]
-                #     targets_coords_raw[fstep][i_strm] = targets_coords_raw[fstep][i_strm][idxs_inv]
-                #     targets_times_raw[fstep][i_strm] = targets_times_raw[fstep][i_strm][idxs_inv]
+                # reorder so that output order of target points matches input when reading
+                # (tokenization and masking changes this order)
+                # TODO: does this work with batch_size > 1
+                if len(idxs_inv) > 0:
+                    pred = pred[:, idxs_inv]
+                    target = target[idxs_inv]
+                    targets_coords_raw[fstep][i_strm] = targets_coords_raw[fstep][i_strm][idxs_inv]
+                    targets_times_raw[fstep][i_strm] = targets_times_raw[fstep][i_strm][idxs_inv]
 
                 f32 = torch.float32
                 preds_all[fstep][i_strm] += [
@@ -500,30 +546,51 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
+            # NOTE: we are still returning legacy batch structure and the new batch together.
 
+            # Julian and Matthias:
+            # here we can access data as follows:
+            # batch[-1] is the new ModelBatch object, see the structure in batch.py
+            # batch[-1].source_samples is a list of Sample objects for the source data, timesteps
+            # batch[-1].target_samples is a list of Sample objects for the target data, timesteps
+            # batch[-1].meta_info is a dictionary with metadata info per sample
+            # batch[-1].meta_info["ERA5"] etc.
+            # here we have the noise_level_rn
+            # batch[-1].source_samples[0].meta_info["ERA5"].noise_level_rnD
+            # == batch[-1].target_samples[0].meta_info["ERA5"].noise_level_rn
+            # for the same timestep, this needs to be fixed for when we have more source timesteps,
+            # and perhaps with bigger batch sizes?
+            # Each Sample object has:
+            # .streams_data: a dictionary of StreamData objects per stream name
+            # .source_cell_lens: list of tensors with lengths of source cells per stream # to be
+            # changed to be in ModelBatch
+            # .target_coords_idx: list of tensors with target coordinate indices per stream # to
+            # be changed to be in ModelBatch
 
+            ###### Legacy batch after batch.to_device:
+            # (Pdb++) batch[0]
+            # [[<weathergen.datasets.stream_data.StreamData object at 0x400572104230>]]
+            # (Pdb++) batch[1]
+            # [tensor([0, 1, 1,  ..., 0, 0, 0], device='cuda:0', dtype=torch.int32)]
+            # (Pdb++) batch[2]
+            # [[tensor([0, 0, 0,  ..., 4, 4, 4], device='cuda:0', dtype=torch.int32)]]
+
+            # TODO: access from new ModelBatch
+            forecast_steps = batch[0][-1]
+            # batch = self.batch_to_device(batch)
+
+            # You will also need the source_cell_lens, target_coords_idx, these are not being passed
+            # through for the views yet.
             ################################################################
-            # SOPH: student teacher access path here:
-            # student_teacher_data = batch[1]
-            # access student views:
-            #all_student_views = student_teacher_data.source_samples
-            #student_sample_1 = student_teacher_data.source_samples[0]
-            #student_sample_1_stream_data = student_teacher_data.source_samples[0].streams_data  # dict, {stream: stream data} of first student view
-            # e.g. target tokens of ERA5 stream of first student view:
-            # target_tokens_of_student_sample_1_ERA5_stream_data = student_teacher_batch.source_samples[0].streams_data["ERA5"].target_tokens
 
-            # access metadata of the student views, this is currently shared, very hacky, to fix.
-            #metadata_student_view = student_teacher_batch.source_samples[0].meta_info
-
-            # You will also need the source_cell_lens, target_coords_idx, these are not being passed through for the views yet.
-            ################################################################
-            
             forecast_steps = batch[0][-1]
             # # make existing pipeline work:
             # batch = batch[0]
             # batch = self.batch_to_device(batch)
 
             # evaluate model
+            ### After to_device, then the original is:
+
             with torch.autocast(
                 device_type=f"cuda:{cf.local_rank}",
                 dtype=self.mixed_precision_dtype,
@@ -532,42 +599,53 @@ class Trainer(TrainerBase):
                 outputs = []
                 for view in batch[-1].source_samples:
                     # TODO remove when ModelBatch and Sample get a to_device()
-                    streams_data = [[view.streams_data['ERA5']]]
+                    streams_data = [[view.streams_data["ERA5"]]]
                     streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
                     source_cell_lens = view.source_cell_lens
                     source_cell_lens = [b.to(self.device) for b in source_cell_lens]
                     target_coords_idxs = view.target_coords_idx
-                    target_coords_idxs = [[b.to(self.device) for b in bf] for bf in target_coords_idxs]
-                    outputs.append(self.model(
-                        self.model_params, (streams_data, source_cell_lens, target_coords_idxs), cf.forecast_offset, forecast_steps
-                    ))
-
+                    target_coords_idxs = [
+                        [b.to(self.device) for b in bf] for bf in target_coords_idxs
+                    ]
+                    outputs.append(
+                        self.model(
+                            self.model_params,
+                            (streams_data, source_cell_lens, target_coords_idxs),
+                            cf.forecast_offset,
+                            forecast_steps,
+                        )
+                    )
                 targets_and_auxs = []
                 for view in batch[-1].target_samples:
                     # TODO remove when ModelBatch and Sample get a to_device()
-                    streams_data = [[view.streams_data['ERA5']]]
+                    streams_data = [[view.streams_data["ERA5"]]]
                     streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
                     source_cell_lens = view.source_cell_lens
                     source_cell_lens = [b.to(self.device) for b in source_cell_lens]
                     target_coords_idxs = view.target_coords_idx
-                    target_coords_idxs = [[b.to(self.device) for b in bf] for bf in target_coords_idxs]
-                    targets_and_auxs.append(self.target_and_aux_calculator.compute(
-                        self.cf.istep,
-                        (streams_data, source_cell_lens, target_coords_idxs),
-                        self.model_params,
-                        self.model,
-                        cf.forecast_offset,
-                        forecast_steps,
-                    ))
-                targets, aux = zip(*targets_and_auxs)
+                    target_coords_idxs = [
+                        [b.to(self.device) for b in bf] for bf in target_coords_idxs
+                    ]
+                    targets_and_auxs.append(
+                        self.target_and_aux_calculator.compute(
+                            self.cf.istep,
+                            (streams_data, source_cell_lens, target_coords_idxs),
+                            self.model_params,
+                            self.model,
+                            cf.forecast_offset,
+                            forecast_steps,
+                        )
+                    )
+                targets, aux = zip(*targets_and_auxs, strict=False)
             loss, loss_values = self.loss_calculator.compute_loss(
                 preds=outputs,
                 targets=targets,
-                view_metadata=(batch[-1].source2target_matching_idxs,
-                                [sample.meta_info for sample in batch[-1].source_samples],
-                                batch[-1].target2source_matching_idxs,
-                                [sample.meta_info for sample in batch[-1].target_samples]
-                               ),
+                metadata=(
+                    batch[-1].source2target_matching_idxs,
+                    [sample.meta_info for sample in batch[-1].source_samples],
+                    batch[-1].target2source_matching_idxs,
+                    [sample.meta_info for sample in batch[-1].target_samples],
+                ),
             )
             # TODO re-enable this, need to think on how to make it compatible with
             # student-teacher training
@@ -703,15 +781,20 @@ class Trainer(TrainerBase):
                         output = model_forward(
                             self.model_params, batch, cf.forecast_offset, forecast_steps
                         )
-
-                    targets = {"physical": batch[0]}
-
-                    # compute loss
+                        target_aux_output = self.target_and_aux_calculator.compute(
+                            bidx,
+                            batch,
+                            self.model_params,
+                            self.model,
+                            cf.forecast_offset,
+                            forecast_steps,
+                        )
                     loss, loss_values = self.loss_calculator_val.compute_loss(
                         preds=output,
-                        targets=targets,
-                        view_metadata=None,
+                        targets=target_aux_output,
+                        metadata=None,
                     )
+
                     # log output
                     if bidx < cf.log_validation:
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
@@ -773,9 +856,8 @@ class Trainer(TrainerBase):
         self.dataset_val.advance()
 
     def batch_to_device(self, batch):
-        # TODO: do not define new members outside of the init!!
-        self.device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{self.device_type}:{self.cf.local_rank}")
+        device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{device_type}:{self.cf.local_rank}")
         # forecast_steps is dropped here from the batch
         return (
             [[d.to_device(self.device) for d in db] for db in batch[0]],

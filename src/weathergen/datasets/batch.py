@@ -19,47 +19,13 @@ from weathergen.datasets.stream_data import StreamData
 # TODO: GetMetaData: then this gets the right rn for the timestep!
 
 
-# NOTE: TO BE DECPRECATED
-@dataclass
-class ViewMetadata:
-    """
-    Metadata describing how a view was generated.
-
-    This captures the spatial selection (which cells/tokens were kept),
-    the strategy used (random, healpix, etc.), and hierarchical parameters.
-
-    Attributes:
-        view_id: Unique identifier (e.g., "teacher_global", "student_local_0")
-        keep_mask: Boolean array [num_healpix_cells] at data level indicating kept cells
-        healpix_level: HEALPix level for hierarchical selection (None if not applicable)
-        rate: Fraction of data kept (e.g., 0.5 = 50% kept); None if fixed count
-        parent_view_id: ID of the parent view this is a subset of (None for teacher)
-    """
-
-    # Core identifiers and selection description
-    view_id: str
-    keep_mask: np.typing.NDArray  # [num_cells] bool at data level
-    strategy: str  # e.g. "random", "healpix", "channel"
-
-    # Hierarchical/quantitative description of selection
-    healpix_level: int | None = None
-    rate: float | None = None
-    parent_view_id: str | None = None  # For students: which teacher they belong to
-
-    # Optional extras for future/other training paradigms
-    loss_type: str | None = None  # e.g. DINO, JEPA
-    strategy_config: Config | None = None  # e.g. {rate: 0.5, hl_mask: 3, overlap: "disjoint"}
-
-
 @dataclass
 class SampleMetaData:
-    # masking strategy
-    # masking_strategy: str
-
-    # parameters for masking strategy
-    masking_params: Config | dict
+    # sample parameters (masking)
+    params: Config | dict
 
     mask: torch.Tensor | None = None
+
 
 class Sample:
     # keys: stream name, values: SampleMetaData
@@ -69,10 +35,11 @@ class Sample:
     # keys: stream_name, values: StreamData
     streams_data: dict[str, StreamData | None]
     forecast_dt: int | None
-    
-    # these two live in ModelBatch as they are flattened!
-    source_cell_lens: list[torch.Tensor] | None
+
+    # TODO:
+    # these two need to live in ModelBatch as they are flattened!
     # this should be a dict also lives in ModelBatch
+    source_cell_lens: list[torch.Tensor] | None
     target_coords_idx: list[torch.Tensor] | None
 
     def __init__(self, streams: dict) -> None:
@@ -123,6 +90,7 @@ class Sample:
         assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
         return self.streams_data[stream_name]
 
+
 class ModelBatch:
     """
     Container for all data and metadata for one training batch.
@@ -165,7 +133,6 @@ class ModelBatch:
 
         # add the meta_info
         self.source_samples[source_sample_idx].add_meta_info(stream_name, source_meta_info)
-        
 
         assert target_sample_idx < len(self.target_samples), "invalid value for target_sample_idx"
         self.source2target_matching_idxs[source_sample_idx] = target_sample_idx
@@ -187,9 +154,13 @@ class ModelBatch:
         self.target_samples[target_sample_idx].add_meta_info(stream_name, target_meta_info)
 
         if isinstance(source_sample_idx, int):
-            assert source_sample_idx < len(self.source_samples), "invalid value for source_sample_idx"
+            assert source_sample_idx < len(self.source_samples), (
+                "invalid value for source_sample_idx"
+            )
         else:
-            assert all(idx < len(self.source_samples) for idx in source_sample_idx), "invalid value for source_sample_idx"
+            assert all(idx < len(self.source_samples) for idx in source_sample_idx), (
+                "invalid value for source_sample_idx"
+            )
         self.target2source_matching_idxs[target_sample_idx] = source_sample_idx
 
     def len_sources(self) -> int:

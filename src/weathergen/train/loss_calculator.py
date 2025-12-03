@@ -69,24 +69,22 @@ class LossCalculator:
         self.loss_calculators = [
             (
                 config.pop("weight"),
-                getattr(LossModules, class_name)(
-                    cf=cf, stage=stage, device=self.device, **config
-                ),
+                getattr(LossModules, class_name)(cf=cf, stage=stage, device=self.device, **config),
             )
             for class_name, config in calculator_configs.items()
         ]
 
     def compute_loss(
         self,
-        preds: dict,
-        targets: dict,
-        view_metadata,
+        preds: dict,  # isn't this a ModelOutput?
+        targets: dict,  # isn't this a TargetAuxOutput?
+        metadata: dict,
     ):
         loss_terms = {}
         loss = torch.tensor(0.0, requires_grad=True)
         for weight, calculator in self.loss_calculators:
             loss_terms[calculator.name] = calculator.compute_loss(
-                preds=preds, targets=targets, metadata=view_metadata
+                preds=preds, targets=targets, metadata=metadata
             )
             loss = loss + weight * loss_terms[calculator.name].loss
 

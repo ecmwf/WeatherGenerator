@@ -167,5 +167,3 @@ class TrainerBase:
             perf_mem /= len(self.device_handles)
 
         return perf_gpu, perf_mem
-
-

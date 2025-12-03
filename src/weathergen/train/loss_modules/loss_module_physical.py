@@ -181,7 +181,7 @@ class LossPhysical(LossModuleBase):
         """
 
         preds = preds[0].physical
-        streams_data = targets[0]["physical"]
+        streams_data = targets[0].physical
 
         # gradient loss
         loss = torch.tensor(0.0, device=self.device, requires_grad=True)
