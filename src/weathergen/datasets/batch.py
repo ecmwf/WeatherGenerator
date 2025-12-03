@@ -34,7 +34,6 @@ class Sample:
     # data for all streams
     # keys: stream_name, values: StreamData
     streams_data: dict[str, StreamData | None]
-    forecast_dt: int | None
 
     # TODO:
     # these two need to live in ModelBatch as they are flattened!
@@ -53,8 +52,6 @@ class Sample:
 
         self.source_cell_lens: list[torch.Tensor] | None = None
         self.target_coords_idx: list[torch.Tensor] | None = None
-
-        self.forecast_dt: int | None = None
 
     def to_device(self, device) -> None:
         if self.source_cell_lens is not None:
@@ -77,6 +74,12 @@ class Sample:
             if val is not None:
                 self.streams_data[key] = val.to_device(device)
 
+    def is_empty(self) -> bool:
+        """
+        Check if sample is empty
+        """
+        return np.all(np.array([s.empty() for _, s in self.streams_data.items()]))
+
     def add_stream_data(self, stream_name: str, stream_data: StreamData) -> None:
         """
         Add data for stream @stream_name to sample
@@ -96,14 +99,6 @@ class Sample:
         """
         self.source_cell_lens = source_cell_lens
         self.target_coords_idx = target_coords_idx
-
-    def set_forecast_dt(self, forecast_dt: int) -> None:
-        """
-        Set forecast_dt for sample
-        """
-        self.forecast_dt = forecast_dt
-
-    # TODO: complete interface, e.g get_stream
 
     def get_stream_data(self, stream_name: str) -> StreamData:
         """
@@ -131,7 +126,11 @@ class ModelBatch:
     source2target_matching_idxs: np.typing.NDArray[np.int32]
     target2source_matching_idxs: np.typing.NDArray[np.int32]
 
-    def __init__(self, streams, num_source_samples: int, num_target_samples: int) -> None:
+    forecast_dt: int | None
+
+    def __init__(
+        self, streams, num_source_samples: int, num_target_samples: int, forecast_dt: int
+    ) -> None:
         """ """
 
         self.source_samples = [Sample(streams) for _ in range(num_source_samples)]
@@ -140,6 +139,8 @@ class ModelBatch:
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         # self.target_source_matching_idxs = np.full(num_target_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
+
+        self.forecast_dt = forecast_dt
 
     def to_device(self, device):
         for sample in self.source_samples:
@@ -192,6 +193,26 @@ class ModelBatch:
                 "invalid value for source_sample_idx"
             )
         self.target2source_matching_idxs[target_sample_idx] = source_sample_idx
+
+    def is_empty(self):
+        """
+        Check if batch is empty
+        """
+        source_empty = np.all(np.array([s.is_empty() for s in self.source_samples]))
+        target_empty = np.all(np.array([s.is_empty() for s in self.target_samples]))
+        return source_empty or target_empty
+
+    def set_forecast_dt(self, forecast_dt: int) -> None:
+        """
+        Set forecast_dt for sample
+        """
+        self.forecast_dt = forecast_dt
+
+    def get_forecast_dt(self) -> int:
+        """
+        Get forecast_dt
+        """
+        return self.forecast_dt
 
     def len_sources(self) -> int:
         """

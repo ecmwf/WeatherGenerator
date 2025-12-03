@@ -26,7 +26,6 @@ from torch.distributed.tensor import DTensor
 import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
-from weathergen.datasets.stream_data import StreamData
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
     get_target_aux_calculator,
@@ -38,7 +37,6 @@ from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.utils import get_batch_size, get_dtype
-from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
 
@@ -547,10 +545,11 @@ class Trainer(TrainerBase):
             # [[tensor([0, 0, 0,  ..., 4, 4, 4], device='cuda:0', dtype=torch.int32)]]
 
             # TODO: access from new ModelBatch
-            forecast_steps = batch[0][-1]
+            forecast_steps = batch.get_forecast_dt()
             # batch = self.batch_to_device(batch)
 
             ### After to_device, then the original is:
+            batch.to_device(self.device)
 
             with torch.autocast(
                 device_type=f"cuda:{cf.local_rank}",
@@ -558,8 +557,7 @@ class Trainer(TrainerBase):
                 enabled=cf.with_mixed_precision,
             ):
                 outputs = []
-                batch[-1].to_device(self.device)
-                for sample in batch[-1].source_samples:
+                for sample in batch.source_samples:
                     outputs.append(
                         self.model(
                             self.model_params,
@@ -574,7 +572,7 @@ class Trainer(TrainerBase):
                     )
 
                 targets_and_auxs = []
-                for sample in batch[-1].target_samples:
+                for sample in batch.target_samples:
                     targets_and_auxs.append(
                         self.target_and_aux_calculator.compute(
                             self.cf.istep,
@@ -727,9 +725,7 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    forecast_steps = batch[0][-1]
-                    old_batch = batch[0]
-                    batch = batch[-1]
+                    forecast_steps = batch.get_forecast_dt()
                     batch.to_device(self.device)
 
                     # evaluate model
@@ -774,40 +770,41 @@ class Trainer(TrainerBase):
 
                     # log output
                     if bidx < cf.log_validation:
-                        # TODO: Move _prepare_logging into write_validation by passing streams_data
-                        # TODO right now we hardcode ERA5 which obviously is bad, but not sure
-                        # how this logging function is supposed to change
-                        streams_data: list[list[StreamData]] = old_batch[0]
-                        import pdb
+                        logger.warning("logging of data currently not implemented")
+                    # # TODO: Move _prepare_logging into write_validation by passing streams_data
+                    # # TODO right now we hardcode ERA5 which obviously is bad, but not sure
+                    # # how this logging function is supposed to change
+                    # streams_data: list[list[StreamData]] = old_batch[0]
+                    # import pdb
 
-                        pdb.set_trace()
-                        (
-                            preds_all,
-                            targets_all,
-                            targets_coords_all,
-                            targets_times_all,
-                            targets_lens,
-                        ) = self._prepare_logging(
-                            preds=output,
-                            forecast_offset=cf.forecast_offset,
-                            forecast_steps=cf.forecast_steps,
-                            streams_data=streams_data,
-                        )
-                        sources = [[item.source_raw for item in stream] for stream in streams_data]
-                        # sample idx should be the same across streams => select first
-                        sample_idxs = [item.sample_idx for item in streams_data[0]]
-                        write_output(
-                            self.cf,
-                            mini_epoch,
-                            bidx,
-                            sources[0],
-                            preds_all,
-                            targets_all,
-                            targets_coords_all,
-                            targets_times_all,
-                            targets_lens,
-                            sample_idxs,
-                        )
+                    # pdb.set_trace()
+                    # (
+                    #     preds_all,
+                    #     targets_all,
+                    #     targets_coords_all,
+                    #     targets_times_all,
+                    #     targets_lens,
+                    # ) = self._prepare_logging(
+                    #     preds=output,
+                    #     forecast_offset=cf.forecast_offset,
+                    #     forecast_steps=cf.forecast_steps,
+                    #     streams_data=streams_data,
+                    # )
+                    # sources = [[item.source_raw for item in stream] for stream in streams_data]
+                    # # sample idx should be the same across streams => select first
+                    # sample_idxs = [item.sample_idx for item in streams_data[0]]
+                    # write_output(
+                    #     self.cf,
+                    #     mini_epoch,
+                    #     bidx,
+                    #     sources[0],
+                    #     preds_all,
+                    #     targets_all,
+                    #     targets_coords_all,
+                    #     targets_times_all,
+                    #     targets_lens,
+                    #     sample_idxs,
+                    # )
 
                     # Collecting loss statistics for later inspection
                     if bidx == 0:

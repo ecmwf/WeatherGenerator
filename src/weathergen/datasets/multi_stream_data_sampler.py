@@ -514,7 +514,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         return (input_data, output_data)
 
-    def _get_sample(self, mode: str, idx: int, forecast_dt: int):
+    def _get_sample(self, idx: int, forecast_dt: int):
         """
 
         modes :
@@ -525,12 +525,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         TODO: these modes are not being used now.
         """
 
+        mode = self.training_cfg.get("training_mode")
+
         # get/coordinate masks
         masks_streams = self._get_source_target_masks(mode)
 
         if mode == "masking" or mode == "student_teacher":
-            streams_data: list[StreamData] = []
-
             # Determine number of views direct from config (teacher & student views)
             target_cfg = self.training_cfg.get("target_input", {}) if self.training_cfg else {}
             target_cfg = target_cfg if target_cfg is not None else {}
@@ -541,7 +541,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 source_cfg.get("num_samples", 1)
             )  # per teacher
 
-            batch = ModelBatch(self.streams, num_source_samples, num_target_samples)
+            batch = ModelBatch(self.streams, num_source_samples, num_target_samples, forecast_dt)
 
             # for all streams
             for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
@@ -591,7 +591,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     t_idx = student_to_teacher[sidx]
                     batch.add_source_stream(sidx, t_idx, name, sdata, source_metadata_list[sidx])
                     # num_input_steps?
-                    batch.source_samples[sidx].set_forecast_dt(forecast_dt)
 
                 # stream_data_target can contain network input
                 stream_data_target = {}
@@ -629,7 +628,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         s_idx for s_idx, tid in enumerate(student_to_teacher) if tid == sidx
                     ]
                     batch.add_target_stream(t_idx, student_indices, name, sdata, target_metadata)
-                    batch.target_samples[t_idx].set_forecast_dt(forecast_dt)
 
                 # TODO: build batch
                 # source_input
@@ -637,13 +635,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # source_output
                 # target_output
 
-                # TOOD: remove
-                # add data for current stream
-                streams_data += [v for k, v in stream_data_source.items()]
-
         elif mode == "diffusion_forecast":
-            streams_data: list[StreamData] = []
-
             # Determine number of views direct from config (teacher & student views)
             teacher_cfg = self.training_cfg.get("target_input", {}) if self.training_cfg else {}
             student_cfg = self.training_cfg.get("model_input", {}) if self.training_cfg else {}
@@ -695,8 +687,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 # Map each student (source) to its teacher (target)
                 batch.add_source_stream(0, 0, name, sdata, source_metadata)
-                # num_input_steps?
-                batch.source_samples[0].set_forecast_dt(forecast_dt)
 
                 # stream_data_target can contain network input
                 stream_data_target = {}
@@ -726,7 +716,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 # Map target to all source students
                 batch.add_target_stream(0, 0, name, sdata, target_metadata)
-                batch.target_samples[0].set_forecast_dt(forecast_dt)
 
                 # TODO: build batch
                 # source_input
@@ -734,14 +723,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # source_output
                 # target_output
 
-                # TOOD: remove
-                # add data for current stream
-                streams_data += [v for k, v in stream_data_source.items()]
-
         else:
             assert False, "Mode not implemented"
 
-        return streams_data, batch
+        return batch
 
     def _get_source_target_masks(self, training_mode):
         """
@@ -790,7 +775,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         return batch, source_cell_lens, target_coords_idx
 
-    def _preprocess_single_view(self, sample: Sample, forecast_dt: int):
+    def _preprocess_model_batch_sample(self, sample: Sample, forecast_dt: int):
         """ """
         streams = [sd for sd in sample.streams_data.values() if sd is not None]
         if not streams:
@@ -799,11 +784,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         _, scl, tci = self._preprocess_model_data([streams], forecast_dt)
         sample.set_preprocessed(scl, tci)
 
-    def _preprocess_model_batch_views(self, model_batch: ModelBatch, forecast_dt: int):
+    def _preprocess_model_batch(self, model_batch: ModelBatch, forecast_dt: int):
         for sample in model_batch.source_samples:
-            self._preprocess_single_view(sample, forecast_dt)
+            self._preprocess_model_batch_sample(sample, forecast_dt)
         for sample in model_batch.target_samples:
-            self._preprocess_single_view(sample, forecast_dt)
+            self._preprocess_model_batch_sample(sample, forecast_dt)
 
     def __iter__(self):
         """
@@ -829,8 +814,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # use while loop due to the scattered nature of the data in time and to
             # ensure batches are not empty
-            batch = []
-            while len(batch) < self.batch_size:
+            while True:
                 idx: TIndex = self.perms[idx_raw % self.perms.shape[0]]
                 idx_raw += 1
 
@@ -838,32 +822,21 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if hasattr(self.tokenizer, "masker"):
                     self.tokenizer.masker.set_batch_strategy()
 
-                # # TODO: ideally update this student-teacher if-else to a more general
-                # # view-based data sampling
-                # if self.training_cfg.get("training_mode") == "student_teacher":
-
-                mode = self.training_cfg.get("training_mode")
-
-                streams_data, student_teacher_batch = self._get_sample(mode, idx, forecast_dt)
+                batch = self._get_sample(idx, forecast_dt)
 
                 # Reset masking strategy for next batch item
                 if hasattr(self.tokenizer, "masker"):
                     self.tokenizer.masker.reset_batch_strategy()
 
-                # skip completely empty batch item or when all targets are empty -> no grad
-                if not (all(s.empty() or s.target_empty() for s in streams_data)):
-                    batch += [streams_data]
+                # # skip completely empty batch item or when all targets are empty -> no grad
+                if not batch.is_empty():
+                    break
+                else:
+                    logger.warning("Skipping empty batch.")
 
-            # TODO: link into ModelBatch
+            self._preprocess_model_batch(batch, forecast_dt)
 
-            # compute
-            batch, source_cell_lens, target_coords_idx = self._preprocess_model_data(
-                batch, forecast_dt
-            )
-
-            self._preprocess_model_batch_views(student_teacher_batch, forecast_dt)
-
-            yield (batch, source_cell_lens, target_coords_idx, forecast_dt), student_teacher_batch
+            yield batch
 
     def __len__(self):
         return self.len
