@@ -58,10 +58,15 @@ class Sample:
 
     def to_device(self, device) -> None:
         if self.source_cell_lens is not None:
+            # iterate over forecast steps
             self.source_cell_lens = [t.to(device) for t in self.source_cell_lens]
 
         if self.target_coords_idx is not None:
-            self.target_coords_idx = [t.to(device) for ls in self.target_coords_idx for t in ls]
+            target_coords_idx_new = {}
+            for k, v in self.target_coords_idx.items():
+                # iterate over forecast steps
+                target_coords_idx_new[k] = [vv.to(device) for vv in v]
+            self.target_coords_idx = target_coords_idx_new
 
         for key in self.meta_info.keys():
             self.meta_info[key].mask = (

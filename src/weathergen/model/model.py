@@ -919,7 +919,7 @@ class Model(torch.nn.Module):
             assert isinstance(tte_kv, torch.nn.Identity)
 
             # lens for varlen attention
-            tcs_lens = target_coords_idxs[fstep]
+            tcs_lens = target_coords_idxs[stream_name][fstep]
             # coord information for learnable layer norm
             tcs_aux = torch.cat(
                 [
