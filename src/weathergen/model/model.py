@@ -601,7 +601,7 @@ class Model(torch.nn.Module):
                 if noise_std > 0.0:
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
-            tokens = self.forecast(model_params, tokens, coords_tokens, fstep)
+            tokens = self.forecast(model_params, tokens, fstep)
 
         # prediction for final step
         preds_all += [
@@ -797,7 +797,6 @@ class Model(torch.nn.Module):
         self,
         model_params: ModelParams,
         tokens: torch.Tensor,
-        coords: torch.Tensor,
         fstep: int,
     ) -> torch.Tensor:
         """Advances latent space representation in time
@@ -805,7 +804,6 @@ class Model(torch.nn.Module):
         Args:
             model_params : Query and embedding parameters (never used)
             tokens : Input tokens to be processed by the model.
-            coords : Lat/lon coordinates associated with the query tokens.
             fstep: Current forecast step index (can be used as aux info).
         Returns:
             Processed tokens
@@ -813,7 +811,7 @@ class Model(torch.nn.Module):
             ValueError: For unexpected arguments in checkpoint method
         """
 
-        tokens = self.forecast_engine(tokens, coords, fstep)
+        tokens = self.forecast_engine(tokens, fstep)
 
         return tokens
 

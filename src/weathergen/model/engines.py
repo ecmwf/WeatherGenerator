@@ -480,20 +480,10 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-    def forward(self, tokens, coords, fstep):
-        aux_info = torch.tensor([fstep], dtype=torch.float32, device=tokens.device)
+    def forward(self, tokens, fstep):
+        aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
         for block in self.fe_blocks:
-            if isinstance(block, MultiSelfAttentionHead) or isinstance(
-                block, MultiSelfAttentionHeadLocal
-            ):
-                tokens = checkpoint(
-                    lambda x, aux, blk=block, c=coords: blk(x, aux, rope_coords=c),
-                    tokens,
-                    aux_info,
-                    use_reentrant=False,
-                )
-            else:
-                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
 
         return tokens
 
