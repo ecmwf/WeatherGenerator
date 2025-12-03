@@ -605,7 +605,6 @@ class Model(torch.nn.Module):
         Returns:
             A list containing all prediction results
         """
-
         (streams_data, source_cell_lens, target_coords_idxs) = batch
 
         # embed
@@ -644,7 +643,8 @@ class Model(torch.nn.Module):
                 model_params,
                 forecast_offset + forecast_steps,
                 tokens,
-                streams_data,
+                # TODO We add the batch dimension back and thus wrap stream_data in a list
+                [streams_data],
                 target_coords_idxs,
             )
         ]
@@ -857,6 +857,7 @@ class Model(torch.nn.Module):
             fstep : Number of forecast steps
             tokens : Tokens from global assimilation engine
             streams_data : Used to initialize target coordinates tokens and index information
+                List of StreamData len(streams_data) == batch_size_per_gpu
             target_coords_idxs : Indices of target coordinates
         Returns:
             Prediction output tokens in physical representation for each target_coords.
@@ -872,8 +873,7 @@ class Model(torch.nn.Module):
 
         # pair with tokens from assimilation engine to obtain target tokens
         preds_tokens = []
-        for idx, stream_name in enumerate(self.stream_names):
-            si = self.cf.streams[idx]
+        for stream_name in self.stream_names:
             tte = self.target_token_engines[stream_name]
             tte_kv = self.pred_adapter_kv[stream_name]
             tc_embed = self.embed_target_coords[stream_name]
@@ -887,18 +887,18 @@ class Model(torch.nn.Module):
                 [
                     checkpoint(
                         tc_embed,
-                        streams_data[i_b][idx].target_coords[fstep],
+                        streams_data[i_b][stream_name].target_coords[fstep],
                         use_reentrant=False,
                     )
-                    if len(streams_data[i_b][idx].target_coords[fstep].shape) > 1
-                    else streams_data[i_b][idx].target_coords[fstep]
-                    for i_b in range(len(streams_data))
+                    if len(streams_data[i_b][stream_name].target_coords[fstep].shape) > 1
+                    else streams_data[i_b][stream_name].target_coords[fstep]
+                    for i_b in range(len(streams_data))  # i_b is the index over the batch dimension
                 ]
             )
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
-                nn = si["name"]
+                nn = stream_name
                 if is_root():
                     logger.warning(
                         (
@@ -919,10 +919,13 @@ class Model(torch.nn.Module):
             assert isinstance(tte_kv, torch.nn.Identity)
 
             # lens for varlen attention
-            tcs_lens = target_coords_idxs[idx][fstep]
+            tcs_lens = target_coords_idxs[stream_name][fstep]
             # coord information for learnable layer norm
             tcs_aux = torch.cat(
-                [streams_data[i_b][idx].target_coords[fstep] for i_b in range(len(streams_data))]
+                [
+                    streams_data[i_b][stream_name].target_coords[fstep]
+                    for i_b in range(len(streams_data))
+                ]
             )
 
             tc_tokens = tte(

@@ -783,8 +783,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # compute offsets and auxiliary data needed for prediction computation
         # (info is not per stream so separate data structure)
 
-        ##### target_coords_idx we probably don't need for the targets #####
-        target_coords_idx = compute_idxs_predict(self.forecast_offset + forecast_dt, batch)
+        # TODO: only use when targets are predicted with decoders
+        target_coords_idx = compute_idxs_predict(
+            self.forecast_offset + forecast_dt, batch, self.streams
+        )
 
         return batch, source_cell_lens, target_coords_idx
 

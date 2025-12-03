@@ -651,7 +651,7 @@ class OutputBatchData:
         source: IOReaderData = self.sources[sample][stream_idx]
 
         assert source.data.shape[1] == len(channels), (
-            "Number of source channel names does not align with source data"
+            f"Number of source channel names {len(channels)} does not align with source data."
         )
 
         source_dataset = OutputDataset(

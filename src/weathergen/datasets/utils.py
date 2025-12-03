@@ -333,7 +333,7 @@ def compute_offsets_scatter_embed(batch: StreamData, num_input_steps: int) -> St
     return batch
 
 
-def compute_idxs_predict(forecast_dt: int, batch: StreamData) -> list:
+def compute_idxs_predict(forecast_dt: int, batch: StreamData, streams: list[dict]) -> list:
     """
     Compute auxiliary information for prediction
 
@@ -353,26 +353,24 @@ def compute_idxs_predict(forecast_dt: int, batch: StreamData) -> list:
     target_coords_lens = [[s.target_coords_lens for s in sb] for sb in batch]
 
     # target coords idxs
-    tcs_lens_merged = []
+    tcs_lens_merged = {}
     pad = torch.zeros(1, dtype=torch.int32)
     for ii in range(len(batch[0])):
         # generate len lists for varlen attention (per batch list for local, per-cell attention and
         # global
-        tcs_lens_merged += [
-            [
-                torch.cat(
-                    [
-                        pad,
-                        torch.cat(
-                            [
-                                target_coords_lens[i_b][ii][fstep]
-                                for i_b in range(len(target_coords_lens))
-                            ]
-                        ),
-                    ]
-                ).to(torch.int32)
-                for fstep in range(forecast_dt + 1)
-            ]
+        tcs_lens_merged[streams[ii]["name"]] = [
+            torch.cat(
+                [
+                    pad,
+                    torch.cat(
+                        [
+                            target_coords_lens[i_b][ii][fstep]
+                            for i_b in range(len(target_coords_lens))
+                        ]
+                    ),
+                ]
+            ).to(torch.int32)
+            for fstep in range(forecast_dt + 1)
         ]
 
     return tcs_lens_merged

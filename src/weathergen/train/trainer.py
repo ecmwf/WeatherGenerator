@@ -463,7 +463,7 @@ class Trainer(TrainerBase):
                 continue
 
             for i_strm, target in enumerate(targets_rt[fstep]):
-                pred = preds[fstep][i_strm]
+                pred = preds.physical[fstep][i_strm]
                 idxs_inv = idxs_inv_rt[fstep][i_strm]
 
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
@@ -558,42 +558,31 @@ class Trainer(TrainerBase):
                 enabled=cf.with_mixed_precision,
             ):
                 outputs = []
-                for view in batch[-1].source_samples:
-                    # TODO remove when ModelBatch and Sample get a to_device()
-                    streams_data = [
-                        [v.to_device(self.device) for k, v in view.streams_data.items()]
-                    ]
-                    source_cell_lens = view.source_cell_lens
-                    source_cell_lens = [b.to(self.device) for b in source_cell_lens]
-                    target_coords_idxs = view.target_coords_idx
-                    target_coords_idxs = [
-                        [b.to(self.device) for b in bf] for bf in target_coords_idxs
-                    ]
+                batch[-1].to_device(self.device)
+                for sample in batch[-1].source_samples:
                     outputs.append(
                         self.model(
                             self.model_params,
-                            (streams_data, source_cell_lens, target_coords_idxs),
+                            (
+                                sample.streams_data,
+                                sample.source_cell_lens,
+                                sample.target_coords_idx,
+                            ),
                             cf.forecast_offset,
                             forecast_steps,
                         )
                     )
 
                 targets_and_auxs = []
-                for view in batch[-1].target_samples:
-                    # TODO remove when ModelBatch and Sample get a to_device()
-                    streams_data = [
-                        [v.to_device(self.device) for k, v in view.streams_data.items()]
-                    ]
-                    source_cell_lens = view.source_cell_lens
-                    source_cell_lens = [b.to(self.device) for b in source_cell_lens]
-                    target_coords_idxs = view.target_coords_idx
-                    target_coords_idxs = [
-                        [b.to(self.device) for b in bf] for bf in target_coords_idxs
-                    ]
+                for sample in batch[-1].target_samples:
                     targets_and_auxs.append(
                         self.target_and_aux_calculator.compute(
                             self.cf.istep,
-                            (streams_data, source_cell_lens, target_coords_idxs),
+                            (
+                                sample.streams_data,
+                                sample.source_cell_lens,
+                                sample.target_coords_idx,
+                            ),
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
@@ -738,8 +727,10 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    forecast_steps = batch[-1]
-                    batch = self.batch_to_device(batch)
+                    forecast_steps = batch[0][-1]
+                    old_batch = batch[0]
+                    batch = batch[-1]
+                    batch.to_device(self.device)
 
                     # evaluate model
                     with torch.autocast(
@@ -752,12 +743,25 @@ class Trainer(TrainerBase):
                             if self.ema_model is None
                             else self.ema_model.forward_eval
                         )
+                        sample = batch.source_samples[0]
                         output = model_forward(
-                            self.model_params, batch, cf.forecast_offset, forecast_steps
+                            self.model_params,
+                            (
+                                sample.streams_data,
+                                sample.source_cell_lens,
+                                sample.target_coords_idx,
+                            ),
+                            cf.forecast_offset,
+                            forecast_steps,
                         )
+                        sample = batch.target_samples[0]
                         target_aux_output = self.target_and_aux_calculator.compute(
                             bidx,
-                            batch,
+                            (
+                                sample.streams_data,
+                                sample.source_cell_lens,
+                                sample.target_coords_idx,
+                            ),
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
@@ -771,7 +775,12 @@ class Trainer(TrainerBase):
                     # log output
                     if bidx < cf.log_validation:
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
-                        streams_data: list[list[StreamData]] = batch[0]
+                        # TODO right now we hardcode ERA5 which obviously is bad, but not sure
+                        # how this logging function is supposed to change
+                        streams_data: list[list[StreamData]] = old_batch[0]
+                        import pdb
+
+                        pdb.set_trace()
                         (
                             preds_all,
                             targets_all,
@@ -791,7 +800,7 @@ class Trainer(TrainerBase):
                             self.cf,
                             mini_epoch,
                             bidx,
-                            sources,
+                            sources[0],
                             preds_all,
                             targets_all,
                             targets_coords_all,
