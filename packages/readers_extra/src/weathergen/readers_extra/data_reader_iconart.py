@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import dask
 import json
 import logging
 from pathlib import Path
@@ -27,6 +28,9 @@ from weathergen.datasets.data_reader_base import (
 
 
 _logger = logging.getLogger(__name__)
+
+# Use Dask synchronous scheduler to avoid conflicts with PyTorch DataLoader workers
+dask.config.set(scheduler='synchronous')
 
 
 class DataReaderIconArt(DataReaderTimestep):
