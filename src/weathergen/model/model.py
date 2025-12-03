@@ -302,7 +302,7 @@ class Model(torch.nn.Module):
 
         ##############
         # query aggregation engine
-        self.ae_aggregation_engine = None
+        self.ae_aggregation_engine = QueryAggregationEngine(cf, self.num_healpix_cells)
 
         ##############
         # global assimilation engine
