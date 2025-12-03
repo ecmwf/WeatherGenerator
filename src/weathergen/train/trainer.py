@@ -304,10 +304,8 @@ class Trainer(TrainerBase):
             "batch_size": None,
             "batch_sampler": None,
             "shuffle": False,
-            "num_workers": min(cf.samples_per_mini_epoch, cf.loader_num_workers),
+            "num_workers": cf.loader_num_workers,
             "pin_memory": True,
-            "persistent_workers": True,
-            "prefetch_factor": 2,
         }
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
         self.data_loader_validation = torch.utils.data.DataLoader(
