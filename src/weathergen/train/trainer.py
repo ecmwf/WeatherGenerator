@@ -748,34 +748,87 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    forecast_steps = batch[-1]
-                    batch = self.batch_to_device(batch)
-
                     # evaluate model
+                    forecast_steps = batch[0][-1]
                     with torch.autocast(
                         device_type=f"cuda:{cf.local_rank}",
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
-                    ):
-                        model_forward = (
-                            self.model.forward
-                            if self.ema_model is None
-                            else self.ema_model.forward_eval
-                        )
-                        output = model_forward(
-                            self.model_params, batch, cf.forecast_offset, forecast_steps
-                        )
-                        target_aux_output = self.target_and_aux_calculator.compute(
-                            bidx,
-                            batch,
-                            self.model_params,
-                            self.model,
-                            cf.forecast_offset,
-                            forecast_steps,
-                        )
+                    ):  
+                        outputs = []
+                        for view in batch[-1].source_samples:
+                            # TODO remove when ModelBatch and Sample get a to_device()
+                            streams_data = [[view.streams_data["ERA5"]]]
+                            streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
+                            source_cell_lens = view.source_cell_lens
+                            source_cell_lens = [b.to(self.device) for b in source_cell_lens]
+                            target_coords_idxs = view.target_coords_idx
+                            target_coords_idxs = [
+                                [b.to(self.device) for b in bf] for bf in target_coords_idxs
+                            ]
+                            outputs.append(
+                                self.model(
+                                    self.model_params,
+                                    (
+                                        streams_data,
+                                        source_cell_lens,
+                                        target_coords_idxs,
+                                        view.meta_info["ERA5"],
+                                    ),
+                                    cf.forecast_offset,
+                                    forecast_steps,
+                                )
+                            )
+
+                        targets_and_auxs = []
+                        for view in batch[-1].target_samples:
+                            # TODO remove when ModelBatch and Sample get a to_device()
+                            streams_data = [[view.streams_data["ERA5"]]]
+                            streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
+                            source_cell_lens = view.source_cell_lens
+                            source_cell_lens = [b.to(self.device) for b in source_cell_lens]
+                            target_coords_idxs = view.target_coords_idx
+                            target_coords_idxs = [
+                                [b.to(self.device) for b in bf] for bf in target_coords_idxs
+                            ]
+                            targets_and_auxs.append(
+                                self.target_and_aux_calculator.compute(
+                                    self.cf.istep,
+                                    (
+                                        streams_data,
+                                        source_cell_lens,
+                                        target_coords_idxs,
+                                        view.meta_info["ERA5"],
+                                    ),
+                                    self.model_params,
+                                    self.model,
+                                    cf.forecast_offset,
+                                    forecast_steps,
+                                )
+                            )
+                        # OLD
+                        # forecast_steps = batch[-1]
+                        # batch = self.batch_to_device(batch)
+                        # 
+                        # model_forward = (
+                        #     self.model.forward
+                        #     if self.ema_model is None
+                        #     else self.ema_model.forward_eval
+                        # )
+                        # output = model_forward(
+                        #     self.model_params, batch, cf.forecast_offset, forecast_steps
+                        # )
+                        # target_aux_output = self.target_and_aux_calculator.compute(
+                        #     bidx,
+                        #     batch,
+                        #     self.model_params,
+                        #     self.model,
+                        #     cf.forecast_offset,
+                        #     forecast_steps,
+                        # )
                     loss, loss_values = self.loss_calculator_val.compute_loss(
-                        preds=output,
-                        targets=target_aux_output,
+                        preds=outputs[0],
+                        targets=targets_and_auxs[0],
                     )
 
                     # log output
@@ -789,7 +842,7 @@ class Trainer(TrainerBase):
                             targets_times_all,
                             targets_lens,
                         ) = self._prepare_logging(
-                            preds=output,
+                            preds=outputs,
                             forecast_offset=cf.forecast_offset,
                             forecast_steps=cf.forecast_steps,
                             streams_data=streams_data,
@@ -843,6 +896,8 @@ class Trainer(TrainerBase):
         self.device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{self.device_type}:{self.cf.local_rank}")
         # forecast_steps is dropped here from the batch
+        for i, b in enumerate(batch[0]):
+            print(f"{i}th b before to_device: {b}")
         return (
             [[d.to_device(self.device) for d in db] for db in batch[0]],
             [b.to(self.device) for b in batch[1]],
