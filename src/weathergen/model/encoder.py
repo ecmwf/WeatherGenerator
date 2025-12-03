@@ -8,40 +8,19 @@
 # nor does it submit to any jurisdiction.
 
 import torch
-import torch.nn as nn
-from torch.utils.checkpoint import checkpoint
-
-import astropy_healpix as hp
-import astropy_healpix.healpy
 from astropy_healpix import healpy
 
 from weathergen.common.config import Config
-from weathergen.model.attention import (
-    MultiCrossAttentionHeadVarlen,
-    MultiCrossAttentionHeadVarlenSlicedQ,
-    MultiSelfAttentionHead,
-    MultiSelfAttentionHeadLocal,
-    MultiSelfAttentionHeadVarlen,
-)
-from weathergen.model.blocks import CrossAttentionBlock, OriginalPredictionBlock, SelfAttentionBlock
-from weathergen.model.embeddings import (
-    StreamEmbedLinear,
-    StreamEmbedTransformer,
-)
-
 from weathergen.model.engines import (
     EmbeddingEngine,
-    LocalAssimilationEngine,
-    Local2GlobalAssimilationEngine,
     GlobalAssimilationEngine,
-    )
+    Local2GlobalAssimilationEngine,
+    LocalAssimilationEngine,
+)
 
 # from weathergen.model.model import ModelParams
-from weathergen.model.layers import MLP
-from weathergen.model.utils import ActivationFactory
-from weathergen.utils.utils import get_dtype
-
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
+from weathergen.utils.utils import get_dtype
 
 
 class EncoderModule(torch.nn.Module):
@@ -57,7 +36,7 @@ class EncoderModule(torch.nn.Module):
         """
         super(EncoderModule, self).__init__()
         self.cf = cf
-        
+
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
 
@@ -66,14 +45,14 @@ class EncoderModule(torch.nn.Module):
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
-        
+
         ##############
         # embedding engine
         # determine stream names once so downstream components use consistent keys
         self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
         # separate embedding networks for differnt observation types
         self.embed_engine = EmbeddingEngine(cf, self.sources_size, self.stream_names)
-        
+
         ##############
         # local assimilation engine
         self.ae_local_engine = LocalAssimilationEngine(cf)
@@ -106,10 +85,16 @@ class EncoderModule(torch.nn.Module):
                 nside=2**self.healpix_level, ipix=torch.arange(self.num_healpix_cells)
             )
             q_cells[:, :, -6:-3] = (
-                torch.cos(theta).unsqueeze(1).unsqueeze(1).repeat((1, self.cf.ae_local_num_queries, 3))
+                torch.cos(theta)
+                .unsqueeze(1)
+                .unsqueeze(1)
+                .repeat((1, self.cf.ae_local_num_queries, 3))
             )
             q_cells[:, :, -3:] = (
-                torch.sin(phi).unsqueeze(1).unsqueeze(1).repeat((1, self.cf.ae_local_num_queries, 3))
+                torch.sin(phi)
+                .unsqueeze(1)
+                .unsqueeze(1)
+                .repeat((1, self.cf.ae_local_num_queries, 3))
             )
             q_cells[:, :, -9] = torch.arange(self.cf.ae_local_num_queries)
             q_cells[:, :, -10] = torch.arange(self.cf.ae_local_num_queries)
@@ -123,7 +108,6 @@ class EncoderModule(torch.nn.Module):
         self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
 
     def forward(self, model_params, streams_data, source_cell_lens):
-        
         # embed
         tokens = self.embed_cells(model_params, streams_data, source_cell_lens)
 
@@ -135,9 +119,7 @@ class EncoderModule(torch.nn.Module):
         return tokens, posteriors
 
     #########################################
-    def embed_cells(
-        self, model_params, streams_data, source_cell_lens
-    ) -> torch.Tensor:
+    def embed_cells(self, model_params, streams_data, source_cell_lens) -> torch.Tensor:
         """Embeds input data for each stream separately and rearranges it to cell-wise order
         Args:
             model_params : Query and embedding parameters

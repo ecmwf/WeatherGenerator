@@ -19,26 +19,17 @@ import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
-from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
+from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
-    EmbeddingEngine,
     EnsPredictionHead,
     ForecastingEngine,
-    GlobalAssimilationEngine,
-    Local2GlobalAssimilationEngine,
-    LocalAssimilationEngine,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
-
-
-from weathergen.model.encoder import EncoderModule
-
 from weathergen.model.layers import MLP, NamedLinear
-from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
@@ -271,9 +262,11 @@ class Model(torch.nn.Module):
     #########################################
     def create(self) -> "Model":
         """Create each individual module of the model"""
-        cf = self.cf    
+        cf = self.cf
 
-        self.encoder = EncoderModule(cf, self.sources_size, self.targets_num_channels, self.targets_coords_size)
+        self.encoder = EncoderModule(
+            cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
+        )
 
         ###############
         # forecasting engine
@@ -295,7 +288,7 @@ class Model(torch.nn.Module):
         self.target_token_engines = torch.nn.ModuleDict()
         self.pred_adapter_kv = torch.nn.ModuleDict()
         self.pred_heads = torch.nn.ModuleDict()
-        
+
         # determine stream names once so downstream components use consistent keys
         self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
 
@@ -411,8 +404,6 @@ class Model(torch.nn.Module):
             )
 
         return self
-    
-    
 
     def reset_parameters(self):
         def _reset_params(module):
@@ -431,13 +422,15 @@ class Model(torch.nn.Module):
         num_params_embed = [
             get_num_parameters(self.encoder.embed_engine.embeds[name]) for name in self.stream_names
         ]
-        num_params_total = get_num_parameters(self) 
+        num_params_total = get_num_parameters(self)
         num_params_ae_local = get_num_parameters(self.encoder.ae_local_engine.ae_local_blocks)
         num_params_ae_global = get_num_parameters(self.encoder.ae_global_engine.ae_global_blocks)
 
-        num_params_q_cells = np.prod(self.encoder.q_cells.shape) if self.encoder.q_cells.requires_grad else 0
+        num_params_q_cells = (
+            np.prod(self.encoder.q_cells.shape) if self.encoder.q_cells.requires_grad else 0
+        )
         num_params_ae_adapater = get_num_parameters(self.encoder.ae_local_global_engine.ae_adapter)
-        
+
         num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
         num_params_pred_adapter = [
@@ -490,11 +483,16 @@ class Model(torch.nn.Module):
             new_params : Dictionary with (renamed) model parameters
         """
         params_cleanup = {
-            "embeds": "encoder.embed_engine.embeds",  # EmbeddingEngine
-            "ae_local_blocks": "encoder.ae_local_engine.ae_local_blocks",  # LocalAssimilationEngine
-            "ae_adapter": "encoder.ae_local_global_engine.ae_adapter",  # Local2GlobalAssimilationEngine
-            "ae_global_blocks": "encoder.ae_global_engine.ae_global_blocks",  # GlobalAssimilationEngine
-            "fe_blocks": "forecast_engine.fe_blocks",  # ForecastingEngine
+            # EmbeddingEngine
+            "embeds": "encoder.embed_engine.embeds",
+            # LocalAssimilationEngine
+            "ae_local_blocks": "encoder.ae_local_engine.ae_local_blocks",
+            # Local2GlobalAssimilationEngine
+            "ae_adapter": "encoder.ae_local_global_engine.ae_adapter",
+            # GlobalAssimilationEngine
+            "ae_global_blocks": "encoder.ae_global_engine.ae_global_blocks",
+            # ForecastingEngine
+            "fe_blocks": "forecast_engine.fe_blocks",
         }
 
         new_params = {}
@@ -538,7 +536,7 @@ class Model(torch.nn.Module):
         """
 
         (streams_data, source_cell_lens, target_coords_idxs) = batch
-        
+
         tokens, posteriors = self.encoder(model_params, streams_data, source_cell_lens)
 
         # roll-out in latent space
@@ -578,8 +576,6 @@ class Model(torch.nn.Module):
         latents["posteriors"] = posteriors
 
         return ModelOutput(physical=preds_all, latent=latents)
-
-    
 
     #########################################
     def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int) -> torch.Tensor:

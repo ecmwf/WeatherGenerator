@@ -210,7 +210,7 @@ class Trainer(TrainerBase):
         self.target_and_aux_calculator = get_target_aux_calculator(
             cf, self.dataset, self.model, self.device
         )
-        
+
         self.target_and_aux_calculator.to_device(self.device)
 
         # if with_fsdp then parameter count is unreliable
