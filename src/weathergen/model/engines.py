@@ -240,6 +240,77 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
         return tokens_global_c
 
 
+class QueryAggregationEngine(torch.nn.Module):
+    name: "QueryAggregationEngine"
+
+    def __init__(self, cf: Config, num_healpix_cells: int) -> None:
+        """
+        Initialize the QueryAggregationEngine with the configuration.
+
+        This engine is used for aggregating information from all query tokens coming
+        from healpix cells, that are not masked.
+
+        :param cf: Configuration object containing parameters for the engine.
+        :param num_healpix_cells: Number of healpix cells used for local queries.
+        """
+        super(QueryAggregationEngine, self).__init__()
+        self.cf = cf
+        self.num_healpix_cells = num_healpix_cells
+
+        self.ae_aggregation_blocks = torch.nn.ModuleList()
+
+        global_rate = int(1 / self.cf.ae_aggregation_att_dense_rate)
+        for i in range(self.cf.ae_aggregation_num_blocks):
+            ## Alternate between local and global attention
+            #  as controlled by cf.ae_dense_local_att_dense_rate
+            # Last block is always global attention
+            if i % global_rate == 0 or i + 1 == self.cf.ae_aggregation_num_blocks:
+                self.ae_aggregation_blocks.append(
+                    MultiSelfAttentionHead(
+                        self.cf.ae_global_dim_embed,
+                        num_heads=self.cf.ae_aggregation_num_heads,
+                        dropout_rate=self.cf.ae_aggregation_dropout_rate,
+                        with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
+                        with_flash=self.cf.with_flash_attention,
+                        norm_type=self.cf.norm_type,
+                        norm_eps=self.cf.norm_eps,
+                        attention_dtype=get_dtype(self.cf.attention_dtype),
+                    )
+                )
+            else:
+                self.ae_aggregation_blocks.append(
+                    MultiSelfAttentionHeadLocal(
+                        self.cf.ae_global_dim_embed,
+                        num_heads=self.cf.ae_aggregation_num_heads,
+                        qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
+                        block_factor=self.cf.ae_aggregation_block_factor,
+                        dropout_rate=self.cf.ae_aggregation_dropout_rate,
+                        with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
+                        with_flash=self.cf.with_flash_attention,
+                        norm_type=self.cf.norm_type,
+                        norm_eps=self.cf.norm_eps,
+                        attention_dtype=get_dtype(self.cf.attention_dtype),
+                    )
+                )
+            # MLP block
+            self.ae_aggregation_blocks.append(
+                MLP(
+                    self.cf.ae_global_dim_embed,
+                    self.cf.ae_global_dim_embed,
+                    with_residual=True,
+                    dropout_rate=self.cf.ae_aggregation_dropout_rate,
+                    hidden_factor=self.cf.ae_aggregation_mlp_hidden_factor,
+                    norm_type=self.cf.norm_type,
+                    norm_eps=self.cf.mlp_norm_eps,
+                )
+            )
+
+    def forward(self, tokens, use_reentrant):
+        for block in self.ae_aggregation_blocks:
+            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+        return tokens
+
+
 class GlobalAssimilationEngine(torch.nn.Module):
     name: "GlobalAssimilationEngine"
 

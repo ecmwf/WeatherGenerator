@@ -21,15 +21,10 @@ from weathergen.datasets.stream_data import StreamData
 
 @dataclass
 class SampleMetaData:
-    # masking strategy
-    # masking_strategy: str
-
-    # parameters for masking strategy
-    masking_params: Config | dict
+    # sample parameters (masking)
+    params: Config | dict
 
     mask: torch.Tensor | None = None
-
-    noise_level_rn: float | None = None
 
 
 class Sample:
