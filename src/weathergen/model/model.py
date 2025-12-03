@@ -490,10 +490,10 @@ class Model(torch.nn.Module):
             new_params : Dictionary with (renamed) model parameters
         """
         params_cleanup = {
-            "embeds": "embed_engine.embeds",  # EmbeddingEngine
-            "ae_local_blocks": "ae_local_engine.ae_local_blocks",  # LocalAssimilationEngine
-            "ae_adapter": "ae_local_global_engine.ae_adapter",  # Local2GlobalAssimilationEngine
-            "ae_global_blocks": "ae_global_engine.ae_global_blocks",  # GlobalAssimilationEngine
+            "embeds": "encoder.embed_engine.embeds",  # EmbeddingEngine
+            "ae_local_blocks": "encoder.ae_local_engine.ae_local_blocks",  # LocalAssimilationEngine
+            "ae_adapter": "encoder.ae_local_global_engine.ae_adapter",  # Local2GlobalAssimilationEngine
+            "ae_global_blocks": "encoder.ae_global_engine.ae_global_blocks",  # GlobalAssimilationEngine
             "fe_blocks": "forecast_engine.fe_blocks",  # ForecastingEngine
         }
 
