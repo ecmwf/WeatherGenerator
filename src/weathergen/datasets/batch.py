@@ -74,7 +74,7 @@ class Sample:
 
         for key, val in self.streams_data.items():
             if val is not None:
-                self.streams_data[key] = val.to_device(device, non_blocking=True)
+                self.streams_data[key] = val.to_device(device)
 
     def is_empty(self) -> bool:
         """
