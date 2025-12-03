@@ -117,7 +117,6 @@ validation_mode_config: {
   "teacher_model": {}
 }
 # masking
-masking_strategy: "random" # obviously TODO
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 #
@@ -137,6 +136,8 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
 
 # Student-teacher configuration (only used when training_mode == "student_teacher")
 # TODO: adapt so that the masking or forecast config entry also sits here
+masking_strategy: "forecast" # obviously TODO
+
 training_config:
   # when this is "masking", we are basically only using the model_input subconfig
   training_mode: "diffusion_forecast"  # "masking", "student_teacher", "forecast"
@@ -151,10 +152,10 @@ training_config:
     loss: "LatentDiffusionLoss" # placeholder
 
 num_mini_epochs: 32
-samples_per_mini_epoch: 2
-samples_per_validation: 2
+samples_per_mini_epoch: 10
+samples_per_validation: 10
 
-shuffle: True
+shuffle: False
 
 lr_scaling_policy: "sqrt"
 lr_start: 1e-6
