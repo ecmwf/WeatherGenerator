@@ -94,37 +94,35 @@ class EmbeddingEngine(torch.nn.Module):
         # TODO: handling of input steps should be done using encoder
         # iterate over all input steps and streams
         for istep in range(num_step_input):
-            # TODO: what is this list dimension??? Where should the istep index be???
-            for _, sb in enumerate(streams_data):
-                for stream_name, s_data in zip(self.stream_names, sb, strict=True):
-                    # embedding network
-                    embed = self.embeds[stream_name]
+            for stream_name, s_data in streams_data.items():
+                # embedding network
+                embed = self.embeds[stream_name]
 
-                    # skip empty stream
-                    if s_data.source_empty():
-                        continue
+                # skip empty stream
+                if s_data.source_empty():
+                    continue
 
-                    idxs = s_data.source_idxs_embed[istep].to(device)
-                    idxs_pe = s_data.source_idxs_embed_pe[istep].to(device)
+                idxs = s_data.source_idxs_embed[istep].to(device)
+                idxs_pe = s_data.source_idxs_embed_pe[istep].to(device)
 
-                    # create full scatter index
-                    # (there's no broadcasting which is likely highly inefficient)
-                    idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed(s_data.source_tokens_cells[istep]).flatten(0, 1)
-                    # there's undocumented limitation in flash_attn that will make embed fail if
-                    # #tokens is too large; code below is a work around
-                    # x_embed = torch.cat(
-                    #     [
-                    #         embed(s_c, c_c).flatten(0, 1)
-                    #         for s_c, c_c in zip(
-                    #             torch.split(s.source_tokens_cells, 49152),
-                    #             torch.split(s.source_centroids, 49152),
-                    #         )
-                    #     ]
-                    # )
+                # create full scatter index
+                # (there's no broadcasting which is likely highly inefficient)
+                idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+                x_embed = embed(s_data.source_tokens_cells[istep]).flatten(0, 1)
+                # there's undocumented limitation in flash_attn that will make embed fail if
+                # #tokens is too large; code below is a work around
+                # x_embed = torch.cat(
+                #     [
+                #         embed(s_c, c_c).flatten(0, 1)
+                #         for s_c, c_c in zip(
+                #             torch.split(s.source_tokens_cells, 49152),
+                #             torch.split(s.source_centroids, 49152),
+                #         )
+                #     ]
+                # )
 
-                    # scatter write to reorder from per stream to per cell ordering
-                    tokens_all[istep].scatter_(0, idxs, x_embed + pe_embed[idxs_pe])
+                # scatter write to reorder from per stream to per cell ordering
+                tokens_all[istep].scatter_(0, idxs, x_embed + pe_embed[idxs_pe])
 
         return tokens_all[0]
 
