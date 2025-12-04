@@ -625,7 +625,16 @@ class WeatherGenReader(Reader):
                 da_tars_fs, da_preds_fs, pps = [], [], []
 
                 for sample in tqdm(samples, desc=f"Processing {self.run_id} - {stream} - {fstep}"):
+                    
                     out = zio.get_data(sample, stream, fstep)
+                    
+                    if out.target is None or out.prediction is None:
+                        _logger.info(
+                            f"Skipping {stream} sample {sample} forecast step: {fstep}. "
+                            "No data found."
+                        )
+                        continue
+
                     target, pred = out.target.as_xarray(), out.prediction.as_xarray()
 
                     npoints = len(target.ipoint)

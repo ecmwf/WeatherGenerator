@@ -466,7 +466,12 @@ class Plotter:
 
         # Create figure and axis objects
         fig = plt.figure(dpi=self.dpi_val)
-        ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
+      
+        proj = ccrs.PlateCarree()
+        if regionname == "global":
+            proj = ccrs.Robinson()
+
+        ax = fig.add_subplot(1, 1, 1, projection=proj)
         ax.coastlines()
 
         assert data["lon"].shape == data["lat"].shape == data.shape, (
