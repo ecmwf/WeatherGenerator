@@ -28,7 +28,7 @@ from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
 from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io.csv_reader import CsvReader
-from weathergen.evaluate.io.wegen_reader import WeatherGenReader
+from weathergen.evaluate.io.wegen_reader import WeatherGenZarrReader, WeatherGenJSONReader
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.utils.utils import (
     calc_scores_per_stream,
@@ -281,9 +281,11 @@ def evaluate_from_config(
         type_ = run.get("type", "zarr")
 
         if type_ == "zarr":
-            reader = WeatherGenReader(run, run_id, private_paths)
+            reader = WeatherGenZarrReader(run, run_id, private_paths)
         elif type_ == "csv":
             reader = CsvReader(run, run_id, private_paths)
+        elif type == "json":
+            reader = WeatherGenJSONReader(run, run_id, private_paths, cfg.evaluation)
         else:
             raise ValueError(f"Unknown run type: {type_}")
 
@@ -335,7 +337,7 @@ def evaluate_from_config(
         channels_set = collect_channels(scores_dict, metric, region, runs)
 
         for run_id, run in runs.items():
-            reader = WeatherGenReader(run, run_id, private_paths)
+            reader = WeatherGenZarrReader(run, run_id, private_paths)
             from_run_id = reader.inference_cfg["from_run_id"]
             parent_run = get_or_create_mlflow_parent_run(mlflow_client, from_run_id)
             _logger.info(f"MLFlow parent run: {parent_run}")
