@@ -125,9 +125,7 @@ class EncoderModule(torch.nn.Module):
         return tokens, posteriors
 
     #########################################
-    def embed_cells(
-        self, model_params, streams_data, source_cell_lens
-    ) -> torch.Tensor:
+    def embed_cells(self, model_params, streams_data, source_cell_lens) -> torch.Tensor:
         """Embeds input data for each stream separately and rearranges it to cell-wise order
         Args:
             model_params : Query and embedding parameters

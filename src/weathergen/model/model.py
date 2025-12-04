@@ -263,7 +263,6 @@ class Model(torch.nn.Module):
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
 
-
         self.embed_target_coords = None
         self.forecast_engine: ForecastingEngine | None = None
         self.pred_adapter_kv = None
