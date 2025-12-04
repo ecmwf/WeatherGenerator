@@ -284,12 +284,18 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         assert idx_end > 0, "dataset size too small for forecast range"
         self.perms = np.arange(index_range.start, idx_end)
         if self.repeat_data and len(self.perms) < self.samples_per_mini_epoch:
-            assert self.samples_per_mini_epoch % len(self.perms) == 0, (
-                "Length of mini epoch is not a multiple of length of available data –- aborting."
-            )
-            self.perms = np.tile(
-                self.perms, self.samples_per_mini_epoch // len(self.perms)
-            )
+            if self.samples_per_mini_epoch % len(self.perms) == 0:
+                self.perms = np.tile(
+                    self.perms, self.samples_per_mini_epoch // len(self.perms)
+                )
+            else:
+                self.perms = np.tile(
+                    self.perms, self.samples_per_mini_epoch // len(self.perms)
+                )
+                random_filler = self.rng.choice(
+                    self.perms, size=self.samples_per_mini_epoch - len(self.perms), replace=False
+                )
+                self.perms = np.concatenate([self.perms, random_filler])
 
         if self.shuffle:
             self.perms = self.rng.permutation(self.perms)
