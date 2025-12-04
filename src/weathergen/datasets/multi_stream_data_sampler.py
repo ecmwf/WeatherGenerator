@@ -627,7 +627,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 ):
                     # Extract metadata for this view
                     target_metadata = target_metadata_list[sidx]
-                    source_metadata = source_metadata_list[student_to_teacher[sidx]] if sidx < len(source_metadata_list) else None
+                    source_metadata = (
+                        source_metadata_list[student_to_teacher[sidx]]
+                        if sidx < len(source_metadata_list)
+                        else None
+                    )
 
                     # stream_data_target[name] = self._build_stream_data(
                     sdata = self._build_stream_data(

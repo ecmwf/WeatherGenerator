@@ -625,10 +625,12 @@ class Masker:
         for token_len, start_idx in zip(token_lens, start_mask_indices, strict=True):
             if token_len > 1:
                 # Keep early timesteps, mask late ones
-                mask = np.concatenate([
-                    np.ones(start_idx, dtype=bool),
-                    np.zeros(max(0, token_len - start_idx), dtype=bool),
-                ])
+                mask = np.concatenate(
+                    [
+                        np.ones(start_idx, dtype=bool),
+                        np.zeros(max(0, token_len - start_idx), dtype=bool),
+                    ]
+                )
             elif token_len == 1:
                 mask = np.ones(1, dtype=bool)
             else:
