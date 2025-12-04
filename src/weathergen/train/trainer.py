@@ -320,9 +320,10 @@ class Trainer(TrainerBase):
             len_per_rank = (
                 len(self.dataset) // (self.world_size_original * cf.batch_size_per_gpu)
             ) * cf.batch_size_per_gpu
+            istep_denom = min(len_per_rank, cf.samples_per_mini_epoch) * self.world_size_original
             mini_epoch_base = int(
                 self.cf.istep
-                / (min(len_per_rank, cf.samples_per_mini_epoch) * self.world_size_original)
+                / max(istep_denom, 1)
             )
 
         # torch.autograd.set_detect_anomaly(True)
