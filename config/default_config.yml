@@ -39,7 +39,7 @@ pred_mlp_adaln: True
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-forecast_offset : 1
+forecast_offset : 0
 forecast_delta_hrs: 0
 forecast_steps: 1
 forecast_policy: "fixed"
@@ -50,6 +50,7 @@ fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
+repeat_data: True
 impute_latent_noise_std: 0.0  # 1e-4
 # Diffusion related parameters
 frequency_embedding_dim: 256
@@ -116,7 +117,6 @@ validation_mode_config: {
   "teacher_model": {}
 }
 # masking
-masking_strategy: "random" # obviously TODO
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 #
@@ -136,6 +136,8 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
 
 # Student-teacher configuration (only used when training_mode == "student_teacher")
 # TODO: adapt so that the masking or forecast config entry also sits here
+masking_strategy: "forecast" # obviously TODO
+
 training_config:
   # when this is "masking", we are basically only using the model_input subconfig
   training_mode: "diffusion_forecast"  # "masking", "student_teacher", "forecast"
@@ -174,9 +176,9 @@ log_grad_norms: False
 
 # start_date: 197901010000
 start_date: 201401010000
-end_date: 202012310000
-start_date_val: 202101010000
-end_date_val: 202201010000
+end_date: 201401011800
+start_date_val: 201401010000
+end_date_val: 201401011800
 len_hrs: 6
 step_hrs: 6
 input_window_steps: 1

@@ -113,6 +113,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.forecast_policy = cf.forecast_policy
 
         self.len = 100000000
+        self.samples_per_mini_epoch = samples_per_mini_epoch
+        self.repeat_data = cf.get("repeat_data", False)
 
         self.streams_datasets: list[list[AnyDataReader]] = []
         for _, stream_info in enumerate(cf.streams):
@@ -186,7 +188,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         index_range = self.time_window_handler.get_index_range()
         self.len = int(index_range.end - index_range.start)
-        self.len = min(self.len, samples_per_mini_epoch if samples_per_mini_epoch else self.len)
+
+        # check the repeat data flag and adjust len accordingly
+        if not self.repeat_data:
+            self.len = min(self.len, samples_per_mini_epoch if samples_per_mini_epoch else self.len)
+        else:
+            assert samples_per_mini_epoch, "Must specify samples_per_mini_epoch if repeat_data."
+            self.len = samples_per_mini_epoch
+
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len // cf.world_size) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)
@@ -269,10 +278,29 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         idx_end = index_range.end
         # native length of datasets, independent of mini_epoch length that has potentially been
         # specified
-        forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
+        forecast_len = (
+            self.len_hrs * (fsm + 1)
+        ) // self.step_hrs
         idx_end -= forecast_len + self.forecast_offset
+
         assert idx_end > 0, "dataset size too small for forecast range"
         self.perms = np.arange(index_range.start, idx_end)
+
+        # check repeat_data flag and fill up perms accordingly
+        if self.repeat_data and len(self.perms) < self.samples_per_mini_epoch:
+            if self.samples_per_mini_epoch % len(self.perms) == 0:
+                self.perms = np.tile(
+                    self.perms, self.samples_per_mini_epoch // len(self.perms)
+                )
+            else:
+                self.perms = np.tile(
+                    self.perms, self.samples_per_mini_epoch // len(self.perms)
+                )
+                random_filler = self.rng.choice(
+                    self.perms, size=self.samples_per_mini_epoch - len(self.perms), replace=False
+                )
+                self.perms = np.concatenate([self.perms, random_filler])
+
         if self.shuffle:
             self.perms = self.rng.permutation(self.perms)
 
@@ -764,6 +792,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 streams_data += [v for k, v in stream_data_source.items()]
 
         elif mode == "diffusion_forecast":
+            assert self.tokenizer.masker.current_strategy == "forecast", (
+                "No masking should be applied during diffusion forecasting."
+            )
+
             streams_data: list[StreamData] = []
 
             # Determine number of views direct from config (teacher & student views)

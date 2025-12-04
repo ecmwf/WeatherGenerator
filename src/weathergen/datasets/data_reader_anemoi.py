@@ -75,7 +75,6 @@ class DataReaderAnemoi(DataReaderTimestep):
         ds: Dataset = anemoi_datasets.open_dataset(
             ds0, **kwargs, start=tw_handler.t_start, end=tw_handler.t_end
         )
-
         period = np.timedelta64(ds.frequency)
         data_start_time = ds.dates[0]
         data_end_time = ds.dates[-1]
