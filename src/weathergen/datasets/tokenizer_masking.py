@@ -72,9 +72,32 @@ class TokenizerMasking(Tokenizer):
 
         return tokens
 
-    def cell_to_token_mask(self, idxs_cells, idxs_cells_lens, mask):
-        """ """
+    def cell_to_token_mask(
+        self,
+        idxs_cells,
+        idxs_cells_lens,
+        cell_mask=None,
+        mask_metadata=None,
+    ):
+        """
+        Convert cell-level information to token-level masks.
 
+        This unified method handles three scenarios:
+        1. Spatial only: replicate cell_mask across tokens
+        2. Temporal only: generate time-varying mask per token
+        3. Spatio-temporal: combine both (AND operation)
+
+        Args:
+            idxs_cells: List of lists of token indices per cell
+            idxs_cells_lens: List of lists of token lengths per cell
+            cell_mask: Optional cell-level spatial mask [num_cells]
+            mask_metadata: Optional metadata for temporal mask generation
+
+        Returns:
+            Tuple of (mask_tokens, mask_channels):
+                - mask_tokens: np.ndarray[bool] of length num_tokens (True = KEEP)
+                - mask_channels: np.ndarray[bool] or None
+        """
         mask_tokens, mask_channels = None, None
         num_tokens = torch.tensor([len(t) for t in idxs_cells_lens]).sum().item()
 
@@ -82,23 +105,58 @@ class TokenizerMasking(Tokenizer):
         if num_tokens == 0:
             return (mask_tokens, mask_channels)
 
-        # TODO, TODO, TODO: use np.repeat
-        # https://stackoverflow.com/questions/26038778/repeat-each-values-of-an-array-different-times
-        # build token level mask: for each cell replicate the keep flag across its tokens
-        token_level_flags: list[np.typing.NDArray] = []
-        for km, lens_cell in zip(mask, idxs_cells_lens, strict=True):
-            num_tokens_cell = len(lens_cell)
-            if num_tokens_cell == 0:
-                continue
-            token_level_flags.append(
-                np.ones(num_tokens_cell, dtype=bool)
-                if km
-                else np.zeros(num_tokens_cell, dtype=bool)
+        # Generate temporal mask if needed
+        if mask_metadata and mask_metadata.get("is_temporal", False):
+            temporal_mask = self.masker._generate_temporal_mask(
+                idxs_cells_lens,
+                strategy=mask_metadata["strategy"],
+                rate=mask_metadata["rate"],
+                masking_strategy_config=mask_metadata["config"],
+                target_mask=None,
+                target_mask_metadata=mask_metadata.get("target_mask_metadata"),
+                relationship=mask_metadata.get("relationship", "subset"),
             )
-        if token_level_flags:
-            mask_tokens = np.concatenate(token_level_flags)
         else:
-            mask_tokens = np.array([], dtype=bool)
+            temporal_mask = None
+
+        # Generate spatial mask replication if needed
+        if cell_mask is not None:
+            # Use np.repeat for efficiency - addresses TODO!
+            # Extract token lengths per cell
+            token_lens = np.array([len(lens_cell) for lens_cell in idxs_cells_lens])
+
+            # Convert cell_mask to numpy if it's a torch.Tensor
+            if isinstance(cell_mask, torch.Tensor):
+                cell_mask_np = cell_mask.cpu().numpy().astype(bool)
+            else:
+                cell_mask_np = np.asarray(cell_mask, dtype=bool)
+
+            # Ensure lengths match (equivalent to strict=True in original zip)
+            if len(cell_mask_np) != len(token_lens):
+                raise ValueError(
+                    f"cell_mask length ({len(cell_mask_np)}) does not match "
+                    f"number of cells in idxs_cells_lens ({len(token_lens)})"
+                )
+
+            # Replicate each cell's mask value across its tokens
+            # np.repeat(a, repeats) repeats each element a[i] by repeats[i] times
+            spatial_mask = np.repeat(cell_mask_np, token_lens)
+        else:
+            spatial_mask = None
+
+        # Combine masks based on what's available
+        if temporal_mask is not None and spatial_mask is not None:
+            # Spatio-temporal: both conditions must be True (AND operation)
+            mask_tokens = temporal_mask & spatial_mask
+        elif temporal_mask is not None:
+            # Temporal only
+            mask_tokens = temporal_mask
+        elif spatial_mask is not None:
+            # Spatial only
+            mask_tokens = spatial_mask
+        else:
+            # No masking - keep everything (should not typically happen)
+            mask_tokens = np.ones(num_tokens, dtype=bool)
 
         return (mask_tokens, mask_channels)
 
@@ -108,7 +166,8 @@ class TokenizerMasking(Tokenizer):
         rdata: IOReaderData,
         idxs_cells_data,
         time_win: tuple,
-        cell_mask: torch.Tensor,
+        cell_mask: torch.Tensor | None = None,
+        mask_metadata: dict | None = None,
     ):
         stream_id = stream_info["stream_id"]
         is_diagnostic = stream_info.get("diagnostic", False)
@@ -121,16 +180,23 @@ class TokenizerMasking(Tokenizer):
                 "strategy": self.masker.current_strategy,
                 "mask_tokens": None,
                 "mask_channels": None,
+                "mask_metadata": None,
             }
             return (source_tokens_cells, source_tokens_lens, mask_state)
 
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = idxs_cells_data
 
-        # select strategy from XXX depending on stream and if student or teacher
-
+        # Unified mask conversion - handles spatial, temporal, or both!
         (mask_tokens, mask_channels) = self.cell_to_token_mask(
-            idxs_cells, idxs_cells_lens, cell_mask
+            idxs_cells, idxs_cells_lens, cell_mask, mask_metadata
+        )
+
+        # Determine current strategy for mask_state
+        current_strategy = (
+            mask_metadata["strategy"]
+            if mask_metadata and mask_metadata.get("is_temporal", False)
+            else self.masker.current_strategy
         )
 
         source_tokens_cells, source_tokens_lens = tokenize_apply_mask_source(
@@ -147,9 +213,10 @@ class TokenizerMasking(Tokenizer):
 
         # capture per-view mask state to later produce consistent targets
         mask_state = {
-            "strategy": self.masker.current_strategy,
+            "strategy": current_strategy,
             "mask_tokens": mask_tokens,
             "mask_channels": mask_channels,
+            "mask_metadata": mask_metadata,
         }
 
         return (source_tokens_cells, source_tokens_lens, mask_state)
@@ -207,14 +274,15 @@ class TokenizerMasking(Tokenizer):
         rdata: IOReaderData,
         token_data,
         time_win: tuple,
-        cell_mask,
-        # mask_state: dict | None = None,
+        cell_mask: torch.Tensor | None = None,
+        mask_metadata: dict | None = None,
     ):
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
 
+        # Unified mask conversion - handles spatial, temporal, or both!
         (mask_tokens, mask_channels) = self.cell_to_token_mask(
-            idxs_cells, idxs_cells_lens, cell_mask
+            idxs_cells, idxs_cells_lens, cell_mask, mask_metadata
         )
 
         # TODO: split up
@@ -267,15 +335,15 @@ class TokenizerMasking(Tokenizer):
         rdata: IOReaderData,
         token_data,
         time_win: tuple,
-        cell_mask,
-        # mask_state: dict | None = None,
-        # selection: torch.Tensor | None = None,
+        cell_mask: torch.Tensor | None = None,
+        mask_metadata: dict | None = None,
     ):
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
 
+        # Unified mask conversion - handles spatial, temporal, or both!
         (mask_tokens, mask_channels) = self.cell_to_token_mask(
-            idxs_cells, idxs_cells_lens, cell_mask
+            idxs_cells, idxs_cells_lens, cell_mask, mask_metadata
         )
 
         data, datetimes, coords, _, _ = tokenize_apply_mask_target(

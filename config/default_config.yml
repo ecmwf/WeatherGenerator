@@ -111,14 +111,22 @@ sampling_rate_target: 1.0
 # note that a sampled masking rate leads to varying requirements
 masking_rate_sampling: True
 # masking_strategy_config is a dictionary of additional parameters for the masking strategy
-# required for "healpix" and "channel" masking strategies
+# Strategy-specific requirements:
 # "healpix": requires healpix mask level to be specified with `hl_mask`
-# "channel": requires "mode" to be specified, "per_cell" or "global",
-masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
+# "channel": requires "mode" to be specified, "per_cell" or "global"
+# "causal": masks latest timesteps (no additional config needed)
+# "temporal_crop": requires "crop_direction" ("start", "end", or "middle")
+# "spatiotemporal": requires "cell_strategy" ("random" or "healpix"). If "healpix", also needs `hl_mask`
+#                   Different spatial mask per timestep
+masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           "probabilities": [0.34, 0.33, 0.33],
                           "hl_mask": 3, "mode": "per_cell",
                           "same_strategy_per_batch": false
                           }
+# Example configurations for temporal strategies:
+# Temporal cropping: masking_strategy_config: {"crop_direction": "end"}
+# Spatiotemporal masking (random): masking_strategy_config: {"cell_strategy": "random"}
+# Spatiotemporal masking (healpix): masking_strategy_config: {"cell_strategy": "healpix", "hl_mask": 3}
 
 # Student-teacher configuration (only used when training_mode == "student_teacher")
 # TODO: adapt so that the masking or forecast config entry also sits here
