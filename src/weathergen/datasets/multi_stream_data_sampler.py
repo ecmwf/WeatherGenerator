@@ -278,7 +278,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # specified
         forecast_len = (
             self.len_hrs * (fsm + 1)
-        ) // self.step_hrs  # TODO: check if it should be fsm + 1
+        ) // self.step_hrs
         idx_end -= forecast_len + self.forecast_offset
 
         assert idx_end > 0, "dataset size too small for forecast range"
