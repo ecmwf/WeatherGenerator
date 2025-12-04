@@ -577,6 +577,8 @@ class Trainer(TrainerBase):
 
                 targets_and_auxs = []
                 for view in batch[-1].target_samples:
+                    # shizzle = view.streams_data["ERA5"].target_tokens
+                    # print(shizzle[0][-1, -1].item(), shizzle[1][-1, -1].item(), shizzle[0].shape)
                     # TODO remove when ModelBatch and Sample get a to_device()
                     streams_data = [[view.streams_data["ERA5"]]]
                     streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
@@ -758,6 +760,8 @@ class Trainer(TrainerBase):
                         outputs = []
                         for view in batch[-1].source_samples:
                             # TODO remove when ModelBatch and Sample get a to_device()
+                            # shizzle = view.streams_data["ERA5"].target_tokens
+                            # print(shizzle[0][-1, -1].item(), shizzle[1][-1, -1].item(), shizzle[0].shape)
                             streams_data = [[view.streams_data["ERA5"]]]
                             streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
                             source_cell_lens = view.source_cell_lens

@@ -176,9 +176,9 @@ log_grad_norms: False
 
 # start_date: 197901010000
 start_date: 201401010000
-end_date: 201401011200
+end_date: 201401011800
 start_date_val: 201401010000
-end_date_val: 201401011200
+end_date_val: 201401011800
 len_hrs: 6
 step_hrs: 6
 input_window_steps: 1
