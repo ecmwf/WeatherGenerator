@@ -265,7 +265,7 @@ def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
 
     target_aux = None
 
-    target_and_aux_calc = cf.get("target_and_aux_calc", "physical")
+    target_and_aux_calc = cf.training_config.get("target_and_aux_calc", "physical")
     if target_and_aux_calc == "physical":
         target_aux = PhysicalTargetAndAux(cf, model)
 
@@ -282,7 +282,7 @@ def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
         )
 
         target_aux = EMATeacher(
-            model, ema_model, get_batch_size(cf, cf.world_size_original), **cf.training_mode_config
+            model, ema_model, get_batch_size(cf, cf.world_size_original), **cf.training_config
         )
     else:
         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")

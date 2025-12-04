@@ -81,10 +81,10 @@ class EmbeddingEngine(torch.nn.Module):
             else:
                 raise ValueError("Unsupported embedding network type")
 
-    def forward(self, streams_data, source_cell_lens, pe_embed, dtype, device):
-        num_step_input = len(source_cell_lens)
-
-        offsets_base = [torch.cumsum(s[1:], 0) for s in source_cell_lens]
+    # TODO: remove device from arg list
+    def forward(self, sample, pe_embed, dtype, device):
+        num_step_input = len(sample.source_cell_lens)
+        offsets_base = [torch.cumsum(s[1:], 0) for s in sample.source_cell_lens]
 
         tokens_all = [
             torch.empty((int(ob[-1]), self.cf.ae_local_dim_embed), dtype=dtype, device=device)
@@ -94,7 +94,7 @@ class EmbeddingEngine(torch.nn.Module):
         # TODO: handling of input steps should be done using encoder
         # iterate over all input steps and streams
         for istep in range(num_step_input):
-            for stream_name, s_data in streams_data.items():
+            for stream_name, s_data in sample.streams_data.items():
                 # embedding network
                 embed = self.embeds[stream_name]
 

@@ -26,7 +26,6 @@ from torch.distributed.tensor import DTensor
 import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
-from weathergen.datasets.stream_data import StreamData
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
     get_target_aux_calculator,
@@ -38,7 +37,6 @@ from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.utils import get_batch_size, get_dtype
-from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +147,12 @@ class Trainer(TrainerBase):
         )
 
         self.model, self.model_params = init_model_and_shard(
-            cf, self.dataset, run_id_contd, mini_epoch_contd, cf.training_strategy.mode, devices[0]
+            cf,
+            self.dataset,
+            run_id_contd,
+            mini_epoch_contd,
+            cf.training_config.training_mode,
+            devices[0],
         )
 
         self.target_and_aux_calculator = get_target_aux_calculator(
@@ -209,7 +212,12 @@ class Trainer(TrainerBase):
         )
 
         self.model, self.model_params = init_model_and_shard(
-            cf, self.dataset, run_id_contd, mini_epoch_contd, cf.training_strategy.mode, devices[0]
+            cf,
+            self.dataset,
+            run_id_contd,
+            mini_epoch_contd,
+            cf.training_config.training_mode,
+            devices[0],
         )
 
         if cf.compile_model:
@@ -217,13 +225,13 @@ class Trainer(TrainerBase):
 
         self.validate_with_ema = cf.get("validate_with_ema", False)
         self.ema_model = None
-        if cf["training_mode"] == "student-teacher":
-            meta_ema_model = self.init_model_and_shard(
+        if cf.training_config["training_mode"] == "student-teacher":
+            meta_ema_model = init_model_and_shard(
                 cf,
+                self.dataset,
                 run_id_contd,
                 mini_epoch_contd,
-                cf.training_strategy.mode,
-                cf.target.teacher_cf,
+                cf.training_config.training_mode,
                 devices[0],
                 {},
             )[0]
@@ -241,7 +249,7 @@ class Trainer(TrainerBase):
                 self.dataset,
                 run_id_contd,
                 mini_epoch_contd,
-                cf.training_strategy.mode,
+                cf.training_config.training_mode,
                 devices[0],
                 {},
             )[0]
@@ -546,50 +554,7 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
-            # NOTE: we are still returning legacy batch structure and the new batch together.
-
-            # Julian and Matthias:
-            # here we can access data as follows:
-            # batch[-1] is the new ModelBatch object, see the structure in batch.py
-            # batch[-1].source_samples is a list of Sample objects for the source data, timesteps
-            # batch[-1].target_samples is a list of Sample objects for the target data, timesteps
-            # batch[-1].meta_info is a dictionary with metadata info per sample
-            # batch[-1].meta_info["ERA5"] etc.
-            # here we have the noise_level_rn
-            # batch[-1].source_samples[0].meta_info["ERA5"].noise_level_rnD
-            # == batch[-1].target_samples[0].meta_info["ERA5"].noise_level_rn
-            # for the same timestep, this needs to be fixed for when we have more source timesteps,
-            # and perhaps with bigger batch sizes?
-            # Each Sample object has:
-            # .streams_data: a dictionary of StreamData objects per stream name
-            # .source_cell_lens: list of tensors with lengths of source cells per stream # to be
-            # changed to be in ModelBatch
-            # .target_coords_idx: list of tensors with target coordinate indices per stream # to
-            # be changed to be in ModelBatch
-
-            ###### Legacy batch after batch.to_device:
-            # (Pdb++) batch[0]
-            # [[<weathergen.datasets.stream_data.StreamData object at 0x400572104230>]]
-            # (Pdb++) batch[1]
-            # [tensor([0, 1, 1,  ..., 0, 0, 0], device='cuda:0', dtype=torch.int32)]
-            # (Pdb++) batch[2]
-            # [[tensor([0, 0, 0,  ..., 4, 4, 4], device='cuda:0', dtype=torch.int32)]]
-
-            # TODO: access from new ModelBatch
-            forecast_steps = batch[0][-1]
-            # batch = self.batch_to_device(batch)
-
-            # You will also need the source_cell_lens, target_coords_idx, these are not being passed
-            # through for the views yet.
-            ################################################################
-
-            forecast_steps = batch[0][-1]
-            # # make existing pipeline work:
-            # batch = batch[0]
-            # batch = self.batch_to_device(batch)
-
-            # evaluate model
-            ### After to_device, then the original is:
+            batch.to_device(self.device)
 
             with torch.autocast(
                 device_type=f"cuda:{cf.local_rank}",
@@ -597,45 +562,35 @@ class Trainer(TrainerBase):
                 enabled=cf.with_mixed_precision,
             ):
                 outputs = []
-                batch[-1].to_device(self.device)
-                for sample in batch[-1].source_samples:
+                for sample in batch.source_samples:
                     outputs.append(
                         self.model(
                             self.model_params,
-                            (
-                                sample.streams_data,
-                                sample.source_cell_lens,
-                                sample.target_coords_idx,
-                            ),
+                            sample,
                             cf.forecast_offset,
-                            forecast_steps,
+                            batch.get_forecast_dt(),
                         )
                     )
-                targets_and_auxs = []
-                for sample in batch[-1].target_samples:
-                    targets_and_auxs.append(
+                target_auxs = []
+                for sample in batch.target_samples:
+                    target_auxs.append(
                         self.target_and_aux_calculator.compute(
                             self.cf.istep,
-                            (
-                                sample.streams_data,
-                                sample.source_cell_lens,
-                                sample.target_coords_idx,
-                            ),
+                            sample,
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
-                            forecast_steps,
+                            batch.get_forecast_dt(),
                         )
                     )
-                targets, aux = zip(*targets_and_auxs, strict=False)
             loss, loss_values = self.loss_calculator.compute_loss(
                 preds=outputs,
-                targets=targets,
+                targets=target_auxs,
                 metadata=(
-                    batch[-1].source2target_matching_idxs,
-                    [sample.meta_info for sample in batch[-1].source_samples],
-                    batch[-1].target2source_matching_idxs,
-                    [sample.meta_info for sample in batch[-1].target_samples],
+                    batch.source2target_matching_idxs,
+                    [sample.meta_info for sample in batch.source_samples],
+                    batch.target2source_matching_idxs,
+                    [sample.meta_info for sample in batch.target_samples],
                 ),
             )
             # TODO re-enable this, need to think on how to make it compatible with
@@ -755,9 +710,7 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    forecast_steps = batch[0][-1]
-                    old_batch = batch[0]
-                    batch = batch[-1]
+                    forecast_steps = batch.get_forecast_dt()
                     batch.to_device(self.device)
 
                     # evaluate model
@@ -774,11 +727,7 @@ class Trainer(TrainerBase):
                         sample = batch.source_samples[0]
                         output = model_forward(
                             self.model_params,
-                            (
-                                sample.streams_data,
-                                sample.source_cell_lens,
-                                sample.target_coords_idx,
-                            ),
+                            sample,
                             cf.forecast_offset,
                             forecast_steps,
                         )
@@ -803,40 +752,41 @@ class Trainer(TrainerBase):
 
                     # log output
                     if bidx < cf.log_validation:
-                        # TODO: Move _prepare_logging into write_validation by passing streams_data
-                        # TODO right now we hardcode ERA5 which obviously is bad, but not sure
-                        # how this logging function is supposed to change
-                        streams_data: list[list[StreamData]] = old_batch[0]
-                        import pdb
+                        logger.warning("logging of data currently not implemented")
+                    # # TODO: Move _prepare_logging into write_validation by passing streams_data
+                    # # TODO right now we hardcode ERA5 which obviously is bad, but not sure
+                    # # how this logging function is supposed to change
+                    # streams_data: list[list[StreamData]] = old_batch[0]
+                    # import pdb
 
-                        pdb.set_trace()
-                        (
-                            preds_all,
-                            targets_all,
-                            targets_coords_all,
-                            targets_times_all,
-                            targets_lens,
-                        ) = self._prepare_logging(
-                            preds=output,
-                            forecast_offset=cf.forecast_offset,
-                            forecast_steps=cf.forecast_steps,
-                            streams_data=streams_data,
-                        )
-                        sources = [[item.source_raw for item in stream] for stream in streams_data]
-                        # sample idx should be the same across streams => select first
-                        sample_idxs = [item.sample_idx for item in streams_data[0]]
-                        write_output(
-                            self.cf,
-                            mini_epoch,
-                            bidx,
-                            sources[0],
-                            preds_all,
-                            targets_all,
-                            targets_coords_all,
-                            targets_times_all,
-                            targets_lens,
-                            sample_idxs,
-                        )
+                    # pdb.set_trace()
+                    # (
+                    #     preds_all,
+                    #     targets_all,
+                    #     targets_coords_all,
+                    #     targets_times_all,
+                    #     targets_lens,
+                    # ) = self._prepare_logging(
+                    #     preds=output,
+                    #     forecast_offset=cf.forecast_offset,
+                    #     forecast_steps=cf.forecast_steps,
+                    #     streams_data=streams_data,
+                    # )
+                    # sources = [[item.source_raw for item in stream] for stream in streams_data]
+                    # # sample idx should be the same across streams => select first
+                    # sample_idxs = [item.sample_idx for item in streams_data[0]]
+                    # write_output(
+                    #     self.cf,
+                    #     mini_epoch,
+                    #     bidx,
+                    #     sources[0],
+                    #     preds_all,
+                    #     targets_all,
+                    #     targets_coords_all,
+                    #     targets_times_all,
+                    #     targets_lens,
+                    #     sample_idxs,
+                    # )
 
                     # Collecting loss statistics for later inspection
                     if bidx == 0:

@@ -58,7 +58,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         source_target_matching_idxs, output_info, target_source_matching_idxs, target_info = (
             metadata
         )
-
+        import pdb; pdb.set_trace()
         for name, (weight, loss_fn, extra_args) in self.losses.items():
             preds_for_loss = gather_preds_for_loss(name, preds, output_info)
             targets_for_loss = gather_targets_for_loss(name, targets, target_info)
@@ -205,7 +205,7 @@ def gather_targets_for_loss(name, targets, metadata):
         return {
             "teacher_patches_masked": torch.stack(
                 [
-                    p[name]
+                    p.latent[name]
                     for p, info in zip(targets, metadata, strict=False)
                     # TODO filter for loss if info.strategy == "masking"
                 ],
@@ -222,7 +222,7 @@ def gather_targets_for_loss(name, targets, metadata):
         return {
             "teacher_patches_masked": torch.stack(
                 [
-                    p[name]
+                    p.latent[name]
                     for p, info in zip(targets, metadata, strict=False)
                     # TODO filter for loss if info.strategy == "masking"
                 ],
@@ -231,7 +231,7 @@ def gather_targets_for_loss(name, targets, metadata):
             # TODO remove the [:, :2049]
             "teacher_class_masked": torch.stack(
                 [
-                    p[name]
+                    p.latent[name]
                     for p, info in zip(targets, metadata, strict=False)
                     # TODO filter for loss if info.strategy == "masking"
                 ],
@@ -242,14 +242,14 @@ def gather_targets_for_loss(name, targets, metadata):
         return {
             "local2global_dino_teacher": torch.stack(
                 [
-                    p[name]
+                    p.latent[name]
                     for p, info in zip(targets, metadata, strict=False)
                     # TODO if info.strategy == "cropping"
                 ],
                 dim=0,
             )[:2],
             "global2global_dino_teacher": torch.stack(
-                list(reversed([p[name] for p, info in zip(targets, metadata, strict=False)])), dim=0
+                list(reversed([p.latent[name] for p, info in zip(targets, metadata, strict=False)])), dim=0
             )[:2],
         }
     else:

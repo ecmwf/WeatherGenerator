@@ -7,7 +7,7 @@ from weathergen.train.ssl_losses_utils import (
     JEPATargetProcessing,
     iBOTPatchTargetProcessing,
 )
-from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase
+from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase, TargetAuxOutput
 
 
 class EMATeacher(TargetAndAuxModuleBase):
@@ -53,7 +53,7 @@ class EMATeacher(TargetAndAuxModuleBase):
         for loss_name, target_module in self.postprocess_targets.items():
             with torch.no_grad():
                 targets[loss_name] = target_module(outputs[loss_name])
-        return targets, None
+        return TargetAuxOutput(physical={}, latent=targets, aux_outputs= {})
 
     def to_device(self, device):
         for _, module in self.postprocess_targets.items():

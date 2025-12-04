@@ -481,7 +481,7 @@ class Model(torch.nn.Module):
 
         # Latent heads for losses
         # TODO write the forward function for this, has to wait until other Model PRs are done
-        target_losses = cf["training_mode_config"]["losses"].get("LossLatentSSLStudentTeacher", {})
+        target_losses = cf["training_config"]["losses"].get("LossLatentSSLStudentTeacher", {})
         # TODO implement later
         # shared_heads = cf.get("shared_heads", False)
         self.latent_heads = nn.ModuleDict()
@@ -639,7 +639,7 @@ class Model(torch.nn.Module):
         return new_params
 
     #########################################
-    def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
+    def forward(self, model_params: ModelParams, sample, forecast_offset: int, forecast_steps: int):
         """Performs the forward pass of the model to generate forecasts
 
         Tokens are processed through the model components, which were defined in the create method.
@@ -656,13 +656,12 @@ class Model(torch.nn.Module):
         Returns:
             A list containing all prediction results
         """
-        (streams_data, source_cell_lens, target_coords_idxs) = batch
 
         # embed
-        tokens = self.embed_cells(model_params, streams_data, source_cell_lens)
+        tokens = self.embed_cells(model_params, sample)
 
         # local assimilation engine and adapter
-        tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
+        tokens, posteriors = self.assimilate_local(model_params, tokens, sample)
 
         tokens = self.assimilate_global(model_params, tokens)
 
@@ -675,8 +674,7 @@ class Model(torch.nn.Module):
                     model_params,
                     fstep,
                     tokens,
-                    streams_data,
-                    target_coords_idxs,
+                    sample,
                 )
             ]
 
@@ -695,8 +693,7 @@ class Model(torch.nn.Module):
                 forecast_offset + forecast_steps,
                 tokens,
                 # TODO We add the batch dimension back and thus wrap stream_data in a list
-                [streams_data],
-                target_coords_idxs,
+                sample,
             )
         ]
 
@@ -726,27 +723,23 @@ class Model(torch.nn.Module):
         return ModelOutput(physical=preds_all, latent=latents)
 
     #########################################
-    def embed_cells(
-        self, model_params: ModelParams, streams_data, source_cell_lens
-    ) -> torch.Tensor:
+    def embed_cells(self, model_params: ModelParams, sample) -> torch.Tensor:
         """Embeds input data for each stream separately and rearranges it to cell-wise order
         Args:
             model_params : Query and embedding parameters
             streams_data : Used to initialize first tokens for pre-processing
-        Returns:
+        Returns:uv
             Tokens for local assimilation
         """
 
         device = next(self.parameters()).device
-        tokens_all = self.embed_engine(
-            streams_data, source_cell_lens, model_params.pe_embed, self.dtype, device
-        )
+        tokens_all = self.embed_engine(sample, model_params.pe_embed, self.dtype, device)
 
         return tokens_all
 
     #########################################
     def assimilate_local(
-        self, model_params: ModelParams, tokens: torch.Tensor, cell_lens: torch.Tensor
+        self, model_params: ModelParams, tokens: torch.Tensor, sample: torch.Tensor
     ) -> torch.Tensor:
         """Processes embedded tokens locally and prepares them for the global assimilation
         Args:
@@ -758,6 +751,7 @@ class Model(torch.nn.Module):
             Tokens for global assimilation
         """
 
+        cell_lens = sample.source_cell_lens
         batch_size = (
             self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
         )
@@ -917,8 +911,7 @@ class Model(torch.nn.Module):
         model_params: ModelParams,
         fstep: int,
         tokens: torch.Tensor,
-        streams_data,
-        target_coords_idxs,
+        sample,
     ) -> list[torch.Tensor]:
         """Predict outputs at the specific target coordinates based on the input weather state and
         pre-training task and projects the latent space representation back to physical space.
@@ -933,6 +926,10 @@ class Model(torch.nn.Module):
         Returns:
             Prediction output tokens in physical representation for each target_coords.
         """
+
+        # add list which represents batch samples
+        streams_data = [sample.streams_data]
+        target_coords_idxs = sample.target_coords_idx
 
         batch_size = (
             self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
