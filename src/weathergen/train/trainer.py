@@ -527,11 +527,7 @@ class Trainer(TrainerBase):
                     outputs.append(
                         self.model(
                             self.model_params,
-                            (
-                                sample.streams_data,
-                                sample.source_cell_lens,
-                                sample.target_coords_idx,
-                            ),
+                            sample,
                             cf.forecast_offset,
                             batch.get_forecast_dt(),
                         )
@@ -698,11 +694,7 @@ class Trainer(TrainerBase):
                         sample = batch.source_samples[0]
                         output = model_forward(
                             self.model_params,
-                            (
-                                sample.streams_data,
-                                sample.source_cell_lens,
-                                sample.target_coords_idx,
-                            ),
+                            sample,
                             cf.forecast_offset,
                             forecast_steps,
                         )

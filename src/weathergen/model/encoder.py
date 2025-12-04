@@ -113,37 +113,35 @@ class EncoderModule(torch.nn.Module):
         # global assimilation engine
         self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
 
-    def forward(self, model_params, streams_data, source_cell_lens):
+    def forward(self, model_params, sample):
         # embed
-        tokens = self.embed_cells(model_params, streams_data, source_cell_lens)
+        tokens = self.embed_cells(model_params, sample)
 
         # local assimilation engine and adapter
-        tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
+        tokens, posteriors = self.assimilate_local(model_params, tokens, sample)
 
         tokens = self.assimilate_global(tokens)
 
         return tokens, posteriors
 
     #########################################
-    def embed_cells(self, model_params, streams_data, source_cell_lens) -> torch.Tensor:
+    def embed_cells(self, model_params, sample) -> torch.Tensor:
         """Embeds input data for each stream separately and rearranges it to cell-wise order
         Args:
             model_params : Query and embedding parameters
             streams_data : Used to initialize first tokens for pre-processing
-        Returns:
+        Returns:uv
             Tokens for local assimilation
         """
 
         device = next(self.parameters()).device
-        tokens_all = self.embed_engine(
-            streams_data, source_cell_lens, model_params.pe_embed, self.dtype, device
-        )
+        tokens_all = self.embed_engine(sample, model_params.pe_embed, self.dtype, device)
 
         return tokens_all
 
     #########################################
     def assimilate_local(
-        self, model_params, tokens: torch.Tensor, cell_lens: torch.Tensor
+        self, model_params, tokens: torch.Tensor, sample: torch.Tensor
     ) -> torch.Tensor:
         """Processes embedded tokens locally and prepares them for the global assimilation
         Args:
@@ -155,6 +153,7 @@ class EncoderModule(torch.nn.Module):
             Tokens for global assimilation
         """
 
+        cell_lens = sample.source_cell_lens
         batch_size = (
             self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
         )

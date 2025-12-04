@@ -534,7 +534,7 @@ class Model(torch.nn.Module):
         return new_params
 
     #########################################
-    def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
+    def forward(self, model_params: ModelParams, sample, forecast_offset: int, forecast_steps: int):
         """Performs the forward pass of the model to generate forecasts
 
         Tokens are processed through the model components, which were defined in the create method.
@@ -551,9 +551,8 @@ class Model(torch.nn.Module):
         Returns:
             A list containing all prediction results
         """
-        (streams_data, source_cell_lens, target_coords_idxs) = batch
 
-        tokens, posteriors = self.encoder(model_params, streams_data, source_cell_lens)
+        tokens, posteriors = self.encoder(model_params, sample)
 
         # roll-out in latent space
         preds_all = []
@@ -564,8 +563,7 @@ class Model(torch.nn.Module):
                     model_params,
                     fstep,
                     tokens,
-                    streams_data,
-                    target_coords_idxs,
+                    sample,
                 )
             ]
 
@@ -584,8 +582,7 @@ class Model(torch.nn.Module):
                 forecast_offset + forecast_steps,
                 tokens,
                 # TODO We add the batch dimension back and thus wrap stream_data in a list
-                [streams_data],
-                target_coords_idxs,
+                sample,
             )
         ]
 
@@ -618,8 +615,7 @@ class Model(torch.nn.Module):
         model_params: ModelParams,
         fstep: int,
         tokens: torch.Tensor,
-        streams_data,
-        target_coords_idxs,
+        sample,
     ) -> list[torch.Tensor]:
         """Predict outputs at the specific target coordinates based on the input weather state and
         pre-training task and projects the latent space representation back to physical space.
@@ -634,6 +630,10 @@ class Model(torch.nn.Module):
         Returns:
             Prediction output tokens in physical representation for each target_coords.
         """
+
+        # add list which represents batch samples
+        streams_data = [sample.streams_data]
+        target_coords_idxs = sample.target_coords_idx
 
         batch_size = (
             self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu

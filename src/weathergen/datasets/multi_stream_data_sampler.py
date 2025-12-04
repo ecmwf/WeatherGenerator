@@ -567,11 +567,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 # collect source data for current stream
                 # loop over student views
-                stream_data_source = {}
                 for sidx, (target_mask, source_mask) in enumerate(
                     zip(target_masks, source_masks, strict=False)
                 ):
-                    # stream_data_source[name] = self._build_stream_data(
                     sdata = self._build_stream_data(
                         "target_coords target_values",
                         idx,
@@ -585,12 +583,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         source_mask,
                     )
 
-                    stream_data_source[name] = sdata
-
                     # Map each student (source) to its teacher (target)
                     t_idx = student_to_teacher[sidx]
                     batch.add_source_stream(sidx, t_idx, name, sdata, source_metadata_list[sidx])
-                    # num_input_steps?
 
                 # stream_data_target can contain network input
                 stream_data_target = {}
@@ -785,18 +780,20 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         sample.set_preprocessed(scl, tci)
 
     def _preprocess_model_batch(self, model_batch: ModelBatch, forecast_dt: int):
+        """
+        Perform necessary pre-processing of model batch
+        """
         for sample in model_batch.source_samples:
             self._preprocess_model_batch_sample(sample, forecast_dt)
         for sample in model_batch.target_samples:
             self._preprocess_model_batch_sample(sample, forecast_dt)
 
-    def __iter__(self):
+    def __iter__(self) -> ModelBatch:
         """
         Return one batch of data
 
-        Return : list[list[StreamData]]
-            len : number of batch items
-            len[*] : number of streams
+        Return :
+            batch of data
         """
         iter_start, iter_end = self.worker_workset()
         logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={self.len}")
@@ -819,14 +816,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 idx_raw += 1
 
                 # Sample masking strategy once per batch item
-                if hasattr(self.tokenizer, "masker"):
-                    self.tokenizer.masker.set_batch_strategy()
+                # TODO: still needed?
+                self.tokenizer.masker.set_batch_strategy()
 
                 batch = self._get_sample(idx, forecast_dt)
 
                 # Reset masking strategy for next batch item
-                if hasattr(self.tokenizer, "masker"):
-                    self.tokenizer.masker.reset_batch_strategy()
+                # TODO: still needed?
+                self.tokenizer.masker.reset_batch_strategy()
 
                 # # skip completely empty batch item or when all targets are empty -> no grad
                 if not batch.is_empty():
