@@ -28,6 +28,7 @@ from weathergen.model.engines import (
     EnsPredictionHead,
     ForecastingEngine,
     GlobalAssimilationEngine,
+    LatentState,
     Local2GlobalAssimilationEngine,
     LocalAssimilationEngine,
     QueryAggregationEngine,
@@ -476,6 +477,10 @@ class Model(torch.nn.Module):
                 final_activation=final_activation,
                 stream_name=stream_name,
             )
+        
+        self.norm = nn.LayerNorm(self.q_cells.size(-1))
+        self.class_tokens = 4    # cf.latent_state_class_tokens
+        self.register_tokens = 10 # cf.latent_state_register_tokens
 
         return self
 
@@ -624,7 +629,7 @@ class Model(torch.nn.Module):
                 self.predict(
                     model_params,
                     fstep,
-                    tokens,
+                    tokens[:, self.class_tokens + self.register_tokens :],
                     streams_data,
                     target_coords_idxs,
                 )
@@ -643,14 +648,25 @@ class Model(torch.nn.Module):
             self.predict(
                 model_params,
                 forecast_offset + forecast_steps,
-                tokens,
+                tokens[:, self.class_tokens + self.register_tokens :],
                 streams_data,
                 target_coords_idxs,
             )
         ]
 
         latents = {}
-        latents["posteriors"] = posteriors
+        z_pre_norm = tokens
+        z = self.norm(z_pre_norm)
+
+        latent_state = LatentState(
+            class_token=z[:, : self.class_tokens],
+            register_tokens=z[:, self.class_tokens : self.class_tokens + self.register_tokens],
+            patch_tokens=z[:, self.class_tokens + self.register_tokens :],
+            z_pre_norm=z_pre_norm,
+        )
+
+        # latents["posteriors"] = posteriors
+        latents["latent_state_pre_heads"] = latent_state
 
         return ModelOutput(physical=preds_all, latent=latents)
 
@@ -798,6 +814,17 @@ class Model(torch.nn.Module):
             tokens_global.reshape([batch_size, self.num_healpix_cells, s[-2], s[-1]])
             + model_params.pe_global
         ).flatten(1, 2)
+
+        # add additional global tokens class and register
+        tokens_global_class = (
+                self.q_cells.repeat(batch_size, self.class_tokens, 1)
+            )
+        tokens_global_register = (
+                self.q_cells.repeat(batch_size, self.register_tokens, 1)
+            )
+
+        # concatenate all global tokens
+        tokens_global = torch.cat([tokens_global_class, tokens_global_register, tokens_global], dim=1)
 
         return tokens_global, posteriors
 
