@@ -639,7 +639,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 student_cfg.get("num_samples", 1)
             )  # per teacher
 
-            batch = ModelBatch(self.streams, num_source_samples, num_target_samples)
+            batch = ModelBatch(self.streams, num_source_samples, num_target_samples, forecast_dt)
 
             # for all streams
             for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
@@ -659,8 +659,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 # collect source data for current stream
                 # loop over student views
-                stream_data_source = {}
-                # stream_data_source[name] = self._build_stream_data(
                 sdata = self._build_stream_data(
                     "target_coords target_values",
                     idx,
@@ -673,8 +671,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     mask=None,
                 )
 
-                stream_data_source[name] = sdata
-
                 source_metadata = source_metadata
 
                 # add a ramdom number for diffusion timestep
@@ -682,9 +678,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 # Map each student (source) to its teacher (target)
                 batch.add_source_stream(0, 0, name, sdata, source_metadata)
-
-                # stream_data_target can contain network input
-                stream_data_target = {}
 
                 # stream_data_target[name] = self._build_stream_data(
                 sdata = self._build_stream_data(

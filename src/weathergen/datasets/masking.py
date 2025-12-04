@@ -362,19 +362,17 @@ class Masker:
 
         source_num_samples = source_cfg.get("num_samples", 1)
         source_strategy = source_cfg.get("masking_strategy", source_cfg.get("strategy", "random"))
-        source_masking_params = source_cfg.get("masking_strategy_config")
+        source_masking_params = source_cfg.get("masking_strategy_config", {})
         relationship = source_cfg.get("relationship", "complement")
 
         if target_cfg is not None:
             target_num_samples = target_cfg.get("num_samples", 1)
             target_strategy = target_cfg.get("strategy", "random")
-            target_masking_params = target_cfg.get("masking_strategy_config")
+            target_masking_params = target_cfg.get("masking_strategy_config", {})
         else:
             target_strategy = source_strategy
             target_num_samples = source_num_samples
             target_masking_params = source_masking_params
-            # # do other relationships make sense
-            # assert relationship == "complement"
 
         assert source_num_samples % target_num_samples == 0, (
             "number of source samples has to be multiple of target samples"
@@ -386,31 +384,29 @@ class Masker:
         target_masks: list[np.typing.NDArray] = []
         target_metadata: list[SampleMetaData] = []
         for _ in range(target_num_samples):
-            target_masks += [
-                self._get_mask(
-                    num_cells=num_cells,
-                    strategy=target_strategy,
-                    target_mask=None,
-                    masking_strategy_config=target_masking_params,
-                )
-            ]
-            target_metadata += [SampleMetaData(params=target_cfg)]
+            target_mask, mask_params = self._get_mask(
+                num_cells=num_cells,
+                strategy=target_strategy,
+                target_mask=None,
+                masking_strategy_config=target_masking_params,
+            )
+            target_masks += [target_mask]
+            target_metadata += [SampleMetaData(params={**target_cfg, **mask_params})]
 
         # iterate over all source samples
         source_masks: list[np.typing.NDArray] = []
         source_metadata: list[SampleMetaData] = []
         source_target_mapping = np.zeros(source_num_samples, dtype=np.int32)
         for it in range(source_num_samples):
-            source_masks += [
-                self._get_mask(
-                    num_cells=num_cells,
-                    strategy=source_strategy,
-                    masking_strategy_config=source_masking_params,
-                    target_mask=target_masks[it % target_num_samples],
-                    relationship=relationship,
-                )
-            ]
-            source_metadata += [SampleMetaData(params=target_cfg)]
+            source_mask, mask_params = self._get_mask(
+                num_cells=num_cells,
+                strategy=source_strategy,
+                masking_strategy_config=source_masking_params,
+                target_mask=target_masks[it % target_num_samples],
+                relationship=relationship,
+            )
+            source_masks += [source_mask]
+            source_metadata += [SampleMetaData(params={**target_cfg, **mask_params})]
             source_target_mapping[it] = it % target_num_samples
 
         return (
@@ -427,7 +423,7 @@ class Masker:
         masking_strategy_config: dict | None = None,
         target_mask: np.typing.NDArray | None = None,
         relationship: str = "subset",
-    ) -> np.typing.NDArray:
+    ) -> (np.typing.NDArray, dict):
         """Get effective mask, combining with target mask if specified.
 
         Parameters
@@ -450,16 +446,18 @@ class Masker:
         -------
         np.ndarray
             Boolean array of shape [num_cells] where True indicates the cell is kept.
+        dict
+            Parameters describing the masking that was applied
         """
 
         # handle cases where mask is directly derived from target_mask
         if target_mask is not None:
             if relationship == "complement":
                 mask = ~target_mask
-                return mask
+                return mask, {}
 
         # get mask
-        mask = self._generate_cell_mask(num_cells, strategy, rate, masking_strategy_config)
+        mask, params = self._generate_cell_mask(num_cells, strategy, rate, masking_strategy_config)
 
         # handle cases where mask needs to be combined with target_mask
         if target_mask is not None:
@@ -468,7 +466,7 @@ class Masker:
             elif relationship == "disjoint":
                 mask = mask & (~target_mask)
 
-        return mask
+        return (mask, params)
 
     def _generate_cell_mask(
         self,
@@ -476,7 +474,7 @@ class Masker:
         strategy: str | None = None,
         rate: float | None = None,
         masking_strategy_config: dict | None = None,
-    ) -> np.typing.NDArray:
+    ) -> (np.typing.NDArray, dict):
         """Generate a boolean keep mask at data healpix level (True = keep cell).
 
         Parameters
@@ -501,6 +499,9 @@ class Masker:
             Boolean array of shape [num_cells] where True indicates the cell is kept.
         """
 
+        # params describing the masking
+        masking_params = {}
+
         # get config for mask
 
         strat = strategy or self.masking_strategy
@@ -516,18 +517,16 @@ class Masker:
             "num_cells inconsistent with configured healpix level."
         )
 
-        if strat not in {"random", "healpix"}:
-            raise NotImplementedError(
-                f"Cell selection strategy '{strat}' not supported for keep mask generation."
-            )
-
         # generate cell mask
 
         if strat == "random":
             mask = self.rng.uniform(0, 1, num_cells) < keep_rate
 
-        elif strat == "forecast" or strat == "causal":
+        elif "forecast" in strat or strat == "causal":
             mask = np.ones(num_cells, dtype=np.bool)
+
+            if "diffusion" in masking_strategy_config:
+                masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)
 
         elif strat == "healpix":
             hl_data = self.healpix_level_data
@@ -552,8 +551,10 @@ class Masker:
                 mask[child_indices] = True
 
         else:
-            assert False, "Unknown strategy."
+            raise NotImplementedError(
+                f"Cell selection strategy '{strat}' not supported for keep mask generation."
+            )
 
         mask = to_bool_tensor(mask)
 
-        return mask
+        return (mask, masking_params)
