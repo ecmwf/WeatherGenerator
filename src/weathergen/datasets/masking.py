@@ -367,7 +367,9 @@ class Masker:
                     masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
                 )
                 target_masks += [target_mask]
-                target_metadata += [SampleMetaData(params={**target_cfg, **mask_params})]
+                target_metadata += [
+                    SampleMetaData(params={**target_cfg, **mask_params}, mask=target_mask)
+                ]
 
         # iterate over all source samples
         source_masks: list[np.typing.NDArray] = []
@@ -385,7 +387,9 @@ class Masker:
                     relationship=source_cfg.get("relationship", "independent"),
                 )
                 source_masks += [source_mask]
-                source_metadata += [SampleMetaData(params={**target_cfg, **mask_params})]
+                source_metadata += [
+                    SampleMetaData(params={**source_cfg, **mask_params}, mask=source_mask)
+                ]
                 source_target_mapping += [i_source]
 
         source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
