@@ -21,6 +21,8 @@ ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
+repeat_data: True
+
 ae_global_dim_embed: 2048
 ae_global_num_blocks: 8
 ae_global_num_heads: 32
@@ -48,9 +50,9 @@ pred_mlp_adaln: True
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-forecast_offset : 1
+forecast_offset : 0
 forecast_delta_hrs: 0
-forecast_steps: 2
+forecast_steps: 1
 forecast_policy: "fixed"
 forecast_att_dense_rate: 1.0
 forecast_with_step_conditioning: True # False
@@ -152,8 +154,8 @@ training_config:
   losses:
 
 num_mini_epochs: 32
-samples_per_mini_epoch: 64 #4096
-samples_per_validation: 32 #512
+samples_per_mini_epoch: 3 #4096
+samples_per_validation: 3 #512
 
 shuffle: True
 
@@ -176,9 +178,9 @@ log_grad_norms: False
 
 # start_date: 197901010000
 start_date: 201401010000
-end_date: 202012310000
+end_date: 201401020000
 start_date_val: 202101010000
-end_date_val: 202201010000
+end_date_val: 202101020000
 len_hrs: 6
 step_hrs: 6
 input_window_steps: 1
