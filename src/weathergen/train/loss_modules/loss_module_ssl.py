@@ -58,7 +58,6 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         source_target_matching_idxs, output_info, target_source_matching_idxs, target_info = (
             metadata
         )
-        import pdb; pdb.set_trace()
         for name, (weight, loss_fn, extra_args) in self.losses.items():
             preds_for_loss = gather_preds_for_loss(name, preds, output_info)
             targets_for_loss = gather_targets_for_loss(name, targets, target_info)
@@ -133,13 +132,13 @@ def gather_preds_for_loss(name, preds, metadata):
                 [
                     p.latent[name]
                     for p, info in zip(preds, metadata, strict=False)
-                    # TODO filter for loss if info.strategy == "masking"
+                    if info.params["loss"] == "jepa"
                 ],
                 dim=0,
             )[:2],
             # TODO remove the [:, :2049]
             "student_masks": torch.stack(
-                [info["ERA5"].mask.to("cuda")[:2049] for info in metadata], dim=0
+                [info.mask.to("cuda")[:2049] for info in metadata], dim=0
             ).unsqueeze(1)[:2],
         }
     elif name == "iBOT":
@@ -154,19 +153,19 @@ def gather_preds_for_loss(name, preds, metadata):
                 [
                     p.latent[name]
                     for p, info in zip(preds, metadata, strict=False)
-                    # TODO filter for loss if info.strategy == "masking"
+                    if info.params["loss"] == "ibot"
                 ],
                 dim=0,
             )[:2],
             # TODO remove the [:, :2049]
             "student_masks": torch.stack(
-                [info["ERA5"].mask.to("cuda")[:2049] for info in metadata], dim=0
+                [info.mask.to("cuda")[:2049] for info in metadata], dim=0
             ).unsqueeze(1)[:2],
             "student_class_masked": torch.stack(
                 [
                     p.latent[name]
                     for p, info in zip(preds, metadata, strict=False)
-                    # TODO filter for loss if info.strategy == "masking"
+                    if info.params["loss"] == "ibot"
                 ],
                 dim=0,
             )[:2, :, :2],
@@ -177,7 +176,7 @@ def gather_preds_for_loss(name, preds, metadata):
                 [
                     p.latent[name]
                     for p, info in zip(preds, metadata, strict=False)
-                    # TODO if info.strategy == "cropping"
+                    if info.params["loss"] == "dino"
                 ],
                 dim=0,
             )[2:],
@@ -185,7 +184,7 @@ def gather_preds_for_loss(name, preds, metadata):
                 [
                     p.latent[name]
                     for p, info in zip(preds, metadata, strict=False)
-                    # if info.strategy == "pure"
+                    if info.params["loss"] == "dino"
                 ],
                 dim=0,
             )[:2],

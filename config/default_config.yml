@@ -134,12 +134,12 @@ training_config:
       #                       }
       # relationship: "independent" #, "subset", "disjoint". Relationship of student views to teacher view.
       relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-      loss : iBOT
+      loss : ibot
     - masking_strategy: "cropping"
       num_samples: 2  # if student-teacher, the number of local (student) views to generate
       masking_strategy_config : { diffusion_rn : True, rate : 0.4 }
       relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-      loss : DINO
+      loss : dino
 
   # target_input:
   #   - masking_strategy: "cropping"  # Strategy for teacher (global) view: "random", "healpix"
