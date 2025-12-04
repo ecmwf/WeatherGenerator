@@ -82,27 +82,6 @@ class Sample:
         """
         return np.all(np.array([s.empty() for _, s in self.streams_data.items()]))
 
-    def to_device(self, device) -> None:
-        if self.source_cell_lens is not None:
-            # iterate over forecast steps
-            self.source_cell_lens = [t.to(device) for t in self.source_cell_lens]
-
-        if self.target_coords_idx is not None:
-            target_coords_idx_new = {}
-            for k, v in self.target_coords_idx.items():
-                # iterate over forecast steps
-                target_coords_idx_new[k] = [vv.to(device) for vv in v]
-            self.target_coords_idx = target_coords_idx_new
-
-        for key in self.meta_info.keys():
-            self.meta_info[key].mask = (
-                self.meta_info[key].mask.to(device) if self.meta_info[key].mask else None
-            )
-
-        for key, val in self.streams_data.items():
-            if val is not None:
-                self.streams_data[key] = val.to_device(device)
-
     def add_stream_data(self, stream_name: str, stream_data: StreamData) -> None:
         """
         Add data for stream @stream_name to sample
