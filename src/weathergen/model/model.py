@@ -479,8 +479,8 @@ class Model(torch.nn.Module):
             )
         
         self.norm = nn.LayerNorm(self.q_cells.size(-1))
-        self.class_tokens = 4    # cf.latent_state_class_tokens
-        self.register_tokens = 10 # cf.latent_state_register_tokens
+        self.num_class_tokens = cf.num_class_tokens
+        self.num_register_tokens = cf.num_register_tokens
 
         return self
 
@@ -629,7 +629,7 @@ class Model(torch.nn.Module):
                 self.predict(
                     model_params,
                     fstep,
-                    tokens[:, self.class_tokens + self.register_tokens :],
+                    tokens[:, self.num_class_tokens + self.num_register_tokens :],
                     streams_data,
                     target_coords_idxs,
                 )
@@ -648,7 +648,7 @@ class Model(torch.nn.Module):
             self.predict(
                 model_params,
                 forecast_offset + forecast_steps,
-                tokens[:, self.class_tokens + self.register_tokens :],
+                tokens[:, self.num_class_tokens + self.num_register_tokens :],
                 streams_data,
                 target_coords_idxs,
             )
@@ -659,9 +659,9 @@ class Model(torch.nn.Module):
         z = self.norm(z_pre_norm)
 
         latent_state = LatentState(
-            class_token=z[:, : self.class_tokens],
-            register_tokens=z[:, self.class_tokens : self.class_tokens + self.register_tokens],
-            patch_tokens=z[:, self.class_tokens + self.register_tokens :],
+            class_tokens=z[:, : self.num_class_tokens],
+            register_tokens=z[:, self.num_class_tokens : self.num_class_tokens + self.num_register_tokens],
+            patch_tokens=z[:, self.num_class_tokens + self.num_register_tokens :],
             z_pre_norm=z_pre_norm,
         )
 
@@ -817,10 +817,10 @@ class Model(torch.nn.Module):
 
         # add additional global tokens class and register
         tokens_global_class = (
-                self.q_cells.repeat(batch_size, self.class_tokens, 1)
+                self.q_cells.repeat(batch_size, self.num_class_tokens, 1)
             )
         tokens_global_register = (
-                self.q_cells.repeat(batch_size, self.register_tokens, 1)
+                self.q_cells.repeat(batch_size, self.num_register_tokens, 1)
             )
 
         # concatenate all global tokens
