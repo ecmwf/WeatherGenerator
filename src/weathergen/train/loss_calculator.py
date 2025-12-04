@@ -9,29 +9,20 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import dataclasses
 import logging
+from collections import defaultdict
 
 import torch
 from omegaconf import DictConfig
 
 import weathergen.train.loss_modules as LossModules
 from weathergen.model.model import ModelOutput
-from weathergen.train.loss_modules.loss_module_base import LossValues
 from weathergen.train.target_and_aux_module_base import TargetAuxOutput
+from weathergen.train.utils import flatten_dictionary
+from weathergen.utils.distributed import ddp_average
 from weathergen.utils.train_logger import TRAIN, Stage
 
 _logger = logging.getLogger(__name__)
-
-
-@dataclasses.dataclass
-class LossTerms:
-    """
-    A dataclass which combines the LossValues of all loss modules
-    """
-
-    # Dictionary containing the LossValues of each loss module.
-    loss_terms: dict[str, LossValues]
 
 
 class LossCalculator:
@@ -63,6 +54,9 @@ class LossCalculator:
         self.cf = cf
         self.stage = stage
         self.device = device
+        self.loss_hist = []
+        self.losses_unweighted_hist = []
+        self.stddev_unweighted_hist = []
 
         calculator_configs = (
             cf.training_mode_config.losses if stage == TRAIN else cf.validation_mode_config.losses
@@ -76,15 +70,51 @@ class LossCalculator:
             for (Cls, config) in calculator_configs
         ]
 
+    def _prepare_losses_for_logging(
+        self,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        """
+        Aggregates across ranks loss and standard deviation data for logging.
+
+        Returns:
+            real_loss (torch.Tensor): The scalar loss used for backpropagation.
+            losses_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
+                per-channel loss tensor.
+            stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
+                per-channel standard deviation tensor.
+        """
+
+        real_loss = [ddp_average(loss).item() for loss in self.loss_hist]
+
+        losses_all = defaultdict(list)
+        stddev_all = defaultdict(list)
+
+        for d in self.losses_unweighted_hist:
+            for key, value in flatten_dictionary(d).items():
+                losses_all[key].append(ddp_average(value).item())
+
+        return real_loss, losses_all, stddev_all
+
     def compute_loss(
         self,
         preds: ModelOutput,
         targets: TargetAuxOutput,
     ):
-        loss_terms = {}
+        losses_all = defaultdict(dict)
+        stddev_all = defaultdict(dict)
         loss = torch.tensor(0.0, requires_grad=True)
-        for weight, calculator in self.loss_calculators:
-            loss_terms[calculator.name] = calculator.compute_loss(preds=preds, targets=targets)
-            loss = loss + weight * loss_terms[calculator.name].loss
 
-        return loss, LossTerms(loss_terms=loss_terms)
+        for weight, calculator in self.loss_calculators:
+            loss_values = calculator.compute_loss(preds=preds, targets=targets)
+            loss = loss + weight * loss_values.loss
+            losses_all[calculator.name] = loss_values.losses_all
+            stddev_all[calculator.name] = loss_values.stddev_all
+
+        # Keep histories for logging
+        self.loss_hist += [
+            loss.detach()
+        ]  # NOTE: It was loss_values.loss.item() but what does item() do in multi-gpu case?
+        self.losses_unweighted_hist += [losses_all]
+        self.stddev_unweighted_hist += [stddev_all]
+
+        return loss
