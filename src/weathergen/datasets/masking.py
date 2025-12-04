@@ -1,5 +1,4 @@
 import logging
-from dataclasses import dataclass
 
 import numpy as np
 import torch
@@ -13,13 +12,6 @@ _logger = logging.getLogger(__name__)
 # Convert to torch.bool
 def to_bool_tensor(arr):
     return torch.from_numpy(np.asarray(arr)).to(torch.bool)
-
-
-@dataclass
-class MaskingStrategy:
-    strategy: str
-    config: dict
-    num_samples: int
 
 
 class Masker:
@@ -347,67 +339,56 @@ class Masker:
         return full_mask
 
     def build_samples_for_stream(
-        self,
-        training_mode: str,
-        num_cells: int,
-        target_cfg: dict,
-        source_cfg: dict,
+        self, training_mode: str, num_cells: int, training_cfg: dict
     ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
         """
         Construct teacher/student keep masks for a stream.
         SampleMetaData is currently just a dict with the masking params used.
         """
 
-        # get source and target configs; target defaults to source config
+        target_cfgs = training_cfg.get("target_input", [])
+        source_cfgs = training_cfg.get("model_input", [])
 
-        source_num_samples = source_cfg.get("num_samples", 1)
-        source_strategy = source_cfg.get("masking_strategy", source_cfg.get("strategy", "random"))
-        source_masking_params = source_cfg.get("masking_strategy_config", {})
-        relationship = source_cfg.get("relationship", "complement")
-
-        if target_cfg is not None:
-            target_num_samples = target_cfg.get("num_samples", 1)
-            target_strategy = target_cfg.get("strategy", "random")
-            target_masking_params = target_cfg.get("masking_strategy_config", {})
-        else:
-            target_strategy = source_strategy
-            target_num_samples = source_num_samples
-            target_masking_params = source_masking_params
-
-        assert source_num_samples % target_num_samples == 0, (
-            "number of source samples has to be multiple of target samples"
-        )
-
-        # translate settings into sampling masks
+        # target and source are assumed identical when target is not specified
+        if len(target_cfgs) == 0:
+            target_cfgs = source_cfgs
 
         # iterate over all target samples
         target_masks: list[np.typing.NDArray] = []
         target_metadata: list[SampleMetaData] = []
-        for _ in range(target_num_samples):
-            target_mask, mask_params = self._get_mask(
-                num_cells=num_cells,
-                strategy=target_strategy,
-                target_mask=None,
-                masking_strategy_config=target_masking_params,
-            )
-            target_masks += [target_mask]
-            target_metadata += [SampleMetaData(params={**target_cfg, **mask_params})]
+        # different strategies
+        for target_cfg in target_cfgs:
+            # different samples/view per strategy
+            for _ in range(target_cfg.get("num_samples", 1)):
+                target_mask, mask_params = self._get_mask(
+                    num_cells=num_cells,
+                    strategy=target_cfg.get("strategy"),
+                    target_mask=None,
+                    masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
+                )
+                target_masks += [target_mask]
+                target_metadata += [SampleMetaData(params={**target_cfg, **mask_params})]
 
         # iterate over all source samples
         source_masks: list[np.typing.NDArray] = []
         source_metadata: list[SampleMetaData] = []
-        source_target_mapping = np.zeros(source_num_samples, dtype=np.int32)
-        for it in range(source_num_samples):
-            source_mask, mask_params = self._get_mask(
-                num_cells=num_cells,
-                strategy=source_strategy,
-                masking_strategy_config=source_masking_params,
-                target_mask=target_masks[it % target_num_samples],
-                relationship=relationship,
-            )
-            source_masks += [source_mask]
-            source_metadata += [SampleMetaData(params={**target_cfg, **mask_params})]
-            source_target_mapping[it] = it % target_num_samples
+        source_target_mapping = []
+        # different strategies
+        for i_source, source_cfg in enumerate(source_cfgs):
+            # samples per strategy
+            for _ in range(source_cfg.get("num_samples", 1)):
+                source_mask, mask_params = self._get_mask(
+                    num_cells=num_cells,
+                    strategy=source_cfg.get("strategy"),
+                    masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
+                    target_mask=target_masks[i_source],
+                    relationship=source_cfg.get("relationship", "independent"),
+                )
+                source_masks += [source_mask]
+                source_metadata += [SampleMetaData(params={**target_cfg, **mask_params})]
+                source_target_mapping += [i_source]
+
+        source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
 
         return (
             (target_masks, target_metadata),
@@ -525,7 +506,7 @@ class Masker:
         elif "forecast" in strat or strat == "causal":
             mask = np.ones(num_cells, dtype=np.bool)
 
-            if "diffusion" in masking_strategy_config:
+            if "diffusion_rn" in masking_strategy_config:
                 masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)
 
         elif strat == "healpix":
