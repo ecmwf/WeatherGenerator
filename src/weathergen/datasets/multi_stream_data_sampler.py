@@ -188,6 +188,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         index_range = self.time_window_handler.get_index_range()
         self.len = int(index_range.end - index_range.start)
+
+        # check the repeat data flag and adjust len accordingly
         if not self.repeat_data:
             self.len = min(self.len, samples_per_mini_epoch if samples_per_mini_epoch else self.len)
         else:
@@ -283,6 +285,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         assert idx_end > 0, "dataset size too small for forecast range"
         self.perms = np.arange(index_range.start, idx_end)
+
+        # check repeat_data flag and fill up perms accordingly
         if self.repeat_data and len(self.perms) < self.samples_per_mini_epoch:
             if self.samples_per_mini_epoch % len(self.perms) == 0:
                 self.perms = np.tile(

@@ -75,10 +75,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         ds: Dataset = anemoi_datasets.open_dataset(
             ds0, **kwargs, start=tw_handler.t_start, end=tw_handler.t_end
         )
-        if len(ds.dates) != 1:
-            period = np.timedelta64(ds.frequency)
-        else:
-            period = np.timedelta64(0, "s")
+        period = np.timedelta64(ds.frequency)
         data_start_time = ds.dates[0]
         data_end_time = ds.dates[-1]
         assert data_start_time is not None and data_end_time is not None, (
