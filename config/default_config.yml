@@ -31,6 +31,14 @@ ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 
+ae_aggregation_num_blocks: 2
+ae_aggregation_num_heads: 32
+ae_aggregation_dropout_rate: 0.1
+ae_aggregation_with_qk_lnorm: True
+ae_aggregation_att_dense_rate: 1.0
+ae_aggregation_block_factor: 64
+ae_aggregation_mlp_hidden_factor: 2
+
 decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
 pred_adapter_kv: False
 pred_self_attention: True
@@ -121,17 +129,17 @@ training_config:
   model_input:
     masking_strategy: "healpix" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
     rate: 0.4  # Masking rate to use for model input
-    num_views: 1  # if student-teacher, the number of local (student) views to generate
+    num_samples: 1  # if student-teacher, the number of local (student) views to generate
     hl_mask : 4  # healpix level to use for healpix masking strategy
-    relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+    relationship: "complement"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
   
-  teacher_model_input:
-    strategy: "healpix"  # Strategy for teacher (global) view: "random", "healpix"
-    rate: 0.4  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
-    num_views: 1 # number of teacher views to generate
-    hl_mask : 0 # healpix level to use for healpix masking strategy
-    # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
-    rate_sampling: true  # randomly sample the rate per batch
+  # target_input:
+    # strategy: "healpix"  # Strategy for teacher (global) view: "random", "healpix"
+    # rate: 0.4  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
+    # num_samples: 1 # number of teacher views to generate
+    # hl_mask : 0 # healpix level to use for healpix masking strategy
+    # # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
+    # rate_sampling: true  # randomly sample the rate per batch
 
 
 

@@ -16,6 +16,7 @@ from weathergen.model.engines import (
     GlobalAssimilationEngine,
     Local2GlobalAssimilationEngine,
     LocalAssimilationEngine,
+    QueryAggregationEngine,
 )
 
 # from weathergen.model.model import ModelParams
@@ -46,6 +47,13 @@ class EncoderModule(torch.nn.Module):
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
 
+        self.ae_aggregation_engine: QueryAggregationEngine | None = None
+        self.ae_global_engine: GlobalAssimilationEngine | None = None
+        self.ae_local_engine: LocalAssimilationEngine | None = None
+        self.ae_local_global_engine: Local2GlobalAssimilationEngine | None = None
+        self.embed_engine: EmbeddingEngine | None = None
+        self.interpolate_latents: LatentInterpolator | None = None
+
         ##############
         # embedding engine
         # determine stream names once so downstream components use consistent keys
@@ -57,12 +65,12 @@ class EncoderModule(torch.nn.Module):
         # local assimilation engine
         self.ae_local_engine = LocalAssimilationEngine(cf)
 
-        if self.cf.latent_noise_kl_weight > 0.0:
+        if cf.latent_noise_kl_weight > 0.0:
             self.interpolate_latents = LatentInterpolator(
-                gamma=self.cf.latent_noise_gamma,
-                dim=self.cf.ae_local_dim_embed,
-                use_additive_noise=self.cf.latent_noise_use_additive_noise,
-                deterministic=self.cf.latent_noise_deterministic_latents,
+                gamma=cf.latent_noise_gamma,
+                dim=cf.ae_local_dim_embed,
+                use_additive_noise=cf.latent_noise_use_additive_noise,
+                deterministic=cf.latent_noise_deterministic_latents,
             )
 
         ##############
@@ -71,37 +79,35 @@ class EncoderModule(torch.nn.Module):
 
         ##############
         # learnable queries
-        if self.cf.ae_local_queries_per_cell:
-            s = (self.num_healpix_cells, self.cf.ae_local_num_queries, self.cf.ae_global_dim_embed)
-            q_cells = torch.rand(s, requires_grad=True) / self.cf.ae_global_dim_embed
+        if cf.ae_local_queries_per_cell:
+            s = (self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed)
+            q_cells = torch.rand(s, requires_grad=True) / cf.ae_global_dim_embed
             # add meta data
             q_cells[:, :, -8:-6] = (
                 (torch.arange(self.num_healpix_cells) / self.num_healpix_cells)
                 .unsqueeze(1)
                 .unsqueeze(1)
-                .repeat((1, self.cf.ae_local_num_queries, 2))
+                .repeat((1, cf.ae_local_num_queries, 2))
             )
             theta, phi = healpy.pix2ang(
                 nside=2**self.healpix_level, ipix=torch.arange(self.num_healpix_cells)
             )
             q_cells[:, :, -6:-3] = (
-                torch.cos(theta)
-                .unsqueeze(1)
-                .unsqueeze(1)
-                .repeat((1, self.cf.ae_local_num_queries, 3))
+                torch.cos(theta).unsqueeze(1).unsqueeze(1).repeat((1, cf.ae_local_num_queries, 3))
             )
             q_cells[:, :, -3:] = (
-                torch.sin(phi)
-                .unsqueeze(1)
-                .unsqueeze(1)
-                .repeat((1, self.cf.ae_local_num_queries, 3))
+                torch.sin(phi).unsqueeze(1).unsqueeze(1).repeat((1, cf.ae_local_num_queries, 3))
             )
-            q_cells[:, :, -9] = torch.arange(self.cf.ae_local_num_queries)
-            q_cells[:, :, -10] = torch.arange(self.cf.ae_local_num_queries)
+            q_cells[:, :, -9] = torch.arange(cf.ae_local_num_queries)
+            q_cells[:, :, -10] = torch.arange(cf.ae_local_num_queries)
         else:
-            s = (1, self.cf.ae_local_num_queries, self.cf.ae_global_dim_embed)
-            q_cells = torch.rand(s, requires_grad=True) / self.cf.ae_global_dim_embed
+            s = (1, cf.ae_local_num_queries, cf.ae_global_dim_embed)
+            q_cells = torch.rand(s, requires_grad=True) / cf.ae_global_dim_embed
         self.q_cells = torch.nn.Parameter(q_cells, requires_grad=True)
+
+        ##############
+        # query aggregation engine
+        self.ae_aggregation_engine = QueryAggregationEngine(cf, self.num_healpix_cells)
 
         ##############
         # global assimilation engine
@@ -119,7 +125,9 @@ class EncoderModule(torch.nn.Module):
         return tokens, posteriors
 
     #########################################
-    def embed_cells(self, model_params, streams_data, source_cell_lens) -> torch.Tensor:
+    def embed_cells(
+        self, model_params, streams_data, source_cell_lens
+    ) -> torch.Tensor:
         """Embeds input data for each stream separately and rearranges it to cell-wise order
         Args:
             model_params : Query and embedding parameters
@@ -195,7 +203,7 @@ class EncoderModule(torch.nn.Module):
 
         cell_lens = cell_lens[istep][1:]
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
-        tokens_global_all = []
+        tokens_global_unmasked_all = []
         posteriors = []
         zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
         for i in range((cell_lens.shape[0]) // clen):
@@ -211,10 +219,6 @@ class EncoderModule(torch.nn.Module):
             cell_lens_c = torch.cat([zero_pad, cell_lens[i * clen : i_end]])
             q_cells_lens_c = q_cells_lens[: cell_lens_c.shape[0]]
 
-            if l0 == l1 or tokens_c.shape[0] == 0:
-                tokens_global_all += [tokens_global_c]
-                continue
-
             # local assimilation model
             tokens_c = self.ae_local_engine(tokens_c, cell_lens_c, use_reentrant=False)
 
@@ -226,13 +230,44 @@ class EncoderModule(torch.nn.Module):
             else:
                 tokens_c, posteriors = tokens_c, 0.0
 
-            tokens_global_c = self.ae_local_global_engine(
-                tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant=False
+            # create mask for global tokens, without first element (used for padding)
+            mask_c = cell_lens_c[1:].to(torch.bool)
+            tokens_global_unmasked_c = tokens_global_c[mask_c]
+            q_cells_lens_unmasked_c = torch.cat([zero_pad, q_cells_lens_c[1:][mask_c]])
+            cell_lens_unmasked_c = torch.cat([zero_pad, cell_lens_c[1:][mask_c]])
+
+            if l0 == l1 or tokens_c.shape[0] == 0:
+                tokens_global_unmasked_all += [tokens_global_unmasked_c]
+                continue
+
+            # local to global adapter engine
+            tokens_global_unmasked_c = self.ae_local_global_engine(
+                tokens_c,
+                tokens_global_unmasked_c,
+                q_cells_lens_unmasked_c,
+                cell_lens_unmasked_c,
+                use_reentrant=False,
             )
 
-            tokens_global_all += [tokens_global_c]
+            tokens_global_unmasked_all += [tokens_global_unmasked_c]
 
-        tokens_global = torch.cat(tokens_global_all)
+        tokens_global_unmasked = torch.cat(tokens_global_unmasked_all)
+
+        # query aggregation engine on the query tokens in unmasked cells
+        # (applying this here assumes batch_size=1)
+        # permute to use ae_local_num_queries as the batchsize and no_of_tokens
+        # as seq len for flash attention
+        tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
+        tokens_global_unmasked = self.ae_aggregation_engine(
+            tokens_global_unmasked, use_reentrant=False
+        )
+        tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
+
+        # create mask from cell lens
+        mask = cell_lens.to(torch.bool)
+
+        # fill empty tensor using mask for positions of unmasked tokens
+        tokens_global[mask] = tokens_global_unmasked.to(tokens_global.dtype)
 
         # recover batch dimension and build global token list
         tokens_global = (

@@ -215,6 +215,10 @@ class Model(torch.nn.Module):
     ae_adapter: Assimilation engine adapter: Adapter to transform local assimilation engine
         information to the global assimilation engine.
 
+    ae_aggregation_blocks: Query aggregation engine: after the learnable queries are created per
+        non-masked healpix cell, this engine combines information from all non-masked cells by
+        using dense attention layers.
+
     ae_global_blocks: Global assimilation engine: Transformer network alternating between local and
         global attention based upon global attention density rate.
 
@@ -258,6 +262,15 @@ class Model(torch.nn.Module):
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
+
+
+        self.embed_target_coords = None
+        self.forecast_engine: ForecastingEngine | None = None
+        self.pred_adapter_kv = None
+        self.pred_heads = None
+        self.q_cells: torch.Tensor | None = None
+        self.stream_names: list[str] = None
+        self.target_token_engines = None
 
     #########################################
     def create(self) -> "Model":
@@ -431,6 +444,10 @@ class Model(torch.nn.Module):
         )
         num_params_ae_adapater = get_num_parameters(self.encoder.ae_local_global_engine.ae_adapter)
 
+        num_params_ae_aggregation = get_num_parameters(
+            self.encoder.ae_aggregation_engine.ae_aggregation_blocks
+        )
+
         num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
         num_params_pred_adapter = [
@@ -455,6 +472,7 @@ class Model(torch.nn.Module):
         print(f" Local assimilation engine: {num_params_ae_local:,}")
         print(f" Local-global adapter: {num_params_ae_adapater:,}")
         print(f" Learnable queries: {num_params_q_cells:,}")
+        print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")
         print(f" Forecast engine: {num_params_fe:,}")
         print(" kv-adapter, coordinate embedding, prediction networks and prediction heads:")
@@ -534,7 +552,6 @@ class Model(torch.nn.Module):
         Returns:
             A list containing all prediction results
         """
-
         (streams_data, source_cell_lens, target_coords_idxs) = batch
 
         tokens, posteriors = self.encoder(model_params, streams_data, source_cell_lens)
@@ -567,7 +584,8 @@ class Model(torch.nn.Module):
                 model_params,
                 forecast_offset + forecast_steps,
                 tokens,
-                streams_data,
+                # TODO We add the batch dimension back and thus wrap stream_data in a list
+                [streams_data],
                 target_coords_idxs,
             )
         ]
@@ -612,6 +630,7 @@ class Model(torch.nn.Module):
             fstep : Number of forecast steps
             tokens : Tokens from global assimilation engine
             streams_data : Used to initialize target coordinates tokens and index information
+                List of StreamData len(streams_data) == batch_size_per_gpu
             target_coords_idxs : Indices of target coordinates
         Returns:
             Prediction output tokens in physical representation for each target_coords.
@@ -622,13 +641,12 @@ class Model(torch.nn.Module):
         )
 
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
-        tokens_stream = (tokens.reshape(s) + model_params.pe_global).flatten(0, 1)
+        tokens_stream = tokens.reshape(s).flatten(0, 1)
         tokens_stream = tokens_stream[model_params.hp_nbours.flatten()].flatten(0, 1)
 
         # pair with tokens from assimilation engine to obtain target tokens
         preds_tokens = []
-        for idx, stream_name in enumerate(self.stream_names):
-            si = self.cf.streams[idx]
+        for stream_name in self.stream_names:
             tte = self.target_token_engines[stream_name]
             tte_kv = self.pred_adapter_kv[stream_name]
             tc_embed = self.embed_target_coords[stream_name]
@@ -642,18 +660,18 @@ class Model(torch.nn.Module):
                 [
                     checkpoint(
                         tc_embed,
-                        streams_data[i_b][idx].target_coords[fstep],
+                        streams_data[i_b][stream_name].target_coords[fstep],
                         use_reentrant=False,
                     )
-                    if len(streams_data[i_b][idx].target_coords[fstep].shape) > 1
-                    else streams_data[i_b][idx].target_coords[fstep]
-                    for i_b in range(len(streams_data))
+                    if len(streams_data[i_b][stream_name].target_coords[fstep].shape) > 1
+                    else streams_data[i_b][stream_name].target_coords[fstep]
+                    for i_b in range(len(streams_data))  # i_b is the index over the batch dimension
                 ]
             )
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
-                nn = si["name"]
+                nn = stream_name
                 if is_root():
                     logger.warning(
                         (
@@ -674,10 +692,13 @@ class Model(torch.nn.Module):
             assert isinstance(tte_kv, torch.nn.Identity)
 
             # lens for varlen attention
-            tcs_lens = target_coords_idxs[idx][fstep]
+            tcs_lens = target_coords_idxs[stream_name][fstep]
             # coord information for learnable layer norm
             tcs_aux = torch.cat(
-                [streams_data[i_b][idx].target_coords[fstep] for i_b in range(len(streams_data))]
+                [
+                    streams_data[i_b][stream_name].target_coords[fstep]
+                    for i_b in range(len(streams_data))
+                ]
             )
 
             tc_tokens = tte(

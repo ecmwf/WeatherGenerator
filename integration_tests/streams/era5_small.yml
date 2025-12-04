@@ -9,6 +9,7 @@
 
 ERA5 :
   type : anemoi
+  stream_id: 0
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
   loss_weight : 1.
   source_exclude : ['w_', 'skt', 'sp', 'tcw', 'cp', 'tp']
