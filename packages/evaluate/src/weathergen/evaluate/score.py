@@ -262,7 +262,7 @@ class Scores:
             self._agg_dims = list(data.prediction.dims)
         else:
             # Check if _agg_dims is in prediction data
-            for dim in self._agg_dims_in:
+            for dim in self._agg_dims:
                 if dim not in data.prediction.dims:
                     raise ValueError(
                         f"Average dimension '{dim}' not found in prediction data "
