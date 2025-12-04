@@ -157,10 +157,15 @@ class StreamData:
         # TODO: use step
         self.source_raw += [ss_raw]
         self.source_tokens_lens += [ss_lens]
-        self.source_tokens_cells += [torch.stack(ss_cells)]
 
-        idx = torch.isnan(self.source_tokens_cells[-1])
-        self.source_tokens_cells[-1][idx] = self.mask_value
+        # Handle empty source (e.g., forecast mode where all tokens go to target)
+        if len(ss_cells) > 0:
+            self.source_tokens_cells += [torch.stack(ss_cells)]
+            idx = torch.isnan(self.source_tokens_cells[-1])
+            self.source_tokens_cells[-1][idx] = self.mask_value
+        else:
+            # Create an empty tensor with the correct dtype
+            self.source_tokens_cells += [torch.tensor([], dtype=torch.float32)]
 
     def add_target(
         self,
