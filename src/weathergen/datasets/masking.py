@@ -381,7 +381,7 @@ class Masker:
                     num_cells=num_cells,
                     strategy=source_cfg.get("masking_strategy"),
                     masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
-                    target_mask=target_masks[i_source],
+                    target_mask=target_masks[i_source % len(target_masks)],
                     relationship=source_cfg.get("relationship", "independent"),
                 )
                 source_masks += [source_mask]
