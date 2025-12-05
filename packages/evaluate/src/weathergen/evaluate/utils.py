@@ -267,7 +267,7 @@ def _plot_score_maps_per_stream(
 
     for metric in plot_metrics.coords["metric"].values:
         for ens_val in tqdm(ens_values, f"Plotting metric - {metric}"):
-            tag = f"score_maps_{region}_{metric}_fstep_{fstep}" + (
+            tag = f"score_maps_{metric}_fstep_{fstep}" + (
                 f"_ens_{ens_val}" if ens_val is not None else ""
             )
             for channel in plot_metrics.coords["channel"].values:
@@ -279,7 +279,7 @@ def _plot_score_maps_per_stream(
                 title = f"{metric} - {channel}: fstep {fstep}" + (
                     f", ens {ens_val}" if ens_val is not None else ""
                 )
-                plotter.scatter_plot(data, map_dir, channel, tag=tag, title=title)
+                plotter.scatter_plot(data, map_dir, channel, region, tag=tag, title=title)
 
 
 def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
@@ -319,9 +319,9 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
         "fps": global_plotting_opts.get("fps", 2),
+        "regions": global_plotting_opts.get("regions", ["global"]),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
     }
-
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
 
     available_data = reader.check_availability(stream, mode="plotting")
