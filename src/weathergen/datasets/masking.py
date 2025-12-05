@@ -52,7 +52,6 @@ class Masker:
         # self.current_strategy = cf.masking_strategy  # Current strategy in use
         # self.masking_rate_sampling = cf.masking_rate_sampling
         # # masking_strategy_config is a dictionary that can hold any additional parameters
-        # self.healpix_level_data = cf.healpix_level
         # self.masking_strategy_config = cf.get("masking_strategy_config", {})
         # self.perm_sel = None
         # self.mask_tokens = None
@@ -62,6 +61,7 @@ class Masker:
         self.dim_time_enc = 6
 
         # number of healpix cells
+        self.healpix_level_data = cf.healpix_level
         self.healpix_num_cells = 12 * (4**cf.healpix_level)
 
     # # Per-batch strategy tracking
