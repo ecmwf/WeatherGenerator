@@ -124,7 +124,7 @@ training_config:
   training_mode: "masking"  # "masking", "student_teacher", "forecast"
 
   model_input:
-    - masking_strategy: "forecast" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
+    - masking_strategy: "random" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
       num_samples: 1  # if student-teacher, the number of local (student) views to generate
       masking_strategy_config : { diffusion_rn : True, rate : 0.4 }
       # masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
@@ -133,34 +133,65 @@ training_config:
       #                       "same_strategy_per_batch": false
       #                       }
       # relationship: "independent" #, "subset", "disjoint". Relationship of student views to teacher view.
-      relationship: "indepenendent"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+      relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+      # loss : ibot
       loss :
         training :
           - LossPhysical: {weight: 0.7, loss_fcts: [['mse', 0.8], ['mae', 0.2]]}
         validation :
           - LossPhysical: {weight: 1.0, loss_fcts: [['mse', 0.8]]}
     - masking_strategy: "random"
-      num_samples: 1  # if student-teacher, the number of local (student) views to generate
+      num_samples: 2  # if student-teacher, the number of local (student) views to generate
       masking_strategy_config : { diffusion_rn : True, rate : 0.4 }
-      relationship: "complement"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+      relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+      # loss : dino
       loss :
         training :
           - LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]}
 
   target_input:
-    - masking_strategy: "random"
-      num_samples: 1  # if student-teacher, the number of local (student) views to generate
-      masking_strategy_config : { rate : 0.4 }
-    - masking_strategy: "random"
-      num_samples: 1  # if student-teacher, the number of local (student) views to generate
-      masking_strategy_config : { rate : 0.4 }
+    - masking_strategy: "random"  # Strategy for teacher (global) view: "random", "healpix"
+      num_samples: 1 # number of teacher views to generate
+      masking_strategy_config : { diffusion_rn : True, rate : 0.4, rate_sampling: true }
+
+  # model_input:
+  #   - masking_strategy: "forecast" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
+  #     num_samples: 1  # if student-teacher, the number of local (student) views to generate
+  #     masking_strategy_config : { diffusion_rn : True, rate : 0.4 }
+  #     # masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
+  #     #                       "probabilities": [0.34, 0.33, 0.33],
+  #     #                       "hl_mask": 3, "mode": "per_cell",
+  #     #                       "same_strategy_per_batch": false
+  #     #                       }
+  #     # relationship: "independent" #, "subset", "disjoint". Relationship of student views to teacher view.
+  #     relationship: "indepenendent"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+  #     loss :
+  #       training :
+  #         - LossPhysical: {weight: 0.7, loss_fcts: [['mse', 0.8], ['mae', 0.2]]}
+  #       validation :
+  #         - LossPhysical: {weight: 1.0, loss_fcts: [['mse', 0.8]]}
+  #   - masking_strategy: "random"
+  #     num_samples: 1  # if student-teacher, the number of local (student) views to generate
+  #     masking_strategy_config : { diffusion_rn : True, rate : 0.4 }
+  #     relationship: "complement"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+  #     loss :
+  #       training :
+  #         - LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]}
+
+  # target_input:
+  #   - masking_strategy: "random"
+  #     num_samples: 1  # if student-teacher, the number of local (student) views to generate
+  #     masking_strategy_config : { rate : 0.4 }
+  #   - masking_strategy: "random"
+  #     num_samples: 1  # if student-teacher, the number of local (student) views to generate
+  #     masking_strategy_config : { rate : 0.4 }
    
-    # masking_strategy: "cropping"  # Strategy for teacher (global) view: "random", "healpix"
-    # rate: 0.1  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
-    # num_samples: 2 # number of teacher views to generate
-    # hl_mask : 0 # healpix level to use for healpix masking strategy
-    # # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
-    # rate_sampling: true  # randomly sample the rate per batch
+  #   # masking_strategy: "cropping"  # Strategy for teacher (global) view: "random", "healpix"
+  #   # rate: 0.1  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
+  #   # num_samples: 2 # number of teacher views to generate
+  #   # hl_mask : 0 # healpix level to use for healpix masking strategy
+  #   # # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
+  #   # rate_sampling: true  # randomly sample the rate per batch
 
 num_mini_epochs: 32
 samples_per_mini_epoch: 64 #4096
