@@ -18,26 +18,6 @@ _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
 
-def to_list(obj: Any) -> list:
-    """
-    Convert given object to list if obj is not already a list. Sets are also transformed to a list.
-
-    Parameters
-    ----------
-    obj : Any
-        The object to transform into a list.
-    Returns
-    -------
-    list
-        A list containing the object, or the object itself if it was already a list.
-    """
-    if isinstance(obj, set | tuple | ListConfig):
-        obj = list(obj)
-    elif not isinstance(obj, list):
-        obj = [obj]
-    return obj
-
-
 class RegionLibrary:
     """
     Predefined bounding boxes for known regions.

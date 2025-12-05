@@ -24,9 +24,10 @@ from omegaconf import DictConfig, OmegaConf
 from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
 from weathergen.common.platform_env import get_platform_env
-from weathergen.evaluate.io_reader import CsvReader, WeatherGenReader
-from weathergen.evaluate.plot_utils import collect_channels
-from weathergen.evaluate.utils import (
+from weathergen.evaluate.io.wegen_reader import WeatherGenReader
+from weathergen.evaluate.io.csv_reader import CsvReader
+from weathergen.evaluate.plotting.plot_utils import collect_channels
+from weathergen.evaluate.utils.utils import (
     calc_scores_per_stream,
     plot_data,
     plot_summary,
