@@ -7,22 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import json
+# Standard library
 import logging
 import re
 from dataclasses import dataclass
-from pathlib import Path
 
-import numpy as np
-import omegaconf as oc
-import pandas as pd
+# Third-party
 import xarray as xr
-from tqdm import tqdm
-
-from weathergen.common.config import get_shared_wg_path, load_config, load_model_config
-from weathergen.common.io import ZarrIO
-from weathergen.evaluate.utils.derived_channels import DeriveChannels
-from weathergen.evaluate.scores.score_utils import to_list
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -321,8 +312,3 @@ class Reader:
             samples=None if (samples == "all" or samples is None) else list(samples),
             ensemble=None if (ensemble == "all" or ensemble is None) else list(ensemble),
         )
-
-
-
-
-

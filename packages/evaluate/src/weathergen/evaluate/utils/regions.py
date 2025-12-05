@@ -9,10 +9,9 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import xarray as xr
-from omegaconf.listconfig import ListConfig
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)

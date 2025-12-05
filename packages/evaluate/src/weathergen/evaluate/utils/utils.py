@@ -7,17 +7,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+# Standard library
 import json
 import logging
 from collections import defaultdict
 from pathlib import Path
 
+# Third-party
 import numpy as np
 import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
 
-from weathergen.evaluate.utils.clim_utils import get_climatology
+# Local application / package
 from weathergen.evaluate.io.io_reader import Reader
 from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
@@ -26,6 +28,7 @@ from weathergen.evaluate.plotting.plot_utils import (
 )
 from weathergen.evaluate.plotting.plotter import BarPlots, LinePlots, Plotter, ScoreCards
 from weathergen.evaluate.scores.score import VerifiedData, get_score
+from weathergen.evaluate.utils.clim_utils import get_climatology
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)

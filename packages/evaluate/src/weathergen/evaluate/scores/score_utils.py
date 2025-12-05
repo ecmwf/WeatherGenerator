@@ -7,9 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+# Standard library
 import logging
+from typing import Any
+
+# Third-party
 from omegaconf.listconfig import ListConfig
-from typing import Any, ClassVar
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -33,5 +36,3 @@ def to_list(obj: Any) -> list:
     elif not isinstance(obj, list):
         obj = [obj]
     return obj
-
-

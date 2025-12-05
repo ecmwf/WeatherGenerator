@@ -7,17 +7,22 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+# Standard library
 import logging
-import xarray as xr
-import pandas as pd
-import numpy as np
 import re
-
 from pathlib import Path
+
+# Third-party
+import numpy as np
+import pandas as pd
+import xarray as xr
+
+# Local application / package
 from weathergen.evaluate.io.io_reader import Reader
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
+
 
 class CsvReader(Reader):
     """
@@ -129,6 +134,7 @@ class CsvReader(Reader):
         )
 
         return da
+
 
 ##### Helper function for CSVReader ####
 def _rename_channels(data) -> pd.DataFrame:

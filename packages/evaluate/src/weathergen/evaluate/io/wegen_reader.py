@@ -1,23 +1,37 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Standard library
 import json
 import logging
-
-from dataclasses import dataclass
 from pathlib import Path
 
+# Third-party
 import numpy as np
 import omegaconf as oc
-import pandas as pd
 import xarray as xr
 from tqdm import tqdm
 
-from weathergen.common.config import get_shared_wg_path, load_config, load_model_config
+# Local application / package
+from weathergen.common.config import (
+    get_shared_wg_path,
+    load_config,
+    load_model_config,
+)
 from weathergen.common.io import ZarrIO
-from weathergen.evaluate.utils.derived_channels import DeriveChannels
-from weathergen.evaluate.scores.score_utils import to_list
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
+from weathergen.evaluate.scores.score_utils import to_list
+from weathergen.evaluate.utils.derived_channels import DeriveChannels
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
+
 
 class WeatherGenReader(Reader):
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
