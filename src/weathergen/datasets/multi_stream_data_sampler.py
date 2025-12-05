@@ -670,7 +670,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """ """
         streams = [sd for sd in sample.streams_data.values() if sd is not None]
         if not streams:
-            sample.set_preprocessed([], [])
+            sample.set_preprocessed([], {})
             return
         _, scl, tci = self._preprocess_model_data([streams], forecast_dt)
         sample.set_preprocessed(scl, tci)
