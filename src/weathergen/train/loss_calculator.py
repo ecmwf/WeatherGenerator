@@ -64,11 +64,20 @@ class LossCalculator:
         self.stage = stage
         self.device = device
 
-        calculator_configs = (
-            cf.training_mode_config.losses if stage == TRAIN else cf.validation_mode_config.losses
-        )
+        training_config = cf.get("training_config")
+        loss_configs = [(t.num_samples, t.loss) for t in training_config.model_input]
+
+        calculator_configs = []
+        for num_samples, lc in loss_configs:
+            for _ in range(num_samples):
+                calculator_configs += (
+                    lc.training if stage == TRAIN else lc.get("validation", lc.training)
+                )
+
         calculator_configs = [
-            (getattr(LossModules, Cls), config) for (Cls, config) in calculator_configs.items()
+            (getattr(LossModules, Cls), config)
+            for t in calculator_configs
+            for (Cls, config) in t.items()
         ]
 
         self.loss_calculators = [
