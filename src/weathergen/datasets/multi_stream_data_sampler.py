@@ -199,7 +199,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.shuffle = shuffle
         # TODO: remove options that are no longer supported
         self.input_window_steps = cf.input_window_steps
-        self.sampling_rate_target = cf.sampling_rate_target
 
         self.batch_size = batch_size
 
@@ -387,7 +386,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if "target_coords" in mode:
                 (tc, tc_l) = self.tokenizer.get_target_coords(
                     stream_info,
-                    self.sampling_rate_target,
                     rdata,
                     token_data,
                     (time_win_target.start, time_win_target.end),
@@ -398,7 +396,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if "target_values" in mode:
                 (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
                     stream_info,
-                    self.sampling_rate_target,
                     rdata,
                     token_data,
                     (time_win_target.start, time_win_target.end),
@@ -714,17 +711,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 idx: TIndex = self.perms[idx_raw % self.perms.shape[0]]
                 idx_raw += 1
 
-                # Sample masking strategy once per batch item
-                # TODO: still needed?
-                self.tokenizer.masker.set_batch_strategy()
-
                 batch = self._get_sample(idx, forecast_dt)
 
-                # Reset masking strategy for next batch item
-                # TODO: still needed?
-                self.tokenizer.masker.reset_batch_strategy()
-
-                # # skip completely empty batch item or when all targets are empty -> no grad
+                # skip completely empty batch item or when all targets are empty -> no grad
                 if not batch.is_empty():
                     break
                 else:
