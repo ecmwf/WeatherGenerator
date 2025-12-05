@@ -80,7 +80,9 @@ class Sample:
         """
         Check if sample is empty
         """
-        return np.all(np.array([s.empty() for _, s in self.streams_data.items()]))
+        return np.all(
+            np.array([s.empty() if s is not None else True for _, s in self.streams_data.items()])
+        )
 
     def add_stream_data(self, stream_name: str, stream_data: StreamData) -> None:
         """
@@ -200,8 +202,12 @@ class ModelBatch:
         """
         Check if batch is empty
         """
-        source_empty = np.all(np.array([s.is_empty() for s in self.source_samples]))
-        target_empty = np.all(np.array([s.is_empty() for s in self.target_samples]))
+        source_empty = np.all(
+            np.array([s.is_empty() if s is not None else True for s in self.source_samples])
+        )
+        target_empty = np.all(
+            np.array([s.is_empty() if s is not None else True for s in self.target_samples])
+        )
         return source_empty or target_empty
 
     def set_forecast_dt(self, forecast_dt: int) -> None:
