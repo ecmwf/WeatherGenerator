@@ -84,7 +84,6 @@ class Plotter:
         self.sample = None
         self.stream = stream
         self.fstep = None
-
         self.select = {}
 
     def update_data_selection(self, select: dict):
@@ -357,14 +356,14 @@ class Plotter:
         for region in self.regions:
             if region != "global":
                 bbox = RegionBoundingBox.from_region_name(region)
-                self.data = bbox.apply_mask(data)
+                reg_data = bbox.apply_mask(data)
             else:
-                self.data = data
+                reg_data = data
 
             plot_names = []
             for var in variables:
                 select_var = self.select | {"channel": var}
-                da = self.select_from_da(self.data, select_var).compute()
+                da = self.select_from_da(reg_data, select_var).compute()
 
                 if self.plot_subtimesteps:
                     ntimes_unique = len(np.unique(da.valid_time))
