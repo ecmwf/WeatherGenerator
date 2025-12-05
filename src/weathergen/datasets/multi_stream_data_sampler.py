@@ -642,8 +642,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         source_cfgs = self.training_cfg.get("model_input")
         target_cfgs = self.training_cfg.get("target_input", source_cfgs)
         target_cfgs = target_cfgs if target_cfgs is not None else source_cfgs
-        num_target_samples = np.array([sc.get("num_samples", 1) for sc in source_cfgs]).sum().item()
-        num_source_samples = np.array([sc.get("num_samples", 1) for sc in target_cfgs]).sum().item()
+        num_source_samples = np.array([sc.get("num_samples", 1) for sc in source_cfgs]).sum().item()
+        num_target_samples = np.array([sc.get("num_samples", 1) for sc in target_cfgs]).sum().item()
 
         return masks, num_source_samples, num_target_samples
 
