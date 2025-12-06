@@ -386,7 +386,8 @@ class Masker:
                 )
                 source_masks += [source_mask]
                 source_metadata += [SampleMetaData(params={**target_cfg, **mask_params})]
-                source_target_mapping += [i_source]
+                # TODO: proper correspondence between source and target
+                source_target_mapping += [i_source % len(target_masks)]
 
         source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
 
