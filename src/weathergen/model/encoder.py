@@ -54,14 +54,12 @@ class EncoderModule(torch.nn.Module):
         self.embed_engine: EmbeddingEngine | None = None
         self.interpolate_latents: LatentInterpolator | None = None
 
-        ##############
         # embedding engine
         # determine stream names once so downstream components use consistent keys
         self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
         # separate embedding networks for differnt observation types
         self.embed_engine = EmbeddingEngine(cf, self.sources_size, self.stream_names)
 
-        ##############
         # local assimilation engine
         self.ae_local_engine = LocalAssimilationEngine(cf)
 
@@ -73,11 +71,9 @@ class EncoderModule(torch.nn.Module):
                 deterministic=cf.latent_noise_deterministic_latents,
             )
 
-        ##############
         # local -> global assimilation engine adapter
         self.ae_local_global_engine = Local2GlobalAssimilationEngine(cf)
 
-        ##############
         # learnable queries
         if cf.ae_local_queries_per_cell:
             s = (self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed)
@@ -105,11 +101,9 @@ class EncoderModule(torch.nn.Module):
             q_cells = torch.rand(s, requires_grad=True) / cf.ae_global_dim_embed
         self.q_cells = torch.nn.Parameter(q_cells, requires_grad=True)
 
-        ##############
         # query aggregation engine
         self.ae_aggregation_engine = QueryAggregationEngine(cf, self.num_healpix_cells)
 
-        ##############
         # global assimilation engine
         self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
 
@@ -124,7 +118,6 @@ class EncoderModule(torch.nn.Module):
 
         return tokens, posteriors
 
-    #########################################
     def embed_cells(self, model_params, sample) -> torch.Tensor:
         """Embeds input data for each stream separately and rearranges it to cell-wise order
         Args:
@@ -139,7 +132,6 @@ class EncoderModule(torch.nn.Module):
 
         return tokens_all
 
-    #########################################
     def assimilate_local(
         self, model_params, tokens: torch.Tensor, sample: torch.Tensor
     ) -> torch.Tensor:
@@ -274,7 +266,6 @@ class EncoderModule(torch.nn.Module):
 
         return tokens_global, posteriors
 
-    #########################################
     def assimilate_global(self, tokens: torch.Tensor) -> torch.Tensor:
         """Performs transformer based global assimilation in latent space
         Args:
