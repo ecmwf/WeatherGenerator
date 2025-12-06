@@ -556,11 +556,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
                 output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
 
-                # collect source data for current stream
-                # loop over student views
-                for sidx, (target_mask, source_mask) in enumerate(
-                    zip(target_masks, source_masks, strict=False)
-                ):
+                for sidx, source_mask in enumerate(source_masks):
+                    # Map each student (source) to its teacher (target)
+                    tidx = student_to_teacher[sidx].item()
                     sdata = self._build_stream_data(
                         "target_coords target_values",
                         idx,
@@ -570,22 +568,22 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         output_data,
                         input_tokens,
                         output_tokens,
-                        target_mask,
-                        source_mask,
+                        target_mask = target_masks[tidx],
+                        source_mask = source_mask,
                     )
 
-                    # Map each student (source) to its teacher (target)
-                    t_idx = student_to_teacher[sidx]
-                    batch.add_source_stream(sidx, t_idx, name, sdata, source_metadata_list[sidx])
+                    batch.add_source_stream(sidx, tidx, name, sdata, source_metadata_list[sidx])
 
                 # stream_data_target can contain network input
                 stream_data_target = {}
 
                 # for t_idx, mask in enumerate(source_masks):
-                for sidx, (target_mask, source_mask) in enumerate(
-                    zip(target_masks, source_masks, strict=False)
+                for tidx, target_mask in enumerate(
+                    target_masks
                 ):
-                    # stream_data_target[name] = self._build_stream_data(
+                    # Note: for EMATeacher we the the streamdata obj
+                    # to have the target mask applied to the inputs!
+                    # Hence the target mask is also the source mask here!!
                     sdata = self._build_stream_data(
                         "target_values",
                         idx,
@@ -595,25 +593,18 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         output_data,
                         input_tokens,
                         output_tokens,
-                        target_mask,
-                        source_mask,
+                        target_mask=target_mask,
+                        source_mask=target_mask,
                     )
                     stream_data_target[name] = sdata
-
-                    # get teacher config info
-                    # TODO, TODO, TODO: is this correct?
-                    t_idx = sidx
-                    target_metadata = target_metadata_list[t_idx]
-
+                    target_metadata = target_metadata_list[tidx]
                     # also want to add the mask to the metadata
-                    target_metadata.mask = None  # target_mask
-
-                    # TODO: seb to check
+                    target_metadata.mask = target_mask
                     # Map target to all source students
                     student_indices = [
-                        s_idx for s_idx, tid in enumerate(student_to_teacher) if tid == sidx
+                        s_idx for s_idx, tid in enumerate(student_to_teacher) if tid == tidx
                     ]
-                    batch.add_target_stream(t_idx, student_indices, name, sdata, target_metadata)
+                    batch.add_target_stream(tidx, student_indices, name, sdata, target_metadata)
 
         else:
             assert False, "Mode not implemented"
@@ -645,8 +636,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         source_cfgs = self.training_cfg.get("model_input")
         target_cfgs = self.training_cfg.get("target_input", source_cfgs)
         target_cfgs = target_cfgs if target_cfgs is not None else source_cfgs
-        num_target_samples = np.array([sc.get("num_samples", 1) for sc in source_cfgs]).sum().item()
-        num_source_samples = np.array([sc.get("num_samples", 1) for sc in target_cfgs]).sum().item()
+        num_target_samples = max(mapping)+1 # np.array([sc.get("num_samples", 1) for sc in source_cfgs]).sum().item()
+        num_source_samples = len(mapping) #np.array([sc.get("num_samples", 1) for sc in target_cfgs]).sum().item()
 
         return masks, num_source_samples, num_target_samples
 

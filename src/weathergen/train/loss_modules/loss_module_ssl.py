@@ -55,12 +55,16 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         # create tensor for each stream
         # losses_all: dict[str, Tensor] = {loss: 0.0 for loss in self.losses}
 
-        source_target_matching_idxs, output_info, target_source_matching_idxs, target_info = (
+        source2target_matching_idxs, output_info, target2source_matching_idxs, target_info = (
             metadata
         )
         for name, (weight, loss_fn, extra_args) in self.losses.items():
-            preds_for_loss = gather_preds_for_loss(name, preds, output_info)
-            targets_for_loss = gather_targets_for_loss(name, targets, target_info)
+            preds_for_loss = gather_preds_for_loss(
+                name, preds, output_info, source2target_matching_idxs
+            )
+            targets_for_loss = gather_targets_for_loss(
+                name, targets, target_info, target2source_matching_idxs
+            )
             loss_value = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
             loss = loss + (weight * loss_value)
             # losses_all[name] = loss_value.item()
@@ -87,6 +91,9 @@ def ibot_loss(
     teacher_class_masked,
     student_temp,
 ):
+    import pdb
+
+    pdb.set_trace()
     loss = loss_fns.masked_student_teacher_patch_softmax(
         student_patches_masked, teacher_patches_masked, student_masks, student_temp
     ) + loss_fns.student_teacher_softmax(student_class_masked, teacher_class_masked, student_temp)
@@ -100,6 +107,9 @@ def dino_loss(
     global2global_dino_teacher,
     student_temp,
 ):
+    import pdb
+
+    pdb.set_trace()
     loss = loss_fns.student_teacher_global_softmax(
         local2global_dino_student, local2global_dino_teacher, student_temp
     ) + loss_fns.student_teacher_softmax(
@@ -121,7 +131,7 @@ def get_loss_function_ssl(name):
         )
 
 
-def gather_preds_for_loss(name, preds, metadata):
+def gather_preds_for_loss(name, preds, metadata, source2target_matching_idxs):
     if name == "JEPA":
         """
         Important this assumes that there is 1 masked version for each global view
@@ -135,11 +145,12 @@ def gather_preds_for_loss(name, preds, metadata):
                     if info.params["loss"] == "jepa"
                 ],
                 dim=0,
-            )[:2],
+            ),
             # TODO remove the [:, :2049]
             "student_masks": torch.stack(
-                [info.mask.to("cuda")[:2049] for info in metadata], dim=0
-            ).unsqueeze(1)[:2],
+                [info.mask.to("cuda")[:2049] for info in metadata if info.params["loss"] == "jepa"],
+                dim=0,
+            ).unsqueeze(1),
         }
     elif name == "iBOT":
         """
@@ -156,11 +167,12 @@ def gather_preds_for_loss(name, preds, metadata):
                     if info.params["loss"] == "ibot"
                 ],
                 dim=0,
-            )[:2],
+            ),
             # TODO remove the [:, :2049]
             "student_masks": torch.stack(
-                [info.mask.to("cuda")[:2049] for info in metadata], dim=0
-            ).unsqueeze(1)[:2],
+                [info.mask.to("cuda")[:2049] for info in metadata if info.params["loss"] == "ibot"],
+                dim=0,
+            ).unsqueeze(1),
             "student_class_masked": torch.stack(
                 [
                     p.latent[name]
@@ -168,7 +180,7 @@ def gather_preds_for_loss(name, preds, metadata):
                     if info.params["loss"] == "ibot"
                 ],
                 dim=0,
-            )[:2, :, :2],
+            ),
         }
     elif name == "DINO":
         return {
@@ -179,7 +191,7 @@ def gather_preds_for_loss(name, preds, metadata):
                     if info.params["loss"] == "dino"
                 ],
                 dim=0,
-            )[2:],
+            ),
             "global2global_dino_student": torch.stack(
                 [
                     p.latent[name]
@@ -187,7 +199,7 @@ def gather_preds_for_loss(name, preds, metadata):
                     if info.params["loss"] == "dino"
                 ],
                 dim=0,
-            )[:2],
+            ),
         }
     else:
         raise NotImplementedError(
@@ -195,7 +207,7 @@ def gather_preds_for_loss(name, preds, metadata):
         )
 
 
-def gather_targets_for_loss(name, targets, metadata):
+def gather_targets_for_loss(name, targets, metadata, target2source_matching_idxs):
     if name == "JEPA":
         """
         Important this assumes that there is 1 masked version for each global view
@@ -203,13 +215,9 @@ def gather_targets_for_loss(name, targets, metadata):
         """
         return {
             "teacher_patches_masked": torch.stack(
-                [
-                    p.latent[name]
-                    for p, info in zip(targets, metadata, strict=False)
-                    # TODO filter for loss if info.strategy == "masking"
-                ],
+                [p.latent[name] for p, info in zip(targets, metadata, strict=False)],
                 dim=0,
-            )[:2],
+            ),
         }
     elif name == "iBOT":
         """
@@ -218,38 +226,32 @@ def gather_targets_for_loss(name, targets, metadata):
 
         Note the class token of iBOT is still missing
         """
+        import pdb
+
+        pdb.set_trace()
         return {
             "teacher_patches_masked": torch.stack(
-                [
-                    p.latent[name]
-                    for p, info in zip(targets, metadata, strict=False)
-                    # TODO filter for loss if info.strategy == "masking"
-                ],
+                [p.latent[name] for p, info in zip(targets, metadata, strict=False)],
                 dim=0,
-            )[:2],
+            ),
             # TODO remove the [:, :2049]
             "teacher_class_masked": torch.stack(
-                [
-                    p.latent[name]
-                    for p, info in zip(targets, metadata, strict=False)
-                    # TODO filter for loss if info.strategy == "masking"
-                ],
+                [p.latent[name] for p, info in zip(targets, metadata, strict=False)],
                 dim=0,
-            )[:2, :, :2],
+            ),
         }
     elif name == "DINO":
         return {
             "local2global_dino_teacher": torch.stack(
-                [
-                    p.latent[name]
-                    for p, info in zip(targets, metadata, strict=False)
-                    # TODO if info.strategy == "cropping"
-                ],
+                [p.latent[name] for p, info in zip(targets, metadata, strict=False)],
                 dim=0,
-            )[:2],
+            ),
             "global2global_dino_teacher": torch.stack(
-                list(reversed([p.latent[name] for p, info in zip(targets, metadata, strict=False)])), dim=0
-            )[:2],
+                list(
+                    reversed([p.latent[name] for p, info in zip(targets, metadata, strict=False)])
+                ),
+                dim=0,
+            ),
         }
     else:
         raise NotImplementedError(

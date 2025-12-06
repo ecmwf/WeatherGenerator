@@ -353,11 +353,15 @@ class Masker:
         if len(target_cfgs) == 0:
             target_cfgs = source_cfgs
 
-        # iterate over all target samples
         target_masks: list[np.typing.NDArray] = []
         target_metadata: list[SampleMetaData] = []
+        source_masks: list[np.typing.NDArray] = []
+        source_metadata: list[SampleMetaData] = []
+        source_target_mapping = []
+        i_target = 0
+        # iterate over all target samples
         # different strategies
-        for target_cfg in target_cfgs:
+        for _, target_cfg in enumerate(target_cfgs):
             # different samples/view per strategy
             for _ in range(target_cfg.get("num_samples", 1)):
                 target_mask, mask_params = self._get_mask(
@@ -371,27 +375,25 @@ class Masker:
                     SampleMetaData(params={**target_cfg, **mask_params}, mask=target_mask)
                 ]
 
-        # iterate over all source samples
-        source_masks: list[np.typing.NDArray] = []
-        source_metadata: list[SampleMetaData] = []
-        source_target_mapping = []
-        # different strategies
-        for i_source, source_cfg in enumerate(source_cfgs):
-            # samples per strategy
-            for _ in range(source_cfg.get("num_samples", 1)):
-                source_mask, mask_params = self._get_mask(
-                    num_cells=num_cells,
-                    strategy=source_cfg.get("strategy"),
-                    masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
-                    target_mask=target_masks[i_source],
-                    relationship=source_cfg.get("relationship", "independent"),
-                )
-                source_masks += [source_mask]
-                source_metadata += [
-                    SampleMetaData(params={**source_cfg, **mask_params}, mask=source_mask)
-                ]
-                source_target_mapping += [i_source]
-
+                # iterate over all source samples
+                # different strategies
+                for i_source, source_cfg in enumerate(source_cfgs):
+                    # samples per strategy
+                    for _ in range(source_cfg.get("num_samples", 1)):
+                        source_mask, mask_params = self._get_mask(
+                            num_cells=num_cells,
+                            strategy=source_cfg.get("strategy"),
+                            masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
+                            target_mask=target_mask,
+                            relationship=source_cfg.get("relationship", "independent"),
+                        )
+                        source_masks += [source_mask]
+                        source_metadata += [
+                            SampleMetaData(params={**source_cfg, **mask_params}, mask=source_mask)
+                        ]
+                        source_target_mapping += [i_target]
+                i_target += 1
+        
         source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
 
         return (
