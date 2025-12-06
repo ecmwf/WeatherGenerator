@@ -712,7 +712,7 @@ class Model(torch.nn.Module):
             class_token=z[:, : self.class_token_idx],
             register_tokens=z[:, self.class_token_idx : self.register_token_idx],
             patch_tokens=z[
-                :, self.register_token_idx : 2048 + self.class_token_idx + self.register_token_idx
+                :, self.register_token_idx : 512 + self.class_token_idx + self.register_token_idx
             ],
             z_pre_norm=z_pre_norm,
         )

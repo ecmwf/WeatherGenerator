@@ -393,7 +393,7 @@ class Masker:
                         ]
                         source_target_mapping += [i_target]
                 i_target += 1
-        
+
         source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
 
         return (
@@ -409,7 +409,7 @@ class Masker:
         rate: float | None = None,
         masking_strategy_config: dict | None = None,
         target_mask: np.typing.NDArray | None = None,
-        relationship: str = "subset",
+        relationship: str = "independent",
     ) -> (np.typing.NDArray, dict):
         """Get effective mask, combining with target mask if specified.
 
@@ -425,9 +425,8 @@ class Masker:
             to instance masking_rate if None.
         masking_strategy_config : dict | None
             Optional override of strategy config (e.g., {'hl_mask': 3}).
-        constraint_keep_mask : np.ndarray | None
-            Optional boolean mask of allowed cells (True = allowed). Selection will be
-            limited to these cells. For subset/disjoint relationships.
+        target_mask
+        relationship: options subset, identity, independent, complement
 
         Returns
         -------
@@ -438,20 +437,33 @@ class Masker:
         """
 
         # handle cases where mask is directly derived from target_mask
-        if target_mask is not None:
-            if relationship == "complement":
-                mask = ~target_mask
-                return mask, {}
+        if relationship == "complement":
+            assert target_mask is not None, (
+                "relationship: {relationship} incompatible with target_mask None"
+            )
+            mask = ~target_mask
+            return mask, {}
 
         # get mask
         mask, params = self._generate_cell_mask(num_cells, strategy, rate, masking_strategy_config)
 
         # handle cases where mask needs to be combined with target_mask
-        if target_mask is not None:
-            if relationship == "subset":
-                mask = mask & target_mask
-            elif relationship == "disjoint":
-                mask = mask & (~target_mask)
+        # without the assert we can fail silently
+        if relationship == "subset":
+            assert target_mask is not None, (
+                "relationship: {relationship} incompatible with target_mask None"
+            )
+            mask = mask & target_mask
+        elif relationship == "disjoint":
+            assert target_mask is not None, (
+                "relationship: {relationship} incompatible with target_mask None"
+            )
+            mask = mask & (~target_mask)
+        elif relationship == "identity":
+            assert target_mask is not None, (
+                "relationship: {relationship} incompatible with target_mask None"
+            )
+            mask = target_mask
 
         return (mask, params)
 

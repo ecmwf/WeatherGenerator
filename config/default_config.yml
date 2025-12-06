@@ -136,9 +136,14 @@ training_config:
       relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
       loss : ibot
     - masking_strategy: "cropping"
-      num_samples: 2  # if student-teacher, the number of local (student) views to generate
+      num_samples: 2 # if student-teacher, the number of local (student) views to generate
       masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
       relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+      loss : dino
+    - masking_strategy: "cropping"
+      num_samples: 1 # if student-teacher, the number of local (student) views to generate
+      masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
+      relationship: "identity"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
       loss : dino
 
   target_input:
@@ -183,7 +188,7 @@ input_window_steps: 1
 
 val_initial: False
 
-loader_num_workers: 0
+loader_num_workers: 8
 log_validation: 0
 streams_output: ["ERA5"]
 
@@ -199,232 +204,6 @@ train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
-
-# #################
-# ###    Data   ###
-# #################
-# streams_directory: "./config/streams/era5_1deg/"
-# 
-# start_date: 197901010000
-# end_date: 202012310000
-# start_date_val: 202101010000
-# end_date_val: 202201010000
-# len_hrs: 6
-# step_hrs: 6
-# input_window_steps: 1
-# 
-# val_initial: False
-# 
-# loader_num_workers: 8
-# log_validation: 0
-# analysis_streams_output: ["ERA5"]
-# 
-# #################
-# ###   Model   ###
-# #################
-# embed_orientation: "channels"
-# embed_unembed_mode: "block"
-# embed_dropout_rate: 0.1
-# 
-# target_cell_local_prediction: True
-# 
-# ae_local_dim_embed: 1024
-# ae_local_num_blocks: 2
-# ae_local_num_heads: 16
-# ae_local_dropout_rate: 0.1
-# ae_local_with_qk_lnorm: True
-# 
-# ae_local_num_queries: 1
-# ae_local_queries_per_cell: False
-# ae_adapter_num_heads: 16
-# ae_adapter_embed: 128
-# ae_adapter_with_qk_lnorm: True
-# ae_adapter_with_residual: True
-# ae_adapter_dropout_rate: 0.1
-# 
-# ae_global_dim_embed: 2048
-# ae_global_num_blocks: 8
-# ae_global_num_heads: 32
-# ae_global_dropout_rate: 0.1
-# ae_global_with_qk_lnorm: True
-# # TODO: switching to < 1 triggers triton-related issues.
-# # See https://github.com/ecmwf/WeatherGenerator/issues/1050
-# ae_global_att_dense_rate: 1.0
-# ae_global_block_factor: 64
-# ae_global_mlp_hidden_factor: 2
-# 
-# decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
-# pred_adapter_kv: False
-# pred_self_attention: True
-# pred_dyadic_dims: False
-# pred_mlp_adaln: True
-# 
-# healpix_level: 5
-# 
-# latent_noise_kl_weight: 0.0 # 1e-5
-# latent_noise_gamma: 2.0
-# latent_noise_saturate_encodings: 5 
-# latent_noise_use_additive_noise: False
-# latent_noise_deterministic_latents: True 
-# 
-# #################
-# ###  Forecast ###
-# #################
-# # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
-# # one is training an auto-encoder
-# forecast_offset : 0
-# forecast_delta_hrs: 0
-# forecast_steps: 0
-# forecast_policy: null
-# forecast_att_dense_rate: 1.0
-# forecast_with_step_conditioning: False
-# fe_num_blocks: 0
-# fe_num_heads: 16
-# fe_dropout_rate: 0.1
-# fe_with_qk_lnorm: True
-# impute_latent_noise_std: 0.0  # 1e-4
-# 
-# #################
-# ###  Training ###
-# #################
-# loss_fcts:
-#   - 
-#     - "mse"
-#     - 1.0
-# loss_fcts_val:
-#   -
-#     - "mse"
-#     - 1.0
-# 
-# 
-# batch_size_per_gpu: 1
-# batch_size_validation_per_gpu: 1
-# 
-# # a regex that needs to fully match the name of the modules you want to freeze
-# # e.g. ".*ERA5" will match any module whose name ends in ERA5\
-# # encoders and decoders that exist per stream have the stream name attached at the end
-# freeze_modules: ""
-# 
-# # whether to track the exponential moving average of weights for validation
-# validate_with_ema: True
-# ema_ramp_up_ratio: 0.09
-# ema_halflife_in_thousands: 1e-3
-# 
-# # training mode: "forecast" or "masking" (masked token modeling) or "student-teacher"
-# # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-# training_mode: "masking"
-# training_mode_config: {
-#   "losses" : { LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]}},
-#     # LossLatentSSLStudentTeacher: { 
-#     #   "iBOT": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
-#     #       "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-#     #   "DINO": {'weight': 0.5, "out_dim": 65536, "n_register_tokens": 4, "student_temp": 0.1,"teacher_temp": 0.1,
-#     #       "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-#     #   "JEPA": {'weight': 0.5, "out_dim": 2048, "n_register_tokens": 4} } }, 
-#   # "target_and_aux_calc": "EMATeacher",
-#   "target_and_aux_calc": "identity",
-#   "teacher_model": {}
-# }
-# validation_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]],}}}
-# 
-# # masking
-# masking_strategy: "random" # obviously TODO
-# # masking rate when training mode is "masking"; ignored in foreacast mode
-# masking_rate: 0.6
-# #
-# sampling_rate_target: 1.0
-# # sample the masking rate (with normal distribution centered at masking_rate)
-# # note that a sampled masking rate leads to varying requirements
-# masking_rate_sampling: True
-# # masking_strategy_config is a dictionary of additional parameters for the masking strategy
-# # required for "healpix" and "channel" masking strategies
-# # "healpix": requires healpix mask level to be specified with `hl_mask`
-# # "channel": requires "mode" to be specified, "per_cell" or "global",
-# masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
-#                           "probabilities": [0.34, 0.33, 0.33],
-#                           "hl_mask": 3, "mode": "per_cell",
-#                           "same_strategy_per_batch": false
-#                           }
-# 
-# #################
-# ###  Trainer  ###
-# #################
-# with_mixed_precision: True
-# with_flash_attention: True
-# compile_model: False
-# with_fsdp: True
-# attention_dtype: bf16
-# mlp_norm_eps: 1e-5
-# norm_eps: 1e-4
-# # Student-teacher configuration (only used when training_mode == "student_teacher")
-# # TODO: adapt so that the masking or forecast config entry also sits here
-# training_config:
-#   # when this is "masking", we are basically only using the model_input subconfig
-#   training_mode: "student_teacher"  # "masking", "student_teacher", "forecast"
-# 
-# 
-#   model_input:
-#     masking_strategy: "healpix" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
-#     rate: 0.5  # Masking rate to use for model input
-#     num_views: 4  # if student-teacher, the number of local (student) views to generate
-#     masking_strategy_config: {"strategies": ["random", "healpix", "channel"], # will be used with masking is moved under here
-#                               "probabilities": [0.34, 0.33, 0.33],
-#                               "hl_mask": 0, "mode": "per_cell",
-#                               "same_strategy_per_batch": false
-#                               }
-#     relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-#   
-#   teacher_model_input:
-#     strategy: "healpix"  # Strategy for teacher (global) view: "random", "healpix"
-#     rate: 0.5  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
-#     num_views: 2 # number of teacher views to generate
-#     # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
-#     rate_sampling: true  # randomly sample the rate per batch
-#     masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
-#                               "probabilities": [0.34, 0.33, 0.33],
-#                               "hl_mask": 4, "mode": "per_cell",
-#                               "same_strategy_per_batch": false
-#                               }
-# 
-# 
-# 
-# num_mini_epochs: 32
-# samples_per_mini_epoch: 4096
-# samples_per_validation: 512
-# 
-# shuffle: True
-# 
-# lr_scaling_policy: "sqrt"
-# lr_start: 1e-6
-# lr_max: 5e-5
-# lr_final_decay: 1e-6
-# lr_final: 0.0
-# lr_steps_warmup: 512 
-# lr_steps_cooldown: 512
-# lr_policy_warmup: "cosine"
-# lr_policy_decay: "constant"
-# lr_policy_cooldown: "linear"
-# 
-# grad_clip: 1.0
-# weight_decay: 0.1
-# norm_type: "LayerNorm"
-# nn_module: "te"
-# log_grad_norms: False
-# 
-# istep: 0
-# run_history: []
-# 
-# desc: ""
-# data_loader_rng_seed: ???
-# run_id: ???
-# 
-# # The period to log in the training loop (in number of batch steps)
-# train_log_freq:
-#   terminal: 10
-#   metrics: 20
-#   checkpoint: 250
-# 
-# log_level: DEBUG
 
 # Tags for experiment tracking
 # These tags will be logged in MLFlow along with completed runs for train, eval, val

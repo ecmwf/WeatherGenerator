@@ -60,7 +60,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         )
         for name, (weight, loss_fn, extra_args) in self.losses.items():
             preds_for_loss = gather_preds_for_loss(
-                name, preds, output_info, source2target_matching_idxs
+                name, preds, output_info, target2source_matching_idxs
             )
             targets_for_loss = gather_targets_for_loss(
                 name, targets, target_info, target2source_matching_idxs
@@ -91,9 +91,6 @@ def ibot_loss(
     teacher_class_masked,
     student_temp,
 ):
-    import pdb
-
-    pdb.set_trace()
     loss = loss_fns.masked_student_teacher_patch_softmax(
         student_patches_masked, teacher_patches_masked, student_masks, student_temp
     ) + loss_fns.student_teacher_softmax(student_class_masked, teacher_class_masked, student_temp)
@@ -107,9 +104,6 @@ def dino_loss(
     global2global_dino_teacher,
     student_temp,
 ):
-    import pdb
-
-    pdb.set_trace()
     loss = loss_fns.student_teacher_global_softmax(
         local2global_dino_student, local2global_dino_teacher, student_temp
     ) + loss_fns.student_teacher_softmax(
@@ -131,7 +125,7 @@ def get_loss_function_ssl(name):
         )
 
 
-def gather_preds_for_loss(name, preds, metadata, source2target_matching_idxs):
+def gather_preds_for_loss(name, preds, metadata, target2source_matching_idxs):
     if name == "JEPA":
         """
         Important this assumes that there is 1 masked version for each global view
@@ -148,7 +142,7 @@ def gather_preds_for_loss(name, preds, metadata, source2target_matching_idxs):
             ),
             # TODO remove the [:, :2049]
             "student_masks": torch.stack(
-                [info.mask.to("cuda")[:2049] for info in metadata if info.params["loss"] == "jepa"],
+                [info.mask.to("cuda")[:513] for info in metadata if info.params["loss"] == "jepa"],
                 dim=0,
             ).unsqueeze(1),
         }
@@ -170,7 +164,7 @@ def gather_preds_for_loss(name, preds, metadata, source2target_matching_idxs):
             ),
             # TODO remove the [:, :2049]
             "student_masks": torch.stack(
-                [info.mask.to("cuda")[:2049] for info in metadata if info.params["loss"] == "ibot"],
+                [info.mask.to("cuda")[:513] for info in metadata if info.params["loss"] == "ibot"],
                 dim=0,
             ).unsqueeze(1),
             "student_class_masked": torch.stack(
@@ -183,20 +177,24 @@ def gather_preds_for_loss(name, preds, metadata, source2target_matching_idxs):
             ),
         }
     elif name == "DINO":
+        local2global_dino_student = []
+        for student_indices in target2source_matching_idxs:
+            local_preds = [
+                preds[sidx].latent[name]
+                for sidx in student_indices
+                if metadata[sidx].params["loss"] == "dino"
+            ]
+            local2global_dino_student.append(local_preds)
+        local2global_dino_student = [
+            torch.stack(latents, dim=0) for latents in zip(*local2global_dino_student)
+        ]
         return {
-            "local2global_dino_student": torch.stack(
-                [
-                    p.latent[name]
-                    for p, info in zip(preds, metadata, strict=False)
-                    if info.params["loss"] == "dino"
-                ],
-                dim=0,
-            ),
+            "local2global_dino_student": local2global_dino_student,
             "global2global_dino_student": torch.stack(
                 [
                     p.latent[name]
                     for p, info in zip(preds, metadata, strict=False)
-                    if info.params["loss"] == "dino"
+                    if info.params["loss"] == "dino" and info.params["relationship"] == "identity"
                 ],
                 dim=0,
             ),
@@ -226,9 +224,6 @@ def gather_targets_for_loss(name, targets, metadata, target2source_matching_idxs
 
         Note the class token of iBOT is still missing
         """
-        import pdb
-
-        pdb.set_trace()
         return {
             "teacher_patches_masked": torch.stack(
                 [p.latent[name] for p, info in zip(targets, metadata, strict=False)],
