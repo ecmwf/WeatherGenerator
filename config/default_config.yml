@@ -117,9 +117,9 @@ training_config:
   losses :  
     LossLatentSSLStudentTeacher: { 
       "weight": 1.0,
-      "iBOT": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 65536, "n_register_tokens": 4,"teacher_temp": 0.1,
+      "iBOT": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 16384, "n_register_tokens": 4,"teacher_temp": 0.1,
           "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      "DINO": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 65536, "n_register_tokens": 4, "teacher_temp": 0.1,
+      "DINO": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 16384, "n_register_tokens": 4, "teacher_temp": 0.1,
           "teacher_style": "softmax_center", "center_momentum": 0.9}, 
       }
       # "JEPA": {'weight': 0.5, "loss_extra_args": {}, "out_dim": 2048, "n_register_tokens": 4} }

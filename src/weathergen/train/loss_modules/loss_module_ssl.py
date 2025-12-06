@@ -72,14 +72,15 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         return LossValues(loss=loss, losses_all={}, stddev_all={})
 
 
-def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked):
+def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, teacher_masks):
     masks_weight = (
         (1 / student_masks.sum(-1).clamp(min=1.0))
         .unsqueeze(-1)
         .expand_as(student_masks)  # [student_masks_flat]
     )
-    loss = F.l1_loss(student_patches_masked, teacher_patches_masked)
-    loss = loss * student_masks * masks_weight
+    mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
+    loss = F.l1_loss(student_patches_masked[mask], teacher_patches_masked[mask])
+    loss = loss * masks_weight[mask]
     return loss.sum() / student_masks.shape[0]
 
 
@@ -87,12 +88,13 @@ def ibot_loss(
     student_patches_masked,
     student_masks,
     teacher_patches_masked,
+    teacher_masks,
     student_class_masked,
     teacher_class_masked,
     student_temp,
 ):
     loss = loss_fns.masked_student_teacher_patch_softmax(
-        student_patches_masked, teacher_patches_masked, student_masks, student_temp
+        student_patches_masked, teacher_patches_masked, student_masks, teacher_masks, student_temp
     ) + loss_fns.student_teacher_softmax(student_class_masked, teacher_class_masked, student_temp)
     return loss / 2
 
@@ -142,7 +144,8 @@ def gather_preds_for_loss(name, preds, metadata, target2source_matching_idxs):
             ),
             # TODO remove the [:, :2049]
             "student_masks": torch.stack(
-                [info.mask.to("cuda")[:513] for info in metadata if info.params["loss"] == "jepa"],
+                # [info.mask.to("cuda")[:513] for info in metadata if info.params["loss"] == "jepa"],
+                [info.mask.to("cuda") for info in metadata if info.params["loss"] == "jepa"],
                 dim=0,
             ).unsqueeze(1),
         }
@@ -164,7 +167,8 @@ def gather_preds_for_loss(name, preds, metadata, target2source_matching_idxs):
             ),
             # TODO remove the [:, :2049]
             "student_masks": torch.stack(
-                [info.mask.to("cuda")[:513] for info in metadata if info.params["loss"] == "ibot"],
+                # [info.mask.to("cuda")[:513] for info in metadata if info.params["loss"] == "ibot"],
+                [info.mask.to("cuda") for info in metadata if info.params["loss"] == "ibot"],
                 dim=0,
             ).unsqueeze(1),
             "student_class_masked": torch.stack(
@@ -216,6 +220,11 @@ def gather_targets_for_loss(name, targets, metadata, target2source_matching_idxs
                 [p.latent[name] for p, info in zip(targets, metadata, strict=False)],
                 dim=0,
             ),
+            "teacher_masks": torch.stack(
+                # [info.mask.to("cuda")[:513] for info in metadata],
+                [info.mask.to("cuda") for info in metadata],
+                dim=0,
+            ).unsqueeze(1),
         }
     elif name == "iBOT":
         """
@@ -230,6 +239,11 @@ def gather_targets_for_loss(name, targets, metadata, target2source_matching_idxs
                 dim=0,
             ),
             # TODO remove the [:, :2049]
+            "teacher_masks": torch.stack(
+                [info.mask.to("cuda") for info in metadata],
+                # [info.mask.to("cuda")[:513] for info in metadata],
+                dim=0,
+            ).unsqueeze(1),
             "teacher_class_masked": torch.stack(
                 [p.latent[name] for p, info in zip(targets, metadata, strict=False)],
                 dim=0,
