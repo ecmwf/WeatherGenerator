@@ -68,7 +68,7 @@ class Sample:
         for key in self.meta_info.keys():
             self.meta_info[key].mask = (
                 self.meta_info[key].mask.to(device, non_blocking=True)
-                if self.meta_info[key].mask
+                if self.meta_info[key].mask is not None
                 else None
             )
 

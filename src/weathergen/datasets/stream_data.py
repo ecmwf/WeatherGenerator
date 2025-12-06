@@ -294,7 +294,9 @@ class StreamData:
         """
 
         # cat over forecast steps
-        return torch.cat(self.target_coords_lens).sum() == 0
+        target_coords_empty = torch.cat(self.target_coords_lens).sum() == 0
+        target_tokens_empty = torch.cat(self.target_tokens).sum() == 0
+        return target_coords_empty and target_tokens_empty
 
     def source_empty(self) -> bool:
         """

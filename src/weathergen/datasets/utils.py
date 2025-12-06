@@ -289,7 +289,7 @@ def compute_offsets_scatter_embed(batch: StreamData, num_input_steps: int) -> St
                 torch.stack(
                     [
                         s.source_tokens_lens[i]
-                        if len(s.source_tokens_lens[i]) > 0
+                        if (len(s.source_tokens_lens) > 0) and (len(s.source_tokens_lens[i]) > 0)
                         else torch.tensor([])
                         for s in stl_b
                     ]
@@ -304,6 +304,9 @@ def compute_offsets_scatter_embed(batch: StreamData, num_input_steps: int) -> St
     offsets_base = [s.sum(1).sum(0).cumsum(0) for s in source_tokens_lens]
     offsets = [torch.cat([torch.zeros(1, dtype=torch.int32), o[:-1]]) for o in offsets_base]
     offsets_pe = [torch.zeros_like(o) for o in offsets]
+
+    if torch.cat(offsets_base).shape[0] == 0:
+        return batch
 
     for i_s in range(num_input_steps):
         for ib, sb in enumerate(batch):  # batch items
@@ -400,7 +403,7 @@ def compute_source_cell_lens(
                 torch.stack(
                     [
                         s.source_tokens_lens[i]
-                        if len(s.source_tokens_lens[i]) > 0
+                        if (len(s.source_tokens_lens) > 0) and (len(s.source_tokens_lens[i]) > 0)
                         else torch.tensor([])
                         for s in stl_b
                     ]
