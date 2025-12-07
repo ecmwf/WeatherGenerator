@@ -16,9 +16,7 @@ import torch
 from omegaconf import DictConfig
 
 import weathergen.train.loss_modules as LossModules
-from weathergen.model.model import ModelOutput
 from weathergen.train.loss_modules.loss_module_base import LossValues
-from weathergen.train.target_and_aux_module_base import TargetAuxOutput
 from weathergen.utils.train_logger import TRAIN, Stage
 
 _logger = logging.getLogger(__name__)
@@ -65,26 +63,29 @@ class LossCalculator:
         self.device = device
 
         calculator_configs = (
-            cf.training_mode_config.losses if stage == TRAIN else cf.validation_mode_config.losses
+            cf.training_config.losses if stage == TRAIN else cf.validation_mode_config.losses
         )
-        calculator_configs = [
-            (getattr(LossModules, Cls), config) for (Cls, config) in calculator_configs.items()
-        ]
 
         self.loss_calculators = [
-            (config.weight, Cls(cf=cf, loss_fcts=config.loss_fcts, stage=stage, device=self.device))
-            for (Cls, config) in calculator_configs
+            (
+                config.pop("weight"),
+                getattr(LossModules, class_name)(cf=cf, stage=stage, device=self.device, **config),
+            )
+            for class_name, config in calculator_configs.items()
         ]
 
     def compute_loss(
         self,
-        preds: ModelOutput,
-        targets: TargetAuxOutput,
+        preds: dict,  # isn't this a ModelOutput?
+        targets: dict,  # isn't this a TargetAuxOutput?
+        metadata: dict,
     ):
         loss_terms = {}
         loss = torch.tensor(0.0, requires_grad=True)
         for weight, calculator in self.loss_calculators:
-            loss_terms[calculator.name] = calculator.compute_loss(preds=preds, targets=targets)
+            loss_terms[calculator.name] = calculator.compute_loss(
+                preds=preds, targets=targets, metadata=metadata
+            )
             loss = loss + weight * loss_terms[calculator.name].loss
 
         return loss, LossTerms(loss_terms=loss_terms)

@@ -1,15 +1,13 @@
 streams_directory: "./config/streams/era5_1deg/"
+# streams_directory: "./config/streams/era5_nppatms_synop/"
 
 embed_orientation: "channels"
-embed_local_coords: True
-embed_centroids_local_coords: False
-embed_size_centroids: 0
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
 target_cell_local_prediction: True
 
-ae_local_dim_embed: 1024
+ae_local_dim_embed: 256
 ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
@@ -23,8 +21,8 @@ ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
-ae_global_dim_embed: 2048
-ae_global_num_blocks: 8
+ae_global_dim_embed: 512
+ae_global_num_blocks: 4
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -47,15 +45,18 @@ pred_adapter_kv: False
 pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
+num_class_tokens: 1
+num_register_tokens: 7
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
 forecast_offset : 0
 forecast_delta_hrs: 0
 forecast_steps: 0
-forecast_policy: null
+forecast_policy: "fixed"
 forecast_att_dense_rate: 1.0
-fe_num_blocks: 0
+forecast_with_step_conditioning: True # False
+fe_num_blocks: 6
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -91,39 +92,84 @@ validate_with_ema: True
 ema_ramp_up_ratio: 0.09
 ema_halflife_in_thousands: 1e-3
 
-# training mode: "forecast" or "masking" (masked token modeling)
-# for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "masking"
-training_mode_config: {"losses": {LossPhysical: {weight: 0.7, loss_fcts: [['mse', 0.8], ['mae', 0.2]]},}
-                      }
-# training_mode_config: {"loss": {LossPhysical: [['mse', 0.7]],
-#                                             LossLatent: [['mse', 0.3]],
-#                                             LossStudentTeacher: [{'iBOT': {<options>}, 'JEPA': {options}}],}
-#                       }
-validation_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},}
-                        }
+
+# masking
+masking_strategy: "random" # TODO
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
+#
+sampling_rate_target: 1.0
 # sample the masking rate (with normal distribution centered at masking_rate)
 # note that a sampled masking rate leads to varying requirements
 masking_rate_sampling: True
-# sample a subset of all target points, useful e.g. to reduce memory requirements (also can specify per-stream)
-sampling_rate_target: 1.0
-# include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "causal" and "combination"
-masking_strategy: "random"
 # masking_strategy_config is a dictionary of additional parameters for the masking strategy
 # required for "healpix" and "channel" masking strategies
 # "healpix": requires healpix mask level to be specified with `hl_mask`
 # "channel": requires "mode" to be specified, "per_cell" or "global",
-masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
-                          "probabilities": [0.34, 0.33, 0.33],
-                          "hl_mask": 3, "mode": "per_cell",
-                          "same_strategy_per_batch": false
-                          }
+
+
+
+validation_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},}}
+# Student-teacher configuration (only used when training_mode == "student_teacher")
+# TODO: adapt so that the masking or forecast config entry also sits here
+training_config:
+  # when this is "masking", we are basically only using the model_input subconfig
+  training_mode: "student-teacher"  # "masking", "student_teacher", "forecast"
+  target_and_aux_calc: "EMATeacher"
+  losses :  
+    LossLatentSSLStudentTeacher: { 
+      "weight": 1.0,
+      # "iBOT": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 16384, "teacher_temp": 0.1,
+      #     "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      # "DINO": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 16384, "teacher_temp": 0.1,
+      #     "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      # }
+      "JEPA": {'weight': 0.5, "loss_extra_args": {}, "out_dim": 2048} }
+  model_input:
+    - masking_strategy: "masking" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
+      num_samples: 1  # if student-teacher, the number of local (student) views to generate
+      masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
+      # masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
+      #                       "probabilities": [0.34, 0.33, 0.33],
+      #                       "hl_mask": 3, "mode": "per_cell",
+      #                       "same_strategy_per_batch": false
+      #                       }
+      # relationship: "independent" #, "subset", "disjoint". Relationship of student views to teacher view.
+      relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+      loss : jepa
+    # - masking_strategy: "masking" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
+    #   num_samples: 1  # if student-teacher, the number of local (student) views to generate
+    #   masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
+    #   # masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
+    #   #                       "probabilities": [0.34, 0.33, 0.33],
+    #   #                       "hl_mask": 3, "mode": "per_cell",
+    #   #                       "same_strategy_per_batch": false
+    #   #                       }
+    #   # relationship: "independent" #, "subset", "disjoint". Relationship of student views to teacher view.
+    #   relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+    #   loss : ibot
+    # - masking_strategy: "cropping"
+    #   num_samples: 2 # if student-teacher, the number of local (student) views to generate
+    #   masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
+    #   relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+    #   loss : dino
+    # - masking_strategy: "cropping"
+    #   num_samples: 1 # if student-teacher, the number of local (student) views to generate
+    #   masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
+    #   relationship: "identity"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+    #   loss : dino
+
+  target_input:
+    - masking_strategy: "cropping"  # Strategy for teacher (global) view: "random", "healpix"
+      rate: 0.1  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
+      num_samples: 2 # number of teacher views to generate
+      hl_mask : 0 # healpix level to use for healpix masking strategy
+      # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
+      rate_sampling: true  # randomly sample the rate per batch
 
 num_mini_epochs: 32
 samples_per_mini_epoch: 4096
-samples_per_validation: 512
+samples_per_validation: 32 #512
 
 shuffle: True
 
@@ -144,7 +190,8 @@ norm_type: "LayerNorm"
 nn_module: "te"
 log_grad_norms: False
 
-start_date: 197901010000
+# start_date: 197901010000
+start_date: 201401010000
 end_date: 202012310000
 start_date_val: 202101010000
 end_date_val: 202201010000
@@ -170,7 +217,6 @@ train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
-
 
 # Tags for experiment tracking
 # These tags will be logged in MLFlow along with completed runs for train, eval, val

@@ -16,7 +16,7 @@ import torch
 from omegaconf import DictConfig
 from torch import Tensor
 
-import weathergen.train.loss_modules.loss_functions as losses
+import weathergen.train.loss_modules.loss_functions as loss_fns
 from weathergen.train.loss_modules.loss_functions import stat_loss_fcts
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.utils.train_logger import TRAIN, VAL, Stage
@@ -50,7 +50,7 @@ class LossPhysical(LossModuleBase):
 
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
-            [getattr(losses, name if name != "mse" else "mse_channel_location_weighted"), w, name]
+            [getattr(loss_fns, name if name != "mse" else "mse_channel_location_weighted"), w, name]
             for name, w in loss_fcts
         ]
 
@@ -83,14 +83,14 @@ class LossPhysical(LossModuleBase):
         timestep_weight_config = self.cf.get("timestep_weight")
         if timestep_weight_config is None:
             return [1.0 for _ in range(forecast_steps)]
-        weights_timestep_fct = getattr(losses, timestep_weight_config[0])
+        weights_timestep_fct = getattr(loss_fns, timestep_weight_config[0])
         return weights_timestep_fct(forecast_steps, timestep_weight_config[1])
 
     def _get_location_weights(self, stream_info, stream_data, forecast_offset, fstep):
         location_weight_type = stream_info.get("location_weight", None)
         if location_weight_type is None:
             return None
-        weights_locations_fct = getattr(losses, location_weight_type)
+        weights_locations_fct = getattr(loss_fns, location_weight_type)
         weights_locations = weights_locations_fct(stream_data, forecast_offset, fstep)
         weights_locations = weights_locations.to(device=self.device, non_blocking=True)
 
@@ -149,11 +149,7 @@ class LossPhysical(LossModuleBase):
 
         return loss_lfct, losses_chs
 
-    def compute_loss(
-        self,
-        preds: dict,
-        targets: dict,
-    ) -> LossValues:
+    def compute_loss(self, preds: dict, targets: dict, metadata) -> LossValues:
         """
         Computes the total loss for a given batch of predictions and corresponding
         stream data.
@@ -184,8 +180,8 @@ class LossPhysical(LossModuleBase):
                           of predictions for channels with statistical loss functions, normalized.
         """
 
-        preds = preds.physical
-        streams_data = targets.physical
+        preds = preds[0].physical
+        streams_data = targets[0].physical
 
         # gradient loss
         loss = torch.tensor(0.0, device=self.device, requires_grad=True)
@@ -212,18 +208,20 @@ class LossPhysical(LossModuleBase):
 
         # TODO: iterate over batch dimension
         i_batch = 0
+        streams_data = [streams_data]
         for i_stream_info, stream_info in enumerate(self.cf.streams):
+            stream_name = stream_info["name"]
             # extract target tokens for current stream from the specified forecast offset onwards
-            targets = streams_data[i_batch][i_stream_info].target_tokens[self.cf.forecast_offset :]
+            targets = streams_data[i_batch][stream_name].target_tokens[self.cf.forecast_offset :]
 
-            stream_data = streams_data[i_batch][i_stream_info]
+            stream_data = streams_data[i_batch][stream_name]
 
             fstep_loss_weights = self._get_fstep_weights(len(targets))
 
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
 
-            stream_is_spoof = streams_data[i_batch][i_stream_info].is_spoof()
+            stream_is_spoof = streams_data[i_batch][stream_name].is_spoof()
             if stream_is_spoof:
                 spoof_weight = torch.tensor(0.0, device=self.device, requires_grad=False)
             else:

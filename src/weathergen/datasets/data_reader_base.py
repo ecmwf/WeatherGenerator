@@ -199,6 +199,7 @@ class ReaderData:
     geoinfos: NDArray[DType]
     data: NDArray[DType]
     datetimes: NDArray[NPDT64]
+    is_spoof: bool = False
 
     @staticmethod
     def empty(num_data_fields: int, num_geo_fields: int) -> "ReaderData":
@@ -215,6 +216,7 @@ class ReaderData:
             geoinfos=np.zeros((0, num_geo_fields), dtype=np.float32),
             data=np.zeros((0, num_data_fields), dtype=np.float32),
             datetimes=np.zeros((0,), dtype=np.datetime64),
+            is_spoof=False,
         )
 
     def is_empty(self):
