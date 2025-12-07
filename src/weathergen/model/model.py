@@ -535,7 +535,7 @@ class Model(torch.nn.Module):
 
     #########################################
     def forward(self, model_params: ModelParams, sample, forecast_offset: int, forecast_steps: int):
-        """Performs the forward pass of the model to generate forecasts
+        """Forward pass of the model
 
         Tokens are processed through the model components, which were defined in the create method.
         Args:
@@ -554,9 +554,12 @@ class Model(torch.nn.Module):
 
         tokens, posteriors = self.encoder(model_params, sample)
 
+        # collapse along input step dimension
+        tokens = torch.stack(tokens, 0).sum(0)
+
         # roll-out in latent space
         preds_all = []
-        for fstep in range(forecast_offset, forecast_offset + forecast_steps):
+        for fstep in range(forecast_offset, forecast_steps):
             # prediction
             preds_all += [
                 self.predict(
@@ -579,9 +582,8 @@ class Model(torch.nn.Module):
         preds_all += [
             self.predict(
                 model_params,
-                forecast_offset + forecast_steps,
+                forecast_steps,
                 tokens,
-                # TODO We add the batch dimension back and thus wrap stream_data in a list
                 sample,
             )
         ]

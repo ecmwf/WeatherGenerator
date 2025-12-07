@@ -266,7 +266,7 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
     return a
 
 
-def compute_offsets_scatter_embed(batch: StreamData, num_input_steps: int) -> StreamData:
+def compute_offsets_scatter_embed(batch: StreamData, num_steps_input: int) -> StreamData:
     """
     Compute auxiliary information for scatter operation that changes from stream-centric to
     cell-centric computations
@@ -297,7 +297,7 @@ def compute_offsets_scatter_embed(batch: StreamData, num_input_steps: int) -> St
                 for stl_b in batch
             ]
         )
-        for i in range(num_input_steps)
+        for i in range(num_steps_input)
     ]
 
     # precompute index sets for scatter operation after embed
@@ -308,7 +308,7 @@ def compute_offsets_scatter_embed(batch: StreamData, num_input_steps: int) -> St
     if torch.cat(offsets_base).shape[0] == 0:
         return batch
 
-    for i_s in range(num_input_steps):
+    for i_s in range(num_steps_input):
         for ib, sb in enumerate(batch):  # batch items
             for itype, s in enumerate(sb):  # streams, i.e. here we have StreamData object
                 if not s.source_empty():
@@ -380,7 +380,7 @@ def compute_idxs_predict(forecast_dt: int, batch: StreamData, streams: list[dict
 
 
 def compute_source_cell_lens(
-    batch: list[list[StreamData]], num_input_steps: int
+    batch: list[list[StreamData]], num_steps_input: int
 ) -> list[torch.tensor]:
     """
     Compute auxiliary information for varlen attention for local assimilation
@@ -411,7 +411,7 @@ def compute_source_cell_lens(
                 for stl_b in batch
             ]
         )
-        for i in range(num_input_steps)
+        for i in range(num_steps_input)
     ]
 
     source_cell_lens = [torch.sum(c, 1).flatten().to(torch.int32) for c in source_cell_lens_raw]

@@ -108,17 +108,28 @@ class EncoderModule(torch.nn.Module):
         self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
 
     def forward(self, model_params, sample):
-        # embed
-        tokens = self.embed_cells(model_params, sample)
+        """
+        Encoder forward
+        """
 
-        # local assimilation engine and adapter
-        tokens, posteriors = self.assimilate_local(model_params, tokens, sample)
+        num_steps_input = len(sample.source_cell_lens)
 
-        tokens = self.assimilate_global(tokens)
+        tokens, posteriors = [], []
+        for input_step in range(num_steps_input):
+            # embed from physical space
+            toks = self.embed_cells(input_step, model_params, sample)
+
+            # local assimilation engine and adapter
+            toks, posts = self.assimilate_local(input_step, model_params, toks, sample)
+
+            toks = self.assimilate_global(toks)
+
+            tokens += [toks]
+            posteriors += [posts]
 
         return tokens, posteriors
 
-    def embed_cells(self, model_params, sample) -> torch.Tensor:
+    def embed_cells(self, input_step, model_params, sample) -> torch.Tensor:
         """Embeds input data for each stream separately and rearranges it to cell-wise order
         Args:
             model_params : Query and embedding parameters
@@ -127,13 +138,13 @@ class EncoderModule(torch.nn.Module):
             Tokens for local assimilation
         """
 
-        device = next(self.parameters()).device
-        tokens_all = self.embed_engine(sample, model_params.pe_embed, self.dtype, device)
+        dev = next(self.parameters()).device
+        tokens_all = self.embed_engine(input_step, sample, model_params.pe_embed, self.dtype, dev)
 
         return tokens_all
 
     def assimilate_local(
-        self, model_params, tokens: torch.Tensor, sample: torch.Tensor
+        self, input_step: int, model_params, tokens: torch.Tensor, sample: torch.Tensor
     ) -> torch.Tensor:
         """Processes embedded tokens locally and prepares them for the global assimilation
         Args:
@@ -145,7 +156,7 @@ class EncoderModule(torch.nn.Module):
             Tokens for global assimilation
         """
 
-        cell_lens = sample.source_cell_lens
+        cell_lens = sample.source_cell_lens[input_step]
         batch_size = (
             self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
         )
@@ -188,9 +199,7 @@ class EncoderModule(torch.nn.Module):
 
         # work around to bug in flash attention for hl>=5
 
-        istep = 0
-
-        cell_lens = cell_lens[istep][1:]
+        cell_lens = cell_lens[1:]
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_unmasked_all = []
         posteriors = []

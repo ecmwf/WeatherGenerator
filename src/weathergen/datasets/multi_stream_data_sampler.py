@@ -88,8 +88,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.mask_value = 0.0
         self._stage = stage
 
-        self.num_input_steps = cf.get("num_input_steps", 1)
-
         self.len_hrs: int = cf.len_hrs
         self.step_hrs: int = cf.step_hrs
         self.time_window_handler = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
@@ -309,6 +307,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         stream_data: StreamData,
         base_idx: TIndex,
         stream_info: dict,
+        num_steps_input: int,
         input_data: list,
         input_tokens: list,
         mask: torch.Tensor | None = None,
@@ -330,7 +329,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         if "network_input" in mode:
             # iterate overall input steps
-            for step, idx in enumerate(range(base_idx, base_idx - self.num_input_steps, -1)):
+            for step, idx in enumerate(range(base_idx, base_idx - num_steps_input, -1)):
                 # TODO: check that we are not out of bounds when we go back in time
 
                 time_win_source = self.time_window_handler.window(idx)
@@ -412,6 +411,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         base_idx: TIndex,
         forecast_dt: int,
         stream_info: dict,
+        num_steps_input: int,
         input_data: list,
         output_data: list,
         input_tokens: list,
@@ -440,13 +440,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """
 
         dt = self.forecast_offset + forecast_dt
-        stream_data = StreamData(base_idx, dt, self.num_healpix_cells)
+        stream_data = StreamData(base_idx, num_steps_input, dt, self.num_healpix_cells)
 
         stream_data = self._build_stream_data_input(
             modes,
             stream_data,
             base_idx,
             stream_info,
+            num_steps_input,
             input_data,
             input_tokens,
             input_mask,
@@ -465,7 +466,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         return stream_data
 
-    def _get_data_windows(self, base_idx, forecast_dt, stream_ds):
+    def _get_data_windows(self, base_idx, forecast_dt, num_steps_input_max, stream_ds):
         """
         Collect all data needed for current stream to potentially amortize costs by
         generating multiple samples
@@ -474,7 +475,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # source data: iterate overall input steps
         input_data = []
-        for idx in range(base_idx - self.num_input_steps, base_idx + 1):
+        for idx in range(base_idx - num_steps_input_max, base_idx + 1):
             # TODO: check that we are not out of bounds when we go back in time
 
             rdata = collect_datasources(stream_ds, idx, "source")
@@ -528,6 +529,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """
 
         mode = self.training_cfg.get("training_mode")
+        source_cfgs = self.training_cfg.get("model_input")
+        target_cfgs = self.training_cfg.get("target_input", source_cfgs)
 
         # get/coordinate masks
         # TODO: should also return number of views
@@ -542,7 +545,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         else:
             raise NotImplementedError(f"Unsupported training mode {mode}.")
 
-        batch = ModelBatch(self.streams, num_source_samples, num_target_samples, forecast_dt)
+        batch = ModelBatch(self.streams, num_source_samples, num_target_samples)
 
         # for all streams
         for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
@@ -559,7 +562,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # input_data and output_data is conceptually consecutive but differs
             # in source and target channels; overlap in one window when self.forecast_offset=0
-            (input_data, output_data) = self._get_data_windows(idx, forecast_dt, stream_ds)
+            # max number of input steps
+            i_max = np.array([sc.get("num_steps_input", 1) for sc in source_cfgs]).max().item()
+            self.num_steps_input = i_max
+            (input_data, output_data) = self._get_data_windows(idx, forecast_dt, i_max, stream_ds)
 
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
@@ -574,6 +580,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     idx,
                     forecast_dt,
                     stream_info,
+                    source_cfgs[sidx].get("num_steps_input", 1),
                     input_data,
                     output_data,
                     input_tokens,
@@ -596,6 +603,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     idx,
                     forecast_dt,
                     stream_info,
+                    target_cfgs[sidx].get("num_steps_input", 1),
                     input_data,
                     output_data,
                     input_tokens,
@@ -642,18 +650,21 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         target_cfgs = self.training_cfg.get("target_input", source_cfgs)
         target_cfgs = target_cfgs if target_cfgs is not None else source_cfgs
         num_source_samples = np.array([sc.get("num_samples", 1) for sc in source_cfgs]).sum().item()
-        num_target_samples = np.array([sc.get("num_samples", 1) for sc in target_cfgs]).sum().item()
+        num_target_samples = np.array([tc.get("num_samples", 1) for tc in target_cfgs]).sum().item()
 
         return masks, num_source_samples, num_target_samples
 
     def _preprocess_model_data(self, batch, forecast_dt):
         """ """
 
+        # TODO, TODO, TODO: cleanup
+        num_steps_input = self.num_steps_input
+
         # aggregated lens of tokens per cell across input batch samples
-        source_cell_lens = compute_source_cell_lens(batch, self.num_input_steps)
+        source_cell_lens = compute_source_cell_lens(batch, num_steps_input)
 
         # compute offsets for scatter computation after embedding
-        batch = compute_offsets_scatter_embed(batch, self.num_input_steps)
+        batch = compute_offsets_scatter_embed(batch, num_steps_input)
 
         # compute offsets and auxiliary data needed for prediction computation
         # (info is not per stream so separate data structure)

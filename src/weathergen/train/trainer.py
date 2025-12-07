@@ -529,7 +529,7 @@ class Trainer(TrainerBase):
                             self.model_params,
                             sample,
                             cf.forecast_offset,
-                            batch.get_forecast_dt(),
+                            sample.get_forecast_steps(),
                         )
                     )
 
@@ -546,7 +546,7 @@ class Trainer(TrainerBase):
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
-                            batch.get_forecast_dt(),
+                            sample.get_forecast_steps(),
                         )
                     )
                 # targets, aux = zip(*targets_and_auxs)
