@@ -264,6 +264,7 @@ class Model(torch.nn.Module):
         self.targets_coords_size = targets_coords_size
 
         self.embed_target_coords = None
+        self.encoder: EncoderModule | None = None
         self.forecast_engine: ForecastingEngine | None = None
         self.pred_adapter_kv = None
         self.pred_heads = None

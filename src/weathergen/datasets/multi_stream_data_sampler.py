@@ -197,6 +197,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.shuffle = shuffle
         # TODO: remove options that are no longer supported
         self.input_window_steps = cf.input_window_steps
+        # TODO, TODO, TODO: this needs to be stream specific and should not be an attribute
+        # current implementation needs to be cleaned up when batch_size > 1 is enabled
+        self.num_steps_input = -1
 
         self.batch_size = batch_size
 
