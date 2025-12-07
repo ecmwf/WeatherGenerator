@@ -568,8 +568,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         output_data,
                         input_tokens,
                         output_tokens,
-                        target_mask = target_masks[tidx],
-                        source_mask = source_mask,
+                        target_mask=target_masks[tidx],
+                        source_mask=source_mask,
                     )
 
                     batch.add_source_stream(sidx, tidx, name, sdata, source_metadata_list[sidx])
@@ -578,9 +578,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 stream_data_target = {}
 
                 # for t_idx, mask in enumerate(source_masks):
-                for tidx, target_mask in enumerate(
-                    target_masks
-                ):
+                for tidx, target_mask in enumerate(target_masks):
                     # Note: for EMATeacher we the the streamdata obj
                     # to have the target mask applied to the inputs!
                     # Hence the target mask is also the source mask here!!
@@ -636,8 +634,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         source_cfgs = self.training_cfg.get("model_input")
         target_cfgs = self.training_cfg.get("target_input", source_cfgs)
         target_cfgs = target_cfgs if target_cfgs is not None else source_cfgs
-        num_target_samples = max(mapping)+1 # np.array([sc.get("num_samples", 1) for sc in source_cfgs]).sum().item()
-        num_source_samples = len(mapping) #np.array([sc.get("num_samples", 1) for sc in target_cfgs]).sum().item()
+        num_target_samples = (
+            max(mapping) + 1
+        )  # np.array([sc.get("num_samples", 1) for sc in source_cfgs]).sum().item()
+        num_source_samples = len(
+            mapping
+        )  # np.array([sc.get("num_samples", 1) for sc in target_cfgs]).sum().item()
 
         return masks, num_source_samples, num_target_samples
 

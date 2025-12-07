@@ -489,7 +489,7 @@ class Model(torch.nn.Module):
         self.class_token_idx = cf.num_class_tokens
         self.register_token_idx = cf.num_register_tokens + cf.num_class_tokens
         for loss, loss_conf in target_losses.items():
-            if loss == "iBOT" or loss == "JEPA":
+            if loss == "iBOT":
                 self.latent_heads[loss] = LatentPredictionHead(
                     f"{loss}-head",
                     cf.ae_global_dim_embed,
@@ -857,12 +857,12 @@ class Model(torch.nn.Module):
         ).flatten(1, 2)
 
         # add additional global tokens class and register
-        tokens_global_class_and_register = self.q_cells.repeat(batch_size, self.register_token_idx, 1)
+        tokens_global_class_and_register = self.q_cells.repeat(
+            batch_size, self.register_token_idx, 1
+        )
 
         # concatenate all global tokens
-        tokens_global = torch.cat(
-            [tokens_global_class_and_register, tokens_global], dim=1
-        )
+        tokens_global = torch.cat([tokens_global_class_and_register, tokens_global], dim=1)
 
         return tokens_global, posteriors
 

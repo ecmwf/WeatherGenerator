@@ -53,7 +53,7 @@ class EMATeacher(TargetAndAuxModuleBase):
         for loss_name, target_module in self.postprocess_targets.items():
             with torch.no_grad():
                 targets[loss_name] = target_module(outputs[loss_name])
-        return TargetAuxOutput(physical={}, latent=targets, aux_outputs= {})
+        return TargetAuxOutput(physical={}, latent=targets, aux_outputs={})
 
     def to_device(self, device):
         for _, module in self.postprocess_targets.items():

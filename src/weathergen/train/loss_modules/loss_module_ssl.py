@@ -142,9 +142,7 @@ def gather_preds_for_loss(name, preds, metadata, target2source_matching_idxs):
                 ],
                 dim=0,
             ),
-            # TODO remove the [:, :2049]
             "student_masks": torch.stack(
-                # [info.mask.to("cuda")[:513] for info in metadata if info.params["loss"] == "jepa"],
                 [info.mask.to("cuda") for info in metadata if info.params["loss"] == "jepa"],
                 dim=0,
             ).unsqueeze(1),
@@ -188,7 +186,7 @@ def gather_preds_for_loss(name, preds, metadata, target2source_matching_idxs):
             ]
             local2global_dino_student.append(local_preds)
         local2global_dino_student = [
-            torch.stack(latents, dim=0) for latents in zip(*local2global_dino_student)
+            torch.stack(latents, dim=0) for latents in zip(*local2global_dino_student, strict=False)
         ]
         return {
             "local2global_dino_student": local2global_dino_student,
@@ -219,7 +217,6 @@ def gather_targets_for_loss(name, targets, metadata, target2source_matching_idxs
                 dim=0,
             ),
             "teacher_masks": torch.stack(
-                # [info.mask.to("cuda")[:513] for info in metadata],
                 [info.mask.to("cuda") for info in metadata],
                 dim=0,
             ).unsqueeze(1),

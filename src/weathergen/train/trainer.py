@@ -588,9 +588,9 @@ class Trainer(TrainerBase):
                 targets=target_auxs,
                 metadata=(
                     batch.source2target_matching_idxs,
-                    [sample.meta_info['ERA5'] for sample in batch.source_samples],
+                    [sample.meta_info["ERA5"] for sample in batch.source_samples],
                     batch.target2source_matching_idxs,
-                    [sample.meta_info['ERA5'] for sample in batch.target_samples],
+                    [sample.meta_info["ERA5"] for sample in batch.target_samples],
                 ),
             )
             # TODO re-enable this, need to think on how to make it compatible with

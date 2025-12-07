@@ -377,7 +377,7 @@ class Masker:
 
                 # iterate over all source samples
                 # different strategies
-                for i_source, source_cfg in enumerate(source_cfgs):
+                for _i_source, source_cfg in enumerate(source_cfgs):
                     # samples per strategy
                     for _ in range(source_cfg.get("num_samples", 1)):
                         source_mask, mask_params = self._get_mask(

@@ -119,24 +119,13 @@ training_config:
   losses :  
     LossLatentSSLStudentTeacher: { 
       "weight": 1.0,
-      "iBOT": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 16384, "n_register_tokens": 4,"teacher_temp": 0.1,
-          "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      "DINO": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 16384, "n_register_tokens": 4, "teacher_temp": 0.1,
-          "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      }
-      # "JEPA": {'weight': 0.5, "loss_extra_args": {}, "out_dim": 2048, "n_register_tokens": 4} }
+      # "iBOT": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 16384, "teacher_temp": 0.1,
+      #     "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      # "DINO": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 16384, "teacher_temp": 0.1,
+      #     "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      # }
+      "JEPA": {'weight': 0.5, "loss_extra_args": {}, "out_dim": 2048} }
   model_input:
-    # - masking_strategy: "masking" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
-    #   num_samples: 1  # if student-teacher, the number of local (student) views to generate
-    #   masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
-    #   # masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
-    #   #                       "probabilities": [0.34, 0.33, 0.33],
-    #   #                       "hl_mask": 3, "mode": "per_cell",
-    #   #                       "same_strategy_per_batch": false
-    #   #                       }
-    #   # relationship: "independent" #, "subset", "disjoint". Relationship of student views to teacher view.
-    #   relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-    #   loss : jepa
     - masking_strategy: "masking" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
       num_samples: 1  # if student-teacher, the number of local (student) views to generate
       masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
@@ -147,17 +136,28 @@ training_config:
       #                       }
       # relationship: "independent" #, "subset", "disjoint". Relationship of student views to teacher view.
       relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-      loss : ibot
-    - masking_strategy: "cropping"
-      num_samples: 2 # if student-teacher, the number of local (student) views to generate
-      masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
-      relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-      loss : dino
-    - masking_strategy: "cropping"
-      num_samples: 1 # if student-teacher, the number of local (student) views to generate
-      masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
-      relationship: "identity"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-      loss : dino
+      loss : jepa
+    # - masking_strategy: "masking" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
+    #   num_samples: 1  # if student-teacher, the number of local (student) views to generate
+    #   masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
+    #   # masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
+    #   #                       "probabilities": [0.34, 0.33, 0.33],
+    #   #                       "hl_mask": 3, "mode": "per_cell",
+    #   #                       "same_strategy_per_batch": false
+    #   #                       }
+    #   # relationship: "independent" #, "subset", "disjoint". Relationship of student views to teacher view.
+    #   relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+    #   loss : ibot
+    # - masking_strategy: "cropping"
+    #   num_samples: 2 # if student-teacher, the number of local (student) views to generate
+    #   masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
+    #   relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+    #   loss : dino
+    # - masking_strategy: "cropping"
+    #   num_samples: 1 # if student-teacher, the number of local (student) views to generate
+    #   masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
+    #   relationship: "identity"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+    #   loss : dino
 
   target_input:
     - masking_strategy: "cropping"  # Strategy for teacher (global) view: "random", "healpix"

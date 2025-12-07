@@ -845,7 +845,7 @@ class LatentPredictionHead(nn.Module):
 
         self.name = name
         self.class_token = class_token
-        self.patch_token =  patch_token
+        self.patch_token = patch_token
         # For now this is a Linear Layer TBD what this architecture should be
         self.layer = nn.Linear(in_dim, out_dim, bias=False)
 
