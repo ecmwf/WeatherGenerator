@@ -840,16 +840,20 @@ class LatentState:
 
 
 class LatentPredictionHead(nn.Module):
-    def __init__(self, name, in_dim, out_dim, class_token: bool):
+    def __init__(self, name, in_dim, out_dim, class_token: bool, patch_token: bool):
         super().__init__()
 
         self.name = name
         self.class_token = class_token
+        self.patch_token =  patch_token
         # For now this is a Linear Layer TBD what this architecture should be
         self.layer = nn.Linear(in_dim, out_dim, bias=False)
 
     def forward(self, x: LatentState):
+        outputs = []
         if self.class_token:
-            return self.layer(x.class_token)
-        else:
-            return self.layer(x.patch_tokens)
+            outputs.append(self.layer(x.class_token))
+        if self.patch_token:
+            outputs.append(self.layer(x.patch_tokens))
+        # We concatenate in the token dimension [Batch, Tokens, Dim]
+        return torch.cat(outputs, dim=1)

@@ -159,21 +159,19 @@ def gather_preds_for_loss(name, preds, metadata, target2source_matching_idxs):
         return {
             "student_patches_masked": torch.stack(
                 [
-                    p.latent[name]
+                    p.latent[name][:, 1:]
                     for p, info in zip(preds, metadata, strict=False)
                     if info.params["loss"] == "ibot"
                 ],
                 dim=0,
             ),
-            # TODO remove the [:, :2049]
             "student_masks": torch.stack(
-                # [info.mask.to("cuda")[:513] for info in metadata if info.params["loss"] == "ibot"],
                 [info.mask.to("cuda") for info in metadata if info.params["loss"] == "ibot"],
                 dim=0,
             ).unsqueeze(1),
             "student_class_masked": torch.stack(
                 [
-                    p.latent[name]
+                    p.latent[name][:, :1]
                     for p, info in zip(preds, metadata, strict=False)
                     if info.params["loss"] == "ibot"
                 ],
@@ -235,17 +233,15 @@ def gather_targets_for_loss(name, targets, metadata, target2source_matching_idxs
         """
         return {
             "teacher_patches_masked": torch.stack(
-                [p.latent[name] for p, info in zip(targets, metadata, strict=False)],
+                [p.latent[name][:, 1:] for p, info in zip(targets, metadata, strict=False)],
                 dim=0,
             ),
-            # TODO remove the [:, :2049]
             "teacher_masks": torch.stack(
                 [info.mask.to("cuda") for info in metadata],
-                # [info.mask.to("cuda")[:513] for info in metadata],
                 dim=0,
             ).unsqueeze(1),
             "teacher_class_masked": torch.stack(
-                [p.latent[name] for p, info in zip(targets, metadata, strict=False)],
+                [p.latent[name][:, :1] for p, info in zip(targets, metadata, strict=False)],
                 dim=0,
             ),
         }

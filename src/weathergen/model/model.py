@@ -494,7 +494,16 @@ class Model(torch.nn.Module):
                     f"{loss}-head",
                     cf.ae_global_dim_embed,
                     loss_conf["out_dim"],
+                    class_token=True,
+                    patch_token=True,
+                )
+            elif loss == "JEPA":
+                self.latent_heads[loss] = LatentPredictionHead(
+                    f"{loss}-head",
+                    cf.ae_global_dim_embed,
+                    loss_conf["out_dim"],
                     class_token=False,
+                    patch_token=True,
                 )
             elif loss == "DINO":
                 self.latent_heads[loss] = LatentPredictionHead(
@@ -502,6 +511,7 @@ class Model(torch.nn.Module):
                     cf.ae_global_dim_embed,
                     loss_conf["out_dim"],
                     class_token=True,
+                    patch_token=False,
                 )
 
         return self
