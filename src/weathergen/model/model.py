@@ -480,38 +480,14 @@ class Model(torch.nn.Module):
             )
 
         # Latent heads for losses
-        # TODO write the forward function for this, has to wait until other Model PRs are done
         target_losses = cf["training_config"]["losses"].get("LossLatentSSLStudentTeacher", {})
         # TODO implement later
         # shared_heads = cf.get("shared_heads", False)
         self.latent_heads = nn.ModuleDict()
         self.norm = nn.LayerNorm(cf.ae_global_dim_embed)
-        # if ("iBOT" in target_losses.keys() and "DINO" in target_losses.keys()) and shared_heads:
-        #     assert False, "Not yet implemented and not a priority"
-        #     loss_conf = target_losses["DINO"]
-        #     self.latent_heads["iBOT-and-DINO-head"] = LatentPredictionHead(
-        #         "iBOT-and-DINO-head",
-        #         cf.ae_global_dim_embed,
-        #         loss_conf["out_dim"],
-        #         class_token=True,
-        #         n_register_tokens=loss_conf["n_register_tokens"],
-        #     )
-        # elif (
-        #     "JEPA" in target_losses.keys()
-        #     or "iBOT" in target_losses.keys()
-        #     or "DINO" in target_losses.keys()
-        # ):
-        #     for loss, loss_conf in target_losses.items():
-        #         self.latent_heads[loss] = LatentPredictionHead(
-        #             f"{loss}-head",
-        #             cf.ae_local_dim_embed,
-        #             loss_conf["out_dim"],
-        #             class_token=loss_conf["class_token"],
-        #         )
         # TODO make these values configurable
-        # TODO make the model indeed have 1+ register_tokens + healpix cell tokens
-        self.class_token_idx = 1
-        self.register_token_idx = 3
+        self.class_token_idx = cf.num_class_tokens
+        self.register_token_idx = cf.num_register_tokens + cf.num_class_tokens
         for loss, loss_conf in target_losses.items():
             if loss == "iBOT" or loss == "JEPA":
                 self.latent_heads[loss] = LatentPredictionHead(
@@ -673,7 +649,7 @@ class Model(torch.nn.Module):
                 self.predict(
                     model_params,
                     fstep,
-                    tokens,
+                    tokens[:, self.register_token_idx :],
                     sample,
                 )
             ]
@@ -691,7 +667,7 @@ class Model(torch.nn.Module):
             self.predict(
                 model_params,
                 forecast_offset + forecast_steps,
-                tokens,
+                tokens[:, self.register_token_idx :],
                 # TODO We add the batch dimension back and thus wrap stream_data in a list
                 sample,
             )
@@ -712,7 +688,8 @@ class Model(torch.nn.Module):
             class_token=z[:, : self.class_token_idx],
             register_tokens=z[:, self.class_token_idx : self.register_token_idx],
             patch_tokens=z[
-                :, self.register_token_idx : ],# 512 + self.class_token_idx + self.register_token_idx],
+                :, self.register_token_idx :
+            ],  # 512 + self.class_token_idx + self.register_token_idx],
             z_pre_norm=z_pre_norm,
         )
         latents["latent_state_pre_heads"] = latent_state
@@ -868,6 +845,14 @@ class Model(torch.nn.Module):
             tokens_global.reshape([batch_size, self.num_healpix_cells, s[-2], s[-1]])
             + model_params.pe_global
         ).flatten(1, 2)
+
+        # add additional global tokens class and register
+        tokens_global_class_and_register = self.q_cells.repeat(batch_size, self.register_token_idx, 1)
+
+        # concatenate all global tokens
+        tokens_global = torch.cat(
+            [tokens_global_class_and_register, tokens_global], dim=1
+        )
 
         return tokens_global, posteriors
 
