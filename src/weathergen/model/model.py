@@ -635,7 +635,7 @@ class Model(torch.nn.Module):
                 self.predict(
                     model_params,
                     fstep,
-                    tokens[:, self.num_class_tokens + self.num_register_tokens :],
+                    tokens[:, self.num_register_tokens :],
                     streams_data,
                     target_coords_idxs,
                 )
