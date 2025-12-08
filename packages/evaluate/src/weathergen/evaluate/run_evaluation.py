@@ -9,22 +9,26 @@
 # weathergen-evaluate = { path = "../../../../../packages/evaluate" }
 # ///
 
+# Standard library
 import argparse
 import logging
 import sys
 from collections import defaultdict
 from pathlib import Path
 
+# Third-party
 import mlflow
 from mlflow.client import MlflowClient
 from omegaconf import OmegaConf
 from xarray import DataArray
 
+# Local application / package
 from weathergen.common.config import _REPO_ROOT
 from weathergen.common.platform_env import get_platform_env
-from weathergen.evaluate.io_reader import CsvReader, WeatherGenReader
-from weathergen.evaluate.plot_utils import collect_channels
-from weathergen.evaluate.utils import (
+from weathergen.evaluate.io.csv_reader import CsvReader
+from weathergen.evaluate.io.wegen_reader import WeatherGenReader
+from weathergen.evaluate.plotting.plot_utils import collect_channels
+from weathergen.evaluate.utils.utils import (
     calc_scores_per_stream,
     metric_list_to_json,
     plot_data,

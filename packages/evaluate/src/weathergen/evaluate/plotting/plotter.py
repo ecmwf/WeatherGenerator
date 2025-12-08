@@ -16,9 +16,10 @@ from PIL import Image
 from scipy.stats import wilcoxon
 
 from weathergen.common.config import _load_private_conf
-from weathergen.evaluate.plot_utils import (
+from weathergen.evaluate.plotting.plot_utils import (
     DefaultMarkerSize,
 )
+from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
