@@ -7,12 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import dask
 import json
 import logging
 from pathlib import Path
 from typing import override
 
+import dask
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
@@ -26,11 +26,10 @@ from weathergen.datasets.data_reader_base import (
     check_reader_data,
 )
 
-
 _logger = logging.getLogger(__name__)
 
 # Use Dask synchronous scheduler to avoid conflicts with PyTorch DataLoader workers
-dask.config.set(scheduler='synchronous')
+dask.config.set(scheduler="synchronous")
 
 
 class DataReaderIconArt(DataReaderTimestep):
@@ -311,7 +310,7 @@ class DataReaderIconArt(DataReaderTimestep):
 
         # data - load channels using optimized time-slicing approach
         channels = np.array(self.colnames)[channels_idx]
-        
+
         # Load only the needed time steps by slicing at xarray level before converting to numpy
         data = [
             self.ds[ch_].isel(time=slice(t_idxs_start, t_idxs_end)).values.reshape(-1, 1)
