@@ -293,7 +293,7 @@ class WeatherGenReader(Reader):
         Get the climatology filename for a given stream from the inference configuration.
         Parameters
         ----------
-        stream : 
+        stream :
             Name of the data stream.
         Returns
         -------
@@ -332,7 +332,7 @@ class WeatherGenReader(Reader):
 
         Parameters
         ----------
-        stream: 
+        stream:
             the stream name
 
         Returns
@@ -361,7 +361,7 @@ class WeatherGenReader(Reader):
 
         Parameters
         ----------
-        stream : 
+        stream :
             The name of the stream to get channels for.
 
         Returns
@@ -377,7 +377,7 @@ class WeatherGenReader(Reader):
         """Get the list of ensemble member names for a given stream from the config.
         Parameters
         ----------
-        stream : 
+        stream :
             The name of the stream to get channels for.
 
         Returns
@@ -396,7 +396,7 @@ class WeatherGenReader(Reader):
         """Check if the latitude and longitude coordinates are regularly spaced for a given stream.
         Parameters
         ----------
-        stream : 
+        stream :
             The name of the stream to get channels for.
 
         Returns
@@ -469,11 +469,11 @@ class WeatherGenReader(Reader):
 
         Parameters:
         ------------
-            config: 
+            config:
                 The full configuration dictionary.
-            stream_name: 
+            stream_name:
                 The name of the stream (e.g. 'ERA5').
-            key: 
+            key:
                 The key to look up (e.g. 'tokenize_spacetime').
             default: Optional
                 Value to return if not found (default: None).

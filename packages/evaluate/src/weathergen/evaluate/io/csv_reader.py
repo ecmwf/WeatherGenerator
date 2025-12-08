@@ -35,11 +35,11 @@ class CsvReader(Reader):
 
         Parameters
         ----------
-        eval_cfg : 
+        eval_cfg :
             config with plotting and evaluation options for that run id
         run_id : str
             run id of the model
-        private_paths: 
+        private_paths:
             list of private paths for the supported HPC
         """
 
@@ -144,7 +144,7 @@ def _rename_channels(data) -> pd.DataFrame:
 
     Parameters
     ----------
-    name : 
+    name :
         Original channel name.
 
     Returns
