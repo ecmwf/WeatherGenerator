@@ -117,7 +117,6 @@ class WeatherGenReader(Reader):
     def get_data(
         self,
         stream: str,
-        region: str = "global",
         samples: list[int] | None = None,
         fsteps: list[str] | None = None,
         channels: list[str] | None = None,
@@ -136,8 +135,6 @@ class WeatherGenReader(Reader):
             Expected scheme `<results_base_dir>/<run_id>`.
         stream :
             Stream name to retrieve data for.
-        region :
-            Region name to retrieve data for. Possible values: "global", "shem", "nhem", "tropics"
         samples :
             List of sample indices to retrieve. If None, all samples are retrieved.
         fsteps :
@@ -156,8 +153,6 @@ class WeatherGenReader(Reader):
             - points_per_sample: xarray DataArray containing the number of points per sample,
               if `return_counts` is True.
         """
-
-        bbox = RegionBoundingBox.from_region_name(region)
 
         with ZarrIO(self.fname_zarr) as zio:
             stream_cfg = self.get_stream(stream)
@@ -201,15 +196,15 @@ class WeatherGenReader(Reader):
 
                 for sample in tqdm(samples, desc=f"Processing {self.run_id} - {stream} - {fstep}"):
                     out = zio.get_data(sample, stream, fstep)
-                    target, pred = out.target.as_xarray(), out.prediction.as_xarray()
 
-                    if region != "global":
-                        _logger.debug(
-                            f"Applying bounding box mask for region '{region}' to targets "
-                            "and predictions..."
+                    if out.target is None or out.prediction is None:
+                        _logger.info(
+                            f"Skipping {stream} sample {sample} forecast step: {fstep}. "
+                            "No data found."
                         )
-                        target = bbox.apply_mask(target)
-                        pred = bbox.apply_mask(pred)
+                        continue
+
+                    target, pred = out.target.as_xarray(), out.prediction.as_xarray()
 
                     npoints = len(target.ipoint)
                     pps.append(npoints)
@@ -259,7 +254,10 @@ class WeatherGenReader(Reader):
                     _logger.debug("Repeating sample coordinate for single-sample case.")
                     for da in (da_tars_fs, da_preds_fs):
                         da.assign_coords(
-                            sample=("ipoint", np.repeat(da.sample.values, da.sizes["ipoint"]))
+                            sample=(
+                                "ipoint",
+                                np.repeat(da.sample.values, da.sizes["ipoint"]),
+                            )
                         )
 
                 if set(channels) != set(all_channels):
