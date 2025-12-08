@@ -114,7 +114,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.len = 100000000
         self.samples_per_mini_epoch = samples_per_mini_epoch
-        self.repeat_data = cf.get("repeat_data", False)
+        self.repeat_data = cf.get("repeat_data_in_mini_epoch", False)
 
         self.streams_datasets: list[list[AnyDataReader]] = []
         for _, stream_info in enumerate(cf.streams):
@@ -193,7 +193,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         if not self.repeat_data:
             self.len = min(self.len, samples_per_mini_epoch if samples_per_mini_epoch else self.len)
         else:
-            assert samples_per_mini_epoch, "Must specify samples_per_mini_epoch if repeat_data."
+            assert samples_per_mini_epoch, "Must specify samples_per_mini_epoch if repeat_data_in_mini_epoch."
             self.len = samples_per_mini_epoch
 
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
@@ -289,14 +289,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # check repeat_data flag and fill up perms accordingly
         if self.repeat_data and len(self.perms) < self.samples_per_mini_epoch:
-            if self.samples_per_mini_epoch % len(self.perms) == 0:
-                self.perms = np.tile(self.perms, self.samples_per_mini_epoch // len(self.perms))
-            else:
-                self.perms = np.tile(self.perms, self.samples_per_mini_epoch // len(self.perms))
-                random_filler = self.rng.choice(
-                    self.perms, size=self.samples_per_mini_epoch - len(self.perms), replace=False
-                )
-                self.perms = np.concatenate([self.perms, random_filler])
+            self.perms = np.tile(self.perms, self.samples_per_mini_epoch // len(self.perms))
+            random_filler = self.rng.choice(
+                self.perms, size=self.samples_per_mini_epoch - len(self.perms), replace=False
+            )
+            self.perms = np.concatenate([self.perms, random_filler])
 
         if self.shuffle:
             self.perms = self.rng.permutation(self.perms)
