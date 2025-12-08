@@ -812,7 +812,6 @@ class LatentState:
     A dataclass to encapsulate the output of latent heads.
     """
 
-    class_tokens: torch.Tensor
     register_tokens: torch.Tensor
     patch_tokens: torch.Tensor
     z_pre_norm: torch.Tensor

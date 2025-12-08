@@ -37,6 +37,7 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
+from weathergen.model.positional_encoding import positional_encoding_harmonic
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
@@ -74,6 +75,10 @@ class ModelParams(torch.nn.Module):
         len_token_seq = 1024
         self.pe_embed = torch.nn.Parameter(
             torch.zeros(len_token_seq, cf.ae_local_dim_embed, dtype=self.dtype), requires_grad=False
+        )
+
+        self.pe_register = torch.nn.Parameter(
+            torch.empty(cf.num_register_tokens, cf.ae_global_dim_embed), requires_grad=False
         )
 
         pe = torch.zeros(
@@ -149,6 +154,8 @@ class ModelParams(torch.nn.Module):
         )
         self.pe_embed.data[:, 0::2] = torch.sin(position * div[: self.pe_embed[:, 0::2].shape[1]])
         self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
+
+        self.pe_register.data = positional_encoding_harmonic(self.pe_register)
 
         dim_embed = cf.ae_global_dim_embed
         self.pe_global.data.fill_(0.0)
@@ -479,7 +486,6 @@ class Model(torch.nn.Module):
             )
         
         self.norm = nn.LayerNorm(self.q_cells.size(-1))
-        self.num_class_tokens = cf.num_class_tokens
         self.num_register_tokens = cf.num_register_tokens
 
         return self
@@ -648,7 +654,7 @@ class Model(torch.nn.Module):
             self.predict(
                 model_params,
                 forecast_offset + forecast_steps,
-                tokens[:, self.num_class_tokens + self.num_register_tokens :],
+                tokens[:, self.num_register_tokens :],
                 streams_data,
                 target_coords_idxs,
             )
@@ -659,13 +665,12 @@ class Model(torch.nn.Module):
         z = self.norm(z_pre_norm)
 
         latent_state = LatentState(
-            class_tokens=z[:, : self.num_class_tokens],
-            register_tokens=z[:, self.num_class_tokens : self.num_class_tokens + self.num_register_tokens],
-            patch_tokens=z[:, self.num_class_tokens + self.num_register_tokens :],
+            register_tokens=z[:, : self.num_register_tokens],
+            patch_tokens=z[:, self.num_register_tokens :],
             z_pre_norm=z_pre_norm,
         )
 
-        # latents["posteriors"] = posteriors
+        latents["posteriors"] = posteriors
         latents["latent_state_pre_heads"] = latent_state
 
         return ModelOutput(physical=preds_all, latent=latents)
@@ -815,16 +820,13 @@ class Model(torch.nn.Module):
             + model_params.pe_global
         ).flatten(1, 2)
 
-        # add additional global tokens class and register
-        tokens_global_class = (
-                self.q_cells.repeat(batch_size, self.num_class_tokens, 1)
-            )
+        # add additional global register tokens
         tokens_global_register = (
-                self.q_cells.repeat(batch_size, self.num_register_tokens, 1)
+                self.q_cells.repeat(batch_size, self.num_register_tokens, 1) + model_params.pe_register
             )
 
         # concatenate all global tokens
-        tokens_global = torch.cat([tokens_global_class, tokens_global_register, tokens_global], dim=1)
+        tokens_global = torch.cat([tokens_global_register, tokens_global], dim=1)
 
         return tokens_global, posteriors
 
