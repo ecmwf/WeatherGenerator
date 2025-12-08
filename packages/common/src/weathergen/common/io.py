@@ -29,7 +29,7 @@ type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
 
-SHARDING_ENABLED = True
+SHARDING_ENABLED = False
 SHARD_N_SAMPLES = CHUNK_N_SAMPLES * 3
 #CHUNK_N_SAMPLES has to equal to integer * SHARD_N_SAMPLES
 
