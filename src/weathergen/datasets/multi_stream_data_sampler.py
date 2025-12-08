@@ -193,7 +193,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         if not self.repeat_data:
             self.len = min(self.len, samples_per_mini_epoch if samples_per_mini_epoch else self.len)
         else:
-            assert samples_per_mini_epoch, "Must specify samples_per_mini_epoch if repeat_data_in_mini_epoch."
+            assert samples_per_mini_epoch, (
+                "Must specify samples_per_mini_epoch if repeat_data_in_mini_epoch."
+            )
             self.len = samples_per_mini_epoch
 
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
