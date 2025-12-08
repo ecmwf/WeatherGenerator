@@ -40,6 +40,7 @@ class Masker:
     """
 
     def __init__(self, cf: Config):
+        self.rng = None
         self.masking_rate = cf.masking_rate
         self.masking_strategy = cf.masking_strategy
         self.current_strategy = cf.masking_strategy  # Current strategy in use

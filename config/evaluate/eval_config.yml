@@ -1,6 +1,7 @@
 #optional: if commented out all is taken care of by the default settings
 # NB. global options apply to all run_ids 
 #global_plotting_options:
+#  region: ["belgium", "global"]
 #  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
 #  dpi_val : 300
 #  ERA5:
