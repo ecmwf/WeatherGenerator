@@ -112,7 +112,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 logger.warning("forecast policy is not None but number of forecast steps is 0.")
         self.forecast_policy = cf.forecast_policy
 
-        self.len = 100000000
         self.samples_per_mini_epoch = samples_per_mini_epoch
         self.repeat_data = cf.get("repeat_data_in_mini_epoch", False)
 
@@ -172,6 +171,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 ds = dataset(filename=filename, **kwargs)
 
                 fsm = self.forecast_steps[0]
+                # if len(ds) > 0:
+                #     self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
 
                 # MODIFIES config !!!
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
