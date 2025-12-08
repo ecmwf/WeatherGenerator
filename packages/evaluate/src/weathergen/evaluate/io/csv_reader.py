@@ -35,11 +35,11 @@ class CsvReader(Reader):
 
         Parameters
         ----------
-        eval_cfg : dir
+        eval_cfg : 
             config with plotting and evaluation options for that run id
         run_id : str
             run id of the model
-        private_paths: lists
+        private_paths: 
             list of private paths for the supported HPC
         """
 
@@ -101,7 +101,6 @@ class CsvReader(Reader):
 
         Returns
         -------
-        xr.DataArray
             The metric DataArray.
         """
 
@@ -145,12 +144,11 @@ def _rename_channels(data) -> pd.DataFrame:
 
     Parameters
     ----------
-    name : str
+    name : 
         Original channel name.
 
     Returns
     -------
-    pd.DataFrame
         Dataset with renamed channel names.
     """
     for name in list(data.index):

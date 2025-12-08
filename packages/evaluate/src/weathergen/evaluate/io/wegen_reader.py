@@ -293,11 +293,10 @@ class WeatherGenReader(Reader):
         Get the climatology filename for a given stream from the inference configuration.
         Parameters
         ----------
-        stream : str
+        stream : 
             Name of the data stream.
         Returns
         -------
-        str or None
             Climatology filename if specified, otherwise None.
         """
 
@@ -333,13 +332,12 @@ class WeatherGenReader(Reader):
 
         Parameters
         ----------
-        stream: str
+        stream: 
             the stream name
 
         Returns
         -------
-        dict
-            the config dictionary associated to that stream
+            The config dictionary associated to that stream
         """
         stream_dict = {}
         with ZarrIO(self.fname_zarr) as zio:
@@ -363,12 +361,11 @@ class WeatherGenReader(Reader):
 
         Parameters
         ----------
-        stream : str
+        stream : 
             The name of the stream to get channels for.
 
         Returns
         -------
-        list[str]
             A list of channel names.
         """
         _logger.debug(f"Getting channels for stream {stream}...")
@@ -380,12 +377,11 @@ class WeatherGenReader(Reader):
         """Get the list of ensemble member names for a given stream from the config.
         Parameters
         ----------
-        stream : str
+        stream : 
             The name of the stream to get channels for.
 
         Returns
         -------
-        list[str]
             A list of ensemble members.
         """
         _logger.debug(f"Getting ensembles for stream {stream}...")
@@ -400,12 +396,11 @@ class WeatherGenReader(Reader):
         """Check if the latitude and longitude coordinates are regularly spaced for a given stream.
         Parameters
         ----------
-        stream : str
+        stream : 
             The name of the stream to get channels for.
 
         Returns
         -------
-        bool
             True if the stream is regularly spaced. False otherwise.
         """
         _logger.debug(f"Checking regular spacing for stream {stream}...")
@@ -453,7 +448,6 @@ class WeatherGenReader(Reader):
 
         Returns
         -------
-        xr.DataArray
             The metric DataArray or None if the file does not exist.
         """
         score_path = (
@@ -475,11 +469,11 @@ class WeatherGenReader(Reader):
 
         Parameters:
         ------------
-            config: dict
+            config: 
                 The full configuration dictionary.
-            stream_name: str
+            stream_name: 
                 The name of the stream (e.g. 'ERA5').
-            key: str
+            key: 
                 The key to look up (e.g. 'tokenize_spacetime').
             default: Optional
                 Value to return if not found (default: None).
@@ -506,7 +500,6 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
        Input dataset
     Returns
     -------
-        xr.DataArray
         Returns a Dataset where all samples have the same lat lon and ipoint ordering
     """
 

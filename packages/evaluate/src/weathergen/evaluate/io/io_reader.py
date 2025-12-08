@@ -46,11 +46,11 @@ class DataAvailability:
     ----------
     score_availability: bool
         True if the metric file contains the requested combination.
-    channels: list[str]
+    channels: 
         List of channels requested
-    fsteps: list[int]
+    fsteps: 
         List of forecast steps requested
-    samples: list[int]
+    samples: 
         List of samples requested
     """
 
@@ -68,11 +68,11 @@ class Reader:
 
         Parameters
         ----------
-        eval_cfg : dir
+        eval_cfg : 
             config with plotting and evaluation options for that run id
-        run_id : str
+        run_id : 
             run id of the model
-        private_paths: dict[srt, str]
+        private_paths: 
             dictionary of private paths for the supported HPC
         """
         self.eval_cfg = eval_cfg
@@ -150,9 +150,9 @@ class Reader:
 
         Parameters
         ----------
-        stream : str
+        stream : 
             The stream considered.
-        available_data : dict, optional
+        available_data : 
             The available data loaded from metric file.
         Returns
         -------
