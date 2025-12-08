@@ -175,9 +175,22 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if is_root():
                     logger.info(
                         f"Opening dataset with type: {ds_type}"
-                        + f" from stream config {stream_info['name']}.",
+                        + f" from stream config {stream_info['name']} at path {filename}.",
                     )
-                ds = dataset(filename=filename, **kwargs)
+                try:
+                    ds = dataset(filename=filename, **kwargs)
+                    if is_root():
+                        logger.info(
+                            f"Successfully opened dataset {stream_info['name']} "
+                            f"with {len(ds)} timesteps"
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to initialize dataset {stream_info['name']} "
+                        f"of type {ds_type} from file {filename}: {e}",
+                        exc_info=True,
+                    )
+                    raise
 
                 fsm = self.forecast_steps[0]
                 if len(ds) > 0:
@@ -198,8 +211,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.len = int(index_range.end - index_range.start)
         self.len = min(self.len, samples_per_mini_epoch if samples_per_mini_epoch else self.len)
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
+        # CRITICAL: All ranks must have the same len to avoid DDP deadlock
         len_chunk = ((self.len // cf.world_size) // batch_size) * batch_size
-        self.len = min(self.len, len_chunk)
+        # Set len to len_chunk (not min) to ensure all ranks process same amount
+        self.len = len_chunk
         logger.info(f"index_range={index_range}, len={self.len}, len_chunk={len_chunk}")
 
         self.rank = cf.rank
@@ -337,7 +352,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             len[*] : number of streams
         """
         iter_start, iter_end = self.worker_workset()
-        logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={self.len}")
 
         # create new shuffeling
         self.reset()
@@ -346,7 +360,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # idx_raw is used to index into the dataset; the decoupling is needed
         # since there are empty batches
         idx_raw = iter_start
+        batch_count = 0
         for i, _bidx in enumerate(range(iter_start, iter_end, self.batch_size)):
+            batch_count += 1
             # forecast_dt needs to be constant per batch (amortized through data parallel training)
             forecast_dt = self.perms_forecast_dt[i]
 
@@ -466,9 +482,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         worker_info = torch.utils.data.get_worker_info()
 
         if worker_info is None:
-            assert self.world_size == 1, self.world_size
-            iter_start = 0
-            iter_end = len(self)
+            # No multiprocessing workers - run in main process
+            # Use local_start/local_end to handle DDP rank distribution
+            iter_start = local_start
+            iter_end = local_end
 
         else:
             # ensure the rng seed is fully unique across workers and mini_epochs
@@ -477,12 +494,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # happens for each mini_epoch, for train and validation, and independently for each DDP
             # worker. After the bit-wise copy, the rng seed needs to be made unique for
             # DDP workers, loader process, mini_epoch.
-            dist = torch.distributed
+            # Use cached self.rank instead of torch.distributed.get_rank() to avoid deadlock
             self.data_loader_rng_seed *= (
-                (((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1)
-                * ((worker_info.id + 1) * 37)
-                * (self.mini_epoch + 13)
-                * 7
+                ((self.rank + 1) * 73) * ((worker_info.id + 1) * 37) * (self.mini_epoch + 13) * 7
             )
             # split workload
             per_worker = (local_end - local_start) // worker_info.num_workers
