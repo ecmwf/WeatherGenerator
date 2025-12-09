@@ -24,6 +24,7 @@ from weathergen.evaluate.io.io_reader import Reader
 from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
     plot_metric_region,
+    ratio_plot_metric_region,
     score_card_metric_region,
 )
 from weathergen.evaluate.plotting.plotter import BarPlots, LinePlots, Plotter, ScoreCards
@@ -517,7 +518,10 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     br_plotter = BarPlots(plot_cfg, summary_dir)
     for region in regions:
         for metric in metrics:
-            plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+            if eval_opt.get("summary_plots", True):
+                plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+            if eval_opt.get("ratio_plots", False):
+                ratio_plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("score_cards", False):
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
             if eval_opt.get("bar_plots", False):

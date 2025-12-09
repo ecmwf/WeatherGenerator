@@ -767,78 +767,27 @@ class LinePlots:
                 f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. "
                 "Skipping ensemble plotting."
             )
-
-    def _plot_ensemble(self, data: xr.DataArray, x_dim: str, label: str) -> None:
-        """
-        Plot ensemble spread for a data array.
-
+    
+    def _preprocess_data(self, data: xr.DataArray, x_dim: str) -> xr.DataArray:
+        """Average all dims except x_dim and sort.
         Parameters
         ----------
-        data: xr.xArray
-            DataArray to be plotted
-        x_dim: str
+        data:
+            DataArray to be preprocessed
+        x_dim:
             Dimension to be used for the x-axis.
-        label: str
-            Label for the dataset
         Returns
         -------
-            None
+            Preprocessed DataArray
         """
-        averaged = data.mean(dim=[dim for dim in data.dims if dim != x_dim], skipna=True).sortby(
-            x_dim
-        )
+        if x_dim not in data.dims:
+            raise ValueError(f"x dimension '{x_dim}' not in {data.dims}")
 
-        lines = plt.plot(
-            averaged[x_dim],
-            averaged.values,
-            label=label,
-            marker="o",
-            linestyle="-",
-        )
-        line = lines[0]
-        color = line.get_color()
-
-        ens = data.mean(
-            dim=[dim for dim in data.dims if dim not in [x_dim, "ens"]], skipna=True
-        ).sortby(x_dim)
-
-        if self.plot_ensemble == "std":
-            std_dev = ens.std(dim="ens", skipna=True).sortby(x_dim)
-            plt.fill_between(
-                averaged[x_dim],
-                (averaged - std_dev).values,
-                (averaged + std_dev).values,
-                label=f"{label} - std dev",
-                color=color,
-                alpha=0.2,
-            )
-
-        elif self.plot_ensemble == "minmax":
-            ens_min = ens.min(dim="ens", skipna=True).sortby(x_dim)
-            ens_max = ens.max(dim="ens", skipna=True).sortby(x_dim)
-
-            plt.fill_between(
-                averaged[x_dim],
-                ens_min.values,
-                ens_max.values,
-                label=f"{label} - min max",
-                color=color,
-                alpha=0.2,
-            )
-
-        elif self.plot_ensemble == "members":
-            for j in range(ens.ens.size):
-                plt.plot(
-                    ens[x_dim],
-                    ens.isel(ens=j).values,
-                    color=color,
-                    alpha=0.2,
-                )
-        else:
-            _logger.warning(
-                f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. "
-                "Skippingensemble plotting."
-            )
+        non_x_dims = [dim for dim in data.dims if dim != x_dim]
+        if any(data.sizes.get(dim, 1) > 1 for dim in non_x_dims):
+            logging.info(f"Averaging over dimensions: {non_x_dims}")
+        
+        return data.mean(dim=non_x_dims, skipna=True).sortby(x_dim)
 
     def plot(
         self,
@@ -887,16 +836,9 @@ class LinePlots:
                 _logger.info(f"LinePlot:: Plotting ensemble with option {self.plot_ensemble}.")
                 self._plot_ensemble(data, x_dim, label_list[i])
             else:
-                if non_zero_dims:
-                    _logger.info(
-                        f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. "
-                        "Averaging..."
-                    )
 
-                averaged = data.mean(
-                    dim=[dim for dim in data.dims if dim != x_dim], skipna=True
-                ).sortby(x_dim)
-
+                averaged = self._preprocess_data(data, x_dim)
+            
                 plt.plot(
                     averaged[x_dim],
                     averaged.values,
@@ -905,14 +847,41 @@ class LinePlots:
                     linestyle="-",
                 )
 
-        xlabel = "".join(c if c.isalnum() else " " for c in x_dim)
-        plt.xlabel(xlabel)
+        parts = ["compare", tag]
+        name = "_".join(filter(None, parts))
+        self._plot_base(fig, name, x_dim, y_dim, print_summary)
 
-        ylabel = "".join(c if c.isalnum() else " " for c in y_dim)
-        plt.ylabel(ylabel)
-
-        title = "".join(c if c.isalnum() else " " for c in tag)
-        plt.title(title)
+    def _plot_base(
+        self, 
+        fig: plt.Figure, 
+        name: str, 
+        x_dim: str, 
+        y_dim: str, 
+        print_summary: bool = False, 
+        line: float | None = None) -> None:
+        """
+        Apply labels, title, legend, save and optionally print summary.
+        Parameters
+        ----------
+        fig:
+            Matplotlib figure to be finalized
+        name:
+            Name of the plot file
+        x_dim:
+            Label for the x-axis
+        y_dim:
+            Label for the y-axis
+        print_summary:
+            If True, print a summary of the values from the graph.
+        line:
+            If provided, draw a horizontal line at the given y-value.
+        Returns
+        -------
+            None
+        """
+        plt.xlabel("".join(c if c.isalnum() else " " for c in x_dim))
+        plt.ylabel("".join(c if c.isalnum() else " " for c in y_dim))
+        plt.title("".join(c if c.isalnum() else " " for c in name   ))
         plt.legend(frameon=False)
 
         if self.add_grid:
@@ -921,14 +890,69 @@ class LinePlots:
         if self.log_scale:
             plt.yscale("log")
 
+
         if print_summary:
             _logger.info(f"Summary values for {tag}")
             self.print_all_points_from_graph(fig)
+        
+        if line:
+            plt.axhline(y=line, color='black', linestyle='--', linewidth=1)
 
-        parts = ["compare", tag]
-        name = "_".join(filter(None, parts))
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
         plt.close()
+
+    def ratio_plot(
+        self,
+        data: xr.DataArray | list,
+        labels: str | list,
+        tag: str = "",
+        x_dim: str = "forecast_step",
+        y_dim: str = "value",
+        print_summary: bool = False,
+    ) -> None:
+
+        data_list, label_list = self._check_lengths(data, labels)
+        
+        fsteps = sorted(data_list[0].forecast_step.values)
+        offsets = compute_offsets(len(data_list))
+        fig = plt.figure(figsize=(max(12, len(data_list)*1.1), 6))
+        
+        all_labels = set()
+        for data in data_list:
+            da = data.sel(forecast_step=fsteps[0])
+            all_labels.update(map(str, da.channel.values))
+
+        ref_labels = sorted(all_labels)
+        x_pos = np.arange(len(ref_labels))
+
+        for i, (data, label) in enumerate(zip(data_list, label_list)):
+            ref_raw = self._preprocess_data(data.sel(forecast_step=fsteps[0]), x_dim)
+            ref = align_labels(ref_raw, ref_labels, x_dim)
+           
+            comm_ch = ref.channel.values
+
+            for f in fsteps:
+                num_raw = self._preprocess_data(data.sel(forecast_step=f), x_dim)
+                num = align_labels(num_raw, ref_labels, x_dim)
+                ratio = num / ref
+
+                final_label = label if f == fsteps[0] else "_"
+                plt.plot(
+                    x_pos + offsets[i],
+                    ratio.values,
+                    label=final_label,
+                    marker="o",
+                    linestyle="",
+                    color=f"C{i+1}",
+                    alpha= 1 - (f / (fsteps[-1]*1.1)), 
+                )
+            
+        parts = ["ratio_plot", tag]
+        name = "_".join(filter(None, parts))
+        plt.autoscale(enable=True, axis='both', tight=None)
+        plt.xticks(rotation=60, ha="right")
+        plt.xticks(x_pos, comm_ch)
+        self._plot_base(fig, name, x_dim, y_dim, print_summary, line = 1.)
 
 
 class ScoreCards:
@@ -1485,3 +1509,19 @@ def calculate_average_over_dim(
 def lower_is_better(metric: str) -> bool:
     # Determine whether lower or higher is better
     return metric in {"l1", "l2", "mae", "mse", "rmse", "vrmse", "bias", "crps", "spread"}
+
+
+def compute_offsets(n, spacing=0.11):
+        idx = np.arange(n)
+        return (idx - (n - 1) / 2.0) * spacing
+
+def align_labels(da: xr.DataArray, labels: list[str], x_dim: str) -> xr.DataArray:
+    """
+    Reindex a DataArray to include all labels in the canonical order.
+    Missing variables are filled with NaN.
+    """
+    # Convert labels → index format expected by xarray
+    labels = np.array(labels, dtype=object)
+
+    # Reindex, inserting NaN for missing labels
+    return da.reindex({x_dim: labels})

@@ -114,6 +114,61 @@ def plot_metric_region(
                     print_summary=print_summary,
                 )
 
+def ratio_plot_metric_region(
+    metric: str,
+    region: str,
+    runs: dict,
+    scores_dict: dict,
+    plotter: object,
+    print_summary: bool,
+) -> None:
+    """Plot ratio data for all streams and channels for a given metric and region.
+
+    Parameters
+    ----------
+    metric: str
+        String specifying the metric to plot
+    region: str
+        String specifying the region to plot
+    runs: dict
+        Dictionary containing the config for all runs
+    scores_dict : dict
+        The dictionary containing all computed metrics.
+    plotter:
+        Plotter object to handle the plotting part
+    print_summary: bool
+        Option to print plot values to screen
+
+    """ 
+    streams_set = collect_streams(runs)
+
+    for stream in streams_set:
+        selected_data = []
+        labels = []
+        run_ids = []
+        for run_id in runs:
+            data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
+            if data is None:
+                continue
+            selected_data.append(data)
+            label = runs[run_id].get("label", run_id)
+            if label != run_id:
+                label = f"{run_id} - {label}"
+            labels.append(label)
+            run_ids.append(run_id)
+        
+        if len(selected_data) > 0:
+            _logger.info(f"Creating Ratio plot for {metric} - {stream}")
+            name = "_".join(["ratio",metric] + sorted(set(run_ids)) + [stream])
+            plotter.ratio_plot(
+                selected_data,
+                labels,
+                tag=name,
+                x_dim="channel",
+                y_dim=metric,
+                print_summary=print_summary,
+            )
+
 
 def score_card_metric_region(
     metric: str,
