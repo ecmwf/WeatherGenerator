@@ -78,7 +78,7 @@ class ModelParams(torch.nn.Module):
         )
 
         self.pe_register = torch.nn.Parameter(
-            torch.empty(cf.num_register_tokens, cf.ae_global_dim_embed), requires_grad=False
+            torch.zeros(cf.num_register_tokens, cf.ae_global_dim_embed), requires_grad=False
         )
 
         pe = torch.zeros(
