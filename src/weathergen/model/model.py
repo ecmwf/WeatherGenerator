@@ -850,13 +850,12 @@ class Model(torch.nn.Module):
             Latent representation of the model
         """
 
-        batch_size = tokens.shape[0]
         coords = None
         if self.use_2D_rope:
             coords = (
                 model_params.rope_coords.flatten(0, 1)
                 .unsqueeze(0)
-                .repeat(batch_size, 1, 1)
+                .repeat(tokens.shape[0], 1, 1)
                 .to(device=tokens.device, dtype=tokens.dtype)
             )
 
