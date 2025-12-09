@@ -694,12 +694,7 @@ class Trainer(TrainerBase):
                         )
                         sample = batch.target_samples[0]
                         target_aux_output = self.target_and_aux_calculator.compute(
-                            bidx,
-                            (
-                                sample.streams_data,
-                                sample.source_cell_lens,
-                                sample.target_coords_idx,
-                            ),
+                            sample,
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
