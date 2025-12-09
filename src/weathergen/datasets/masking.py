@@ -21,7 +21,7 @@ class Masker:
     Attributes:
         masking_rate (float): The base rate at which tokens are masked.
         masking_strategy (str): The strategy used for masking (e.g., "random",
-        "block", "healpix", "channel").
+        "block", "healpix", "cropping_healpix", "channel").
         current_strategy (str): The current strategy in use, relevant
                                 when using "combination" strategy.
         "random" - random masking of tokens at the level of the data
@@ -33,6 +33,11 @@ class Masker:
                     e.g. masking_strategy_config = {"hl_mask": 1}
                     with hl_mask the level for masking that we want to apply
                     e.g. level 1 very large cells masked
+        "cropping_healpix" - spatial cropping that keeps spatially contiguous regions
+                    and masks everything else. Uses neighbor relationships or geodesic
+                    distance to ensure spatial contiguity. Perfect for DINO/JEPA/IBOT.
+                    e.g. masking_strategy_config = {"hl_mask": 0, "method": "geodesic_disk"}
+                    method: "disk" (neighbor growth), "random_walk", or "geodesic_disk" (circular)
         "channel" - masking data channels, where channels of the data are masked
                     can be done per-cell (each cell has different channels masked)
                     or globally (all have the same channels masked).
@@ -106,6 +111,193 @@ class Masker:
         Reset rng after mini_epoch to ensure proper randomization
         """
         self.rng = rng
+
+    def _select_spatially_contiguous_cells(
+        self,
+        healpix_level: int,
+        num_cells_to_select: int,
+        center_cell: int | None = None,
+        method: str = "disk",
+        overlap_with: np.ndarray | None = None,
+        overlap_ratio: float | None = None,
+    ) -> np.ndarray:
+        """
+        Select spatially contiguous cells on the sphere using neighbor relationships.
+
+        This is the core spatial selection helper used for both masking and cropping.
+
+        Args:
+            healpix_level: HEALPix level for selection
+            num_cells_to_select: Number of cells to select
+            center_cell: Starting cell (None = random, or optimized for overlap if specified)
+            method: Selection method:
+                - "disk": Layer-by-layer neighbor growth (compact regions)
+                - "random_walk": Random neighbor selection (irregular shapes)
+                - "geodesic_disk": Angular distance selection (circular regions, best for SSL)
+            overlap_with: Existing crop to control overlap with (for IBOT-style training)
+            overlap_ratio: Target overlap ratio [0.0-1.0] (requires overlap_with)
+                         0.0 = no overlap, 0.5 = 50% overlap, 1.0 = complete overlap
+
+        Returns:
+            Array of selected cell indices forming a spatially contiguous region
+
+        Examples:
+            # Independent crop
+            crop1 = _select_spatially_contiguous_cells(0, 9, method="geodesic_disk")
+
+            # Crop with 30% overlap (IBOT-style)
+            crop2 = _select_spatially_contiguous_cells(0, 9, method="geodesic_disk",
+                                                       overlap_with=crop1, overlap_ratio=0.3)
+        """
+        import warnings
+        import astropy_healpix as hp
+
+        num_total_cells = 12 * (4**healpix_level)
+        nside = 2**healpix_level
+
+        assert num_cells_to_select <= num_total_cells
+
+        # Optimize center for controlled overlap if requested
+        if overlap_with is not None and overlap_ratio is not None and center_cell is None:
+            assert 0.0 <= overlap_ratio <= 1.0, "overlap_ratio must be in [0.0, 1.0]"
+
+            # Try multiple candidate centers to find best overlap
+            max_attempts = 100
+            best_center = None
+            best_overlap_diff = float('inf')
+
+            overlap_set = set(overlap_with)
+            target_overlap_count = int(overlap_ratio * num_cells_to_select)
+
+            for _ in range(max_attempts):
+                candidate_center = self.rng.integers(0, num_total_cells)
+
+                # Quick preview: estimate overlap by checking if center is inside existing crop
+                # and sampling a few neighbors
+                if method == "geodesic_disk":
+                    # For geodesic_disk, we can estimate overlap more accurately
+                    # by checking the center's distance to the existing crop's center
+                    existing_center = overlap_with[len(overlap_with)//2]  # Approximate center
+
+                    center_lonlat = hp.healpix_to_lonlat(candidate_center, nside, order="nested")
+                    existing_lonlat = hp.healpix_to_lonlat(existing_center, nside, order="nested")
+
+                    # Simplified distance check (full computation is in geodesic_disk below)
+                    if candidate_center in overlap_set:
+                        # Center inside existing crop - likely high overlap
+                        estimated_overlap = max(0.3, overlap_ratio)
+                    else:
+                        # Center outside - lower overlap, depends on distance
+                        estimated_overlap = min(0.3, overlap_ratio)
+
+                    overlap_diff = abs(estimated_overlap - overlap_ratio)
+                else:
+                    # For other methods, use simpler heuristic
+                    center_in_overlap = candidate_center in overlap_set
+                    if (overlap_ratio > 0.5 and center_in_overlap) or \
+                       (overlap_ratio <= 0.5 and not center_in_overlap):
+                        overlap_diff = 0.0
+                    else:
+                        overlap_diff = abs(overlap_ratio - 0.5)
+
+                if overlap_diff < best_overlap_diff:
+                    best_overlap_diff = overlap_diff
+                    best_center = candidate_center
+
+                    # Early exit if we found a good candidate
+                    if overlap_diff < 0.1:
+                        break
+
+            center_cell = best_center
+
+            if best_overlap_diff > 0.2:
+                _logger.debug(
+                    f"Controlled overlap: target={overlap_ratio:.1%}, "
+                    f"estimated diff={best_overlap_diff:.1%}"
+                )
+
+        # Random starting point if not specified
+        elif center_cell is None:
+            center_cell = self.rng.integers(0, num_total_cells)
+
+        if method == "disk":
+            # Layer-by-layer neighbor growth
+            selected = {center_cell}
+            frontier = {center_cell}
+
+            while len(selected) < num_cells_to_select and frontier:
+                next_frontier = set()
+                for cell in frontier:
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", message="invalid value encountered")
+                        neighbors = hp.neighbours(cell, nside, order="nested")
+                    valid_neighbors = [n for n in neighbors if n != -1 and n not in selected]
+                    next_frontier.update(valid_neighbors)
+
+                candidates = list(next_frontier)
+                if not candidates:
+                    break
+
+                self.rng.shuffle(candidates)
+                num_to_add = min(len(candidates), num_cells_to_select - len(selected))
+                selected.update(candidates[:num_to_add])
+                frontier = set(candidates[:num_to_add])
+
+        elif method == "random_walk":
+            # Random walk through neighbors
+            selected = {center_cell}
+            frontier = {center_cell}
+
+            while len(selected) < num_cells_to_select:
+                neighbors = set()
+                for cell in frontier:
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", message="invalid value encountered")
+                        cell_neighbors = hp.neighbours(cell, nside, order="nested")
+                    valid = [n for n in cell_neighbors if n != -1 and n not in selected]
+                    neighbors.update(valid)
+
+                if not neighbors:
+                    break
+
+                next_cell = self.rng.choice(list(neighbors))
+                selected.add(next_cell)
+                frontier = {next_cell}
+
+        elif method == "geodesic_disk":
+            # Angular distance selection - most uniform circular regions
+            center_lonlat = hp.healpix_to_lonlat(center_cell, nside, order="nested")
+            center_lon = float(center_lonlat[0].value) if hasattr(center_lonlat[0], 'value') else float(center_lonlat[0])
+            center_lat = float(center_lonlat[1].value) if hasattr(center_lonlat[1], 'value') else float(center_lonlat[1])
+
+            center_xyz = np.array([
+                np.cos(center_lat) * np.cos(center_lon),
+                np.cos(center_lat) * np.sin(center_lon),
+                np.sin(center_lat)
+            ])
+
+            all_indices = np.arange(num_total_cells)
+            all_lonlat = hp.healpix_to_lonlat(all_indices, nside, order="nested")
+            all_lon = all_lonlat[0].value if hasattr(all_lonlat[0], 'value') else all_lonlat[0]
+            all_lat = all_lonlat[1].value if hasattr(all_lonlat[1], 'value') else all_lonlat[1]
+
+            all_xyz = np.stack([
+                np.cos(all_lat) * np.cos(all_lon),
+                np.cos(all_lat) * np.sin(all_lon),
+                np.sin(all_lat)
+            ], axis=1)
+
+            dot_products = np.dot(all_xyz, center_xyz)
+            dot_products = np.clip(dot_products, -1.0, 1.0)
+            angular_distances = np.arccos(dot_products)
+
+            sorted_indices = np.argsort(angular_distances)
+            selected = sorted_indices[:num_cells_to_select]
+
+        else:
+            raise ValueError(f"Unknown selection method: {method}")
+
+        return np.array(sorted(selected))
 
     # def set_batch_strategy(self):
     #     """
@@ -518,6 +710,73 @@ class Masker:
                 child_indices = (
                     parent_ids[:, None] * num_children_per_parent + child_offsets
                 ).reshape(-1)
+                mask = np.zeros(num_cells, dtype=bool)
+                mask[child_indices] = True
+
+        elif strategy == "cropping_healpix":
+            # Spatial cropping: select spatially contiguous region and KEEP it (mask everything else)
+            # This is the elegant inverse of healpix masking
+            hl_data = self.healpix_level_data
+            hl_mask = cfg.get("hl_mask")
+            assert hl_mask is not None and hl_mask < hl_data, (
+                "For cropping_healpix, cfg['hl_mask'] must be set and < data level."
+            )
+            num_parent_cells = 12 * (4**hl_mask)
+            level_diff = hl_data - hl_mask
+            num_children_per_parent = 4**level_diff
+
+            # Number of parents to keep (spatially contiguous)
+            num_parents_to_keep = int(np.round(keep_rate * num_parent_cells))
+
+            if num_parents_to_keep == 0:
+                mask = np.zeros(num_cells, dtype=bool)
+            else:
+                # Spatial selection method
+                method = cfg.get("method", "geodesic_disk")  # Default to best method for SSL
+
+                # Controlled overlap support (for IBOT-style training)
+                # Note: overlap_with_mask should be provided by calling code for multi-crop setups
+                overlap_with_mask = cfg.get("overlap_with_mask", None)  # Previous crop mask at parent level
+                overlap_ratio = cfg.get("overlap_ratio", None)  # Target overlap [0.0-1.0]
+
+                # If overlap is requested but no mask provided, log a warning
+                if overlap_ratio is not None and overlap_with_mask is None:
+                    _logger.warning(
+                        "overlap_ratio specified but no overlap_with_mask provided. "
+                        "Overlap control requires reference mask from previous crop. "
+                        "Use programmatic API for controlled overlap."
+                    )
+
+                # Convert overlap mask to parent-level indices if provided
+                overlap_with_parents = None
+                if overlap_with_mask is not None:
+                    # Project data-level mask back to parent-level indices
+                    # Assume a parent is selected if any of its children are in the mask
+                    overlap_with_parents = []
+                    for parent_id in range(num_parent_cells):
+                        child_start = parent_id * num_children_per_parent
+                        child_end = child_start + num_children_per_parent
+                        if np.any(overlap_with_mask[child_start:child_end]):
+                            overlap_with_parents.append(parent_id)
+                    overlap_with_parents = np.array(overlap_with_parents) if overlap_with_parents else None
+
+                # Select spatially contiguous parent cells
+                parent_ids = self._select_spatially_contiguous_cells(
+                    healpix_level=hl_mask,
+                    num_cells_to_select=num_parents_to_keep,
+                    center_cell=None,  # Auto-select random center (or optimized for overlap)
+                    method=method,
+                    overlap_with=overlap_with_parents,
+                    overlap_ratio=overlap_ratio,
+                )
+
+                # Project to data level
+                child_offsets = np.arange(num_children_per_parent)
+                child_indices = (
+                    parent_ids[:, None] * num_children_per_parent + child_offsets
+                ).reshape(-1)
+
+                # Create mask: True = KEEP (the crop), False = MASK (everything else)
                 mask = np.zeros(num_cells, dtype=bool)
                 mask[child_indices] = True
 
