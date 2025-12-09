@@ -677,7 +677,6 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    forecast_steps = batch.get_forecast_dt()
                     batch.to_device(self.device)
 
                     # evaluate model
@@ -696,7 +695,7 @@ class Trainer(TrainerBase):
                             self.model_params,
                             sample,
                             cf.forecast_offset,
-                            forecast_steps,
+                            sample.get_forecast_dt(),
                         )
                         sample = batch.target_samples[0]
                         target_aux_output = self.target_and_aux_calculator.compute(
@@ -709,7 +708,7 @@ class Trainer(TrainerBase):
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
-                            forecast_steps,
+                            sample.get_forecast_dt(),
                         )
                     loss, loss_values = self.loss_calculator_val.compute_loss(
                         preds=output,
