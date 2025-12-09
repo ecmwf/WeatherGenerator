@@ -21,7 +21,7 @@ from tqdm import tqdm
 # Local application / package
 from weathergen.common.config import (
     get_shared_wg_path,
-    load_merge_config,
+    load_merge_configs,
     load_run_config,
 )
 from weathergen.common.io import ZarrIO
