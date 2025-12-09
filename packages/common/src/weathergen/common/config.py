@@ -68,18 +68,16 @@ def save(config: Config, mini_epoch: int | None):
         f.write(json_str)
 
 
-def load_run_config(
-    run_id: str, mini_epoch: int | None, model_path: str | None
-) -> Config:
+def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None) -> Config:
     """
     Load a configuration file from a given run_id and mini_epoch.
     If run_id is a full path, loads it from the full path.
-    
+
     Args:
         run_id: Run ID of the pretrained WeatherGenerator model
         mini_epoch: Mini-epoch of the checkpoint to load. -1 indicates last checkpoint available.
         model_path: Path to the model directory. If None, uses the model_path from private config.
-        
+
     Returns:
         Configuration object loaded from the specified run and mini_epoch.
     """
@@ -196,14 +194,14 @@ def load_merge_configs(
         private_home: Configuration file containing platform dependent information and secrets
         from_run_id: Run id of the pretrained WeatherGenerator model
         to continue training or inference
-        mini_epoch: Mini-epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
         *overwrites: Additional overwrites from different sources
 
     Note: The order of precedence for merging the final config is in ascending order:
         - base config (either default config or loaded from previous run)
         - private config
         - overwrites (also in ascending order)
-        
+
     Returns:
         Merged configuration object.
     """

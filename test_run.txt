@@ -1,0 +1,422 @@
+[rushchanskii2@jwb0149 WeatherGenerator]$  uv run pytest  /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/small1.py
+Cannot read termcap database;
+using dumb terminal settings.
+================================================================================ test session starts =================================================================================
+platform linux -- Python 3.12.0, pytest-8.3.5, pluggy-1.6.0
+rootdir: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator
+configfile: pyproject.toml
+plugins: anyio-4.11.0, mock-3.14.1
+collected 0 items                                                                                                                                                                    
+
+=============================================================================== no tests ran in 0.01s ================================================================================
+ERROR: file or directory not found: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/small1.py
+
+[rushchanskii2@jwb0149 WeatherGenerator]$ vi /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/small1
+small1_test.py  small1.yaml     
+[rushchanskii2@jwb0149 WeatherGenerator]$ uv run pytest  /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/small1_test.py 
+Cannot read termcap database;
+using dumb terminal settings.
+================================================================================ test session starts =================================================================================
+platform linux -- Python 3.12.0, pytest-8.3.5, pluggy-1.6.0
+rootdir: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator
+configfile: pyproject.toml
+plugins: anyio-4.11.0, mock-3.14.1
+collecting ... 
+-------------------------------------------------------------------------------- live log collection ---------------------------------------------------------------------------------
+2025-12-01 15:54:48 [    INFO] Note: detected 96 virtual cores but NumExpr set to maximum of 64, check "NUMEXPR_MAX_THREADS" environment variable. (utils.py:148)
+2025-12-01 15:54:48 [    INFO] Note: NumExpr detected 96 cores but "NUMEXPR_MAX_THREADS" not set, so enforcing safe limit of 16. (utils.py:151)
+2025-12-01 15:54:48 [    INFO] NumExpr defaulting to 16 threads. (utils.py:164)
+2025-12-01 15:57:22 [    INFO] Loading private config from platform-env.py: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/platform-env.py. (config.py:356)
+2025-12-01 15:57:22 [    INFO] Detected HPC: juwels_booster. (config.py:375)
+2025-12-01 15:57:22 [    INFO] Loading private config from platform-env.py output: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/juwels_booster/config/paths.yml. (config.py:381)
+2025-12-01 15:59:45 [    INFO] Current commit hash: bca5c (small1_test.py:31)
+collected 1 item                                                                                                                                                                     
+
+integration_tests/small1_test.py::test_train[test_small1_bca5c] 
+----------------------------------------------------------------------------------- live log setup -----------------------------------------------------------------------------------
+2025-12-01 15:59:45 [    INFO] setup fixture with test_small1_bca5c (small1_test.py:41)
+----------------------------------------------------------------------------------- live log call ------------------------------------------------------------------------------------
+2025-12-01 15:59:45 [    INFO] test_train with run_id test_small1_bca5c /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator (small1_test.py:50)
+2025-12-01 15:59:45 [    INFO] Loading private config from platform-env.py: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/platform-env.py. (config.py:356)
+2025-12-01 15:59:45 [    INFO] Detected HPC: juwels_booster. (config.py:375)
+2025-12-01 15:59:45 [    INFO] Loading private config from platform-env.py output: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/juwels_booster/config/paths.yml. (config.py:381)
+2025-12-01 15:59:45 [    INFO] Loading overwrite config from file: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/small1.yaml. (config.py:326)
+2025-12-01 15:59:45 [    INFO] Reading streams from /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/streams (config.py:431)
+2025-12-01 15:59:45 [    INFO] Discover stream configs: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/streams/era5_small.yml (config.py:437)
+2025-12-01 15:59:45 [    INFO] Loaded stream config: ERA5 from file /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/streams/era5_small.yml (config.py:453)
+2025-12-01 15:59:45 [    INFO] Using existing config as overwrite: {}. (config.py:332)
+2025-12-01 15:59:45 [    INFO] using assigned run_id: test_small1_bca5c. If you manually selected this run_id, this is an error. (config.py:297)
+2025-12-01 15:59:46 [    INFO] Loading private config from platform-env.py: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/platform-env.py. (config.py:356)
+2025-12-01 15:59:46 [    INFO] Detected HPC: juwels_booster. (config.py:375)
+2025-12-01 15:59:46 [    INFO] Loading private config from platform-env.py output: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/juwels_booster/config/paths.yml. (config.py:381)
+2025-12-01 15:59:46 [    INFO] Loading private config from platform-env.py: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/platform-env.py. (config.py:356)
+2025-12-01 15:59:46 [    INFO] Detected HPC: juwels_booster. (config.py:375)
+2025-12-01 15:59:46 [    INFO] Loading private config from platform-env.py output: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/juwels_booster/config/paths.yml. (config.py:381)
+FAILED                                                                                                                                                                         [100%]
+
+====================================================================================== FAILURES ======================================================================================
+___________________________________________________________________________ test_train[test_small1_bca5c] ____________________________________________________________________________
+
+setup = None, test_run_id = 'test_small1_bca5c'
+
+    @pytest.mark.parametrize("test_run_id", ["test_small1_" + commit_hash])
+    def test_train(setup, test_run_id):
+        logger.info(f"test_train with run_id {test_run_id} {WEATHERGEN_HOME}")
+    
+        train_with_args(
+            f"--config={WEATHERGEN_HOME}/integration_tests/small1.yaml".split()
+            + [
+                "--run_id",
+                test_run_id,
+            ],
+            f"{WEATHERGEN_HOME}/config/streams/streams_test/",
+        )
+    
+>       infer_with_missing(test_run_id)
+
+integration_tests/small1_test.py:61: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+integration_tests/small1_test.py:86: in infer_with_missing
+    inference_from_args(
+src/weathergen/run_train.py:54: in inference_from_args
+    cf = config.load_merge_configs(
+packages/common/src/weathergen/common/config.py:232: in load_merge_configs
+    base_config = load_run_config(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+run_id = 'test_small1_bca5c', mini_epoch = 0, model_path = '/p/scratch/weatherai/shared_work/models'
+
+    def load_run_config(
+        run_id: str, mini_epoch: int | None, model_path: str | None
+    ) -> Config:
+        """
+        Load a configuration file from a given run_id and mini_epoch.
+        If run_id is a full path, loads it from the full path.
+    
+        Args:
+            run_id: Run ID of the pretrained WeatherGenerator model
+            mini_epoch: Mini-epoch of the checkpoint to load. -1 indicates last checkpoint available.
+            model_path: Path to the model directory. If None, uses the model_path from private config.
+    
+        Returns:
+            Configuration object loaded from the specified run and mini_epoch.
+        """
+        if Path(run_id).exists():  # load from the full path if a full path is provided
+            fname = Path(run_id)
+            _logger.info(f"Loading config from provided full run_id path: {fname}")
+        else:
+            # Load model config here. In case model_path is not provided, get it from private conf
+            if model_path is None:
+                pconf = _load_private_conf()
+                model_path = _get_config_attribute(
+                    config=pconf, attribute_name="model_path", fallback="models"
+                )
+            path = Path(model_path)
+            fname = _get_model_config_file_read_name(path, run_id, mini_epoch)
+>           assert fname.exists(), (
+                "The fallback path to the model does not exist. Please provide a `model_path`.",
+                fname,
+            )
+E           AssertionError: ('The fallback path to the model does not exist. Please provide a `model_path`.', PosixPath('/p/scratch/weatherai/shared_work/models/test_small1_bca5c/model_test_small1_bca5c_chkpt00000.json'))
+
+packages/common/src/weathergen/common/config.py:98: AssertionError
+--------------------------------------------------------------------------------- Captured log setup ---------------------------------------------------------------------------------
+INFO     small1_test:small1_test.py:41 setup fixture with test_small1_bca5c
+-------------------------------------------------------------------------------- Captured stdout call --------------------------------------------------------------------------------
+Logging set up. Logs are in ./output/test_small1_bca5c
+DDP initialization: rank=0, world_size=1
+Reading streams from /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/streams
+Discover stream configs: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/streams/era5_small.yml
+Loaded stream config: ERA5 from file /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/streams/era5_small.yml
+Time window handler: start=1979-01-01T00:00:00.000000, end=2020-12-31T00:00:00.000000,len_hrs=6, step_hrs=6
+Opening dataset with type: anemoi from stream config ERA5.
+ERA5: source channels: ['t_850', 'z_850']
+ERA5: target channels: ['t_850']
+ERA5: geoinfo channels: []
+index_range=TimeIndexRange(start=np.int64(0), end=np.int64(61360)), len=100, len_chunk=100
+Time window handler: start=2021-01-01T00:00:00.000000, end=2022-01-01T00:00:00.000000,len_hrs=6, step_hrs=6
+Opening dataset with type: anemoi from stream config ERA5.
+ERA5: source channels: ['t_850', 'z_850']
+ERA5: target channels: ['t_850']
+ERA5: geoinfo channels: []
+index_range=TimeIndexRange(start=np.int64(0), end=np.int64(1460)), len=5, len_chunk=5
+ERA5 :: coord embed: :: [16, 16, 16]
+ERA5 :: coord embed: :: [16, 16, 16]
+latent_noise_kl_weight : 0.0
+latent_noise_gamma : 2.0
+latent_noise_use_additive_noise : False
+latent_noise_deterministic_latents : True
+latent_noise_saturate_encodings : 5
+streams_directory : ./integration_tests/streams/
+embed_orientation : channels
+embed_local_coords : True
+embed_centroids_local_coords : False
+embed_size_centroids : 0
+embed_unembed_mode : block
+embed_dropout_rate : 0.1
+target_cell_local_prediction : True
+ae_local_dim_embed : 1024
+ae_local_num_blocks : 2
+ae_local_num_heads : 16
+ae_local_dropout_rate : 0.1
+ae_local_with_qk_lnorm : True
+ae_local_num_queries : 1
+ae_local_queries_per_cell : False
+ae_adapter_num_heads : 16
+ae_adapter_embed : 128
+ae_adapter_with_qk_lnorm : True
+ae_adapter_with_residual : True
+ae_adapter_dropout_rate : 0.1
+ae_global_dim_embed : 2048
+ae_global_num_blocks : 8
+ae_global_num_heads : 32
+ae_global_dropout_rate : 0.1
+ae_global_with_qk_lnorm : True
+ae_global_att_dense_rate : 1.0
+ae_global_block_factor : 64
+ae_global_mlp_hidden_factor : 2
+decoder_type : PerceiverIOCoordConditioning
+pred_adapter_kv : False
+pred_self_attention : True
+pred_dyadic_dims : False
+pred_mlp_adaln : True
+forecast_offset : 0
+forecast_delta_hrs : 0
+forecast_steps : 0
+forecast_policy : None
+forecast_att_dense_rate : 1.0
+fe_num_blocks : 0
+fe_num_heads : 16
+fe_dropout_rate : 0.1
+fe_with_qk_lnorm : True
+impute_latent_noise_std : 0.0
+healpix_level : 5
+with_mixed_precision : True
+with_flash_attention : True
+compile_model : False
+with_fsdp : True
+attention_dtype : bf16
+mixed_precision_dtype : bf16
+mlp_norm_eps : 1e-05
+norm_eps : 0.0001
+batch_size_per_gpu : 1
+batch_size_validation_per_gpu : 1
+freeze_modules : 
+validate_with_ema : True
+ema_ramp_up_ratio : 0.09
+ema_halflife_in_thousands : 0.001
+training_mode : masking
+training_mode_config : {'losses': {'LossPhysical': {'weight': 0.7, 'loss_fcts': [['mse', 0.8], ['mae', 0.2]]}}}
+validation_mode_config : {'losses': {'LossPhysical': {'weight': 1.0, 'loss_fcts': [['mse', 1.0]]}}}
+masking_rate : 0.6
+masking_rate_sampling : True
+sampling_rate_target : 1.0
+masking_strategy : random
+masking_strategy_config : {'strategies': ['random', 'healpix', 'channel'], 'probabilities': [0.34, 0.33, 0.33], 'hl_mask': 3, 'mode': 'per_cell', 'same_strategy_per_batch': False}
+num_mini_epochs : 1
+samples_per_mini_epoch : 100
+samples_per_validation : 5
+shuffle : True
+lr_scaling_policy : sqrt
+lr_start : 1e-06
+lr_max : 5e-05
+lr_final_decay : 1e-06
+lr_final : 0.0
+lr_steps_warmup : 2
+lr_steps_cooldown : 2
+lr_policy_warmup : cosine
+lr_policy_decay : constant
+lr_policy_cooldown : linear
+grad_clip : 1.0
+weight_decay : 0.1
+norm_type : LayerNorm
+nn_module : te
+log_grad_norms : False
+start_date : 197901010000
+end_date : 202012310000
+start_date_val : 202101010000
+end_date_val : 202201010000
+len_hrs : 6
+step_hrs : 6
+input_window_steps : 1
+val_initial : False
+loader_num_workers : 8
+log_validation : 0
+streams_output : ['ERA5']
+istep : 0
+run_history : []
+desc : 
+data_loader_rng_seed : 1764601185
+run_id : test_small1_bca5c
+train_log_freq : {'terminal': 10, 'metrics': 20, 'checkpoint': 250}
+wgtags : {'org': 'None', 'exp': 'None', 'grid': 'None'}
+from_run_id : None
+data_path_anemoi : /p/scratch/weatherai/shared/weather_generator_data/
+data_path_obs : /p/scratch/weatherai/shared/weather_generator_data/
+data_path_eobs : /p/scratch/weatherai/shared/weather_generator_data/
+data_path_aux : /p/scratch/weatherai/shared_work/assets/
+path_shared_working_dir : /p/scratch/weatherai/shared_work/
+path_shared_slurm_dir : /p/scratch/weatherai/slurm/
+data_path_fesom : /p/project1/hclimrep/koldunovn1
+data_path_icon : /p/scratch/hclimrep/shared/weather_generator_data/icon_art
+mlflow : {'tracking_uri': 'https://dbc-080c3210-c159.cloud.databricks.com/'}
+run_path : ./results
+model_path : ./models
+loss_fcts : [['mse', 1.0]]
+loss_fcts_val : [['mse', 1.0]]
+lr_steps : 100
+train_log : {'log_interval': 1}
+  type : anemoi  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']  loss_weight : 1.0  source_exclude : ['w_', 'skt', 'sp', 'tcw', 'cp', 'tp']  target_exclude : ['w_', 'skt', 'sp', 'tcw', 'cp', 'tp']  source : ['t_850', 'z_850']  target : ['t_850']  diagnostic : False  masking_rate : 0.6  masking_rate_none : 0.05  token_size : 32  tokenize_spacetime : True  max_num_targets : -1  embed : {'net': 'transformer', 'num_tokens': 1, 'num_heads': 2, 'dim_embed': 16, 'num_blocks': 2}  embed_target_coords : {'net': 'linear', 'dim_embed': 16}  target_readout : {'type': 'obs_value', 'num_layers': 2, 'num_heads': 2}  pred_head : {'ens_size': 1, 'num_layers': 1}  name : ERA5  train_source_channels : ['t_850', 'z_850']  train_target_channels : ['t_850']  target_channel_weights : [1.0]  val_source_channels : ['t_850', 'z_850']  val_target_channels : ['t_850']world_size : 1
+rank : 0
+local_rank : 0
+with_ddp : False
+world_size_original : 1
+
+Mini_epoch 0 of 1: train.
+0::0 : dataset [0,100) : [0,12)
+iter_start=0, iter_end=12, len=100
+0::7 : dataset [0,100) : [84,100)
+iter_start=84, iter_end=100, len=100
+0::6 : dataset [0,100) : [72,84)
+iter_start=72, iter_end=84, len=100
+0::5 : dataset [0,100) : [60,72)
+iter_start=60, iter_end=72, len=100
+0::3 : dataset [0,100) : [36,48)
+iter_start=36, iter_end=48, len=100
+0::1 : dataset [0,100) : [12,24)
+iter_start=12, iter_end=24, len=100
+0::4 : dataset [0,100) : [48,60)
+iter_start=48, iter_end=60, len=100
+0::2 : dataset [0,100) : [24,36)
+iter_start=24, iter_end=36, len=100
+Switching scheduler to None at scheduler step = 2.
+000 : 00010/00100 : 000010 : loss = 7.3524E-01 (lr=5.00E-05, s/sec=0.111)
+	
+LossPhysical.ERA5.mse : 2.3201E+00 	
+LossPhysical.ERA5.mae : 1.2229E+00 	
+
+
+000 : 00020/00100 : 000020 : loss = 5.1634E-01 (lr=5.00E-05, s/sec=0.213)
+	
+LossPhysical.ERA5.mse : 1.5997E+00 	
+LossPhysical.ERA5.mae : 9.7768E-01 	
+
+
+000 : 00030/00100 : 000030 : loss = 1.6185E-01 (lr=5.00E-05, s/sec=0.214)
+	
+LossPhysical.ERA5.mse : 4.4904E-01 	
+LossPhysical.ERA5.mae : 5.1596E-01 	
+
+
+000 : 00040/00100 : 000040 : loss = 1.3815E-01 (lr=5.00E-05, s/sec=0.129)
+	
+LossPhysical.ERA5.mse : 3.7685E-01 	
+LossPhysical.ERA5.mae : 4.6614E-01 	
+
+
+000 : 00050/00100 : 000050 : loss = 9.7729E-02 (lr=5.00E-05, s/sec=0.214)
+	
+LossPhysical.ERA5.mse : 2.5076E-01 	
+LossPhysical.ERA5.mae : 3.9307E-01 	
+
+
+000 : 00060/00100 : 000060 : loss = 8.3050E-02 (lr=5.00E-05, s/sec=0.216)
+	
+LossPhysical.ERA5.mse : 2.1099E-01 	
+LossPhysical.ERA5.mae : 3.4248E-01 	
+
+
+000 : 00070/00100 : 000070 : loss = 6.2191E-02 (lr=5.00E-05, s/sec=0.208)
+	
+LossPhysical.ERA5.mse : 1.5206E-01 	
+LossPhysical.ERA5.mae : 2.8019E-01 	
+
+
+000 : 00080/00100 : 000080 : loss = 5.5887E-02 (lr=5.00E-05, s/sec=0.131)
+	
+LossPhysical.ERA5.mse : 1.3508E-01 	
+LossPhysical.ERA5.mae : 2.5805E-01 	
+
+
+000 : 00090/00100 : 000090 : loss = 4.8599E-02 (lr=5.00E-05, s/sec=0.215)
+	
+LossPhysical.ERA5.mse : 1.1384E-01 	
+LossPhysical.ERA5.mae : 2.3890E-01 	
+
+
+Switching scheduler to <torch.optim.lr_scheduler.LinearLR object at 0x1516505ce570> at scheduler step = 98.
+Mini_epoch 0 of 1: validate.
+0::0 : dataset [0,5) : [0,0)
+iter_start=0, iter_end=0, len=5
+0::1 : dataset [0,5) : [0,0)
+iter_start=0, iter_end=0, len=5
+0::2 : dataset [0,5) : [0,0)
+iter_start=0, iter_end=0, len=5
+0::3 : dataset [0,5) : [0,0)
+iter_start=0, iter_end=0, len=5
+0::4 : dataset [0,5) : [0,0)
+iter_start=0, iter_end=0, len=5
+0::5 : dataset [0,5) : [0,0)
+iter_start=0, iter_end=0, len=5
+0::6 : dataset [0,5) : [0,0)
+iter_start=0, iter_end=0, len=5
+0::7 : dataset [0,5) : [0,5)
+iter_start=0, iter_end=5, len=5
+validation (test_small1_bca5c) : 000 : 
+                        0.07421738654375076
+LossPhysical.ERA5.mse : 7.4217E-02 	
+
+
+Mini_epoch 0 of 1: save_model.
+Saved model to models/test_small1_bca5c/test_small1_bca5c_chkpt00000.chkpt
+Saved model to models/test_small1_bca5c/test_small1_bca5c_chkpt00001.chkpt
+run inference
+Loading private config from platform-env.py: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/platform-env.py.
+Detected HPC: juwels_booster.
+Loading private config from platform-env.py output: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/juwels_booster/config/paths.yml.
+Loading overwrite config from file: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/small1.yaml.
+Reading streams from /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/streams
+Discover stream configs: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/streams/era5_small.yml
+Loaded stream config: ERA5 from file /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/streams/era5_small.yml
+Loading overwrite config from dict: {'shuffle': False, 'start_date_val': '202210100000', 'end_date_val': '202210110000', 'samples_per_validation': 10, 'log_validation': 10, 'streams_output': None}.
+Using existing config as overwrite: {}.
+-------------------------------------------------------------------------------- Captured stderr call --------------------------------------------------------------------------------
+100%|██████████| 5/5 [00:25<00:00,  5.10s/it]
+--------------------------------------------------------------------------------- Captured log call ----------------------------------------------------------------------------------
+INFO     small1_test:small1_test.py:50 test_train with run_id test_small1_bca5c /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator
+INFO     weathergen.common.config:config.py:356 Loading private config from platform-env.py: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/platform-env.py.
+INFO     weathergen.common.config:config.py:375 Detected HPC: juwels_booster.
+INFO     weathergen.common.config:config.py:381 Loading private config from platform-env.py output: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/juwels_booster/config/paths.yml.
+INFO     weathergen.common.config:config.py:326 Loading overwrite config from file: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/small1.yaml.
+INFO     weathergen.common.config:config.py:431 Reading streams from /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/streams
+INFO     weathergen.common.config:config.py:437 Discover stream configs: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/streams/era5_small.yml
+INFO     weathergen.common.config:config.py:453 Loaded stream config: ERA5 from file /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/integration_tests/streams/era5_small.yml
+INFO     weathergen.common.config:config.py:332 Using existing config as overwrite: {}.
+INFO     weathergen.common.config:config.py:297 using assigned run_id: test_small1_bca5c. If you manually selected this run_id, this is an error.
+INFO     weathergen.common.config:config.py:356 Loading private config from platform-env.py: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/platform-env.py.
+INFO     weathergen.common.config:config.py:375 Detected HPC: juwels_booster.
+INFO     weathergen.common.config:config.py:381 Loading private config from platform-env.py output: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/juwels_booster/config/paths.yml.
+INFO     weathergen.common.config:config.py:356 Loading private config from platform-env.py: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/platform-env.py.
+INFO     weathergen.common.config:config.py:375 Detected HPC: juwels_booster.
+INFO     weathergen.common.config:config.py:381 Loading private config from platform-env.py output: /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator-private/hpc/juwels_booster/config/paths.yml.
+------------------------------------------------------------------------------ Captured stdout teardown ------------------------------------------------------------------------------
+end fixture
+------------------------------------------------------------------------------- Captured log teardown --------------------------------------------------------------------------------
+INFO     small1_test:small1_test.py:45 end fixture
+================================================================================== warnings summary ==================================================================================
+integration_tests/small1_test.py::test_train[test_small1_bca5c]
+integration_tests/small1_test.py::test_train[test_small1_bca5c]
+  /p/project1/hclimrep/rushchanskii/WG/WeatherGenerator/.venv/lib/python3.12/site-packages/torch/utils/data/dataloader.py:624: UserWarning: This DataLoader will create 8 worker processes in total. Our suggested max number of worker in current system is 1, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+    warnings.warn(
+
+integration_tests/small1_test.py: 16 warnings
+  /p/home/jusers/rushchanskii2/juwels/.local/share/uv/python/cpython-3.12.0-linux-x86_64-gnu/lib/python3.12/multiprocessing/popen_fork.py:66: DeprecationWarning: This process (pid=2408559) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================================================================== short test summary info ===============================================================================
+FAILED integration_tests/small1_test.py::test_train[test_small1_bca5c] - AssertionError: ('The fallback path to the model does not exist. Please provide a `model_path`.', PosixPath('/p/scratch/weatherai/shared_work/models/test_small1_bca5c/model_test...
+===================================================================== 1 failed, 18 warnings in 971.54s (0:16:11) =====================================================================
+[rushchanskii2@jwb0149 WeatherGenerator]$ exit
+exit
+srun: error: jwb0149: task 0: Exited with exit code 1
