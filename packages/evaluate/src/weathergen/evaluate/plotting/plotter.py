@@ -16,9 +16,10 @@ from PIL import Image
 from scipy.stats import wilcoxon
 
 from weathergen.common.config import _load_private_conf
-from weathergen.evaluate.plot_utils import (
+from weathergen.evaluate.plotting.plot_utils import (
     DefaultMarkerSize,
 )
+from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
@@ -68,6 +69,7 @@ class Plotter:
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
         self.fps = plotter_cfg.get("fps")
+        self.regions = plotter_cfg.get("regions")
         self.plot_subtimesteps = plotter_cfg.get(
             "plot_subtimesteps", False
         )  # True if plots are created for each valid time separately
@@ -82,7 +84,6 @@ class Plotter:
         self.sample = None
         self.stream = stream
         self.fstep = None
-
         self.select = {}
 
     def update_data_selection(self, select: dict):
@@ -352,38 +353,46 @@ class Plotter:
             _logger.info(f"Creating dir {map_output_dir}")
             os.makedirs(map_output_dir)
 
-        plot_names = []
-        for var in variables:
-            select_var = self.select | {"channel": var}
-            da = self.select_from_da(data, select_var).compute()
-
-            if self.plot_subtimesteps:
-                ntimes_unique = len(np.unique(da.valid_time))
-                _logger.info(
-                    f"Creating maps for {ntimes_unique} valid times of variable {var} - {tag}"
-                )
-
-                groups = da.groupby("valid_time")
+        for region in self.regions:
+            if region != "global":
+                bbox = RegionBoundingBox.from_region_name(region)
+                reg_data = bbox.apply_mask(data)
             else:
-                _logger.info(f"Creating maps for all valid times of {var} - {tag}")
-                groups = [(None, da)]  # single dummy group
+                reg_data = data
 
-            for valid_time, da_t in groups:
-                if valid_time is not None:
-                    _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
+            plot_names = []
+            for var in variables:
+                select_var = self.select | {"channel": var}
+                da = self.select_from_da(reg_data, select_var).compute()
 
-                da_t = da_t.dropna(dim="ipoint")
-                assert da_t.size > 0, "Data array must not be empty or contain only NAs"
+                if self.plot_subtimesteps:
+                    ntimes_unique = len(np.unique(da.valid_time))
+                    _logger.info(
+                        f"Creating maps for {ntimes_unique} valid times of variable {var} - {tag}"
+                    )
 
-                name = self.scatter_plot(
-                    da_t,
-                    map_output_dir,
-                    var,
-                    tag=tag,
-                    map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
-                    title=f"{self.stream}, {var} : fstep = {self.fstep:03} ({valid_time})",
-                )
-                plot_names.append(name)
+                    groups = da.groupby("valid_time")
+                else:
+                    _logger.info(f"Creating maps for all valid times of {var} - {tag}")
+                    groups = [(None, da)]  # single dummy group
+
+                for valid_time, da_t in groups:
+                    if valid_time is not None:
+                        _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
+
+                    da_t = da_t.dropna(dim="ipoint")
+                    assert da_t.size > 0, "Data array must not be empty or contain only NAs"
+
+                    name = self.scatter_plot(
+                        da_t,
+                        map_output_dir,
+                        var,
+                        region,
+                        tag=tag,
+                        map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
+                        title=f"{self.stream}, {var} : fstep = {self.fstep:03} ({valid_time})",
+                    )
+                    plot_names.append(name)
 
         self.clean_data_selection()
 
@@ -394,6 +403,7 @@ class Plotter:
         data: xr.DataArray,
         map_output_dir: Path,
         varname: str,
+        regionname: str | None,
         tag: str = "",
         map_kwargs: dict | None = None,
         title: str | None = None,
@@ -409,6 +419,8 @@ class Plotter:
             Directory where the map will be saved
         varname: str
             Name of the variable to be plotted
+        regionname: str
+            Name of the region to be plotted
         tag: str
             Any tag you want to add to the plot
         map_kwargs: dict | None
@@ -453,7 +465,12 @@ class Plotter:
 
         # Create figure and axis objects
         fig = plt.figure(dpi=self.dpi_val)
-        ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
+
+        proj = ccrs.PlateCarree()
+        if regionname == "global":
+            proj = ccrs.Robinson()
+
+        ax = fig.add_subplot(1, 1, 1, projection=proj)
         ax.coastlines()
 
         assert data["lon"].shape == data["lat"].shape == data.shape, (
@@ -476,13 +493,22 @@ class Plotter:
 
         plt.colorbar(scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}")
         plt.title(title)
-        ax.set_global()
+        if regionname == "global":
+            ax.set_global()
+        else:
+            region_extent = [
+                data["lon"].min().item(),
+                data["lon"].max().item(),
+                data["lat"].min().item(),
+                data["lat"].max().item(),
+            ]
+            ax.set_extent(region_extent, crs=ccrs.PlateCarree())
         ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
 
         # TODO: make this nicer
         parts = ["map", self.run_id, tag]
 
-        if self.sample:
+        if self.sample is not None:
             parts.append(str(self.sample))
 
         if "valid_time" in data.coords:
@@ -499,6 +525,7 @@ class Plotter:
         if self.stream:
             parts.append(self.stream)
 
+        parts.append(regionname)
         parts.append(varname)
 
         if self.fstep is not None:
@@ -542,42 +569,45 @@ class Plotter:
         # Convert FPS to duration in milliseconds
         duration_ms = int(1000 / self.fps) if self.fps > 0 else 400
 
-        for _, sa in enumerate(samples):
-            for _, var in enumerate(variables):
-                _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
-                image_paths = []
-                for _, fstep in enumerate(fsteps):
-                    # TODO: refactor to avoid code duplication with scatter_plot
-                    parts = [
-                        "map",
-                        self.run_id,
-                        tag,
-                        str(sa),
-                        "*",
-                        self.stream,
-                        var,
-                        "fstep",
-                        str(fstep).zfill(3),
-                    ]
+        for region in self.regions:
+            for _, sa in enumerate(samples):
+                for _, var in enumerate(variables):
+                    _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
+                    image_paths = []
+                    for _, fstep in enumerate(fsteps):
+                        # breakpoint()
+                        # TODO: refactor to avoid code duplication with scatter_plot
+                        parts = [
+                            "map",
+                            self.run_id,
+                            tag,
+                            str(sa),
+                            "*",
+                            self.stream,
+                            region,
+                            var,
+                            "fstep",
+                            str(fstep).zfill(3),
+                        ]
 
-                    name = "_".join(filter(None, parts))
-                    fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
+                        name = "_".join(filter(None, parts))
+                        fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
 
-                    names = glob.glob(fname)
-                    image_paths += names
+                        names = glob.glob(fname)
+                        image_paths += names
 
-                if image_paths:
-                    images = [Image.open(path) for path in image_paths]
-                    images[0].save(
-                        f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{var}.gif",
-                        save_all=True,
-                        append_images=images[1:],
-                        duration=duration_ms,
-                        loop=0,
-                    )
+                    if image_paths:
+                        images = [Image.open(path) for path in image_paths]
+                        images[0].save(
+                            f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{region}_{var}.gif",
+                            save_all=True,
+                            append_images=images[1:],
+                            duration=duration_ms,
+                            loop=0,
+                        )
 
-                else:
-                    _logger.warning(f"No images found for animation {var} sample {sa}")
+                    else:
+                        _logger.warning(f"No images found for animation {var} sample {sa}")
 
         return image_paths
 
