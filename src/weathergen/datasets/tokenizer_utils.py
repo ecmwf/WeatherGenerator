@@ -251,7 +251,7 @@ def tokenize_apply_mask_source(
         idxs_data = [t for t, m in zip(idxs_tokens, mask_tokens, strict=True) if m]
 
         if len(idxs_data) == 0:
-            tokens_cells = []
+            tokens_cells = [torch.tensor([])]
             tokens_per_cell = torch.zeros(len(idxs_cells_lens), dtype=torch.int32)
             return tokens_cells, tokens_per_cell
 

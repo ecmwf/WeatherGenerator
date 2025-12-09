@@ -68,8 +68,8 @@ class StreamData:
         self.source_raw = [None for _ in range(self.input_steps)]
         # auxiliary data for scatter operation that changes from stream-centric to cell-centric
         # processing after embedding
-        self.source_idxs_embed = [None for _ in range(self.input_steps)]
-        self.source_idxs_embed_pe = [None for _ in range(self.input_steps)]
+        self.source_idxs_embed = [torch.tensor([]) for _ in range(self.input_steps)]
+        self.source_idxs_embed_pe = [torch.tensor([]) for _ in range(self.input_steps)]
 
     def to_device(self, device: str) -> None:
         """
