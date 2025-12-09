@@ -42,6 +42,8 @@ class TokenizerMasking(Tokenizer):
     def __init__(self, healpix_level: int, masker: Masker):
         super().__init__(healpix_level)
         self.masker = masker
+        self.rng = None
+        self.token_size = None
 
     def reset_rng(self, rng) -> None:
         """
@@ -70,13 +72,43 @@ class TokenizerMasking(Tokenizer):
 
         return tokens
 
+    def cell_to_token_mask(self, idxs_cells, idxs_cells_lens, mask):
+        """ """
+
+        mask_tokens, mask_channels = None, None
+        num_tokens = torch.tensor([len(t) for t in idxs_cells_lens]).sum().item()
+
+        # If there are no tokens, return empty lists.
+        if num_tokens == 0:
+            return (mask_tokens, mask_channels)
+
+        # TODO, TODO, TODO: use np.repeat
+        # https://stackoverflow.com/questions/26038778/repeat-each-values-of-an-array-different-times
+        # build token level mask: for each cell replicate the keep flag across its tokens
+        token_level_flags: list[np.typing.NDArray] = []
+        for km, lens_cell in zip(mask, idxs_cells_lens, strict=True):
+            num_tokens_cell = len(lens_cell)
+            if num_tokens_cell == 0:
+                continue
+            token_level_flags.append(
+                np.ones(num_tokens_cell, dtype=bool)
+                if km
+                else np.zeros(num_tokens_cell, dtype=bool)
+            )
+        if token_level_flags:
+            mask_tokens = np.concatenate(token_level_flags)
+        else:
+            mask_tokens = np.array([], dtype=bool)
+
+        return (mask_tokens, mask_channels)
+
     def get_source(
         self,
         stream_info: dict,
         rdata: IOReaderData,
         idxs_cells_data,
         time_win: tuple,
-        keep_mask: torch.Tensor | None = None,
+        cell_mask: torch.Tensor,
     ):
         stream_id = stream_info["stream_id"]
         is_diagnostic = stream_info.get("diagnostic", False)
@@ -92,22 +124,14 @@ class TokenizerMasking(Tokenizer):
             }
             return (source_tokens_cells, source_tokens_lens, mask_state)
 
-        # # create tokenization index
+        # create tokenization index
         (idxs_cells, idxs_cells_lens) = idxs_cells_data
 
         # select strategy from XXX depending on stream and if student or teacher
 
-        # Optional per-cell keep_mask (boolean) converts to numpy for Masker override.
-        if keep_mask is not None:
-            keep_np = keep_mask.cpu().numpy().astype(bool)
-            (mask_tokens, mask_channels) = self.masker.mask_source_idxs(
-                idxs_cells, idxs_cells_lens, keep_mask=keep_np
-            )
-        else:
-            (mask_tokens, mask_channels) = self.masker.mask_source_idxs(
-                idxs_cells,
-                idxs_cells_lens,
-            )
+        (mask_tokens, mask_channels) = self.cell_to_token_mask(
+            idxs_cells, idxs_cells_lens, cell_mask
+        )
 
         source_tokens_cells, source_tokens_lens = tokenize_apply_mask_source(
             idxs_cells,
@@ -123,7 +147,7 @@ class TokenizerMasking(Tokenizer):
 
         # capture per-view mask state to later produce consistent targets
         mask_state = {
-            "strategy": self.masker.current_strategy,
+            "strategy": None,  # self.masker.current_strategy,
             "mask_tokens": mask_tokens,
             "mask_channels": mask_channels,
         }
@@ -179,24 +203,17 @@ class TokenizerMasking(Tokenizer):
     def get_target_coords(
         self,
         stream_info: dict,
-        sampling_rate_target: float,
         rdata: IOReaderData,
         token_data,
         time_win: tuple,
-        mask_state: dict | None = None,
+        cell_mask,
+        # mask_state: dict | None = None,
     ):
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
 
-        # Apply per-view mask state if provided
-        if mask_state is not None:
-            self.masker.current_strategy = mask_state.get("strategy", self.masker.masking_strategy)
-            self.masker.mask_tokens = mask_state.get("mask_tokens")
-            self.masker.mask_channels = mask_state.get("mask_channels")
-
-        (mask_tokens, mask_channels, idxs_ord_inv) = self.masker.mask_targets_idxs(
-            idxs_cells,
-            idxs_cells_lens,
+        (mask_tokens, mask_channels) = self.cell_to_token_mask(
+            idxs_cells, idxs_cells_lens, cell_mask
         )
 
         # TODO: split up
@@ -214,56 +231,49 @@ class TokenizerMasking(Tokenizer):
             encode_times_target,
         )
 
-        selection = self._select_target_subset(stream_info, coords_local.shape[0])
+        # selection = self._select_target_subset(stream_info, coords_local.shape[0])
 
-        if selection is not None and coords_local.numel() > 0:
-            # use nice index_select method
-            coords_local = coords_local.index_select(0, selection.to(coords_local.device))
+        # if selection is not None and coords_local.numel() > 0:
+        #     # use nice index_select method
+        #     coords_local = coords_local.index_select(0, selection.to(coords_local.device))
 
-        # coords_per_cell is trickier
-        if selection is not None and coords_per_cell.numel() > 0:
-            total_points = int(coords_per_cell.sum().item())
-            if total_points == 0:
-                coords_per_cell = torch.zeros_like(coords_per_cell)
-            else:
-                cell_ids = torch.repeat_interleave(
-                    torch.arange(coords_per_cell.shape[0], dtype=torch.long),
-                    coords_per_cell.to(torch.long),
-                )
-                if cell_ids.numel() == 0:
-                    coords_per_cell = torch.zeros_like(coords_per_cell)
-                else:
-                    new_counts = torch.bincount(
-                        cell_ids[selection.to(cell_ids.device)],
-                        minlength=coords_per_cell.shape[0],
-                    )
-                    coords_per_cell = new_counts.to(dtype=coords_per_cell.dtype)
+        # # coords_per_cell is trickier
+        # if selection is not None and coords_per_cell.numel() > 0:
+        #     total_points = int(coords_per_cell.sum().item())
+        #     if total_points == 0:
+        #         coords_per_cell = torch.zeros_like(coords_per_cell)
+        #     else:
+        #         cell_ids = torch.repeat_interleave(
+        #             torch.arange(coords_per_cell.shape[0], dtype=torch.long),
+        #             coords_per_cell.to(torch.long),
+        #         )
+        #         if cell_ids.numel() == 0:
+        #             coords_per_cell = torch.zeros_like(coords_per_cell)
+        #         else:
+        #             new_counts = torch.bincount(
+        #                 cell_ids[selection.to(cell_ids.device)],
+        #                 minlength=coords_per_cell.shape[0],
+        #             )
+        #             coords_per_cell = new_counts.to(dtype=coords_per_cell.dtype)
 
         # pass the selection back for use in get_target_values
-        return (coords_local, coords_per_cell, selection)
+        return (coords_local, coords_per_cell)
 
     def get_target_values(
         self,
         stream_info: dict,
-        sampling_rate_target: float,
         rdata: IOReaderData,
         token_data,
         time_win: tuple,
-        mask_state: dict | None = None,
-        selection: torch.Tensor | None = None,
+        cell_mask,
+        # mask_state: dict | None = None,
+        # selection: torch.Tensor | None = None,
     ):
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
 
-        # Apply per-view mask state if provided
-        if mask_state is not None:
-            self.masker.current_strategy = mask_state.get("strategy", self.masker.masking_strategy)
-            self.masker.mask_tokens = mask_state.get("mask_tokens")
-            self.masker.mask_channels = mask_state.get("mask_channels")
-
-        (mask_tokens, mask_channels, idxs_ord_inv) = self.masker.mask_targets_idxs(
-            idxs_cells,
-            idxs_cells_lens,
+        (mask_tokens, mask_channels) = self.cell_to_token_mask(
+            idxs_cells, idxs_cells_lens, cell_mask
         )
 
         data, datetimes, coords, _, _ = tokenize_apply_mask_target(
@@ -280,21 +290,24 @@ class TokenizerMasking(Tokenizer):
             encode_times_target,
         )
 
-        if selection is None:
-            selection = self._select_target_subset(stream_info, data.shape[0])
+        # if selection is None:
+        #     selection = self._select_target_subset(stream_info, data.shape[0])
 
-        if selection is not None and data.numel() > 0:
-            device_sel = selection.to(data.device)
-            data = data.index_select(0, device_sel)
-            coords = coords.index_select(0, device_sel)
-            if idxs_ord_inv.numel() > 0:
-                idxs_ord_inv = idxs_ord_inv.index_select(0, device_sel)
+        # if selection is not None and data.numel() > 0:
+        #     device_sel = selection.to(data.device)
+        #     data = data.index_select(0, device_sel)
+        #     coords = coords.index_select(0, device_sel)
+        #     if idxs_ord_inv.numel() > 0:
+        #         idxs_ord_inv = idxs_ord_inv.index_select(0, device_sel)
 
-            # datetimes is numpy here
-            np_sel = selection.cpu().numpy()
-            datetimes = datetimes[np_sel]
+        #     # datetimes is numpy here
+        #     np_sel = selection.cpu().numpy()
+        #     datetimes = datetimes[np_sel]
 
         # TODO: shuffling
+
+        # TODO: idxs_ord_inv
+        idxs_ord_inv = None
 
         # selection not passed on, we call get_target_coords first
         return (data, datetimes, coords, idxs_ord_inv)

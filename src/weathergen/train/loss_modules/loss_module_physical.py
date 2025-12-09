@@ -212,18 +212,20 @@ class LossPhysical(LossModuleBase):
 
         # TODO: iterate over batch dimension
         i_batch = 0
+        streams_data = [streams_data]
         for i_stream_info, stream_info in enumerate(self.cf.streams):
+            stream_name = stream_info["name"]
             # extract target tokens for current stream from the specified forecast offset onwards
-            targets = streams_data[i_batch][i_stream_info].target_tokens[self.cf.forecast_offset :]
+            targets = streams_data[i_batch][stream_name].target_tokens[self.cf.forecast_offset :]
 
-            stream_data = streams_data[i_batch][i_stream_info]
+            stream_data = streams_data[i_batch][stream_name]
 
             fstep_loss_weights = self._get_fstep_weights(len(targets))
 
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
 
-            stream_is_spoof = streams_data[i_batch][i_stream_info].is_spoof()
+            stream_is_spoof = streams_data[i_batch][stream_name].is_spoof()
             if stream_is_spoof:
                 spoof_weight = torch.tensor(0.0, device=self.device, requires_grad=False)
             else:

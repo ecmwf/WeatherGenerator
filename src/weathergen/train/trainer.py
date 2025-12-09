@@ -26,7 +26,6 @@ from torch.distributed.tensor import DTensor
 import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
-from weathergen.datasets.stream_data import StreamData
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
     get_target_aux_calculator,
@@ -38,7 +37,6 @@ from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.utils import get_batch_size, get_dtype
-from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +47,31 @@ class Trainer(TrainerBase):
 
         self.train_log_freq = train_log_freq
 
+        self.data_loader: torch.utils.data.DataLoader | None = None
+        self.data_loader_validation: torch.utils.data.DataLoader | None = None
+        self.dataset: MultiStreamDataSampler | None = None
+        self.dataset_val: MultiStreamDataSampler | None = None
+        self.device: torch.device = None
+        self.ema_model = None
+        self.grad_scaler: torch.amp.GradScaler | None = None
+        self.last_grad_norm = None
+        self.loss_calculator: LossCalculator | None = None
+        self.loss_calculator_val: LossCalculator | None = None
+        self.loss_model_hist = []
+        self.loss_unweighted_hist: dict = {}
+        self.lr_scheduler: LearningRateScheduler | None = None
+        self.model = None
+        self.model_params = None
+        self.optimizer: torch.optim.Optimizer | None = None
+        self.perf_gpu = None
+        self.perf_mem = None
+        self.stdev_unweighted_hist: dict = {}
+        self.t_start: float = 0
+        self.target_and_aux_calculator = None
+        self.validate_with_ema: bool = False
+
     def init(self, cf: Config, devices):
+        # pylint: disable=attribute-defined-outside-init
         self.cf = OmegaConf.merge(
             OmegaConf.create(
                 {
@@ -94,8 +116,8 @@ class Trainer(TrainerBase):
         self.init(cf, devices)
 
         cf = self.cf
-        self.device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
+        device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{device_type}:{cf.local_rank}")
         self.ema_model = None
 
         # create data loader
@@ -149,9 +171,8 @@ class Trainer(TrainerBase):
         self.init(cf, devices)
         cf = self.cf
 
-        # TODO: do not define new members outside of the init!!
-        self.device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{self.device_type}:{cf.local_rank}")
+        device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{device_type}:{cf.local_rank}")
 
         # create data loaders
         self.dataset = MultiStreamDataSampler(
@@ -212,7 +233,6 @@ class Trainer(TrainerBase):
         self.target_and_aux_calculator = get_target_aux_calculator(
             cf, self.dataset, self.model, self.device
         )
-
         self.target_and_aux_calculator.to_device(self.device)
 
         # if with_fsdp then parameter count is unreliable
@@ -442,7 +462,7 @@ class Trainer(TrainerBase):
                 continue
 
             for i_strm, target in enumerate(targets_rt[fstep]):
-                pred = preds[fstep][i_strm]
+                pred = preds.physical[fstep][i_strm]
                 idxs_inv = idxs_inv_rt[fstep][i_strm]
 
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
@@ -496,40 +516,7 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
-            # NOTE: we are still returning legacy batch structure and the new batch together.
-
-            # Julian and Matthias:
-            # here we can access data as follows:
-            # batch[-1] is the new ModelBatch object, see the structure in batch.py
-            # batch[-1].source_samples is a list of Sample objects for the source data, timesteps
-            # batch[-1].target_samples is a list of Sample objects for the target data, timesteps
-            # batch[-1].meta_info is a dictionary with metadata info per sample
-            # batch[-1].meta_info["ERA5"] etc.
-            # here we have the noise_level_rn
-            # batch[-1].source_samples[0].meta_info["ERA5"].noise_level_rn
-            # == batch[-1].target_samples[0].meta_info["ERA5"].noise_level_rn
-            # for the same timestep, this needs to be fixed for when we have more source timesteps,
-            # and perhaps with bigger batch sizes?
-            # Each Sample object has:
-            # .streams_data: a dictionary of StreamData objects per stream name
-            # .source_cell_lens: list of tensors with lengths of source cells per stream # to be
-            # changed to be in ModelBatch
-            # .target_coords_idx: list of tensors with target coordinate indices per stream # to
-            # be changed to be in ModelBatch
-
-            ###### Legacy batch after batch.to_device:
-            # (Pdb++) batch[0]
-            # [[<weathergen.datasets.stream_data.StreamData object at 0x400572104230>]]
-            # (Pdb++) batch[1]
-            # [tensor([0, 1, 1,  ..., 0, 0, 0], device='cuda:0', dtype=torch.int32)]
-            # (Pdb++) batch[2]
-            # [[tensor([0, 0, 0,  ..., 4, 4, 4], device='cuda:0', dtype=torch.int32)]]
-
-            # TODO: access from new ModelBatch
-            forecast_steps = batch[0][-1]
-            # batch = self.batch_to_device(batch)
-
-            ### After to_device, then the original is:
+            batch.to_device(self.device)
 
             with torch.autocast(
                 device_type=f"cuda:{cf.local_rank}",
@@ -537,54 +524,26 @@ class Trainer(TrainerBase):
                 enabled=cf.with_mixed_precision,
             ):
                 outputs = []
-                for view in batch[-1].source_samples:
-                    # TODO remove when ModelBatch and Sample get a to_device()
-                    streams_data = [[view.streams_data["ERA5"]]]
-                    streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
-                    source_cell_lens = view.source_cell_lens
-                    source_cell_lens = [b.to(self.device) for b in source_cell_lens]
-                    target_coords_idxs = view.target_coords_idx
-                    target_coords_idxs = [
-                        [b.to(self.device) for b in bf] for bf in target_coords_idxs
-                    ]
+                for sample in batch.source_samples:
                     outputs.append(
                         self.model(
                             self.model_params,
-                            (
-                                streams_data,
-                                source_cell_lens,
-                                target_coords_idxs,
-                                view.meta_info["ERA5"],
-                            ),
+                            sample,
                             cf.forecast_offset,
-                            forecast_steps,
+                            sample.get_forecast_steps(),
                         )
                     )
 
                 targets_and_auxs = []
-                for view in batch[-1].target_samples:
-                    # TODO remove when ModelBatch and Sample get a to_device()
-                    streams_data = [[view.streams_data["ERA5"]]]
-                    streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
-                    source_cell_lens = view.source_cell_lens
-                    source_cell_lens = [b.to(self.device) for b in source_cell_lens]
-                    target_coords_idxs = view.target_coords_idx
-                    target_coords_idxs = [
-                        [b.to(self.device) for b in bf] for bf in target_coords_idxs
-                    ]
+                for sample in batch.target_samples:
                     targets_and_auxs.append(
                         self.target_and_aux_calculator.compute(
                             self.cf.istep,
-                            (
-                                streams_data,
-                                source_cell_lens,
-                                target_coords_idxs,
-                                view.meta_info["ERA5"],
-                            ),
+                            sample,
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
-                            forecast_steps,
+                            sample.get_forecast_steps(),
                         )
                     )
                 # targets, aux = zip(*targets_and_auxs)
@@ -598,16 +557,6 @@ class Trainer(TrainerBase):
                 #                 [sample.meta_info for sample in batch[-1].target_samples]
                 #                ),
             )
-
-            # OLD
-            #     output = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
-            #     target_aux_output = self.target_and_aux_calculator.compute(
-            #         bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
-            #     )
-            # loss, loss_values = self.loss_calculator.compute_loss(
-            #     preds=output,
-            #     targets=target_aux_output,
-            # )
 
             # TODO re-enable this, need to think on how to make it compatible with
             # TODO: CL, this should become a regular loss term
@@ -725,84 +674,41 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
+                    forecast_steps = batch.get_forecast_dt()
+                    batch.to_device(self.device)
+
                     # evaluate model
                     forecast_steps = batch[0][-1]
                     with torch.autocast(
                         device_type=f"cuda:{cf.local_rank}",
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
-                    ):  
-                        outputs = []
-                        for view in batch[-1].source_samples:
-                            # TODO remove when ModelBatch and Sample get a to_device()
-                            streams_data = [[view.streams_data["ERA5"]]]
-                            streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
-                            source_cell_lens = view.source_cell_lens
-                            source_cell_lens = [b.to(self.device) for b in source_cell_lens]
-                            target_coords_idxs = view.target_coords_idx
-                            target_coords_idxs = [
-                                [b.to(self.device) for b in bf] for bf in target_coords_idxs
-                            ]
-                            outputs.append(
-                                self.model(
-                                    self.model_params,
-                                    (
-                                        streams_data,
-                                        source_cell_lens,
-                                        target_coords_idxs,
-                                        view.meta_info["ERA5"],
-                                    ),
-                                    cf.forecast_offset,
-                                    forecast_steps,
-                                )
-                            )
-
-                        targets_and_auxs = []
-                        for view in batch[-1].target_samples:
-                            # TODO remove when ModelBatch and Sample get a to_device()
-                            streams_data = [[view.streams_data["ERA5"]]]
-                            streams_data = [[d.to_device(self.device) for d in db] for db in streams_data]
-                            source_cell_lens = view.source_cell_lens
-                            source_cell_lens = [b.to(self.device) for b in source_cell_lens]
-                            target_coords_idxs = view.target_coords_idx
-                            target_coords_idxs = [
-                                [b.to(self.device) for b in bf] for bf in target_coords_idxs
-                            ]
-                            targets_and_auxs.append(
-                                self.target_and_aux_calculator.compute(
-                                    self.cf.istep,
-                                    (
-                                        streams_data,
-                                        source_cell_lens,
-                                        target_coords_idxs,
-                                        view.meta_info["ERA5"],
-                                    ),
-                                    self.model_params,
-                                    self.model,
-                                    cf.forecast_offset,
-                                    forecast_steps,
-                                )
-                            )
-                        # OLD
-                        # forecast_steps = batch[-1]
-                        # batch = self.batch_to_device(batch)
-                        # 
-                        # model_forward = (
-                        #     self.model.forward
-                        #     if self.ema_model is None
-                        #     else self.ema_model.forward_eval
-                        # )
-                        # output = model_forward(
-                        #     self.model_params, batch, cf.forecast_offset, forecast_steps
-                        # )
-                        # target_aux_output = self.target_and_aux_calculator.compute(
-                        #     bidx,
-                        #     batch,
-                        #     self.model_params,
-                        #     self.model,
-                        #     cf.forecast_offset,
-                        #     forecast_steps,
-                        # )
+                    ):
+                        model_forward = (
+                            self.model.forward
+                            if self.ema_model is None
+                            else self.ema_model.forward_eval
+                        )
+                        sample = batch.source_samples[0]
+                        output = model_forward(
+                            self.model_params,
+                            sample,
+                            cf.forecast_offset,
+                            forecast_steps,
+                        )
+                        sample = batch.target_samples[0]
+                        target_aux_output = self.target_and_aux_calculator.compute(
+                            bidx,
+                            (
+                                sample.streams_data,
+                                sample.source_cell_lens,
+                                sample.target_coords_idx,
+                            ),
+                            self.model_params,
+                            self.model,
+                            cf.forecast_offset,
+                            forecast_steps,
+                        )
                     loss, loss_values = self.loss_calculator_val.compute_loss(
                         preds=outputs[0],
                         targets=targets_and_auxs[0],
@@ -810,35 +716,41 @@ class Trainer(TrainerBase):
 
                     # log output
                     if bidx < cf.log_validation:
-                        # TODO: Move _prepare_logging into write_validation by passing streams_data
-                        streams_data: list[list[StreamData]] = batch[0]
-                        (
-                            preds_all,
-                            targets_all,
-                            targets_coords_all,
-                            targets_times_all,
-                            targets_lens,
-                        ) = self._prepare_logging(
-                            preds=outputs,
-                            forecast_offset=cf.forecast_offset,
-                            forecast_steps=cf.forecast_steps,
-                            streams_data=streams_data,
-                        )
-                        sources = [[item.source_raw for item in stream] for stream in streams_data]
-                        # sample idx should be the same across streams => select first
-                        sample_idxs = [item.sample_idx for item in streams_data[0]]
-                        write_output(
-                            self.cf,
-                            mini_epoch,
-                            bidx,
-                            sources,
-                            preds_all,
-                            targets_all,
-                            targets_coords_all,
-                            targets_times_all,
-                            targets_lens,
-                            sample_idxs,
-                        )
+                        logger.warning("logging of data currently not implemented")
+                    # # TODO: Move _prepare_logging into write_validation by passing streams_data
+                    # # TODO right now we hardcode ERA5 which obviously is bad, but not sure
+                    # # how this logging function is supposed to change
+                    # streams_data: list[list[StreamData]] = old_batch[0]
+                    # import pdb
+
+                    # pdb.set_trace()
+                    # (
+                    #     preds_all,
+                    #     targets_all,
+                    #     targets_coords_all,
+                    #     targets_times_all,
+                    #     targets_lens,
+                    # ) = self._prepare_logging(
+                    #     preds=output,
+                    #     forecast_offset=cf.forecast_offset,
+                    #     forecast_steps=cf.forecast_steps,
+                    #     streams_data=streams_data,
+                    # )
+                    # sources = [[item.source_raw for item in stream] for stream in streams_data]
+                    # # sample idx should be the same across streams => select first
+                    # sample_idxs = [item.sample_idx for item in streams_data[0]]
+                    # write_output(
+                    #     self.cf,
+                    #     mini_epoch,
+                    #     bidx,
+                    #     sources[0],
+                    #     preds_all,
+                    #     targets_all,
+                    #     targets_coords_all,
+                    #     targets_times_all,
+                    #     targets_lens,
+                    #     sample_idxs,
+                    # )
 
                     # Collecting loss statistics for later inspection
                     if bidx == 0:
@@ -869,9 +781,8 @@ class Trainer(TrainerBase):
         self.dataset_val.advance()
 
     def batch_to_device(self, batch):
-        # TODO: do not define new members outside of the init!!
-        self.device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{self.device_type}:{self.cf.local_rank}")
+        device_type = torch.accelerator.current_accelerator()
+        self.device = torch.device(f"{device_type}:{self.cf.local_rank}")
         # forecast_steps is dropped here from the batch
         for i, b in enumerate(batch[0]):
             print(f"{i}th b before to_device: {b}")

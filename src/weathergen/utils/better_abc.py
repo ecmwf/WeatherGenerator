@@ -21,13 +21,14 @@ def abstract_attribute[R](obj: Callable[[Any], R] | None = None) -> R:
     _obj = cast(Any, obj)
     if obj is None:
         _obj = DummyAttribute()
-    _obj.__is_abstract_attribute__ = True
+    _obj.__is_abstract_attribute__ = True  # pylint: disable=attribute-defined-outside-init
     return cast(R, _obj)
 
 
 class ABCMeta(NativeABCMeta):
     def __call__(cls, *args, **kwargs):
         instance = NativeABCMeta.__call__(cls, *args, **kwargs)
+        # pylint: disable-next=attribute-defined-outside-init
         abstract_attributes = {
             name
             for name in dir(instance)

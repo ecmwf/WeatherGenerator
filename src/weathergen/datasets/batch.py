@@ -21,30 +21,25 @@ from weathergen.datasets.stream_data import StreamData
 
 @dataclass
 class SampleMetaData:
-    # masking strategy
-    # masking_strategy: str
-
-    # parameters for masking strategy
-    masking_params: Config | dict
+    # sample parameters (masking)
+    params: Config | dict
 
     mask: torch.Tensor | None = None
-
-    noise_level_rn: float | None = None
 
 
 class Sample:
     # keys: stream name, values: SampleMetaData
-    meta_info: dict
+    meta_info: dict[str | SampleMetaData]
 
     # data for all streams
     # keys: stream_name, values: StreamData
     streams_data: dict[str, StreamData | None]
-    forecast_dt: int | None
 
     # TODO:
     # these two need to live in ModelBatch as they are flattened!
     # this should be a dict also lives in ModelBatch
     source_cell_lens: list[torch.Tensor] | None
+    # TODO why is this a list of lists in practice, but the type says list of tensors?
     target_coords_idx: list[torch.Tensor] | None
 
     def __init__(self, streams: dict) -> None:
@@ -58,7 +53,36 @@ class Sample:
         self.source_cell_lens: list[torch.Tensor] | None = None
         self.target_coords_idx: list[torch.Tensor] | None = None
 
-        self.forecast_dt: int | None = None
+    def to_device(self, device) -> None:
+        if self.source_cell_lens is not None:
+            # iterate over forecast steps
+            self.source_cell_lens = [t.to(device, non_blocking=True) for t in self.source_cell_lens]
+
+        if self.target_coords_idx is not None:
+            target_coords_idx_new = {}
+            for k, v in self.target_coords_idx.items():
+                # iterate over forecast steps
+                target_coords_idx_new[k] = [vv.to(device, non_blocking=True) for vv in v]
+            self.target_coords_idx = target_coords_idx_new
+
+        for key in self.meta_info.keys():
+            self.meta_info[key].mask = (
+                self.meta_info[key].mask.to(device, non_blocking=True)
+                if self.meta_info[key].mask is not None
+                else None
+            )
+
+        for key, val in self.streams_data.items():
+            if val is not None:
+                self.streams_data[key] = val.to_device(device)
+
+    def is_empty(self) -> bool:
+        """
+        Check if sample is empty
+        """
+        return np.all(
+            np.array([s.empty() if s is not None else True for _, s in self.streams_data.items()])
+        )
 
     def add_stream_data(self, stream_name: str, stream_data: StreamData) -> None:
         """
@@ -80,20 +104,17 @@ class Sample:
         self.source_cell_lens = source_cell_lens
         self.target_coords_idx = target_coords_idx
 
-    def set_forecast_dt(self, forecast_dt: int) -> None:
-        """
-        Set forecast_dt for sample
-        """
-        self.forecast_dt = forecast_dt
-
-    # TODO: complete interface, e.g get_stream
-
     def get_stream_data(self, stream_name: str) -> StreamData:
         """
         Get data for stream @stream_name from sample
         """
         assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
         return self.streams_data[stream_name]
+
+    def get_forecast_steps(self) -> int:
+        for _, sdata in self.streams_data.items():
+            forecast_dt = sdata.get_forecast_steps()
+        return forecast_dt
 
 
 class ModelBatch:
@@ -110,6 +131,7 @@ class ModelBatch:
     # index of corresponding target (for source samples) or source (for target samples)
     # these are in 1-to-1 corresponding for classical training modes (MTM, forecasting) but
     # can be more complex for strategies like student-teacher training
+    # TODO @CL and @SHickman can we make these tensors?
     source2target_matching_idxs: np.typing.NDArray[np.int32]
     target2source_matching_idxs: np.typing.NDArray[np.int32]
 
@@ -120,8 +142,14 @@ class ModelBatch:
         self.target_samples = [Sample(streams) for _ in range(num_target_samples)]
 
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
-        # self.target_source_matching_idxs = np.full(num_target_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
+
+    def to_device(self, device):
+        for sample in self.source_samples:
+            sample.to_device(device)
+
+        for sample in self.target_samples:
+            sample.to_device(device)
 
     def add_source_stream(
         self,
@@ -167,6 +195,18 @@ class ModelBatch:
                 "invalid value for source_sample_idx"
             )
         self.target2source_matching_idxs[target_sample_idx] = source_sample_idx
+
+    def is_empty(self):
+        """
+        Check if batch is empty
+        """
+        source_empty = np.all(
+            np.array([s.is_empty() if s is not None else True for s in self.source_samples])
+        )
+        target_empty = np.all(
+            np.array([s.is_empty() if s is not None else True for s in self.target_samples])
+        )
+        return source_empty or target_empty
 
     def len_sources(self) -> int:
         """

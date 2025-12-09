@@ -28,6 +28,7 @@ import math
 import torch
 
 from weathergen.common.config import Config
+from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
 
 
@@ -54,7 +55,12 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.p_mean = self.cf.p_mean
         self.p_std = self.cf.p_std
 
-    def forward(self, tokens: torch.Tensor, fstep: int, metadata: dict) -> torch.Tensor:
+    def forward(
+        self,
+        tokens: torch.Tensor,
+        fstep: int,
+        meta_info: dict[str, SampleMetaData]
+    ) -> torch.Tensor:
         """
         Model forward call during training. Unpacks the conditioning c = [x_{t-k}, ..., x_{t}], the
         target y = x_{t+1}, and the random noise eta from the data, computes the diffusion noise
@@ -69,7 +75,8 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
         y = tokens
-        eta = torch.tensor([metadata.noise_level_rn], device=tokens.device)
+        # TODO: add correct eta from meta_info
+        eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
         # eta = torch.randn(1).to(device=tokens.device)
         # eta = torch.tensor([metadata.noise_level_rn]).to(device=tokens.device)
 

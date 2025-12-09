@@ -266,7 +266,7 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
     return a
 
 
-def compute_offsets_scatter_embed(batch: StreamData, num_input_steps: int) -> StreamData:
+def compute_offsets_scatter_embed(batch: StreamData, num_steps_input: int) -> StreamData:
     """
     Compute auxiliary information for scatter operation that changes from stream-centric to
     cell-centric computations
@@ -289,7 +289,7 @@ def compute_offsets_scatter_embed(batch: StreamData, num_input_steps: int) -> St
                 torch.stack(
                     [
                         s.source_tokens_lens[i]
-                        if len(s.source_tokens_lens[i]) > 0
+                        if (len(s.source_tokens_lens) > 0) and (len(s.source_tokens_lens[i]) > 0)
                         else torch.tensor([])
                         for s in stl_b
                     ]
@@ -297,7 +297,7 @@ def compute_offsets_scatter_embed(batch: StreamData, num_input_steps: int) -> St
                 for stl_b in batch
             ]
         )
-        for i in range(num_input_steps)
+        for i in range(num_steps_input)
     ]
 
     # precompute index sets for scatter operation after embed
@@ -305,7 +305,10 @@ def compute_offsets_scatter_embed(batch: StreamData, num_input_steps: int) -> St
     offsets = [torch.cat([torch.zeros(1, dtype=torch.int32), o[:-1]]) for o in offsets_base]
     offsets_pe = [torch.zeros_like(o) for o in offsets]
 
-    for i_s in range(num_input_steps):
+    if torch.cat(offsets_base).shape[0] == 0:
+        return batch
+
+    for i_s in range(num_steps_input):
         for ib, sb in enumerate(batch):  # batch items
             for itype, s in enumerate(sb):  # streams, i.e. here we have StreamData object
                 if not s.source_empty():
@@ -333,7 +336,7 @@ def compute_offsets_scatter_embed(batch: StreamData, num_input_steps: int) -> St
     return batch
 
 
-def compute_idxs_predict(forecast_dt: int, batch: StreamData) -> list:
+def compute_idxs_predict(forecast_dt: int, batch: StreamData, streams: list[dict]) -> list:
     """
     Compute auxiliary information for prediction
 
@@ -353,33 +356,31 @@ def compute_idxs_predict(forecast_dt: int, batch: StreamData) -> list:
     target_coords_lens = [[s.target_coords_lens for s in sb] for sb in batch]
 
     # target coords idxs
-    tcs_lens_merged = []
+    tcs_lens_merged = {}
     pad = torch.zeros(1, dtype=torch.int32)
     for ii in range(len(batch[0])):
         # generate len lists for varlen attention (per batch list for local, per-cell attention and
         # global
-        tcs_lens_merged += [
-            [
-                torch.cat(
-                    [
-                        pad,
-                        torch.cat(
-                            [
-                                target_coords_lens[i_b][ii][fstep]
-                                for i_b in range(len(target_coords_lens))
-                            ]
-                        ),
-                    ]
-                ).to(torch.int32)
-                for fstep in range(forecast_dt + 1)
-            ]
+        tcs_lens_merged[streams[ii]["name"]] = [
+            torch.cat(
+                [
+                    pad,
+                    torch.cat(
+                        [
+                            target_coords_lens[i_b][ii][fstep]
+                            for i_b in range(len(target_coords_lens))
+                        ]
+                    ),
+                ]
+            ).to(torch.int32)
+            for fstep in range(forecast_dt + 1)
         ]
 
     return tcs_lens_merged
 
 
 def compute_source_cell_lens(
-    batch: list[list[StreamData]], num_input_steps: int
+    batch: list[list[StreamData]], num_steps_input: int
 ) -> list[torch.tensor]:
     """
     Compute auxiliary information for varlen attention for local assimilation
@@ -402,7 +403,7 @@ def compute_source_cell_lens(
                 torch.stack(
                     [
                         s.source_tokens_lens[i]
-                        if len(s.source_tokens_lens[i]) > 0
+                        if (len(s.source_tokens_lens) > 0) and (len(s.source_tokens_lens[i]) > 0)
                         else torch.tensor([])
                         for s in stl_b
                     ]
@@ -410,7 +411,7 @@ def compute_source_cell_lens(
                 for stl_b in batch
             ]
         )
-        for i in range(num_input_steps)
+        for i in range(num_steps_input)
     ]
 
     source_cell_lens = [torch.sum(c, 1).flatten().to(torch.int32) for c in source_cell_lens_raw]
