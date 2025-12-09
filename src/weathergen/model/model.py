@@ -23,6 +23,7 @@ from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
+from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.engines import (
     EmbeddingEngine,
     EnsPredictionHead,
@@ -82,6 +83,23 @@ class ModelParams(torch.nn.Module):
             dtype=self.dtype,
         )
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
+
+        ### ROPE COORDS (for 2D RoPE when use_2D_rope=True) ###
+        # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
+        # Shape: (num_healpix_cells, ae_local_num_queries, 2)
+        self.use_2D_rope = getattr(cf, "use_2D_rope", False)
+        if self.use_2D_rope:
+            self.rope_coords = torch.nn.Parameter(
+                torch.zeros(
+                    self.num_healpix_cells,
+                    cf.ae_local_num_queries,
+                    2,
+                    dtype=torch.float32,
+                ),
+                requires_grad=False,
+            )
+        else:
+            self.rope_coords = None
 
         ### HEALPIX NEIGHBOURS ###
         hlc = self.healpix_level
@@ -150,28 +168,39 @@ class ModelParams(torch.nn.Module):
         self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
 
         dim_embed = cf.ae_global_dim_embed
-        self.pe_global.data.fill_(0.0)
-        xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
-        self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
-            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
-        )
-        self.pe_global.data[..., 0::2] += (
-            torch.sin(
-                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+        
+        if self.use_2D_rope:
+            # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
+            verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
+            coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
+            coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
+            self.rope_coords.data.copy_(coords)
+            # Clear pe_global when using 2D RoPE
+            self.pe_global.data.fill_(0.0)
+        else:
+            # Original pe_global initialization
+            self.pe_global.data.fill_(0.0)
+            xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
+            self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
+                torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
             )
-            .unsqueeze(1)
-            .repeat((1, cf.ae_local_num_queries, 1))
-        )
-        self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
-            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
-        )
-        self.pe_global.data[..., 1::2] += (
-            torch.cos(
-                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+            self.pe_global.data[..., 0::2] += (
+                torch.sin(
+                    torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+                )
+                .unsqueeze(1)
+                .repeat((1, cf.ae_local_num_queries, 1))
             )
-            .unsqueeze(1)
-            .repeat((1, cf.ae_local_num_queries, 1))
-        )
+            self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
+                torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
+            )
+            self.pe_global.data[..., 1::2] += (
+                torch.cos(
+                    torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+                )
+                .unsqueeze(1)
+                .repeat((1, cf.ae_local_num_queries, 1))
+            )
 
         # healpix neighborhood structure
 
@@ -268,6 +297,8 @@ class Model(torch.nn.Module):
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
+        
+        self.use_2D_rope = getattr(cf, "use_2D_rope", False)
 
         self.ae_aggregation_engine: QueryAggregationEngine | None = None
         self.ae_global_engine: GlobalAssimilationEngine | None = None
@@ -781,14 +812,22 @@ class Model(torch.nn.Module):
         # (applying this here assumes batch_size=1)
         # permute to use ae_local_num_queries as the batchsize and no_of_tokens
         # as seq len for flash attention
-        tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
-        tokens_global_unmasked = self.ae_aggregation_engine(
-            tokens_global_unmasked, use_reentrant=False
-        )
-        tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
 
         # create mask from cell lens
         mask = cell_lens.to(torch.bool)
+        
+        coords_global = None
+        if self.use_2D_rope:
+            coords_global = (
+                model_params.rope_coords[mask]
+                .to(device=tokens_global_unmasked.device, dtype=tokens_global_unmasked.dtype)
+                .permute(1, 0, 2)
+            )
+        tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
+        tokens_global_unmasked = self.ae_aggregation_engine(
+            tokens_global_unmasked, coords=coords_global, use_reentrant=False
+        )
+        tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
 
         # fill empty tensor using mask for positions of unmasked tokens
         tokens_global[mask] = tokens_global_unmasked.to(tokens_global.dtype)
@@ -811,8 +850,18 @@ class Model(torch.nn.Module):
             Latent representation of the model
         """
 
+        batch_size = tokens.shape[0]
+        coords = None
+        if self.use_2D_rope:
+            coords = (
+                model_params.rope_coords.flatten(0, 1)
+                .unsqueeze(0)
+                .repeat(batch_size, 1, 1)
+                .to(device=tokens.device, dtype=tokens.dtype)
+            )
+
         # global assimilation engine and adapter
-        tokens = self.ae_global_engine(tokens, use_reentrant=False)
+        tokens = self.ae_global_engine(tokens, coords=coords, use_reentrant=False)
 
         return tokens
 
