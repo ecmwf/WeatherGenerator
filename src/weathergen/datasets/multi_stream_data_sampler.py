@@ -252,6 +252,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.mini_epoch = 0
 
+        self.rng = None
+        self.perms = None
+        self.perms_forecast_dt = None
+
     ###################################################
     def advance(self):
         """

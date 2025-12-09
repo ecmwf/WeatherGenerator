@@ -133,6 +133,8 @@ class DataReaderFesom(DataReaderTimestep):
         Initializes the dataset object. This method is called once per worker process
         to ensure dask scheduler is not shared between them.
         """
+        # pylint: disable=attribute-defined-outside-init
+
         if self._initialized:
             return
 

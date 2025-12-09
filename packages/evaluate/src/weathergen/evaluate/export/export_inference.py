@@ -10,9 +10,9 @@
 # weathergen-common = { path = "../../../../../packages/common" }
 # weathergen = { path = "../../../../../" }
 # ///
-## Example USAGE: uv run export --run-id grwnhykd --stream ERA5 \
-## --output-dir /p/home/jusers/owens1/jureca/WeatherGen/test_output1 \
-## --format netcdf --type prediction target --fsteps 1 --samples 1
+## Example USAGE: uv run export --run-id o8b60tgh --stream ERA5
+# --output-dir ../o8b60tgh --format netcdf
+# --regrid-degree 0.25 --regrid-type regular_ll
 import argparse
 import logging
 import sys
@@ -154,6 +154,22 @@ def parse_args(args: list) -> argparse.Namespace:
         type=str,
         help="Expver to include in the output filename (i.e. 'iuoo')",
         required=False,
+    )
+
+    parser.add_argument(
+        "--regrid-degree",
+        type=float,
+        default=None,
+        help="""If specified, regrid the data to a regular lat/lon grid with the given degree,
+        (e.g., 0.25 for 0.25x0.25 degree grid) or O/N Gaussian grid (e.g., 63 for N63 grid).""",
+    )
+
+    parser.add_argument(
+        "--regrid-type",
+        type=str,
+        choices=["regular_ll", "O", "N"],
+        default=None,
+        help="Type of grid to regrid to (only used if --regrid-degree is specified)",
     )
 
     args, unknown_args = parser.parse_known_args(args)
