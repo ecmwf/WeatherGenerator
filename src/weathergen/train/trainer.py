@@ -537,12 +537,7 @@ class Trainer(TrainerBase):
                 for sample in batch.target_samples:
                     targets_and_auxs.append(
                         self.target_and_aux_calculator.compute(
-                            self.cf.istep,
-                            (
-                                sample.streams_data,
-                                sample.source_cell_lens,
-                                sample.target_coords_idx,
-                            ),
+                            sample,
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
@@ -695,7 +690,7 @@ class Trainer(TrainerBase):
                             self.model_params,
                             sample,
                             cf.forecast_offset,
-                            sample.get_forecast_dt(),
+                            sample.get_forecast_steps(),
                         )
                         sample = batch.target_samples[0]
                         target_aux_output = self.target_and_aux_calculator.compute(
@@ -708,7 +703,7 @@ class Trainer(TrainerBase):
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
-                            sample.get_forecast_dt(),
+                            sample.get_forecast_steps(),
                         )
                     loss, loss_values = self.loss_calculator_val.compute_loss(
                         preds=output,
