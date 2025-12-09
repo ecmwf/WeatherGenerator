@@ -667,7 +667,10 @@ class Model(torch.nn.Module):
                 if noise_std > 0.0:
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
-            tokens = self.forecast(model_params, tokens, fstep)
+            # Apply 2D RoPE coords only on the first forecast step
+            # to help model understand spatial relationships before temporal roll-out
+            is_first_forecast = fstep == forecast_offset
+            tokens = self.forecast(model_params, tokens, fstep, apply_rope=is_first_forecast)
 
         # prediction for final step
         preds_all += [
@@ -865,20 +868,32 @@ class Model(torch.nn.Module):
         return tokens
 
     #########################################
-    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
+    def forecast(
+        self, model_params: ModelParams, tokens: torch.Tensor, fstep: int, apply_rope: bool = False
+    ) -> torch.Tensor:
         """Advances latent space representation in time
 
         Args:
-            model_params : Query and embedding parameters (never used)
+            model_params : Query and embedding parameters
             tokens : Input tokens to be processed by the model.
             fstep: Current forecast step index (can be used as aux info).
+            apply_rope: Whether to apply 2D RoPE coords (only on first forecast step).
         Returns:
             Processed tokens
         Raises:
             ValueError: For unexpected arguments in checkpoint method
         """
 
-        tokens = self.forecast_engine(tokens, fstep)
+        coords = None
+        if apply_rope and self.use_2D_rope:
+            coords = (
+                model_params.rope_coords.flatten(0, 1)
+                .unsqueeze(0)
+                .repeat(tokens.shape[0], 1, 1)
+                .to(device=tokens.device, dtype=tokens.dtype)
+            )
+
+        tokens = self.forecast_engine(tokens, fstep, coords=coords)
 
         return tokens
 
