@@ -30,7 +30,7 @@ def write_output(
     sample_idxs,
 ):
     stream_names = [stream.name for stream in cf.streams]
-    analysis_streams_output = cf.get( 'analysis_streams_output', None)
+    analysis_streams_output = cf.get("analysis_streams_output", None)
     if cf.streams_output is not None:
         output_stream_names = cf.streams_output
     elif analysis_streams_output is not None:  # --- to be removed at some point ---
