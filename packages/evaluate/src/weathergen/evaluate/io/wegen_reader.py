@@ -18,16 +18,12 @@ import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
 
-<<<<<<< HEAD:packages/evaluate/src/weathergen/evaluate/io_reader.py
-from weathergen.common.config import get_shared_wg_path, load_merge_configs, load_run_config
-=======
 # Local application / package
 from weathergen.common.config import (
     get_shared_wg_path,
     load_merge_config,
     load_run_config,
 )
->>>>>>> ecmwf/develop:packages/evaluate/src/weathergen/evaluate/io/wegen_reader.py
 from weathergen.common.io import ZarrIO
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
