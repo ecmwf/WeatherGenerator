@@ -619,8 +619,8 @@ class Trainer(TrainerBase):
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
 
             self._log_terminal(bidx, mini_epoch, TRAIN)
-            if bidx % self.train_log_freq.metrics == 0:
-                self._log(TRAIN)
+            # if bidx % self.train_log_freq.metrics == 0:
+            #     self._log(TRAIN)
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
@@ -902,7 +902,7 @@ class Trainer(TrainerBase):
                 if stage == VAL:
                     logger.info(
                         f"""validation ({self.cf.run_id}) : {mini_epoch:03d} : 
-                        {avg_loss.nanmean().item()}"""
+                        {np.nanmean(avg_loss)}"""
                     )
                     for loss_name, loss_values in losses_all.items():
                         logger.info(
@@ -916,7 +916,7 @@ class Trainer(TrainerBase):
                     len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
                     pstr = (
                         f"{mini_epoch:03d} : {bidx:05d}/{len_dataset:05d} : "
-                        + f"{self.cf.istep:06d} : loss = {avg_loss.nanmean().item():.4E} "
+                        + f"{self.cf.istep:06d} : loss = {np.nanmean(avg_loss):.4E} "
                         + f"(lr={self.lr_scheduler.get_lr():.2E}, "
                     )
                     if self.log_grad_norms:
@@ -926,7 +926,8 @@ class Trainer(TrainerBase):
                     logger.info("\t")
                     for loss_name, loss_values in losses_all.items():
                         logger.info(
-                            f"{loss_name}" + f" : {loss_values.nanmean():0.4E} \t",
+                            f"{loss_name}.loss_avg"
+                            + f" : {np.nanmean(loss_values['loss_avg']):0.4E} \t",
                         )
                     logger.info("\n")
 

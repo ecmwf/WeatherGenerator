@@ -99,7 +99,7 @@ class TrainLogger:
         self,
         samples: int,
         lr: float,
-        avg_loss: Tensor,
+        avg_loss: list[float],
         losses_all: dict[str, Tensor],
         stddev_all: dict[str, Tensor],
         perf_gpu: float = 0.0,
@@ -113,10 +113,10 @@ class TrainLogger:
         log_vals: list[float] = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
         log_vals += [samples]
 
-        metrics["loss_avg_mean"] = avg_loss.nanmean().item()
+        metrics["loss_avg_mean"] = np.nanmean(avg_loss)
         metrics["learning_rate"] = lr
         metrics["num_samples"] = int(samples)
-        log_vals += [avg_loss.nanmean().item()]
+        log_vals += [np.nanmean(avg_loss)]
         log_vals += [lr]
 
         stream_names = [st["name"] for st in self.cf.streams]

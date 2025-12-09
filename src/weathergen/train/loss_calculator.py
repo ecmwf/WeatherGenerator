@@ -18,7 +18,7 @@ from omegaconf import DictConfig
 import weathergen.train.loss_modules as LossModules
 from weathergen.model.model import ModelOutput
 from weathergen.train.target_and_aux_module_base import TargetAuxOutput
-from weathergen.train.utils import flatten_dictionary
+from weathergen.train.utils import flatten_dict, unflatten_dict
 from weathergen.utils.distributed import ddp_average
 from weathergen.utils.train_logger import TRAIN, Stage
 
@@ -90,10 +90,10 @@ class LossCalculator:
         stddev_all = defaultdict(list)
 
         for d in self.losses_unweighted_hist:
-            for key, value in flatten_dictionary(d).items():
+            for key, value in flatten_dict(d).items():
                 losses_all[key].append(ddp_average(value).item())
 
-        return real_loss, losses_all, stddev_all
+        return real_loss, unflatten_dict(losses_all), unflatten_dict(stddev_all)
 
     def compute_loss(
         self,
@@ -108,6 +108,7 @@ class LossCalculator:
             loss_values = calculator.compute_loss(preds=preds, targets=targets)
             loss = loss + weight * loss_values.loss
             losses_all[calculator.name] = loss_values.losses_all
+            losses_all[calculator.name]["loss_avg"] = loss_values.loss
             stddev_all[calculator.name] = loss_values.stddev_all
 
         # Keep histories for logging

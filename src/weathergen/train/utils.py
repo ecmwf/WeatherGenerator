@@ -31,7 +31,7 @@ def json_to_dict(fname):
     return json.loads("".join([s.replace("\n", "") for s in json_str]))
 
 
-def flatten_dictionary(d, parent_key="", sep="."):
+def flatten_dict(d, parent_key="", sep="."):
     """
     Flattens a nested dictionary into a single-level dictionary
     with concatenated keys.
@@ -51,14 +51,14 @@ def flatten_dictionary(d, parent_key="", sep="."):
 
         if isinstance(v, dict):
             # Recursively flatten nested dictionaries
-            items.extend(flatten_dictionary(v, new_key, sep=sep).items())
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
         elif isinstance(v, list | tuple):
             # Handle lists/tuples, treating items inside as indexed elements
             for i, item in enumerate(v):
                 if isinstance(item, dict):
                     # If list item is a dict, flatten it with index in key
                     list_key = new_key + sep + str(i)
-                    items.extend(flatten_dictionary(item, list_key, sep=sep).items())
+                    items.extend(flatten_dict(item, list_key, sep=sep).items())
                 else:
                     # If list item is a scalar, store it with index in key
                     items.append((new_key + sep + str(i), item))
@@ -67,3 +67,34 @@ def flatten_dictionary(d, parent_key="", sep="."):
             items.append((new_key, v))
 
     return dict(items)
+
+
+def unflatten_dict(d, separator="."):
+    """
+    Unflattens a dictionary where nested keys were joined by a separator.
+
+    :param d: The flattened dictionary.
+    :param separator: The delimiter used to join nested keys.
+    :return: The unflattened dictionary.
+    """
+    unflattened = {}
+    for key, value in d.items():
+        # Split the key into its components
+        parts = key.split(separator)
+
+        # Start at the root of the unflattened dictionary
+        current_level = unflattened
+
+        # Iterate over all parts of the key except the last one
+        for part in parts[:-1]:
+            # If the part is not a key in the current level, create a new dictionary
+            if part not in current_level:
+                current_level[part] = {}
+
+            # Move down to the next level
+            current_level = current_level[part]
+
+        # Set the value for the final, innermost key
+        current_level[parts[-1]] = value
+
+    return unflattened
