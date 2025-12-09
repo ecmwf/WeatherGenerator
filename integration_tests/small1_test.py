@@ -135,7 +135,7 @@ def evaluate_results(run_id):
         }
     )
     # Not passing the mlflow client for tests.
-    evaluate_from_config(cfg, None)
+    evaluate_from_config(cfg, None, None)
 
 
 def load_metrics(run_id):
