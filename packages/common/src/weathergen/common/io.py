@@ -20,6 +20,7 @@ import xarray as xr
 import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
+from zarr.storage import LocalStore
 
 # experimental value, should be inferred more intelligently
 CHUNK_N_SAMPLES = 16392
@@ -317,15 +318,17 @@ class ZarrIO:
     def __init__(self, store_path: pathlib.Path):
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
+        self._store: LocalStore | None = None
 
     def __enter__(self) -> typing.Self:
-        self._store = zarr.storage.DirectoryStore(self._store_path)
+        self._store = LocalStore(self._store_path)
         self.data_root = zarr.group(store=self._store)
 
         return self
 
     def __exit__(self, exc_type, exc_value, exc_tb):
-        self._store.close()
+        if self._store is not None:
+            self._store.close()
 
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
@@ -355,9 +358,8 @@ class ZarrIO:
             for name, dataset in group.groups()
         }
 
-    def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Group:
+    def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Array | zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
-        group: zarr.Group | None
         if create:
             group = self.data_root.create_group(item.path)
         else:
@@ -388,14 +390,14 @@ class ZarrIO:
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
         assert is_ndarray(array), f"Expected ndarray but got: {type(array)}"
         if array.size == 0:  # sometimes for geoinfo
-            chunks = None
+            chunks = "auto"
         else:
             chunks = (CHUNK_N_SAMPLES, *array.shape[1:])
         _logger.debug(
             f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
             + "into group: {group}."
         )
-        group.create_dataset(name, data=array, chunks=chunks)
+        group.create_array(name, data=array, chunks=chunks)
 
     @functools.cached_property
     def forecast_offset(self) -> int:
@@ -433,7 +435,8 @@ class ZarrIO:
         _, example_sample = next(self.data_root.groups())
         _, example_stream = next(example_sample.groups())
 
-        all_steps = list(example_stream.group_keys())
+        all_steps = sorted(list(example_stream.group_keys()))
+
         if self.forecast_offset == 1:
             return all_steps[1:]  # exclude fstep with no targets/preds
         else:
