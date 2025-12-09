@@ -629,16 +629,17 @@ class Model(torch.nn.Module):
             tokens = self.forecast(model_params, tokens, fstep, metadata)
             latents["preds"] += [tokens]
 
-        # prediction for final step
-        # preds_all += [
-        #     self.predict(
-        #         model_params,
-        #         forecast_offset + forecast_steps,
-        #         tokens,
-        #         streams_data,
-        #         target_coords_idxs,
-        #     )
-        # ]
+        if not self.training:
+            # Decode tokens to physical space
+            preds_all += [
+                self.predict(
+                    model_params,
+                    forecast_offset + forecast_steps,
+                    tokens,
+                    streams_data,
+                    target_coords_idxs,
+                )
+            ]
 
         latents["posteriors"] = posteriors
 
