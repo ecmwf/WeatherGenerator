@@ -1,0 +1,52 @@
+#optional: if commented out all is taken care of by the default settings
+# NB. global options apply to all run_ids 
+#global_plotting_options:
+#  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
+#  dpi_val : 300
+#  ERA5:
+#    marker_size: 2
+#    scale_marker_size: 1
+#    marker: "o"
+#    # alpha: 0.5
+#    2t: 
+#      vmin: 250
+#      vmax: 300
+#    10u:
+#      vmin: -40
+#      vmax: 40
+
+evaluation:
+  metrics  : ["rmse", "mae"]
+  regions: ["global", "nhem"]
+  summary_plots : true
+  summary_dir: "./plots/"
+  plot_ensemble: "members" #supported: false, "std", "minmax", "members"
+  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
+  print_summary: false #print out score values on screen. it can be verbose
+  log_scale: false
+  add_grid: false
+  score_cards: false
+  num_processes: 0  #options: int, "auto", 0 means no parallelism (default)
+
+run_ids :
+  vpqg83lz:
+    label: "overfit model vpqg83lz"
+    results_base_dir : "./results/"
+    mini_epoch: 0
+    rank: 0
+    streams:
+      ERA5:
+        channels: ["2t", "10u"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
+        evaluation:
+          forecast_step: "all"
+          sample: "all"
+          ensemble: "all" #supported: "all", "mean", [0,1,2]
+        plotting:
+          sample: [1]
+          forecast_step: [1]
+          ensemble: "all" #supported: "all", "mean", [0,1,2]
+          plot_maps: true
+          plot_histograms: true
+          plot_animations: true
+
+    
