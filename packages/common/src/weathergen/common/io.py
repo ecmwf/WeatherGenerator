@@ -22,15 +22,16 @@ import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
 from zarr.storage import LocalStore
+from tqdm import tqdm
 
 # experimental value, should be inferred more intelligently
-CHUNK_N_SAMPLES = 16392 * 2
+CHUNK_N_SAMPLES = 32784
 type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
 
-SHARDING_ENABLED = False
-SHARD_N_SAMPLES = CHUNK_N_SAMPLES * 3
+SHARDING_ENABLED = True
+SHARD_N_SAMPLES = CHUNK_N_SAMPLES * 10
 #CHUNK_N_SAMPLES has to equal to integer * SHARD_N_SAMPLES
 
 # zarr.config.set({
@@ -268,9 +269,10 @@ class OutputDataset:
         """Convert raw dask arrays into chunked dask-aware xarray dataset."""
         chunks = (chunk_nsamples, *self.data.shape[1:])
         if SHARDING_ENABLED:
-            shards = (shard_nsamples, *(x*3 for x in self.data.shape[1:]))
+            shards = (shard_nsamples, *(x*4 for x in self.data.shape[1:]))
             print(f"sharding enabled with shards: {shards} and chunks: {chunks}")
         else:
+            shards = None
             print(f"sharding disabled, using chunks: {chunks}")
         # maybe do dask conversion earlier? => usefull for parallel writing?
         data = da.from_zarr(self.data, chunks=chunks, shards = shards)  # dont call compute to lazy load
@@ -354,7 +356,7 @@ class ZarrIO:
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
         group = self._get_group(item.key, create=True)
-        for dataset in item.datasets:
+        for dataset in tqdm(item.datasets):
             if dataset is not None:
                 self._write_dataset(group, dataset)
 
@@ -420,7 +422,7 @@ class ZarrIO:
         )
         start_time = timeit.default_timer()
         if SHARDING_ENABLED and chunks != "auto":
-            shards = (SHARD_N_SAMPLES, *(x*3 for x in array.shape[1:]))
+            shards = (SHARD_N_SAMPLES, *(x*1 for x in array.shape[1:]))
             z = group.create_array(name, data=array, chunks=chunks, shards =shards)
             print(f"sharding enabled with shards: {shards} and chunks: {chunks}")
         else:
