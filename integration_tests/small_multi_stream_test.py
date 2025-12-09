@@ -71,7 +71,7 @@ def infer_multi_stream(run_id):
     """Run inference for multi-stream model."""
     logger.info("run multi-stream inference")
     inference_from_args(
-        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--mini_epoch", "0"]
+        ["-start", "2021-10-10", "-end", "2022-10-11", "--samples", "10", "--mini_epoch", "0"]
         + [
             "--from_run_id",
             run_id,
