@@ -427,22 +427,27 @@ class Trainer(TrainerBase):
         ]
 
         # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
-        fsteps = len(targets_rt)
+        
+        preds = preds[0]
         preds_all: list[list[list[NDArray]]] = [
-            [[] for _ in self.cf.streams] for _ in range(fsteps)
+            [[] for _ in self.cf.streams] for _ in forecast_range
         ]
         targets_all: list[list[list[NDArray]]] = [
-            [[] for _ in self.cf.streams] for _ in range(fsteps)
+            [[] for _ in self.cf.streams] for _ in forecast_range
         ]
-        targets_lens: list[list[list[int]]] = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
+        targets_lens: list[list[list[int]]] = [[[] for _ in self.cf.streams] for _ in forecast_range]
 
         # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
-        for fstep in range(len(targets_rt)):
+        print(f'forecast range is {forecast_range}')
+        print(f'range of targets_rt is {range(len(targets_rt))}')
+        for fstep in forecast_range:
+            print(f'Processing forecast step {fstep}...')
+            print(len(preds.physical))
             if len(preds.physical[fstep]) == 0:
                 continue
 
             for i_strm, target in enumerate(targets_rt[fstep]):
-                pred = preds[fstep][i_strm]
+                pred = preds.physical[fstep][i_strm]
                 idxs_inv = idxs_inv_rt[fstep][i_strm]
 
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
@@ -838,7 +843,11 @@ class Trainer(TrainerBase):
                     # log output
                     if bidx < cf.log_validation:
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
-                        streams_data: list[list[StreamData]] = batch[0]
+                        streams_data: list[list[StreamData]] = batch[0][0]
+                        for i in streams_data:
+                            print(f"unpacking {i}")
+                            for f in i:
+                                print(f)
                         (
                             preds_all,
                             targets_all,
