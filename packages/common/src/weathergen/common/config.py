@@ -75,7 +75,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
 
     Args:
         run_id: Run ID of the pretrained WeatherGenerator model
-        mini_epoch: Mini-epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
         model_path: Path to the model directory. If None, uses the model_path from private config.
 
     Returns:
