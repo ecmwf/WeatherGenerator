@@ -37,6 +37,7 @@ from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
+type StreamName = str
 
 logger = logging.getLogger(__name__)
 
@@ -112,9 +113,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.len = 100000000
 
-        self.streams_datasets: list[list[AnyDataReader]] = []
+        self.streams_datasets: dict[StreamName, list[AnyDataReader]] = {}
         for _, stream_info in enumerate(cf.streams):
-            self.streams_datasets.append([])
+            # list of sources for current stream
+            self.streams_datasets[stream_info["name"]] = []
 
             for fname in stream_info["filenames"]:
                 kwargs = {
@@ -171,7 +173,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if len(ds) > 0:
                     self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
 
-                # MODIFIES config !!!
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
                 stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
                 stream_info["target_channel_weights"] = (
@@ -180,7 +181,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     else [1.0 for _ in ds.target_channels]
                 )
 
-                self.streams_datasets[-1] += [ds]
+                self.streams_datasets[stream_info["name"]] += [ds]
 
         index_range = self.time_window_handler.get_index_range()
         self.len = int(index_range.end - index_range.start)
@@ -239,20 +240,21 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             + ds[0].get_geoinfo_size()
             + ds[0].get_coords_size()
             + self.tokenizer.get_size_time_embedding()
-            for ds in self.streams_datasets
+            for _, ds in self.streams_datasets.items()
         ]
 
     def get_sources_num_channels(self):
-        return [ds[0].get_source_num_channels() for ds in self.streams_datasets]
+        return [ds[0].get_source_num_channels() for _, ds in self.streams_datasets.items()]
 
     def get_targets_num_channels(self):
-        return [ds[0].get_target_num_channels() for ds in self.streams_datasets]
+        return [ds[0].get_target_num_channels() for _, ds in self.streams_datasets.items()]
 
     def get_targets_coords_size(self):
         # TODO: avoid hard coding magic values
         # +6 at the end for stram_id and time encoding
         return [
-            (ds[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6 for ds in self.streams_datasets
+            (ds[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6
+            for _, ds in self.streams_datasets.items()
         ]
 
     def reset(self):
@@ -296,13 +298,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.tokenizer.reset_rng(self.rng)
 
-    def denormalize_source_channels(self, stream_id, data) -> torch.Tensor:
+    def denormalize_source_channels(self, stream_name, data) -> torch.Tensor:
         # TODO: with multiple ds per stream we need to distinguish these here
-        return self.streams_datasets[stream_id][0].denormalize_source_channels(data)
+        return self.streams_datasets[stream_name][0].denormalize_source_channels(data)
 
-    def denormalize_target_channels(self, stream_id, data) -> torch.Tensor:
+    def denormalize_target_channels(self, stream_name, data) -> torch.Tensor:
         # TODO: with multiple ds per stream we need to distinguish these here
-        return self.streams_datasets[stream_id][0].denormalize_target_channels(data)
+        return self.streams_datasets[stream_name][0].denormalize_target_channels(data)
 
     def _build_stream_data_input(
         self,
@@ -542,7 +544,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         if mode == "masking":
             source_select = ["network_input", "target_coords"]
             target_select = ["target_values"]
-        elif mode == "student_teacher":
+        elif mode == "student_teacher" or mode == "latent_loss":
             source_select = ["network_input"]
             target_select = ["network_input"]
         else:
@@ -551,9 +553,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         batch = ModelBatch(self.streams, num_source_samples, num_target_samples)
 
         # for all streams
-        for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
-            stream_name = stream_info["name"]
-
+        for stream_info, (stream_name, stream_ds) in zip(
+            self.streams, self.streams_datasets.items(), strict=True
+        ):
             # TODO: data class for this or something similar
             (
                 target_masks,
