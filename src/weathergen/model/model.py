@@ -85,8 +85,6 @@ class ModelParams(torch.nn.Module):
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
         ### ROPE COORDS (for 2D RoPE when use_2D_rope=True) ###
-        # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
-        # Shape: (bs, num_healpix_cells * ae_local_num_queries, 2)
         self.use_2D_rope = cf.use_2D_rope
         if self.use_2D_rope:
             self.rope_coords = torch.nn.Parameter(
@@ -176,9 +174,9 @@ class ModelParams(torch.nn.Module):
             verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
             coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
-            # Transform to final shape: (bs, num_healpix_cells * ae_local_num_queries, 2)
             coords_flat = coords.flatten(0, 1).unsqueeze(0).repeat(bs, 1, 1)
             self.rope_coords.data.copy_(coords_flat)
+            
             # Clear pe_global when using 2D RoPE
             self.pe_global.data.fill_(0.0)
         else:

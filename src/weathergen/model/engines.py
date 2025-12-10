@@ -458,8 +458,6 @@ class ForecastingEngine(torch.nn.Module):
         aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
         for block in self.fe_blocks:
             if isinstance(block, MultiSelfAttentionHead | MultiSelfAttentionHeadLocal):
-                # Pass coords if provided (for 2D RoPE on first forecast step), otherwise None
-                # Always pass aux to AdaLayerNorm.
                 tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
             else:
                 tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
