@@ -98,6 +98,7 @@ def positional_encoding_harmonic_coord(x, lats, lons):
 
 ####################################################################################################
 # Rotary positional embeddings (2D) adapted from Qwen3 & LLama for reuse in WeatherGenerator.
+# rotate_half () and apply_rotary_pos_emb () from:
 # https://github.com/qiuzh20/gated_attention/blob/main/modeling_qwen3.py
 def rotate_half(x):
     """Rotates half the hidden dims of the input."""
