@@ -86,15 +86,15 @@ class ModelParams(torch.nn.Module):
 
         ### ROPE COORDS (for 2D RoPE when use_2D_rope=True) ###
         # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
-        # Shape: (num_healpix_cells, ae_local_num_queries, 2)
-        self.use_2D_rope = getattr(cf, "use_2D_rope", False)
+        # Shape: (bs, num_healpix_cells * ae_local_num_queries, 2)
+        self.use_2D_rope = cf.use_2D_rope
         if self.use_2D_rope:
             self.rope_coords = torch.nn.Parameter(
                 torch.zeros(
-                    self.num_healpix_cells,
-                    cf.ae_local_num_queries,
+                    bs,
+                    self.num_healpix_cells * cf.ae_local_num_queries,
                     2,
-                    dtype=torch.float32,
+                    dtype=self.dtype,
                 ),
                 requires_grad=False,
             )
@@ -156,6 +156,7 @@ class ModelParams(torch.nn.Module):
 
         # positional encodings
 
+        bs = cf.batch_size_per_gpu
         dim_embed = cf.ae_local_dim_embed
         len_token_seq = 1024
         self.pe_embed.data.fill_(0.0)
@@ -171,10 +172,13 @@ class ModelParams(torch.nn.Module):
         
         if self.use_2D_rope:
             # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
+            # Shape: (num_healpix_cells, ae_local_num_queries, 2)
             verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
             coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
-            self.rope_coords.data.copy_(coords)
+            # Transform to final shape: (bs, num_healpix_cells * ae_local_num_queries, 2)
+            coords_flat = coords.flatten(0, 1).unsqueeze(0).repeat(bs, 1, 1)
+            self.rope_coords.data.copy_(coords_flat)
             # Clear pe_global when using 2D RoPE
             self.pe_global.data.fill_(0.0)
         else:
@@ -217,7 +221,6 @@ class ModelParams(torch.nn.Module):
 
         # varlen index set for tokens
         assert cf.batch_size_per_gpu == cf.batch_size_validation_per_gpu
-        bs = cf.batch_size_per_gpu
         nqs = 9
         s = [bs, self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed]
         if cf.target_cell_local_prediction:
@@ -297,8 +300,6 @@ class Model(torch.nn.Module):
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
-        
-        self.use_2D_rope = getattr(cf, "use_2D_rope", False)
 
         self.ae_aggregation_engine: QueryAggregationEngine | None = None
         self.ae_global_engine: GlobalAssimilationEngine | None = None
@@ -668,7 +669,6 @@ class Model(torch.nn.Module):
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
             # Apply 2D RoPE coords only on the first forecast step
-            # to help model understand spatial relationships before temporal roll-out
             is_first_forecast = fstep == forecast_offset
             tokens = self.forecast(model_params, tokens, fstep, apply_rope=is_first_forecast)
 
@@ -845,17 +845,8 @@ class Model(torch.nn.Module):
             Latent representation of the model
         """
 
-        coords = None
-        if self.use_2D_rope:
-            coords = (
-                model_params.rope_coords.flatten(0, 1)
-                .unsqueeze(0)
-                .repeat(tokens.shape[0], 1, 1)
-                .to(device=tokens.device, dtype=tokens.dtype)
-            )
-
         # global assimilation engine and adapter
-        tokens = self.ae_global_engine(tokens, coords=coords, use_reentrant=False)
+        tokens = self.ae_global_engine(tokens, coords=model_params.rope_coords, use_reentrant=False)
 
         return tokens
 
@@ -876,16 +867,10 @@ class Model(torch.nn.Module):
             ValueError: For unexpected arguments in checkpoint method
         """
 
-        coords = None
-        if apply_rope and self.use_2D_rope:
-            coords = (
-                model_params.rope_coords.flatten(0, 1)
-                .unsqueeze(0)
-                .repeat(tokens.shape[0], 1, 1)
-                .to(device=tokens.device, dtype=tokens.dtype)
-            )
-
-        tokens = self.forecast_engine(tokens, fstep, coords=coords)
+        if apply_rope and model_params.use_2D_rope:
+            tokens = self.forecast_engine(tokens, fstep, coords=model_params.rope_coords)
+        else:
+            tokens = self.forecast_engine(tokens, fstep, coords=None)
 
         return tokens
 
