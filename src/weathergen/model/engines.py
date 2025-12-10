@@ -30,18 +30,19 @@ from weathergen.utils.utils import get_dtype
 
 
 class EmbeddingEngine(torch.nn.Module):
+    """Embedding engine for the model."""
+
     name: "EmbeddingEngine"
 
     def __init__(self, cf: Config, sources_size) -> None:
-        """
-        Initialize the EmbeddingEngine with the configuration.
+        """Initialize the EmbeddingEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
-        :param sources_size: List of source sizes for each stream.
+        :param sources_size: Tensor of number of channels for each stream
         """
         super(EmbeddingEngine, self).__init__()
         self.cf = cf
-        self.sources_size = sources_size  # KCT:iss130, what is this?
+        self.sources_size = sources_size
         self.embeds = torch.nn.ModuleList()
 
         for i, si in enumerate(self.cf.streams):
@@ -81,6 +82,15 @@ class EmbeddingEngine(torch.nn.Module):
                 raise ValueError("Unsupported embedding network type")
 
     def forward(self, streams_data, pe_embed, dtype, device):
+        """Forward pass of the embedding engine.
+
+        :param streams_data: Tensor of streams data.
+        :param pe_embed: Positional encoding embeddings.
+        :param dtype: Data type for the embeddings.
+        :param device: Device to run the embeddings on.
+
+        :return tokens_all: Embedded tokens.
+        """
         source_tokens_lens = torch.stack(
             [
                 torch.stack(
@@ -105,20 +115,26 @@ class EmbeddingEngine(torch.nn.Module):
                     idxs_pe = s.source_idxs_embed_pe.to(device)
 
                     # create full scatter index
-                    # (there's no broadcasting which is likely highly inefficient)
-                    idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
-                    # there's undocumented limitation in flash_attn that will make embed fail if
-                    # #tokens is too large; code below is a work around
-                    # x_embed = torch.cat(
-                    #     [
-                    #         embed(s_c, c_c).flatten(0, 1)
-                    #         for s_c, c_c in zip(
-                    #             torch.split(s.source_tokens_cells, 49152),
-                    #             torch.split(s.source_centroids, 49152),
-                    #         )
-                    #     ]
-                    # )
+                    idxs = idxs.unsqueeze(
+                        1
+                    ).expand(
+                        -1, self.cf.ae_local_dim_embed
+                    )  # expand works as the tensor is only read (!do not apply in-place write 
+                       # operations on it!)
+                    try:
+                        x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
+                    except RuntimeError:
+                        # there's undocumented limitation in flash_attn that will make embed fail if
+                        # #tokens is too large; code below is a work around
+                        x_embed = torch.cat(
+                            [
+                                embed(s_c, c_c).flatten(0, 1)
+                                for s_c, c_c in zip(
+                                    torch.split(s.source_tokens_cells, 49152),
+                                    torch.split(s.source_centroids, 49152), strict=False,
+                                )
+                            ]
+                        )
 
                     # scatter write to reorder from per stream to per cell ordering
                     tokens_all.scatter_(0, idxs, x_embed + pe_embed[idxs_pe])
@@ -126,11 +142,20 @@ class EmbeddingEngine(torch.nn.Module):
 
 
 class LocalAssimilationEngine(torch.nn.Module):
+    """Local assimilation engine for the model.
+    
+    The LocalAssimilationEngine is responsible for fusing information from different input
+    streams (e.g., satellite, station data) within each HEALPix cell. It operates locally,
+    meaning attention is computed only among tokens belonging to the same cell. This step 
+    aggregates high-resolution, heterogeneous input data into a unified cell-level 
+    representation before global interaction takes place. It uses a sequence of self-attention 
+    blocks and MLPs.
+    """
+
     name: "LocalAssimilationEngine"
 
     def __init__(self, cf: Config) -> None:
-        """
-        Initialize the LocalAssimilationEngine with the configuration.
+        """Initialize the LocalAssimilationEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
         """
@@ -163,17 +188,26 @@ class LocalAssimilationEngine(torch.nn.Module):
             )
 
     def forward(self, tokens_c, cell_lens_c, use_reentrant):
+        """Forward pass of the local assimilation engine.
+
+        :param tokens_c: Tokens to be assimilated.
+        :param cell_lens_c: Cell lengths for the tokens.
+        :param use_reentrant: Whether to use reentrant mode.
+
+        :return tokens_c: Assimilated tokens.
+        """
         for block in self.ae_local_blocks:
             tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=use_reentrant)
         return tokens_c
 
 
 class Local2GlobalAssimilationEngine(torch.nn.Module):
+    """Local2GlobalAssimilationEngine for the model."""
+
     name: "Local2GlobalAssimilationEngine"
 
     def __init__(self, cf: Config) -> None:
-        """
-        Initialize the Local2GlobalAssimilationEngine with the configuration.
+        """Initialize the Local2GlobalAssimilationEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
         """
@@ -225,6 +259,16 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
         )
 
     def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant):
+        """Forward pass of the local to global assimilation engine.
+
+        :param tokens_c: Tokens to be assimilated.
+        :param tokens_global_c: Global tokens to be assimilated.
+        :param q_cells_lens_c: Query cell lengths for the tokens.
+        :param cell_lens_c: Cell lengths for the tokens.
+        :param use_reentrant: Whether to use reentrant mode.
+
+        :return tokens_global_c: Assimilated tokens.
+        """
         for block in self.ae_adapter:
             tokens_global_c = checkpoint(
                 block,
@@ -238,11 +282,20 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
 
 
 class GlobalAssimilationEngine(torch.nn.Module):
+    """Global assimilation engine for the model.
+    
+    The GlobalAssimilationEngine processes the unified cell-level representations generated by
+    the LocalAssimilationEngine. Its primary role is to model long-range dependencies and
+    physical interactions across the entire globe. It alternates between local attention 
+    (focusing on neighboring cells) and global attention (fully connected or sparse global 
+    patterns) to efficiently propagate information. This engine transforms the local latents 
+    into a globally consistent state representation.
+    """
+
     name: "GlobalAssimilationEngine"
 
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
-        """
-        Initialize the GlobalAssimilationEngine with the configuration.
+        """Initialize the GlobalAssimilationEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
         :param num_healpix_cells: Number of healpix cells used for local queries.
@@ -300,17 +353,25 @@ class GlobalAssimilationEngine(torch.nn.Module):
             )
 
     def forward(self, tokens, use_reentrant):
+        """Forward pass of the global assimilation engine.
+
+        :param tokens: Tokens to be assimilated.
+        :param use_reentrant: Whether to use reentrant mode.
+
+        :return tokens: Assimilated tokens.
+        """
         for block in self.ae_global_blocks:
             tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
         return tokens
 
 
 class ForecastingEngine(torch.nn.Module):
+    """Forecasting engine for the model."""
+
     name: "ForecastingEngine"
 
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
-        """
-        Initialize the ForecastingEngine with the configuration.
+        """Initialize the ForecastingEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
         :param num_healpix_cells: Number of healpix cells used for local queries.
@@ -368,6 +429,7 @@ class ForecastingEngine(torch.nn.Module):
                 )
 
         def init_weights_final(m):
+            """Initialize the weights of the forecasting engine."""
             if isinstance(m, torch.nn.Linear):
                 torch.nn.init.normal_(m.weight, mean=0, std=0.001)
                 if m.bias is not None:
@@ -377,6 +439,13 @@ class ForecastingEngine(torch.nn.Module):
             block.apply(init_weights_final)
 
     def forward(self, tokens, fstep):
+        """Forward pass of the forecasting engine.
+
+        :param tokens: Tokens to be forecasted.
+        :param fstep: Forecast step.
+
+        :return tokens: Forecasted tokens.
+        """
         aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
         for block in self.fe_blocks:
             tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
@@ -385,6 +454,8 @@ class ForecastingEngine(torch.nn.Module):
 
 
 class EnsPredictionHead(torch.nn.Module):
+    """Ensemble prediction head for the model."""
+
     def __init__(
         self,
         dim_embed,
@@ -396,7 +467,17 @@ class EnsPredictionHead(torch.nn.Module):
         hidden_factor=2,
         final_activation: None | str = None,
     ):
-        """Constructor"""
+        """Initialize the EnsPredictionHead with the configuration.
+
+        :param dim_embed: Dimension of the embedding.
+        :param dim_out: Dimension of the output.
+        :param ens_num_layers: Number of layers in the ensemble.
+        :param ens_size: Size of the ensemble.
+        :param stream_name: Name of the stream.
+        :param norm_type: Type of normalization.
+        :param hidden_factor: Hidden factor to create an internal dimension.
+        :param final_activation: Optional final activation function.
+        """
 
         super(EnsPredictionHead, self).__init__()
 
@@ -428,6 +509,12 @@ class EnsPredictionHead(torch.nn.Module):
 
     #########################################
     def forward(self, toks):
+        """Forward pass of the EnsPredictionHead.
+
+        :param toks: Tokens to be predicted.
+
+        :return preds: Ensemble predictions.
+        """
         preds = []
         for pred_head in self.pred_heads:
             cpred = toks
@@ -440,6 +527,16 @@ class EnsPredictionHead(torch.nn.Module):
 
 
 class TargetPredictionEngineClassic(nn.Module):
+    """Target prediction engine for the model.
+    
+    The TargetPredictionEngineClassic is a specialized decoding module that projects the global
+    latent states back to specific target coordinates (e.g., station locations). It typically 
+    employs a PerceiverIO-style architecture where target coordinate embeddings query the 
+    latent state via cross-attention. This engine is "Classic" in the sense that it strictly 
+    follows the original design with coordinate conditioning and optional self-attention, 
+    without the flexible decoder types found in the newer `TargetPredictionEngine`.
+    """
+
     def __init__(
         self,
         cf,
@@ -451,11 +548,10 @@ class TargetPredictionEngineClassic(nn.Module):
         tro_type,
         stream_name: str,
     ):
-        """
-        Initialize the TargetPredictionEngine with the configuration.
+        """Initialize the TargetPredictionEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
-        :param dims_embed: List of embedding dimensions for each layer.
+        :param dims_embed: Tensor of embedding dimensions for each layer.
         :param dim_coord_in: Input dimension for coordinates.
         :param tr_dim_head_proj: Dimension for head projection.
         :param tr_mlp_hidden_factor: Hidden factor for the MLP layers.
@@ -525,6 +621,16 @@ class TargetPredictionEngineClassic(nn.Module):
             )
 
     def forward(self, latent, output, latent_lens, output_lens, coordinates):
+        """Forward pass of the TargetPredictionEngineClassic.
+
+        :param latent: Latent tokens.
+        :param output: Output tokens.
+        :param latent_lens: Lengths of the latent tokens.
+        :param output_lens: Lengths of the output tokens.
+        :param coordinates: Coordinates of the tokens.
+
+        :returns tc_tokens: Output tokens.
+        """
         tc_tokens = output
         tcs_lens = output_lens
         tokens_stream = latent
@@ -548,6 +654,17 @@ class TargetPredictionEngineClassic(nn.Module):
 
 
 class TargetPredictionEngine(nn.Module):
+    """TargetPredictionEngine for the model.
+    
+    The TargetPredictionEngine handles the decoding of the latent representation into the target
+    observational space. Unlike the Classic version which solely relies on a fixed
+    PerceiverIO-like structure with coordinate conditioning, this engine is configurable via
+    `decoder_type`. It supports various conditioning mechanisms, allowing for experimentation
+    with how the latent state and auxiliary information (like coordinates) are fused to generate
+    predictions. It includes normalization, optional positional embeddings and a flexible 
+    sequence of decoding blocks.
+    """
+
     def __init__(
         self,
         cf,
@@ -559,11 +676,10 @@ class TargetPredictionEngine(nn.Module):
         tro_type,
         stream_name: str,
     ):
-        """
-        Initialize the TargetPredictionEngine with the configuration.
+        """Initialize the TargetPredictionEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
-        :param dims_embed: List of embedding dimensions for each layer.
+        :param dims_embed: Tensor of embedding dimensions for each layer.
         :param dim_coord_in: Input dimension for coordinates.
         :param tr_dim_head_proj: Dimension for head projection.
         :param tr_mlp_hidden_factor: Hidden factor for the MLP layers.
@@ -692,6 +808,16 @@ class TargetPredictionEngine(nn.Module):
                 )
 
     def forward(self, latent, output, latent_lens, output_lens, coordinates):
+        """Forward pass of the TargetPredictionEngine.
+
+        :param latent: Latent tokens.
+        :param output: Output tokens.
+        :param latent_lens: Lengths of the latent tokens.
+        :param output_lens: Lengths of the output tokens.
+        :param coordinates: Coordinates of the tokens.
+
+        :return output: Output tokens.
+        """
         latent = (
             self.dropout(self.latent_in_norm(latent + self.pos_embed))
             if self.cf.decoder_type != "PerceiverIOCoordConditioning"
