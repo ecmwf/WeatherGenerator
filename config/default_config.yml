@@ -143,7 +143,7 @@ training_mode: "forecast"
 # TODO: adapt so that the masking or forecast config entry also sits here
 training_config:
   # when this is "masking", we are basically only using the model_input subconfig
-  training_mode: "masking"  # "masking", "student_teacher"
+  training_mode: "student_teacher"  # "masking", "student_teacher"
 
   model_input:
     - masking_strategy: "forecast" # "random", "healpix", "forecast". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher

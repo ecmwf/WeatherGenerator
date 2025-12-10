@@ -403,7 +403,7 @@ class Masker:
         strategy: str | None = None,
         masking_strategy_config: dict | None = None,
         target_mask: np.typing.NDArray | None = None,
-        relationship: str = "subset",
+        relationship: str | None = None,
     ) -> (np.typing.NDArray, dict):
         """Get effective mask, combining with target mask if specified.
 
@@ -427,6 +427,12 @@ class Masker:
         dict
             Parameters describing the masking that was applied
         """
+
+        if strategy == "forecast":
+            if relationship is not None:
+                assert relationship == "independent", (
+                    "strategy forecast requires relationship independent "
+                )
 
         # handle cases where mask is directly derived from target_mask
         if target_mask is not None:

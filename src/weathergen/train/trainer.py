@@ -538,15 +538,15 @@ class Trainer(TrainerBase):
                 for sample in batch.target_samples:
                     targets_and_auxs.append(
                         self.target_and_aux_calculator.compute(
-                            self.cf.istep,
-                            sample,
-                            self.model_params,
-                            self.model,
-                            cf.forecast_offset,
-                            sample.get_forecast_steps(),
+                            sample=sample,
+                            model_params=self.model_params,
+                            model=self.model,
+                            forecast_offset=cf.forecast_offset,
+                            forecast_steps=sample.get_forecast_steps(),
                         )
                     )
                 # targets, aux = zip(*targets_and_auxs)
+            breakpoint()
             loss, loss_values = self.loss_calculator.compute_loss(
                 preds=outputs[0],
                 targets=targets_and_auxs[0],
@@ -674,7 +674,6 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    forecast_steps = batch.get_forecast_dt()
                     batch.to_device(self.device)
 
                     # evaluate model
@@ -694,20 +693,22 @@ class Trainer(TrainerBase):
                             self.model_params,
                             sample,
                             cf.forecast_offset,
-                            forecast_steps,
+                            sample.get_forecast_steps(),
                         )
                         sample = batch.target_samples[0]
                         target_aux_output = self.target_and_aux_calculator.compute(
-                            bidx,
-                            (
-                                sample.streams_data,
-                                sample.source_cell_lens,
-                                sample.target_coords_idx,
-                            ),
+                            sample,
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
-                            forecast_steps,
+                            sample.get_forecast_steps(),
+                        )
+                        target_aux_output = self.target_and_aux_calculator.compute(
+                            sample=sample,
+                            model_params=self.model_params,
+                            model=self.model,
+                            forecast_offset=cf.forecast_offset,
+                            forecast_step=sample.get_forecast_steps(),
                         )
                     loss, loss_values = self.loss_calculator_val.compute_loss(
                         preds=outputs[0],
