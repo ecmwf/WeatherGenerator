@@ -51,7 +51,7 @@ def inference_from_args(argl: list[str]):
     )
 
     cli_overwrite = config.from_cli_arglist(args.options)
-    cf = config.load_config(
+    cf = config.load_merge_configs(
         args.private_config,
         args.from_run_id,
         args.mini_epoch,
@@ -100,7 +100,7 @@ def train_continue_from_args(argl: list[str]):
 
     finetune_overwrite = dict()
     cli_overwrite = config.from_cli_arglist(args.options)
-    cf = config.load_config(
+    cf = config.load_merge_configs(
         args.private_config,
         args.from_run_id,
         args.mini_epoch,
@@ -151,7 +151,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
     cli_overwrite = config.from_cli_arglist(args.options)
 
-    cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
+    cf = config.load_merge_configs(args.private_config, None, None, *args.config, cli_overwrite)
     cf = config.set_run_id(cf, args.run_id, False)
 
     cf.data_loader_rng_seed = int(time.time())
