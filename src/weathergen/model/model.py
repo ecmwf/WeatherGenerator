@@ -870,7 +870,7 @@ class Model(torch.nn.Module):
         """Advances latent space representation in time
 
         Args:
-            model_params : Query and embedding parameters
+            model_params : Query and embedding parameters (never used)
             tokens : Input tokens to be processed by the model.
             fstep: Current forecast step index (can be used as aux info).
             apply_rope: Whether to apply 2D RoPE coords (only on first forecast step).
