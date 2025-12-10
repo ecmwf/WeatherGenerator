@@ -8,18 +8,14 @@
 # nor does it submit to any jurisdiction.
 
 ICONART :
-  type : icon
+  type : iconart
   filenames : ['icon_art_3d_DOM01_subset.zarr']
   source : [
     'U_', 'V_', 'T_', 'QV_', 'P_', 'CH4_',
-    # 'U_h050', 'V_h050', 'T_h050', 'QV_h050', 'P_h050', 'CH4_h050', 'O3_h050',
-    # 'U_h080', 'V_h080', 'T_h080', 'QV_h080', 'P_h080', 'CH4_h080', 'O3_h080',
-    ]  # Matches all U and V at all height levels
+    ]  # Matches all U, V etc. at all height levels
   target : [
     'U_', 'V_', 'T_', 'QV_', 'P_', 'CH4_',
-    # 'U_h050', 'V_h050', 'T_h050', 'QV_h050', 'P_h050', 'CH4_h050', 'O3_h050',
-    # 'U_h080', 'V_h080', 'T_h080', 'QV_h080', 'P_h080', 'CH4_h080', 'O3_h080',
-    ]  # Matches all U and V at all height levels  
+    ]
   attributes:
     lon: 'clon'
     lat: 'clat'
