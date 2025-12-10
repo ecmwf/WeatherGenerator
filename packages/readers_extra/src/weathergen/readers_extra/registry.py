@@ -23,7 +23,7 @@ def get_extra_reader(name: str, cf: Config) -> object | None:
         case "iconart":
             from weathergen.readers_extra.data_reader_iconart import DataReaderIconArt
 
-            return ReaderEntry(cf.data_path_iconart, DataReaderIconArt)
+            return ReaderEntry(cf.data_path_icon, DataReaderIconArt)
         case "eobs":
             from weathergen.readers_extra.data_reader_eobs import DataReaderEObs
 
