@@ -294,9 +294,16 @@ class Model(torch.nn.Module):
                 "Empty forecast engine (fe_num_blocks = 0), but forecast_steps[i] > 0 for some i"
             )
 
-        self.forecast_engine = ForecastingEngine(cf, self.num_healpix_cells)
-        if cf.fe_diffusion_model:
+        # check if diffusion mode is enabled
+        fe_diffusion_model = cf.get("fe_diffusion_model", False)
+        if fe_diffusion_model:
             self.forecast_engine = DiffusionForecastEngine(
+                forecast_engine=ForecastingEngine(
+                     cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
+                )
+            )
+        else:
+            self.forecast_engine = ForecastingEngine(
                 cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
             )
 
