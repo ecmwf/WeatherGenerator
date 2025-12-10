@@ -50,12 +50,12 @@ pred_mlp_adaln: True
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-forecast_offset : 1
+forecast_offset : 0
 forecast_delta_hrs: 0
-forecast_steps: 4
-forecast_policy: "fixed"
+forecast_steps: 0
+forecast_policy: null
 forecast_att_dense_rate: 1.0
-fe_num_blocks: 8
+fe_num_blocks: 0
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
