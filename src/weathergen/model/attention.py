@@ -270,7 +270,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
 
         :param dim_embed: Embedding dimension.
         :param num_heads: Number of attention heads.
-        :param qkv_len: Length of the query, key, and value.
+        :param qkv_len: Length of the query, key and value.
         :param block_factor: Block factor.
         :param dim_head_proj: Dimension of the projection head.
         :param dropout_rate: Dropout rate.
