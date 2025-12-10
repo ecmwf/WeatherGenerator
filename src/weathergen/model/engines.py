@@ -305,7 +305,7 @@ class QueryAggregationEngine(torch.nn.Module):
 
     def forward(self, tokens, coords=None, use_reentrant=True):
         for block in self.ae_aggregation_blocks:
-            if isinstance(block, (MultiSelfAttentionHead, MultiSelfAttentionHeadLocal)):
+            if isinstance(block, MultiSelfAttentionHead | MultiSelfAttentionHeadLocal):
                 tokens = checkpoint(block, tokens, coords, use_reentrant=use_reentrant)
             else:
                 tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
@@ -376,7 +376,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens, coords=None, use_reentrant=True):
         for block in self.ae_global_blocks:
-            if isinstance(block, (MultiSelfAttentionHead, MultiSelfAttentionHeadLocal)):
+            if isinstance(block, MultiSelfAttentionHead | MultiSelfAttentionHeadLocal):
                 tokens = checkpoint(block, tokens, coords, use_reentrant=use_reentrant)
             else:
                 tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
@@ -457,7 +457,7 @@ class ForecastingEngine(torch.nn.Module):
     def forward(self, tokens, fstep, coords=None):
         aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
         for block in self.fe_blocks:
-            if isinstance(block, (MultiSelfAttentionHead, MultiSelfAttentionHeadLocal)):
+            if isinstance(block, MultiSelfAttentionHead | MultiSelfAttentionHeadLocal):
                 # Pass coords if provided (for 2D RoPE on first forecast step), otherwise None
                 # Always pass aux to AdaLayerNorm.
                 tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)

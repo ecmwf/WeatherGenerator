@@ -169,7 +169,7 @@ class ModelParams(torch.nn.Module):
         self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
 
         dim_embed = cf.ae_global_dim_embed
-        
+
         if self.use_2D_rope:
             # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
             # Shape: (num_healpix_cells, ae_local_num_queries, 2)
@@ -184,23 +184,36 @@ class ModelParams(torch.nn.Module):
         else:
             # Original pe_global initialization
             self.pe_global.data.fill_(0.0)
-            xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
+            xs = (
+                2.0
+                * np.pi
+                * torch.arange(0, dim_embed, 2, device=self.pe_global.device)
+                / dim_embed
+            )
             self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
-                torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
+                torch.outer(
+                    8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs
+                )
             )
             self.pe_global.data[..., 0::2] += (
                 torch.sin(
-                    torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+                    torch.outer(
+                        torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs
+                    )
                 )
                 .unsqueeze(1)
                 .repeat((1, cf.ae_local_num_queries, 1))
             )
             self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
-                torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
+                torch.outer(
+                    8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs
+                )
             )
             self.pe_global.data[..., 1::2] += (
                 torch.cos(
-                    torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+                    torch.outer(
+                        torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs
+                    )
                 )
                 .unsqueeze(1)
                 .repeat((1, cf.ae_local_num_queries, 1))
