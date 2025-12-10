@@ -213,7 +213,7 @@ class LossPhysical(LossModuleBase):
         # TODO: iterate over batch dimension
         i_batch = 0
         streams_data = [streams_data]
-        for i_stream_info, stream_info in enumerate(self.cf.streams):
+        for stream_info in self.cf.streams:
             stream_name = stream_info["name"]
             # extract target tokens for current stream from the specified forecast offset onwards
             targets = streams_data[i_batch][stream_name].target_tokens[self.cf.forecast_offset :]
@@ -235,7 +235,7 @@ class LossPhysical(LossModuleBase):
                 zip(targets, fstep_loss_weights, strict=False)
             ):
                 # skip if either target or prediction has no data points
-                pred = preds[fstep][i_stream_info]
+                pred = preds[fstep + self.cf.forecast_offset].get(stream_name, torch.tensor([]))
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):
                     continue
 
