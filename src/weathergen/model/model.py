@@ -64,13 +64,13 @@ class ModelOutput:
     def get_physical_prediction(self, fstep: int, stream_name: StreamName | None = None):
         pred = self.physical[fstep]
         if stream_name is not None:
-            pred = pred[stream_name]
+            pred = pred.get(stream_name, None)
         return pred
 
     def get_latent_prediction(self, fstep: int, stream_name: StreamName | None = None):
         pred = self.latent[fstep]
         if stream_name is not None:
-            pred = pred[stream_name]
+            pred = pred.get(stream_name, None)
         return pred
 
 
