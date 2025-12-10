@@ -31,7 +31,7 @@ import pandas as pd
 import yaml
 from omegaconf import OmegaConf
 
-from weathergen.common.config import load_model_config
+from weathergen.common.config import load_run_config
 
 
 def truncate_value(value, max_length=50):
@@ -205,7 +205,7 @@ def main():
             "and their model directories."
         )
         return
-    # Load configs using load_model_config from config module
+    # Load configs using load_run_config from config module
     configs = {}
     for item in config_files:
         # Handle both formats: [run_id, path] or just path
@@ -217,13 +217,13 @@ def main():
 
         logger.info(f"Loading config for run_id: {run_id} from {path}")
         try:
-            cfg = load_model_config(run_id=run_id, mini_epoch=None, model_path=path)
+            cfg = load_run_config(run_id=run_id, mini_epoch=None, model_path=path)
         except Exception:
             logger.warning(
                 f"Failed to load config for run_id: {run_id} from {path}",
                 "Assuming mini_epoch=0 and retrying.",
             )
-            cfg = load_model_config(run_id=run_id, mini_epoch=0, model_path=path)
+            cfg = load_run_config(run_id=run_id, mini_epoch=0, model_path=path)
         actual_run_id = cfg.get("run_id", run_id)
 
         # Process streams and flatten

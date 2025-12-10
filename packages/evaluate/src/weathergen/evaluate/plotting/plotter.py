@@ -16,9 +16,10 @@ from PIL import Image
 from scipy.stats import wilcoxon
 
 from weathergen.common.config import _load_private_conf
-from weathergen.evaluate.plot_utils import (
+from weathergen.evaluate.plotting.plot_utils import (
     DefaultMarkerSize,
 )
+from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
@@ -68,6 +69,7 @@ class Plotter:
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
         self.fps = plotter_cfg.get("fps")
+        self.regions = plotter_cfg.get("regions")
         self.plot_subtimesteps = plotter_cfg.get(
             "plot_subtimesteps", False
         )  # True if plots are created for each valid time separately
@@ -82,7 +84,6 @@ class Plotter:
         self.sample = None
         self.stream = stream
         self.fstep = None
-
         self.select = {}
 
     def update_data_selection(self, select: dict):
@@ -352,38 +353,46 @@ class Plotter:
             _logger.info(f"Creating dir {map_output_dir}")
             os.makedirs(map_output_dir)
 
-        plot_names = []
-        for var in variables:
-            select_var = self.select | {"channel": var}
-            da = self.select_from_da(data, select_var).compute()
-
-            if self.plot_subtimesteps:
-                ntimes_unique = len(np.unique(da.valid_time))
-                _logger.info(
-                    f"Creating maps for {ntimes_unique} valid times of variable {var} - {tag}"
-                )
-
-                groups = da.groupby("valid_time")
+        for region in self.regions:
+            if region != "global":
+                bbox = RegionBoundingBox.from_region_name(region)
+                reg_data = bbox.apply_mask(data)
             else:
-                _logger.info(f"Creating maps for all valid times of {var} - {tag}")
-                groups = [(None, da)]  # single dummy group
+                reg_data = data
 
-            for valid_time, da_t in groups:
-                if valid_time is not None:
-                    _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
+            plot_names = []
+            for var in variables:
+                select_var = self.select | {"channel": var}
+                da = self.select_from_da(reg_data, select_var).compute()
 
-                da_t = da_t.dropna(dim="ipoint")
-                assert da_t.size > 0, "Data array must not be empty or contain only NAs"
+                if self.plot_subtimesteps:
+                    ntimes_unique = len(np.unique(da.valid_time))
+                    _logger.info(
+                        f"Creating maps for {ntimes_unique} valid times of variable {var} - {tag}"
+                    )
 
-                name = self.scatter_plot(
-                    da_t,
-                    map_output_dir,
-                    var,
-                    tag=tag,
-                    map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
-                    title=f"{self.stream}, {var} : fstep = {self.fstep:03} ({valid_time})",
-                )
-                plot_names.append(name)
+                    groups = da.groupby("valid_time")
+                else:
+                    _logger.info(f"Creating maps for all valid times of {var} - {tag}")
+                    groups = [(None, da)]  # single dummy group
+
+                for valid_time, da_t in groups:
+                    if valid_time is not None:
+                        _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
+
+                    da_t = da_t.dropna(dim="ipoint")
+                    assert da_t.size > 0, "Data array must not be empty or contain only NAs"
+
+                    name = self.scatter_plot(
+                        da_t,
+                        map_output_dir,
+                        var,
+                        region,
+                        tag=tag,
+                        map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
+                        title=f"{self.stream}, {var} : fstep = {self.fstep:03} ({valid_time})",
+                    )
+                    plot_names.append(name)
 
         self.clean_data_selection()
 
@@ -394,6 +403,7 @@ class Plotter:
         data: xr.DataArray,
         map_output_dir: Path,
         varname: str,
+        regionname: str | None,
         tag: str = "",
         map_kwargs: dict | None = None,
         title: str | None = None,
@@ -409,6 +419,8 @@ class Plotter:
             Directory where the map will be saved
         varname: str
             Name of the variable to be plotted
+        regionname: str
+            Name of the region to be plotted
         tag: str
             Any tag you want to add to the plot
         map_kwargs: dict | None
@@ -453,7 +465,12 @@ class Plotter:
 
         # Create figure and axis objects
         fig = plt.figure(dpi=self.dpi_val)
-        ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
+
+        proj = ccrs.PlateCarree()
+        if regionname == "global":
+            proj = ccrs.Robinson()
+
+        ax = fig.add_subplot(1, 1, 1, projection=proj)
         ax.coastlines()
 
         assert data["lon"].shape == data["lat"].shape == data.shape, (
@@ -476,13 +493,22 @@ class Plotter:
 
         plt.colorbar(scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}")
         plt.title(title)
-        ax.set_global()
+        if regionname == "global":
+            ax.set_global()
+        else:
+            region_extent = [
+                data["lon"].min().item(),
+                data["lon"].max().item(),
+                data["lat"].min().item(),
+                data["lat"].max().item(),
+            ]
+            ax.set_extent(region_extent, crs=ccrs.PlateCarree())
         ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
 
         # TODO: make this nicer
         parts = ["map", self.run_id, tag]
 
-        if self.sample:
+        if self.sample is not None:
             parts.append(str(self.sample))
 
         if "valid_time" in data.coords:
@@ -499,6 +525,7 @@ class Plotter:
         if self.stream:
             parts.append(self.stream)
 
+        parts.append(regionname)
         parts.append(varname)
 
         if self.fstep is not None:
@@ -542,42 +569,45 @@ class Plotter:
         # Convert FPS to duration in milliseconds
         duration_ms = int(1000 / self.fps) if self.fps > 0 else 400
 
-        for _, sa in enumerate(samples):
-            for _, var in enumerate(variables):
-                _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
-                image_paths = []
-                for _, fstep in enumerate(fsteps):
-                    # TODO: refactor to avoid code duplication with scatter_plot
-                    parts = [
-                        "map",
-                        self.run_id,
-                        tag,
-                        str(sa),
-                        "*",
-                        self.stream,
-                        var,
-                        "fstep",
-                        str(fstep).zfill(3),
-                    ]
+        for region in self.regions:
+            for _, sa in enumerate(samples):
+                for _, var in enumerate(variables):
+                    _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
+                    image_paths = []
+                    for _, fstep in enumerate(fsteps):
+                        # breakpoint()
+                        # TODO: refactor to avoid code duplication with scatter_plot
+                        parts = [
+                            "map",
+                            self.run_id,
+                            tag,
+                            str(sa),
+                            "*",
+                            self.stream,
+                            region,
+                            var,
+                            "fstep",
+                            str(fstep).zfill(3),
+                        ]
 
-                    name = "_".join(filter(None, parts))
-                    fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
+                        name = "_".join(filter(None, parts))
+                        fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
 
-                    names = glob.glob(fname)
-                    image_paths += names
+                        names = glob.glob(fname)
+                        image_paths += names
 
-                if image_paths:
-                    images = [Image.open(path) for path in image_paths]
-                    images[0].save(
-                        f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{var}.gif",
-                        save_all=True,
-                        append_images=images[1:],
-                        duration=duration_ms,
-                        loop=0,
-                    )
+                    if image_paths:
+                        images = [Image.open(path) for path in image_paths]
+                        images[0].save(
+                            f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{region}_{var}.gif",
+                            save_all=True,
+                            append_images=images[1:],
+                            duration=duration_ms,
+                            loop=0,
+                        )
 
-                else:
-                    _logger.warning(f"No images found for animation {var} sample {sa}")
+                    else:
+                        _logger.warning(f"No images found for animation {var} sample {sa}")
 
         return image_paths
 
@@ -921,6 +951,7 @@ class ScoreCards:
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.improvement = plotter_cfg.get("improvement_scale", 0.2)
         self.out_plot_dir = Path(output_basedir) / "score_cards"
+        self.baseline = plotter_cfg.get("baseline")
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
@@ -950,15 +981,24 @@ class ScoreCards:
         tag:
             Tag to be added to the plot title and filename
         """
-        n_runs, n_vars = len(runs), len(channels)
-        fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_vars))
+        n_runs = len(runs)
+
+        if self.baseline and self.baseline in runs:
+            baseline_idx = runs.index(self.baseline)
+            runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
+            data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
+
+        common_channels, n_common_channels = self.extract_common_channels(data, channels, n_runs)
+
+        fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_common_channels))
 
         baseline = data[0]
         skill_models = []
-
         for run_index in range(1, n_runs):
             skill_model = 0.0
-            for var_index, var in enumerate(channels):
+            for var_index, var in enumerate(common_channels):
+                if var not in data[0].channel.values or var not in data[run_index].channel.values:
+                    continue
                 diff, avg_diff, avg_skill = self.compare_models(
                     data, baseline, run_index, var, metric
                 )
@@ -974,36 +1014,37 @@ class ScoreCards:
                 ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
 
                 # Perform Wilcoxon test
-                stat, p = wilcoxon(diff, alternative=alt)
+                if diff["forecast_step"].item() > 1.0:
+                    stat, p = wilcoxon(diff, alternative=alt)
 
-                # Draw rectangle border for significance
-                if p < 0.05:
-                    lw = 2 if p < 0.01 else 1
-                    rect_color = color
-                    rect = plt.Rectangle(
-                        (x - 0.25, y - 0.25),
-                        0.5,
-                        0.5,
-                        fill=False,
-                        edgecolor=rect_color,
-                        linewidth=lw,
-                        zorder=2,
-                    )
-                    ax.add_patch(rect)
+                    # Draw rectangle border for significance
+                    if p < 0.05:
+                        lw = 2 if p < 0.01 else 1
+                        rect_color = color
+                        rect = plt.Rectangle(
+                            (x - 0.25, y - 0.25),
+                            0.5,
+                            0.5,
+                            fill=False,
+                            edgecolor=rect_color,
+                            linewidth=lw,
+                            zorder=2,
+                        )
+                        ax.add_patch(rect)
 
-            skill_models.append(skill_model / n_vars)
+            skill_models.append(skill_model / n_common_channels)
 
         # Set axis labels
         ylabels = [
             f"{var}\n({baseline.coords['metric'].item().upper()}={baseline.sel(channel=var).mean().values.squeeze():.3f})"
-            for var in channels
+            for var in common_channels
         ]
         xlabels = [
             f"{model_name}\nSkill: {skill_models[i]:.3f}" for i, model_name in enumerate(runs[1::])
         ]
         ax.set_xticks(np.arange(1, n_runs))
         ax.set_xticklabels(xlabels, fontsize=10)
-        ax.set_yticks(np.arange(n_vars) + 0.5)
+        ax.set_yticks(np.arange(n_common_channels) + 0.5)
         ax.set_yticklabels(ylabels, fontsize=10)
         for label in ax.get_yticklabels():
             label.set_horizontalalignment("center")
@@ -1017,7 +1058,7 @@ class ScoreCards:
         for x in np.arange(0.5, n_runs - 1, 1):
             ax.axvline(x, color="gray", linestyle="--", linewidth=0.5, zorder=0, alpha=0.5)
         ax.set_xlim(0.5, n_runs - 0.5)
-        ax.set_ylim(0, n_vars)
+        ax.set_ylim(0, n_common_channels)
 
         legend = [
             Line2D(
@@ -1042,6 +1083,17 @@ class ScoreCards:
             dpi=self.dpi_val,
         )
         plt.close(fig)
+
+    def extract_common_channels(self, data, channels, n_runs):
+        common_channels = []
+        for run_index in range(1, n_runs):
+            for var in channels:
+                if var not in data[0].channel.values or var not in data[run_index].channel.values:
+                    continue
+                common_channels.append(var)
+        common_channels = list(set(common_channels))
+        n_vars = len(common_channels)
+        return common_channels, n_vars
 
     def compare_models(
         self,
@@ -1233,6 +1285,7 @@ class BarPlots:
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.cmap = plotter_cfg.get("cmap", "bwr")
         self.out_plot_dir = Path(output_basedir) / "bar_plots"
+        self.baseline = plotter_cfg.get("baseline")
         _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
@@ -1273,27 +1326,43 @@ class BarPlots:
         )
         ax = ax.flatten()
 
+        if self.baseline and self.baseline in runs:
+            baseline_idx = runs.index(self.baseline)
+            runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
+            data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
+
         for run_index in range(1, len(runs)):
             ratio_score, channels_per_comparison = self.calc_ratio_per_run_id(
                 data, channels, run_index
             )
-
-            ax[run_index - 1].barh(
-                np.arange(len(ratio_score)),
-                ratio_score,
-                color=self.colors(ratio_score, metric),
-                align="center",
-                edgecolor="black",
-                linewidth=0.5,
-            )
-            ax[run_index - 1].set_yticks(
-                np.arange(len(ratio_score)), labels=channels_per_comparison
-            )
-            ax[run_index - 1].invert_yaxis()
-            ax[run_index - 1].set_xlabel(
-                f"Relative {data[0].coords['metric'].item().upper()}: "
-                f"Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
-            )
+            if len(ratio_score) > 0:
+                ax[run_index - 1].barh(
+                    np.arange(len(ratio_score)),
+                    ratio_score,
+                    color=self.colors(ratio_score, metric),
+                    align="center",
+                    edgecolor="black",
+                    linewidth=0.5,
+                )
+                ax[run_index - 1].set_yticks(
+                    np.arange(len(ratio_score)), labels=channels_per_comparison
+                )
+                ax[run_index - 1].invert_yaxis()
+                ax[run_index - 1].set_xlabel(
+                    f"Relative {data[0].coords['metric'].item().upper()}: "
+                    f"Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
+                )
+            else:
+                ax[run_index - 1].set_visible(False)  # or annotate as missing
+                # Or show a message:
+                ax[run_index - 1].text(
+                    0.5,
+                    0.5,
+                    "No Data",
+                    ha="center",
+                    va="center",
+                    transform=ax[run_index - 1].transAxes,
+                )
 
         _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
         parts = ["bar_plot_compare", tag] + runs
@@ -1403,9 +1472,7 @@ def calculate_average_over_dim(
     ]
 
     if non_zero_dims:
-        _logger.info(
-            f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. Averaging..."
-        )
+        _logger.info(f"Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
 
     baseline_score = baseline_var.mean(
         dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
@@ -1417,4 +1484,4 @@ def calculate_average_over_dim(
 
 def lower_is_better(metric: str) -> bool:
     # Determine whether lower or higher is better
-    return metric in {"l1", "l2", "mse", "rmse", "vrmse", "bias", "crps", "spread"}
+    return metric in {"l1", "l2", "mae", "mse", "rmse", "vrmse", "bias", "crps", "spread"}

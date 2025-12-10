@@ -143,34 +143,20 @@ def score_card_metric_region(
 
     for stream in streams_set:
         selected_data, run_ids = [], []
-        channels_common = None
-        for _, data in scores_dict[metric][region].get(stream, {}).items():
-            channels_per_run = []
-            for ch in channels_set:
-                if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
-                    continue
-                else:
-                    channels_per_run.append(ch)
-
-            if channels_common is None:
-                channels_common = set(channels_per_run)
-            else:
-                channels_common = set(channels_common).intersection(set(channels_per_run))
-
-        if not channels_common:
-            continue
-
         for run_id, data in scores_dict[metric][region].get(stream, {}).items():
-            selected_data.append(data.sel(channel=list(channels_common)))
+            if data.isnull().all():
+                continue
+            selected_data.append(data)
             run_ids.append(run_id)
 
         if selected_data and len(selected_data) > 1.0:
             _logger.info(f"Creating score cards for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
-            sc_plotter.plot(selected_data, run_ids, metric, channels_common, name)
+            sc_plotter.plot(selected_data, run_ids, metric, channels_set, name)
         else:
             _logger.info(
-                f"Only one run_id under stream: {stream}. Creating score card is skipped..."
+                f"Only one run_id for ({region}) region under stream : {stream}. "
+                "Creating bar plot is skipped..."
             )
 
 

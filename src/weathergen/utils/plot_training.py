@@ -167,7 +167,7 @@ def get_stream_names(run_id: str, model_path: Path | None = "./model"):
         List of stream names
     """
     # return col names from training (should be identical to validation)
-    cf = config.load_model_config(run_id, -1, model_path=model_path)
+    cf = config.load_run_config(run_id, -1, model_path=model_path)
     return [si["name"].replace(",", "").replace("/", "_").replace(" ", "_") for si in cf.streams]
 
 

@@ -7,6 +7,12 @@ case "$1" in
   sync)
     (
       cd "$SCRIPT_DIR" || exit 1
+      # If we are running on a mac, use the cpu extra
+      if [[ "$(uname)" == "Darwin" ]]; then
+        uv sync --all-packages --extra cpu
+        exit 0
+      fi
+      # Otherwise, use the gpu extra
       uv sync --all-packages --extra gpu
     )
     ;;
@@ -31,7 +37,10 @@ case "$1" in
         && \
       uv run --no-project --with "ruff==0.12.2" \
        ruff check  --target-version py312  \
-       src/ scripts/ packages/
+       src/ scripts/ packages/ \
+        && \
+      uv run --no-project --with "pylint==4.0.3" \
+       pylint src/ packages/
     )
     ;;
   type-check)
@@ -85,13 +94,19 @@ case "$1" in
       uv run --no-project python scripts/check_tomls.py
     )
     ;;
-  integration-test)
+  integration-test-single)
     (
       cd "$SCRIPT_DIR" || exit 1
       uv sync --offline --all-packages --extra gpu
       uv run --offline pytest ./integration_tests/small1_test.py --verbose -s
     )
     ;;
+    integration-test)
+    (
+      cd "$SCRIPT_DIR" || exit 1
+      uv sync --offline --all-packages --extra gpu
+      uv run --offline pytest ./integration_tests/small_multi_stream_test.py --verbose -s
+    );;
   create-links)
     (
       cd "$SCRIPT_DIR" || exit 1
@@ -146,7 +161,9 @@ case "$1" in
     )
     ;;
   *)
-    echo "Usage: $0 {sync|lint|lint-check|type-check|unit-test|toml-check|integration-test|create-links|create-jupyter-kernel|jupytext-sync}"
+    # Automatically extract all options from the case statement
+    options=$(grep -oP '^\s*\K[\w-]+(?=\))' "$0" | tr '\n' '|' | sed 's/|$//')
+    echo "Usage: $0 {$options}"
     exit 1
     ;;
 esac

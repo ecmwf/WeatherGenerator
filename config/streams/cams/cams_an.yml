@@ -1,0 +1,77 @@
+# (C) Copyright 2024 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+CAMSANALYSIS :
+  type : cams
+  filenames : ['cams_analysis_2017_2022.zarr']
+  source : [
+      'tc_o3',
+
+      # Ozone (o3)
+      'go3_1000', 'go3_925', 'go3_850', 'go3_700', 'go3_600', 'go3_500',
+      'go3_400', 'go3_300', 'go3_250', 'go3_200', 'go3_150', 'go3_100', 'go3_50',
+      'go3_400', 'go3_300', 'go3_250', 'go3_200', 'go3_150', 'go3_100', 'go3_50',
+  ]
+  target : [
+      'tc_o3',
+
+      # Ozone (o3)
+      'go3_1000', 'go3_925', 'go3_850', 'go3_700', 'go3_600', 'go3_500',
+      'go3_400', 'go3_300', 'go3_250', 'go3_200', 'go3_150', 'go3_100', 'go3_50',
+  ]
+  source_exclude : []
+  target_exclude : []
+  variables: [
+      # Surface variables
+      'pm1', 'pm2p5', 'pm10',
+      'tc_co', 'tc_no', 'tc_no2', 'tc_o3', 'tc_so2',
+
+      # Ozone (o3)
+      'go3_1000', 'go3_925', 'go3_850', 'go3_700', 'go3_600', 'go3_500',
+      'go3_400', 'go3_300', 'go3_250', 'go3_200', 'go3_150', 'go3_100', 'go3_50',
+
+      # Sulfur dioxide (so2)
+      'so2_1000', 'so2_925', 'so2_850', 'so2_700', 'so2_600', 'so2_500',
+      'so2_400', 'so2_300', 'so2_250', 'so2_200', 'so2_150', 'so2_100', 'so2_50',
+
+      # Nitrogen monoxide (no)
+      'no_1000', 'no_925', 'no_850', 'no_700', 'no_600', 'no_500',
+      'no_400', 'no_300', 'no_250', 'no_200', 'no_150', 'no_100', 'no_50',
+
+      # Nitrogen dioxide (no2)
+      'no2_1000', 'no2_925', 'no2_850', 'no2_700', 'no2_600', 'no2_500',
+      'no2_400', 'no2_300', 'no2_250', 'no2_200', 'no2_150', 'no2_100', 'no2_50',
+
+      # Carbon monoxide (co)
+      'co_1000', 'co_925', 'co_850', 'co_700', 'co_600', 'co_500',
+      'co_400', 'co_300', 'co_250', 'co_200', 'co_150', 'co_100', 'co_50',
+  ]
+  pressure_levels : ["50", "100", "150", "200", "250", "300", "400", "500", "600", "700", "850", "925", "1000"]
+  loss_weight : 1.
+  masking_rate : 0.6
+  masking_rate_none : 0.05
+  token_size : 16
+  tokenize_spacetime : True
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 8
+    dim_embed : 512
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 512
+  target_readout :
+    type : 'obs_value'  # token or obs_value
+    num_layers : 2
+    num_heads : 4
+    # sampling_rate : 0.2
+  pred_head :
+    ens_size : 1
+    num_layers : 1

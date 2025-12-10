@@ -68,10 +68,18 @@ def save(config: Config, mini_epoch: int | None):
         f.write(json_str)
 
 
-def load_model_config(run_id: str, mini_epoch: int | None, model_path: str | None) -> Config:
+def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None) -> Config:
     """
     Load a configuration file from a given run_id and mini_epoch.
     If run_id is a full path, loads it from the full path.
+
+    Args:
+        run_id: Run ID of the pretrained WeatherGenerator model
+        mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        model_path: Path to the model directory. If None, uses the model_path from private config.
+
+    Returns:
+        Configuration object loaded from the specified run and mini_epoch.
     """
     if Path(run_id).exists():  # load from the full path if a full path is provided
         fname = Path(run_id)
@@ -172,27 +180,30 @@ def _check_logging(config: Config) -> Config:
     return config
 
 
-def load_config(
-    private_home: Path | None,
-    from_run_id: str | None,
-    mini_epoch: int | None,
+def load_merge_configs(
+    private_home: Path | None = None,
+    from_run_id: str | None = None,
+    mini_epoch: int | None = None,
     *overwrites: Path | dict | Config,
 ) -> Config:
     """
     Merge config information from multiple sources into one run_config. Anything in the
-    private configs "secrets" section will be discarted.
+    private configs "secrets" section will be discarded.
 
     Args:
-        private_home: Configuration file containing platform dependent information and secretes
+        private_home: Configuration file containing platform dependent information and secrets
         from_run_id: Run id of the pretrained WeatherGenerator model
         to continue training or inference
-        mini_epoch: mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
         *overwrites: Additional overwrites from different sources
 
-    Note: The order of precendence for merging the final config is in ascending order:
+    Note: The order of precedence for merging the final config is in ascending order:
         - base config (either default config or loaded from previous run)
         - private config
         - overwrites (also in ascending order)
+
+    Returns:
+        Merged configuration object.
     """
     private_config = _load_private_conf(private_home)
     overwrite_configs: list[Config] = []
@@ -216,7 +227,7 @@ def load_config(
     if from_run_id is None:
         base_config = _load_default_conf()
     else:
-        base_config = load_model_config(
+        base_config = load_run_config(
             from_run_id, mini_epoch, private_config.get("model_path", None)
         )
         from_run_id = base_config.run_id
@@ -225,7 +236,7 @@ def load_config(
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
-    
+
     # Ensure the config has mini-epoch notation
     if hasattr(c, "samples_per_epoch"):
         c.samples_per_mini_epoch = c.samples_per_epoch

@@ -44,7 +44,7 @@ class EMAModel:
         self.ema_model.to_empty(device="cuda")
         maybe_sharded_sd = self.original_model.state_dict()
         # this copies correctly tested in pdb
-        mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=True, assign=False)
+        mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=False, assign=False)
 
     @torch.no_grad()
     def update(self, cur_step, batch_size):
@@ -53,7 +53,7 @@ class EMAModel:
             halflife_steps = min(halflife_steps, cur_step / 1e3 * self.rampup_ratio)
         beta = 0.5 ** (batch_size / max(halflife_steps * 1e3, 1e-6))
         for p_net, p_ema in zip(
-            self.original_model.parameters(), self.ema_model.parameters(), strict=True
+            self.original_model.parameters(), self.ema_model.parameters(), strict=False
         ):
             p_ema.lerp_(p_net, 1 - beta)
 

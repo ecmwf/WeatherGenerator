@@ -20,8 +20,8 @@ from pathlib import Path
 
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
+from weathergen.common.logger import init_loggers
 from weathergen.train.trainer import Trainer
-from weathergen.utils.logger import init_loggers
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ def inference_from_args(argl: list[str]):
     )
 
     cli_overwrite = config.from_cli_arglist(args.options)
-    cf = config.load_config(
+    cf = config.load_merge_configs(
         args.private_config,
         args.from_run_id,
         args.mini_epoch,
@@ -71,7 +71,12 @@ def inference_from_args(argl: list[str]):
     cf.run_history += [(args.from_run_id, cf.istep)]
 
     trainer = Trainer(cf.train_log_freq)
-    trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
+    try:
+        trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
+    except Exception:
+        extype, value, tb = sys.exc_info()
+        traceback.print_exc()
+        pdb.post_mortem(tb)
 
 
 ####################################################################################################
@@ -93,34 +98,9 @@ def train_continue_from_args(argl: list[str]):
     parser = cli.get_continue_parser()
     args = parser.parse_args(argl)
 
-    if args.finetune_forecast:
-        finetune_overwrite = dict(
-            training_mode="forecast",
-            forecast_delta_hrs=0,  # 12
-            forecast_steps=1,  # [j for j in range(1,9) for i in range(4)]
-            forecast_policy="fixed",  # 'sequential_random' # 'fixed' #'sequential' #_random'
-            forecast_att_dense_rate=1.0,  # 0.25
-            fe_num_blocks=8,
-            fe_num_heads=16,
-            fe_dropout_rate=0.1,
-            fe_with_qk_lnorm=True,
-            lr_start=0.000001,
-            lr_max=0.00003,
-            lr_final_decay=0.00003,
-            lr_final=0.0,
-            lr_steps_warmup=1024,
-            lr_steps_cooldown=4096,
-            lr_policy_warmup="cosine",
-            lr_policy_decay="linear",
-            lr_policy_cooldown="linear",
-            num_mini_epochs=12,  # len(cf.forecast_steps) + 4
-            istep=0,
-        )
-    else:
-        finetune_overwrite = dict()
-
+    finetune_overwrite = dict()
     cli_overwrite = config.from_cli_arglist(args.options)
-    cf = config.load_config(
+    cf = config.load_merge_configs(
         args.private_config,
         args.from_run_id,
         args.mini_epoch,
@@ -139,7 +119,13 @@ def train_continue_from_args(argl: list[str]):
     cf.run_history += [(args.from_run_id, cf.istep)]
 
     trainer = Trainer(cf.train_log_freq)
-    trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
+
+    try:
+        trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
+    except Exception:
+        extype, value, tb = sys.exc_info()
+        traceback.print_exc()
+        pdb.post_mortem(tb)
 
 
 ####################################################################################################
@@ -165,7 +151,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
     cli_overwrite = config.from_cli_arglist(args.options)
 
-    cf = config.load_config(args.private_config, None, None, *args.config, cli_overwrite)
+    cf = config.load_merge_configs(args.private_config, None, None, *args.config, cli_overwrite)
     cf = config.set_run_id(cf, args.run_id, False)
 
     cf.data_loader_rng_seed = int(time.time())

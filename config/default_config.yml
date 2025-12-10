@@ -34,6 +34,14 @@ ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 
+ae_aggregation_num_blocks: 2
+ae_aggregation_num_heads: 32
+ae_aggregation_dropout_rate: 0.1
+ae_aggregation_with_qk_lnorm: True
+ae_aggregation_att_dense_rate: 1.0
+ae_aggregation_block_factor: 64
+ae_aggregation_mlp_hidden_factor: 2
+
 decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
 pred_adapter_kv: False
 pred_self_attention: True
@@ -60,6 +68,7 @@ with_flash_attention: True
 compile_model: False
 with_fsdp: True
 attention_dtype: bf16
+mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
 norm_eps: 1e-4
 
@@ -68,15 +77,6 @@ latent_noise_gamma: 2.0
 latent_noise_saturate_encodings: 5 
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
-
-loss_fcts:
-  -
-    - "mse"
-    - 1.0
-loss_fcts_val:
-  -
-    - "mse"
-    - 1.0
 
 batch_size_per_gpu: 1
 batch_size_validation_per_gpu: 1
@@ -93,7 +93,15 @@ ema_halflife_in_thousands: 1e-3
 
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "forecast"
+training_mode: "masking"
+training_mode_config: {"losses": {LossPhysical: {weight: 0.7, loss_fcts: [['mse', 0.8], ['mae', 0.2]]},}
+                      }
+# training_mode_config: {"loss": {LossPhysical: [['mse', 0.7]],
+#                                             LossLatent: [['mse', 0.3]],
+#                                             LossStudentTeacher: [{'iBOT': {<options>}, 'JEPA': {options}}],}
+#                       }
+validation_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},}
+                        }
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
@@ -115,7 +123,8 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
 
 num_mini_epochs: 32
 samples_per_mini_epoch: 4096
-samples_per_validation: 1024
+samples_per_validation: 512
+
 shuffle: True
 
 lr_scaling_policy: "sqrt"
@@ -161,3 +170,25 @@ train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
+
+
+# Tags for experiment tracking
+# These tags will be logged in MLFlow along with completed runs for train, eval, val
+# The tags are free-form, with the following rules:
+# - tags should be primitive types (strings, numbers, booleans). NO lists or dictionaries
+# - tags should not duplicate existing config entries.
+# - try to reuse existing tags where possible. MLFlow does not like having too many unique tags
+# - do not use long strings in values (less than 20 characters is a good rule of thumb, we may enforce this in the future)
+wgtags:
+  # The name of the organization of the person running the experiment.
+  # This may be autofilled in the future. Expected values are lowercase strings of 
+  # the organizations codenames in https://confluence.ecmwf.int/display/MAEL/Staff+Contact+List
+  # e.g. "ecmwf", "cmcc", "metnor", "jsc", "escience"
+  org: None
+  # The name of the experiment. This is a distinctive codename for the experiment campaign being run.
+  # This is expected to be the primary tag for comparing experiments in MLFlow.
+  # Expected values are lowercase strings with no spaces, just underscores:
+  # Examples: "rollout_ablation_grid"  
+  exp: None
+  # *** Experiment-specific tags ***
+  grid: None

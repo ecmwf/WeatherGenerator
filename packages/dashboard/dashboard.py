@@ -54,7 +54,10 @@ if st.session_state.get("authentication_status"):
                 st.Page("atmo_training.py", title="training"),
                 st.Page("atmo_eval.py", title="evaluation"),
             ],
-            "Data": [st.Page("data_overview.py", title="overview")],
+            "Data": [
+                st.Page("data_overview.py", title="overview"),
+                st.Page("data_sources.py", title="sources"),
+            ],
         }
     )
     pg.run()

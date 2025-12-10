@@ -7,7 +7,7 @@ import xarray as xr
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-from weathergen.evaluate.export.reshape import find_pl
+from weathergen.evaluate.export.reshape import Regridder, find_pl
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -80,9 +80,11 @@ class NetcdfParser(CfParser):
 
         if da_fs:
             da_fs = self.concatenate(da_fs)
-            da_fs = self.assign_coords(da_fs, ref_time)
+            da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
             da_fs = self.add_metadata(da_fs)
+            da_fs = self.add_encoding(da_fs)
+            da_fs = self.regrid(da_fs)
             self.save(da_fs, ref_time)
 
     def get_output_filename(self, forecast_ref_time: np.datetime64) -> Path:
@@ -160,6 +162,26 @@ class NetcdfParser(CfParser):
 
         return reshaped_dataset
 
+    def regrid(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Regrid a single xarray Dataset to specified grid type and degree.
+        Parameters
+        ----------
+            output_grid_type : Type of grid to regrid to (e.g., 'regular_ll').
+            degree : Degree of the grid; for regular grids, this is the lat/lon degree spacing;
+                     for Gaussian grids, this is the N number (e.g., 63 for N63).
+        Returns
+        -------
+            Regridded xarray Dataset.
+        """
+        if self.regrid_degree is None or self.regrid_type is None:
+            _logger.info("No regridding specified, skipping regridding step.")
+            return ds
+        nc_regridder = Regridder(ds, output_grid_type=self.regrid_type, degree=self.regrid_degree)
+
+        regrid_ds = nc_regridder.regrid_ds()
+        return regrid_ds
+
     def concatenate(
         self,
         array_list,
@@ -209,7 +231,7 @@ class NetcdfParser(CfParser):
 
         return data
 
-    def assign_coords(self, ds: xr.Dataset, reference_time: np.datetime64) -> xr.Dataset:
+    def assign_frt(self, ds: xr.Dataset, reference_time: np.datetime64) -> xr.Dataset:
         """
         Assign forecast reference time coordinate to the dataset.
 
@@ -222,14 +244,13 @@ class NetcdfParser(CfParser):
         -------
             xarray Dataset with assigned forecast reference time coordinate.
         """
-        ds = ds.assign_coords(forecast_ref_time=reference_time)
+        ds = ds.assign_coords(forecast_reference_time=reference_time)
 
         if "sample" in ds.coords:
             ds = ds.drop_vars("sample")
 
         n_hours = self.fstep_hours.astype("int64")
-        ds["forecast_period"] = ds["forecast_step"] * n_hours
-
+        ds["forecast_step"] = ds["forecast_step"] * n_hours
         return ds
 
     def add_attrs(self, ds: xr.Dataset) -> xr.Dataset:
@@ -244,12 +265,6 @@ class NetcdfParser(CfParser):
             xarray Dataset with CF-compliant variable attributes.
         """
 
-        ds["forecast_period"].attrs = {
-            "standard_name": "forecast_period",
-            "long_name": "time since forecast_reference_time",
-            "units": "hours",
-        }
-
         if self.grid_type == "gaussian":
             variables = self._attrs_gaussian_grid(ds)
         else:
@@ -257,8 +272,35 @@ class NetcdfParser(CfParser):
 
         dataset = xr.merge(variables.values())
         dataset.attrs = ds.attrs
-
         return dataset
+
+    def add_encoding(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Add time encoding to the dataset variables.
+        Add aux coordinates to forecast_period
+
+        Parameters
+        ----------
+            ds : xarray Dataset to add time encoding to.
+        Returns
+        -------
+            xarray Dataset with time encoding added.
+        """
+        time_encoding = {
+            "units": "hours since 1970-01-01 00:00:00",
+            "calendar": "gregorian",
+        }
+
+        if "valid_time" in ds.coords:
+            ds["valid_time"].encoding.update(time_encoding)
+
+        if "forecast_reference_time" in ds.coords:
+            ds["forecast_reference_time"].encoding.update(time_encoding)
+
+        if "forecast_period" in ds.coords:
+            ds["forecast_period"].encoding.update({"coordinates": "forecast_reference_time"})
+
+        return ds
 
     def _attrs_gaussian_grid(self, ds: xr.Dataset) -> xr.Dataset:
         """
@@ -273,29 +315,27 @@ class NetcdfParser(CfParser):
                 Dataset with CF-compliant variable attributes.
         """
         variables = {}
-
+        dims_cfg = self.config.get("dimensions", {})
+        ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
         for var_name, da in ds.data_vars.items():
-            if var_name in ["lat", "lon"]:
-                continue
-
             mapped_info = self.mapping.get(var_name, {})
             mapped_name = mapped_info.get("var", var_name)
+
+            coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
 
             attributes = {
                 "standard_name": mapped_info.get("std", var_name),
                 "units": mapped_info.get("std_unit", "unknown"),
-                "coordinates": "lat lon",
             }
-
+            if "long" in mapped_info:
+                attributes["long_name"] = mapped_info["long"]
             variables[mapped_name] = xr.DataArray(
                 data=da.values,
-                dims=list(da.dims),
-                coords={coord: ds.coords[coord] for coord in da.coords if coord in ds.coords},
+                dims=da.dims,
+                coords=coords,
                 attrs=attributes,
                 name=mapped_name,
             )
-
-        self._assign_latlon_attrs(ds)
 
         return variables
 
@@ -304,7 +344,6 @@ class NetcdfParser(CfParser):
         Assign CF-compliant attributes to variables in a regular grid dataset.
         Parameters
         ----------
-
             ds : xr.Dataset
                 Input dataset.
         Returns
@@ -313,67 +352,43 @@ class NetcdfParser(CfParser):
                 Dataset with CF-compliant variable attributes.
         """
         variables = {}
-        dims = self.config.get("dimensions", {})
-        ds_attrs = self._assign_dim_attrs(ds, dims)
-        mapping = self.mapping
-
+        dims_cfg = self.config.get("dimensions", {})
+        ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
+        dims_list = ["pressure", "latitude", "longitude", "valid_time"]
         for var_name, da in ds.data_vars.items():
-            var_cfg = mapping.get(var_name)
-            if var_cfg is None:
-                continue
-
-            dims = ["pressure", "valid_time", "latitude", "longitude"]
-            if var_cfg.get("level_type") == "sfc":
+            mapped_info = self.mapping.get(var_name, {})
+            mapped_name = mapped_info.get("var", var_name)
+            dims = dims_list.copy()
+            if mapped_info.get("level_type") == "sfc":
                 dims.remove("pressure")
 
-            coords = self._build_coordinate_mapping(ds, var_cfg, ds_attrs)
+            coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
 
-            attrs = {
-                "standard_name": var_cfg.get("std", var_name),
-                "units": var_cfg.get("std_unit", "unknown"),
+            attributes = {
+                "standard_name": mapped_info.get("std", var_name),
+                "units": mapped_info.get("std_unit", "unknown"),
             }
-
-            mapped_name = var_cfg.get("var", var_name)
+            if "long" in mapped_info:
+                attributes["long_name"] = mapped_info["long"]
             variables[mapped_name] = xr.DataArray(
                 data=da.values,
                 dims=dims,
                 coords={**coords, "valid_time": ds["valid_time"].values},
-                attrs=attrs,
+                attrs=attributes,
                 name=mapped_name,
             )
+            if da.encoding.get("coordinates"):
+                variables[mapped_name].encoding["coordinates"] = (
+                    da.encoding["coordinates"]
+                    .replace(" lat ", " latitude ")
+                    .replace(" lon ", " longitude "),
+                )
 
         return variables
 
-    def _assign_latlon_attrs(self, ds: xr.Dataset) -> None:
-        """Add CF-compliant attributes to lat/lon coordinates if they exist.
-        Parameters
-        ----------
-            ds : xr.Dataset
-                Input dataset.
-        Returns
-        -------
-            None
-        """
-        if "lat" in ds.coords:
-            ds.coords["lat"].attrs.update(
-                {
-                    "standard_name": "latitude",
-                    "long_name": "latitude",
-                    "units": "degrees_north",
-                }
-            )
-        if "lon" in ds.coords:
-            ds.coords["lon"].attrs.update(
-                {
-                    "standard_name": "longitude",
-                    "long_name": "longitude",
-                    "units": "degrees_east",
-                }
-            )
-
     def _assign_dim_attrs(
         self, ds: xr.Dataset, dim_cfg: dict[str, Any]
-    ) -> dict[str, dict[str, str]]:
+    ) -> tuple[xr.Dataset, dict[str, dict[str, str]]]:
         """
         Assign CF attributes from given config file.
         Parameters
@@ -386,6 +401,8 @@ class NetcdfParser(CfParser):
         -------
             Dict[str, Dict[str, str]]:
                 Attributes for each dimension.
+            xr.Dataset:
+                Dataset with renamed dimensions.
         """
         ds_attrs = {}
 
@@ -397,9 +414,11 @@ class NetcdfParser(CfParser):
             dim_attrs = {"standard_name": meta.get("std", wg_name)}
             if meta.get("std_unit"):
                 dim_attrs["units"] = meta["std_unit"]
+            if meta.get("long"):
+                dim_attrs["long_name"] = meta["long"]
             ds_attrs[wg_name] = dim_attrs
 
-        return ds_attrs
+        return ds, ds_attrs
 
     def _build_coordinate_mapping(
         self, ds: xr.Dataset, var_cfg: dict[str, Any], attrs: dict[str, dict[str, str]]
@@ -485,6 +504,8 @@ class NetcdfParser(CfParser):
             + np.datetime_as_string(np.datetime64("now"), unit="s")
         )
         ds.attrs["Conventions"] = "CF-1.12"
+        # drop stream now it's in title
+        ds = ds.drop_vars("stream")
         return ds
 
     def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64) -> None:
