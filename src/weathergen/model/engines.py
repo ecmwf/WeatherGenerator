@@ -303,7 +303,7 @@ class QueryAggregationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens, coords=None, use_reentrant=True):
+    def forward(self, tokens, coords=None, use_reentrant=False):
         for block in self.ae_aggregation_blocks:
             if isinstance(block, MultiSelfAttentionHead | MultiSelfAttentionHeadLocal):
                 tokens = checkpoint(block, tokens, coords, use_reentrant=use_reentrant)
@@ -374,7 +374,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens, coords=None, use_reentrant=True):
+    def forward(self, tokens, coords=None, use_reentrant=False):
         for block in self.ae_global_blocks:
             if isinstance(block, MultiSelfAttentionHead | MultiSelfAttentionHeadLocal):
                 tokens = checkpoint(block, tokens, coords, use_reentrant=use_reentrant)
