@@ -176,7 +176,7 @@ class ModelParams(torch.nn.Module):
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
             coords_flat = coords.flatten(0, 1).unsqueeze(0).repeat(bs, 1, 1)
             self.rope_coords.data.copy_(coords_flat)
-            
+
             # Clear pe_global when using 2D RoPE
             self.pe_global.data.fill_(0.0)
         else:
