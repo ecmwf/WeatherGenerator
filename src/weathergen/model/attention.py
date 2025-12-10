@@ -18,12 +18,13 @@ from weathergen.model.norms import AdaLayerNorm, RMSNorm
 
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     """Multi-head self-attention with variable length sequences.
-    
+
     This module implements multi-head self-attention for variable length sequences packed into a
     single tensor. It leverages FlashAttention's variable length API (`flash_attn_varlen_func`)
     to efficiently handle batches of sequences with differing lengths without padding, using
     cumulative length indices to define sequence boundaries.
     """
+
     def __init__(
         self,
         dim_embed,
@@ -40,7 +41,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         attention_dtype=torch.bfloat16,
     ):
         """Initialize the MultiSelfAttentionHeadVarlen module.
-        
+
         :param dim_embed: Embedding dimension.
         :param num_heads: Number of attention heads.
         :param dim_head_proj: Dimension of the projection head.
@@ -92,7 +93,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
 
     def forward(self, x, x_lens, ada_ln_aux=None):
         """Forward pass of the MultiSelfAttentionHeadVarlen module.
-        
+
         :param x: Input tensor.
         :param x_lens: Lengths of the input sequences.
         :param ada_ln_aux: Auxiliary data for adaptive layer normalization.
@@ -137,12 +138,13 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
 
 class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
     """Multi-head self-attention with variable length sequences and flex attention.
-    
+
     This module implements multi-head self-attention using PyTorch's FlexAttention. It allows
     for defining custom sparse attention patterns via a score modification function. This is
     particularly useful for optimizing attention mechanisms where full NxN interactions are not
     required or desired, enabling flexible and efficient attention computations.
     """
+
     def __init__(
         self,
         dim_embed,
@@ -158,7 +160,7 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
         attention_dtype=torch.bfloat16,
     ):
         """Initialize the MultiSelfAttentionHeadVarlenFlex module.
-        
+
         :param dim_embed: Embedding dimension.
         :param num_heads: Number of attention heads.
         :param dim_head_proj: Dimension of the projection head.
@@ -212,7 +214,7 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
 
     def forward(self, x, x_lens=None):
         """Forward pass of the MultiSelfAttentionHeadVarlenFlex module.
-        
+
         :param x: Input tensor.
         :param x_lens: Lengths of the input sequences.
 
@@ -246,6 +248,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
     the same block. This effectively reduces the computational complexity from quadratic to
     linear with respect to the sequence length (for a fixed block size), making it suitable for
     processing long sequences where local interactions dominate."""
+
     def __init__(
         self,
         dim_embed,
@@ -264,7 +267,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         attention_dtype=torch.bfloat16,
     ):
         """Initialize the MultiSelfAttentionHeadLocal module.
-        
+
         :param dim_embed: Embedding dimension.
         :param num_heads: Number of attention heads.
         :param qkv_len: Length of the query, key, and value.
@@ -326,7 +329,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
 
     def forward(self, x, ada_ln_aux=None):
         """Forward pass of the MultiSelfAttentionHeadLocal module.
-        
+
         :param x: Input tensor.
         :param ada_ln_aux: Auxiliary data for adaptive layer normalization.
 
@@ -353,12 +356,13 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
 
 class MultiCrossAttentionHeadVarlen(torch.nn.Module):
     """Multi-head cross-attention with variable length sequences.
-    
+
     This module implements multi-head cross-attention for variable length sequences. Similar to
     the self-attention variant, it uses FlashAttention (`flash_attn_varlen_func`) to handle
     packed sequences of queries and keys/values with different lengths. It ensures correct masking
     and efficient computation for cases where both source and target sequences vary in length.
     """
+
     def __init__(
         self,
         dim_embed_q,
@@ -376,7 +380,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         attention_dtype=torch.bfloat16,
     ):
         """Initialize the MultiCrossAttentionHeadVarlen module.
-        
+
         :param dim_embed_q: Embedding dimension of the query.
         :param dim_embed_kv: Embedding dimension of the key and value.
         :param num_heads: Number of attention heads.
@@ -434,7 +438,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
 
     def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
         """Forward pass of the MultiCrossAttentionHeadVarlen module.
-        
+
         :param x_q: Query tensor.
         :param x_kv: Key and value tensor.
         :param x_q_lens: Lengths of the query sequences.
@@ -485,12 +489,13 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
 
 class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
     """Multi-head cross-attention with variable length sequences and sliced queries.
-    
+
     This module implements a memory-efficient variant of multi-head cross-attention where the
     query projection is sliced into chunks. This allows processing extremely large query sets
     (e.g., global queries against local latents) by computing attention for subsets of queries
     sequentially. This approach reduces peak memory usage significantly, enabling the model to
     scale to higher resolutions or larger query counts."""
+
     def __init__(
         self,
         dim_embed_q,
@@ -509,7 +514,7 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
         attention_dtype=torch.bfloat16,
     ):
         """Initialize the MultiCrossAttentionHeadVarlenSlicedQ module.
-        
+
         :param dim_embed_q: Embedding dimension of the query.
         :param dim_embed_kv: Embedding dimension of the key and value.
         :param num_slices_q: Number of slices for the query.
@@ -575,13 +580,13 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
 
     def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
         """Forward pass of the MultiCrossAttentionHeadVarlenSlicedQ module.
-        
+
         :param x_q: Query tensor.
         :param x_kv: Key and value tensor.
         :param x_q_lens: Lengths of the query sequences.
         :param x_kv_lens: Lengths of the key and value sequences.
         :param ada_ln_aux: Auxiliary data for adaptive layer normalization.
-        
+
         :return outs: Output tensors.
         """
         if self.with_residual:
@@ -630,6 +635,7 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
 
 class MultiSelfAttentionHead(torch.nn.Module):
     """Multi-head self-attention."""
+
     def __init__(
         self,
         dim_embed,
@@ -646,7 +652,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         attention_dtype=torch.bfloat16,
     ):
         """Initialize the MultiSelfAttentionHead module.
-        
+
         :param dim_embed: Embedding dimension.
         :param num_heads: Number of attention heads.
         :param dim_head_proj: Dimension of the projection head.
@@ -701,10 +707,10 @@ class MultiSelfAttentionHead(torch.nn.Module):
 
     def forward(self, x, ada_ln_aux=None):
         """Forward pass of the MultiSelfAttentionHead module.
-        
+
         :param x: Input tensor.
         :param ada_ln_aux: Auxiliary data for adaptive layer normalization.
-        
+
         :return out: Output tensor.
         """
         if self.with_residual:
@@ -733,6 +739,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
 
 class MultiCrossAttentionHead(torch.nn.Module):
     """Multi-head cross-attention."""
+
     def __init__(
         self,
         dim_embed_q,
@@ -748,7 +755,7 @@ class MultiCrossAttentionHead(torch.nn.Module):
         attention_dtype=torch.bfloat16,
     ):
         """Initialize the MultiCrossAttentionHead module.
-        
+
         :param dim_embed_q: Embedding dimension of the query.
         :param dim_embed_kv: Embedding dimension of the key and value.
         :param num_heads: Number of attention heads.
@@ -802,10 +809,10 @@ class MultiCrossAttentionHead(torch.nn.Module):
     #########################################
     def forward(self, x_q, x_kv):
         """Forward pass of the MultiCrossAttentionHead module.
-        
+
         :param x_q: Query tensor.
         :param x_kv: Key and value tensor.
-        
+
         :return outs: Output tensors.
         """
         if self.with_residual:

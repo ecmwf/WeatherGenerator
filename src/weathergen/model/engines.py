@@ -31,6 +31,7 @@ from weathergen.utils.utils import get_dtype
 
 class EmbeddingEngine(torch.nn.Module):
     """Embedding engine for the model."""
+
     name: "EmbeddingEngine"
 
     def __init__(self, cf: Config, sources_size) -> None:
@@ -114,7 +115,11 @@ class EmbeddingEngine(torch.nn.Module):
                     idxs_pe = s.source_idxs_embed_pe.to(device)
 
                     # create full scatter index
-                    idxs = idxs.unsqueeze(1).expand(-1, self.cf.ae_local_dim_embed)
+                    idxs = idxs.unsqueeze(
+                        1
+                    ).expand(
+                        -1, self.cf.ae_local_dim_embed
+                    )  # expand works as the tensor is only read (!do not apply in-place write operations on it!)
                     try:
                         x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
                     except RuntimeError:
@@ -137,6 +142,7 @@ class EmbeddingEngine(torch.nn.Module):
 
 class LocalAssimilationEngine(torch.nn.Module):
     """Local assimilation engine for the model."""
+
     name: "LocalAssimilationEngine"
 
     def __init__(self, cf: Config) -> None:
@@ -194,6 +200,7 @@ class LocalAssimilationEngine(torch.nn.Module):
 
 class Local2GlobalAssimilationEngine(torch.nn.Module):
     """Local2GlobalAssimilationEngine for the model."""
+
     name: "Local2GlobalAssimilationEngine"
 
     def __init__(self, cf: Config) -> None:
@@ -273,6 +280,7 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
 
 class GlobalAssimilationEngine(torch.nn.Module):
     """Global assimilation engine for the model."""
+
     name: "GlobalAssimilationEngine"
 
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
@@ -355,6 +363,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
 
 class ForecastingEngine(torch.nn.Module):
     """Forecasting engine for the model."""
+
     name: "ForecastingEngine"
 
     def __init__(self, cf: Config, num_healpix_cells: int) -> None:
@@ -442,6 +451,7 @@ class ForecastingEngine(torch.nn.Module):
 
 class EnsPredictionHead(torch.nn.Module):
     """Ensemble prediction head for the model."""
+
     def __init__(
         self,
         dim_embed,
@@ -454,7 +464,7 @@ class EnsPredictionHead(torch.nn.Module):
         final_activation: None | str = None,
     ):
         """Initialize the EnsPredictionHead with the configuration.
-        
+
         :param dim_embed: Dimension of the embedding.
         :param dim_out: Dimension of the output.
         :param ens_num_layers: Number of layers in the ensemble.
@@ -514,6 +524,7 @@ class EnsPredictionHead(torch.nn.Module):
 
 class TargetPredictionEngineClassic(nn.Module):
     """Target prediction engine for the model."""
+
     def __init__(
         self,
         cf,
@@ -637,6 +648,7 @@ class TargetPredictionEngineClassic(nn.Module):
 
 class TargetPredictionEngine(nn.Module):
     """TargetPredictionEngine for the model."""
+
     def __init__(
         self,
         cf,
@@ -789,7 +801,7 @@ class TargetPredictionEngine(nn.Module):
 
     def forward(self, latent, output, latent_lens, output_lens, coordinates):
         """Forward pass of the TargetPredictionEngine.
-        
+
         :param latent: Latent tokens.
         :param output: Output tokens.
         :param latent_lens: Lengths of the latent tokens.

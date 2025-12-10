@@ -77,7 +77,9 @@ def get_score_step_48h(score_col: str) -> pl.DataFrame:
         .sort("start_time")
         .filter(pl.col(score_col).is_not_null())
     )
-    _logger.info(f"Getting score data for {score_col} at 48h (step={step_48h}): len={len(score_data)}")
+    _logger.info(
+        f"Getting score data for {score_col} at 48h (step={step_48h}): len={len(score_data)}"
+    )
 
     # Iterate over the runs to get the metric at step 48h
     scores_dt: list[float | None] = []
