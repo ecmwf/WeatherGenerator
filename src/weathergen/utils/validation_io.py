@@ -24,6 +24,7 @@ def write_output(cf, mini_epoch, batch_idx, dn_data, batch, model_output, target
     Interface for writing model output
     """
 
+    # collect all target / prediction-related information
     fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
     for fstep in range(cf.forecast_offset, cf.forecast_steps + 2):
@@ -61,6 +62,7 @@ def write_output(cf, mini_epoch, batch_idx, dn_data, batch, model_output, target
     # TODO: remove
     targets_lens = [[[t[0].shape[0]] for t in tt] for tt in targets_all]
 
+    # collect source information
     sources = []
     for sample in batch.source_samples:
         sources += [[]]
@@ -77,11 +79,8 @@ def write_output(cf, mini_epoch, batch_idx, dn_data, batch, model_output, target
     # more prep work
 
     stream_names = [stream.name for stream in cf.streams]
-    analysis_streams_output = cf.get("analysis_streams_output", None)
     if cf.streams_output is not None:
         output_stream_names = cf.streams_output
-    elif analysis_streams_output is not None:  # --- to be removed at some point ---
-        output_stream_names = analysis_streams_output  # --- to be removed at some point ---
     else:
         output_stream_names = None
 
@@ -97,8 +96,7 @@ def write_output(cf, mini_epoch, batch_idx, dn_data, batch, model_output, target
 
     geoinfo_channels = [[] for _ in cf.streams]  # TODO obtain channels
 
-    # assume: is batch size guarnteed and constant:
-    # => calculate global sample indices for this batch by offsetting by sample_start
+    # calculate global sample indices for this batch by offsetting by sample_start
     sample_start = batch_idx * cf.batch_size_validation_per_gpu
 
     # write output
