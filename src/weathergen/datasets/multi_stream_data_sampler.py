@@ -561,6 +561,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 student_to_teacher,
                 target_metadata_list,
                 source_metadata_list,
+                target_config_indices,  # Maps each target mask to its config index
+                source_config_indices,  # Maps each source mask to its config index
             ) = masks_streams[stream_name]
 
             # input_data and output_data is conceptually consecutive but differs
@@ -578,12 +580,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # collect source data for current stream
             # loop over student views
             for sidx, source_mask in enumerate(source_masks):
+                # Use config index mapping to access the correct config entry
+                # This allows num_samples > 1 to work correctly
+                cfg_idx = int(source_config_indices[sidx])  # Convert numpy int32 to Python int
                 sdata = self._build_stream_data(
                     source_select,
                     idx,
                     forecast_dt,
                     stream_info,
-                    source_cfgs[sidx].get("num_steps_input", 1),
+                    source_cfgs[cfg_idx].get("num_steps_input", 1),
                     input_data,
                     output_data,
                     input_tokens,
@@ -601,12 +606,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 batch.add_source_stream(sidx, t_idx, stream_name, sdata, source_metadata)
 
             for sidx, target_mask in enumerate(target_masks):
+                # Use config index mapping to access the correct config entry
+                cfg_idx = int(target_config_indices[sidx])  # Convert numpy int32 to Python int
                 sdata = self._build_stream_data(
                     target_select,
                     idx,
                     forecast_dt,
                     stream_info,
-                    target_cfgs[sidx].get("num_steps_input", 1),
+                    target_cfgs[cfg_idx].get("num_steps_input", 1),
                     input_data,
                     output_data,
                     input_tokens,
@@ -640,12 +647,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             )
 
             # TODO: avoid the unpacking here
+            # Unpack: target_data = (masks, metadata, config_mapping)
+            #         source_data = (masks, metadata, config_mapping)
             masks[stream_info["name"]] = (
-                target_data[0],
-                source_data[0],
-                mapping,
-                target_data[1],
-                source_data[1],
+                target_data[0],  # target_masks
+                source_data[0],  # source_masks
+                mapping,         # source_target_mapping
+                target_data[1],  # target_metadata
+                source_data[1],  # source_metadata
+                target_data[2],  # target_config_mapping
+                source_data[2],  # source_config_mapping
             )
 
         # Determine number of samples directly from config (teacher and student views)
