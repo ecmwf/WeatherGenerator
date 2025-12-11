@@ -151,17 +151,11 @@ class TrainLogger:
         log_vals: list[float] = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
         log_vals += [samples]
 
-        stream_names = [st["name"] for st in self.cf.streams]
+        for key, value in flatten_dict(losses_all).items():
+            metrics[key] = np.nanmean(value)
 
-        for loss_name, loss_values in losses_all.items():
-            metrics[f"loss.{loss_name}.loss_avg"] = loss_values[:, :].nanmean().item()
-            st = self.cf.streams[stream_names.index(loss_name.split(".")[1])]
-            for k, ch_n in enumerate(st.val_target_channels):
-                metrics[f"loss.{loss_name}.{ch_n}"] = loss_values[:, k].nanmean().item()
-            log_vals += [loss_values[:, :].nanmean().item()]
-        for loss_name, stddev_values in stddev_all.items():
-            metrics[f"loss.{loss_name}.stddev_avg"] = stddev_values.nanmean().item()
-            log_vals += [stddev_values.nanmean().item()]
+        for key, value in flatten_dict(stddev_all).items():
+            metrics[key] = np.nanmean(value)
 
         self.log_metrics("val", metrics)
         with open(self.path_run / (self.cf.run_id + "_val_log.txt"), "ab") as f:

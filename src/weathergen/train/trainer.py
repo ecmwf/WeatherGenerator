@@ -723,25 +723,6 @@ class Trainer(TrainerBase):
                     #     sample_idxs,
                     # )
 
-                    # Collecting loss statistics for later inspection
-                    if bidx == 0:
-                        self.loss_unweighted_hist = {
-                            loss_name: []
-                            for _, calc_terms in loss_values.loss_terms.items()
-                            for loss_name in calc_terms.losses_all.keys()
-                        }
-                        self.stdev_unweighted_hist = {
-                            loss_name: []
-                            for _, calc_terms in loss_values.loss_terms.items()
-                            for loss_name in calc_terms.stddev_all.keys()
-                        }
-                        self.loss_model_hist = []
-                    for _, loss_terms in loss_values.loss_terms.items():
-                        for loss_name, losses_all in loss_terms.losses_all.items():
-                            self.loss_unweighted_hist[loss_name].append(losses_all)
-                        for loss_name, stddev_all in loss_terms.stddev_all.items():
-                            self.stdev_unweighted_hist[loss_name].append(stddev_all)
-                    self.loss_model_hist += [loss.item()]
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 

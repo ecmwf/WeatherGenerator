@@ -33,37 +33,49 @@ def json_to_dict(fname):
 
 def flatten_dict(d, parent_key="", sep="."):
     """
-    Flattens a nested dictionary into a single-level dictionary
-    with concatenated keys.
+    Flattens a nested dictionary, keeping lists of scalar values intact.
 
-    Args:
-        d (dict): The dictionary to flatten.
-        parent_key (str): The base key string for the current level (used in recursion).
-        sep (str): The separator to use between keys (e.g., '_', '.').
-
-    Returns:
-        dict: The flattened dictionary.
+    :param d: The dictionary to flatten.
+    :param parent_key: The base key for recursion (used internally).
+    :param sep: The separator to join keys.
+    :return: The flattened dictionary.
     """
     items = []
-
     for k, v in d.items():
-        new_key = parent_key + sep + str(k) if parent_key else str(k)
+        # Construct the new key
+        new_key = parent_key + sep + k if parent_key else k
 
+        # 1. Handle Dictionaries (Recursion)
         if isinstance(v, dict):
             # Recursively flatten nested dictionaries
             items.extend(flatten_dict(v, new_key, sep=sep).items())
-        elif isinstance(v, list | tuple):
-            # Handle lists/tuples, treating items inside as indexed elements
-            for i, item in enumerate(v):
-                if isinstance(item, dict):
-                    # If list item is a dict, flatten it with index in key
-                    list_key = new_key + sep + str(i)
-                    items.extend(flatten_dict(item, list_key, sep=sep).items())
-                else:
-                    # If list item is a scalar, store it with index in key
-                    items.append((new_key + sep + str(i), item))
+
+        # 2. Handle Lists
+        elif isinstance(v, list):
+            # Check if the list contains non-scalar/non-empty values (i.e., nested dicts/lists)
+            # A value is considered a scalar if it's NOT a dict or a list.
+            is_scalar_list = all(not isinstance(item, (dict | list)) for item in v)
+
+            if is_scalar_list:
+                # Requirement: Keep lists of scalar values as is
+                items.append((new_key, v))
+            else:
+                # If the list contains nested dicts/lists, we must iterate and flatten them
+                for i, item in enumerate(v):
+                    index_key = new_key + sep + str(i)
+                    if isinstance(item, dict):
+                        # Recursively flatten the dictionary inside the list
+                        items.extend(flatten_dict(item, index_key, sep=sep).items())
+                    elif isinstance(item, list):
+                        # Treat list within a list as a scalar list *at that level* # and append it (to avoid overly complex list indexing)
+                        items.append((index_key, item))
+                    else:
+                        # Append the scalar item
+                        items.append((index_key, item))
+
+        # 3. Handle Scalar Values
         else:
-            # Base case: value is a scalar, store key-value pair
+            # Append all other scalar values (str, int, float, bool, None, etc.)
             items.append((new_key, v))
 
     return dict(items)
