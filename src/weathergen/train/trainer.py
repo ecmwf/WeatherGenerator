@@ -351,7 +351,6 @@ class Trainer(TrainerBase):
     def train(self, mini_epoch):
         cf = self.cf
         self.model.train()
-        # torch.autograd.set_detect_anomaly(True)
 
         dataset_iter = iter(self.data_loader)
 
@@ -433,7 +432,6 @@ class Trainer(TrainerBase):
             # optimizer step
             self.grad_scaler.step(self.optimizer)
             self.grad_scaler.update()
-            # self.optimizer.step()
 
             self.target_and_aux_calculator.update_state_post_opt_step(bidx, batch, self.model)
 
