@@ -25,13 +25,14 @@ from zarr.storage import LocalStore
 from tqdm import tqdm
 
 # experimental value, should be inferred more intelligently
-CHUNK_N_SAMPLES = 32784
+SHARDING_ENABLED = True
+SHARD_N_SAMPLES = 40320
+CHUNK_N_SAMPLES = SHARD_N_SAMPLES // 60
 type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
 
-SHARDING_ENABLED = True
-SHARD_N_SAMPLES = CHUNK_N_SAMPLES * 10
+
 #CHUNK_N_SAMPLES has to equal to integer * SHARD_N_SAMPLES
 
 # zarr.config.set({
@@ -359,6 +360,7 @@ class ZarrIO:
         for dataset in tqdm(item.datasets):
             if dataset is not None:
                 self._write_dataset(group, dataset)
+        
 
     def get_data(self, sample: int, stream: str, forecast_step: int) -> OutputItem:
         """Get datasets for the output item matching the arguments."""
@@ -412,21 +414,22 @@ class ZarrIO:
 
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
         assert is_ndarray(array), f"Expected ndarray but got: {type(array)}"
+        print(array.shape)
         if array.size == 0:  # sometimes for geoinfo
             chunks = "auto"
         else:
-            chunks = (CHUNK_N_SAMPLES, *array.shape[1:])
-        _logger.debug(
+            chunks = (CHUNK_N_SAMPLES, *(max(x//4,1) for x in array.shape[1:]))
+        print(
             f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
             + f"into group: {group}."
         )
         start_time = timeit.default_timer()
         if SHARDING_ENABLED and chunks != "auto":
-            shards = (SHARD_N_SAMPLES, *(x*1 for x in array.shape[1:]))
-            z = group.create_array(name, data=array, chunks=chunks, shards =shards)
+            shards = (SHARD_N_SAMPLES, *(5*x for x in chunks[1:]))
+            group.create_array(name, data=array, chunks=chunks, shards =shards)
             print(f"sharding enabled with shards: {shards} and chunks: {chunks}")
         else:
-            z = group.create_array(name, data=array, chunks=chunks)
+            group.create_array(name, data=array, chunks=chunks)
             print(f"sharding disabled, writing with chunks: {chunks}")
         elapsed = timeit.default_timer() - start_time
         print(f"writing array: {name} took {elapsed:.2f}")
