@@ -1,5 +1,5 @@
-streams_directory: "./config/streams/era5_1deg/"
-# streams_directory: "./config/streams/era5_nppatms_synop/"
+# streams_directory: "./config/streams/era5_1deg/"
+streams_directory: "./config/streams/era5_nppatms_synop/"
 
 embed_orientation: "channels"
 embed_unembed_mode: "block"
@@ -156,7 +156,7 @@ training_config:
       #                       }
       # relationship: "independent" #, "subset", "disjoint". Relationship of student views to teacher view.
       relationship: "independent"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-      num_steps_input: 2
+      num_steps_input: 1
       # loss : ibot
       loss :
         training :
@@ -251,7 +251,7 @@ input_window_steps: 1
 
 val_initial: False
 
-loader_num_workers: 0
+loader_num_workers: 8
 log_validation: 0
 streams_output: ["ERA5"]
 
