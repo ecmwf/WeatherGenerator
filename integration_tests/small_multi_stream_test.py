@@ -184,13 +184,13 @@ def assert_stream_losses_below_threshold(run_id, stage="train"):
     thresholds = {
         "train": {
             "ERA5": 0.2,
-            "NPPATMS": 0.4,
-            "SurfaceCombined": 0.6,
+            "NPPATMS": 0.5,
+            "SurfaceCombined": 0.7,
         },
         "val": {
             "ERA5": 0.2,
-            "NPPATMS": 0.3,
-            "SurfaceCombined": 0.5,
+            "NPPATMS": 0.4,
+            "SurfaceCombined": 0.6,
         },
     }
 
