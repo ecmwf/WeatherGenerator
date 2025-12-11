@@ -68,7 +68,7 @@ class Sample:
         for key in self.meta_info.keys():
             self.meta_info[key].mask = (
                 self.meta_info[key].mask.to(device, non_blocking=True)
-                if self.meta_info[key].mask
+                if self.meta_info[key].mask is not None
                 else None
             )
 
@@ -80,7 +80,9 @@ class Sample:
         """
         Check if sample is empty
         """
-        return np.all(np.array([s.empty() for _, s in self.streams_data.items()]))
+        return np.all(
+            np.array([s.empty() if s is not None else True for _, s in self.streams_data.items()])
+        )
 
     def add_stream_data(self, stream_name: str, stream_data: StreamData) -> None:
         """
@@ -109,6 +111,11 @@ class Sample:
         assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
         return self.streams_data[stream_name]
 
+    def get_forecast_steps(self) -> int:
+        for _, sdata in self.streams_data.items():
+            forecast_dt = sdata.get_forecast_steps()
+        return forecast_dt
+
 
 class ModelBatch:
     """
@@ -128,21 +135,14 @@ class ModelBatch:
     source2target_matching_idxs: np.typing.NDArray[np.int32]
     target2source_matching_idxs: np.typing.NDArray[np.int32]
 
-    forecast_dt: int | None
-
-    def __init__(
-        self, streams, num_source_samples: int, num_target_samples: int, forecast_dt: int
-    ) -> None:
+    def __init__(self, streams, num_source_samples: int, num_target_samples: int) -> None:
         """ """
 
         self.source_samples = [Sample(streams) for _ in range(num_source_samples)]
         self.target_samples = [Sample(streams) for _ in range(num_target_samples)]
 
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
-        # self.target_source_matching_idxs = np.full(num_target_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
-
-        self.forecast_dt = forecast_dt
 
     def to_device(self, device):
         for sample in self.source_samples:
@@ -200,21 +200,13 @@ class ModelBatch:
         """
         Check if batch is empty
         """
-        source_empty = np.all(np.array([s.is_empty() for s in self.source_samples]))
-        target_empty = np.all(np.array([s.is_empty() for s in self.target_samples]))
+        source_empty = np.all(
+            np.array([s.is_empty() if s is not None else True for s in self.source_samples])
+        )
+        target_empty = np.all(
+            np.array([s.is_empty() if s is not None else True for s in self.target_samples])
+        )
         return source_empty or target_empty
-
-    def set_forecast_dt(self, forecast_dt: int) -> None:
-        """
-        Set forecast_dt for sample
-        """
-        self.forecast_dt = forecast_dt
-
-    def get_forecast_dt(self) -> int:
-        """
-        Get forecast_dt
-        """
-        return self.forecast_dt
 
     def len_sources(self) -> int:
         """

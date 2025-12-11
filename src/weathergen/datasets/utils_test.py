@@ -1,10 +1,9 @@
 import torch
-from torch import Tensor, tensor
+from torch import tensor
 
 from weathergen.datasets.utils import (
     locs_to_cell_coords_ctrs,
     locs_to_ctr_coords,
-    s2tor3,
     vecs_to_rots,
 )
 

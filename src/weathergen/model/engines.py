@@ -79,50 +79,46 @@ class EmbeddingEngine(torch.nn.Module):
             else:
                 raise ValueError("Unsupported embedding network type")
 
-    def forward(self, streams_data, source_cell_lens, pe_embed, dtype, device):
-        num_step_input = len(source_cell_lens)
+    # TODO: remove device from arg list
+    def forward(self, input_step, sample, pe_embed, dtype, device):
+        offsets_base = torch.cumsum(sample.source_cell_lens[input_step][1:], 0)
 
-        offsets_base = [torch.cumsum(s[1:], 0) for s in source_cell_lens]
+        tokens_all = torch.empty(
+            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=dtype, device=device
+        )
 
-        tokens_all = [
-            torch.empty((int(ob[-1]), self.cf.ae_local_dim_embed), dtype=dtype, device=device)
-            for ob in offsets_base
-        ]
+        # iterate over all streams
+        for stream_name, s_data in sample.streams_data.items():
+            # embedding network
+            embed = self.embeds[stream_name]
 
-        # TODO: handling of input steps should be done using encoder
-        # iterate over all input steps and streams
-        for istep in range(num_step_input):
-            for stream_name, s_data in streams_data.items():
-                # embedding network
-                embed = self.embeds[stream_name]
+            # skip empty stream
+            if s_data.source_empty():
+                continue
 
-                # skip empty stream
-                if s_data.source_empty():
-                    continue
+            idxs = s_data.source_idxs_embed[input_step].to(device)
+            idxs_pe = s_data.source_idxs_embed_pe[input_step].to(device)
 
-                idxs = s_data.source_idxs_embed[istep].to(device)
-                idxs_pe = s_data.source_idxs_embed_pe[istep].to(device)
+            # create full scatter index
+            # (there's no broadcasting which is likely highly inefficient)
+            idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+            x_embed = embed(s_data.source_tokens_cells[input_step]).flatten(0, 1)
+            # there's undocumented limitation in flash_attn that will make embed fail if
+            # #tokens is too large; code below is a work around
+            # x_embed = torch.cat(
+            #     [
+            #         embed(s_c, c_c).flatten(0, 1)
+            #         for s_c, c_c in zip(
+            #             torch.split(s.source_tokens_cells, 49152),
+            #             torch.split(s.source_centroids, 49152),
+            #         )
+            #     ]
+            # )
 
-                # create full scatter index
-                # (there's no broadcasting which is likely highly inefficient)
-                idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                x_embed = embed(s_data.source_tokens_cells[istep]).flatten(0, 1)
-                # there's undocumented limitation in flash_attn that will make embed fail if
-                # #tokens is too large; code below is a work around
-                # x_embed = torch.cat(
-                #     [
-                #         embed(s_c, c_c).flatten(0, 1)
-                #         for s_c, c_c in zip(
-                #             torch.split(s.source_tokens_cells, 49152),
-                #             torch.split(s.source_centroids, 49152),
-                #         )
-                #     ]
-                # )
+            # scatter write to reorder from per stream to per cell ordering
+            tokens_all.scatter_(0, idxs, x_embed + pe_embed[idxs_pe])
 
-                # scatter write to reorder from per stream to per cell ordering
-                tokens_all[istep].scatter_(0, idxs, x_embed + pe_embed[idxs_pe])
-
-        return tokens_all[0]
+        return tokens_all
 
 
 class LocalAssimilationEngine(torch.nn.Module):
