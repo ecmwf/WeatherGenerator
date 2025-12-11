@@ -1,5 +1,5 @@
-# streams_directory: "./config/streams/era5_1deg/"
-streams_directory: "./config/streams/era5_nppatms_synop/"
+streams_directory: "./config/streams/era5_1deg/"
+# streams_directory: "./config/streams/era5_nppatms_synop/"
 
 embed_orientation: "channels"
 embed_unembed_mode: "block"
@@ -195,7 +195,7 @@ training_config:
   #   # rate_sampling: true  # randomly sample the rate per batch
 
 num_mini_epochs: 32
-samples_per_mini_epoch: 64 #4096
+samples_per_mini_epoch: 512 #4096
 samples_per_validation: 32 #512
 
 shuffle: True
@@ -226,9 +226,9 @@ len_hrs: 6
 step_hrs: 6
 input_window_steps: 1
 
-val_initial: False
+val_initial: False #True
 
-loader_num_workers: 8
+loader_num_workers: 12
 log_validation: 0
 streams_output: ["ERA5"]
 
