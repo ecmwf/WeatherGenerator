@@ -2,6 +2,7 @@ import logging
 
 import numpy as np
 import torch
+from numpy.typing import NDArray
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
@@ -118,9 +119,9 @@ class Masker:
         num_cells_to_select: int,
         center_cell: int | None = None,
         method: str = "disk",
-        overlap_with: np.ndarray | None = None,
+        overlap_with: NDArray | None = None,
         overlap_ratio: float | None = None,
-    ) -> np.ndarray:
+    ) -> NDArray:
         """
         Select spatially contiguous cells on the sphere using neighbor relationships.
 
@@ -150,6 +151,7 @@ class Masker:
                                                        overlap_with=crop1, overlap_ratio=0.3)
         """
         import warnings
+
         import astropy_healpix as hp
 
         num_total_cells = 12 * (4**healpix_level)
@@ -239,29 +241,32 @@ class Masker:
 
             def lonlat_to_xyz(lon, lat):
                 """Convert lon/lat to 3D cartesian coordinates."""
-                return np.array([
-                    np.cos(lat) * np.cos(lon),
-                    np.cos(lat) * np.sin(lon),
-                    np.sin(lat)
-                ])
+                return np.array([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)])
 
             # Get center coordinates
             center_lonlat = hp.healpix_to_lonlat(center_cell, nside, order="nested")
-            center_lon = float(center_lonlat[0].value if hasattr(center_lonlat[0], 'value') else center_lonlat[0])
-            center_lat = float(center_lonlat[1].value if hasattr(center_lonlat[1], 'value') else center_lonlat[1])
+            center_lon = float(
+                center_lonlat[0].value if hasattr(center_lonlat[0], "value") else center_lonlat[0]
+            )
+            center_lat = float(
+                center_lonlat[1].value if hasattr(center_lonlat[1], "value") else center_lonlat[1]
+            )
             center_xyz = lonlat_to_xyz(center_lon, center_lat)
 
             # Get all cell coordinates
             all_indices = np.arange(num_total_cells)
             all_lonlat = hp.healpix_to_lonlat(all_indices, nside, order="nested")
-            all_lon = all_lonlat[0].value if hasattr(all_lonlat[0], 'value') else all_lonlat[0]
-            all_lat = all_lonlat[1].value if hasattr(all_lonlat[1], 'value') else all_lonlat[1]
+            all_lon = all_lonlat[0].value if hasattr(all_lonlat[0], "value") else all_lonlat[0]
+            all_lat = all_lonlat[1].value if hasattr(all_lonlat[1], "value") else all_lonlat[1]
 
-            all_xyz = np.stack([
-                np.cos(all_lat) * np.cos(all_lon),
-                np.cos(all_lat) * np.sin(all_lon),
-                np.sin(all_lat)
-            ], axis=1)
+            all_xyz = np.stack(
+                [
+                    np.cos(all_lat) * np.cos(all_lon),
+                    np.cos(all_lat) * np.sin(all_lon),
+                    np.sin(all_lat),
+                ],
+                axis=1,
+            )
 
             # Compute angular distances and select closest cells
             dot_products = np.clip(np.dot(all_xyz, center_xyz), -1.0, 1.0)
@@ -551,7 +556,11 @@ class Masker:
                 if "overlap_ratio" in masking_cfg and len(target_masks) > 0:
                     # Enable overlap control by passing teacher's mask
                     target_mask_for_overlap = target_masks[i_source % len(target_masks)]
-                    masking_cfg["overlap_with_mask"] = target_mask_for_overlap.cpu().numpy() if hasattr(target_mask_for_overlap, 'cpu') else target_mask_for_overlap
+                    masking_cfg["overlap_with_mask"] = (
+                        target_mask_for_overlap.cpu().numpy()
+                        if hasattr(target_mask_for_overlap, "cpu")
+                        else target_mask_for_overlap
+                    )
 
                 source_mask, mask_params = self._get_mask(
                     num_cells=num_cells,
@@ -701,7 +710,7 @@ class Masker:
                 mask[child_indices] = True
 
         elif strategy == "cropping_healpix":
-            # Spatial cropping: select spatially contiguous region and KEEP it (mask everything else)
+            # Spatial cropping: select contiguous region and KEEP it (mask rest)
             # This is the elegant inverse of healpix masking
             hl_data = self.healpix_level_data
             hl_mask = cfg.get("hl_mask")
@@ -748,14 +757,14 @@ class Masker:
 
                     # Deterministically select overlap cells from teacher
                     num_overlap_cells = int(np.round(overlap_ratio * total_student_cells))
-                    num_overlap_cells = min(num_overlap_cells, len(teacher_cell_indices))  # Can't exceed teacher size
+                    num_overlap_cells = min(
+                        num_overlap_cells, len(teacher_cell_indices)
+                    )  # Can't exceed teacher size
 
                     # Randomly select which teacher cells to use for overlap
                     if num_overlap_cells > 0:
                         overlap_cell_indices = self.rng.choice(
-                            teacher_cell_indices,
-                            size=num_overlap_cells,
-                            replace=False
+                            teacher_cell_indices, size=num_overlap_cells, replace=False
                         )
                     else:
                         overlap_cell_indices = np.array([], dtype=int)
@@ -769,15 +778,15 @@ class Masker:
                         # This ensures we get exactly the right number
                         num_available = min(num_non_overlap_cells, len(non_teacher_cell_indices))
                         non_overlap_child_indices = self.rng.choice(
-                            non_teacher_cell_indices,
-                            size=num_available,
-                            replace=False
+                            non_teacher_cell_indices, size=num_available, replace=False
                         )
                     else:
                         non_overlap_child_indices = np.array([], dtype=int)
 
                     # Combine overlap and non-overlap cells
-                    child_indices = np.concatenate([overlap_cell_indices, non_overlap_child_indices])
+                    child_indices = np.concatenate(
+                        [overlap_cell_indices, non_overlap_child_indices]
+                    )
 
                     # Create mask
                     mask = np.zeros(num_cells, dtype=bool)
@@ -785,7 +794,7 @@ class Masker:
 
                     _logger.info(
                         f"Deterministic overlap: target={overlap_ratio:.1%}, "
-                        f"actual={len(overlap_cell_indices)/len(child_indices):.1%} "
+                        f"actual={len(overlap_cell_indices) / len(child_indices):.1%} "
                         f"({len(overlap_cell_indices)}/{len(child_indices)} cells)"
                     )
 

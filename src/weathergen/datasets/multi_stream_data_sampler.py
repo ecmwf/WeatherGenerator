@@ -652,7 +652,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             masks[stream_info["name"]] = (
                 target_data[0],  # target_masks
                 source_data[0],  # source_masks
-                mapping,         # source_target_mapping
+                mapping,  # source_target_mapping
                 target_data[1],  # target_metadata
                 source_data[1],  # source_metadata
                 target_data[2],  # target_config_mapping
