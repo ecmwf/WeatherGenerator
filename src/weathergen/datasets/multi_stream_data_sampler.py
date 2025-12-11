@@ -556,14 +556,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         for stream_info, (stream_name, stream_ds) in zip(
             self.streams, self.streams_datasets.items(), strict=True
         ):
-            # TODO: data class for this or something similar
-            (
-                target_masks,
-                source_masks,
-                student_to_teacher,
-                target_metadata_list,
-                source_metadata_list,
-            ) = masks_streams[stream_name]
+            (target_masks, source_masks, student_to_teacher) = masks_streams[stream_name]
 
             # input_data and output_data is conceptually consecutive but differs
             # in source and target channels; overlap in one window when self.forecast_offset=0
@@ -579,7 +572,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # collect source data for current stream
             # loop over student views
-            for sidx, source_mask in enumerate(source_masks):
+            for sidx, source_mask in enumerate(source_masks.masks):
                 sdata = self._build_stream_data(
                     source_select,
                     idx,
@@ -590,19 +583,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     output_data,
                     input_tokens,
                     output_tokens,
-                    target_masks[student_to_teacher[sidx]],
+                    target_masks.masks[student_to_teacher[sidx]],
                     source_mask,
                 )
 
                 # also want to add the mask to the metadata
-                source_metadata = source_metadata_list[sidx]
+                source_metadata = source_masks.metadata[sidx]
                 source_metadata.mask = source_mask
 
                 # map each source to its target
                 t_idx = student_to_teacher[sidx]
                 batch.add_source_stream(sidx, t_idx, stream_name, sdata, source_metadata)
 
-            for sidx, target_mask in enumerate(target_masks):
+            for sidx, target_mask in enumerate(target_masks.masks):
                 sdata = self._build_stream_data(
                     target_select,
                     idx,
@@ -618,7 +611,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 )
 
                 # get target config info
-                target_metadata = target_metadata_list[sidx]
+                target_metadata = target_masks.metadata[sidx]
                 target_metadata.mask = target_mask
 
                 # find indices of all sources for current target
@@ -637,17 +630,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         masks = {}
         for stream_info in self.streams:
             # Build source and target sample masks
-            target_data, source_data, mapping = self.tokenizer.masker.build_samples_for_stream(
+            masks[stream_info["name"]] = self.tokenizer.masker.build_samples_for_stream(
                 training_mode, self.num_healpix_cells, self.training_cfg
-            )
-
-            # TODO: avoid the unpacking here
-            masks[stream_info["name"]] = (
-                target_data[0],
-                source_data[0],
-                mapping,
-                target_data[1],
-                source_data[1],
             )
 
         # Determine number of samples directly from config (teacher and student views)
