@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import zarr
 
 import weathergen.common.config as config
 import weathergen.common.io as io
@@ -84,3 +85,5 @@ def write_output(
     with io.ZarrIO(config.get_path_output(cf, mini_epoch)) as writer:
         for subset in data.items():
             writer.write_zarr(subset)
+    
+        zarr.consolidate_metadata(config.get_path_output(cf, mini_epoch))

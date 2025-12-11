@@ -13,6 +13,7 @@ import itertools
 import logging
 import pathlib
 import typing
+import timeit
 
 import dask.array as da
 import numpy as np
@@ -21,13 +22,31 @@ import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
 from zarr.storage import LocalStore
+from tqdm import tqdm
 
 # experimental value, should be inferred more intelligently
-CHUNK_N_SAMPLES = 16392
+SHARDING_ENABLED = True
+SHARD_N_SAMPLES = 40320
+CHUNK_N_SAMPLES = SHARD_N_SAMPLES // 60
 type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
 
+
+#CHUNK_N_SAMPLES has to equal to integer * SHARD_N_SAMPLES
+
+# zarr.config.set({
+#     "threading.num_workers": None,
+#     "array.write_empty_chunks": False,
+#     "codec_pipeline": {
+#         'batch_size': 1,
+#         "path": "zarrs.ZarrsCodecPipeline",
+#         "validate_checksums": True,
+#         "store_empty_chunks": False,
+#         "chunk_concurrent_minimum": 4,
+#         "chunk_concurrent_maximum": None,
+#     }
+# })
 
 _logger = logging.getLogger(__name__)
 
@@ -247,12 +266,17 @@ class OutputDataset:
     def datapoints(self) -> NDArray[np.int_]:
         return np.arange(self.data.shape[0])
 
-    def as_xarray(self, chunk_nsamples=CHUNK_N_SAMPLES) -> xr.DataArray:
+    def as_xarray(self, chunk_nsamples=CHUNK_N_SAMPLES, shard_nsamples = SHARD_N_SAMPLES) -> xr.DataArray:
         """Convert raw dask arrays into chunked dask-aware xarray dataset."""
         chunks = (chunk_nsamples, *self.data.shape[1:])
-
+        if SHARDING_ENABLED:
+            shards = (shard_nsamples, *(x*4 for x in self.data.shape[1:]))
+            print(f"sharding enabled with shards: {shards} and chunks: {chunks}")
+        else:
+            shards = None
+            print(f"sharding disabled, using chunks: {chunks}")
         # maybe do dask conversion earlier? => usefull for parallel writing?
-        data = da.from_zarr(self.data, chunks=chunks)  # dont call compute to lazy load
+        data = da.from_zarr(self.data, chunks=chunks, shards = shards)  # dont call compute to lazy load
         # include pseudo ens dim so all data arrays have same dimensionality
         # TODO: does it make sense for target and source to have ens dim?
         additional_dims = (0, 1, 2) if len(data.shape) == 3 else (0, 1, 2, 5)
@@ -333,9 +357,10 @@ class ZarrIO:
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
         group = self._get_group(item.key, create=True)
-        for dataset in item.datasets:
+        for dataset in tqdm(item.datasets):
             if dataset is not None:
                 self._write_dataset(group, dataset)
+        
 
     def get_data(self, sample: int, stream: str, forecast_step: int) -> OutputItem:
         """Get datasets for the output item matching the arguments."""
@@ -389,15 +414,27 @@ class ZarrIO:
 
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
         assert is_ndarray(array), f"Expected ndarray but got: {type(array)}"
+        print(array.shape)
         if array.size == 0:  # sometimes for geoinfo
             chunks = "auto"
         else:
-            chunks = (CHUNK_N_SAMPLES, *array.shape[1:])
-        _logger.debug(
+            chunks = (CHUNK_N_SAMPLES, *(max(x//4,1) for x in array.shape[1:]))
+        print(
             f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
-            + "into group: {group}."
+            + f"into group: {group}."
         )
-        group.create_array(name, data=array, chunks=chunks)
+        start_time = timeit.default_timer()
+        if SHARDING_ENABLED and chunks != "auto":
+            shards = (SHARD_N_SAMPLES, *(5*x for x in chunks[1:]))
+            group.create_array(name, data=array, chunks=chunks, shards =shards)
+            print(f"sharding enabled with shards: {shards} and chunks: {chunks}")
+        else:
+            group.create_array(name, data=array, chunks=chunks)
+            print(f"sharding disabled, writing with chunks: {chunks}")
+        elapsed = timeit.default_timer() - start_time
+        print(f"writing array: {name} took {elapsed:.2f}")
+        #print(z.info_complete())
+
 
     @functools.cached_property
     def forecast_offset(self) -> int:
