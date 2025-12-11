@@ -560,7 +560,7 @@ class Model(torch.nn.Module):
         output = self.predict(model_params, forecast_steps, tokens, sample, output)
 
         # TODO: set properly
-        output.latents = posteriors
+        output.latent = posteriors
 
         return output
 
