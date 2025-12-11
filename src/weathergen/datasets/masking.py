@@ -2,6 +2,7 @@ import logging
 
 import numpy as np
 import torch
+from numpy.typing import NDArray
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
@@ -21,7 +22,7 @@ class Masker:
     Attributes:
         masking_rate (float): The base rate at which tokens are masked.
         masking_strategy (str): The strategy used for masking (e.g., "random",
-        "block", "healpix", "channel").
+        "block", "healpix", "cropping_healpix", "channel").
         current_strategy (str): The current strategy in use, relevant
                                 when using "combination" strategy.
         "random" - random masking of tokens at the level of the data
@@ -33,6 +34,11 @@ class Masker:
                     e.g. masking_strategy_config = {"hl_mask": 1}
                     with hl_mask the level for masking that we want to apply
                     e.g. level 1 very large cells masked
+        "cropping_healpix" - spatial cropping that keeps spatially contiguous regions
+                    and masks everything else. Uses neighbor relationships or geodesic
+                    distance to ensure spatial contiguity. Perfect for DINO/JEPA/IBOT.
+                    e.g. masking_strategy_config = {"hl_mask": 0, "method": "geodesic_disk"}
+                    method: "disk" (neighbor growth), "random_walk", or "geodesic_disk" (circular)
         "channel" - masking data channels, where channels of the data are masked
                     can be done per-cell (each cell has different channels masked)
                     or globally (all have the same channels masked).
@@ -106,6 +112,171 @@ class Masker:
         Reset rng after mini_epoch to ensure proper randomization
         """
         self.rng = rng
+
+    def _select_spatially_contiguous_cells(
+        self,
+        healpix_level: int,
+        num_cells_to_select: int,
+        center_cell: int | None = None,
+        method: str = "disk",
+        overlap_with: NDArray | None = None,
+        overlap_ratio: float | None = None,
+    ) -> NDArray:
+        """
+        Select spatially contiguous cells on the sphere using neighbor relationships.
+
+        This is the core spatial selection helper used for both masking and cropping.
+
+        Args:
+            healpix_level: HEALPix level for selection
+            num_cells_to_select: Number of cells to select
+            center_cell: Starting cell (None = random, or optimized for overlap if specified)
+            method: Selection method:
+                - "disk": Layer-by-layer neighbor growth (compact regions)
+                - "random_walk": Random neighbor selection (irregular shapes)
+                - "geodesic_disk": Angular distance selection (circular regions, best for SSL)
+            overlap_with: Existing crop to control overlap with (for IBOT-style training)
+            overlap_ratio: Target overlap ratio [0.0-1.0] (requires overlap_with)
+                         0.0 = no overlap, 0.5 = 50% overlap, 1.0 = complete overlap
+
+        Returns:
+            Array of selected cell indices forming a spatially contiguous region
+
+        Examples:
+            # Independent crop
+            crop1 = _select_spatially_contiguous_cells(0, 9, method="geodesic_disk")
+
+            # Crop with 30% overlap (IBOT-style)
+            crop2 = _select_spatially_contiguous_cells(0, 9, method="geodesic_disk",
+                                                       overlap_with=crop1, overlap_ratio=0.3)
+        """
+        import warnings
+
+        import astropy_healpix as hp
+
+        num_total_cells = 12 * (4**healpix_level)
+        nside = 2**healpix_level
+
+        assert num_cells_to_select <= num_total_cells
+
+        # Optimize center for controlled overlap if requested
+        # NOTE: This is the programmatic API approach. The config system uses a more
+        # deterministic approach in _generate_cell_mask (see lines 752-803).
+        if overlap_with is not None and overlap_ratio is not None and center_cell is None:
+            assert 0.0 <= overlap_ratio <= 1.0, "overlap_ratio must be in [0.0, 1.0]"
+
+            overlap_set = set(overlap_with)
+
+            # Use intelligent center selection based on overlap target
+            if overlap_ratio > 0.7:
+                # High overlap: select center from within existing crop
+                center_cell = self.rng.choice(list(overlap_set))
+            elif overlap_ratio < 0.3:
+                # Low overlap: select center from outside existing crop
+                non_overlap_cells = [c for c in range(num_total_cells) if c not in overlap_set]
+                if non_overlap_cells:
+                    center_cell = self.rng.choice(non_overlap_cells)
+                else:
+                    # Fallback if no non-overlap cells available
+                    center_cell = self.rng.integers(0, num_total_cells)
+            else:
+                # Medium overlap: random selection (boundary-agnostic)
+                center_cell = self.rng.integers(0, num_total_cells)
+
+        # Random starting point if not specified
+        elif center_cell is None:
+            center_cell = self.rng.integers(0, num_total_cells)
+
+        if method == "disk":
+            # Layer-by-layer neighbor growth - creates compact irregular regions
+            selected = {center_cell}
+            frontier = {center_cell}
+
+            while len(selected) < num_cells_to_select and frontier:
+                # Expand frontier by one layer
+                next_frontier = set()
+                for cell in frontier:
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", message="invalid value encountered")
+                        neighbors = hp.neighbours(cell, nside, order="nested")
+                    valid_neighbors = [n for n in neighbors if n != -1 and n not in selected]
+                    next_frontier.update(valid_neighbors)
+
+                if not next_frontier:
+                    break
+
+                # Randomly select from frontier to reach target count
+                candidates = list(next_frontier)
+                self.rng.shuffle(candidates)
+                num_to_add = min(len(candidates), num_cells_to_select - len(selected))
+                selected.update(candidates[:num_to_add])
+                frontier = set(candidates[:num_to_add])
+
+        elif method == "random_walk":
+            # Random walk through neighbors - creates elongated irregular regions
+            selected = {center_cell}
+            frontier = {center_cell}
+
+            while len(selected) < num_cells_to_select:
+                # Get all neighbors of current frontier
+                neighbors = set()
+                for cell in frontier:
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", message="invalid value encountered")
+                        cell_neighbors = hp.neighbours(cell, nside, order="nested")
+                    valid = [n for n in cell_neighbors if n != -1 and n not in selected]
+                    neighbors.update(valid)
+
+                if not neighbors:
+                    break
+
+                # Randomly pick one neighbor and continue from there
+                next_cell = self.rng.choice(list(neighbors))
+                selected.add(next_cell)
+                frontier = {next_cell}
+
+        elif method == "geodesic_disk":
+            # Angular distance selection - creates most uniform circular regions
+            # Best method for SSL (DINO/JEPA/IBOT) due to shape regularity
+
+            def lonlat_to_xyz(lon, lat):
+                """Convert lon/lat to 3D cartesian coordinates."""
+                return np.array([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)])
+
+            # Get center coordinates
+            center_lonlat = hp.healpix_to_lonlat(center_cell, nside, order="nested")
+            center_lon = float(
+                center_lonlat[0].value if hasattr(center_lonlat[0], "value") else center_lonlat[0]
+            )
+            center_lat = float(
+                center_lonlat[1].value if hasattr(center_lonlat[1], "value") else center_lonlat[1]
+            )
+            center_xyz = lonlat_to_xyz(center_lon, center_lat)
+
+            # Get all cell coordinates
+            all_indices = np.arange(num_total_cells)
+            all_lonlat = hp.healpix_to_lonlat(all_indices, nside, order="nested")
+            all_lon = all_lonlat[0].value if hasattr(all_lonlat[0], "value") else all_lonlat[0]
+            all_lat = all_lonlat[1].value if hasattr(all_lonlat[1], "value") else all_lonlat[1]
+
+            all_xyz = np.stack(
+                [
+                    np.cos(all_lat) * np.cos(all_lon),
+                    np.cos(all_lat) * np.sin(all_lon),
+                    np.sin(all_lat),
+                ],
+                axis=1,
+            )
+
+            # Compute angular distances and select closest cells
+            dot_products = np.clip(np.dot(all_xyz, center_xyz), -1.0, 1.0)
+            angular_distances = np.arccos(dot_products)
+            selected = np.argsort(angular_distances)[:num_cells_to_select]
+
+        else:
+            raise ValueError(f"Unknown selection method: {method}")
+
+        return np.array(sorted(selected))
 
     # def set_batch_strategy(self):
     #     """
@@ -356,8 +527,9 @@ class Masker:
         # iterate over all target samples
         target_masks: list[np.typing.NDArray] = []
         target_metadata: list[SampleMetaData] = []
+        target_config_mapping = []  # Track which config each target mask came from
         # different strategies
-        for target_cfg in target_cfgs:
+        for i_target, target_cfg in enumerate(target_cfgs):
             # different samples/view per strategy
             for _ in range(target_cfg.get("num_samples", 1)):
                 target_mask, mask_params = self._get_mask(
@@ -368,19 +540,32 @@ class Masker:
                 )
                 target_masks += [target_mask]
                 target_metadata += [SampleMetaData(params={**target_cfg, **mask_params})]
+                target_config_mapping += [i_target]  # Track which config this mask came from
 
         # iterate over all source samples
         source_masks: list[np.typing.NDArray] = []
         source_metadata: list[SampleMetaData] = []
         source_target_mapping = []
+        source_config_mapping = []  # Track which config each source mask came from
         # different strategies
         for i_source, source_cfg in enumerate(source_cfgs):
             # samples per strategy
             for _ in range(source_cfg.get("num_samples", 1)):
+                # Prepare masking config - inject target mask if overlap_ratio is specified
+                masking_cfg = source_cfg.get("masking_strategy_config", {}).copy()
+                if "overlap_ratio" in masking_cfg and len(target_masks) > 0:
+                    # Enable overlap control by passing teacher's mask
+                    target_mask_for_overlap = target_masks[i_source % len(target_masks)]
+                    masking_cfg["overlap_with_mask"] = (
+                        target_mask_for_overlap.cpu().numpy()
+                        if hasattr(target_mask_for_overlap, "cpu")
+                        else target_mask_for_overlap
+                    )
+
                 source_mask, mask_params = self._get_mask(
                     num_cells=num_cells,
                     strategy=source_cfg.get("masking_strategy"),
-                    masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
+                    masking_strategy_config=masking_cfg,
                     target_mask=target_masks[i_source % len(target_masks)],
                     relationship=source_cfg.get("relationship", "independent"),
                 )
@@ -388,12 +573,15 @@ class Masker:
                 source_metadata += [SampleMetaData(params={**target_cfg, **mask_params})]
                 # TODO: proper correspondence between source and target
                 source_target_mapping += [i_source % len(target_masks)]
+                source_config_mapping += [i_source]  # Track which config this mask came from
 
         source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
+        source_config_mapping = np.array(source_config_mapping, dtype=np.int32)
+        target_config_mapping = np.array(target_config_mapping, dtype=np.int32)
 
         return (
-            (target_masks, target_metadata),
-            (source_masks, source_metadata),
+            (target_masks, target_metadata, target_config_mapping),
+            (source_masks, source_metadata, source_config_mapping),
             source_target_mapping,
         )
 
@@ -526,6 +714,116 @@ class Masker:
                 ).reshape(-1)
                 mask = np.zeros(num_cells, dtype=bool)
                 mask[child_indices] = True
+
+        elif strategy == "cropping_healpix":
+            # Spatial cropping: select contiguous region and KEEP it (mask rest)
+            # This is the elegant inverse of healpix masking
+            hl_data = self.healpix_level_data
+            hl_mask = cfg.get("hl_mask")
+            assert hl_mask is not None and hl_mask < hl_data, (
+                "For cropping_healpix, cfg['hl_mask'] must be set and < data level."
+            )
+            num_parent_cells = 12 * (4**hl_mask)
+            level_diff = hl_data - hl_mask
+            num_children_per_parent = 4**level_diff
+
+            # Number of parents to keep (spatially contiguous)
+            num_parents_to_keep = int(np.round(keep_rate * num_parent_cells))
+
+            if num_parents_to_keep == 0:
+                mask = np.zeros(num_cells, dtype=bool)
+            else:
+                # Spatial selection method
+                method = cfg.get("method", "geodesic_disk")  # Default to best method for SSL
+
+                # Deterministic overlap support (for IBOT-style training)
+                # overlap_with_mask: Teacher's crop mask at data level (hl=5)
+                # overlap_ratio: Target overlap as fraction of student crop [0.0-1.0]
+                overlap_with_mask = cfg.get("overlap_with_mask", None)
+                overlap_ratio = cfg.get("overlap_ratio", None)
+
+                # If overlap is requested but no mask provided, log a warning
+                if overlap_ratio is not None and overlap_with_mask is None:
+                    _logger.warning(
+                        "overlap_ratio specified but no overlap_with_mask provided. "
+                        "Overlap control requires reference mask from previous crop. "
+                        "Use programmatic API for controlled overlap."
+                    )
+
+                # NEW DETERMINISTIC APPROACH: Work at data level (hl=5) for exact overlap
+                if overlap_with_mask is not None and overlap_ratio is not None:
+                    assert 0.0 <= overlap_ratio <= 1.0, "overlap_ratio must be in [0.0, 1.0]"
+
+                    # Calculate total cells we want in student crop
+                    total_student_cells = num_parents_to_keep * num_children_per_parent
+
+                    # Get indices of teacher's cells (at data level)
+                    teacher_cell_indices = np.where(overlap_with_mask)[0]
+                    non_teacher_cell_indices = np.where(~overlap_with_mask)[0]
+
+                    # Deterministically select overlap cells from teacher
+                    num_overlap_cells = int(np.round(overlap_ratio * total_student_cells))
+                    num_overlap_cells = min(
+                        num_overlap_cells, len(teacher_cell_indices)
+                    )  # Can't exceed teacher size
+
+                    # Randomly select which teacher cells to use for overlap
+                    if num_overlap_cells > 0:
+                        overlap_cell_indices = self.rng.choice(
+                            teacher_cell_indices, size=num_overlap_cells, replace=False
+                        )
+                    else:
+                        overlap_cell_indices = np.array([], dtype=int)
+
+                    # Select remaining cells from outside teacher crop
+                    # Simplified: directly sample from non-teacher cells to guarantee correct count
+                    num_non_overlap_cells = total_student_cells - num_overlap_cells
+
+                    if num_non_overlap_cells > 0 and len(non_teacher_cell_indices) > 0:
+                        # Directly sample from non-teacher cells at data level
+                        # This ensures we get exactly the right number
+                        num_available = min(num_non_overlap_cells, len(non_teacher_cell_indices))
+                        non_overlap_child_indices = self.rng.choice(
+                            non_teacher_cell_indices, size=num_available, replace=False
+                        )
+                    else:
+                        non_overlap_child_indices = np.array([], dtype=int)
+
+                    # Combine overlap and non-overlap cells
+                    child_indices = np.concatenate(
+                        [overlap_cell_indices, non_overlap_child_indices]
+                    )
+
+                    # Create mask
+                    mask = np.zeros(num_cells, dtype=bool)
+                    mask[child_indices] = True
+
+                    _logger.info(
+                        f"Deterministic overlap: target={overlap_ratio:.1%}, "
+                        f"actual={len(overlap_cell_indices) / len(child_indices):.1%} "
+                        f"({len(overlap_cell_indices)}/{len(child_indices)} cells)"
+                    )
+
+                else:
+                    # No overlap control - use standard spatial selection
+                    parent_ids = self._select_spatially_contiguous_cells(
+                        healpix_level=hl_mask,
+                        num_cells_to_select=num_parents_to_keep,
+                        center_cell=None,
+                        method=method,
+                        overlap_with=None,
+                        overlap_ratio=None,
+                    )
+
+                    # Project to data level
+                    child_offsets = np.arange(num_children_per_parent)
+                    child_indices = (
+                        parent_ids[:, None] * num_children_per_parent + child_offsets
+                    ).reshape(-1)
+
+                    # Create mask: True = KEEP (the crop), False = MASK (everything else)
+                    mask = np.zeros(num_cells, dtype=bool)
+                    mask[child_indices] = True
 
         else:
             raise NotImplementedError(
