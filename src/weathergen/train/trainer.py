@@ -619,8 +619,8 @@ class Trainer(TrainerBase):
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
 
             self._log_terminal(bidx, mini_epoch, TRAIN)
-            # if bidx % self.train_log_freq.metrics == 0:
-            #     self._log(TRAIN)
+            if bidx % self.train_log_freq.metrics == 0:
+                self._log(TRAIN)
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:

@@ -22,6 +22,7 @@ import polars as pl
 from torch import Tensor
 
 import weathergen.common.config as config
+from weathergen.train.utils import flatten_dict
 from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 
 _weathergen_timestamp = "weathergen.timestamp"
@@ -100,8 +101,8 @@ class TrainLogger:
         samples: int,
         lr: float,
         avg_loss: list[float],
-        losses_all: dict[str, Tensor],
-        stddev_all: dict[str, Tensor],
+        losses_all: dict,
+        stddev_all: dict,
         perf_gpu: float = 0.0,
         perf_mem: float = 0.0,
     ) -> None:
@@ -119,17 +120,11 @@ class TrainLogger:
         log_vals += [np.nanmean(avg_loss)]
         log_vals += [lr]
 
-        stream_names = [st["name"] for st in self.cf.streams]
+        for key, value in flatten_dict(losses_all).items():
+            metrics[key] = np.nanmean(value)
 
-        for loss_name, loss_values in losses_all.items():
-            metrics[f"loss.{loss_name}.loss_avg"] = loss_values[:, :].nanmean().item()
-            st = self.cf.streams[stream_names.index(loss_name.split(".")[1])]
-            for k, ch_n in enumerate(st.train_target_channels):
-                metrics[f"loss.{loss_name}.{ch_n}"] = loss_values[:, k].nanmean().item()
-            log_vals += [loss_values[:, :].nanmean().item()]
-        for loss_name, stddev_values in stddev_all.items():
-            metrics[f"loss.{loss_name}.stddev_avg"] = stddev_values.nanmean().item()
-            log_vals += [stddev_values.nanmean().item()]
+        for key, value in flatten_dict(stddev_all).items():
+            metrics[key] = np.nanmean(value)
 
         with open(self.path_run / f"{self.cf.run_id}_train_log.txt", "ab") as f:
             np.savetxt(f, log_vals)
