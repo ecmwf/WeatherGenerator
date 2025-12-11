@@ -556,7 +556,6 @@ class Model(torch.nn.Module):
         preds_all = []
         latents = {"preds": []}
         for fstep in range(forecast_offset, forecast_steps):
-
             if self.training:
                 # Impute noise to the latent state
                 noise_std = self.cf.get("impute_latent_noise_std", 0.0)
@@ -568,7 +567,7 @@ class Model(torch.nn.Module):
 
             # Decode tokens into physical space
             output = self.predict(model_params, fstep, tokens, sample, output)
-        
+
         if len(preds_all) == 0:
             # Decode tokens when no forecasting is involved
             output = self.predict(model_params, forecast_steps, tokens, sample, output)
@@ -582,9 +581,9 @@ class Model(torch.nn.Module):
     def forecast(
         self,
         model_params: ModelParams,
-        tokens: torch.Tensor, 
-        fstep: int, 
-        meta_info: dict[str, SampleMetaData] = None
+        tokens: torch.Tensor,
+        fstep: int,
+        meta_info: dict[str, SampleMetaData] = None,
     ) -> torch.Tensor:
         """Advances latent space representation in time
 

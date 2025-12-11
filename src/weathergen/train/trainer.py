@@ -390,7 +390,7 @@ class Trainer(TrainerBase):
                         )
                     )
                 # targets, aux = zip(*target_aux_outputs)
-            
+
             loss, loss_values = self.loss_calculator.compute_loss(
                 preds=outputs[0],
                 targets=target_aux_outputs[0],

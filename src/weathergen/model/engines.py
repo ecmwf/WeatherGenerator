@@ -459,7 +459,7 @@ class ForecastingEngine(torch.nn.Module):
         tokens: torch.Tensor,
         fstep: int,
         meta_info: SampleMetaData = None,
-        noise_emb: torch.Tensor = None
+        noise_emb: torch.Tensor = None,
     ) -> torch.Tensor:
         # predict residual to last time step if requested
         forecast_residual = self.cf.get("forecast_residual", False)

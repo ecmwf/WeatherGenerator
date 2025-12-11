@@ -56,10 +56,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.p_std = self.cf.p_std
 
     def forward(
-        self,
-        tokens: torch.Tensor,
-        fstep: int,
-        meta_info: dict[str, SampleMetaData]
+        self, tokens: torch.Tensor, fstep: int, meta_info: dict[str, SampleMetaData]
     ) -> torch.Tensor:
         """
         Model forward call during training. Unpacks the conditioning c = [x_{t-k}, ..., x_{t}], the

@@ -13,7 +13,9 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         self.encoder = model.encoder
 
     def compute(self, sample: Sample, model_params: ModelParams, **kwargs) -> tuple[Any, Any]:
-        noise_level_rn = sample.meta_info["ERA5"].params["noise_level_rn"]  # TODO: adjust for multiple streams
+        noise_level_rn = sample.meta_info["ERA5"].params[
+            "noise_level_rn"
+        ]  # TODO: adjust for multiple streams
         with torch.no_grad():
             tokens, posteriors = self.encoder(model_params=model_params, sample=sample)
         return TargetAuxOutput(
