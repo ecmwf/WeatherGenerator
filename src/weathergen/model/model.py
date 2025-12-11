@@ -618,7 +618,6 @@ class Model(torch.nn.Module):
         tokens_stream = tokens_stream[model_params.hp_nbours.flatten()].flatten(0, 1)
 
         # pair with tokens from assimilation engine to obtain target tokens
-        preds_tokens = {}
         for stream_name in self.stream_names:
             tte = self.target_token_engines[stream_name]
             tte_kv = self.pred_adapter_kv[stream_name]
@@ -644,46 +643,44 @@ class Model(torch.nn.Module):
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
-                nn = stream_name
-                if is_root():
-                    logger.warning(
-                        (
-                            f"Skipping prediction for {nn} because",
-                            f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
-                        )
+                logger.warning(
+                    (
+                        f"Skipping prediction for {stream_name} because",
+                        f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
                     )
-                preds_tokens += [torch.tensor([], device=tc_tokens.device)]
-                continue
+                )
+                pred = torch.tensor([], device=tc_tokens.device)
 
             # skip empty lengths
-            if tc_tokens.shape[0] == 0:
-                preds_tokens += [torch.tensor([], device=tc_tokens.device)]
-                continue
+            elif tc_tokens.shape[0] == 0:
+                pred = torch.tensor([], device=tc_tokens.device)
 
-            # TODO: how to support tte_kv efficiently,
-            #  generate 1-ring neighborhoods here or on a per stream basis
-            assert isinstance(tte_kv, torch.nn.Identity)
+            else:
+                # TODO: how to support tte_kv efficiently,
+                #  generate 1-ring neighborhoods here or on a per stream basis
+                assert isinstance(tte_kv, torch.nn.Identity)
 
-            # lens for varlen attention
-            tcs_lens = target_coords_idxs[stream_name][fstep]
-            # coord information for learnable layer norm
-            tcs_aux = torch.cat(
-                [
-                    streams_data[i_b][stream_name].target_coords[fstep]
-                    for i_b in range(len(streams_data))
-                ]
-            )
+                # lens for varlen attention
+                tcs_lens = target_coords_idxs[stream_name][fstep]
+                # coord information for learnable layer norm
+                tcs_aux = torch.cat(
+                    [
+                        streams_data[i_b][stream_name].target_coords[fstep]
+                        for i_b in range(len(streams_data))
+                    ]
+                )
 
-            tc_tokens = tte(
-                latent=tokens_stream,
-                output=tc_tokens,
-                latent_lens=model_params.tokens_lens,
-                output_lens=tcs_lens,
-                coordinates=tcs_aux,
-            )
+                tc_tokens = tte(
+                    latent=tokens_stream,
+                    output=tc_tokens,
+                    latent_lens=model_params.tokens_lens,
+                    output_lens=tcs_lens,
+                    coordinates=tcs_aux,
+                )
 
-            # final prediction head to map back to physical space
-            pred = checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
+                # final prediction head to map back to physical space
+                pred = checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
+
             output.add_physical_prediction(fstep, stream_name, pred)
 
         return output
