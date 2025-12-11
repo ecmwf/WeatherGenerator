@@ -9,7 +9,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import dataclasses
 import logging
 import math
 import warnings
@@ -38,15 +37,42 @@ from weathergen.utils.utils import get_dtype
 
 logger = logging.getLogger(__name__)
 
+type StreamName = str
 
-@dataclasses.dataclass
+
 class ModelOutput:
     """
-    A dataclass to encapsulate the model output and give a clear API.
+    Representation of model output
     """
 
-    physical: dict[str, torch.Tensor]
-    latent: dict[str, torch.Tensor]
+    physical: list[dict[StreamName, torch.Tensor]]
+    latent: list[dict[StreamName, torch.Tensor]]
+
+    def __init__(self, forecast_steps: int) -> None:
+        self.physical = [{} for _ in range(forecast_steps)]
+        self.latent = [{} for _ in range(forecast_steps)]
+
+    def add_physical_prediction(
+        self, fstep: int, stream_name: StreamName, pred: torch.Tensor
+    ) -> None:
+        self.physical[fstep][stream_name] = pred
+
+    def add_latent_prediction(
+        self, fstep: int, stream_name: StreamName, pred: torch.Tensor
+    ) -> None:
+        self.latent[fstep][stream_name] = pred
+
+    def get_physical_prediction(self, fstep: int, stream_name: StreamName | None = None):
+        pred = self.physical[fstep]
+        if stream_name is not None:
+            pred = pred.get(stream_name, None)
+        return pred
+
+    def get_latent_prediction(self, fstep: int, stream_name: StreamName | None = None):
+        pred = self.latent[fstep]
+        if stream_name is not None:
+            pred = pred.get(stream_name, None)
+        return pred
 
 
 class ModelParams(torch.nn.Module):
@@ -501,51 +527,7 @@ class Model(torch.nn.Module):
         print("-----------------")
 
     #########################################
-    def rename_old_state_dict(self, params: dict) -> dict:
-        """Checks if model from checkpoint is from the old model version and if so renames
-        the parameters accordingly to the new model version.
-
-        Args:
-            params : Dictionary with (old) model parameters from checkpoint
-        Returns:
-            new_params : Dictionary with (renamed) model parameters
-        """
-        params_cleanup = {
-            # EmbeddingEngine
-            "embeds": "encoder.embed_engine.embeds",
-            # LocalAssimilationEngine
-            "ae_local_blocks": "encoder.ae_local_engine.ae_local_blocks",
-            # Local2GlobalAssimilationEngine
-            "ae_adapter": "encoder.ae_local_global_engine.ae_adapter",
-            # GlobalAssimilationEngine
-            "ae_global_blocks": "encoder.ae_global_engine.ae_global_blocks",
-            # ForecastingEngine
-            "fe_blocks": "forecast_engine.fe_blocks",
-        }
-
-        new_params = {}
-
-        for k, v in params.items():
-            new_k = k
-            prefix = ""
-
-            # Strip "module." (prefix for DataParallel or DistributedDataParallel)
-            if new_k.startswith("module."):
-                prefix = "module."
-                new_k = new_k[len(prefix) :]
-
-            first_w, rest = new_k.split(".", 1) if "." in new_k else (new_k, "")
-            # Only check first word (root level modules) to avoid false matches.
-            if first_w in params_cleanup:
-                new_k = params_cleanup[first_w] + "." + rest
-
-            new_k = prefix + new_k
-            new_params[new_k] = v
-
-        return new_params
-
-    #########################################
-    def forward(self, model_params: ModelParams, sample: Sample, forecast_offset: int, forecast_steps: int):
+    def forward(self, model_params: ModelParams, sample, forecast_offset: int, forecast_steps: int):
         """Forward pass of the model
 
         Tokens are processed through the model components, which were defined in the create method.
@@ -562,6 +544,8 @@ class Model(torch.nn.Module):
         Returns:
             A list containing all prediction results
         """
+
+        output = ModelOutput(forecast_steps + 1)
 
         tokens, posteriors = self.encoder(model_params, sample)
 
@@ -583,29 +567,16 @@ class Model(torch.nn.Module):
             latents["preds"] += [tokens]
 
             # Decode tokens into physical space
-            preds_all += [
-                self.predict(
-                    model_params,
-                    fstep,
-                    tokens,
-                    sample,
-                )
-            ]
+            output = self.predict(model_params, fstep, tokens, sample, output)
         
         if len(preds_all) == 0:
             # Decode tokens when no forecasting is involved
-            preds_all += [
-                self.predict(
-                    model_params,
-                    forecast_steps,
-                    tokens,
-                    sample,
-                )
-            ]
+            output = self.predict(model_params, forecast_steps, tokens, sample, output)
 
-        latents["posteriors"] = posteriors
+        output.latent = latents
+        output.posteriors = posteriors
 
-        return ModelOutput(physical=preds_all, latent=latents)
+        return output
 
     #########################################
     def forecast(
@@ -638,7 +609,8 @@ class Model(torch.nn.Module):
         model_params: ModelParams,
         fstep: int,
         tokens: torch.Tensor,
-        sample,
+        sample: Sample,
+        output: ModelOutput,
     ) -> list[torch.Tensor]:
         """Predict outputs at the specific target coordinates based on the input weather state and
         pre-training task and projects the latent space representation back to physical space.
@@ -732,8 +704,7 @@ class Model(torch.nn.Module):
             )
 
             # final prediction head to map back to physical space
-            preds_tokens += [
-                checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
-            ]
+            pred = checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
+            output.add_physical_prediction(fstep, stream_name, pred)
 
-        return preds_tokens
+        return output

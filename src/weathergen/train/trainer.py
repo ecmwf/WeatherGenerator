@@ -10,13 +10,10 @@
 # nor does it submit to any jurisdiction.
 import logging
 import time
-from typing import Any
 
 import numpy as np
-import omegaconf
 import torch
 import tqdm
-from numpy.typing import NDArray
 from omegaconf import OmegaConf
 from torch import Tensor
 
@@ -37,6 +34,7 @@ from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
 from weathergen.utils.utils import get_batch_size, get_dtype
+from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
 
@@ -351,163 +349,9 @@ class Trainer(TrainerBase):
         # log final model
         self.save_model(cf.num_mini_epochs)
 
-    ###########################################
-    def _prepare_logging(
-        self,
-        preds: list[list[Tensor]],
-        forecast_offset: int,
-        forecast_steps: int,
-        streams_data: list[list[Any]],
-    ):
-        """Collects and denormalizes prediction and target data for logging.
-
-        This function processes target and prediction tensors, extracts relevant
-        coordinates and timestamps, denormalizes the data, and organizes it
-        into a structured format suitable for logging or further analysis. It
-        handles potential empty tensors and NaN values.
-
-        Args:
-            preds: A list of lists, where the outer list
-                corresponds to forecast steps, and the inner list contains prediction
-                tensors for each observation stream. Each prediction tensor is
-                expected to be in the normalized latent or observation space,
-                depending on the model's output.
-            targets: A list of lists, where the outer list
-                corresponds to forecast steps, and the inner list contains target
-                tensors for each observation stream. Each target tensor is expected
-                to be in the normalized observation space.
-            forecast_offset: The starting offset for the forecast steps
-                relative to the original data.
-            forecast_steps: The number of forecast steps to consider.
-            streams_data: A list of lists, where each inner list
-                contains data objects (e.g., `BatchItem` instances) for each stream
-                at a specific time step. These objects are expected to have
-                `target_coords_raw` and `target_times_raw` attributes.
-
-        Returns:
-            tuple: A tuple containing:
-                - preds_all: Denormalized
-                predictions, organized by forecast step and observation stream.
-                - targets_all: Denormalized
-                targets, organized by forecast step and observation stream.
-                - targets_coords_raw: Raw target coordinates,
-                extracted and concatenated for each forecast step and stream.
-                - targets_times_raw: Raw target timestamps,
-                extracted and concatenated for each forecast step and stream.
-                - targets_lens: A list of lists, where each
-                inner list contains the original lengths (shape[0]) of the target
-                tensors before any filtering.
-        """
-
-        # handle case when forecast_steps is a list
-        if type(forecast_steps) is omegaconf.listconfig.ListConfig:
-            forecast_range = np.array(forecast_steps)
-        else:
-            forecast_range = np.arange(forecast_offset, forecast_offset + forecast_steps + 1)
-
-        #'''
-        # TODO: Remove this function and port functionality to write_validation(), which then
-        # extracts preds_all, targets_all,... itself directly from stream_data.
-        # TODO: Undo list resorting
-        # The following list operations realize a reshaping of the original tensors in streams_data
-        # from shape [batch_sample][stream][fstep] into shape [fstep][stream][batch_sample]. When
-        # removing the reshaping, make sure to index the tensors starting at forecast_offset, e.g.,
-        # target_times_raw = streams_data[i_batch][i_strm].target_times_raw[forecast_offset+fstep],
-        # when iterating over batch, stream, and fsteps.
-        targets_rt = [
-            [
-                torch.cat([t[i].target_tokens[fstep] for t in streams_data])
-                for i in range(len(self.cf.streams))
-            ]
-            for fstep in forecast_range
-        ]
-        # TODO: Undo list resorting
-        targets_coords_raw = [
-            [
-                torch.cat([t[i].target_coords_raw[fstep] for t in streams_data])
-                for i in range(len(self.cf.streams))
-            ]
-            for fstep in forecast_range
-        ]
-        # TODO: Undo list resorting
-        targets_times_raw = [
-            [
-                np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
-                for i in range(len(self.cf.streams))
-            ]
-            for fstep in forecast_range
-        ]
-        # inverse indices
-        idxs_inv_rt = [
-            [
-                torch.cat([t[i].idxs_inv[fstep] for t in streams_data])
-                for i in range(len(self.cf.streams))
-            ]
-            for fstep in range(forecast_offset, forecast_offset + forecast_steps + 1)
-        ]
-
-        # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
-        fsteps = len(targets_rt)
-        preds_all: list[list[list[NDArray]]] = [
-            [[] for _ in self.cf.streams] for _ in range(fsteps)
-        ]
-        targets_all: list[list[list[NDArray]]] = [
-            [[] for _ in self.cf.streams] for _ in range(fsteps)
-        ]
-        targets_lens: list[list[list[int]]] = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
-
-        # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
-        for fstep in range(len(targets_rt)):
-            if len(preds.physical[fstep]) == 0:
-                continue
-
-            for i_strm, target in enumerate(targets_rt[fstep]):
-                pred = preds.physical[fstep][i_strm]
-                idxs_inv = idxs_inv_rt[fstep][i_strm]
-
-                if not (target.shape[0] > 0 and pred.shape[0] > 0):
-                    continue
-
-                # extract data/coords and remove token dimension if it exists
-                pred = pred.reshape([pred.shape[0], *target.shape])
-                assert pred.shape[1] > 0
-
-                mask_nan = ~torch.isnan(target)
-                if pred[:, mask_nan].shape[1] == 0:
-                    continue
-
-                targets_lens[fstep][i_strm] += [target.shape[0]]
-                dn_data = self.dataset_val.denormalize_target_channels
-
-                # reorder so that output order of target points matches input when reading
-                # (tokenization and masking changes this order)
-                # TODO: does this work with batch_size > 1
-                if len(idxs_inv) > 0:
-                    pred = pred[:, idxs_inv]
-                    target = target[idxs_inv]
-                    targets_coords_raw[fstep][i_strm] = targets_coords_raw[fstep][i_strm][idxs_inv]
-                    targets_times_raw[fstep][i_strm] = targets_times_raw[fstep][i_strm][idxs_inv]
-
-                f32 = torch.float32
-                preds_all[fstep][i_strm] += [
-                    np.asarray(dn_data(i_strm, pred.to(f32)).detach().cpu())
-                ]
-                targets_all[fstep][i_strm] += [
-                    np.asarray(dn_data(i_strm, target.to(f32)).detach().cpu())
-                ]
-
-        return (
-            preds_all,
-            targets_all,
-            targets_coords_raw,
-            targets_times_raw,
-            targets_lens,
-        )
-
     def train(self, mini_epoch):
         cf = self.cf
         self.model.train()
-        # torch.autograd.set_detect_anomaly(True)
 
         dataset_iter = iter(self.data_loader)
 
@@ -534,9 +378,9 @@ class Trainer(TrainerBase):
                         )
                     )
 
-                targets_and_auxs = []
+                target_aux_outputs = []
                 for sample in batch.target_samples:
-                    targets_and_auxs.append(
+                    target_aux_outputs.append(
                         self.target_and_aux_calculator.compute(
                             sample=sample,
                             model_params=self.model_params,
@@ -545,11 +389,11 @@ class Trainer(TrainerBase):
                             forecast_steps=sample.get_forecast_steps(),
                         )
                     )
-                # targets, aux = zip(*targets_and_auxs)
+                # targets, aux = zip(*target_aux_outputs)
             
             loss, loss_values = self.loss_calculator.compute_loss(
                 preds=outputs[0],
-                targets=targets_and_auxs[0],
+                targets=target_aux_outputs[0],
                 # TOOD: view_metadata has to be part of targets and/or preds
                 # view_metadata=(batch[-1].source2target_matching_idxs,
                 #                 [sample.meta_info for sample in batch[-1].source_samples],
@@ -590,7 +434,6 @@ class Trainer(TrainerBase):
             # optimizer step
             self.grad_scaler.step(self.optimizer)
             self.grad_scaler.update()
-            # self.optimizer.step()
 
             self.target_and_aux_calculator.update_state_post_opt_step(bidx, batch, self.model)
 
@@ -677,7 +520,6 @@ class Trainer(TrainerBase):
                     batch.to_device(self.device)
 
                     # evaluate model
-                    forecast_steps = batch[0][-1]
                     with torch.autocast(
                         device_type=f"cuda:{cf.local_rank}",
                         dtype=self.mixed_precision_dtype,
@@ -697,13 +539,6 @@ class Trainer(TrainerBase):
                         )
                         sample = batch.target_samples[0]
                         target_aux_output = self.target_and_aux_calculator.compute(
-                            sample,
-                            self.model_params,
-                            self.model,
-                            cf.forecast_offset,
-                            sample.get_forecast_steps(),
-                        )
-                        target_aux_output = self.target_and_aux_calculator.compute(
                             sample=sample,
                             model_params=self.model_params,
                             model=self.model,
@@ -711,47 +546,16 @@ class Trainer(TrainerBase):
                             forecast_step=sample.get_forecast_steps(),
                         )
                     loss, loss_values = self.loss_calculator_val.compute_loss(
-                        preds=outputs[0],
-                        targets=targets_and_auxs[0],
+                        preds=output,
+                        targets=target_aux_output,
                     )
 
                     # log output
                     if bidx < cf.log_validation:
-                        logger.warning("logging of data currently not implemented")
-                    # # TODO: Move _prepare_logging into write_validation by passing streams_data
-                    # # TODO right now we hardcode ERA5 which obviously is bad, but not sure
-                    # # how this logging function is supposed to change
-                    # streams_data: list[list[StreamData]] = old_batch[0]
-                    # import pdb
-
-                    # pdb.set_trace()
-                    # (
-                    #     preds_all,
-                    #     targets_all,
-                    #     targets_coords_all,
-                    #     targets_times_all,
-                    #     targets_lens,
-                    # ) = self._prepare_logging(
-                    #     preds=output,
-                    #     forecast_offset=cf.forecast_offset,
-                    #     forecast_steps=cf.forecast_steps,
-                    #     streams_data=streams_data,
-                    # )
-                    # sources = [[item.source_raw for item in stream] for stream in streams_data]
-                    # # sample idx should be the same across streams => select first
-                    # sample_idxs = [item.sample_idx for item in streams_data[0]]
-                    # write_output(
-                    #     self.cf,
-                    #     mini_epoch,
-                    #     bidx,
-                    #     sources[0],
-                    #     preds_all,
-                    #     targets_all,
-                    #     targets_coords_all,
-                    #     targets_times_all,
-                    #     targets_lens,
-                    #     sample_idxs,
-                    # )
+                        dn_data = self.dataset_val.denormalize_target_channels
+                        write_output(
+                            self.cf, mini_epoch, bidx, dn_data, batch, output, target_aux_output
+                        )
 
                     # Collecting loss statistics for later inspection
                     if bidx == 0:

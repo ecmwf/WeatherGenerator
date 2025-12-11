@@ -1,5 +1,5 @@
-# streams_directory: "./config/streams/era5_1deg/"
-streams_directory: "./config/streams/era5_nppatms_synop/"
+streams_directory: "./config/streams/era5_1deg/"
+# streams_directory: "./config/streams/era5_nppatms_synop/"
 
 embed_orientation: "channels"
 embed_unembed_mode: "block"

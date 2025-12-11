@@ -9,6 +9,22 @@ from weathergen.datasets.batch import SampleMetaData
 _logger = logging.getLogger(__name__)
 
 
+class MaskData:
+    masks: list[np.typing.NDArray] = []
+    metadata: list[SampleMetaData] = []
+
+    def __init__(self):
+        self.masks = []
+        self.metadata = []
+
+    def __len__(self):
+        return len(self.masks)
+
+    def add_mask(self, mask, params, cfg):
+        self.masks += [mask]
+        self.metadata += [SampleMetaData(params={**cfg, **params})]
+
+
 # Convert to torch.bool
 def to_bool_tensor(arr):
     return torch.from_numpy(np.asarray(arr)).to(torch.bool)
@@ -354,8 +370,7 @@ class Masker:
             target_cfgs = source_cfgs
 
         # iterate over all target samples
-        target_masks: list[np.typing.NDArray] = []
-        target_metadata: list[SampleMetaData] = []
+        target_masks = MaskData()
         # different strategies
         for target_cfg in target_cfgs:
             # different samples/view per strategy
@@ -366,12 +381,10 @@ class Masker:
                     target_mask=None,
                     masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
                 )
-                target_masks += [target_mask]
-                target_metadata += [SampleMetaData(params={**target_cfg, **mask_params})]
+                target_masks.add_mask(target_mask, mask_params, target_cfg)
 
         # iterate over all source samples
-        source_masks: list[np.typing.NDArray] = []
-        source_metadata: list[SampleMetaData] = []
+        source_masks = MaskData()
         source_target_mapping = []
         # different strategies
         for i_source, source_cfg in enumerate(source_cfgs):
@@ -381,21 +394,16 @@ class Masker:
                     num_cells=num_cells,
                     strategy=source_cfg.get("masking_strategy"),
                     masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
-                    target_mask=target_masks[i_source % len(target_masks)],
+                    target_mask=target_masks.masks[i_source % len(target_masks)],
                     relationship=source_cfg.get("relationship", "independent"),
                 )
-                source_masks += [source_mask]
-                source_metadata += [SampleMetaData(params={**target_cfg, **mask_params})]
+                source_masks.add_mask(source_mask, mask_params, source_cfg)
                 # TODO: proper correspondence between source and target
                 source_target_mapping += [i_source % len(target_masks)]
 
         source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
 
-        return (
-            (target_masks, target_metadata),
-            (source_masks, source_metadata),
-            source_target_mapping,
-        )
+        return (target_masks, source_masks, source_target_mapping)
 
     def _get_mask(
         self,
