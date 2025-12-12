@@ -189,6 +189,20 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len // cf.world_size) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)
+
+        forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
+        perms_len = int(index_range.end - index_range.start) - (forecast_len + self.forecast_offset)
+        n_duplicates = self.len - perms_len
+        if n_duplicates > 0:
+            # TODO fix this more permanently (#1085)
+            msg = (
+                "WARNING: Missmatch between length of permutation indexes and"
+                "length of MultiStreamDataSampler,"
+                f"{n_duplicates} duplicate samples will be sampled."
+                "To avoid this increase the the length of the"
+                f"global sampling window by {n_duplicates * cf.step_hrs} hours."
+            )
+            logger.warning(msg)
         logger.info(f"index_range={index_range}, len={self.len}, len_chunk={len_chunk}")
 
         self.rank = cf.rank

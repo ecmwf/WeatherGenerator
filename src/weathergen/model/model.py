@@ -27,6 +27,7 @@ from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     EnsPredictionHead,
     ForecastingEngine,
+    LatentState,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
@@ -46,21 +47,19 @@ class ModelOutput:
     """
 
     physical: list[dict[StreamName, torch.Tensor]]
-    latent: list[dict[StreamName, torch.Tensor]]
+    latent: list[torch.Tensor]
 
     def __init__(self, forecast_steps: int) -> None:
         self.physical = [{} for _ in range(forecast_steps)]
-        self.latent = [{} for _ in range(forecast_steps)]
+        self.latent = [None for _ in range(forecast_steps)]
 
     def add_physical_prediction(
         self, fstep: int, stream_name: StreamName, pred: torch.Tensor
     ) -> None:
         self.physical[fstep][stream_name] = pred
 
-    def add_latent_prediction(
-        self, fstep: int, stream_name: StreamName, pred: torch.Tensor
-    ) -> None:
-        self.latent[fstep][stream_name] = pred
+    def add_latent_prediction(self, fstep: int, pred: torch.Tensor) -> None:
+        self.latent[fstep] = pred
 
     def get_physical_prediction(self, fstep: int, stream_name: StreamName | None = None):
         pred = self.physical[fstep]
@@ -68,11 +67,8 @@ class ModelOutput:
             pred = pred.get(stream_name, None)
         return pred
 
-    def get_latent_prediction(self, fstep: int, stream_name: StreamName | None = None):
-        pred = self.latent[fstep]
-        if stream_name is not None:
-            pred = pred.get(stream_name, None)
-        return pred
+    def get_latent_prediction(self, fstep: int):
+        return self.latent[fstep]
 
 
 class ModelParams(torch.nn.Module):
@@ -299,6 +295,9 @@ class Model(torch.nn.Module):
         self.q_cells: torch.Tensor | None = None
         self.stream_names: list[str] = None
         self.target_token_engines = None
+
+        assert cf.forecast_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
+        self.num_register_tokens = cf.num_register_tokens
 
     #########################################
     def create(self) -> "Model":
@@ -545,35 +544,50 @@ class Model(torch.nn.Module):
             A list containing all prediction results
         """
 
-        output = ModelOutput(forecast_steps + 1)
+        output = ModelOutput(forecast_steps + 1)  # Why +1?
 
         tokens, posteriors = self.encoder(model_params, sample)
 
         # collapse along input step dimension
         tokens = torch.stack(tokens, 0).sum(0)
 
-        # roll-out in latent space
-        preds_all = []
-        latents = {"preds": []}
+        # latents for output (forecast mode not working when adding latents for fstep 0 to output)
+        # latent_state = LatentState(
+        #     register_tokens=tokens[:, : self.num_register_tokens].clone(),
+        #     latent_tokens=tokens[:, self.num_register_tokens :].clone(),
+        # )
+        # output.add_latent_prediction(0, {"posteriors": posteriors, "latent_state": latent_state})
+
+        # Decode tokens into physical space
+        tokens_latent = tokens[:, self.num_register_tokens :]
+        pred = self.predict(model_params, 0, tokens_latent, sample, output)
+        # TODO: adjust to multiple streams
+        for stream_name in ["ERA5"]:
+            output.add_physical_prediction(fstep=0, stream_name=stream_name, pred=pred)
+
+        # forecasting: roll-out in latent space
         for fstep in range(forecast_offset, forecast_steps):
+
             if self.training:
                 # Impute noise to the latent state
                 noise_std = self.cf.get("impute_latent_noise_std", 0.0)
                 if noise_std > 0.0:
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
+            # Rollout step in latent space
             tokens = self.forecast(model_params, tokens, fstep, meta_info=sample.meta_info)
-            latents["preds"] += [tokens]
+            latent_state = LatentState(
+                register_tokens=tokens[:, : self.num_register_tokens].clone(),
+                latent_tokens=tokens[:, self.num_register_tokens :].clone(),
+            )
+            output.add_latent_prediction(fstep, {"latent_state": latent_state})
 
             # Decode tokens into physical space
-            output = self.predict(model_params, fstep, tokens, sample, output)
-
-        if len(preds_all) == 0:
-            # Decode tokens when no forecasting is involved
-            output = self.predict(model_params, forecast_steps, tokens, sample, output)
-
-        output.latent = latents
-        output.posteriors = posteriors
+            tokens_latent = tokens[:, self.num_register_tokens :]
+            pred = self.predict(model_params, fstep, tokens_latent, sample, output)
+            # TODO: adjust to multiple streams
+            for stream_name in ["ERA5"]:
+                output.add_physical_prediction(fstep, stream_name, pred)
 
         return output
 
@@ -638,7 +652,6 @@ class Model(torch.nn.Module):
         tokens_stream = tokens_stream[model_params.hp_nbours.flatten()].flatten(0, 1)
 
         # pair with tokens from assimilation engine to obtain target tokens
-        preds_tokens = []
         for stream_name in self.stream_names:
             tte = self.target_token_engines[stream_name]
             tte_kv = self.pred_adapter_kv[stream_name]
@@ -664,46 +677,44 @@ class Model(torch.nn.Module):
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
-                nn = stream_name
-                if is_root():
-                    logger.warning(
-                        (
-                            f"Skipping prediction for {nn} because",
-                            f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
-                        )
+                logger.warning(
+                    (
+                        f"Skipping prediction for {stream_name} because",
+                        f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
                     )
-                preds_tokens += [torch.tensor([], device=tc_tokens.device)]
-                continue
+                )
+                pred = torch.tensor([], device=tc_tokens.device)
 
             # skip empty lengths
-            if tc_tokens.shape[0] == 0:
-                preds_tokens += [torch.tensor([], device=tc_tokens.device)]
-                continue
+            elif tc_tokens.shape[0] == 0:
+                pred = torch.tensor([], device=tc_tokens.device)
 
-            # TODO: how to support tte_kv efficiently,
-            #  generate 1-ring neighborhoods here or on a per stream basis
-            assert isinstance(tte_kv, torch.nn.Identity)
+            else:
+                # TODO: how to support tte_kv efficiently,
+                #  generate 1-ring neighborhoods here or on a per stream basis
+                assert isinstance(tte_kv, torch.nn.Identity)
 
-            # lens for varlen attention
-            tcs_lens = target_coords_idxs[stream_name][fstep]
-            # coord information for learnable layer norm
-            tcs_aux = torch.cat(
-                [
-                    streams_data[i_b][stream_name].target_coords[fstep]
-                    for i_b in range(len(streams_data))
-                ]
-            )
+                # lens for varlen attention
+                tcs_lens = target_coords_idxs[stream_name][fstep]
+                # coord information for learnable layer norm
+                tcs_aux = torch.cat(
+                    [
+                        streams_data[i_b][stream_name].target_coords[fstep]
+                        for i_b in range(len(streams_data))
+                    ]
+                )
 
-            tc_tokens = tte(
-                latent=tokens_stream,
-                output=tc_tokens,
-                latent_lens=model_params.tokens_lens,
-                output_lens=tcs_lens,
-                coordinates=tcs_aux,
-            )
+                tc_tokens = tte(
+                    latent=tokens_stream,
+                    output=tc_tokens,
+                    latent_lens=model_params.tokens_lens,
+                    output_lens=tcs_lens,
+                    coordinates=tcs_aux,
+                )
 
-            # final prediction head to map back to physical space
-            pred = checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
+                # final prediction head to map back to physical space
+                pred = checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
+
             output.add_physical_prediction(fstep, stream_name, pred)
 
         return output
