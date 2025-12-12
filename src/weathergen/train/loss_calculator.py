@@ -121,9 +121,7 @@ class LossCalculator:
             stddev_all[calculator.name] = loss_values.stddev_all
 
         # Keep histories for logging
-        self.loss_hist += [
-            loss.detach()
-        ]  # NOTE: It was loss_values.loss.item() but what does item() do in multi-gpu case?
+        self.loss_hist += [loss.detach()]
         self.losses_unweighted_hist += [losses_all]
         self.stddev_unweighted_hist += [stddev_all]
 
