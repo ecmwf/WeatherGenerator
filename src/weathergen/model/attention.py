@@ -14,7 +14,7 @@ from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
-from weathergen.model.positional_encoding import apply_rotary_pos_emb_2d
+from weathergen.model.positional_encoding import rotary_pos_emb_2d
 
 
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
@@ -255,7 +255,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         vs = self.proj_heads_v(x).reshape(s).permute([0, 2, 1, 3])
 
         if coords is not None:
-            qs, ks = apply_rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=1)
+            qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=1)
 
         outs = self.flex_attention(qs, ks, vs, block_mask=self.block_mask).transpose(1, 2)
 

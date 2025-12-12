@@ -84,9 +84,9 @@ class ModelParams(torch.nn.Module):
         )
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
-        ### ROPE COORDS (for 2D RoPE when use_2D_rope=True) ###
-        self.use_2D_rope = cf.use_2D_rope
-        if self.use_2D_rope:
+        ### ROPE COORDS ###
+        self.rope_2D = cf.get("rope_2D", False)
+        if self.rope_2D:
             self.rope_coords = torch.nn.Parameter(
                 torch.zeros(
                     bs,
@@ -168,7 +168,7 @@ class ModelParams(torch.nn.Module):
 
         dim_embed = cf.ae_global_dim_embed
 
-        if self.use_2D_rope:
+        if self.rope_2D:
             # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
             # Shape: (num_healpix_cells, ae_local_num_queries, 2)
             verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
@@ -680,8 +680,7 @@ class Model(torch.nn.Module):
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
             # Apply 2D RoPE coords only on the first forecast step
-            is_first_forecast = fstep == forecast_offset
-            tokens = self.forecast(model_params, tokens, fstep, apply_rope=is_first_forecast)
+            tokens = self.forecast(model_params, tokens, fstep, apply_rope = fstep == forecast_offset)
 
         # prediction for final step
         preds_all += [
@@ -878,7 +877,7 @@ class Model(torch.nn.Module):
             ValueError: For unexpected arguments in checkpoint method
         """
 
-        if apply_rope and model_params.use_2D_rope:
+        if apply_rope and model_params.rope_2D:
             tokens = self.forecast_engine(tokens, fstep, coords=model_params.rope_coords)
         else:
             tokens = self.forecast_engine(tokens, fstep, coords=None)
