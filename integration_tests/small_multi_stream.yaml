@@ -6,10 +6,9 @@ loss_fcts_val: [["mse", 1.0]]
 num_mini_epochs: 1
 samples_per_mini_epoch: 16
 samples_per_validation: 4
-lr_steps: 4
 lr_steps_warmup: 2
 lr_steps_cooldown: 2
-loader_num_workers: 1
+loader_num_workers: 8
 
 # forecast_offset: 0
 forecast_offset : 1
