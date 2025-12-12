@@ -19,7 +19,6 @@ from typing import Literal
 
 import numpy as np
 import polars as pl
-from torch import Tensor
 
 import weathergen.common.config as config
 from weathergen.train.utils import flatten_dict
@@ -96,29 +95,28 @@ class TrainLogger:
             f.write(s.encode("utf-8"))
 
     #######################################
-    def add_train(
+    def add_logs(
         self,
+        stage: Stage,
         samples: int,
-        lr: float,
-        avg_loss: list[float],
         losses_all: dict,
         stddev_all: dict,
+        avg_loss: list[float] = None,
+        lr: float = None,
         perf_gpu: float = 0.0,
         perf_mem: float = 0.0,
     ) -> None:
         """
-        Log training data
+        Log training or validation data
         """
         metrics: dict[str, float] = dict(num_samples=samples)
 
-        log_vals: list[float] = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
-        log_vals += [samples]
-
-        metrics["loss_avg_mean"] = np.nanmean(avg_loss)
-        metrics["learning_rate"] = lr
-        metrics["num_samples"] = int(samples)
-        log_vals += [np.nanmean(avg_loss)]
-        log_vals += [lr]
+        if stage == "train":
+            metrics["loss_avg_mean"] = np.nanmean(avg_loss)
+            metrics["learning_rate"] = lr
+            metrics["num_samples"] = int(samples)
+            metrics[_performance_gpu] = perf_gpu
+            metrics[_performance_memory] = perf_mem
 
         for key, value in flatten_dict(losses_all).items():
             metrics[key] = np.nanmean(value)
@@ -126,40 +124,7 @@ class TrainLogger:
         for key, value in flatten_dict(stddev_all).items():
             metrics[key] = np.nanmean(value)
 
-        with open(self.path_run / f"{self.cf.run_id}_train_log.txt", "ab") as f:
-            np.savetxt(f, log_vals)
-
-        log_vals = []
-        log_vals += [perf_gpu]
-        log_vals += [perf_mem]
-        metrics[_performance_gpu] = perf_gpu
-        metrics[_performance_memory] = perf_mem
         self.log_metrics("train", metrics)
-        with open(self.path_run / (self.cf.run_id + "_perf_log.txt"), "ab") as f:
-            np.savetxt(f, log_vals)
-
-    #######################################
-    def add_val(
-        self, samples: int, losses_all: dict[str, Tensor], stddev_all: dict[str, Tensor]
-    ) -> None:
-        """
-        Log validation data
-        """
-
-        metrics: dict[str, float] = dict(num_samples=int(samples))
-
-        log_vals: list[float] = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
-        log_vals += [samples]
-
-        for key, value in flatten_dict(losses_all).items():
-            metrics[key] = np.nanmean(value)
-
-        for key, value in flatten_dict(stddev_all).items():
-            metrics[key] = np.nanmean(value)
-
-        self.log_metrics("val", metrics)
-        with open(self.path_run / (self.cf.run_id + "_val_log.txt"), "ab") as f:
-            np.savetxt(f, log_vals)
 
     #######################################
     @staticmethod

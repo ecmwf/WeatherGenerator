@@ -15,7 +15,6 @@ import numpy as np
 import torch
 import tqdm
 from omegaconf import OmegaConf
-from torch import Tensor
 
 # FSDP2
 from torch.distributed.tensor import DTensor
@@ -452,9 +451,9 @@ class Trainer(TrainerBase):
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
 
-            self._log_terminal(bidx, mini_epoch, TRAIN)
-            if bidx % self.train_log_freq.metrics == 0:
-                self._log(TRAIN)
+            # self._log_terminal(bidx, mini_epoch, TRAIN)
+            # if bidx % self.train_log_freq.metrics == 0:
+            #     self._log(TRAIN)
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
@@ -515,7 +514,6 @@ class Trainer(TrainerBase):
                         write_output(
                             self.cf, mini_epoch, bidx, dn_data, batch, output, target_aux_output
                         )
-
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
@@ -628,17 +626,18 @@ class Trainer(TrainerBase):
         if is_root():
             # plain logger
             if stage == VAL:
-                self.train_logger.add_val(samples, losses_all, stddev_all)
+                self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
 
             elif self.cf.istep >= 0:
-                self.train_logger.add_train(
+                self.train_logger.add_logs(
+                    stage,
                     samples,
-                    self.lr_scheduler.get_lr(),
-                    avg_loss,
                     losses_all,
                     stddev_all,
-                    self.perf_gpu,
-                    self.perf_mem,
+                    avg_loss=avg_loss,
+                    lr=self.lr_scheduler.get_lr(),
+                    perf_gpu=self.perf_gpu,
+                    perf_mem=self.perf_mem,
                 )
 
         loss_calculator.loss_model_hist = []
