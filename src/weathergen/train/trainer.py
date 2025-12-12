@@ -15,7 +15,6 @@ import numpy as np
 import torch
 import tqdm
 from omegaconf import OmegaConf
-from torch import Tensor
 
 # FSDP2
 from torch.distributed.tensor import DTensor
@@ -31,8 +30,8 @@ from weathergen.model.model_interface import (
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
-from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
-from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
+from weathergen.utils.distributed import ddp_average, is_root
+from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_batch_size, get_dtype
 from weathergen.utils.validation_io import write_output
 
@@ -55,15 +54,12 @@ class Trainer(TrainerBase):
         self.last_grad_norm = None
         self.loss_calculator: LossCalculator | None = None
         self.loss_calculator_val: LossCalculator | None = None
-        self.loss_model_hist = []
-        self.loss_unweighted_hist: dict = {}
         self.lr_scheduler: LearningRateScheduler | None = None
         self.model = None
         self.model_params = None
         self.optimizer: torch.optim.Optimizer | None = None
         self.perf_gpu = None
         self.perf_mem = None
-        self.stdev_unweighted_hist: dict = {}
         self.t_start: float = 0
         self.target_and_aux_calculator = None
         self.validate_with_ema: bool = False
@@ -356,6 +352,9 @@ class Trainer(TrainerBase):
 
         self.optimizer.zero_grad()
 
+        # Unweighted loss, real weighted loss, std for losses that need it
+        self.loss_model_hist, self.loss_unweighted_hist, self.stdev_unweighted_hist = [], [], []
+
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
@@ -389,7 +388,7 @@ class Trainer(TrainerBase):
                         )
                     )
                 # targets, aux = zip(*targets_and_auxs)
-            loss, loss_values = self.loss_calculator.compute_loss(
+            loss = self.loss_calculator.compute_loss(
                 preds=outputs[0],
                 targets=targets_and_auxs[0],
                 # TOOD: view_metadata has to be part of targets and/or preds
@@ -445,26 +444,6 @@ class Trainer(TrainerBase):
                     get_batch_size(self.cf, self.world_size_original),
                 )
 
-            # Collecting loss statistics for later inspection
-            if bidx == 0:
-                self.loss_unweighted_hist = {
-                    loss_name: []
-                    for _, calc_terms in loss_values.loss_terms.items()
-                    for loss_name in calc_terms.losses_all.keys()
-                }
-                self.stdev_unweighted_hist = {
-                    loss_name: []
-                    for _, calc_terms in loss_values.loss_terms.items()
-                    for loss_name in calc_terms.stddev_all.keys()
-                }
-                self.loss_model_hist = []
-            for _, loss_terms in loss_values.loss_terms.items():
-                for loss_name, losses_all in loss_terms.losses_all.items():
-                    self.loss_unweighted_hist[loss_name].append(losses_all)
-                for loss_name, stddev_all in loss_terms.stddev_all.items():
-                    self.stdev_unweighted_hist[loss_name].append(stddev_all)
-            self.loss_model_hist += [loss.item()]
-
             perf_gpu, perf_mem = self.get_perf()
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
@@ -472,32 +451,10 @@ class Trainer(TrainerBase):
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
-                self.loss_unweighted_hist = {
-                    loss_name: []
-                    for _, calc_terms in loss_values.loss_terms.items()
-                    for loss_name in calc_terms.losses_all.keys()
-                }
-                self.stdev_unweighted_hist = {
-                    loss_name: []
-                    for _, calc_terms in loss_values.loss_terms.items()
-                    for loss_name in calc_terms.stddev_all.keys()
-                }
-                self.loss_model_hist = []
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
-                self.loss_unweighted_hist = {
-                    loss_name: []
-                    for _, calc_terms in loss_values.loss_terms.items()
-                    for loss_name in calc_terms.losses_all.keys()
-                }
-                self.stdev_unweighted_hist = {
-                    loss_name: []
-                    for _, calc_terms in loss_values.loss_terms.items()
-                    for loss_name in calc_terms.stddev_all.keys()
-                }
-                self.loss_model_hist = []
 
             self.cf.istep += 1
 
@@ -543,7 +500,7 @@ class Trainer(TrainerBase):
                             cf.forecast_offset,
                             sample.get_forecast_steps(),
                         )
-                    loss, loss_values = self.loss_calculator_val.compute_loss(
+                    loss = self.loss_calculator_val.compute_loss(
                         preds=output,
                         targets=target_aux_output,
                     )
@@ -554,26 +511,6 @@ class Trainer(TrainerBase):
                         write_output(
                             self.cf, mini_epoch, bidx, dn_data, batch, output, target_aux_output
                         )
-
-                    # Collecting loss statistics for later inspection
-                    if bidx == 0:
-                        self.loss_unweighted_hist = {
-                            loss_name: []
-                            for _, calc_terms in loss_values.loss_terms.items()
-                            for loss_name in calc_terms.losses_all.keys()
-                        }
-                        self.stdev_unweighted_hist = {
-                            loss_name: []
-                            for _, calc_terms in loss_values.loss_terms.items()
-                            for loss_name in calc_terms.stddev_all.keys()
-                        }
-                        self.loss_model_hist = []
-                    for _, loss_terms in loss_values.loss_terms.items():
-                        for loss_name, losses_all in loss_terms.losses_all.items():
-                            self.loss_unweighted_hist[loss_name].append(losses_all)
-                        for loss_name, stddev_all in loss_terms.stddev_all.items():
-                            self.stdev_unweighted_hist[loss_name].append(stddev_all)
-                    self.loss_model_hist += [loss.item()]
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
@@ -667,37 +604,6 @@ class Trainer(TrainerBase):
             # save config
             config.save(self.cf, mini_epoch)
 
-    def _prepare_losses_for_logging(
-        self,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """
-        Aggregates across ranks loss and standard deviation data for logging.
-
-        Returns:
-            real_loss (torch.Tensor): The scalar loss used for backpropagation.
-            losses_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
-                per-channel loss tensor.
-            stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
-                per-channel standard deviation tensor.
-        """
-
-        losses_all: dict[str, Tensor] = {}
-        stddev_all: dict[str, Tensor] = {}
-
-        # Make list of losses into a tensor. This is individual tensor per rank
-        real_loss = torch.tensor(self.loss_model_hist, device=self.device)
-        # Gather all tensors from all ranks into a list and stack them into one tensor again
-        real_loss = torch.cat(all_gather_vlen(real_loss))
-
-        for loss_name, loss_values in self.loss_unweighted_hist.items():
-            loss_values = torch.stack(loss_values).to(torch.float64)
-            losses_all[loss_name] = torch.cat(all_gather_vlen(loss_values))
-        for stddev_name, stddev_values in self.stdev_unweighted_hist.items():
-            stddev_values = torch.stack(stddev_values).to(torch.float64)
-            stddev_all[stddev_name] = torch.cat(all_gather_vlen(stddev_values))
-
-        return real_loss, losses_all, stddev_all
-
     def _log(self, stage: Stage):
         """
         Logs training or validation metrics.
@@ -710,24 +616,35 @@ class Trainer(TrainerBase):
             - This method only executes logging on the main process (rank 0).
             - After logging, historical loss and standard deviation records are cleared.
         """
-        avg_loss, losses_all, stddev_all = self._prepare_losses_for_logging()
+        loss_calculator = self.loss_calculator_val if stage == VAL else self.loss_calculator
+        avg_loss, losses_all, stddev_all = prepare_losses_for_logging(
+            loss_calculator.loss_hist,
+            loss_calculator.losses_unweighted_hist,
+            loss_calculator.stddev_unweighted_hist,
+        )
+
         samples = self.cf.istep * self.cf.batch_size_per_gpu * self.cf.world_size
 
         if is_root():
             # plain logger
             if stage == VAL:
-                self.train_logger.add_val(samples, losses_all, stddev_all)
+                self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
 
             elif self.cf.istep >= 0:
-                self.train_logger.add_train(
+                self.train_logger.add_logs(
+                    stage,
                     samples,
-                    self.lr_scheduler.get_lr(),
-                    avg_loss,
                     losses_all,
                     stddev_all,
-                    self.perf_gpu,
-                    self.perf_mem,
+                    avg_loss=avg_loss,
+                    lr=self.lr_scheduler.get_lr(),
+                    perf_gpu=self.perf_gpu,
+                    perf_mem=self.perf_mem,
                 )
+
+        loss_calculator.loss_hist = []
+        loss_calculator.loss_unweighted_hist = []
+        loss_calculator.stdev_unweighted_hist = []
 
     def _get_tensor_item(self, tensor):
         """
@@ -753,19 +670,19 @@ class Trainer(TrainerBase):
         print_freq = self.train_log_freq.terminal
         if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
-            avg_loss, losses_all, _ = self._prepare_losses_for_logging()
+            loss_calculator = self.loss_calculator_val if stage == VAL else self.loss_calculator
+            avg_loss, losses_all, _ = prepare_losses_for_logging(
+                loss_calculator.loss_hist,
+                loss_calculator.losses_unweighted_hist,
+                loss_calculator.stddev_unweighted_hist,
+            )
 
             if is_root():
                 if stage == VAL:
                     logger.info(
                         f"""validation ({self.cf.run_id}) : {mini_epoch:03d} : 
-                        {avg_loss.nanmean().item()}"""
+                        {np.nanmean(avg_loss)}"""
                     )
-                    for loss_name, loss_values in losses_all.items():
-                        logger.info(
-                            f"{loss_name}" + f" : {loss_values.nanmean():0.4E} \t",
-                        )
-                    logger.info("\n")
 
                 elif stage == TRAIN:
                     # samples per sec
@@ -773,7 +690,7 @@ class Trainer(TrainerBase):
                     len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
                     pstr = (
                         f"{mini_epoch:03d} : {bidx:05d}/{len_dataset:05d} : "
-                        + f"{self.cf.istep:06d} : loss = {avg_loss.nanmean().item():.4E} "
+                        + f"{self.cf.istep:06d} : loss = {np.nanmean(avg_loss):.4E} "
                         + f"(lr={self.lr_scheduler.get_lr():.2E}, "
                     )
                     if self.log_grad_norms:
@@ -781,10 +698,12 @@ class Trainer(TrainerBase):
                     pstr += f"s/sec={(print_freq * self.cf.batch_size_per_gpu) / dt:.3f})"
                     logger.info(pstr)
                     logger.info("\t")
-                    for loss_name, loss_values in losses_all.items():
+
+                for key, value in losses_all.items():
+                    if key.endswith("avg"):
                         logger.info(
-                            f"{loss_name}" + f" : {loss_values.nanmean():0.4E} \t",
+                            f"{key} : {np.nanmean(value):0.4E} \t",
                         )
-                    logger.info("\n")
+                logger.info("\n")
 
             self.t_start = time.time()

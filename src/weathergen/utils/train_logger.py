@@ -13,15 +13,17 @@ import logging
 import math
 import time
 import traceback
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 import numpy as np
 import polars as pl
-from torch import Tensor
 
 import weathergen.common.config as config
+from weathergen.train.utils import flatten_dict
+from weathergen.utils.distributed import ddp_average
 from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 
 _weathergen_timestamp = "weathergen.timestamp"
@@ -95,82 +97,36 @@ class TrainLogger:
             f.write(s.encode("utf-8"))
 
     #######################################
-    def add_train(
+    def add_logs(
         self,
+        stage: Stage,
         samples: int,
-        lr: float,
-        avg_loss: Tensor,
-        losses_all: dict[str, Tensor],
-        stddev_all: dict[str, Tensor],
+        losses_all: dict,
+        stddev_all: dict,
+        avg_loss: list[float] = None,
+        lr: float = None,
         perf_gpu: float = 0.0,
         perf_mem: float = 0.0,
     ) -> None:
         """
-        Log training data
+        Log training or validation data
         """
         metrics: dict[str, float] = dict(num_samples=samples)
 
-        log_vals: list[float] = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
-        log_vals += [samples]
+        if stage == "train":
+            metrics["loss_avg_mean"] = np.nanmean(avg_loss)
+            metrics["learning_rate"] = lr
+            metrics["num_samples"] = int(samples)
+            metrics[_performance_gpu] = perf_gpu
+            metrics[_performance_memory] = perf_mem
 
-        metrics["loss_avg_mean"] = avg_loss.nanmean().item()
-        metrics["learning_rate"] = lr
-        metrics["num_samples"] = int(samples)
-        log_vals += [avg_loss.nanmean().item()]
-        log_vals += [lr]
+        for key, value in losses_all.items():
+            metrics[key] = np.nanmean(value)
 
-        stream_names = [st["name"] for st in self.cf.streams]
+        for key, value in stddev_all.items():
+            metrics[key] = np.nanmean(value)
 
-        for loss_name, loss_values in losses_all.items():
-            metrics[f"loss.{loss_name}.loss_avg"] = loss_values[:, :].nanmean().item()
-            st = self.cf.streams[stream_names.index(loss_name.split(".")[1])]
-            for k, ch_n in enumerate(st.train_target_channels):
-                metrics[f"loss.{loss_name}.{ch_n}"] = loss_values[:, k].nanmean().item()
-            log_vals += [loss_values[:, :].nanmean().item()]
-        for loss_name, stddev_values in stddev_all.items():
-            metrics[f"loss.{loss_name}.stddev_avg"] = stddev_values.nanmean().item()
-            log_vals += [stddev_values.nanmean().item()]
-
-        with open(self.path_run / f"{self.cf.run_id}_train_log.txt", "ab") as f:
-            np.savetxt(f, log_vals)
-
-        log_vals = []
-        log_vals += [perf_gpu]
-        log_vals += [perf_mem]
-        metrics[_performance_gpu] = perf_gpu
-        metrics[_performance_memory] = perf_mem
         self.log_metrics("train", metrics)
-        with open(self.path_run / (self.cf.run_id + "_perf_log.txt"), "ab") as f:
-            np.savetxt(f, log_vals)
-
-    #######################################
-    def add_val(
-        self, samples: int, losses_all: dict[str, Tensor], stddev_all: dict[str, Tensor]
-    ) -> None:
-        """
-        Log validation data
-        """
-
-        metrics: dict[str, float] = dict(num_samples=int(samples))
-
-        log_vals: list[float] = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
-        log_vals += [samples]
-
-        stream_names = [st["name"] for st in self.cf.streams]
-
-        for loss_name, loss_values in losses_all.items():
-            metrics[f"loss.{loss_name}.loss_avg"] = loss_values[:, :].nanmean().item()
-            st = self.cf.streams[stream_names.index(loss_name.split(".")[1])]
-            for k, ch_n in enumerate(st.val_target_channels):
-                metrics[f"loss.{loss_name}.{ch_n}"] = loss_values[:, k].nanmean().item()
-            log_vals += [loss_values[:, :].nanmean().item()]
-        for loss_name, stddev_values in stddev_all.items():
-            metrics[f"loss.{loss_name}.stddev_avg"] = stddev_values.nanmean().item()
-            log_vals += [stddev_values.nanmean().item()]
-
-        self.log_metrics("val", metrics)
-        with open(self.path_run / (self.cf.run_id + "_val_log.txt"), "ab") as f:
-            np.savetxt(f, log_vals)
 
     #######################################
     @staticmethod
@@ -447,3 +403,36 @@ def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
 def _key_stddev(st_name: str) -> str:
     st_name = clean_name(st_name)
     return f"stream.{st_name}.stddev_avg"
+
+
+def prepare_losses_for_logging(
+    loss_hist: list,
+    losses_unweighted_hist: list[dict],
+    stddev_unweighted_hist: list[dict],
+) -> tuple[list, dict, dict]:
+    """
+    Aggregates across ranks loss and standard deviation data for logging.
+
+    Returns:
+        real_loss (list): List of ddp-averaged scaler losses used for backpropagation.
+        losses_all (dict): Dictionary mapping each stream name to its
+            per-channel loss tensor.
+        stddev_all (dict): Dictionary mapping each stream name to its
+            per-channel standard deviation tensor.
+    """
+
+    real_loss = [ddp_average(loss).item() for loss in loss_hist]
+
+    losses_all = defaultdict(list)
+    stddev_all = defaultdict(list)
+
+    for d in losses_unweighted_hist:
+        for key, value in flatten_dict(d).items():
+            losses_all[key].append(ddp_average(value).item())
+
+    for d in stddev_unweighted_hist:
+        for key, value in flatten_dict(d).items():
+            if value:
+                stddev_all[key].append(ddp_average(value).item())
+
+    return real_loss, losses_all, stddev_all
