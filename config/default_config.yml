@@ -140,8 +140,8 @@ log_grad_norms: False
 
 start_date: 197901010000
 end_date: 202012310000
-start_date_val: 202101010000
-end_date_val: 202201010000
+start_date_val: 2023100100
+end_date_val: 2023123100
 len_hrs: 6
 step_hrs: 6
 input_window_steps: 1

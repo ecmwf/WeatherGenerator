@@ -14,6 +14,7 @@ ERA5 :
   source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp']
   target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp']
   loss_weight : 1.
+  location_weight : cosine_latitude
   masking_rate : 0.6
   masking_rate_none : 0.05
   token_size : 8
