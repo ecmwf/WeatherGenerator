@@ -207,6 +207,9 @@ class LossPhysical(LossModuleBase):
 
             stream_data = streams_data[i_batch][stream_name]
 
+            # get weigths for current streams
+            stream_loss_weight, weights_channels = self._get_weights(stream_info)
+
             fstep_loss_weights = self._get_fstep_weights(len(targets))
 
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
@@ -232,9 +235,6 @@ class LossPhysical(LossModuleBase):
                 # expected final shape of pred is [ensemble_size, num_samples, num_channels].
                 pred = pred.reshape([pred.shape[0], *target.shape])
                 assert pred.shape[1] > 0
-
-                # get weigths for current streams
-                stream_loss_weight, weights_channels = self._get_weights(stream_info)
 
                 # get weights for locations
                 weights_locations = self._get_location_weights(
@@ -268,20 +268,45 @@ class LossPhysical(LossModuleBase):
 
                     # Add the weighted and normalized loss from this loss function to the total
                     # batch loss
-                    loss_fstep = loss_fstep + (
-                        loss_fct_weight * loss_lfct * stream_loss_weight * fstep_weight
-                    )
+                    loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct * fstep_weight)
                     ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
 
-                loss_fsteps = loss_fsteps + (loss_fstep / ctr_loss_fcts if ctr_loss_fcts > 0 else 0)
+                loss_fsteps = loss_fsteps + loss_fstep
                 ctr_fsteps += 1 if ctr_loss_fcts > 0 else 0
 
-            loss = loss + ((spoof_weight * loss_fsteps) / (ctr_fsteps if ctr_fsteps > 0 else 1.0))
+            loss = loss + (
+                (spoof_weight * stream_loss_weight * loss_fsteps)
+                / (ctr_fsteps if ctr_fsteps > 0 else 1.0)
+            )
             ctr_streams += 1 if ctr_fsteps > 0 and not stream_is_spoof else 0
 
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)
         loss = loss / ctr_streams
 
+        def _nested_dict():
+            return defaultdict(dict)
+
+        # Reorder losses_all to [stream_name][loss_fct_name][ch_n][fstep]
+        reordered_losses = defaultdict(dict)
+        for stream_name, fstep_dict in losses_all.items():
+            reordered_losses[stream_name] = defaultdict(_nested_dict)
+            for fstep, lfct_dict in fstep_dict.items():
+                for loss_fct_name, ch_dict in lfct_dict.items():
+                    for ch_n, v in ch_dict.items():
+                        reordered_losses[stream_name][loss_fct_name][ch_n][fstep] = v
+
+        # Calculate per stream, per lfct average across channels and fsteps
+        for stream_name, lfct_dict in reordered_losses.items():
+            for loss_fct_name, ch_dict in lfct_dict.items():
+                reordered_losses[stream_name][loss_fct_name]["avg"] = 0
+                count = 0
+                for ch_n, fstep_dict in ch_dict.items():
+                    if ch_n != "avg":
+                        for _, v in fstep_dict.items():
+                            reordered_losses[stream_name][loss_fct_name]["avg"] += v
+                            count += 1
+                reordered_losses[stream_name][loss_fct_name]["avg"] /= count
+
         # Return all computed loss components encapsulated in a ModelLoss dataclass
-        return LossValues(loss=loss, losses_all=losses_all, stddev_all=None)
+        return LossValues(loss=loss, losses_all=reordered_losses, stddev_all=None)

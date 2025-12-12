@@ -22,7 +22,7 @@ import numpy as np
 import polars as pl
 
 import weathergen.common.config as config
-from weathergen.train.utils import flatten_dict, unflatten_dict
+from weathergen.train.utils import flatten_dict
 from weathergen.utils.distributed import ddp_average
 from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 
@@ -120,10 +120,10 @@ class TrainLogger:
             metrics[_performance_gpu] = perf_gpu
             metrics[_performance_memory] = perf_mem
 
-        for key, value in flatten_dict(losses_all).items():
+        for key, value in losses_all.items():
             metrics[key] = np.nanmean(value)
 
-        for key, value in flatten_dict(stddev_all).items():
+        for key, value in stddev_all.items():
             metrics[key] = np.nanmean(value)
 
         self.log_metrics("train", metrics)
@@ -435,4 +435,4 @@ def prepare_losses_for_logging(
             if value:
                 stddev_all[key].append(ddp_average(value).item())
 
-    return real_loss, unflatten_dict(losses_all), unflatten_dict(stddev_all)
+    return real_loss, losses_all, stddev_all

@@ -699,10 +699,11 @@ class Trainer(TrainerBase):
                     logger.info(pstr)
                     logger.info("\t")
 
-                for loss_name, loss_values in losses_all.items():
-                    logger.info(
-                        f"{loss_name} : {np.nanmean(loss_values['loss_avg']):0.4E} \t",
-                    )
+                for key, value in losses_all.items():
+                    if key.endswith("avg"):
+                        logger.info(
+                            f"{key} : {np.nanmean(value):0.4E} \t",
+                        )
                 logger.info("\n")
 
             self.t_start = time.time()
