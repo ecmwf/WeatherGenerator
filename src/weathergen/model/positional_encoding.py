@@ -97,9 +97,9 @@ def positional_encoding_harmonic_coord(x, lats, lons):
 
 
 ####################################################################################################
-# The functions rotate_half() and apply_rotary_pos_emb() below are derived from LLaMA and Qwen3 models,
-# originally developed by Meta Platforms, Inc., The Qwen team, Alibaba Group and the HuggingFace Inc. team,
-# licensed under the Apache License, Version 2.0.
+# The functions rotate_half() and apply_rotary_pos_emb() below are derived from LLaMA and Qwen3
+# models, originally developed by Meta Platforms, Inc., The Qwen team, Alibaba Group and the
+# HuggingFace Inc. team, licensed under the Apache License, Version 2.0.
 # Source: https://github.com/qiuzh20/gated_attention/blob/main/modeling_qwen3.py
 
 
