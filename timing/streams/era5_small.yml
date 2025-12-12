@@ -1,0 +1,37 @@
+# (C) Copyright 2024 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+ERA5 :
+  type : anemoi
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6.zarr']
+  loss_weight : 1.
+  source : ["t_850"]
+  target : ["t_850"]
+  diagnostic : False
+  masking_rate : 0.6
+  masking_rate_none : 0.05
+  token_size : 8
+  tokenize_spacetime : True
+  max_num_targets: -1
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 2
+    dim_embed : 4
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 4
+  target_readout :
+    type : 'obs_value'
+    num_layers : 2
+    num_heads : 2
+  pred_head :
+    ens_size : 1
+    num_layers : 1

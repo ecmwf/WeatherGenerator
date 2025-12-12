@@ -1,0 +1,14 @@
+
+num_mini_epochs: 1
+samples_per_mini_epoch: 20
+samples_per_validation: 20
+
+loader_num_workers: 1
+
+log_validation: 20
+
+# The period to log in the training loop (in number of batch steps)
+train_log_freq:
+  terminal: 20
+  metrics: 1
+  checkpoint: 20

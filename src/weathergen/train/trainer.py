@@ -24,6 +24,7 @@ from torch import Tensor
 from torch.distributed.tensor import DTensor
 
 import weathergen.common.config as config
+import weathergen.common.timing as timing
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.datasets.stream_data import StreamData
@@ -498,11 +499,14 @@ class Trainer(TrainerBase):
 
         # training loop
         self.t_start = time.time()
+        timing.train.record()
+        timing.train.record("sample")
         for bidx, batch in enumerate(dataset_iter):
             forecast_steps = batch[-1]
             batch = self.batch_to_device(batch)
 
             # evaluate model
+            timing.train.record("forward")
             with torch.autocast(
                 device_type=f"cuda:{cf.local_rank}",
                 dtype=self.mixed_precision_dtype,
@@ -512,6 +516,7 @@ class Trainer(TrainerBase):
                 target_aux_output = self.target_and_aux_calculator.compute(
                     bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
                 )
+            timing.train.record("loss")
             loss, loss_values = self.loss_calculator.compute_loss(
                 preds=output,
                 targets=target_aux_output,
@@ -523,6 +528,7 @@ class Trainer(TrainerBase):
             self.target_and_aux_calculator.update_state_pre_backward(bidx, batch, self.model)
 
             # backward pass
+            timing.train.record("backward")
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss).backward()
             # loss_values.loss.backward()
@@ -577,11 +583,16 @@ class Trainer(TrainerBase):
                     self.stdev_unweighted_hist[loss_name].append(stddev_all)
             self.loss_model_hist += [loss.item()]
 
+            timing.train.record("log")
             perf_gpu, perf_mem = self.get_perf()
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
 
             self._log_terminal(bidx, mini_epoch, TRAIN)
+            # save model checkpoint (with designation _latest)
+            if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
+                self.save_model(-1)
+
             if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
                 self.loss_unweighted_hist = {
@@ -612,6 +623,8 @@ class Trainer(TrainerBase):
                 self.loss_model_hist = []
 
             self.cf.istep += 1
+            timing.train.record()
+            timing.train.record("sample")
 
         self.dataset.advance()
 
@@ -626,11 +639,14 @@ class Trainer(TrainerBase):
             with tqdm.tqdm(
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
+                timing.validate.record()
+                timing.validate.record("sample")
                 for bidx, batch in enumerate(dataset_val_iter):
                     forecast_steps = batch[-1]
                     batch = self.batch_to_device(batch)
 
                     # evaluate model
+                    timing.validate.record("forward")
                     with torch.autocast(
                         device_type=f"cuda:{cf.local_rank}",
                         dtype=self.mixed_precision_dtype,
@@ -652,6 +668,7 @@ class Trainer(TrainerBase):
                             cf.forecast_offset,
                             forecast_steps,
                         )
+                    timing.validate.record("loss")
                     loss, loss_values = self.loss_calculator_val.compute_loss(
                         preds=output,
                         targets=target_aux_output,
@@ -659,6 +676,7 @@ class Trainer(TrainerBase):
 
                     # log output
                     if bidx < cf.log_validation:
+                        timing.validate.record("output")
                         # TODO: Move _prepare_logging into write_validation by passing streams_data
                         streams_data: list[list[StreamData]] = batch[0]
                         (

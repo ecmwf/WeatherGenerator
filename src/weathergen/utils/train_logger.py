@@ -13,7 +13,7 @@ import logging
 import math
 import time
 import traceback
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -22,6 +22,7 @@ import polars as pl
 from torch import Tensor
 
 import weathergen.common.config as config
+import weathergen.common.timing as timing
 from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 
 _weathergen_timestamp = "weathergen.timestamp"
@@ -139,6 +140,9 @@ class TrainLogger:
         log_vals += [perf_mem]
         metrics[_performance_gpu] = perf_gpu
         metrics[_performance_memory] = perf_mem
+        for key, result in timing.train.reset().items():
+            metrics |= result.as_metric(key)
+
         self.log_metrics("train", metrics)
         with open(self.path_run / (self.cf.run_id + "_perf_log.txt"), "ab") as f:
             np.savetxt(f, log_vals)
@@ -167,6 +171,9 @@ class TrainLogger:
         for loss_name, stddev_values in stddev_all.items():
             metrics[f"loss.{loss_name}.stddev_avg"] = stddev_values.nanmean().item()
             log_vals += [stddev_values.nanmean().item()]
+
+        for key, result in timing.validate.reset().items():
+            metrics |= result.as_metric(key)
 
         self.log_metrics("val", metrics)
         with open(self.path_run / (self.cf.run_id + "_val_log.txt"), "ab") as f:
