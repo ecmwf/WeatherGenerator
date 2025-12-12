@@ -484,7 +484,7 @@ class Model(torch.nn.Module):
                 final_activation=final_activation,
                 stream_name=stream_name,
             )
-        
+
         self.norm = nn.LayerNorm(self.q_cells.size(-1))
         self.num_register_tokens = cf.num_register_tokens
 
@@ -822,8 +822,8 @@ class Model(torch.nn.Module):
 
         # add additional global register tokens
         tokens_global_register = (
-                self.q_cells.repeat(batch_size, self.num_register_tokens, 1) + model_params.pe_register
-            )
+            self.q_cells.repeat(batch_size, self.num_register_tokens, 1) + model_params.pe_register
+        )
 
         # concatenate all global tokens
         tokens_global = torch.cat([tokens_global_register, tokens_global], dim=1)
