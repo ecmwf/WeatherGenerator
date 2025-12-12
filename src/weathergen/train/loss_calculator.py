@@ -18,8 +18,6 @@ from omegaconf import DictConfig
 import weathergen.train.loss_modules as LossModules
 from weathergen.model.model import ModelOutput
 from weathergen.train.target_and_aux_module_base import TargetAuxOutput
-from weathergen.train.utils import flatten_dict, unflatten_dict
-from weathergen.utils.distributed import ddp_average
 from weathergen.utils.train_logger import TRAIN, Stage
 
 _logger = logging.getLogger(__name__)
@@ -78,31 +76,6 @@ class LossCalculator:
             (config.weight, Cls(cf=cf, loss_fcts=config.loss_fcts, stage=stage, device=self.device))
             for (Cls, config) in calculator_configs
         ]
-
-    def _prepare_losses_for_logging(
-        self,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """
-        Aggregates across ranks loss and standard deviation data for logging.
-
-        Returns:
-            real_loss (torch.Tensor): The scalar loss used for backpropagation.
-            losses_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
-                per-channel loss tensor.
-            stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
-                per-channel standard deviation tensor.
-        """
-
-        real_loss = [ddp_average(loss).item() for loss in self.loss_hist]
-
-        losses_all = defaultdict(list)
-        stddev_all = defaultdict(list)
-
-        for d in self.losses_unweighted_hist:
-            for key, value in flatten_dict(d).items():
-                losses_all[key].append(ddp_average(value).item())
-
-        return real_loss, unflatten_dict(losses_all), unflatten_dict(stddev_all)
 
     def compute_loss(
         self,

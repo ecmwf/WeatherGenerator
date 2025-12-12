@@ -31,7 +31,7 @@ from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.utils.distributed import ddp_average, is_root
-from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
+from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_batch_size, get_dtype
 from weathergen.utils.validation_io import write_output
 
@@ -54,15 +54,12 @@ class Trainer(TrainerBase):
         self.last_grad_norm = None
         self.loss_calculator: LossCalculator | None = None
         self.loss_calculator_val: LossCalculator | None = None
-        self.loss_model_hist = []
-        self.loss_unweighted_hist: dict = {}
         self.lr_scheduler: LearningRateScheduler | None = None
         self.model = None
         self.model_params = None
         self.optimizer: torch.optim.Optimizer | None = None
         self.perf_gpu = None
         self.perf_mem = None
-        self.stdev_unweighted_hist: dict = {}
         self.t_start: float = 0
         self.target_and_aux_calculator = None
         self.validate_with_ema: bool = False
@@ -620,7 +617,12 @@ class Trainer(TrainerBase):
             - After logging, historical loss and standard deviation records are cleared.
         """
         loss_calculator = self.loss_calculator_val if stage == VAL else self.loss_calculator
-        avg_loss, losses_all, stddev_all = loss_calculator._prepare_losses_for_logging()
+        avg_loss, losses_all, stddev_all = prepare_losses_for_logging(
+            loss_calculator.loss_hist,
+            loss_calculator.losses_unweighted_hist,
+            loss_calculator.stddev_unweighted_hist,
+        )
+
         samples = self.cf.istep * self.cf.batch_size_per_gpu * self.cf.world_size
 
         if is_root():
@@ -640,7 +642,7 @@ class Trainer(TrainerBase):
                     perf_mem=self.perf_mem,
                 )
 
-        loss_calculator.loss_model_hist = []
+        loss_calculator.loss_hist = []
         loss_calculator.loss_unweighted_hist = []
         loss_calculator.stdev_unweighted_hist = []
 
@@ -669,7 +671,11 @@ class Trainer(TrainerBase):
         if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
             loss_calculator = self.loss_calculator_val if stage == VAL else self.loss_calculator
-            avg_loss, losses_all, _ = loss_calculator._prepare_losses_for_logging()
+            avg_loss, losses_all, _ = prepare_losses_for_logging(
+                loss_calculator.loss_hist,
+                loss_calculator.losses_unweighted_hist,
+                loss_calculator.stddev_unweighted_hist,
+            )
 
             if is_root():
                 if stage == VAL:
@@ -677,11 +683,6 @@ class Trainer(TrainerBase):
                         f"""validation ({self.cf.run_id}) : {mini_epoch:03d} : 
                         {np.nanmean(avg_loss)}"""
                     )
-                    for loss_name, loss_values in losses_all.items():
-                        logger.info(
-                            f"{loss_name}" + f" : {loss_values.nanmean():0.4E} \t",
-                        )
-                    logger.info("\n")
 
                 elif stage == TRAIN:
                     # samples per sec
@@ -697,10 +698,11 @@ class Trainer(TrainerBase):
                     pstr += f"s/sec={(print_freq * self.cf.batch_size_per_gpu) / dt:.3f})"
                     logger.info(pstr)
                     logger.info("\t")
-                    for loss_name, loss_values in losses_all.items():
-                        logger.info(
-                            f"{loss_name} : {np.nanmean(loss_values['loss_avg']):0.4E} \t",
-                        )
-                    logger.info("\n")
+
+                for loss_name, loss_values in losses_all.items():
+                    logger.info(
+                        f"{loss_name} : {np.nanmean(loss_values['loss_avg']):0.4E} \t",
+                    )
+                logger.info("\n")
 
             self.t_start = time.time()

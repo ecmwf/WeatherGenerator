@@ -13,6 +13,7 @@ import logging
 import math
 import time
 import traceback
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -21,7 +22,8 @@ import numpy as np
 import polars as pl
 
 import weathergen.common.config as config
-from weathergen.train.utils import flatten_dict
+from weathergen.train.utils import flatten_dict, unflatten_dict
+from weathergen.utils.distributed import ddp_average
 from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 
 _weathergen_timestamp = "weathergen.timestamp"
@@ -401,3 +403,36 @@ def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
 def _key_stddev(st_name: str) -> str:
     st_name = clean_name(st_name)
     return f"stream.{st_name}.stddev_avg"
+
+
+def prepare_losses_for_logging(
+    loss_hist: list,
+    losses_unweighted_hist: list[dict],
+    stddev_unweighted_hist: list[dict],
+) -> tuple[list, dict, dict]:
+    """
+    Aggregates across ranks loss and standard deviation data for logging.
+
+    Returns:
+        real_loss (list): List of ddp-averaged scaler losses used for backpropagation.
+        losses_all (dict): Dictionary mapping each stream name to its
+            per-channel loss tensor.
+        stddev_all (dict): Dictionary mapping each stream name to its
+            per-channel standard deviation tensor.
+    """
+
+    real_loss = [ddp_average(loss).item() for loss in loss_hist]
+
+    losses_all = defaultdict(list)
+    stddev_all = defaultdict(list)
+
+    for d in losses_unweighted_hist:
+        for key, value in flatten_dict(d).items():
+            losses_all[key].append(ddp_average(value).item())
+
+    for d in stddev_unweighted_hist:
+        for key, value in flatten_dict(d).items():
+            if value:
+                stddev_all[key].append(ddp_average(value).item())
+
+    return real_loss, unflatten_dict(losses_all), unflatten_dict(stddev_all)
