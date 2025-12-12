@@ -13,7 +13,7 @@ import pathlib
 import numpy as np
 import torch
 
-from weathergen.common.config import timedelta_to_str
+from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
@@ -82,20 +82,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ###################################################
     def __init__(
         self,
-        cf,
-        start_date_,
-        end_date_,
-        batch_size,
-        samples_per_mini_epoch,
+        cf: Config,
+        start_date: np.datetime64,
+        end_date: np.datetime64,
+        batch_size: int,
+        samples_per_mini_epoch: int,
         stage: Stage,
         shuffle=True,
     ):
         super(MultiStreamDataSampler, self).__init__()
-
-        start_date = start_date_
-        end_date = end_date_
-
-        assert end_date > start_date, (end_date, start_date)
 
         self.mask_value = 0.0
         self._stage = stage
@@ -106,11 +101,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             start_date, end_date, self.len_timedelta, self.step_timedelta
         )
         if is_root():
-            logger.info(
-                f"Time window handler: start={start_date}, end={end_date}, "
-                f"time_window_len={timedelta_to_str(cf.time_window_len)} "
-                f"time_window_step={timedelta_to_str(cf.time_window_step)}"
-            )
+            logger.info(self.time_window_handler)
 
         self.forecast_offset = cf.forecast_offset
 

@@ -33,11 +33,17 @@ class DataReaderObs(DataReaderBase):
         self.z = zarr.open(filename, mode="r")
         self.data = self.z["data"]
         self.dt = self.z["dates"]  # datetime only
-        self.base_datetime = stream_info.get("base_datetime", "1970-01-01T00:00:00")
+        base_dt_raw = stream_info.get("base_datetime", "1970-01-01T00:00:00")
         format_str = "%Y-%m-%dT%H:%M:%S"
-        self.base_datetime = datetime.datetime.strptime(str(self.base_datetime), format_str)
+
+        # Use python datetime for strict parsing/validation and string formatting
+        dt_obj = datetime.datetime.strptime(str(base_dt_raw), format_str)
+
+        # Store as numpy datetime64 for stable arithmetic
+        self.base_datetime = np.datetime64(dt_obj)
+
         # To read idx convert to a string, format e.g.: 197001010000
-        base_date_str = self.base_datetime.strftime("%Y%m%d%H%M")
+        base_date_str = dt_obj.strftime("%Y%m%d%H%M")
         self.hrly_index = self.z[f"idx_{base_date_str}_1"]
         self.colnames = self.data.attrs["colnames"]
 
@@ -140,25 +146,24 @@ class DataReaderObs(DataReaderBase):
         # TODO: generalize this
         t_len = self.time_window_handler.t_window_len
         len_seconds = t_len / np.timedelta64(1, "s")
-        assert (
-            len_seconds % 3600 == 0
-        ), f"t_window_len has to be full hour (now {self.time_window_handler.t_window_len})"
+        assert len_seconds % 3600 == 0, (
+            f"t_window_len has to be full hour (now {self.time_window_handler.t_window_len})"
+        )
         len_hrs = int(len_seconds) // 3600
 
         t_step = self.time_window_handler.t_window_step
         step_seconds = t_step / np.timedelta64(1, "s")
-        assert (
-            step_seconds % 3600 == 0
-        ), f"t_window_step has to be full hour (now {self.time_window_handler.t_window_step})"
+        assert step_seconds % 3600 == 0, (
+            f"t_window_step has to be full hour (now {self.time_window_handler.t_window_step})"
+        )
         step_hrs = int(step_seconds) // 3600
 
-        self.start_dt = self.time_window_handler.t_start.item()
-        self.end_dt = self.time_window_handler.t_end.item()
+        self.start_dt = self.time_window_handler.t_start
+        self.end_dt = self.time_window_handler.t_end
 
-        ## Calculate the number of hours between start of hourly base index
-        #  and the requested sample index
-        diff_in_hours_start = int((self.start_dt - self.base_datetime).total_seconds() / 3600)
-        diff_in_hours_end = int((self.end_dt - self.base_datetime).total_seconds() / 3600)
+        # Calculate the number of hours between start of hourly base index
+        diff_in_hours_start = int((self.start_dt - self.base_datetime) / np.timedelta64(1, "h"))
+        diff_in_hours_end = int((self.end_dt - self.base_datetime) / np.timedelta64(1, "h"))
 
         end_range_1 = min(diff_in_hours_end, self.hrly_index.shape[0] - 1)
         self.indices_start = self.hrly_index[diff_in_hours_start:end_range_1:step_hrs]

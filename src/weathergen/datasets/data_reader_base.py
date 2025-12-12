@@ -15,6 +15,7 @@ import numpy as np
 from numpy import datetime64, timedelta64
 from numpy.typing import NDArray
 
+from weathergen.common.config import timedelta_to_str
 from weathergen.utils.better_abc import ABCMeta, abstract_attribute
 
 _logger = logging.getLogger(__name__)
@@ -72,8 +73,8 @@ class TimeWindowHandler:
         self,
         t_start: NPDT64,
         t_end: NPDT64,
-        t_window_len_hours: np.timedelta64,
-        t_window_step_hours: np.timedelta64,
+        t_window_len_hours: NPTDel64,
+        t_window_step_hours: NPTDel64,
     ):
         """
         Parameters
@@ -95,6 +96,14 @@ class TimeWindowHandler:
 
         assert self.t_start < self.t_end, "end datetime has to be in the past of start datetime"
         assert self.t_start > _DT_ZERO, "start datetime has to be >= 1850-01-01T00:00."
+
+    def __str__(self) -> str:
+        # Helper to ensure readable timedelta formatting
+        l_str = timedelta_to_str(self.t_window_len)
+        s_str = timedelta_to_str(self.t_window_step)
+        return (
+            f"TimeWindowHandler: start={self.t_start}, end={self.t_end}, len={l_str}, step={s_str}"
+        )
 
     def get_index_range(self) -> TimeIndexRange:
         """
