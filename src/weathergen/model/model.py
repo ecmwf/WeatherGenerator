@@ -295,6 +295,7 @@ class Model(torch.nn.Module):
         self.stream_names: list[str] = None
         self.target_token_engines = None
 
+        assert cf.forecast_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
         self.num_register_tokens = cf.num_register_tokens
 
     #########################################
