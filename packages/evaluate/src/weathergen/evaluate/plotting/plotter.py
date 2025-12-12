@@ -646,7 +646,7 @@ class LinePlots:
         self.log_scale = plotter_cfg.get("log_scale")
         self.add_grid = plotter_cfg.get("add_grid")
         self.plot_ensemble = plotter_cfg.get("plot_ensemble", False)
-
+        self.baseline = plotter_cfg.get("baseline")
         self.out_plot_dir = Path(output_basedir) / "line_plots"
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
@@ -877,7 +877,8 @@ class LinePlots:
         x_dim: str, 
         y_dim: str, 
         print_summary: bool = False, 
-        line: float | None = None) -> None:
+        line: float | None = None,
+        title: str | None = None) -> None:
         """
         Apply labels, title, legend, save and optionally print summary.
         Parameters
@@ -894,13 +895,15 @@ class LinePlots:
             If True, print a summary of the values from the graph.
         line:
             If provided, draw a horizontal line at the given y-value.
+        title:
+            Title for the plot.
         Returns
         -------
             None
         """
         plt.xlabel("".join(c if c.isalnum() else " " for c in x_dim))
         plt.ylabel("".join(c if c.isalnum() else " " for c in y_dim))
-        plt.title("".join(c if c.isalnum() else " " for c in name   ))
+        plt.title(title if title is not None else " ".join(c if c.isalnum() else " " for c in name  ))
         plt.legend(frameon=False)
 
         if self.add_grid:
@@ -924,55 +927,91 @@ class LinePlots:
     def ratio_plot(
         self,
         data: xr.DataArray | list,
+        run_ids: list[str],
         labels: str | list,
         tag: str = "",
         x_dim: str = "forecast_step",
         y_dim: str = "value",
         print_summary: bool = False,
     ) -> None:
+        """
+        Plot a ratio plot comparing multiple datasets to the first dataset.
+        Parameters
+        ----------
+        data:
+            DataArray or list of DataArrays to be plotted
+        run_ids:
+            List of run IDs corresponding to each dataset
+        labels:
+            Label or list of labels for each dataset
+        tag:
+            Tag to be added to the plot title and filename
+        x_dim:
+            Dimension to be used for the x-axis. The code will average over all other dimensions.
+        y_dim:
+            Name of the dimension to be used for the y-axis.
+        print_summary:
+            If True, print a summary of the values from the graph.
+        Returns
+        -------
+            None
+        """
 
         data_list, label_list = self._check_lengths(data, labels)
-        
-        fsteps = sorted(data_list[0].forecast_step.values)
-        
-        
-        x_ticks_names = set(data_list[0].sel(forecast_step=fsteps[0]).channel.values)
 
+        if len(data_list) < 2:
+            _logger.warning("Ratio plot requires at least two datasets to compare. Skipping.")
+            return
+
+        baseline_name = self.baseline
+        baseline_idx = run_ids.index(self.baseline) if self.baseline in run_ids else None
+        if baseline_idx is not None:
+            _logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
+            baseline = data_list[baseline_idx]
+            
+        else:
+            baseline_name = run_ids[0]
+            baseline = data_list[0]
+
+        ref_raw = self._preprocess_data(baseline, x_dim, verbose = False)
+
+        channel_names = set(ref_raw.channel.values)
         # Merge channels from remaining datasets
         for data in data_list[1:]:
-            da = data.sel(forecast_step=fsteps[0])
-            x_ticks_names.update(da.channel.values)  # add new channels
-
+            channel_names.update(data.channel.values)  # add new channels
+        
         # Sort the merged list
-        ref_ticks_names = sorted(x_ticks_names)
+        ref_channel_names = sorted(channel_names)
 
-        fig = plt.figure(figsize=(max(12, len(ref_ticks_names)*0.25), 6))
-        for i, (data, label) in enumerate(zip(data_list, label_list)):
-            ref_raw = self._preprocess_data(data.sel(forecast_step=fsteps[0]), x_dim, verbose = False)
-            ref = align_labels(ref_raw, ref_ticks_names, x_dim)
+        ref = align_labels(ref_raw, ref_channel_names, x_dim).reindex(channel=ref_channel_names)
+
+        fig = plt.figure(figsize=(max(12, len(ref_channel_names)*0.25), 6))
+
+        for (data, run_id, lbl) in zip(data_list, run_ids, label_list):
            
-            ratios = [] 
-            for f in fsteps:
-                num_raw = self._preprocess_data(data.sel(forecast_step=f), x_dim, verbose = False)
-                num = align_labels(num_raw, ref_ticks_names, x_dim)
-                ratios.append(num / ref)
-    
-            ratio = xr.concat(ratios, dim="fsteps").mean("fsteps", skipna=True).reindex(channel=ref_ticks_names)
+            if run_id == baseline_name:
+                continue  # skip baseline
+           
+            num_raw = self._preprocess_data(data, x_dim, verbose = False)
+            num = align_labels(num_raw, ref_channel_names, x_dim).reindex(channel=ref_channel_names)
+            
+            ratio = num.sel(channel=ref_channel_names) / ref.sel(channel=ref_channel_names)
 
             plt.plot(
-                ref_ticks_names,
+                ref_channel_names,
                 ratio.values,
-                label=label,
+                label=lbl,
                 marker="o",
                 linestyle="-",
-                color=f"C{i+1}",
             )
-            
+
         parts = ["ratio_plot", tag]
         name = "_".join(filter(None, parts))
         plt.xticks(rotation=90, ha="right")
         plt.grid(True, linestyle="--", color="gray", alpha=0.5)
-        self._plot_base(fig, name, x_dim, y_dim, print_summary, line = 1.)
+        title = f"Ratio plot {tag.split('_')[0]} - {tag.split('_')[-1]} (baseline: {baseline_name})"
+        self._plot_base(fig, name, x_dim, y_dim, print_summary, line = 1., title = title)
+        
 
     def heat_map(
         self,
@@ -1024,7 +1063,7 @@ class LinePlots:
             
             heatmap_data = num / ref
             
-            cmap = plt.get_cmap("Blues_r") if lower_is_better(metric) else plt.get_cmap("Blues")
+            cmap = plt.get_cmap("magma_r") if lower_is_better(metric) else plt.get_cmap("magma")
             global_min = min(global_min, float(heatmap_data.min()))
             global_max = max(global_max, float(heatmap_data.max()))
             

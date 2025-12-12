@@ -146,12 +146,12 @@ def ratio_plot_metric_region(
         selected_data = []
         labels = []
         run_ids = []
-        for run_id in runs:
+        for run_id, run_data in runs.items():
             data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
             if data is None:
                 continue
             selected_data.append(data)
-            label = runs[run_id].get("label", run_id)
+            label = run_data.get("label", run_id)
             if label != run_id:
                 label = f"{run_id} - {label}"
             labels.append(label)
@@ -162,6 +162,7 @@ def ratio_plot_metric_region(
             name = "_".join([metric] + sorted(set(run_ids)) + [stream])
             plotter.ratio_plot(
                 selected_data,
+                run_ids,
                 labels,
                 tag=name,
                 x_dim="channel",
