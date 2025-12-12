@@ -451,9 +451,9 @@ class Trainer(TrainerBase):
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
 
-            # self._log_terminal(bidx, mini_epoch, TRAIN)
-            # if bidx % self.train_log_freq.metrics == 0:
-            #     self._log(TRAIN)
+            self._log_terminal(bidx, mini_epoch, TRAIN)
+            if bidx % self.train_log_freq.metrics == 0:
+                self._log(TRAIN)
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
@@ -503,7 +503,7 @@ class Trainer(TrainerBase):
                             cf.forecast_offset,
                             sample.get_forecast_steps(),
                         )
-                    loss, loss_values = self.loss_calculator_val.compute_loss(
+                    loss = self.loss_calculator_val.compute_loss(
                         preds=output,
                         targets=target_aux_output,
                     )
@@ -699,8 +699,7 @@ class Trainer(TrainerBase):
                     logger.info("\t")
                     for loss_name, loss_values in losses_all.items():
                         logger.info(
-                            f"{loss_name}.loss_avg"
-                            + f" : {np.nanmean(loss_values['loss_avg']):0.4E} \t",
+                            f"{loss_name} : {np.nanmean(loss_values['loss_avg']):0.4E} \t",
                         )
                     logger.info("\n")
 
