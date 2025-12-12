@@ -371,7 +371,11 @@ class Plotter:
                     _logger.info(
                         f"Creating maps for {ntimes_unique} valid times of variable {var} - {tag}"
                     )
-
+                    if ntimes_unique == 0:
+                        _logger.warning(
+                            f"No valid times found for variable {var} - {tag}. Skipping."
+                        )
+                        continue
                     groups = da.groupby("valid_time")
                 else:
                     _logger.info(f"Creating maps for all valid times of {var} - {tag}")
@@ -1076,7 +1080,7 @@ class LinePlots:
                 fmt=".2f",
                 cbar=False,
             )
-            ax.set_title(f"Score Heatmap – {label}")
+            ax.set_title(f"Heatmap {metric} – {label}")
             ax.set_xlabel("Forecast Step (h)")
             ax.set_ylabel("Variable")
             plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
@@ -1084,7 +1088,7 @@ class LinePlots:
         cbar = fig.colorbar(
             last_hm.collections[0], ax=axes.ravel().tolist(), shrink=0.6, location="right", pad=0.02
         )
-        cbar.set_label("Score")
+        cbar.set_label(f"{metric} - fstep[0]/fstep[x]")
         parts = ["heat_map", metric, tag]
         name = "_".join(filter(None, parts))
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
