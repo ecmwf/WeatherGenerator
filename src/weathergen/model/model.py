@@ -46,7 +46,7 @@ class ModelOutput:
     """
 
     physical: list[dict[StreamName, torch.Tensor]]
-    latent: list[torch.Tensor | None]
+    latent: list[torch.Tensor]
 
     def __init__(self, forecast_steps: int) -> None:
         self.physical = [{} for _ in range(forecast_steps)]
@@ -295,6 +295,8 @@ class Model(torch.nn.Module):
         self.stream_names: list[str] = None
         self.target_token_engines = None
 
+        self.num_register_tokens = cf.num_register_tokens
+
     #########################################
     def create(self) -> "Model":
         """Create each individual module of the model"""
@@ -438,8 +440,6 @@ class Model(torch.nn.Module):
                 final_activation=final_activation,
                 stream_name=stream_name,
             )
-
-        self.num_register_tokens = cf.num_register_tokens
 
         return self
 
