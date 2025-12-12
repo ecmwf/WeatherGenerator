@@ -26,6 +26,7 @@ from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     EnsPredictionHead,
     ForecastingEngine,
+    LatentState,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
@@ -45,21 +46,19 @@ class ModelOutput:
     """
 
     physical: list[dict[StreamName, torch.Tensor]]
-    latent: list[dict[StreamName, torch.Tensor]]
+    latent: list[torch.Tensor | None]
 
     def __init__(self, forecast_steps: int) -> None:
         self.physical = [{} for _ in range(forecast_steps)]
-        self.latent = [{} for _ in range(forecast_steps)]
+        self.latent = [None for _ in range(forecast_steps)]
 
     def add_physical_prediction(
         self, fstep: int, stream_name: StreamName, pred: torch.Tensor
     ) -> None:
         self.physical[fstep][stream_name] = pred
 
-    def add_latent_prediction(
-        self, fstep: int, stream_name: StreamName, pred: torch.Tensor
-    ) -> None:
-        self.latent[fstep][stream_name] = pred
+    def add_latent_prediction(self, fstep: int, pred: torch.Tensor) -> None:
+        self.latent[fstep] = pred
 
     def get_physical_prediction(self, fstep: int, stream_name: StreamName | None = None):
         pred = self.physical[fstep]
@@ -67,11 +66,8 @@ class ModelOutput:
             pred = pred.get(stream_name, None)
         return pred
 
-    def get_latent_prediction(self, fstep: int, stream_name: StreamName | None = None):
-        pred = self.latent[fstep]
-        if stream_name is not None:
-            pred = pred.get(stream_name, None)
-        return pred
+    def get_latent_prediction(self, fstep: int):
+        return self.latent[fstep]
 
 
 class ModelParams(torch.nn.Module):
@@ -443,6 +439,8 @@ class Model(torch.nn.Module):
                 stream_name=stream_name,
             )
 
+        self.num_register_tokens = cf.num_register_tokens
+
         return self
 
     def reset_parameters(self):
@@ -543,10 +541,20 @@ class Model(torch.nn.Module):
         # collapse along input step dimension
         tokens = torch.stack(tokens, 0).sum(0)
 
+        # latents for output
+        latent_state = LatentState(
+            register_tokens=tokens[:, : self.num_register_tokens].clone(),
+            latent_tokens=tokens[:, self.num_register_tokens :].clone(),
+        )
+        output.add_latent_prediction(0, {"posteriors": posteriors, "latent_state": latent_state})
+
+        # forecasting
+
         # roll-out in latent space
         for fstep in range(forecast_offset, forecast_steps):
             # prediction
-            output = self.predict(model_params, fstep, tokens, sample, output)
+            tokens_latent = tokens[:, self.num_register_tokens :]
+            output = self.predict(model_params, fstep, tokens_latent, sample, output)
 
             if self.training:
                 # Impute noise to the latent state
@@ -557,10 +565,8 @@ class Model(torch.nn.Module):
             tokens = self.forecast(model_params, tokens, fstep)
 
         # prediction for final step
-        output = self.predict(model_params, forecast_steps, tokens, sample, output)
-
-        # TODO: set properly
-        output.latent = posteriors
+        tokens_latent = tokens[:, self.num_register_tokens :]
+        output = self.predict(model_params, forecast_steps, tokens_latent, sample, output)
 
         return output
 

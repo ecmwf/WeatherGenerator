@@ -194,6 +194,8 @@ training_config:
   #   # # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
   #   # rate_sampling: true  # randomly sample the rate per batch
 
+num_register_tokens: 16
+
 num_mini_epochs: 32
 samples_per_mini_epoch: 512 #4096
 samples_per_validation: 32 #512
