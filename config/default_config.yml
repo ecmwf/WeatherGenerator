@@ -21,6 +21,8 @@ ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
+repeat_data_in_mini_epoch: False
+
 ae_global_dim_embed: 2048
 ae_global_num_blocks: 8
 ae_global_num_heads: 32
